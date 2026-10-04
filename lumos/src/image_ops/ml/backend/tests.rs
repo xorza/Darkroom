@@ -146,18 +146,26 @@ fn an_identity_model_reproduces_the_input() {
     }
 }
 
-/// The stride covers the frame or is refused before any model loads: 0 never advances, and past
-/// the window the bands between tiles hold no output. 1 and 512 are the edges that run.
+/// The stride covers the frame at full weight or is refused before any model loads: 0 never
+/// advances, and past 512 − 2·64 = 384 a band between tiles lies only on their feather ramps. 1
+/// and 384 are the edges that run. At 384 the full-weight cores, positions 64 to 447 of each
+/// window, meet: the next core starts at 384 + 64 = 448.
 #[test]
 fn the_stride_must_cover_the_frame() {
     let config = |stride| TiledOnnxConfig {
         weights: "unused.onnx".into(),
         stride,
     };
-    for stride in [1, 256, WINDOW] {
+    assert_eq!(MAX_STRIDE, 384);
+    let core: Vec<usize> = (0..WINDOW).filter(|&i| feather(i) == 1.0).collect();
+    assert_eq!(
+        (core[0], core[core.len() - 1], core.len()),
+        (64, 447, MAX_STRIDE)
+    );
+    for stride in [1, 256, MAX_STRIDE] {
         assert_eq!(config(stride).validate(), Ok(()), "{stride}");
     }
-    for stride in [0, WINDOW + 1] {
+    for stride in [0, MAX_STRIDE + 1, WINDOW] {
         let image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
         let error = config(stride).run(&image).unwrap_err();
         assert!(

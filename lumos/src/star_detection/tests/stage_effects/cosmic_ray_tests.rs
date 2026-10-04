@@ -11,7 +11,6 @@ use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
 use crate::star_detection::config::Config;
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::internals::saturation_level_of;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -19,7 +18,7 @@ use imaginarium::drawing::{draw_circle, draw_cross};
 /// The sharpness cut rejects a cosmic ray on its own. A ray is one pixel, or one with 15% bled to
 /// each side: its peak holds ≥ 1/1.3 = 0.77 of its 3×3 core, past the 0.7 cut, where a 4-px-FWHM
 /// star holds ≤ 0.14. With every other cut that can drop a ray opened — the area floor at 1, the
-/// eccentricity and roundness bars at 1, the FWHM-outlier cut off — the default sharpness cut
+/// eccentricity bar at 1 and the roundness bar at 2, the FWHM-outlier cut off — the default sharpness cut
 /// leaves no isolated ray, and a cut opened to 1.0 keeps every isolated ray below the saturation
 /// level (a saturated peak is rejected as such). With the defaults, no isolated ray survives
 /// either. Every isolated star survives all three.
@@ -42,7 +41,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     let pixels = frame.image.channel(0);
     let size = Size2us::new(pixels.width(), pixels.height());
     let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
-    let saturation = saturation_level_of(&frame.image);
+    let saturation = frame.image.metadata.saturation_level();
     let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;
     assert!(
         lone_stars.len() >= 15,
@@ -68,7 +67,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
         let mut config = synthetic_config();
         config.detection.min_area = 1;
         config.filter.max_eccentricity = 1.0;
-        config.filter.max_roundness = 1.0;
+        config.filter.max_roundness = 2.0;
         config.filter.max_fwhm_deviation = None;
         config.filter.max_sharpness = max_sharpness;
         config

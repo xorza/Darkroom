@@ -1,37 +1,26 @@
 //! Detection, registration, warping, and combination of calibrated images.
 
+use std::cmp::Reverse;
 use std::mem;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 
 use common::CancelToken;
 
-use crate::combine::cache::frame_check::FrameCheck;
-use crate::combine::error::Error as StackError;
-use crate::combine::stack::stack_stored_frames;
 use crate::concurrency;
-use crate::error::FrameDimensionMismatch;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::linear::LinearImage;
-use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory::run_memory::RunMemory;
-use crate::memory::{
-    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
-};
-use crate::progress::stage_counter::StageCounter;
-use crate::progress::{ProgressCallback, StackingStage};
-use crate::registration::register;
+use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::detected_frame::DetectedFrame;
+use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
+use crate::pipeline::frame_tier::StagePlan;
+use crate::pipeline::light_source::LightSource;
+use crate::pipeline::registered_set::RegisteredSet;
+use crate::pipeline::result::AlignStackResult;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpBuffers;
-use crate::registration::result::RegistrationError;
 use crate::star_detection::detector::DetectionResult;
 use crate::star_detection::detector::Diagnostics;
-
-use crate::memory;
-use crate::pipeline::config::{AlignStackConfig, Reference};
-use crate::pipeline::detector_pool::DetectorPool;
-use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
-use crate::pipeline::result::{AlignStackResult, Error};
-use crate::pipeline::tier::StagePlan;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
 ///
@@ -41,8 +30,8 @@ use crate::pipeline::tier::StagePlan;
 /// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped);
 /// the stack proceeds with whatever aligned. A single input frame is returned as its own "stack".
 ///
-/// Every light must share the first one's dimensions and hold only finite samples; both are
-/// checked before any work, so a bad input is reported as one instead of surfacing from the
+/// Every light must share the first one's dimensions and hold only finite samples; each is checked
+/// before its stars are detected, so a bad input is reported as one instead of surfacing from the
 /// combine after a warp has spread it.
 ///
 /// The frames arrive decoded and resident, so the inputs are committed before this is called —
@@ -55,89 +44,14 @@ pub fn align_and_stack(
     config: &AlignStackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<AlignStackResult, Error> {
+) -> Result<AlignStackResult, AlignStackError> {
     if lights.is_empty() {
-        return Err(Error::NoFrames);
+        return Err(AlignStackError::NoFrames);
     }
     config.validate(lights.len())?;
-    let dimensions = lights[0].dimensions();
-    for (index, light) in lights.iter().enumerate() {
-        FrameDimensionMismatch::check(index, dimensions, light.dimensions())
-            .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
-        FrameCheck {
-            index,
-            cancel: &cancel,
-        }
-        .samples(light)?;
-    }
-
-    // One reading for the run, for the tier decision and the combine's chunk sizes alike.
-    let memory = RunMemory::read(config.stack.cache.memory_override);
-    let total = lights.len();
-    // The inputs are already decoded and resident: what the preparing pass adds to each is the
-    // copy its statistics sort, beside the detector. On the spill tier that charges the input
-    // itself as well, which the caller already holds — one frame of slack per worker.
-    let frame_bytes = memory::frame_bytes(dimensions);
-    let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
-    let plan = MemoryPlan::plan(
-        RunShape {
-            frame_count: total,
-            decode: DemosaicMemory {
-                output_bytes: frame_bytes,
-                peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
-            },
-            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-            warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
-            output_bytes: config.stack.quality.resident_bytes(dimensions),
-        },
-        rayon::current_num_threads(),
-        memory.planning(),
-    );
-    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
-
-    tracing::info!(
-        frames = total,
-        spilling = stage.tier.spills(),
-        "Detecting stars"
-    );
-    let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
-    let detections = {
-        // Bounded like the calibrated entry's: the plan charges each in-flight frame the
-        // detector's whole working set.
-        let mut detectors =
-            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
-                .map_err(Error::DetectionConfig)?;
-        detectors.try_map(&lights, |detector, _index, image| {
-            // Cancelled: abort the batch rather than spend the rest of the budget detecting
-            // frames the run will discard.
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            let result = detector.detect(image);
-            // Measured before interpolation, which correlates neighbouring pixels and would
-            // otherwise understate the frame's noise.
-            let stats = FrameStats::measure(image);
-            let n = detected_count.complete_one();
-            log_detection(n, total, &result);
-            Ok((result, stats))
-        })
-    }?;
-
-    // Resident whatever the tier: these frames are already in RAM, and spilling them here would
-    // be a write and a read-back for nothing. The tier governs the *warped* set below, which is
-    // the one that would otherwise double the footprint.
-    let detected: Vec<DetectedFrame> = lights
-        .into_iter()
-        .zip(detections)
-        .map(|(image, (result, stats))| DetectedFrame {
-            image: PipelineFrame::Resident(image),
-            stars: result.stars,
-            diagnostics: result.diagnostics,
-            stats,
-        })
-        .collect();
-
-    register_warp_and_stack(detected, config, stage, progress, cancel)
+    let run = IngestRun::new(&config.stack.ingest, cancel.clone());
+    let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
+    register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
@@ -171,14 +85,14 @@ pub(crate) fn register_warp_and_stack(
     stage: StagePlan,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<AlignStackResult, Error> {
+) -> Result<AlignStackResult, AlignStackError> {
     let StagePlan {
         tier,
         warp_concurrency,
     } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(AlignStackError::Cancelled);
     }
     debug_assert!(
         detected
@@ -195,169 +109,141 @@ pub(crate) fn register_warp_and_stack(
         .collect();
 
     let star_counts: Vec<usize> = detected.iter().map(|frame| frame.stars.len()).collect();
+    let median_fwhms: Vec<Option<f32>> =
+        detection.iter().map(|funnel| funnel.median_fwhm).collect();
     let reference = select_reference(
         &star_counts,
+        &median_fwhms,
         config.reference,
         config
             .registration
             .matching
             .required_stars(config.registration.transform_type),
     )?;
-    // The master follows the alignment anchor rather than whichever frame reaches combine first.
     let metadata = detected[reference].image.metadata().clone();
     let dimensions = detected[reference].image.dimensions();
-    let ref_stars = mem::take(&mut detected[reference].stars);
-    tracing::info!(
+    let registrar = FrameRegistrar::new(
         reference,
-        ref_stars = ref_stars.len(),
-        "Reference frame selected"
+        mem::take(&mut detected[reference].stars),
+        config,
+        &tier,
+        total,
+        &progress,
+        &cancel,
     );
-
-    tracing::info!(frames = total - 1, "Registering frames to the reference");
-    let registered_so_far = AtomicUsize::new(0);
-    // Counted where the work ends rather than where it starts. `registered` and `dropped`
-    // frames both count — the bar tracks attempts resolved, not survivors.
-    let resolved = StageCounter::new(&progress, StackingStage::Registering, total - 1);
-    let report_resolved = || {
-        resolved.complete_one();
-    };
-    // One reusable set of warp output planes per in-flight worker. The spill tier hands its
-    // buffers back once the frame is on disk, so a worker warps into pages it has already faulted
-    // in; the RAM tier keeps them, and the slot simply refills from a fresh allocation it would
-    // have made anyway.
+    // One reusable set of warp output planes per in-flight worker.
     let mut warp_buffers: Vec<Option<WarpBuffers>> = (0..warp_concurrency).map(|_| None).collect();
     // Taking each detected record by value frees its input image as soon as the warped output
     // exists, so this stage never holds the complete input and warped sets simultaneously.
     let outcomes = concurrency::try_par_map_bounded_owned(
         detected,
         &mut warp_buffers,
-        |buffers, index, detected| -> Result<Option<StoredFrame>, Error> {
-            // Cancelled: drop this frame (skips the heavy register + warp); the post-loop check
-            // below turns the run into `Cancelled`.
-            if cancel.is_cancelled() {
-                return Ok(None);
-            }
-            let name = format!("warped_{index}");
-            let source_stats = detected.stats;
-            if index == reference {
-                // The unwarped reference has full support and unit interpolation confidence.
-                let image = detected.image.into_image();
-                return tier.store_reference(&name, image, source_stats).map(Some);
-            }
-
-            let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
-            let source = detected.image.into_image();
-            let registration = match register(&ref_stars, &detected.stars, &config.registration) {
-                Ok(registration) => registration,
-                // A pair that did not match is a frame to drop. An invalid config is not: it
-                // fails identically for every pair, so dropping it would spend the whole run to
-                // report `AllFramesDropped` and blame the data.
-                Err(RegistrationError::InvalidConfig(invalid)) => {
-                    return Err(Error::RegistrationConfig(invalid));
-                }
-                Err(error) => {
-                    tracing::info!(frame = n, total = total - 1, %error, "registration failed");
-                    report_resolved();
-                    return Ok(None);
-                }
-            };
-            tracing::info!(
-                frame = n,
-                total = total - 1,
-                inliers = registration.num_inliers(),
-                rms = format!("{:.3}", registration.rms_error()),
-                quality = format!("{:.3}", registration.quality_score()),
-                transform = %registration.transform(),
-                "registered"
-            );
-            let mut warped = buffers
-                .take()
-                .unwrap_or_else(|| WarpBuffers::new(source.dimensions()));
-            warped.warp_into(
-                &source,
-                &registration.warp_transform(),
-                config.registration.warp,
-            );
-            let metadata = source.metadata.clone();
-            drop(source);
-            report_resolved();
-            let stored = tier.store(&name, metadata, warped, source_stats)?;
-            *buffers = stored.reusable;
-            Ok(Some(stored.frame))
+        |buffers, index, detected| {
+            registrar.park(
+                buffers,
+                FrameToPark {
+                    index,
+                    image: detected.image,
+                    stars: &detected.stars,
+                    stats: detected.stats,
+                },
+            )
         },
     )?;
-    if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
+    drop(registrar);
+    // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
+    // against the memory without them.
+    drop(warp_buffers);
 
-    let mut frames = Vec::with_capacity(outcomes.len());
-    let mut dropped = Vec::new();
-    // Ascending without a sort: the bounded map preserves input order, so this visits outcomes
-    // by frame index — the ordering `AlignmentSummary::dropped` documents.
-    for (index, outcome) in outcomes.into_iter().enumerate() {
-        match outcome {
-            Some(frame) => frames.push(frame),
-            None => dropped.push(index),
-        }
-    }
-    tracing::info!(
-        aligned = frames.len(),
-        dropped = dropped.len(),
-        "Registration complete"
-    );
-
-    // Only the reference survived → every non-reference frame dropped. (A lone reference input
-    // is fine; "nothing aligned" with more than one input is an error.)
-    if frames.len() <= 1 && total > 1 {
-        return Err(Error::AllFramesDropped { count: total - 1 });
-    }
-
-    let registered = frames.len();
-    tracing::info!(frames = registered, "Stacking aligned frames");
-    let stacked = stack_stored_frames(
-        frames,
-        tier.into_cache_tier(),
-        dimensions,
+    RegisteredSet {
+        outcomes,
+        reference,
         metadata,
-        &config.stack.for_survivors(&dropped),
-        progress,
-        cancel,
-    )?;
-    tracing::info!("Stack complete");
-
-    Ok(AlignStackResult::from_product(
-        stacked, reference, registered, dropped, detection,
-    ))
+        dimensions,
+        detection,
+    }
+    .combine(&tier, config, progress, cancel)
 }
 
-/// Choose the reference (alignment anchor) index from per-frame star counts, validating it has
-/// enough stars.
+/// Choose the reference (alignment anchor) index, validating it has enough stars.
+///
+/// `Auto` takes the sharpest frame among those with `required` stars: the lowest median FWHM, as
+/// Siril chooses, ties to the lowest index. Every other frame is warped onto it, so its seeing is
+/// what the stack is resampled to; the star count only has to clear the gate registration needs.
+/// When no frame clears it, the one with the most stars is reported.
 fn select_reference(
     star_counts: &[usize],
+    median_fwhms: &[Option<f32>],
     reference: Reference,
     required: usize,
-) -> Result<usize, Error> {
+) -> Result<usize, AlignStackError> {
     let index = match reference {
         Reference::Index(index) => {
             if index >= star_counts.len() {
-                return Err(Error::ReferenceOutOfRange {
+                return Err(AlignStackError::ReferenceOutOfRange {
                     index,
                     count: star_counts.len(),
                 });
             }
             index
         }
-        // Most stars → most anchors for the other frames to match against.
         Reference::Auto => (0..star_counts.len())
-            .max_by_key(|&i| star_counts[i])
-            .expect("star_counts is non-empty"),
+            .filter(|&i| star_counts[i] >= required)
+            .filter_map(|i| median_fwhms[i].map(|fwhm| (i, fwhm)))
+            .reduce(|best, candidate| {
+                if candidate.1 < best.1 {
+                    candidate
+                } else {
+                    best
+                }
+            })
+            .map_or_else(
+                || {
+                    (0..star_counts.len())
+                        .max_by_key(|&i| (star_counts[i], Reverse(i)))
+                        .expect("star_counts is non-empty")
+                },
+                |(i, _)| i,
+            ),
     };
     if star_counts[index] < required {
-        return Err(Error::ReferenceInsufficientStars {
+        return Err(AlignStackError::ReferenceInsufficientStars {
             index,
             found: star_counts[index],
             required,
         });
     }
     Ok(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Auto` takes the lowest median FWHM among the frames with the stars registration needs:
+    /// frame 2 at 2.5 of 2.5, 3.0 and 3.5; a tie goes to the lowest index; a frame below the gate
+    /// is passed over however sharp, frame 1 at 2.0 with 30 of 40 stars; and when none clears the
+    /// gate, the one with the most stars is the one reported. An index must lie in the input.
+    #[test]
+    fn auto_takes_the_sharpest_frame_with_enough_stars() {
+        let auto = |counts: &[usize], fwhms: &[f32]| {
+            let fwhms: Vec<Option<f32>> = fwhms.iter().map(|&fwhm| Some(fwhm)).collect();
+            select_reference(counts, &fwhms, Reference::Auto, 40)
+        };
+        assert_eq!(auto(&[50, 80, 60], &[3.0, 3.5, 2.5]).unwrap(), 2);
+        assert_eq!(auto(&[50, 80, 60], &[2.5, 3.0, 2.5]).unwrap(), 0);
+        assert_eq!(auto(&[50, 30, 60], &[3.0, 2.0, 3.5]).unwrap(), 0);
+        assert!(matches!(
+            auto(&[10, 20, 15], &[3.0, 2.0, 3.5]),
+            Err(AlignStackError::ReferenceInsufficientStars {
+                index: 1,
+                found: 20,
+                required: 40
+            })
+        ));
+        assert!(matches!(
+            select_reference(&[50, 60], &[Some(3.0), Some(3.0)], Reference::Index(5), 40),
+            Err(AlignStackError::ReferenceOutOfRange { index: 5, count: 2 })
+        ));
+    }
 }

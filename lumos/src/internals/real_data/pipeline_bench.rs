@@ -1,5 +1,6 @@
 //! Full pipeline benchmark: CFA master creation -> calibration -> registration -> stacking.
 
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -9,17 +10,19 @@ use common::{CancelToken, TempDir};
 use crate::combine::cache::FrameCache;
 use crate::combine::stack::run_stacking;
 use crate::concurrency;
+use crate::ingest::ingest_run::IngestRun;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
-use crate::memory::run_memory::RunMemory;
+use crate::star_detection::config::Config as StarDetectionConfig;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star::Star;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
-    Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
-    StarDetector, register, stack, warp,
+    Normalization, ProgressCallback, RegistrationConfig, StackConfig, register, stack, warp,
 };
 
 #[test]
@@ -59,9 +62,9 @@ fn bench_full_pipeline() {
         let cache = FrameCache::from_cfa_paths(
             paths,
             &config,
-            RunMemory::read(config.cache.memory_override),
+            IngestRun::new(&config.ingest, CancelToken::never()),
+            None,
             ProgressCallback::default(),
-            CancelToken::never(),
         )
         .unwrap();
         let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -78,9 +81,9 @@ fn bench_full_pipeline() {
         Some(result.into_cfa_master())
     };
 
-    let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
+    let dark = stack_cfa("Dark", &dark_paths, StackConfig::bias_or_dark());
     let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());
-    let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias());
+    let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias_or_dark());
 
     let t_defect = Instant::now();
     let masters = CalibrationMasters::from_images(
@@ -131,7 +134,10 @@ fn bench_full_pipeline() {
         concurrency::try_par_map_limited(&light_paths, 3, |_index, p| {
             let mut cfa = load_raw_cfa(p, &LoadContext::default()).unwrap();
             masters.calibrate(&mut cfa).unwrap();
-            Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
+            Ok::<_, ()>(
+                cfa.demosaic(MarkesteijnPasses::One, &CancelToken::never())
+                    .unwrap(),
+            )
         })
         .unwrap();
 

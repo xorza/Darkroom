@@ -2,11 +2,12 @@
 
 use thiserror::Error;
 
-/// The parametric noise model needs the ADU one sample unit is worth, which a frame states only
-/// through the quantization σ its decoder recorded — a float FITS or a synthesized frame has none.
+/// A stated gain needs the ADU one sample unit is worth, which a frame states through a declared
+/// scale or the quantization σ its decoder recorded — a float FITS or a synthesized frame has
+/// neither.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error(
-    "parametric cosmic-ray noise needs the frame's ADC step, which its decoder did not record; \
-     use the empirical noise model for this frame"
+    "a stated cosmic-ray gain needs the ADU one sample unit is worth, which this frame does not \
+     record; use the measured noise model for it"
 )]
 pub struct UnknownAdcStep;

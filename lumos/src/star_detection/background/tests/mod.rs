@@ -7,6 +7,7 @@ use crate::internals::synthetic::background_map;
 use crate::math::statistics::mad_to_sigma;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
 use crate::star_detection::config::background_config::BackgroundConfig;
+use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
 
 /// The background and noise maps of `pixels` at `tile_size`.
@@ -202,7 +203,9 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
     assert!(background.background.pixels().iter().all(|&v| v == 0.2));
 }
 
-/// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest.
+/// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest. On
+/// the unfiltered residual the detection plane's σ is the sky's, so the mask stands where the sky's
+/// own threshold does.
 ///
 /// Every 32×32 tile holds a checkerboard `v ± a` (v = 0.25, a = 1/64) with a 4×4 core 8 above it
 /// and a 2-px halo 2a above it around the core. Unmasked, each tile counts 480 pixels at v − a and
@@ -210,9 +213,10 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
 /// keeps the halo through the clip; and its mean sits 0.905a from the median, past the 0.3σ Pearson
 /// bound, so the sky is the median: v + a in every tile, which no median filter can undo. The mask
 /// stands at v + a + 4σ = v + 12.9a, which only the core clears. Undilated, the halo stays and the
-/// sky with it; dilated by 2 the mask covers exactly the 8×8 halo, leaving 480 of each checker
-/// value: the sky is v and σ is `mad_to_sigma(a)`, exactly, and a second pass, whose mask at v +
-/// 5.9a is the same, keeps them.
+/// sky with it. A disk of 2 leaves 3 pixels at each corner of the halo, at √5 and √8 from the core,
+/// and the sky with them. A disk of 3 covers the 8×8 halo and the 4 sky pixels straight out from
+/// each side of the core at distance 3, 2 of each checker value, leaving 472 of each: the sky is v
+/// and σ is `mad_to_sigma(a)`, exactly, and a second pass, whose mask is the same, keeps them.
 #[test]
 fn refine_masks_the_stars_and_their_halos_out() {
     const SKY: f32 = 0.25;
@@ -240,18 +244,23 @@ fn refine_masks_the_stars_and_their_halos_out() {
     };
     let refined = |iterations, mask_dilation| {
         let mut resources = DetectionResources::new(size);
-        let mut background = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
-        background.refine(
-            &pixels,
-            &config,
-            Refinement {
-                iterations,
-                mask_dilation,
-            },
-            4.0,
-            &mut resources,
-        );
-        background
+        BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
+            .refine(
+                &pixels,
+                Refinement {
+                    iterations,
+                    mask_dilation,
+                    mask_sigma: 4.0,
+                },
+                PlaneFilters {
+                    median: false,
+                    matched: None,
+                    mask: None,
+                },
+                &config,
+                &mut resources,
+            )
+            .estimate
     };
 
     let unrefined = estimate(&pixels, 32);
@@ -262,16 +271,19 @@ fn refine_masks_the_stars_and_their_halos_out() {
             .iter()
             .all(|&v| v == SKY + SPREAD)
     );
-    let undilated = refined(1, 0);
-    assert!(
-        undilated
-            .background
-            .pixels()
-            .iter()
-            .all(|&v| v == SKY + SPREAD)
-    );
+    for mask_dilation in [0, 2] {
+        let haloed = refined(1, mask_dilation);
+        assert!(
+            haloed
+                .background
+                .pixels()
+                .iter()
+                .all(|&v| v == SKY + SPREAD),
+            "dilated by {mask_dilation}"
+        );
+    }
     for iterations in [1, 2] {
-        let clean = refined(iterations, 2);
+        let clean = refined(iterations, 3);
         assert!(
             clean.background.pixels().iter().all(|&v| v == SKY),
             "{iterations} passes"
@@ -302,19 +314,19 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     };
     let mut resources = DetectionResources::new(Size2us::new(96, 64));
 
-    let first = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
+    let first = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
     let expected_background = first.background.pixels().to_vec();
     let expected_noise = first.noise.pixels().to_vec();
     first.release_to_pool(&mut resources);
 
-    let second = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
+    let second = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
     assert_eq!(second.background.pixels(), expected_background);
     assert_eq!(second.noise.pixels(), expected_noise);
     second.release_to_pool(&mut resources);
 
     resources.reset(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
-    let resized = BackgroundEstimate::estimate(&resized_pixels, &config, &mut resources);
+    let resized = BackgroundEstimate::estimate(&resized_pixels, None, &config, &mut resources);
     assert_eq!(resized.background.width(), 48);
     assert_eq!(resized.background.height(), 32);
     assert!(

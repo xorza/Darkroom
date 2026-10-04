@@ -5,7 +5,6 @@
 //! - X-Trans 6x6 patterns (Fujifilm sensors)
 
 pub(crate) mod bayer;
-pub(crate) mod sensor_layout;
 pub(crate) mod xtrans;
 
 /// What one decode costs: the bytes it leaves, and its peak on the way there, the output included.
@@ -35,8 +34,11 @@ mod memory_tests {
     use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
+    use crate::io::raw::demosaic::xtrans::markesteijn;
 
+    /// Mono holds its one plane. Both demosaics hold the input, the three output planes and the
+    /// pool's tile buffers, whatever the frame's size.
     #[test]
     fn demosaic_memory_counts_each_plane_the_kernel_holds() {
         let even = ImageDimensions::new((10, 8), 1);
@@ -46,19 +48,19 @@ mod memory_tests {
         assert_eq!(mono.output_bytes, 80 * 4);
         assert_eq!(mono.peak_bytes, 80 * 4);
 
-        let bayer = CfaType::Bayer(CfaPattern::Rggb);
-        let bayer_even = bayer.demosaic_memory(even);
-        assert_eq!(bayer_even.output_bytes, 3 * 80 * 4);
-        assert_eq!(bayer_even.peak_bytes, 7 * 80 * 4);
-
-        // RCD's two half-width diagonal buffers use ceil(width / 2), so an odd-width frame peaks
-        // at 6P + 2 ceil(W/2)H = 6(15) + 2(3)(3) = 108 live f32 values.
-        let bayer_odd = bayer.demosaic_memory(odd);
-        assert_eq!(bayer_odd.output_bytes, 3 * 15 * 4);
-        assert_eq!(bayer_odd.peak_bytes, 108 * 4);
-
-        let xtrans = CfaType::XTrans(XTRANS_PATTERN).demosaic_memory(even);
-        assert_eq!(xtrans.output_bytes, 3 * 80 * 4);
-        assert_eq!(xtrans.peak_bytes, 22 * 80 * 4);
+        for (cfa_type, workspace) in [
+            (CfaType::Bayer(CfaPattern::Rggb), rcd::workspace_bytes()),
+            (
+                CfaType::XTrans(XTRANS_PATTERN),
+                markesteijn::workspace_bytes(),
+            ),
+        ] {
+            for dimensions in [even, odd] {
+                let plane = dimensions.pixel_count() * 4;
+                let memory = cfa_type.demosaic_memory(dimensions);
+                assert_eq!(memory.output_bytes, 3 * plane, "{cfa_type:?}");
+                assert_eq!(memory.peak_bytes, 4 * plane + workspace, "{cfa_type:?}");
+            }
+        }
     }
 }

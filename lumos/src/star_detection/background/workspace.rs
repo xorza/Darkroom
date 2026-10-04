@@ -1,7 +1,7 @@
 //! Working memory the background estimator keeps between detections.
 
 use crate::background_mesh::workspace::MeshWorkspace;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 
 #[derive(Debug, Default)]
 pub(crate) struct BackgroundWorkspace {
@@ -23,6 +23,8 @@ pub(crate) struct InterpolateScratch {
     pub(crate) d2x_bg: Vec<f32>,
     pub(crate) d2x_noise: Vec<f32>,
     pub(crate) spline_scratch: Vec<f32>,
+    /// The sky row of an interpolation that keeps only the noise.
+    pub(crate) discarded_row: Vec<f32>,
 }
 
 impl InterpolateScratch {
@@ -37,7 +39,7 @@ impl InterpolateScratch {
 
 #[cfg(test)]
 mod tests {
-    use crate::concurrency::internals::job_count;
+    use crate::concurrency::job_scratch_pool::internals::job_count;
     use crate::star_detection::background::workspace::BackgroundWorkspace;
 
     #[test]

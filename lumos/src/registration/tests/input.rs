@@ -1,7 +1,6 @@
 //! Registration's handling of the star lists it is handed: too few, degenerate FWHM,
 //! mismatched counts.
 
-use crate::registration::tests::helpers::register;
 use crate::registration::*;
 
 // Registration reads only `pos` and `fwhm`, so these fixtures set the FWHM under test and
@@ -86,7 +85,8 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
         };
         stars[3].pos = DVec2::new(f64::NAN, 4.0);
 
-        let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
         match error {
             RegistrationError::InvalidStarPosition {
                 catalog: actual,
@@ -103,8 +103,9 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
     }
 }
 
+/// Every float a star carries is checked, in both catalogs.
 #[test]
-fn register_rejects_non_finite_fwhm_in_both_catalogs() {
+fn register_rejects_non_finite_fields_in_both_catalogs() {
     for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
         let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
         let mut target_stars = ref_stars.clone();
@@ -113,19 +114,40 @@ fn register_rejects_non_finite_fwhm_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = f32::INFINITY;
+        stars[6].snr = f32::NAN;
 
-        let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
         match error {
-            RegistrationError::InvalidStarFwhm {
+            RegistrationError::InvalidStarField {
                 catalog: actual,
                 index,
+                field,
                 value,
             } => {
                 assert_eq!(actual, catalog);
-                assert_eq!(index, 5);
-                assert_eq!(value, f32::INFINITY);
+                assert_eq!((index, field), (5, "FWHM"));
+                assert_eq!(value, f64::INFINITY);
             }
             other => panic!("expected invalid star FWHM, got {other:?}"),
         }
+        let stars = match catalog {
+            RegistrationCatalog::Reference => &mut ref_stars,
+            RegistrationCatalog::Target => &mut target_stars,
+        };
+        stars[5].fwhm = 2.0;
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                RegistrationError::InvalidStarField {
+                    index: 6,
+                    field: "SNR",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
     }
 }

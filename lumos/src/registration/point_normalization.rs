@@ -53,30 +53,23 @@ impl PointNormalization {
         Self::new(center, average_distance(points, center).unwrap_or(1.0))
     }
 
+    pub(crate) const fn center(self) -> DVec2 {
+        self.center
+    }
+
+    pub(crate) const fn scale(self) -> f64 {
+        self.scale
+    }
+
     #[inline]
     pub(crate) fn normalize(self, p: DVec2) -> DVec2 {
         (p - self.center) / self.scale
     }
 
     /// Map a point from normalized space back to pixel space.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only TPS denormalizes whole points, and TPS has no caller outside its own \
-                      tests until the registration pipeline takes it up; see `tps/mod.rs`"
-        )
-    )]
     #[inline]
     pub(crate) fn denormalize(self, p: DVec2) -> DVec2 {
         p * self.scale + self.center
-    }
-
-    /// Map a displacement into normalized space. A displacement is a difference of two points, so
-    /// `center` cancels and only `scale` acts.
-    #[inline]
-    pub(crate) fn normalize_delta(self, d: DVec2) -> DVec2 {
-        d / self.scale
     }
 
     #[inline]
@@ -124,6 +117,21 @@ fn average_distance(points: &[DVec2], center: DVec2) -> Option<f64> {
     let total: f64 = points.iter().map(|p| (*p - center).length()).sum();
     let average = total / points.len() as f64;
     (average > 0.0).then_some(average)
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use glam::DVec2;
+
+    use crate::registration::point_normalization::PointNormalization;
+
+    impl PointNormalization {
+        /// Map a displacement into normalized space. A displacement is a difference of two points,
+        /// so `center` cancels and only `scale` acts.
+        pub(crate) fn normalize_delta(self, d: DVec2) -> DVec2 {
+            d / self.scale
+        }
+    }
 }
 
 #[cfg(test)]

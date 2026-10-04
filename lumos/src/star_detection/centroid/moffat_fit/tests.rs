@@ -49,7 +49,7 @@ impl MoffatCase {
     /// Five standard deviations of each centre coordinate under the stamp's noise: the Fisher
     /// information on x₀ is `Σ(∂f/∂x₀)²/σₙ²` over the fitted stamp, so `σ_x = σₙ/√Σ(∂f/∂x₀)²`.
     fn position_bound(&self) -> DVec2 {
-        let model = MoffatFixedBeta::new(self.fit_radius as f64, f64::from(self.beta), 1e-6);
+        let mut model = MoffatFixedBeta::new(self.fit_radius as f64, f64::from(self.beta), 1e-6);
         let params = [
             self.center.x,
             self.center.y,
@@ -57,6 +57,7 @@ impl MoffatCase {
             f64::from(self.alpha),
             f64::from(self.background),
         ];
+        model.integrate_at(model.sufficient_order(&params));
         let (cx, cy) = (self.guess.x.round() as isize, self.guess.y.round() as isize);
         let r = self.fit_radius as isize;
         let mut information = DVec2::ZERO;
@@ -136,7 +137,8 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         background: 0.5,
         ..clean("faint_on_bright_sky")
     },
-    with_alpha("alpha_0.8", 0.8),
+    // The narrowest α the fit admits at β 2.5 is 1.025, the FWHM of a Gaussian of σ 0.5.
+    with_alpha("alpha_1.1", 1.1),
     with_alpha("alpha_2", 2.0),
     with_alpha("alpha_3", 3.0),
     with_alpha("alpha_3.5", 3.5),
@@ -190,20 +192,16 @@ fn moffat_fit_recovers_known_parameters() {
         .stamp(Size2us::new(case.stamp, case.stamp), case.background);
         case.perturbation.apply(&mut pixels);
 
-        let config = MoffatFitConfig {
-            fixed_beta: case.fixed_beta,
-            ..Default::default()
-        };
+        let beta = case.fixed_beta;
         let result = MoffatFit::new(
             &pixels,
             case.guess,
             &StampGrid::new(case.fit_radius),
             case.fit_background.unwrap_or(case.background),
             None,
-            &config,
+            beta,
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
-        assert!(result.converged, "{}: did not converge", case.name);
 
         let offset = (result.pos - case.center).abs();
         if case.fixed_beta != case.beta {
@@ -236,6 +234,9 @@ fn moffat_fit_recovers_known_parameters() {
             ] {
                 assert!(error <= bound, "{}: {what} off by {error:e}", case.name);
             }
+            let model = MoffatFixedBeta::new(case.fit_radius as f64, f64::from(case.beta), 1e-6);
+            let order = model.sufficient_order(&[0.0, 0.0, 1.0, f64::from(case.alpha), 0.0]);
+            assert_eq!(result.debug.order, order, "{}: quadrature order", case.name);
         } else {
             let bound = case.position_bound();
             assert!(
@@ -271,14 +272,7 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
             false,
         ),
     ] {
-        let fit = MoffatFit::new(
-            pixels,
-            seed,
-            &StampGrid::new(8),
-            sky,
-            None,
-            &MoffatFitConfig::default(),
-        );
+        let fit = MoffatFit::new(pixels, seed, &StampGrid::new(8), sky, None, 2.5);
         assert_eq!(fit.is_some(), lands, "{name}");
     }
 }
@@ -316,10 +310,13 @@ fn select_pow_strategy_general() {
     }
 }
 
+/// Each strategy's power against libm's: the half-integer and integer ones within 1e-14 relative,
+/// and the general `exp(−β·ln u)` too, from just above 1 out to `u = 10⁶`, a radius of a thousand
+/// α, at β from barely above 1 to the configured bound of 10.
 #[test]
-fn fast_pow_neg_accuracy_half_integers() {
-    let u_values = [1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0];
-    let betas = [1.5, 2.5, 3.5, 4.5, 5.5];
+fn fast_pow_neg_accuracy_every_strategy() {
+    let u_values = [1.000_001, 1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0, 1e4, 1e6];
+    let betas = [1.5, 2.5, 3.5, 4.5, 5.5, 3.0, 1.01, 2.3, 3.7, 9.9];
 
     for &beta in &betas {
         let strategy = select_pow_strategy(beta);
@@ -391,15 +388,24 @@ fn moffat_fixed_beta_evaluate_and_jacobian_consistency() {
 
     // Every `PowStrategy`: integers, half-integers and the general power.
     for beta in [2.0, 2.3, 2.5, 3.0, 3.5, 4.5] {
-        let model = MoffatFixedBeta::new(15.0, beta, 1e-6);
+        let mut model = MoffatFixedBeta::new(15.0, beta, 1e-6);
+        model.integrate_at(3);
         for params in params_list {
             for &(x, y) in &points {
-                let eval = model.evaluate(x, y, params);
+                let eval = model.point(x, y, params);
                 let jac = model.jacobian_row(x, y, params);
                 let ModelSample {
                     value: fused_eval,
                     jacobian: fused_jac,
-                } = model.evaluate_and_jacobian(x, y, params);
+                } = model.point_and_jacobian(x, y, params);
+                // Over the pixel, the same terms weighted alike: within the same bound of the sum.
+                let integrated = model.evaluate(x, y, params);
+                let fused_integrated = model.evaluate_and_jacobian(x, y, params).value;
+                assert!(
+                    (integrated - fused_integrated).abs()
+                        <= 16.0 * f64::EPSILON * integrated.abs().max(1.0),
+                    "integrated mismatch: beta={beta}, {integrated} vs {fused_integrated}"
+                );
 
                 // The two share `fast_pow_neg` and differ in operation order: a few ulps.
                 assert!(
@@ -429,7 +435,8 @@ fn batch_normal_equations_match_reference() {
     // Away from the truth, so the residuals are not zero.
     let params = [6.7, 6.3, 790.0, 2.1, 82.0];
     for beta in [2.0, 2.3, 2.5, 3.0, 3.5] {
-        let model = MoffatFixedBeta::new(8.0, beta, 1e-6);
+        let mut model = MoffatFixedBeta::new(8.0, beta, 1e-6);
+        model.integrate_at(3);
         for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
             let stamp = ModelStamp::of(&model, size, &truth);
             assert_batch_matches_reference(&model, &stamp, &params);

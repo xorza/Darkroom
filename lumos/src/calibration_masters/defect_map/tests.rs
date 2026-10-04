@@ -3,12 +3,12 @@ use crate::combine::cache::FrameCache;
 use crate::combine::config::{Normalization, StackConfig};
 use crate::combine::stack::run_stacking;
 use crate::internals::cfa::XTRANS_PATTERN;
+use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::vec2us::Vec2us;
 
-use crate::calibration_masters::defect_map::sampling::{
-    collect_color_sample_indices, collect_color_samples,
-};
+use crate::calibration_masters::defect_map::sampling::collect_color_sample_indices;
+use crate::calibration_masters::defect_map::sampling::internals::collect_color_samples;
 use crate::{internals::cfa::make_cfa, io::raw::demosaic::bayer::CfaPattern};
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
@@ -168,7 +168,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                 }
 
                 let mut dark = make_cfa(size, pixels, CfaType::Mono);
-                dark.quantization_sigma = Some(sigma);
+                dark.metadata.quantization_sigma = Some(sigma);
                 dark.metadata.gain = Some(gain);
                 let detected = DefectMap::new(dark.size())
                     .detect_hot(&dark, 5.0, &CancelToken::never())
@@ -204,7 +204,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
                 pixels[index] += 4.0 * master_sigma;
             }
             let mut image = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
-            image.quantization_sigma = Some(source_sigma);
+            image.metadata.quantization_sigma = Some(source_sigma);
             image
         })
         .collect();
@@ -213,7 +213,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
     let product =
         run_stacking(&cache, &StackConfig::default()).expect("this cache is never cancelled");
     assert!(
-        (product.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
+        (product.image.metadata.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
         "eight equal surviving frames must propagate σ/√8"
     );
     // Defect detection consumes the mosaic master, the same projection `stack_cfa_master` makes.
@@ -430,15 +430,20 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         })
         .collect();
     let data = Buffer2::new(size.width, size.height, pixels);
-    let background = DarkBackground::fit(&data, CfaType::Mono, &CancelToken::never()).unwrap();
+    let background = ColourMesh::measure(
+        &data,
+        &CfaType::Mono,
+        DARK_BACKGROUND_TILE_SIZE,
+        &mut MeshWorkspace::default(),
+    );
 
     for y in 0..size.height {
         for x in 0..size.width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
+            let sky = background.at(0, Vec2us::new(x, y)).sky;
             assert!(
-                (background.at(Vec2us::new(x, y), 0) - expected).abs() < 2e-7,
-                "affine background mismatch at ({x}, {y}): expected {expected}, got {}",
-                background.at(Vec2us::new(x, y), 0)
+                (sky - expected).abs() < 2e-7,
+                "affine background mismatch at ({x}, {y}): expected {expected}, got {sky}"
             );
         }
     }
@@ -666,4 +671,79 @@ fn a_pixel_hot_and_dead_counts_once() {
     assert_eq!(map.percentage(), 18.75);
     assert!(DefectMap::from_indices(size, vec![16], vec![]).is_none());
     assert!(DefectMap::from_indices(size, vec![], vec![15]).is_some());
+}
+
+/// `LOWER_RESIDUAL_P1_TO_SIGMA` is `1 / Φ⁻¹(0.99)`: the normal CDF at its reciprocal is 0.99, to
+/// the f32 rounding of the constant (its relative ε moves the CDF by `φ(2.326)·2.326·ε`, under
+/// 1e-7) and the erf port's own error.
+#[test]
+fn the_lower_tail_constant_is_the_reciprocal_normal_percentile() {
+    use crate::math::error_function::erf;
+    let z = 1.0 / f64::from(LOWER_RESIDUAL_P1_TO_SIGMA);
+    let cdf = f64::midpoint(1.0, erf(z / std::f64::consts::SQRT_2));
+    assert!((cdf - 0.99).abs() < 1e-7, "{cdf}");
+}
+
+/// A dark where 10% of the pixels run hot — an uncooled sensor's warm population — still flags
+/// every one. Gaussian noise of σ 0.001 on a level of 0.01, and every tenth pixel 0.02 hotter:
+/// 20σ. The lower tail sees noise alone, so σ comes out near 0.001 and the 5σ cut near 0.005 above
+/// the median, far under the hot pixels and far over the noise (a 5σ excursion has odds 3e-7, and
+/// 3686 clean pixels give it about 1e-3 of a chance). The absolute 99th percentile sat among the
+/// hot pixels, at about 0.02, and put the cut near 0.039: it flagged none.
+#[test]
+fn a_dense_warm_population_is_flagged() {
+    let size = Size2us::new(64, 64);
+    let mut rng = TestRng::new(31);
+    let pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| {
+            let hot = if index % 10 == 0 { 0.02 } else { 0.0 };
+            0.01 + 0.001 * rng.next_gaussian_f32() + hot
+        })
+        .collect();
+    let dark = make_cfa(size, pixels, CfaType::Mono);
+    let map = DefectMap::new(size)
+        .detect_hot(&dark, 5.0, &CancelToken::never())
+        .unwrap();
+    let expected: Vec<usize> = (0..size.pixel_count()).step_by(10).collect();
+    assert_eq!(map.hot_indices(), expected.as_slice());
+}
+
+/// The ring's plane reads a planar dark exactly where a pixel sits, in the interior and in a corner
+/// where the ring is one quadrant; a third of the ring hot does not move it; and a frame too small
+/// for a ring gives none. The dark is `0.1 + 0.001·x + 0.002·y` on an RGGB mosaic of 40 × 40, every
+/// photosite of a colour on the one plane, so the fit is the plane to f32 rounding of the samples
+/// (each within 2⁻²⁴ of its value) carried through the solve: 1e-6.
+#[test]
+fn the_ring_plane_reads_the_level_at_the_pixel() {
+    use crate::calibration_masters::defect_map::ring_reference::RingReference;
+    let size = Size2us::new(40, 40);
+    let level = |x: usize, y: usize| 0.1 + 0.001 * x as f32 + 0.002 * y as f32;
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| level(index % size.width, index / size.width))
+        .collect();
+    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let mut ring = RingReference::default();
+    for point in [Vec2us::new(20, 20), Vec2us::new(0, 0), Vec2us::new(39, 38)] {
+        let plain = make_cfa(size, pixels.clone(), cfa);
+        let read = ring.at(&plain.data, &cfa, point).unwrap();
+        assert!(
+            (read - level(point.x, point.y)).abs() < 1e-6,
+            "{point:?}: {read}"
+        );
+    }
+    // Every red photosite at Chebyshev distance 6 or 8 to the left of (20, 20) runs 0.5 hot: a
+    // third of its ring.
+    for y in (12..=28).step_by(2) {
+        for x in [12, 14] {
+            pixels[y * size.width + x] += 0.5;
+        }
+    }
+    let spotted = make_cfa(size, pixels, cfa);
+    let read = ring.at(&spotted.data, &cfa, Vec2us::new(20, 20)).unwrap();
+    assert!((read - level(20, 20)).abs() < 1e-6, "{read}");
+    let tiny = make_cfa(Size2us::new(6, 6), vec![0.1; 36], CfaType::Mono);
+    assert!(
+        ring.at(&tiny.data, &CfaType::Mono, Vec2us::new(3, 3))
+            .is_none()
+    );
 }

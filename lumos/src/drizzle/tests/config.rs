@@ -5,7 +5,7 @@ fn drizzle_config_default() {
     let config = DrizzleConfig::default();
     assert_eq!(config.scale, 2.0);
     assert_eq!(config.pixfrac, 0.8);
-    assert_eq!(config.kernel, DrizzleKernel::Turbo);
+    assert_eq!(config.kernel, DrizzleKernel::Square);
 }
 
 #[test]

@@ -67,9 +67,7 @@ rfd = { version = "0.17" }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 async-trait = { version = "0.1" }
 arrayvec = { version = "0.7", features = ["serde"] }
-smallvec = { version = "1.16" }
 static_assertions = "1.1"
-parking_lot = { version = "0.12" }
 rand_chacha = { version = "0.10" }
 nalgebra = { version = "0.35" }
 statrs = { version = "0.19", default-features = false }

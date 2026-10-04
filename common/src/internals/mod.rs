@@ -49,16 +49,20 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// A path under the OS temp directory nothing else will pick: `tag` says which
-/// fixture wants it, the process id separates concurrent test binaries, and the
-/// counter separates repeated calls within one.
+/// A path under `.tmp/tests` in the workspace nothing else will pick: `tag` says which fixture
+/// wants it, the process id separates concurrent test binaries, and the counter separates repeated
+/// calls within one. On disk rather than in the OS temp directory, which Debian 13 and Arch mount
+/// as tmpfs: a frame-sized fixture there spends RAM, and lumos's frame store refuses to spill to a
+/// memory-backed directory at all.
 ///
 /// Shared by [`TempDir`](temp_dir::TempDir) and [`TempFile`](temp_file::TempFile),
 /// so the two cannot collide with each other either.
 fn unique_temp_path(tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    env::temp_dir().join(format!("{tag}-{}-{sequence}", process::id()))
+    let root = scratch_dir("tests");
+    fs::create_dir_all(&root).expect("the test scratch root is creatable");
+    root.join(format!("{tag}-{}-{sequence}", process::id()))
 }
 
 #[cfg(test)]

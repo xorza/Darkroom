@@ -61,6 +61,6 @@ fn denoise_reduces_linear_noise() {
 
     // Finish the display chain — stretch then clean any residual green — and save the final image.
     Stretch::auto_stf().apply(&mut img).unwrap();
-    Scnr::average_neutral().apply(&mut img).unwrap();
+    Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     visual::save_linear(&img, "denoise/stacked_light_denoised");
 }

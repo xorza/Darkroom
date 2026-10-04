@@ -1,15 +1,39 @@
 use crate::combine::cache::*;
+use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::config::Weighting;
 use crate::combine::rejection::Rejection;
 use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
-use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::spill_directory::SpillDirectory;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
+use crate::memory::run_memory::RunMemory;
 use common::TempDir;
+
+/// A mono request with the default survivor minimum, no weights and no noise.
+fn request(planes: QualityPlanes) -> CombineRequest<'static> {
+    CombineRequest {
+        weights: None,
+        planes,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        noise: None,
+        slots: Slots::new(None, 1),
+    }
+}
+
+/// `cache` with every frame measured to have unit noise in every slot, so a sample's variance is
+/// one over its confidence.
+fn with_unit_noise(mut cache: FrameCache) -> FrameCache {
+    for frame in &mut cache.frames {
+        for noise in &mut frame.source_stats.noise {
+            *noise = 1.0;
+        }
+    }
+    cache
+}
 
 #[test]
 fn unrequested_quality_planes_are_never_allocated() {
@@ -23,30 +47,50 @@ fn unrequested_quality_planes_are_never_allocated() {
         ],
         Normalization::None,
     );
-    let reduce = |values: &mut [f32], weights: &[f32], _: &mut ScratchBuffers| {
-        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
+    let reduce = |samples: PixelSamples<'_>, _: &mut ScratchBuffers| {
+        let PixelSamples {
+            values, weights, ..
+        } = samples;
+        let count = values.len();
+        CombinedSample::from_survivors(
+            values.iter().sum::<f32>() / count as f32,
+            values,
+            weights,
+            0..count,
+            None,
+        )
     };
 
     let weight_only = cache.process_chunked(
-        None,
-        QualityPlanes {
+        request(QualityPlanes {
             variance: false,
+            dispersion: false,
             ..QualityPlanes::ALL
-        },
+        }),
         reduce,
     );
     assert!(weight_only.weight.is_some());
     assert!(
-        weight_only.linear_variance.is_none(),
-        "a variance plane was allocated for a combine that did not ask for one"
+        weight_only.variance.is_none() && weight_only.dispersion.is_none(),
+        "a variance or dispersion plane was allocated for a combine that did not ask for one"
     );
 
-    let bare = cache.process_chunked(None, QualityPlanes::IMAGE_ONLY, reduce);
+    let bare = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), reduce);
     assert!(bare.weight.is_none());
-    assert!(bare.linear_variance.is_none());
+    assert!(bare.variance.is_none() && bare.dispersion.is_none());
 
-    // Skipping the planes must not disturb the combined pixels.
-    let all = cache.process_chunked(None, QualityPlanes::ALL, reduce);
+    // Skipping the planes must not disturb the combined pixels. Two equal-weight samples, 1 and 3,
+    // about their mean 2: (1 + 1) / ((2 − 1)·2) = 1.
+    let all = cache.process_chunked(request(QualityPlanes::ALL), reduce);
+    assert!(
+        all.dispersion
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels()
+            .iter()
+            .all(|&dispersion| dispersion == 1.0)
+    );
     assert_eq!(
         bare.pixels.channel(0).pixels(),
         all.pixels.channel(0).pixels()
@@ -57,11 +101,16 @@ fn unrequested_quality_planes_are_never_allocated() {
 fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     assert_eq!(
         QualityPlanes::ALL.resolve(false),
+        QualityPlanes::STANDARD.resolve(false),
+        "a reducer that is not a weighted mean reports no variance factor and no dispersion"
+    );
+    assert_eq!(
+        QualityPlanes::ALL.resolve(false),
         QualityPlanes {
             variance: false,
+            dispersion: false,
             ..QualityPlanes::ALL
         },
-        "a reducer that is not a linear combination reports no variance factor"
     );
     assert_eq!(QualityPlanes::ALL.resolve(true), QualityPlanes::ALL);
     assert_eq!(
@@ -72,7 +121,7 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 }
 
 /// Every frame of `frames` through the per-frame checks, in order.
-fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), Error> {
+fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), StackError> {
     let mut facts = SetFacts::default();
     for (index, frame) in frames.iter().enumerate() {
         FrameCheck {
@@ -105,7 +154,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            Error::StoredFramePlaneSamples {
+            StackError::StoredFramePlaneSamples {
                 index: 1,
                 plane: FramePlane::Channel,
                 expected: 8,
@@ -127,7 +176,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            Error::StoredFramePlaneSamples {
+            StackError::StoredFramePlaneSamples {
                 plane: FramePlane::Coverage,
                 expected: 8,
                 actual: 2,
@@ -195,7 +244,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
         assert!(
             matches!(
                 error,
-                Error::CfaPatternMismatch {
+                StackError::CfaPatternMismatch {
                     index: 1,
                     actual: a,
                     reference_index: 0,
@@ -247,7 +296,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     assert!(
         matches!(
             error,
-            Error::FrameQualityPairMismatch {
+            StackError::FrameQualityPairMismatch {
                 index: 0,
                 pixel: 2,
                 coverage: 1.0,
@@ -268,11 +317,29 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     );
 }
 
+/// The plain weighted mean of `cache` with every plane, under manual `weights` or equal ones.
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let combined =
-        cache.process_chunked(weights, QualityPlanes::ALL, |values, weights, scratch| {
-            Rejection::None.combine_mean(values, weights, scratch, true)
-        });
+    let slots = Slots::new(None, cache.core.dimensions.channels());
+    let weights = weights.map(|weights| {
+        FrameWeights::resolve(&Weighting::Manual(weights.to_vec()), [], None, slots)
+            .unwrap()
+            .unwrap()
+    });
+    let noise = SampleNoise::new(
+        cache.frames.iter().map(|frame| &frame.source_stats),
+        None,
+        slots,
+    );
+    let request = CombineRequest {
+        weights: weights.as_ref(),
+        planes: QualityPlanes::ALL,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        noise: Some(&noise),
+        slots,
+    };
+    let combined = cache.process_chunked(request, |samples, scratch| {
+        Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, true)
+    });
     cache.finish_product(combined, QualityPlanes::ALL, None)
 }
 
@@ -298,12 +365,19 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     .expect("frames are valid");
 
     // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
-    // Residents: 3 channels × (pixels + weight + variance).
+    // Residents: 3 channels × (pixels + weight + variance), and the dispersion when asked for.
+    assert_eq!(
+        cache.weighted_layout(QualityPlanes::STANDARD),
+        ChunkMemoryLayout {
+            input_bytes: 7 * 4,
+            resident_planes: 9,
+        }
+    );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
-            input_planes: 7,
-            resident_planes: 9,
+            input_bytes: 7 * 4,
+            resident_planes: 12,
         }
     );
 
@@ -311,7 +385,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     assert_eq!(
         cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
-            input_planes: 7,
+            input_bytes: 7 * 4,
             resident_planes: 3,
         }
     );
@@ -319,9 +393,9 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
     // accumulating to the combine's residents.
     assert_eq!(
-        cache.coverage_layout(QualityPlanes::ALL),
+        cache.coverage_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_planes: 2,
+            input_bytes: 2 * 4,
             resident_planes: 10,
         }
     );
@@ -329,14 +403,17 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
 
 #[test]
 fn finish_product_uniform_equal_weights() {
-    // 4 frames, no coverage maps → fast path. Equal weights: every pixel sees all 4 frames at
-    // weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 4/4 = 1.
+    // 4 frames, no coverage maps → fast path. Equal weights and unit noise: every pixel sees all 4
+    // frames at weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 1.
     let dims = ImageDimensions::new((3, 2), 1);
     let images: Vec<LinearImage> = (0..4)
         .map(|i| LinearImage::from_pixels(dims, vec![i as f32; 6]))
         .collect();
-    let product = mean_product(&FrameCache::from_images(images, Normalization::None), None);
-    let linear_variance = product.linear_variance.as_ref().unwrap();
+    let product = mean_product(
+        &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
+        None,
+    );
+    let linear_variance = product.variance.as_ref().unwrap();
     assert!(matches!(
         product.weight.as_ref().unwrap(),
         QualityMap::Shared(_)
@@ -367,16 +444,17 @@ fn finish_product_uniform_equal_weights() {
 
 #[test]
 fn finish_product_uniform_manual_weights() {
-    // weights [1,2,3,4], full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance = 30/100 = 0.30.
+    // Weights [1,2,3,4] and unit noise, full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance =
+    // 30/100 = 0.30.
     let dims = ImageDimensions::new((2, 1), 1);
     let images: Vec<LinearImage> = (0..4)
         .map(|_| LinearImage::from_pixels(dims, vec![0.5; 2]))
         .collect();
     let product = mean_product(
-        &FrameCache::from_images(images, Normalization::None),
+        &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
         Some(&[1.0, 2.0, 3.0, 4.0]),
     );
-    let linear_variance = product.linear_variance.as_ref().unwrap();
+    let linear_variance = product.variance.as_ref().unwrap();
     for p in 0..2 {
         assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
@@ -389,7 +467,7 @@ fn finish_product_partial_coverage() {
     // width-3 frames. px1 has support from f0, f1, and f3, while f2 is unsupported. px2 excludes
     // f1 the other way: coverage exactly at the floor, which is border fill rather than data — the
     // two exclusions have to produce the same counts, since one rule decides both.
-    // Coverage gates inclusion but does not scale statistical weight.
+    // Coverage gates inclusion but does not scale statistical weight. Unit noise:
     //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, variance 0.25
     //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, variance 1/3
     //   px2: count 3, as px1
@@ -408,15 +486,17 @@ fn finish_product_partial_coverage() {
             frame
         })
         .collect();
-    let cache = FrameCache::from_stack_frames(
-        frames,
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("frames are valid");
+    let cache = with_unit_noise(
+        FrameCache::from_stack_frames(
+            frames,
+            Normalization::None,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("frames are valid"),
+    );
     let product = mean_product(&cache, None);
-    let linear_variance = product.linear_variance.as_ref().unwrap();
+    let linear_variance = product.variance.as_ref().unwrap();
 
     assert_eq!(product.coverage.as_ref().unwrap()[0], 1.0);
     assert_eq!(product.weight.as_ref().unwrap().channel(0)[0], 4.0);
@@ -459,17 +539,25 @@ fn light_and_calibration_frames_combine_through_one_engine() {
     };
     for cache in caches(&[1.0, 3.0, 2.0]) {
         assert_eq!(cache.core.tier.chunk_memory(), None);
-        let median = cache.process_chunked(None, QualityPlanes::IMAGE_ONLY, |values, _, _| {
-            CombinedSample::value_only(statistics::median_mut(values), values.len())
+        let median = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, _| {
+            let count = samples.values.len();
+            CombinedSample::value_only(statistics::median_mut(samples.values), count)
         });
         assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
     }
     for cache in caches(&[10.0, 20.0]) {
+        let slots = Slots::new(cache.frames[0].source_stats.facts.cfa_type, 1);
+        let weights = FrameWeights::resolve(&Weighting::Manual(vec![1.0, 3.0]), [], None, slots)
+            .unwrap()
+            .unwrap();
         let weighted = cache.process_chunked(
-            Some(&[1.0, 3.0]),
-            QualityPlanes::IMAGE_ONLY,
-            |values, weights, scratch| {
-                Rejection::None.combine_mean(values, weights, scratch, false)
+            CombineRequest {
+                weights: Some(&weights),
+                slots,
+                ..request(QualityPlanes::IMAGE_ONLY)
+            },
+            |samples, scratch| {
+                Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
             },
         );
         assert_eq!(weighted.pixels.channel(0).pixels(), &[17.5; 4]);
@@ -485,11 +573,9 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         vec![rgb([1.0, 2.0, 3.0]), rgb([5.0, 6.0, 7.0])],
         Normalization::None,
     );
-    let mean = cache.process_chunked(
-        None,
-        QualityPlanes::IMAGE_ONLY,
-        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, false),
-    );
+    let mean = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, scratch| {
+        Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
+    });
     for (channel, level) in [3.0, 4.0, 5.0].into_iter().enumerate() {
         assert_eq!(mean.pixels.channel(channel).pixels(), &[level; 4]);
     }
@@ -501,7 +587,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
 #[test]
 fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
-    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
+    let scratch = RunScratch::create(temp_dir.path()).unwrap();
     let dims = ImageDimensions::new((4, 3), 1);
     let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, ramp.clone());
@@ -510,7 +596,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let spilled = FrameCache::from_stored_frames(
         vec![
             StoredFrame::spill(
-                &FrameSpill::new(spill_directory.path(), "test_chunk"),
+                &scratch,
                 &image,
                 &FrameQuality::None,
                 FrameStats::measure(&image),
@@ -518,10 +604,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             .unwrap(),
         ],
         CacheCore::plain(
-            CacheTier::of(
-                Some(spill_directory),
-                RunMemory::new(1 << 30, Some(123_456)),
-            ),
+            CacheTier::of(true, RunMemory::new(1 << 30, Some(123_456))),
             dims,
         ),
         Normalization::None,

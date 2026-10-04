@@ -1,7 +1,7 @@
 //! Row-major 3x3 matrix of f64 values.
 
 use glam::DVec2;
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
 
 /// Row-major 3x3 matrix of f64 values.
 ///
@@ -135,13 +135,6 @@ impl Index<usize> for DMat3 {
     #[inline]
     fn index(&self, idx: usize) -> &f64 {
         &self.data[idx]
-    }
-}
-
-impl IndexMut<usize> for DMat3 {
-    #[inline]
-    fn index_mut(&mut self, idx: usize) -> &mut f64 {
-        &mut self.data[idx]
     }
 }
 

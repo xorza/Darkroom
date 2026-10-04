@@ -44,7 +44,7 @@ fn rendered_skies_are_recovered() {
             sky: BackgroundField::Uniform { level: 0.15 },
             num_stars: 30,
             model_error: None,
-            star_move: 0.000_272,
+            star_move: 0.000_165,
         },
         Case {
             name: "gradient",
@@ -55,7 +55,7 @@ fn rendered_skies_are_recovered() {
             },
             num_stars: 30,
             model_error: None,
-            star_move: 0.000_157,
+            star_move: 0.000_190,
         },
         Case {
             name: "vignette",
@@ -66,7 +66,7 @@ fn rendered_skies_are_recovered() {
             }),
             num_stars: 30,
             model_error: Some(0.049_95),
-            star_move: 0.000_349,
+            star_move: 0.000_421,
         },
         Case {
             name: "nebula",
@@ -80,7 +80,7 @@ fn rendered_skies_are_recovered() {
             }),
             num_stars: 40,
             model_error: Some(0.2006),
-            star_move: 0.004_73,
+            star_move: 0.005_03,
         },
     ];
     let config = BackgroundConfig::default();

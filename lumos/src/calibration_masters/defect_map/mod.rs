@@ -27,8 +27,10 @@
 //!
 //! 4. **Broad dark structure:**
 //!    Per-color tile medians are bilinearly interpolated into a smooth dark-current model before
-//!    thresholding. This prevents gradients and amp glow from becoming false point defects while
-//!    preserving isolated pixels and same-color clusters as positive residuals.
+//!    thresholding, which keeps isolated pixels and same-color clusters as positive residuals. A
+//!    pixel the model calls hot is confirmed against a robust plane through its colour's photosites
+//!    6 to 8 pixels around it ([`RingReference`](ring_reference::RingReference)), so amp glow that
+//!    curves faster than the tiles, or rises past the outer ones, does not become a defect.
 //!
 //! 5. **Adaptive sampling for large images:**
 //!    Exact median computation is slow on full-resolution sensors. Each color receives up to 100K
@@ -47,15 +49,18 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
-pub(crate) mod dark_background;
-mod sampling;
+mod ring_reference;
+pub(crate) mod sampling;
 
+use crate::background_mesh::colour_mesh::ColourMesh;
+use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
-use crate::calibration_masters::defect_map::dark_background::DarkBackground;
+use crate::calibration_masters::defect_map::ring_reference::RingReference;
 use crate::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::calibration_masters::error::CalibrationError;
-use crate::io::image::cfa::same_color::SameColorMedian;
+use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 use common::CancelToken;
@@ -219,7 +224,9 @@ impl DefectMap {
     }
 
     /// Correct defective pixels on raw CFA data by replacing with median of
-    /// same-color CFA neighbors.
+    /// same-color CFA neighbors, and flag them [`QualityFlags::DEFECT`] and
+    /// [`QualityFlags::REPAIRED`]: the value left there is the neighbours', and a combine with
+    /// other frames at that pixel can leave it out.
     ///
     /// # Panics
     ///
@@ -229,15 +236,38 @@ impl DefectMap {
         if self.count == 0 {
             return;
         }
-        // Every defect is masked, so each repair draws only on good neighbours: a clustered
-        // defect (hot column, adjacent same-color pixels) cannot pull a bad or half-corrected
-        // value into a neighbour's median, and the order of the lists does not matter. A pixel
-        // in both lists is repaired twice to the same value.
-        let neighbors = SameColorMedian::new(&image.cfa_type);
+        // Every defect is masked, and every pixel that holds no measurement, so each repair draws
+        // only on measured neighbours: a clustered defect (hot column, adjacent same-color pixels)
+        // cannot pull a bad or half-corrected value into a neighbour's median, a fill cannot pass
+        // for a measurement, and the order of the lists does not matter. A pixel in both lists is
+        // repaired twice to the same value.
+        let with_nulls = image
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
+            .map(|flags| {
+                let mut mask = flags.mask_of(QualityFlags::NO_DATA);
+                mask.or_with(&self.mask);
+                mask
+            });
+        let mask = with_nulls.as_ref().unwrap_or(&self.mask);
+        let lattice = CfaLattice::new(&image.cfa_type);
+        let mut scratch = Gathered::default();
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
-            image.data[idx] =
-                neighbors.at(&image.data, self.dimensions.point_of(idx), Some(&self.mask));
+            image.data[idx] = lattice.median(
+                &image.data,
+                self.dimensions.point_of(idx),
+                Some(mask),
+                &mut scratch,
+            );
         }
+        let mask = &self.mask;
+        PixelFlags::add_where(
+            &mut image.flags,
+            self.dimensions,
+            QualityFlags::DEFECT.union(QualityFlags::REPAIRED),
+            |index| mask.get(index),
+        );
     }
 }
 
@@ -248,8 +278,9 @@ pub(super) const MAX_MEDIAN_SAMPLES: usize = 100_000;
 /// median while remaining much smaller than normal sensor-scale gradients and amp glow.
 pub(super) const DARK_BACKGROUND_TILE_SIZE: usize = 64;
 
-/// Convert the 99th percentile of `|N(0, σ)|` back to σ.
-const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
+/// `1 / Φ⁻¹(0.99)`: the 1st percentile of `N(m, σ)` lies `Φ⁻¹(0.99)·σ` below `m`, so this turns
+/// that distance back into σ.
+const LOWER_RESIDUAL_P1_TO_SIGMA: f32 = 0.429_858_32;
 // Five expected tail samples keep one sparse defect from defining the scale on tiny images.
 const MIN_TAIL_SCALE_SAMPLES: usize = 500;
 
@@ -280,23 +311,41 @@ fn detect_hot_pixels(
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
     let cfa_type = image.cfa_type;
-    let background = DarkBackground::fit(data, cfa_type, cancel)?;
+    let background = ColourMesh::measure(
+        data,
+        &cfa_type,
+        DARK_BACKGROUND_TILE_SIZE,
+        &mut MeshWorkspace::default(),
+    );
+    if cancel.is_cancelled() {
+        return Err(CalibrationError::Cancelled);
+    }
     let sigma_floor = residual_sigma_floor(image);
     let stats = compute_per_color_residual_stats(data, cfa_type, &background, sigma_floor);
 
-    // The broad model uses tile medians rather than same-color neighbour medians so a compact
-    // same-color cluster remains an outlier instead of becoming its own local reference.
+    // The broad model reads each colour's tile skies rather than same-color neighbour medians, so a
+    // compact same-color cluster remains an outlier instead of becoming its own local reference.
+    // What it calls hot must stand as far above the ring's plane, which follows the structure the
+    // tiles cannot.
     let indices = (0..total)
         .into_par_iter()
-        .filter(|&i| {
+        .map_init(RingReference::default, |ring, i| {
             if cancel.is_cancelled() {
-                return false;
+                return None;
             }
             let point = size.point_of(i);
             let color = cfa_type.color_at(point) as usize;
             let ColorStats { median, sigma } = stats[color];
-            data[i] - background.at(point, color) > median + sigma_threshold * sigma
+            let local = background.at(color, point);
+            let cut = sigma_threshold * sigma.max(local.noise);
+            if data[i] - local.sky <= median + cut {
+                return None;
+            }
+            ring.at(data, &cfa_type, point)
+                .is_none_or(|level| data[i] - level > cut)
+                .then_some(i)
         })
+        .flatten()
         .collect();
 
     if cancel.is_cancelled() {
@@ -307,6 +356,7 @@ fn detect_hot_pixels(
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
     if let Some(sigma) = image
+        .metadata
         .quantization_sigma
         .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
     {
@@ -338,17 +388,18 @@ fn detect_cold_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let neighbors = SameColorMedian::new(&image.cfa_type);
+    let lattice = CfaLattice::new(&image.cfa_type);
 
     let indices = (0..total)
         .into_par_iter()
-        .filter(|&i| {
+        .map_init(Gathered::default, |scratch, i| {
             if cancel.is_cancelled() {
-                return false;
+                return None;
             }
-            let local = neighbors.at(data, size.point_of(i), None);
-            data[i] < dead_fraction * local
+            let local = lattice.median(data, size.point_of(i), None, scratch);
+            (data[i] < dead_fraction * local).then_some(i)
         })
+        .flatten()
         .collect();
 
     if cancel.is_cancelled() {
@@ -362,21 +413,24 @@ fn detect_cold_pixels(
 struct ColorStats {
     /// Median residual for the color (the hot-detection center).
     median: f32,
-    /// Robust σ from MAD and the upper residual bulk, resolution-floored. No samples gives `∞`.
+    /// Robust σ from MAD and the lower residual tail, resolution-floored. No samples gives `∞`.
     sigma: f32,
 }
 
 /// Per-CFA-color robust background-subtracted stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
-/// `sigma` takes the larger of MAD and the Gaussian-calibrated 99th absolute residual percentile.
-/// The latter keeps broad model error and column structure out of the defect tail while remaining
-/// insensitive to a sparse (<1%) defect population. The result is floored at the master image's
-/// quantization/numeric resolution so a zero-MAD plateau does not turn every representable
-/// deviation into a defect. A color with no samples gets `sigma = ∞` so it never flags.
+/// `sigma` takes the larger of MAD and the Gaussian-calibrated distance from the median down to the
+/// 1st residual percentile. The latter keeps broad model error and column structure, which spread
+/// a residual both ways, out of the defect tail; a hot pixel only reads high, so the lower tail
+/// holds none of them whatever their density. (The upper tail, or the absolute one, falls inside
+/// the defects once they pass 1% of a colour, as they do on an uncooled sensor's dark.) The result
+/// is floored at the master image's quantization/numeric resolution so a zero-MAD plateau does not
+/// turn every representable deviation into a defect. A color with no samples gets `sigma = ∞` so
+/// it never flags.
 fn compute_per_color_residual_stats(
     data: &Buffer2<f32>,
     cfa_type: CfaType,
-    background: &DarkBackground,
+    background: &ColourMesh,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
     let num_colors = cfa_type.num_colors();
@@ -393,15 +447,12 @@ fn compute_per_color_residual_stats(
             continue;
         }
 
-        // Leaves `samples` holding the absolute deviations, which the tail scale ranks.
+        let lower_tail = (samples.len() >= MIN_TAIL_SCALE_SAMPLES).then(|| {
+            let p1_index = (samples.len() - 1) / 100;
+            *samples.select_nth_unstable_by(p1_index, f32::total_cmp).1
+        });
         let MedianMad { median, mad } = MedianMad::of_mut(&mut samples);
-        let tail_sigma = if samples.len() >= MIN_TAIL_SCALE_SAMPLES {
-            let p99_index = (samples.len() - 1) * 99 / 100;
-            let (_, p99, _) = samples.select_nth_unstable_by(p99_index, f32::total_cmp);
-            *p99 * ABSOLUTE_RESIDUAL_P99_TO_SIGMA
-        } else {
-            0.0
-        };
+        let tail_sigma = lower_tail.map_or(0.0, |p1| (median - p1) * LOWER_RESIDUAL_P1_TO_SIGMA);
         let sigma = mad_to_sigma(mad).max(tail_sigma).max(sigma_floor);
 
         tracing::debug!(

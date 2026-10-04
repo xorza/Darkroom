@@ -67,14 +67,6 @@ impl Isa for Avx2Fma {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> Avx2F32 {
-        Avx2F32(unsafe {
-            let samples = _mm_loadu_si128(lanes.as_ptr().cast());
-            _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(samples))
-        })
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: Avx2F32) -> Avx2F32 {
         let clamped = index
             .min(self.splat_f32(lookup_last(table)))
@@ -280,6 +272,29 @@ impl F64x4 for Avx2F64 {
             let exponent = _mm256_cvtepi32_epi64(_mm256_cvtpd_epi32(self.0));
             let biased = _mm256_add_epi64(exponent, _mm256_set1_epi64x(1023));
             Self(_mm256_castsi256_pd(_mm256_slli_epi64::<52>(biased)))
+        }
+    }
+
+    #[inline(always)]
+    fn frexp(self) -> Frexp<Self> {
+        unsafe {
+            let bits = _mm256_castpd_si256(self.0);
+            let mantissa = _mm256_or_si256(
+                _mm256_and_si256(
+                    bits,
+                    _mm256_set1_epi64x(0x800f_ffff_ffff_ffff_u64.cast_signed()),
+                ),
+                _mm256_set1_epi64x(0x3fe0_0000_0000_0000),
+            );
+            // The top 12 bits as an integer below 2⁵², converted exactly: placed in the mantissa
+            // of 2⁵² and that 2⁵² taken off again, as AVX2 has no 64-bit integer conversion.
+            let two_52 = _mm256_set1_epi64x(0x4330_0000_0000_0000);
+            let field = _mm256_or_si256(_mm256_srli_epi64::<52>(bits), two_52);
+            let exponent = _mm256_sub_pd(_mm256_castsi256_pd(field), _mm256_castsi256_pd(two_52));
+            Frexp {
+                mantissa: Self(_mm256_castsi256_pd(mantissa)),
+                exponent: Self(_mm256_sub_pd(exponent, _mm256_set1_pd(1022.0))),
+            }
         }
     }
 

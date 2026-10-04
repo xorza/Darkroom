@@ -7,9 +7,10 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::registration::tests::helpers::{self, max_deviation, register};
+use crate::registration::register;
+use crate::registration::tests::helpers::{self, max_deviation};
 use crate::registration::transform::{Transform, TransformModel};
-use crate::registration::{Config, TransformType};
+use crate::registration::{RegistrationConfig, TransformType};
 use crate::star_detection::config::Config as DetConfig;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::star::Star;
@@ -71,7 +72,7 @@ impl Rendered {
         let reference_stars = detector.detect(&reference.image).stars;
         let target_stars = detector.detect(&target.image).stars;
 
-        let config = Config {
+        let config = RegistrationConfig {
             transform_type: TransformModel::Fixed(self.model),
             matching: helpers::matching_config(6, self.min_matches),
             ..Default::default()

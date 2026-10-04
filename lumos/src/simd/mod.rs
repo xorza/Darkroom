@@ -76,9 +76,6 @@ pub(crate) trait Isa: Copy + Debug {
 
     fn load_f64(self, lanes: &[f64; F64_LANES]) -> Self::F64;
 
-    /// Each sample converted to f32, which holds every u16 exactly.
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> Self::F32;
-
     /// `table[⌊index⌋]` per lane, with `index` first clamped to `[0, table.len() − 1]` (a NaN to
     /// 0), so no lane reads outside the table.
     ///
@@ -199,6 +196,10 @@ pub(crate) trait F64x4:
 
     /// `2^self` for lanes that hold an integer in `[−1022, 1023]`; other lanes are garbage.
     fn pow2i(self) -> Self;
+
+    /// `self = mantissa · 2^exponent`, mantissa in `[0.5, 1)`, for lanes that hold a positive
+    /// normal number; every other lane is the same garbage on every Isa, as [`F32x8::frexp`]'s.
+    fn frexp(self) -> Frexp<Self>;
 
     /// `(l0 + l1) + (l2 + l3)`: the fold every Isa takes.
     fn reduce_sum(self) -> f64;

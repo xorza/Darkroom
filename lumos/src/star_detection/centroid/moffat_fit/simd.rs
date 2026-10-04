@@ -1,10 +1,29 @@
 //! The Moffat as a [`BatchModel`]: each lane evaluates `MoffatFixedBeta`'s own expressions,
 //! `u^(−β)` by its own [`PowStrategy`]. The integer and half-integer powers multiply in `int_pow`'s
-//! order and every division is a division, so a lane is the scalar model bit for bit.
+//! order, the general one is `exp(−β·ln u)` from [`Math`], which the scalar model takes through
+//! [`GeneralPower`], and every division is a division, so a lane is the scalar model bit for bit.
 
-use crate::simd::{F64x4, Isa};
+use crate::simd::math::Math;
+use crate::simd::{F64x4, Isa, Kernel};
 use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
-use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Lanes, Sample};
+use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
+
+/// `u^neg_beta` for one `u`, as a lane of [`Profile::pow_neg`]'s general power computes it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GeneralPower {
+    pub(super) u: f64,
+    pub(super) neg_beta: f64,
+}
+
+impl Kernel for GeneralPower {
+    type Output = f64;
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) -> f64 {
+        isa.exp_f64(isa.splat_f64(self.neg_beta) * isa.ln_f64(isa.splat_f64(self.u)))
+            .to_array()[0]
+    }
+}
 
 /// The Moffat at `[x0, y0, amplitude, alpha, background]`.
 #[derive(Debug, Clone, Copy)]
@@ -58,15 +77,15 @@ pub(super) struct Profile<S: Isa> {
 
 impl<S: Isa> LaneProfile<S, 5> for Profile<S> {
     #[inline(always)]
-    fn sample(self, isa: S, lanes: Lanes<S::F64>) -> Sample<S::F64, 5> {
-        let dx = lanes.x - self.x0;
-        let dy = lanes.y - self.y0;
+    fn sample(self, isa: S, x: S::F64, y: S::F64) -> Sample<S::F64, 5> {
+        let dx = x - self.x0;
+        let dy = y - self.y0;
         let r2 = dx * dx + dy * dy;
         let u = self.one + r2 / self.alpha2;
         let u_neg_beta = self.pow_neg(isa, u);
         let common = self.common_factor * (u_neg_beta / u);
         Sample {
-            residual: lanes.z - (self.amp * u_neg_beta + self.bg),
+            value: self.amp * u_neg_beta + self.bg,
             jacobian: [
                 common * dx,
                 common * dy,
@@ -86,7 +105,7 @@ impl<S: Isa> Profile<S> {
             PowStrategy::HalfInt { int_part } => self.one / (self.int_pow(u, int_part) * u.sqrt()),
             PowStrategy::Int { n } => self.one / self.int_pow(u, n),
             PowStrategy::General { neg_beta } => {
-                isa.load_f64(&u.to_array().map(|u| u.powf(neg_beta)))
+                isa.exp_f64(isa.splat_f64(neg_beta) * isa.ln_f64(u))
             }
         }
     }
@@ -108,6 +127,7 @@ impl<S: Isa> Profile<S> {
 
 #[cfg(test)]
 mod tests {
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
     use crate::star_detection::centroid::lm_optimizer::internals::ModelStamp;
     use crate::star_detection::centroid::moffat_fit::MoffatFixedBeta;
     use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
@@ -117,11 +137,13 @@ mod tests {
     #[test]
     fn every_tier_matches_portable_bit_for_bit() {
         for beta in [2.5, 3.0, 2.3] {
-            let model = MoffatFixedBeta::new(8.0, beta, 1e-6);
+            let mut model = MoffatFixedBeta::new(8.0, beta, 1e-6);
+            model.integrate_at(3);
             let stamp = ModelStamp::of(&model, 4, &[1.5, 1.5, 800.0, 2.0, 80.0]);
             assert_every_tier_matches_portable(
                 MoffatBatch::new(&model, [1.7, 1.3, 790.0, 2.1, 82.0]),
                 stamp.data(),
+                &model.quadrature,
             );
         }
     }

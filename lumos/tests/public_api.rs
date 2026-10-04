@@ -2,23 +2,21 @@ use std::io::{Error, ErrorKind};
 
 use common::CancelToken;
 use imaginarium::Buffer2;
+use lumos::detection;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
-    CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage,
-    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
-    FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
-    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
-    FitsTransferProvenance, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
-    InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, MatchIndices, NoiseModel, Normalization, PercentileClipConfig, QualityMap,
-    QualityPlanes, RansacConfig, RawTransferProvenance, RegistrationCatalog, RegistrationConfig,
-    RegistrationError, RegistrationMatchingConfig, Rejection, SampleDomain, ScaleOrigin,
-    SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
-    WarpTransform, Weighting, WinsorizedClipConfig,
+    AlignStackError, AlignStackResult, AlignmentSummary, CalibrationComponent, CalibrationError,
+    CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage, DefectSummary,
+    DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
+    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
+    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
+    FlagCounts, FrameRegistration, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
+    IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
+    LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap,
+    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct, StarMatch,
+    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
+    WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -36,18 +34,17 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             float_scale: FitsFloatScale::FullScale(65_535.0),
             nulls: FitsNullPolicy::Reject,
             unstated_bayer_pattern: Some(CfaPattern::Grbg),
+            pedestal: Pedestal::Unknown,
         },
+        xtrans_passes: MarkesteijnPasses::Three,
     };
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.
     assert_eq!(FitsLoadOptions::default().nulls, FitsNullPolicy::Mask);
 
-    let provenance = TransferProvenance::FitsNormalized(FitsTransferProvenance {
+    let _ = TransferProvenance::FitsNormalized(FitsTransferProvenance {
         bscale: 1.0,
         bzero: 0.0,
-        physical_scale: 65_535.0,
-        scale_origin: ScaleOrigin::Declared,
-        unit: Some("adu".to_owned()),
         hdu: FitsHduProvenance {
             index: 3,
             extname: Some("SCI".to_owned()),
@@ -58,33 +55,28 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             checksum: FitsChecksumState::Valid,
         },
     });
-    // Both decoders answer the same question about their samples, so a caller can compare two
-    // frames' domains without knowing which produced them. The FITS answer carries the declared
-    // BUNIT; a RAW frame states none, which is why the two still convert here.
-    let fits = provenance.sample_domain().unwrap();
+    // A caller compares two frames' domains without knowing which decoder produced them. A FITS
+    // frame that kept a 2048-ADU pedestal relates to a RAW frame with none by the scale ratio and an
+    // offset that moves the pedestal away.
+    let fits = SampleDomain {
+        scale: 65_535.0,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Kept(2048.0),
+        unit: Some("adu".to_owned()),
+    };
+    let raw = SampleDomain {
+        scale: 16_383.0,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Removed,
+        unit: None,
+    };
     assert_eq!(
-        fits,
-        SampleDomain {
-            scale: 65_535.0,
-            origin: ScaleOrigin::Declared,
-            unit: Some("adu".to_owned()),
-        }
+        fits.conversion_to(&raw),
+        Some(DomainMap {
+            gain: 65_535.0 / 16_383.0,
+            offset: -2048.0 / 16_383.0,
+        })
     );
-    let raw = TransferProvenance::RawNormalized(RawTransferProvenance {
-        physical_scale: 65_535.0,
-    })
-    .sample_domain()
-    .unwrap();
-    assert_eq!(
-        raw,
-        SampleDomain {
-            scale: 65_535.0,
-            origin: ScaleOrigin::Declared,
-            unit: None,
-        }
-    );
-    assert_eq!(fits.conversion_to(&raw), Some(1.0));
-    assert_eq!(TransferProvenance::UnspecifiedRaster.sample_domain(), None);
 }
 
 #[test]
@@ -93,7 +85,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         Rejection::SigmaClip(SigmaClipConfig::default()),
         Rejection::Winsorized(WinsorizedClipConfig::default()),
         Rejection::LinearFit(LinearFitClipConfig::default()),
-        Rejection::Percentile(PercentileClipConfig::default()),
+        Rejection::Trim(TrimConfig::default()),
         Rejection::Gesd(GesdConfig::default()),
     ];
 
@@ -105,10 +97,18 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             min_frames: 3,
             fallback: CombineMethod::Median,
         },
-        cache: CacheConfig::default(),
+        ingest: IngestConfig::default(),
         quality: QualityPlanes::IMAGE_ONLY,
+        min_survivors: 4,
     };
-    assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
+    assert_eq!(QualityPlanes::default(), QualityPlanes::STANDARD);
+    assert_eq!(
+        QualityPlanes::ALL,
+        QualityPlanes {
+            dispersion: true,
+            ..QualityPlanes::STANDARD
+        }
+    );
 
     let registration = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Similarity),
@@ -124,7 +124,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         },
         ransac: RansacConfig {
             max_iterations: 750,
-            seed: Some(42),
+            seed: 42,
             ..Default::default()
         },
         sip: Some(SipConfig {
@@ -134,6 +134,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         warp: WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: -1.0,
+            clamping_threshold: None,
         },
         ..Default::default()
     };
@@ -146,18 +147,14 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         10
     );
 
-    let detection = StarDetectionConfig {
-        background: StarDetectionBackgroundConfig::default(),
-        detection: StarDetectionCandidateConfig::default(),
-        fwhm: StarDetectionFwhmConfig::default(),
-        measurement: StarDetectionMeasurementConfig::default(),
-        filter: StarDetectionFilterConfig::default(),
+    let detection = detection::Config {
+        background: detection::BackgroundConfig::default(),
+        detection: detection::DetectionConfig::default(),
+        fwhm: detection::FwhmConfig::default(),
+        measurement: detection::MeasurementConfig::default(),
+        filter: detection::FilterConfig::default(),
     };
     detection.validate().unwrap();
-
-    NoiseModel::from_normalized(1_000.0, 10.0)
-        .validate()
-        .unwrap();
 
     // A drizzle frame weighs one by default and has no per-pixel weights.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
@@ -230,12 +227,12 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "scale must be finite and positive, got 0"
     );
 
-    let detection_error = StarDetector::from_config(StarDetectionConfig {
-        detection: StarDetectionCandidateConfig {
+    let detection_error = detection::StarDetector::from_config(detection::Config {
+        detection: detection::DetectionConfig {
             sigma_threshold: 0.0,
             ..Default::default()
         },
-        ..StarDetectionConfig::default()
+        ..detection::Config::default()
     })
     .unwrap_err();
     assert_eq!(
@@ -260,10 +257,11 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         AlignStackError::Calibration(CalibrationError::AlreadyCalibrated)
     ));
 
-    let registration_error = RegistrationError::InvalidStarFwhm {
+    let registration_error = RegistrationError::InvalidStarField {
         catalog: RegistrationCatalog::Target,
         index: 7,
-        value: f32::INFINITY,
+        field: "FWHM",
+        value: f64::INFINITY,
     };
     assert_eq!(
         registration_error.to_string(),
@@ -273,7 +271,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
 #[test]
 fn star_detection_filter_diagnostics_are_one_nested_component() {
-    let quality_filter = StarDetectionQualityFilterDiagnostics {
+    let quality_filter = detection::QualityFilterDiagnostics {
         saturated: 1,
         low_snr: 2,
         high_eccentricity: 3,
@@ -282,7 +280,7 @@ fn star_detection_filter_diagnostics_are_one_nested_component() {
         fwhm_outliers: 6,
         duplicates: 7,
     };
-    let _: StarDetectionDiagnostics = StarDetectionDiagnostics {
+    let _: detection::Diagnostics = detection::Diagnostics {
         quality_filter,
         ..Default::default()
     };
@@ -313,18 +311,35 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
         coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
-        linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
-        quantization_sigma: Some(0.001),
+        variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
+        dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,
+        report: RunReport {
+            excluded_samples: FlagCounts {
+                saturated: 2,
+                ..FlagCounts::default()
+            },
+            kept_flagged_samples: FlagCounts::default(),
+            variance_background_only: true,
+            ..RunReport::default()
+        },
     };
     let _: AlignStackResult = AlignStackResult {
         product,
         alignment: AlignmentSummary {
             reference: 1,
-            registered: 2,
-            dropped: vec![0, 3],
+            frames: vec![
+                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+                FrameRegistration::Reference,
+                FrameRegistration::Registered {
+                    warp: Box::new(WarpTransform::new(Transform::identity())),
+                    inliers: 40,
+                    rms_error: 0.1,
+                },
+                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+            ],
         },
-        detection: vec![StarDetectionDiagnostics::default(); 4],
+        detection: vec![detection::Diagnostics::default(); 4],
     };
 
     // A uniform coverage is one number until a plane is asked for.

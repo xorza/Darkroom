@@ -5,7 +5,9 @@ use std::sync::{Arc, Barrier};
 
 use rayon::ThreadPoolBuilder;
 
-use crate::concurrency::{JobScratchPool, try_par_map_bounded_owned, try_par_map_limited};
+use crate::concurrency;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
+use crate::concurrency::{try_par_map_bounded_owned, try_par_map_limited};
 
 #[test]
 fn job_scratch_leases_are_exclusive_and_reused() {
@@ -90,6 +92,27 @@ fn limited_map_propagates_error_and_stops_taking_work() {
     );
 }
 
+/// Of two failures the lower index is reported, whichever lands first: index 1 fails at once,
+/// index 0 waits for that failure and then fails too, and the map returns index 0's error, as a
+/// sequential map would.
+#[test]
+fn the_lowest_failing_index_is_reported() {
+    let failed = AtomicBool::new(false);
+    let items: Vec<usize> = (0..4).collect();
+    let result = try_par_map_limited(&items, 2, |index, _value| match index {
+        0 => {
+            wait_for_failure(&failed);
+            Err(0)
+        }
+        1 => {
+            failed.store(true, Ordering::SeqCst);
+            Err(1)
+        }
+        _ => Ok(()),
+    });
+    assert_eq!(result, Err(0));
+}
+
 #[test]
 fn limited_map_accepts_empty_input() {
     let result = try_par_map_limited(&[], 2, |_index, value: &usize| Ok::<_, ()>(*value));
@@ -157,4 +180,15 @@ fn owned_map_propagates_error_and_stops_taking_work() {
         ran <= SLOTS,
         "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"
     );
+}
+
+/// Zeros at every length: none, fewer than one block, and a block and a half, whose last piece is
+/// short.
+#[test]
+fn zeroed_in_parallel_is_all_zeros_at_its_length() {
+    for len in [0, 3, 3 * 1024 * 1024 / 4] {
+        let plane = concurrency::zeroed_in_parallel(len);
+        assert_eq!(plane.len(), len);
+        assert!(plane.iter().all(|&value| value.to_bits() == 0));
+    }
 }

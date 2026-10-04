@@ -32,7 +32,7 @@ use crate::drizzle::accumulator::DrizzleFrame;
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::stack::drizzle_images;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -90,7 +90,7 @@ fn kernel_config(kernel: DrizzleKernel) -> DrizzleConfig {
         scale,
         pixfrac,
         kernel,
-        quality: QualityPlanes::ALL,
+        quality: QualityPlanes::STANDARD,
         ..DrizzleConfig::default()
     }
 }
@@ -107,8 +107,8 @@ fn drizzle(frames: &[DrizzleFrame<LinearImage>], config: &DrizzleConfig) -> Stac
     drizzle_images(
         frames.to_vec(),
         config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .expect("bench fixture must drizzle")
     .product
@@ -144,12 +144,12 @@ fn bench_drizzle_kernels(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_drizzle_quality_planes(b: ::quickbench::Bencher) {
     let frames = dithered_set(&star_field(FIELD, 250, 5).image, 0.0);
-    for quality in [QualityPlanes::ALL, QualityPlanes::IMAGE_ONLY] {
+    for quality in [QualityPlanes::STANDARD, QualityPlanes::IMAGE_ONLY] {
         let config = DrizzleConfig {
             quality,
             ..kernel_config(DrizzleKernel::Turbo)
         };
-        let label = if quality == QualityPlanes::ALL {
+        let label = if quality == QualityPlanes::STANDARD {
             "all-planes"
         } else {
             "image-only"

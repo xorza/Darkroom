@@ -28,6 +28,31 @@ pub enum CalibrationError {
     /// dark given as the flat) and a subtractor at the wrong level both end here.
     #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
     NonPositiveFlat { channel: Option<usize> },
+    /// The flat still holds an additive offset — its pedestal is kept or unknown — and the set has
+    /// no bias or flat-dark to remove it: divided by, it would add an inverse-vignetting pattern of
+    /// the offset to every light.
+    #[error("the flat holds an offset, and the set has no bias or flat-dark to subtract it")]
+    FlatWithoutSubtractor,
+    /// A master had another subtracted when it was stacked, so the offset it exists to remove is
+    /// no longer in it: a bias, or a flat-dark in a set with no bias to remove the flat's offset.
+    /// Subtracted, it would leave the offset in the frame.
+    #[error("the {component} master is already calibrated, and holds no offset to subtract")]
+    CalibratedSubtractor { component: MasterRole },
+    /// The light still holds an additive offset and the set has a flat but nothing that removes
+    /// the offset — no bias, and no dark that still holds it: `(S + b)/flat` puts the offset `b`
+    /// under the flat's vignetting.
+    #[error("the light holds an offset, and the set has a flat but no dark or bias to subtract it")]
+    LightWithoutSubtractor,
+    /// The dark was exposed for another time than the light, and it still holds the bias, so it
+    /// cannot be scaled to the light: its thermal signal is wrong by the ratio.
+    #[error(
+        "the dark's exposure {dark} s does not match the light's {light} s, and with no bias to separate its thermal signal it cannot be scaled"
+    )]
+    DarkExposureMismatch { light: f64, dark: f64 },
+    /// The dark was taken at another sensor temperature than the light: dark current changes by
+    /// about 12% per degree.
+    #[error("the dark's temperature {dark} °C does not match the light's {light} °C")]
+    DarkTemperatureMismatch { light: f64, dark: f64 },
     /// A calibration master was captured with a different sensor pattern than the rest of the
     /// bundle, when the set is assembled, or than the light, when one is calibrated.
     #[error("{component} master CFA pattern {master:?} does not match {expected:?}")]

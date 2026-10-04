@@ -59,9 +59,9 @@ use crate::internals::mem_probe::{
 };
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
-use crate::memory;
-use crate::memory::{MemoryPlan, RunShape};
-use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
+use crate::memory::memory_plan::{MemoryPlan, RunShape};
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::{StackingProgress, StackingStage};
 use crate::stack_product::quality_planes::QualityPlanes;
 
 fn build_config(
@@ -79,9 +79,9 @@ fn build_config(
         "sigma" => StackConfig::sigma_clipped(3.0),
         other => panic!("LUMOS_METHOD: expected sigma|median|mean, got {other:?}"),
     };
-    config.cache.memory_override = memory_override;
-    config.cache.cache_dir = cache_dir;
-    config.cache.keep_cache = keep;
+    config.ingest.memory_override = memory_override;
+    config.ingest.cache_dir = cache_dir;
+    config.ingest.keep_cache = keep;
     config
 }
 
@@ -129,13 +129,13 @@ fn master_stack_memory_probe() -> io::Result<()> {
     if let Some(avail) = budget.memory_override {
         // The loader's own plan for this set: plain mono frames, every quality plane requested.
         let dimensions = ImageDimensions::new(size, 1);
-        let frame = memory::frame_bytes(dimensions);
+        let frame = dimensions.frame_bytes();
         let plan = MemoryPlan::plan(
             RunShape::decoded_stack(
                 n,
                 frame,
                 frame,
-                QualityPlanes::ALL.resident_bytes(dimensions),
+                QualityPlanes::STANDARD.resident_bytes(dimensions),
             ),
             rayon::current_num_threads(),
             avail,

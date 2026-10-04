@@ -1,22 +1,7 @@
 use std::io::{Error as IoError, ErrorKind};
-use std::path::Path;
 
-use crate::io::image::error::ImageError;
-
-pub(crate) fn fits_err(path: &Path, source: fits_well::FitsError) -> ImageError {
-    ImageError::Fits {
-        path: path.to_path_buf(),
-        source,
-    }
-}
-
-pub(crate) fn fits_unsupported(path: &Path, reason: impl Into<String>) -> ImageError {
-    ImageError::FitsUnsupported {
-        path: path.to_path_buf(),
-        reason: reason.into(),
-    }
-}
-
+/// fits-well's error as an `io::Error`, for the writers and the bundle reader, which report in
+/// `io::Result`: its own I/O failure as it is, every other as invalid data.
 pub(crate) fn fits_to_io(source: fits_well::FitsError) -> IoError {
     match source {
         fits_well::FitsError::Io(source) => source,

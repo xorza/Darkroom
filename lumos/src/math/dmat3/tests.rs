@@ -24,18 +24,6 @@ fn every_constructor_and_accessor_round_trips() {
     }
 }
 
-/// Mutable indexing reaches the same storage the read paths do.
-#[test]
-fn mutable_accessors_write_through() {
-    let mut m = DMat3::identity();
-    m[2] = 5.0;
-    m[5] = -3.0;
-    assert_eq!(
-        *m.as_array(),
-        [1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.0, 0.0, 1.0]
-    );
-}
-
 /// Every fixture below is small integers, dyadic fractions or a power of two, so each product and
 /// sum is exact in f64 and every result compares with `assert_eq!`.
 const M: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];

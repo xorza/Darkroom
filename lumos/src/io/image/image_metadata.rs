@@ -3,6 +3,8 @@
 use fits_well::image::SampleType;
 
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
+use crate::io::image::mosaic_noise::MosaicNoise;
+use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
@@ -17,11 +19,14 @@ pub struct ImageMetadata {
     /// The type a FITS source stored its samples as, after its unsigned-offset convention;
     /// `None` for a source with no such declaration.
     pub sample_type: Option<SampleType>,
-    pub header_dimensions: Vec<usize>,
-    /// Camera-recorded white-balance multipliers `[R, G1, B, G2]`, normalized so the smallest
-    /// multiplier is `1.0`. X-Trans and RAW metadata without a second green duplicate `G1`.
+    /// The multipliers that balance the samples as stored, `[R, G1, B, G2]`, normalized so the
+    /// smallest is `1.0`: the camera's as-shot balance, or unity for a RAW file whose samples
+    /// already carry it (LibRaw's `as_shot_wb_applied`). X-Trans and RAW metadata without a second
+    /// green duplicate `G1`.
     ///
-    /// Metadata only: RAW decoding and calibration keep unity white balance.
+    /// The samples keep the sensor's balance: the demosaic balances by these before it
+    /// interpolates, as its direction decisions assume balanced channels, and divides them out
+    /// after.
     pub camera_white_balance: Option<[f32; 4]>,
     /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
     pub filter: Option<String>,
@@ -56,25 +61,36 @@ pub struct ImageMetadata {
     /// Maximum valid pixel value (saturation level).
     pub data_max: Option<f64>,
     pub provenance: Option<ImageProvenance>,
+    /// What one sample is worth in the source's own terms: the span its decoder divided by, the
+    /// pedestal it still carries, and the unit.
+    ///
+    /// `None` for an image this crate synthesized rather than decoded, and for a preview raster
+    /// that declared no domain. Two frames are commensurate when both answer and
+    /// [`SampleDomain::conversion_to`] relates the answers; when either is `None` there is nothing
+    /// to compare, which is not the same as agreeing. Calibration updates the pedestal when it
+    /// subtracts a master.
+    pub domain: Option<SampleDomain>,
+    /// The uncertainty one quantization step adds to a sample, `step / √12`, in the samples' own
+    /// units: a lower bound on any sample's noise.
+    ///
+    /// Set by a decoder that knows the step — a RAW with a linear curve, an integer FITS — and by
+    /// the combine for a master. A demosaic clears it: interpolation mixes samples, so the bound no
+    /// longer describes one of them.
+    pub quantization_sigma: Option<f32>,
+    /// The white noise of the mosaic a demosaic made this frame from, which a measurement of the
+    /// frame would understate. Set by the demosaic; `None` for any frame not demosaiced, and for a
+    /// master, which the combine made.
+    pub mosaic_noise: Option<MosaicNoise>,
+    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS with a
+    /// `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
+    /// leaves a consumer to test the samples itself.
+    pub saturation_flagged: bool,
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
     pub calibrated: bool,
 }
 
 impl ImageMetadata {
-    /// What one sample is worth in the source's own terms — the span its decoder divided by, and
-    /// the unit that span was in.
-    ///
-    /// `None` for an image this crate synthesized rather than decoded, and for a preview raster
-    /// that declared no domain. Two frames are commensurate when both answer and
-    /// [`SampleDomain::conversion_to`] relates the answers; when either is `None` there is nothing
-    /// to compare, which is not the same as agreeing.
-    pub fn sample_domain(&self) -> Option<SampleDomain> {
-        self.provenance
-            .as_ref()
-            .and_then(|provenance| provenance.transfer.sample_domain())
-    }
-
     /// Which end of the image the first stored row belongs to, or `None` for an image this crate
     /// synthesized rather than decoded.
     ///
@@ -84,6 +100,13 @@ impl ImageMetadata {
         self.provenance
             .as_ref()
             .map(|provenance| provenance.row_order)
+    }
+
+    /// The level a sample saturates at when the decoder flagged nothing: [`SATURATION_FRACTION`] of
+    /// its declared ceiling, `DATAMAX` in the normalized domain, or of that domain's 1 when it
+    /// declares none. It describes the samples as decoded, before any calibration moves them.
+    pub(crate) fn saturation_level(&self) -> f32 {
+        SATURATION_FRACTION * self.data_max.map_or(1.0, |max| max as f32)
     }
 
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts. A

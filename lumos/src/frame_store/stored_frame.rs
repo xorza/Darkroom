@@ -8,20 +8,29 @@ use imaginarium::Buffer2;
 use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::{Committed, FrameSpill};
+use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill};
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::plane_store::PlaneStore;
+use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
-/// if a warp produced one or its source declared pixels with no measurement, and the statistics
-/// measured on the source before any interpolation.
+/// if a warp produced one or its source declared pixels with no measurement, its flags when it
+/// carries any but `NO_DATA` (which the quality planes already hold), and the statistics measured
+/// on the source before any interpolation.
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     pub(crate) quality: FrameQuality<StoredPlane>,
+    pub(crate) flags: Option<StoredPlane<u8>>,
     pub(crate) source_stats: FrameStats,
+}
+
+/// The flags a stored frame keeps: those of an image that carries any but `NO_DATA`.
+fn kept_flags(flags: Option<&PixelFlags>) -> Option<&PixelFlags> {
+    flags.filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
 }
 
 impl StoredFrame {
@@ -30,38 +39,41 @@ impl StoredFrame {
         quality: FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Self {
-        let channels = image
-            .into_planes()
-            .into_iter()
-            .map(StoredPlane::Memory)
-            .collect();
+        let ImageParts { planes, flags } = image.into_parts();
+        let flags = flags
+            .filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
+            .map(|flags| StoredPlane::Memory(flags.into_buffer()));
         Self {
-            channels,
+            channels: planes.into_iter().map(StoredPlane::Memory).collect(),
             quality: quality.map(StoredPlane::Memory),
+            flags,
             source_stats,
         }
     }
 
-    /// Write the frame's channels and quality planes to `spill`'s files and memory-map them back.
+    /// Write the frame's channels, quality planes and flags to `store` and memory-map them back.
     ///
     /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
     /// stage hand the same ones to the next frame rather than allocating a set that has to be
     /// faulted in from scratch.
     pub(crate) fn spill(
-        spill: &FrameSpill<'_>,
+        store: &impl PlaneStore,
         image: &impl StackableImage,
         quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        let channels = spill.spill_channels(image)?;
-        let quality = quality.try_map(|plane, buffer| {
-            let path = spill.quality_path(plane);
-            StoredPlane::write(&path, buffer.pixels())?;
-            StoredPlane::map(&path)
-        })?;
+        let channels = (0..image.dimensions().channels())
+            .map(|channel| store.store_channel(channel, image.channel(channel)))
+            .collect::<Result<_, _>>()?;
+        let quality =
+            quality.try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
+        let flags = kept_flags(image.flags())
+            .map(|flags| store.store_flags(flags.bytes()))
+            .transpose()?;
         Ok(Self {
             channels,
             quality,
+            flags,
             source_stats,
         })
     }
@@ -75,7 +87,11 @@ impl StoredFrame {
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let frame = Self::spill(spill, image, quality, source_stats)?;
-        spill.commit(key, !quality.is_none(), &frame.source_stats)?;
+        let carries = Carries {
+            quality: !quality.is_none(),
+            flags: frame.flags.is_some(),
+        };
+        spill.commit(key, carries, &frame.source_stats)?;
         Ok(frame)
     }
 
@@ -89,27 +105,33 @@ impl StoredFrame {
     ) -> Result<Option<Self>, FrameStoreError> {
         let Some(Committed {
             stats: source_stats,
-            carries_quality,
+            carries,
         }) = spill.committed(key)
         else {
             return Ok(None);
         };
         if !spill.channels_on_disk(dimensions)
-            || (carries_quality && !spill.quality_on_disk(dimensions))
+            || (carries.quality && !spill.quality_on_disk(dimensions))
+            || (carries.flags && !spill.flags_on_disk(dimensions))
         {
             return Ok(None);
         }
         let channels = (0..dimensions.channels())
             .map(|channel| StoredPlane::map(&spill.channel_path(channel)))
             .collect::<Result<_, _>>()?;
-        let quality = if carries_quality {
+        let quality = if carries.quality {
             FrameQuality::read_spilled(|plane| StoredPlane::map(&spill.quality_path(plane)))?
         } else {
             FrameQuality::None
         };
+        let flags = carries
+            .flags
+            .then(|| StoredPlane::map(&spill.flags_path()))
+            .transpose()?;
         Ok(Some(Self {
             channels,
             quality,
+            flags,
             source_stats,
         }))
     }

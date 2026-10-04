@@ -4,7 +4,7 @@ use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::frame_store::cache_key::DecoderKind;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
 use crate::io::image::cfa::CfaType;
@@ -19,17 +19,18 @@ use crate::io::image::image_provenance::{
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
+use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::io::image::standard::{f32_target_format, read_standard_image};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
 pub struct LinearImage {
     pub metadata: ImageMetadata,
     pub(crate) pixels: LinearPixels,
-    /// Which pixels carry no measurement, for a source that declared any. The samples at those
-    /// positions are a finite fill, not data — see [`NullMask`].
-    pub(crate) nulls: Option<NullMask>,
+    /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
+    /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
+    pub(crate) flags: Option<PixelFlags>,
 }
 
 impl LinearImage {
@@ -47,7 +48,7 @@ impl LinearImage {
         let format = match InputFormat::of(path)? {
             InputFormat::Fits => return fits_decode::load_linear_fits(path, context),
             InputFormat::CameraRaw => {
-                return Err(scientific_rejection(
+                return Err(ImageError::scientific_rejection(
                     path,
                     "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
                 ));
@@ -55,7 +56,7 @@ impl LinearImage {
             InputFormat::Raster(format) => format,
         };
         if format != FileFormat::Tiff {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
             ));
@@ -65,7 +66,7 @@ impl LinearImage {
         context.check_cancelled(path)?;
         let desc = decoded.desc();
         if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 format!(
                     "{}x{} has a side past {} px",
@@ -76,13 +77,13 @@ impl LinearImage {
             ));
         }
         if !decoded.desc().color_format.sample_type.is_float() {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "scientific raster input must be a floating-point TIFF",
             ));
         }
         if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "scientific raster input must not contain an alpha channel",
             ));
@@ -104,6 +105,14 @@ impl LinearImage {
             // Every raster format this path reads stores its first row at the top.
             row_order: RowOrder::TopDown,
         });
+        // A float raster is taken as it stands, so one sample is one unit of whatever the file
+        // already held — which it does not name, and whose span and zero point it does not state.
+        image.metadata.domain = Some(SampleDomain {
+            scale: 1.0,
+            origin: ScaleOrigin::Assumed,
+            pedestal: Pedestal::Unknown,
+            unit: None,
+        });
         Ok(image)
     }
 
@@ -112,7 +121,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_interleaved(dimensions, pixels),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -124,7 +133,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_planar_channels(dimensions, channels),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -174,14 +183,28 @@ impl LinearImage {
         self.pixels.channel(c)
     }
 
-    /// Get channel as mutable Buffer2 reference.
+    /// Get channel as mutable Buffer2 reference. The metadata's quantization σ and mosaic noise
+    /// are dropped: they describe the samples as they were.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
-        self.pixels.channel_mut(c)
+        self.samples_mut().channel_mut(c)
+    }
+
+    /// The samples, mutably, with the noise facts that described them dropped. Every mutable path
+    /// to the samples comes through here, so no change to them keeps a stale noise.
+    const fn samples_mut(&mut self) -> &mut LinearPixels {
+        self.metadata.quantization_sigma = None;
+        self.metadata.mosaic_noise = None;
+        &mut self.pixels
+    }
+
+    /// The data-quality flags of the pixels; `None` when no pixel carries one.
+    pub const fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     /// Iterate the channel planes in channel order: one for grayscale, three for RGB.
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
-        self.pixels.planes_mut()
+        self.samples_mut().planes_mut()
     }
 
     /// The three channel planes' samples, borrowed at once — what a cross-channel per-pixel op
@@ -190,7 +213,7 @@ impl LinearImage {
     /// # Panics
     /// On a grayscale image; callers gate on [`Self::is_rgb`].
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
-        self.pixels.rgb_planes_mut()
+        self.samples_mut().rgb_planes_mut()
     }
 
     /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.
@@ -202,7 +225,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -312,8 +335,8 @@ impl StackableImage for LinearImage {
         self.dimensions()
     }
 
-    fn nulls(&self) -> Option<&NullMask> {
-        self.nulls.as_ref()
+    fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     fn channel(&self, c: usize) -> &[f32] {
@@ -332,8 +355,11 @@ impl StackableImage for LinearImage {
         LinearImage::from_file(path, context)
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
-        self.pixels.into_planes()
+    fn into_parts(self) -> ImageParts {
+        ImageParts {
+            planes: self.pixels.into_planes(),
+            flags: self.flags,
+        }
     }
 }
 
@@ -342,7 +368,7 @@ impl From<Buffer2<f32>> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: plane.into(),
-            nulls: None,
+            flags: None,
         }
     }
 }
@@ -352,7 +378,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: planes.into(),
-            nulls: None,
+            flags: None,
         }
     }
 }

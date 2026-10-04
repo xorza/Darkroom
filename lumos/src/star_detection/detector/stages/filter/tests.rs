@@ -2,6 +2,21 @@ use crate::internals::prelude::*;
 use crate::star_detection::detector::stages::filter::*;
 use crate::star_detection::roundness::Roundness;
 
+/// The cell pass on a fresh scratch, as one call.
+fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    DuplicateScratch::default().remove_duplicates(stars, min_separation)
+}
+
+/// [`FilterOutcome::from_stars`] on fresh scratch.
+fn filter(stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
+    FilterOutcome::from_stars(
+        stars,
+        config,
+        &mut Vec::new(),
+        &mut DuplicateScratch::default(),
+    )
+}
+
 #[test]
 fn filter_returns_the_diagnostics_stored_by_the_detector() {
     let stars = vec![
@@ -34,7 +49,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             }),
     ];
 
-    let outcome = FilterOutcome::from_stars(stars.clone(), &FilterConfig::default());
+    let outcome = filter(stars.clone(), &FilterConfig::default());
 
     assert_eq!(
         outcome
@@ -58,7 +73,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
     );
 
     // With no FWHM deviation bound the 20.0-px star stays, and nothing counts as an outlier.
-    let unbounded = FilterOutcome::from_stars(
+    let unbounded = filter(
         stars,
         &FilterConfig {
             max_fwhm_deviation: None,
@@ -137,7 +152,8 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 4),
         },
         // Exactly five is the smallest set that filters. Reference is all five: median 3.1,
-        // mad 0.1, floor 0.31, so max_fwhm = 3.1 + 3·0.31 = 4.03 and only the 20.0 goes.
+        // mad 0.1, floor 0.31, σ = 1.4826·0.31 = 0.4596, so max_fwhm = 3.1 + 3·0.4596 = 4.48 and
+        // only the 20.0 goes.
         Case {
             name: "exactly five stars",
             stars: vec![
@@ -150,7 +166,7 @@ fn filter_fwhm_outliers_over_every_case() {
             deviation: 3.0,
             survivors: vec![100.0, 90.0, 80.0, 70.0],
         },
-        // Reference 3.0..3.4: median 3.2, mad 0.1, floor 0.32 → max_fwhm 4.16.
+        // Reference 3.0..3.4: median 3.2, mad 0.1, floor 0.32, σ 0.4744 → max_fwhm 4.62.
         Case {
             name: "one gross outlier",
             stars: {
@@ -171,8 +187,8 @@ fn filter_fwhm_outliers_over_every_case() {
             deviation: 3.0,
             survivors: fluxes(100.0, 7),
         },
-        // Nothing stands out: reference median 3.1, floor 0.31 → max_fwhm 4.03, and the widest
-        // star is 3.45.
+        // Nothing stands out: reference median 3.1, floor 0.31, σ 0.4596 → max_fwhm 4.48, and the
+        // widest star is 3.45.
         Case {
             name: "uniform",
             stars: ramp(10, 3.0, 0.05),
@@ -180,7 +196,7 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 10),
         },
         // An identical reference gives mad = 0, so only the floor keeps the threshold finite:
-        // median 3.0, floor 0.3 → max_fwhm 3.9, which the 5.0 exceeds.
+        // median 3.0, floor 0.3, σ 0.4448 → max_fwhm 4.33, which the 5.0 exceeds.
         Case {
             name: "mad floor carries a zero-spread reference",
             stars: {
@@ -192,20 +208,22 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 9),
         },
         // The reference is the bright half only, so the faint half is judged against it: median
-        // 3.0, mad 0.1, floor 0.3 → max_fwhm 3.9. The 4.0 goes with the 8.0 and the 15.0.
+        // 3.0, mad 0.1, floor 0.3, σ 0.4448 → max_fwhm 4.33. The 4.0 stays, the 8.0 and the 15.0
+        // go.
         Case {
             name: "reference is the bright half",
             stars: mixed_flux_order.to_vec(),
             deviation: 3.0,
-            survivors: vec![100.0, 95.0, 90.0, 85.0, 80.0, 50.0, 20.0],
+            survivors: vec![100.0, 95.0, 90.0, 85.0, 80.0, 50.0, 40.0, 20.0],
         },
-        // One fixture, two deviations. Reference 3.0..3.8: median 3.4, mad 0.2, floor 0.34.
-        // Strict 1.5 → max_fwhm 3.91, keeping five; loose 5.0 → 5.10, keeping all but 6.0 and 7.0.
+        // One fixture, two deviations. Reference 3.0..3.8: median 3.4, mad 0.2, floor 0.34,
+        // σ 0.5041. Strict 1.5 → max_fwhm 4.16, keeping six of the ramp to 4.4; loose 5.0 → 5.92,
+        // keeping all but 6.0 and 7.0.
         Case {
             name: "strict deviation",
             stars: with_two_outliers.clone(),
             deviation: 1.5,
-            survivors: fluxes(100.0, 5),
+            survivors: fluxes(100.0, 6),
         },
         Case {
             name: "loose deviation",
@@ -224,7 +242,7 @@ fn filter_fwhm_outliers_over_every_case() {
         } = case;
         let mut subjects = stars(&pairs);
         let before = subjects.len();
-        let removed = filter_fwhm_outliers(&mut subjects, deviation);
+        let removed = filter_fwhm_outliers(&mut subjects, deviation, &mut Vec::new());
 
         let survivors: Vec<f32> = subjects.iter().map(|s| s.flux).collect();
         assert_eq!(survivors, expected, "{name}: surviving fluxes");
@@ -408,8 +426,8 @@ fn remove_duplicate_stars_over_every_geometry() {
     ];
 
     let paths: [(&str, Path); 2] = [
-        ("simple", remove_duplicate_stars_simple),
-        ("hashed", remove_duplicate_stars_hashed),
+        ("brute force", brute_force_dedup),
+        ("cells", remove_duplicate_stars),
     ];
     for case in &cases {
         for (path, dedupe) in paths {
@@ -432,11 +450,11 @@ fn remove_duplicate_stars_over_every_geometry() {
     }
 }
 
-/// `duplicate_min_separation = 0` passes validation and means "no deduplication" on both paths —
-/// the spatial-hash one too, which must not divide every coordinate by a zero cell size.
+/// `duplicate_min_separation = 0` passes validation and means "no deduplication", at any count —
+/// the cells must not divide every coordinate by a zero size.
 #[test]
-fn zero_separation_removes_nothing_on_either_path() {
-    for count in [10, SPATIAL_HASH_CROSSOVER + 50] {
+fn zero_separation_removes_nothing() {
+    for count in [10, 150] {
         // Every star twice, at exactly the same spot.
         let mut stars: Vec<Star> = (0..count)
             .map(|i| Star::at(DVec2::new((i / 2) as f64 * 3.0, 7.0)).with_flux(1.0))
@@ -446,10 +464,9 @@ fn zero_separation_removes_nothing_on_either_path() {
     }
 }
 
-/// The two paths agree star for star on 500 random positions — the dispatcher's own choice, the
-/// hash at this count, against the brute force.
+/// The cell pass agrees star for star with the brute force on 500 random positions.
 #[test]
-fn remove_duplicate_stars_spatial_hash_consistency() {
+fn remove_duplicate_stars_matches_the_brute_force() {
     let mut rng = TestRng::new(12345);
     let base_stars: Vec<Star> = (0..500)
         .map(|i| {
@@ -462,7 +479,7 @@ fn remove_duplicate_stars_spatial_hash_consistency() {
     let mut stars_hash = base_stars.clone();
     let removed_hash = remove_duplicate_stars(&mut stars_hash, 10.0);
     let mut stars_simple = base_stars;
-    let removed_simple = remove_duplicate_stars_simple(&mut stars_simple, 10.0);
+    let removed_simple = brute_force_dedup(&mut stars_simple, 10.0);
 
     assert!(
         removed_hash > 0,
@@ -514,4 +531,49 @@ fn rejection_bounds_and_precedence() {
     for (star, expected) in cases {
         assert_eq!(Rejection::of(&star, &config), expected, "{star:?}");
     }
+}
+
+/// A NaN flux sorts last, and the finite ones go brightest first. The old comparator called NaN
+/// equal to everything, which is not an order.
+#[test]
+fn sort_by_flux_puts_nan_last() {
+    let mut stars: Vec<Star> = [3.0, f32::NAN, 7.0, -1.0, f32::NAN, 5.0]
+        .into_iter()
+        .map(|flux| Star::at(DVec2::ZERO).with_flux(flux))
+        .collect();
+    sort_by_flux(&mut stars);
+    let fluxes: Vec<f32> = stars.iter().map(|star| star.flux).collect();
+    assert_eq!(&fluxes[..4], &[7.0, 5.0, 3.0, -1.0]);
+    assert!(fluxes[4].is_nan() && fluxes[5].is_nan());
+}
+
+/// The reference the cell pass is held to: every pair, O(n²), each kept star dropping the later
+/// stars strictly closer than `min_separation`.
+fn brute_force_dedup(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    let min_sep_sq = f64::from(min_separation * min_separation);
+    let mut kept = vec![true; stars.len()];
+
+    for i in 0..stars.len() {
+        if !kept[i] {
+            continue;
+        }
+        for j in (i + 1)..stars.len() {
+            if !kept[j] {
+                continue;
+            }
+            let dx = stars[i].pos.x - stars[j].pos.x;
+            let dy = stars[i].pos.y - stars[j].pos.y;
+            if dx * dx + dy * dy < min_sep_sq {
+                kept[j] = false;
+            }
+        }
+    }
+
+    let removed = kept.iter().filter(|&&keep| !keep).count();
+    let mut index = 0;
+    stars.retain(|_| {
+        index += 1;
+        kept[index - 1]
+    });
+    removed
 }

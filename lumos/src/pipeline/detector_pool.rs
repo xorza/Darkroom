@@ -8,7 +8,7 @@ use crate::star_detection::detector::StarDetector;
 /// One [`StarDetector`] per concurrency slot, reused across batches so each batch inherits the
 /// previous one's warmed buffer pools.
 ///
-/// Deliberately not a [`JobScratchPool`](crate::concurrency::JobScratchPool), and the type system
+/// Deliberately not a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool), and the type system
 /// will not stop you: `StarDetector` implements `Default`, so `JobScratchPool<StarDetector>`
 /// compiles — and then quietly hands out detectors built from `Config::default()` instead of the
 /// caller's detection config, because the pool fills gaps with `T::default()`. Building every
@@ -33,22 +33,46 @@ impl DetectorPool {
         Ok(Self { detectors })
     }
 
-    /// Map `f` over `items` with one detector per concurrent slot, passing each item's index.
+    /// Map `f` over the indices `0..len` with one detector per concurrent slot.
     ///
     /// The detectors *are* the slots of [`concurrency::try_par_map_bounded`], so concurrency is
     /// capped at the pool size and each detector carries its warmed buffers from one frame to
     /// the next it happens to pick up. Which frames a given detector sees is not fixed: a
     /// detector takes whatever is next when it frees up.
-    pub(crate) fn try_map<T, R, E, F>(&mut self, items: &[T], f: F) -> Result<Vec<R>, E>
+    pub(crate) fn try_map<R, E, F>(&mut self, len: usize, f: F) -> Result<Vec<R>, E>
     where
-        T: Sync,
         R: Send,
         E: Send,
-        F: Fn(&mut StarDetector, usize, &T) -> Result<R, E> + Sync,
+        F: Fn(&mut StarDetector, usize) -> Result<R, E> + Sync,
     {
-        concurrency::try_par_map_bounded(items.len(), &mut self.detectors, |detector, index| {
-            f(detector, index, &items[index])
+        concurrency::try_par_map_bounded(len, &mut self.detectors, f)
+    }
+
+    /// [`Self::try_map`] with a second slot beside each detector, which the job keeps from one
+    /// index to the next it takes: a worker's warp buffers, for one.
+    pub(crate) fn try_map_with<S, R, E, F>(
+        &mut self,
+        len: usize,
+        slots: &mut [S],
+        f: F,
+    ) -> Result<Vec<R>, E>
+    where
+        S: Send,
+        R: Send,
+        E: Send,
+        F: Fn(&mut StarDetector, &mut S, usize) -> Result<R, E> + Sync,
+    {
+        assert_eq!(slots.len(), self.detectors.len(), "one slot per detector");
+        let mut paired: Vec<(&mut StarDetector, &mut S)> =
+            self.detectors.iter_mut().zip(slots.iter_mut()).collect();
+        concurrency::try_par_map_bounded(len, &mut paired, |(detector, slot), index| {
+            f(detector, slot, index)
         })
+    }
+
+    /// One detector of the pool, for a frame detected alone.
+    pub(crate) fn first(&mut self) -> &mut StarDetector {
+        &mut self.detectors[0]
     }
 }
 
@@ -59,7 +83,7 @@ mod tests {
     use std::ptr;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use parking_lot::Mutex;
+    use std::sync::Mutex;
 
     use crate::pipeline::detector_pool::DetectorPool;
     use crate::star_detection::config::Config;
@@ -75,7 +99,7 @@ mod tests {
     fn results_stay_ordered_and_never_use_more_detectors_than_slots() {
         let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
         let uses = pool
-            .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
+            .try_map(5, |detector, item| {
                 Ok::<_, ()>(DetectorUse {
                     item,
                     detector_address: ptr::from_ref::<StarDetector>(detector).addr(),
@@ -101,7 +125,6 @@ mod tests {
     fn an_error_stops_the_pool_taking_further_items() {
         const SLOTS: usize = 2;
         let mut pool = DetectorPool::from_config(&Config::default(), SLOTS).unwrap();
-        let items: Vec<usize> = (0..1000).collect();
 
         // Each slot is held on its first item until the failure is recorded, so this measures
         // "no further items are taken once the failure is visible" rather than how fast the flag
@@ -109,8 +132,11 @@ mod tests {
         let attempted = Mutex::new(Vec::new());
         let failed = AtomicBool::new(false);
         let error = pool
-            .try_map(&items, |_, _index, &item| {
-                attempted.lock().push(item);
+            .try_map(1000, |_, item| {
+                attempted
+                    .lock()
+                    .expect("no holder of this lock panicked")
+                    .push(item);
                 if item == 0 {
                     failed.store(true, Ordering::SeqCst);
                     return Err(item);
@@ -126,7 +152,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, 0);
-        let ran = attempted.into_inner().len();
+        let ran = attempted
+            .into_inner()
+            .expect("no holder of this lock panicked")
+            .len();
         assert!(
             ran <= SLOTS,
             "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"

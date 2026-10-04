@@ -9,6 +9,7 @@
 use imaginarium::Buffer2;
 
 use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -62,9 +63,8 @@ impl Display for FramePlane {
 /// one.
 ///
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
-/// `registration::resample::quality::quality_at` establishes that — outside the source footprint
-/// both are zero, and inside it every branch gives a positive confidence wherever there is support
-/// — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
+/// `registration::resample::frame_sampler` establishes that — a pixel the warp has no sample for
+/// takes zero for both, and every sample it takes has positive coverage and confidence — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
 /// on it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it
 /// by, and `source_noise_variance` a non-zero one to divide by.
 ///
@@ -91,10 +91,15 @@ impl FrameQuality<Buffer2<f32>> {
     /// value for every photosite, so no RAW frame and almost no camera FITS allocates anything
     /// here.
     pub(crate) fn for_unwarped(image: &impl StackableImage) -> Self {
-        let Some(nulls) = image.nulls() else {
+        Self::for_flags(image.flags())
+    }
+
+    /// [`Self::for_unwarped`] from the frame's flags alone.
+    pub(crate) fn for_flags(flags: Option<&PixelFlags>) -> Self {
+        let Some(flags) = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA)) else {
             return Self::None;
         };
-        let coverage = nulls.validity_plane();
+        let coverage = flags.validity_plane();
         Self::Planes {
             confidence: coverage.clone(),
             coverage,

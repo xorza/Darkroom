@@ -7,18 +7,16 @@
 
 use rayon::prelude::*;
 
+use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::same_color::XTransOffsets;
+use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
+use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
-use crate::calibration_masters::cosmic_ray::mono::{
-    degenerate_sigma, empirical_noise, parametric_noise_into,
-};
 use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
 /// Radius (px) scanned for same-color neighbors — one X-Trans period (6×6) contains every color.
@@ -30,8 +28,8 @@ const XTRANS_LARGE: usize = 24;
 const XTRANS_REPLACE: usize = 12;
 
 /// Frame-sized `f32` planes the X-Trans detector holds: `lplus`, `f`, `signal`, `noise` and
-/// `frame`, and the three colour buckets, which share one plane's worth between them.
-pub(crate) const XTRANS_SCRATCH_PLANES: usize = 6;
+/// `frame`.
+pub(crate) const XTRANS_SCRATCH_PLANES: usize = 5;
 
 /// The CFA detector's per-pixel inputs and the scratch that builds them, allocated on the first
 /// iteration and reused by every one after it — [`MonoDetector`](super::mono::MonoDetector)'s rule
@@ -47,10 +45,7 @@ struct XtransScratch {
     signal: Vec<f32>,
     /// Per-pixel noise `N`.
     noise: Vec<f32>,
-    /// The frame's pixels bucketed by color, for the per-color empirical background statistics.
-    by_color: [Vec<f32>; 3],
-    /// Frame-sized scratch: the deviations a per-color MAD consumes, then the read-only snapshot
-    /// [`xtrans_replace`] gathers from — never both at once.
+    /// The read-only snapshot [`xtrans_replace`] gathers from.
     frame: Vec<f32>,
 }
 
@@ -64,12 +59,9 @@ pub(super) struct XtransDetector<'a> {
     cfa: &'a CfaType,
     config: &'a CosmicRayConfig,
     noise: NoiseModel,
-    /// Same-colour neighbour geometry, built once per detector.
-    ///
-    /// Shared with the defect scan, which added it after finding that recomputing the neighbour set
-    /// per pixel — a 13×13 `color_at` sweep plus a distance sort — dominated its own scan. This
-    /// scan does the same walk at every pixel of every iteration, so it wants the table more.
-    offsets: XTransOffsets,
+    /// Same-colour neighbour geometry, built once per detector: recomputing the neighbour set per
+    /// pixel — a 13×13 colour sweep plus a distance sort — dominated the scan.
+    lattice: CfaLattice,
     scratch: XtransScratch,
 }
 
@@ -82,7 +74,7 @@ impl<'a> XtransDetector<'a> {
             cfa,
             config,
             noise,
-            offsets: XTransOffsets::new(pattern),
+            lattice: CfaLattice::new(&CfaType::XTrans(*pattern)),
             scratch: XtransScratch::default(),
         }
     }
@@ -102,20 +94,20 @@ impl<'a> XtransDetector<'a> {
     /// mono path's ×2 subsample — same-colour sampling is already coarse and the iteration handles
     /// multi-pixel hits. Significance is `S = L⁺/N` with no `S'` median subtraction, since `L⁺`
     /// (excess over the same-colour median) is already a local high-pass.
-    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+    pub(super) fn reject(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        mesh: &ColourMesh,
+        found: &mut BitBuffer2,
+    ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
         if size.width < 7 || size.height < 7 {
             return 0;
         }
         let mut masks = CrMasks::new(size);
         let scratch = &mut self.scratch;
-        // Sized exactly up front, so the working set is the planes `XTRANS_SCRATCH_PLANES` counts:
-        // the buckets grown by pushing, and `frame` by the MADs before the snapshot, would each
-        // round their capacity up past it.
-        let counts = color_counts(self.cfa, size);
-        for (bucket, &count) in scratch.by_color.iter_mut().zip(&counts) {
-            bucket.reserve_exact(count);
-        }
+        // Sized exactly up front, so the working set is the planes `XTRANS_SCRATCH_PLANES` counts.
         scratch.frame.reserve_exact(size.pixel_count());
 
         for _ in 0..self.config.niter {
@@ -125,8 +117,8 @@ impl<'a> XtransDetector<'a> {
                 cfa: self.cfa,
                 mask: &masks.accumulated,
             };
-            scratch.fill_structure(&scene, &self.offsets);
-            scratch.fill_noise(&scene, self.noise);
+            scratch.fill_structure(&scene, &self.lattice);
+            scratch.fill_noise(&scene, mesh, self.noise);
             // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
             for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
                 *l /= nz;
@@ -140,34 +132,14 @@ impl<'a> XtransDetector<'a> {
                 size,
                 self.cfa,
                 &masks.accumulated,
-                &self.offsets,
+                &self.lattice,
                 &mut scratch.frame,
             );
         }
 
+        found.copy_from(&masks.accumulated);
         masks.accumulated.count_ones()
     }
-}
-
-/// How many of a `size` mosaic's pixels are each colour. The pattern repeats every six pixels on
-/// both axes, so each of its 36 cells stands for every pixel congruent to it.
-fn color_counts(cfa: &CfaType, size: Size2us) -> [usize; 3] {
-    const PERIOD: usize = 6;
-    let repeats = |start: usize, extent: usize| {
-        if start < extent {
-            (extent - 1 - start) / PERIOD + 1
-        } else {
-            0
-        }
-    };
-    let mut counts = [0; 3];
-    for y in 0..PERIOD {
-        for x in 0..PERIOD {
-            let color = (cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
-            counts[color] += repeats(x, size.width) * repeats(y, size.height);
-        }
-    }
-    counts
 }
 
 /// Read-only context for same-color gathering: the plane data, its size, the CFA pattern, and the
@@ -182,8 +154,9 @@ struct CfaScene<'a> {
 
 impl XtransScratch {
     /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales
-    /// (one gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-    fn fill_structure(&mut self, scene: &CfaScene<'_>, offsets: &XTransOffsets) {
+    /// (one gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset, each
+    /// with its ties).
+    fn fill_structure(&mut self, scene: &CfaScene<'_>, lattice: &CfaLattice) {
         let (w, n) = (scene.size.width, scene.size.pixel_count());
         // Every element is written below, so only the length matters.
         self.lplus.resize(n, 0.0);
@@ -194,88 +167,53 @@ impl XtransScratch {
             .zip(self.f.par_chunks_mut(w))
             .zip(self.signal.par_chunks_mut(w))
             .enumerate()
-            .for_each_init(
-                || Vec::<f32>::with_capacity(XTRANS_LARGE),
-                |gathered, (y, ((lrow, frow), srow))| {
-                    for x in 0..w {
-                        let v = scene.pix[y * w + x];
-                        offsets.gather(
-                            scene.pix,
-                            scene.size,
-                            Vec2us::new(x, y),
-                            scene.mask,
-                            XTRANS_LARGE,
-                            gathered,
-                        );
-                        if gathered.is_empty() {
-                            frow[x] = 0.0;
-                            srow[x] = v;
-                            continue;
-                        }
-                        // Nearest-first, so the two scales are prefixes of one gather. The coarse
-                        // median reorders `gathered`, so the fine one is taken first.
-                        let small = gathered.len().min(XTRANS_SMALL);
-                        let med_small = median_mut(&mut gathered[..small]);
-                        let med_large = median_mut(gathered);
-                        lrow[x] = (v - med_small).max(0.0);
-                        // Non-negative only — see the mono detector: the σ-unit floor downstream
-                        // is what guards the contrast ratio, at any sample scale.
-                        frow[x] = (med_small - med_large).max(0.0);
-                        srow[x] = med_small;
-                    }
-                },
-            );
-    }
-
-    /// Per-pixel noise for the CFA path, from the signal estimate [`Self::fill_structure`] left.
-    /// Empirical uses **per-color** background+σ (R/G/B sit at different sky levels after
-    /// flat-fielding, so a whole-mosaic MAD would be inflated); parametric is color-independent
-    /// (sensor gain), reusing the Poisson+read model on the same-color signal.
-    fn fill_noise(&mut self, scene: &CfaScene<'_>, noise: NoiseModel) {
-        let Self {
-            signal,
-            noise: out,
-            by_color,
-            frame,
-            ..
-        } = self;
-        let size = scene.size;
-        match noise {
-            NoiseModel::Empirical => {
-                for vals in by_color.iter_mut() {
-                    vals.clear();
-                }
-                for y in 0..size.height {
-                    for x in 0..size.width {
-                        let c = (scene.cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
-                        by_color[c].push(scene.pix[y * size.width + x]);
-                    }
-                }
-                // The seed is unreachable — a colour with no samples has no pixel mapping to it
-                // either, so nothing reads `stats[c]` — and only has to be positive.
-                let mut stats = [(0.0f32, f32::MIN_POSITIVE); 3];
-                for (c, vals) in by_color.iter_mut().enumerate() {
-                    if vals.is_empty() {
+            .for_each_init(Gathered::default, |gathered, (y, ((lrow, frow), srow))| {
+                for x in 0..w {
+                    let v = scene.pix[y * w + x];
+                    lattice.gather(
+                        scene.pix,
+                        scene.size,
+                        Vec2us::new(x, y),
+                        XTRANS_LARGE,
+                        |index| !scene.mask.get(index),
+                        gathered,
+                    );
+                    if gathered.values.is_empty() {
+                        frow[x] = 0.0;
+                        srow[x] = v;
                         continue;
                     }
-                    let bg = median_mut(vals);
-                    let sigma = mad_to_sigma(mad_fast(vals, bg, frame)).max(degenerate_sigma(bg));
-                    stats[c] = (bg, sigma);
+                    // Nearest-first, so the two scales are prefixes of one gather. The coarse
+                    // median reorders the values, so the fine one is taken first.
+                    let small = gathered.tie_end(XTRANS_SMALL);
+                    let med_small = median_mut(&mut gathered.values[..small]);
+                    let med_large = median_mut(&mut gathered.values);
+                    lrow[x] = (v - med_small).max(0.0);
+                    // Non-negative only — see the mono detector: the σ-unit floor downstream
+                    // is what guards the contrast ratio, at any sample scale.
+                    frow[x] = (med_small - med_large).max(0.0);
+                    srow[x] = med_small;
                 }
-                out.clear();
-                out.extend((0..size.pixel_count()).map(|i| {
-                    let p = size.point_of(i);
-                    let c = (scene.cfa.color_at(p) as usize).min(2);
-                    let (bg, sigma) = stats[c];
-                    empirical_noise(signal[i], bg, sigma)
-                }));
-            }
-            NoiseModel::Parametric {
-                gain,
-                read_noise,
-                full_scale,
-            } => parametric_noise_into(signal, gain, read_noise, full_scale, out),
-        }
+            });
+    }
+
+    /// Per-pixel noise for the CFA path, from the signal estimate [`Self::fill_structure`] left and
+    /// the local background of the pixel's own colour: R, G and B sit at different sky levels after
+    /// flat-fielding, so one background for the mosaic would inflate σ.
+    fn fill_noise(&mut self, scene: &CfaScene<'_>, mesh: &ColourMesh, noise: NoiseModel) {
+        let Self {
+            signal, noise: out, ..
+        } = self;
+        let size = scene.size;
+        out.resize(size.pixel_count(), 0.0);
+        out.par_iter_mut()
+            .zip(&*signal)
+            .enumerate()
+            .for_each(|(index, (out, &signal))| {
+                let position = size.point_of(index);
+                let colour = usize::from(scene.cfa.color_at(position));
+                *out = noise.noise(signal, mesh.at(colour, position));
+            });
     }
 }
 
@@ -287,7 +225,7 @@ fn xtrans_replace(
     size: Size2us,
     cfa: &CfaType,
     mask: &BitBuffer2,
-    offsets: &XTransOffsets,
+    lattice: &CfaLattice,
     snapshot: &mut Vec<f32>,
 ) {
     let w = size.width;
@@ -299,90 +237,64 @@ fn xtrans_replace(
         cfa,
         mask,
     };
-    data.par_chunks_mut(w).enumerate().for_each_init(
-        || Vec::<f32>::with_capacity(XTRANS_REPLACE),
-        |gathered, (y, row)| {
+    data.par_chunks_mut(w)
+        .enumerate()
+        .for_each_init(Gathered::default, |gathered, (y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
                 if !mask[y * w + x] {
                     continue;
                 }
-                offsets.gather(
+                lattice.gather(
                     scene.pix,
                     scene.size,
                     Vec2us::new(x, y),
-                    mask,
                     XTRANS_REPLACE,
+                    |index| !mask.get(index),
                     gathered,
                 );
-                if gathered.is_empty() {
+                if gathered.values.is_empty() {
                     continue;
                 }
-                *o = median_mut(gathered);
+                *o = median_mut(&mut gathered.values);
             }
-        },
-    );
+        });
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+    use imaginarium::Buffer2;
+
+    use crate::background_mesh::colour_mesh::ColourMesh;
+    use crate::background_mesh::workspace::MeshWorkspace;
+    use crate::bit_buffer2::BitBuffer2;
+    use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
     use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
     use crate::calibration_masters::cosmic_ray::xtrans::{XtransDetector, XtransScratch};
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::image_metadata::ImageMetadata;
     use crate::math::size2us::Size2us;
 
     /// Total capacity, in floats, of the X-Trans detector's working set after a run on `data`.
     /// Destructured so a buffer added to [`XtransScratch`] fails to compile here.
     pub(crate) fn xtrans_scratch_floats(data: &mut [f32], size: Size2us, cfa: &CfaType) -> usize {
         let config = CosmicRayConfig::default();
-        let mut detector = XtransDetector::new(&config, NoiseModel::Empirical, cfa);
-        detector.reject(data, size);
+        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
+            .expect("the measured model needs nothing from the frame");
+        let mesh = ColourMesh::measure(
+            &Buffer2::new(size.width, size.height, data.to_vec()),
+            cfa,
+            64,
+            &mut MeshWorkspace::default(),
+        );
+        let mut detector = XtransDetector::new(&config, noise, cfa);
+        detector.reject(data, size, &mesh, &mut BitBuffer2::new_default(size));
         let XtransScratch {
             lplus,
             f,
             signal,
             noise,
-            by_color,
             frame,
         } = &detector.scratch;
-        lplus.capacity()
-            + f.capacity()
-            + signal.capacity()
-            + noise.capacity()
-            + by_color.iter().map(Vec::capacity).sum::<usize>()
-            + frame.capacity()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::calibration_masters::cosmic_ray::xtrans::color_counts;
-    use crate::internals::cfa::XTRANS_PATTERN;
-    use crate::io::image::cfa::CfaType;
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
-
-    /// The period arithmetic against a pixel-by-pixel count, over every size up to two periods and
-    /// a pixel on each axis — whole periods, part periods and frames narrower than one.
-    #[test]
-    fn color_counts_match_a_pixel_by_pixel_count() {
-        let cfa = CfaType::XTrans(XTRANS_PATTERN);
-        for height in 0..=13 {
-            for width in 0..=13 {
-                let mut expected = [0; 3];
-                for y in 0..height {
-                    for x in 0..width {
-                        expected[(cfa.color_at(Vec2us::new(x, y)) as usize).min(2)] += 1;
-                    }
-                }
-                assert_eq!(
-                    color_counts(&cfa, Size2us::new(width, height)),
-                    expected,
-                    "{width}×{height}"
-                );
-            }
-        }
-        // One period holds 8 red, 20 green and 8 blue.
-        assert_eq!(color_counts(&cfa, Size2us::new(6, 6)), [8, 20, 8]);
+        lplus.capacity() + f.capacity() + signal.capacity() + noise.capacity() + frame.capacity()
     }
 }

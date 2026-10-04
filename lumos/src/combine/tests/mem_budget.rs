@@ -19,7 +19,7 @@ use crate::combine::stack::stack;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use common::TempDir;
 use std::fs;
 use std::path::Path;
@@ -63,8 +63,8 @@ fn disk_and_memory_tiers_produce_identical_masters() {
 
     let master = |memory_override: u64, tag: &str| {
         let mut config = StackConfig::mean(); // Mean, no rejection → exact average.
-        config.cache.memory_override = Some(memory_override);
-        config.cache.cache_dir = dir.join(format!("cache_{tag}"));
+        config.ingest.memory_override = Some(memory_override);
+        config.ingest.cache_dir = dir.join(format!("cache_{tag}"));
         stack(
             &paths,
             &config,

@@ -30,62 +30,50 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
 }
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
+fn bench_label_map_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 500, 42)
         .image
         .channel(0)
         .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labeler = Labeler::default();
-    let mut labels = Some(Buffer2::new_filled(1024, 1024, 0u32));
 
     b.bench(|| {
-        let mut buffer = labels.take().expect("the last iteration returned it");
-        buffer.pixels_mut().fill(0);
-        let map = labeler.label(black_box(&mask), Connectivity::Four, buffer);
+        let map = labeler.label(black_box(&mask), Connectivity::Four);
         black_box(map.num_labels());
-        labels = Some(map.labels);
-        labeler.recycle(map.components);
+        labeler.recycle(map);
     });
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
+fn bench_label_map_4k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
         .image
         .channel(0)
         .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labeler = Labeler::default();
-    let mut labels = Some(Buffer2::new_filled(4096, 4096, 0u32));
 
     b.bench(|| {
-        let mut buffer = labels.take().expect("the last iteration returned it");
-        buffer.pixels_mut().fill(0);
-        let map = labeler.label(black_box(&mask), Connectivity::Four, buffer);
+        let map = labeler.label(black_box(&mask), Connectivity::Four);
         black_box(map.num_labels());
-        labels = Some(map.labels);
-        labeler.recycle(map.components);
+        labeler.recycle(map);
     });
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
+fn bench_label_map_4k_globular(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(4096, 4096), 50000, 42)
         .image
         .channel(0)
         .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labeler = Labeler::default();
-    let mut labels = Some(Buffer2::new_filled(4096, 4096, 0u32));
 
     b.bench(|| {
-        let mut buffer = labels.take().expect("the last iteration returned it");
-        buffer.pixels_mut().fill(0);
-        let map = labeler.label(black_box(&mask), Connectivity::Four, buffer);
+        let map = labeler.label(black_box(&mask), Connectivity::Four);
         black_box(map.num_labels());
-        labels = Some(map.labels);
-        labeler.recycle(map.components);
+        labeler.recycle(map);
     });
 }
 
@@ -97,14 +85,10 @@ fn bench_label_small(b: ::quickbench::Bencher) {
     let pixels = star_field(size, 30, 42).image.channel(0).clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labeler = Labeler::default();
-    let mut labels = Some(Buffer2::new_filled(size.width, size.height, 0u32));
 
     b.bench(|| {
-        let mut buffer = labels.take().expect("the last iteration returned it");
-        buffer.pixels_mut().fill(0);
-        let map = labeler.label(black_box(&mask), Connectivity::Four, buffer);
+        let map = labeler.label(black_box(&mask), Connectivity::Four);
         black_box(map.num_labels());
-        labels = Some(map.labels);
-        labeler.recycle(map.components);
+        labeler.recycle(map);
     });
 }

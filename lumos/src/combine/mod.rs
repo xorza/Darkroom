@@ -17,7 +17,6 @@
 pub(crate) const CANCEL_POLL_CHUNK: usize = 16_384;
 
 pub(crate) mod cache;
-pub(crate) mod cache_config;
 pub(crate) mod config;
 pub(crate) mod error;
 mod normalization;

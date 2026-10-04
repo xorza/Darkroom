@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaFrameInfo;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::memory;
+use crate::io::image::pixel_flags::QualityFlags;
 
 /// What one frame is worth to a memory estimate, before the rest of the set is read.
 ///
@@ -24,19 +24,21 @@ impl FramePeek {
     pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
         Self {
             dimensions: image.dimensions(),
-            may_carry_nulls: image.nulls().is_some(),
+            may_carry_nulls: image
+                .flags()
+                .is_some_and(|flags| flags.contains(QualityFlags::NO_DATA)),
         }
     }
 
-    /// Bytes one such frame occupies once resident: its own pixels, plus the quality planes if it
-    /// may carry them.
+    /// Bytes one such frame occupies once resident: its own pixels and its flag plane, plus the
+    /// quality planes if it may carry them.
     pub(crate) const fn resident_bytes(self) -> usize {
         let quality = if self.may_carry_nulls {
-            memory::quality_plane_bytes(self.dimensions)
+            self.dimensions.quality_plane_bytes()
         } else {
             0
         };
-        memory::frame_bytes(self.dimensions) + quality
+        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes() + quality
     }
 }
 

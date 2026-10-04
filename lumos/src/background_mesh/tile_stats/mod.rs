@@ -6,6 +6,7 @@ use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::statistics::ClippedStats;
 use crate::math::urect::URect;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
@@ -34,6 +35,9 @@ pub(crate) struct TileStats {
     /// SExtractor's background RMS: the spread of the clip survivors of the raw samples, which
     /// counts the sky's own change across the tile as well as the noise.
     pub(crate) sigma: f32,
+    /// The spread of the clip survivors about the tile's plane: the noise alone, which a gradient
+    /// across the tile does not inflate.
+    pub(crate) noise: f32,
 }
 
 /// The slope of a plane over one tile, per unit of a doubled, centred offset (see [`centred`]).
@@ -142,12 +146,14 @@ impl TileStats {
         }
     }
 
-    /// Compute the sky, about the tile's own plane, and the raw clipped σ of the pixels of `tile`.
+    /// Compute the sky, about the tile's own plane, and the raw clipped σ of the pixels of `tile`,
+    /// or `None` for a bad tile: one whose mask leaves less than half of it.
     ///
-    /// When a mask is provided, only unmasked pixels are used. If all pixels
-    /// are masked, falls back to sampling all pixels (including masked) as a
-    /// last resort. A noisy estimate from few background pixels is far better
-    /// than a biased estimate contaminated by star flux.
+    /// When a mask is provided, only unmasked pixels are used. Below half the tile, the unmasked
+    /// pixels are the margins of whatever the mask covers, and they no longer span the tile the
+    /// plane fit and the sky's position assume; the grid takes such a tile from its good neighbours
+    /// instead, as photutils excludes boxes past `exclude_percentile` and SExtractor flags bad
+    /// meshes.
     ///
     /// The sky reads the samples less a plane fitted to the clip survivors — the departure from
     /// SExtractor, photutils and `NoiseChisel`, which take it from the raw pixels and leave the
@@ -160,13 +166,16 @@ impl TileStats {
     /// where the sky changes fast across a tile the mesh follows it worst: a σ about the plane
     /// drops the threshold under that model error, and on a vignetted or nebulous field the sky's
     /// residual then joins the stars into a few large regions that hide most of them.
+    /// `eligible`, when given, limits the tile to the pixels it takes, such as one colour of a
+    /// mosaic; the half is then of those pixels.
     pub(crate) fn compute(
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
+        eligible: Option<&Eligible<'_>>,
         tile: URect,
         sigma_clip_iterations: usize,
         scratch: &mut TileScratch,
-    ) -> Self {
+    ) -> Option<Self> {
         let TileScratch {
             values,
             offsets,
@@ -176,20 +185,31 @@ impl TileStats {
         values.clear();
         offsets.clear();
 
-        match mask {
-            Some(m) => {
-                collect_unmasked_pixels(pixels, m, tile, values, offsets);
-                if values.is_empty() {
-                    // All pixels masked — no choice but to use all pixels
-                    collect_tile_pixels(pixels, tile, values, offsets);
+        match (mask, eligible) {
+            (_, Some(eligible)) => {
+                let counted = count_eligible_pixels(mask, eligible, tile);
+                if counted.unmasked == 0 || 2 * counted.unmasked < counted.eligible {
+                    return None;
                 }
+                collect_eligible_pixels(
+                    pixels,
+                    mask,
+                    eligible,
+                    tile,
+                    counted.unmasked,
+                    values,
+                    offsets,
+                );
             }
-            None => collect_tile_pixels(pixels, tile, values, offsets),
+            (Some(m), None) => {
+                if 2 * count_unmasked_pixels(m, tile) < tile.area() {
+                    return None;
+                }
+                collect_unmasked_pixels(pixels, m, tile, values, offsets);
+            }
+            (None, None) => collect_tile_pixels(pixels, tile, values, offsets),
         }
-
-        if values.is_empty() {
-            return Self::default();
-        }
+        debug_assert!(!values.is_empty(), "a tile holds at least one pixel");
 
         let clipped = |slope: TileSlope, detrended: &mut Vec<f32>, deviations: &mut Vec<f32>| {
             detrended.clear();
@@ -214,10 +234,11 @@ impl TileStats {
             stats = clipped(slope, detrended, deviations);
         }
 
-        Self {
+        Some(Self {
             sky: sextractor_sky(&stats),
             sigma: raw.sigma,
-        }
+            noise: stats.sigma,
+        })
     }
 }
 
@@ -351,6 +372,68 @@ fn collect_unmasked_pixels(
         }
     }
     unreachable!("unmasked pixel count changed between sampling passes");
+}
+
+/// Which pixels a tile may read beyond the mask, by position: one colour of a mosaic, for one.
+pub(crate) type Eligible<'a> = dyn Fn(Vec2us) -> bool + Sync + 'a;
+
+/// A tile's pixels that `eligible` takes, and how many of those the mask leaves.
+#[derive(Debug, Clone, Copy)]
+struct EligibleCount {
+    eligible: usize,
+    unmasked: usize,
+}
+
+fn count_eligible_pixels(
+    mask: Option<&BitBuffer2>,
+    eligible: &Eligible<'_>,
+    tile: URect,
+) -> EligibleCount {
+    let mut count = EligibleCount {
+        eligible: 0,
+        unmasked: 0,
+    };
+    for y in tile.min.y..tile.max.y {
+        for x in tile.min.x..tile.max.x {
+            let position = Vec2us::new(x, y);
+            if eligible(position) {
+                count.eligible += 1;
+                count.unmasked += usize::from(!mask.is_some_and(|mask| mask.get_at(position)));
+            }
+        }
+    }
+    count
+}
+
+/// The eligible, unmasked pixels of `tile`, `candidates` of them, or [`MAX_TILE_SAMPLES`] picked by
+/// [`sample_ordinal`], each with its [`centred`] offset.
+fn collect_eligible_pixels(
+    pixels: &Buffer2<f32>,
+    mask: Option<&BitBuffer2>,
+    eligible: &Eligible<'_>,
+    tile: URect,
+    candidates: usize,
+    values: &mut Vec<f32>,
+    offsets: &mut Vec<[i32; 2]>,
+) {
+    let count = sample_count(candidates);
+    values.reserve_exact(count);
+    offsets.reserve_exact(count);
+    let mut ordinal = 0;
+    for y in tile.min.y..tile.max.y {
+        for x in tile.min.x..tile.max.x {
+            let position = Vec2us::new(x, y);
+            if !eligible(position) || mask.is_some_and(|mask| mask.get_at(position)) {
+                continue;
+            }
+            if values.len() < count && ordinal == sample_ordinal(values.len(), count, candidates) {
+                values.push(pixels[(x, y)]);
+                offsets.push(centred(tile, x, y));
+            }
+            ordinal += 1;
+        }
+    }
+    debug_assert_eq!(values.len(), count);
 }
 
 #[inline]

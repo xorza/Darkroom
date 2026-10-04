@@ -3,14 +3,15 @@
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::combine::config::{StackConfig, Weighting};
 use crate::combine::error::StackConfigError;
-use crate::pipeline::result::Error;
-use crate::registration::config::Config as RegistrationConfig;
+use crate::pipeline::error::AlignStackError;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::star_detection::config::Config as StarDetectionConfig;
 
 /// How the reference frame (the alignment anchor) is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reference {
-    /// The frame with the most detected stars — the strongest registration anchor.
+    /// The sharpest frame — the lowest median FWHM — among those with the stars registration
+    /// needs, ties to the lowest index.
     #[default]
     Auto,
     /// A specific frame, by index into the input slice.
@@ -37,18 +38,20 @@ impl AlignStackConfig {
     /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking every
     /// stage here means a bad config is reported as one, before any frame is decoded. Manual
     /// weights are given one per input light, so their count is checked against the lights too.
-    pub(super) fn validate(&self, frame_count: usize) -> Result<(), Error> {
-        self.detection.validate().map_err(Error::DetectionConfig)?;
+    pub(super) fn validate(&self, frame_count: usize) -> Result<(), AlignStackError> {
+        self.detection
+            .validate()
+            .map_err(AlignStackError::DetectionConfig)?;
         self.registration
             .validate()
-            .map_err(Error::RegistrationConfig)?;
+            .map_err(AlignStackError::RegistrationConfig)?;
         self.stack
             .validate()
-            .map_err(|source| Error::Stack(source.into()))?;
+            .map_err(|source| AlignStackError::Stack(source.into()))?;
         if let Weighting::Manual(weights) = &self.stack.weighting
             && weights.len() != frame_count
         {
-            return Err(Error::Stack(
+            return Err(AlignStackError::Stack(
                 StackConfigError::ManualWeightCountMismatch {
                     expected: frame_count,
                     actual: weights.len(),
@@ -57,7 +60,9 @@ impl AlignStackConfig {
             ));
         }
         if let Some(cosmic_ray) = &self.cosmic_ray {
-            cosmic_ray.validate().map_err(Error::CosmicRayConfig)?;
+            cosmic_ray
+                .validate()
+                .map_err(AlignStackError::CosmicRayConfig)?;
         }
         Ok(())
     }

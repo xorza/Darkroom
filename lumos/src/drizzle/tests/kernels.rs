@@ -228,7 +228,8 @@ fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
 /// cell 2i and 0.7 of cell 2i + 1; along y, [2j, 2j + 1] covers half of cells 2j and 2j + 1. So
 /// every cell's weight is 0.3·0.5 = 0.15 or 0.7·0.5 = 0.35: the maximum is 0.35, the threshold
 /// 0.6·0.35 = 0.21. The bright pixel (0,0)'s cells (1,0) and (1,1) weigh 0.35 and read 1.0; its
-/// cells (0,0) and (0,1) weigh 0.15 — covered, but below the threshold — and take the fill.
+/// cells (0,0) and (0,1) weigh 0.15 — covered, but below the threshold — and take the fill. A
+/// filled cell holds no measurement, so its weight plane reads 0 and its coverage 0.
 #[test]
 fn min_weight_fraction_gates_against_the_deepest_weight() {
     let size = Size2us::new(4, 4);
@@ -248,9 +249,11 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
     for (x, y) in [(1, 0), (1, 1)] {
         assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
     }
+    let coverage = product.coverage.as_ref().unwrap().to_plane();
     for (x, y) in [(0, 0), (0, 1)] {
         assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
-        assert!(weight[(x, y)] > 0.0, "cell ({x},{y}) is covered");
+        assert_eq!(weight[(x, y)], 0.0, "cell ({x},{y}) weight");
+        assert_eq!(coverage[(x, y)], 0.0, "cell ({x},{y}) coverage");
     }
 }
 
@@ -350,7 +353,8 @@ fn unit_sampling_copies_the_input() {
 /// the shares of a drop sum to 1, and a frame registered at unit scale is not magnified. One pixel
 /// at frame weight 2.5, well inside the grid, so nothing of it falls off.
 ///
-/// The weight plane's sum adds at most 49 deposits, each a share rounded once.
+/// The deposited weights' sum adds at most 49 deposits, each a share rounded once. Read before the
+/// gate, which zeroes the cells it fills, a Lanczos lobe's negative ones among them.
 #[test]
 fn an_unmagnified_drop_deposits_its_frame_weight() {
     let size = Size2us::new(16, 16);
@@ -363,8 +367,7 @@ fn an_unmagnified_drop_deposits_its_frame_weight() {
             2.5,
             Some(&only(size, pixel)),
         );
-        let product = acc.finalize().product;
-        let total: f32 = weight_plane(&product).pixels().iter().sum();
+        let total: f32 = acc.accumulated_weights().pixels().iter().sum();
         assert!(
             (total - 2.5).abs() <= 2.0 * MAX_DEPOSITS * f32::EPSILON * 2.5 * LOBE_EXCESS,
             "{kernel:?}: {total}"
@@ -382,7 +385,7 @@ fn an_unmagnified_drop_deposits_its_frame_weight() {
 /// left, 2.7 to the right) and six rows: 36.
 ///
 /// The gate is a quarter of the deepest weight: next to the excluded pixel a Lanczos window keeps
-/// little more than its lobes.
+/// little more than its lobes. The footprint is read from the deposits, before the gate.
 #[test]
 fn a_zero_pixel_weight_keeps_the_pixel_out() {
     const GATE: f32 = 0.25;
@@ -413,14 +416,15 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
         );
         assert_constant_or_fill(&product, 4.0, -1.0, GATE, &format!("{kernel:?}"));
 
-        let alone = drizzle_one(
-            size,
-            config,
+        let mut alone = accumulator(ImageDimensions::new(size, 1), config);
+        alone.add_image(
             constant_image(size, 4.0),
             &transform,
+            1.0,
             Some(&only(size, pixel)),
         );
-        let reached = weight_plane(&alone)
+        let reached = alone
+            .accumulated_weights()
             .pixels()
             .iter()
             .filter(|&&w| w != 0.0)
@@ -556,4 +560,39 @@ fn rgb_channels_drizzle_independently() {
             );
         }
     }
+}
+
+/// A tap where the Lanczos window ends deposits nothing and reaches nothing. Shifted
+/// half a pixel along x, a lone pixel at (6, 6) lands at (6.5, 6) at scale 1. Its neighbourhood is
+/// the 7 × 7 about the rounded centre (7, 6): columns 4 to 10 at distances −2.5 to 3.5, rows 3 to 9
+/// at distances −3 to 3. `L` is 0 from distance 3 on, so column 10 and rows 3 and 9 receive exactly
+/// zero weight from it and are not marked covered by it. A first, unshifted frame covers
+/// every cell, so the gate keeps those cells, and their coverage counts that frame alone: 1/2.
+#[test]
+fn a_zero_lanczos_tap_marks_no_coverage() {
+    let size = Size2us::new(13, 13);
+    let pixel = Vec2us::new(6, 6);
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 1),
+        kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
+    );
+    acc.add_image(constant_image(size, 1.0), &Transform::identity(), 1.0, None);
+    let first = acc.accumulated_weights().clone();
+    acc.add_image(
+        constant_image(size, 1.0),
+        &Transform::translation(DVec2::new(0.5, 0.0)),
+        1.0,
+        Some(&only(size, pixel)),
+    );
+    let weights = acc.accumulated_weights().clone();
+    let product = acc.finalize().product;
+    let coverage = product.coverage.as_ref().unwrap().to_plane();
+    let zero_cells = (4..=10)
+        .flat_map(|x| [(x, 3), (x, 9)])
+        .chain((3..=9).map(|y| (10, y)));
+    for (x, y) in zero_cells {
+        assert_eq!(weights[(x, y)], first[(x, y)], "({x}, {y}) weight");
+        assert_eq!(coverage[(x, y)], 0.5, "({x}, {y}) coverage");
+    }
+    assert_eq!(coverage[(6, 6)], 1.0);
 }

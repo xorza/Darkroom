@@ -4,21 +4,23 @@
 )]
 
 use crate::internals::prelude::*;
-use crate::registration::config::{self, InterpolationMethod, WarpParams};
+use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
+use crate::registration::resample;
 use crate::registration::resample::internals::warp_plane;
-use crate::registration::resample::kernel::LanczosOrder;
-use crate::registration::resample::quality;
+use crate::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
+use crate::registration::resample::kernel::warp_kernel::Filter;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
 /// there, and outside the source it is the border.
 ///
 /// Nearest, bilinear and bicubic weigh the centre tap 1 and the rest exactly 0, so they copy it
-/// exactly. A Lanczos table entry at a nonzero integer is the f32 kernel's rounding residue, not 0:
-/// its window lets through `leak = Σ|L(k)|, k ≠ 0` per axis of every other tap's difference from
-/// the centre, `((1 + leak)² − 1)·range` in all, on top of the row's `SIZE² + 3` roundings against
-/// the window's absolute sum (see `row`'s oracle test). At the edges Lanczos falls back to
-/// bilinear, which is exact.
+/// exactly, clamp or none: the clamp sees no negative lobe, and splits the value into its parts
+/// above and below zero, one of which is zero. A Lanczos table entry at a nonzero integer is the
+/// f32 kernel's rounding residue, not 0: its window lets through `leak = Σ|L(k)|, k ≠ 0` per axis
+/// of every other tap's difference from the centre, `((1 + leak)² − 1)·range` in all, on top of
+/// the `SIZE² + 3` roundings of each sum against the window's absolute sum. At the edges the
+/// window keeps its in-bounds taps, the centre among them.
 #[test]
 fn integer_shifts_copy_the_source() {
     let size = Size2us::new(24, 20);
@@ -37,16 +39,19 @@ fn integer_shifts_copy_the_source() {
             f64::from(shift.1),
         )));
         for method in InterpolationMethod::ALL {
-            let params = config::internals::warp_params(method);
-            let tolerance = LanczosOrder::of(method).map_or(0.0, |order| {
-                let lut = order.lut();
-                let leak: f32 = (1..=order.a())
-                    .map(|k| 2.0 * lut.lookup_positive(k as f32).abs())
-                    .sum();
-                let taps = (4 * order.a() * order.a()) as f32;
-                let spread = (1.0 + leak) * (1.0 + leak);
-                (spread - 1.0) * range + (taps + 3.0) * f32::EPSILON * largest * spread
-            });
+            let params = registration_config::internals::warp_params(method);
+            let tolerance = match Filter::of(method) {
+                Some(Filter::Lanczos(order)) => {
+                    let lut = order.lut();
+                    let leak: f32 = (1..=order.a())
+                        .map(|k| 2.0 * lut.at((k * LANCZOS_LUT_RESOLUTION) as f32).abs())
+                        .sum();
+                    let taps = (4 * order.a() * order.a()) as f32;
+                    let spread = (1.0 + leak) * (1.0 + leak);
+                    (spread - 1.0) * range + (taps + 3.0) * f32::EPSILON * largest * spread
+                }
+                _ => 0.0,
+            };
             let mut output = Buffer2::new_filled(size.width, size.height, f32::NAN);
             warp_plane(&input, &mut output, &transform, params);
             for y in 0..size.height {
@@ -81,7 +86,10 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
     const HORIZON_X: usize = 8;
     const BORDER: f32 = -0.25;
 
-    let input = Buffer2::new_filled(WIDTH, HEIGHT, 0.75);
+    let input = LinearImage::from_pixels(
+        ImageDimensions::new((WIDTH, HEIGHT), 1),
+        vec![0.75; WIDTH * HEIGHT],
+    );
     for horizon_scale in [1.0, 1.0 - 1e-12] {
         let transform = Transform::homography([
             1.0,
@@ -106,11 +114,11 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
             let params = WarpParams {
                 method,
                 border_value: BORDER,
+                ..Default::default()
             };
-            let mut output = Buffer2::new_default(WIDTH, HEIGHT);
-            warp_plane(&input, &mut output, &wt, params);
-            let coverage =
-                quality::internals::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
+            let warped = resample::warp(&input, &wt, params);
+            let output = warped.image.channel(0);
+            let coverage = &warped.coverage;
 
             for y in 0..HEIGHT {
                 assert_eq!(
@@ -136,13 +144,17 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
     }
 }
 
-/// An image narrower than any Lanczos window is sampled by the bilinear fallback everywhere, which
-/// returns a constant exactly.
+/// An image narrower than any Lanczos window reads a constant back wherever it is sampled: every
+/// window is clipped, and the in-bounds taps, normalized, or the Bilinear fallback over them, give
+/// the constant to the rounding of their sums. Each sum of up to 64 terms rounds by `64·ε` of its
+/// absolute sum, and a window the test admits has `Σ|L| ≤ √n·√(Σ L²) ≤ 8·Σ L`, so the ratio of
+/// two of them is off by at most `2·64·ε·8` of the constant.
 #[test]
-fn an_image_smaller_than_the_kernel_falls_back_exactly() {
+fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
     let size = Size2us::new(3, 3);
     let input = Buffer2::new_filled(size.width, size.height, 0.5f32);
     let wt = WarpTransform::new(Transform::translation(DVec2::new(0.3, -0.2)));
+    let tolerance = 2.0 * 64.0 * f32::EPSILON * 8.0 * 0.5;
     for method in [
         InterpolationMethod::Lanczos2,
         InterpolationMethod::Lanczos3,
@@ -153,10 +165,13 @@ fn an_image_smaller_than_the_kernel_falls_back_exactly() {
             &input,
             &mut output,
             &wt,
-            config::internals::warp_params(method),
+            registration_config::internals::warp_params(method),
         );
         assert!(
-            output.pixels().iter().all(|&value| value == 0.5),
+            output
+                .pixels()
+                .iter()
+                .all(|&value| (value - 0.5).abs() <= tolerance),
             "{method:?}: {:?}",
             output.pixels()
         );

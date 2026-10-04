@@ -16,7 +16,7 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 
 const W: usize = 128;
 const H: usize = 128;
@@ -169,7 +169,7 @@ fn all_rejection_methods_remove_outliers() {
         ("sigma_clip", StackConfig::sigma_clipped(2.5)),
         ("winsorized", StackConfig::winsorized(2.5)),
         ("linear_fit", StackConfig::linear_fit(2.5)),
-        ("percentile", StackConfig::percentile(20.0)),
+        ("trim", StackConfig::trim(20.0)),
         ("gesd", StackConfig::gesd()),
         ("median", StackConfig::median()),
     ];

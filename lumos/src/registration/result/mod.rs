@@ -52,30 +52,30 @@ impl Display for RansacFailureReason {
     }
 }
 
-/// One model the `Auto` ladder tried and the reason it did not produce a fit.
+/// One model `Auto` tried and the reason it did not produce a fit.
 ///
-/// Boxed because a rung's failure is itself a [`RegistrationError`] — without it the enum would be
+/// Boxed because a model's failure is itself a [`RegistrationError`] — without it the enum would be
 /// infinitely sized.
 #[derive(Debug, Clone)]
-pub struct FailedRung {
+pub struct FailedModel {
     /// The model that was attempted.
     pub model: TransformType,
     /// Why it failed.
     pub error: Box<RegistrationError>,
 }
 
-impl Display for FailedRung {
+impl Display for FailedModel {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.model, self.error)
     }
 }
 
-/// The rungs on one line: a dropped frame logs its error as a single tracing field, so a message
+/// The failures on one line: a dropped frame logs its error as a single tracing field, so a message
 /// spanning lines would be unreadable where it is actually read.
-fn joined(failures: &[FailedRung]) -> String {
+fn joined(failures: &[FailedModel]) -> String {
     failures
         .iter()
-        .map(FailedRung::to_string)
+        .map(FailedModel::to_string)
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -97,12 +97,14 @@ pub enum RegistrationError {
         index: usize,
         position: DVec2,
     },
-    /// A star has a non-finite FWHM.
-    #[error("{catalog} star {index} FWHM must be finite, got {value}")]
-    InvalidStarFwhm {
+    /// A star has a non-finite measurement: its FWHM, flux, SNR, peak, sharpness, eccentricity,
+    /// roundness or position σ.
+    #[error("{catalog} star {index} {field} must be finite, got {value}")]
+    InvalidStarField {
         catalog: RegistrationCatalog,
         index: usize,
-        value: f32,
+        field: &'static str,
+        value: f64,
     },
     /// No matching star patterns found.
     #[error("No matching star patterns found between images")]
@@ -135,23 +137,23 @@ pub enum RegistrationError {
     /// Not enough matched points are available for a stable SIP fit.
     #[error("Insufficient points for SIP fit: found {found}, need {required}")]
     InsufficientSipPoints { found: usize, required: usize },
+    /// The final fit's matched pairs do not determine the model.
+    #[error("the matched pairs do not determine a {model:?} transform")]
+    DegenerateFit { model: TransformType },
     /// The SIP polynomial system is singular.
     #[error("SIP fit failed: singular polynomial system")]
     SingularSipSystem,
-    /// Every model on the `Auto` ladder failed, each with its own reason.
+    /// Every model `Auto` tries failed, each with its own reason.
     ///
-    /// Distinct from any single rung's error because the rungs fail independently: RANSAC estimates
-    /// the model it was given, and SIP is fit on that model's inlier set, so a homography that
-    /// cannot be estimated says nothing about whether Euclidean could. Reporting only the last
-    /// rung's failure made "the ladder had nothing to offer" indistinguishable from "homography
-    /// specifically failed", and hid the other three reasons.
+    /// Distinct from any single model's error because the models fail independently: RANSAC
+    /// estimates the model it was given, so a homography that cannot be estimated says nothing
+    /// about whether Euclidean could, and no single reason stands in for the others.
     ///
-    /// Only reachable when *no* rung produced a fit — a rung that fit is returned rather than
-    /// discarded, even when a later one fails.
+    /// Only reachable when *no* model produced a fit — any model that fit is a candidate.
     #[error("no transform model fit: {}", joined(failures))]
-    AutoLadderExhausted {
-        /// Every rung tried, in ladder order.
-        failures: Vec<FailedRung>,
+    EveryModelFailed {
+        /// Every model tried, from the fewest degrees of freedom to the most.
+        failures: Vec<FailedModel>,
     },
 }
 

@@ -3,10 +3,12 @@
 //! then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew), with a
 //! 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous interpolation.
 //!
-//! Foundation module (depends only on `math`/`common`): the canonical robust background estimate,
-//! reused by `star_detection::background` (full-res background+noise map for detection)
-//! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
+//! The canonical robust background estimate, reused by `star_detection::background` (full-res
+//! background+noise map for detection), `background_extraction` (tile-centre samples feeding the
+//! gradient surface fit), and per colour of a mosaic by [`colour_mesh`] for the hot-pixel and
+//! cosmic-ray scans.
 
+pub(crate) mod colour_mesh;
 pub(crate) mod mesh_axis;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
@@ -14,10 +16,10 @@ pub(crate) mod workspace;
 
 use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::tile_stats::{TileComponent, TileD2y, TileStats};
+use crate::background_mesh::tile_stats::{Eligible, TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::urect::URect;
@@ -39,6 +41,8 @@ pub(crate) struct TileGrid {
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
     dimensions: Size2us,
+    /// Which tiles measured their own statistics; the others were filled from them.
+    measured: Vec<bool>,
 }
 
 impl TileGrid {
@@ -71,6 +75,7 @@ impl TileGrid {
             centers_y,
             tile_size,
             dimensions,
+            measured: vec![false; n],
         }
     }
 
@@ -84,8 +89,6 @@ impl TileGrid {
         self.d2y[tile.y * self.stats.width() + tile.x].get(component)
     }
 
-    /// Find the tile index whose center is at or before the given Y position.
-    #[inline]
     /// The least and the greatest tile σ.
     pub(crate) fn sigma_range(&self) -> RangeInclusive<f32> {
         let stats = self.stats.pixels();
@@ -100,6 +103,8 @@ impl TileGrid {
         low..=high
     }
 
+    /// Find the tile index whose center is at or before the given Y position.
+    #[inline]
     pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
         // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.stats.height();
@@ -118,35 +123,119 @@ impl TileGrid {
         lo.saturating_sub(1)
     }
 
+    /// Every tile's statistics, a bad tile's taken from its good neighbours (see
+    /// [`Self::fill_bad_tiles`]). When the mask leaves no good tile at all, it covers too much to
+    /// leave a sky anywhere, and every tile is measured without it.
     fn fill_tile_stats(
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
+        eligible: Option<&Eligible<'_>>,
         sigma_clip_iterations: usize,
         tile_scratch: &JobScratchPool<TileScratch>,
     ) {
         let tiles_x = self.stats.width();
         let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
         let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
+        let tile_at = |index: usize| {
+            let (tx, ty) = (index % tiles_x, index / tiles_x);
+            URect::new(
+                Vec2us::new(columns.start(tx), rows.start(ty)),
+                Vec2us::new(columns.end(tx), rows.end(ty)),
+            )
+        };
 
+        self.measured.resize(self.stats.pixels().len(), false);
         self.stats
             .pixels_mut()
             .par_iter_mut()
+            .zip(self.measured.par_iter_mut())
             .enumerate()
             .for_each_init(
                 || tile_scratch.acquire(),
-                |scratch, (idx, out)| {
-                    let tx = idx % tiles_x;
-                    let ty = idx / tiles_x;
-
-                    let tile = URect::new(
-                        Vec2us::new(columns.start(tx), rows.start(ty)),
-                        Vec2us::new(columns.end(tx), rows.end(ty)),
+                |scratch, (index, (out, measured))| {
+                    let stats = TileStats::compute(
+                        pixels,
+                        mask,
+                        eligible,
+                        tile_at(index),
+                        sigma_clip_iterations,
+                        scratch,
                     );
-
-                    *out = TileStats::compute(pixels, mask, tile, sigma_clip_iterations, scratch);
+                    *measured = stats.is_some();
+                    *out = stats.unwrap_or_default();
                 },
             );
+        if self.measured.iter().all(|&measured| measured) {
+            return;
+        }
+        if !self.measured.contains(&true) {
+            self.stats
+                .pixels_mut()
+                .par_iter_mut()
+                .enumerate()
+                .for_each_init(
+                    || tile_scratch.acquire(),
+                    |scratch, (index, out)| {
+                        // An eligibility test that takes no pixel of a tile leaves it nothing to
+                        // measure, mask or not.
+                        *out = TileStats::compute(
+                            pixels,
+                            None,
+                            eligible,
+                            tile_at(index),
+                            sigma_clip_iterations,
+                            scratch,
+                        )
+                        .unwrap_or_default();
+                    },
+                );
+            return;
+        }
+        self.fill_bad_tiles();
+    }
+
+    /// Give each bad tile the median sky, σ and noise of the good tiles on the nearest square
+    /// ring around it that holds any, as SExtractor fills a bad mesh from its neighbours. Read from
+    /// the measured tiles only, so a fill never feeds another.
+    fn fill_bad_tiles(&mut self) {
+        let (tiles_x, tiles_y) = (self.stats.width(), self.stats.height());
+        let reach = tiles_x.max(tiles_y);
+        let mut skies = Vec::new();
+        let mut sigmas = Vec::new();
+        let mut noises = Vec::new();
+        for index in 0..self.measured.len() {
+            if self.measured[index] {
+                continue;
+            }
+            let (tx, ty) = (index % tiles_x, index / tiles_x);
+            for radius in 1..=reach {
+                skies.clear();
+                sigmas.clear();
+                noises.clear();
+                let ring = ty.saturating_sub(radius)..=(ty + radius).min(tiles_y - 1);
+                for y in ring {
+                    for x in tx.saturating_sub(radius)..=(tx + radius).min(tiles_x - 1) {
+                        let on_ring = x.abs_diff(tx).max(y.abs_diff(ty)) == radius;
+                        if on_ring && self.measured[y * tiles_x + x] {
+                            let stats = self.stats[(x, y)];
+                            skies.push(stats.sky);
+                            sigmas.push(stats.sigma);
+                            noises.push(stats.noise);
+                        }
+                    }
+                }
+                if !skies.is_empty() {
+                    break;
+                }
+            }
+            debug_assert!(!skies.is_empty(), "some tile is measured");
+            self.stats[(tx, ty)] = TileStats {
+                sky: median_mut(&mut skies),
+                sigma: median_mut(&mut sigmas),
+                noise: median_mut(&mut noises),
+            };
+        }
     }
 
     /// The 3×3 median of every tile, to reject tiles a bright object spoiled.
@@ -174,6 +263,7 @@ impl TileGrid {
 
             let mut skies = [0.0f32; 9];
             let mut sigmas = [0.0f32; 9];
+            let mut noises = [0.0f32; 9];
             let mut count = 0;
 
             for dy in -1isize..=1 {
@@ -181,14 +271,19 @@ impl TileGrid {
                     let x = Reflection::of(tile.x, dx, last.x);
                     let y = Reflection::of(tile.y, dy, last.y);
                     let edge = src[(x.pivot, y.pivot)];
-                    let (sky, sigma) = if x.pivot == x.mirror && y.pivot == y.mirror {
-                        (edge.sky, edge.sigma)
+                    let reflected = if x.pivot == x.mirror && y.pivot == y.mirror {
+                        edge
                     } else {
                         let inner = src[(x.mirror, y.mirror)];
-                        (2.0 * edge.sky - inner.sky, 2.0 * edge.sigma - inner.sigma)
+                        TileStats {
+                            sky: 2.0 * edge.sky - inner.sky,
+                            sigma: 2.0 * edge.sigma - inner.sigma,
+                            noise: 2.0 * edge.noise - inner.noise,
+                        }
                     };
-                    skies[count] = sky;
-                    sigmas[count] = sigma;
+                    skies[count] = reflected.sky;
+                    sigmas[count] = reflected.sigma;
+                    noises[count] = reflected.noise;
                     count += 1;
                 }
             }
@@ -196,6 +291,7 @@ impl TileGrid {
             out.sky = median_mut(&mut skies);
             // A steep σ gradient can reflect below zero, which no noise level is.
             out.sigma = median_mut(&mut sigmas).max(0.0);
+            out.noise = median_mut(&mut noises).max(0.0);
         });
 
         mem::swap(&mut self.stats, scratch);

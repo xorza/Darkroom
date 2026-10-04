@@ -14,11 +14,11 @@ use common::CancelToken;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::combine::CANCEL_POLL_CHUNK;
-use crate::combine::error::Error;
-use crate::combine::error::check_cancel;
+use crate::combine::error::StackError;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::io::cancelled::Cancelled;
 use crate::math::size2us::Size2us;
 
 #[derive(Debug)]
@@ -42,10 +42,10 @@ impl CommonDomain {
         frames: &[StoredFrame],
         pixel_count: usize,
         cancel: &CancelToken,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         let mut common_domain = Self::full_mask(pixel_count);
         for frame in frames {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
             if let Some(coverage) = frame.quality.coverage() {
                 intersect_domain(
                     &mut common_domain,
@@ -56,10 +56,10 @@ impl CommonDomain {
                 )?;
             }
         }
-        check_cancel(cancel)?;
+        Cancelled::check(cancel)?;
         let sample_count = common_domain.count_ones();
         if sample_count == 0 {
-            return Err(Error::NoCommonCoverage);
+            return Err(StackError::NoCommonCoverage);
         }
         Ok(Self {
             valid: common_domain,
@@ -78,7 +78,7 @@ fn intersect_domain(
     pixel_count: usize,
     is_valid: impl Fn(f32) -> bool,
     cancel: &CancelToken,
-) -> Result<(), Error> {
+) -> Result<(), StackError> {
     const BITS: usize = 64;
     let values = plane.chunk(0, pixel_count);
     // The mask is one row, so word `w` covers pixels `64w..64w+64`.
@@ -89,7 +89,7 @@ fn intersect_domain(
             break;
         }
         if w % words_per_check == 0 {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
         }
         let mut incoming = 0u64;
         for bit in 0..BITS.min(pixel_count - base) {

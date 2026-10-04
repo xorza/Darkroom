@@ -4,12 +4,14 @@
 //! → fine structure `F` → flag → grow → in-paint → iterate. Also serves each deinterleaved Bayer
 //! phase, whose dense neighbours are same-colour in the mosaic.
 
+use std::array;
+
 use rayon::prelude::*;
 
+use crate::background_mesh::colour_mesh::LocalBackground;
 use crate::bit_buffer2::BitBuffer2;
-use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
+use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
@@ -28,8 +30,7 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 /// each producer keeps the largest allocation.
 ///
 /// Five planes, not the eight the stages name: `significance` and `fine` are rewritten in place by
-/// the elementwise step that consumes them, and `median` and `frame` are each handed from one
-/// stage to the next. On a 6144² mono frame that is 720 MB of working set instead of 1.1 GB —
+/// the elementwise step that consumes them, and `median` is handed from one stage to the next. On a 6144² mono frame that is 720 MB of working set instead of 1.1 GB —
 /// and, the point of the struct, no allocation at all after the first iteration.
 #[derive(Debug, Default)]
 struct MonoScratch {
@@ -42,8 +43,7 @@ struct MonoScratch {
     /// The window medians, one at a time: `median₇(median₃(I))`, then `median₅(I)`, then
     /// `median₅(S)`. Each is consumed by the step immediately after it, so the three never overlap.
     median: Vec<f32>,
-    /// Whole-frame scratch: the copy the empirical background median and MAD consume, then the
-    /// read-only snapshot [`replace_flagged`] gathers from — again never both at once.
+    /// The read-only snapshot [`replace_flagged`] gathers from.
     frame: Vec<f32>,
 }
 
@@ -77,11 +77,20 @@ impl<'a> MonoDetector<'a> {
         MONO_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
     }
 
-    /// Detect and in-paint cosmic rays in one dense plane, in place, returning the CR pixel count.
+    /// Detect and in-paint cosmic rays in one dense plane, in place, marking every in-painted pixel
+    /// in `found` (the plane's size) and returning how many there are.
     ///
     /// Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` →
     /// `S' = S − median₅(S)` → fine structure `F` → flag → grow → in-paint → iterate.
-    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+    ///
+    /// `local` gives each pixel's background sky and σ, by flat index into the plane.
+    pub(super) fn reject(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        local: &(dyn Fn(usize) -> LocalBackground + Sync),
+        found: &mut BitBuffer2,
+    ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
         if size.width < 3 || size.height < 3 {
             return 0;
@@ -119,7 +128,7 @@ impl<'a> MonoDetector<'a> {
             // structure. Both steps are elementwise over the same extent, so they run in place down
             // the Laplacian buffer instead of allocating a frame each.
             median_window_into(pix, size, 2, median);
-            noise_map_into(pix, median, self.noise, noise, frame);
+            noise_map_into(median, local, self.noise, noise);
             for (l, &nz) in significance.iter_mut().zip(&*noise) {
                 *l /= 2.0 * nz;
             }
@@ -134,6 +143,7 @@ impl<'a> MonoDetector<'a> {
             replace_flagged(data, size, &masks.accumulated, frame);
         }
 
+        found.copy_from(&masks.accumulated);
         masks.accumulated.count_ones()
     }
 }
@@ -180,7 +190,7 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 }
 
 /// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
-/// every output sees a full window. Scalar, row-parallel.
+/// every output sees a full window. Row-parallel.
 ///
 /// Deliberately not star detection's own `median_filter_3x3`, even
 /// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
@@ -190,108 +200,136 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// difference while `median₇` stayed replicated would corrupt the border in a way neither
 /// convention does alone. Replication is also the usual choice for astronomical median filtering.
 ///
-/// The two *could* still share an interior kernel: `median_filter`'s `median_filter_row`
-/// takes three rows and fills the interior, knowing nothing about edges. That is worth doing
-/// behind a cosmic-ray benchmark rather than before one — it couples two subsystems to accelerate
-/// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to
-/// be proven bit-identical to this general one or the detection changes.
+/// Eight pixels whose windows lie inside the row take their medians together by forgetful
+/// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
+/// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
+/// gathers its replicated window and takes `median_mut`.
 fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
+    let side = 2 * r + 1;
     // Every element is written below, so only the length matters.
     out.resize(size.pixel_count(), 0.0);
     out.par_chunks_mut(size.width).enumerate().for_each_init(
-        || Vec::<f32>::with_capacity((2 * r + 1) * (2 * r + 1)),
-        |buf, (y, row)| {
-            for (x, o) in row.iter_mut().enumerate() {
-                buf.clear();
-                // `y + dy − r` for dy in `0..=2r`, replicated into the frame at both edges.
-                for dy in 0..=2 * r {
-                    let yy = (y + dy).saturating_sub(r).min(size.height - 1);
-                    for dx in 0..=2 * r {
-                        let xx = (x + dx).saturating_sub(r).min(size.width - 1);
-                        buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
+        || WindowScratch {
+            values: Vec::with_capacity(side * side),
+            lanes: Vec::with_capacity(side * side),
+        },
+        |scratch, (y, row)| {
+            let width = size.width;
+            let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
+            let mut x = 0;
+            while x < width {
+                if x >= r && x + LANES + r <= width {
+                    scratch.lanes.clear();
+                    for dy in 0..side {
+                        let start = rows(dy) * width + x - r;
+                        for dx in 0..side {
+                            let at = &data[start + dx..start + dx + LANES];
+                            scratch
+                                .lanes
+                                .push(array::from_fn(|lane| total_key(at[lane])));
+                        }
                     }
+                    let medians = median_of_lanes(&mut scratch.lanes);
+                    for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
+                        *o = from_total_key(key);
+                    }
+                    x += LANES;
+                } else {
+                    scratch.values.clear();
+                    for dy in 0..side {
+                        let yy = rows(dy);
+                        for dx in 0..side {
+                            let xx = (x + dx).saturating_sub(r).min(width - 1);
+                            scratch
+                                .values
+                                .push(data[size.index_of(Vec2us::new(xx, yy))]);
+                        }
+                    }
+                    row[x] = median_mut(&mut scratch.values);
+                    x += 1;
                 }
-                *o = median_mut(buf);
             }
         },
     );
 }
 
-/// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5`, into `out`.
+/// The pixels one forgetful selection runs over at once: an AVX2 register of `i32`s.
+const LANES: usize = 8;
+
+/// One worker's windows: a pixel's values, and eight pixels' keys, value by value.
+#[derive(Debug)]
+struct WindowScratch {
+    values: Vec<f32>,
+    lanes: Vec<[i32; LANES]>,
+}
+
+/// `total_cmp`'s key for `value`: an `i32` whose order is the total order of the f32s.
+#[inline(always)]
+const fn total_key(value: f32) -> i32 {
+    let bits = value.to_bits().cast_signed();
+    bits ^ ((bits >> 31).cast_unsigned() >> 1).cast_signed()
+}
+
+/// The f32 of a [`total_key`]: the same transform, which undoes itself.
+#[inline(always)]
+const fn from_total_key(key: i32) -> f32 {
+    f32::from_bits((key ^ ((key >> 31).cast_unsigned() >> 1).cast_signed()).cast_unsigned())
+}
+
+/// Each lane's median of `lanes`, an odd count of them, by forgetful selection (Paeth): keep
+/// `k + 2` of the `2k + 1` values, move the least to the front and the greatest to the back and
+/// drop both, take the next value, and repeat until three are left, whose middle is the median.
 ///
-/// `scratch` is a frame-sized buffer the empirical background statistics consume; what it holds on
-/// entry means nothing, and what it holds on return means nothing either.
-fn noise_map_into(
-    data: &[f32],
-    m5: &[f32],
-    noise: NoiseModel,
-    out: &mut Vec<f32>,
-    scratch: &mut Vec<f32>,
-) {
-    match noise {
-        NoiseModel::Empirical => {
-            scratch.clear();
-            scratch.extend_from_slice(data);
-            let bg = median_mut(scratch);
-            let sigma_bg = mad_to_sigma(mad_fast(data, bg, scratch)).max(degenerate_sigma(bg));
-            out.clear();
-            out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
+/// With `W` the kept values and `U` the unseen ones, `|W| = |U| + 3` throughout. The median of
+/// `W ∪ U` has `|U| + 1` values below it, so not all of `W` lies above it, nor all below: `W`'s
+/// least is at or below it and `W`'s greatest at or above, and dropping one from each side leaves
+/// the median where it was. Taking the next value moves it from `U` to `W`, which changes neither.
+/// Each move is a compare-exchange of every lane at once, so the lanes share one branch-free
+/// sweep. Overwrites `lanes`.
+fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
+    let count = lanes.len();
+    debug_assert!(
+        count % 2 == 1 && count >= 3,
+        "an odd window of three or more"
+    );
+    let exchange = |lanes: &mut [[i32; LANES]], low: usize, high: usize| {
+        let (a, b) = (lanes[low], lanes[high]);
+        lanes[low] = array::from_fn(|lane| a[lane].min(b[lane]));
+        lanes[high] = array::from_fn(|lane| a[lane].max(b[lane]));
+    };
+    let (mut first, mut end, mut next) = (0, count / 2 + 2, count / 2 + 2);
+    loop {
+        for index in first + 1..end {
+            exchange(lanes, first, index);
         }
-        NoiseModel::Parametric {
-            gain,
-            read_noise,
-            full_scale,
-        } => parametric_noise_into(m5, gain, read_noise, full_scale, out),
+        for index in first + 1..end - 1 {
+            exchange(lanes, index, end - 1);
+        }
+        if end - first == 3 {
+            debug_assert_eq!(next, count);
+            return lanes[first + 1];
+        }
+        first += 1;
+        end -= 1;
+        lanes[end] = lanes[next];
+        end += 1;
+        next += 1;
     }
 }
 
-/// The σ to fall back on when a frame's MAD comes out zero: one `f32` step at the background's own
-/// magnitude.
-///
-/// `empirical_noise` would otherwise return 0 there and the significance `L⁺/(2N)` would divide by
-/// it. Derived from `bg` rather than fixed, so it holds at whatever magnitude the decoder's span
-/// left the samples — and on a frame flat enough for the MAD to vanish, `bg` *is* the frame's
-/// magnitude. Strictly positive, so it is safe as a divisor even on an all-zero frame.
-///
-/// Shared by the mono (whole-image `bg`) and X-Trans (per-colour `bg`) paths, like the noise model
-/// below it.
-#[inline]
-pub(super) fn degenerate_sigma(bg: f32) -> f32 {
-    (bg.abs() * f32::EPSILON).max(f32::MIN_POSITIVE)
-}
-
-/// Empirical per-pixel noise: a read-noise floor `σ` plus a sky-anchored Poisson term that rises as
-/// `σ²·(signal−bg)/max(bg,σ)` above the background. Shared by the mono (whole-image `bg,σ`) and
-/// X-Trans (per-color `bg,σ`) paths so the model can't drift between them.
-#[inline]
-pub(super) fn empirical_noise(signal: f32, bg: f32, sigma: f32) -> f32 {
-    let sigma2 = sigma * sigma;
-    let slope = sigma2 / bg.max(sigma);
-    (sigma2 + (signal - bg).max(0.0) * slope).sqrt()
-}
-
-/// Poisson + read noise per pixel from a CR-free signal estimate, in normalized units:
-/// `N_e = √(gain·I_ADU + read_noise²)` mapped back through `full_scale`.
-///
-/// Floored at one ADC step's digitization σ rather than at a constant. `full_scale` already states
-/// what one normalized unit is worth in ADU, so `(1/√12)/full_scale` is the smallest noise a
-/// digitized sample can have — the right floor in any domain, and the same figure
-/// [`crate::CfaImage`] carries as its quantization σ. Only reached where both the signal and the
-/// read noise are zero.
-pub(super) fn parametric_noise_into(
-    signal: &[f32],
-    gain: f32,
-    read_noise: f32,
-    full_scale: f32,
+/// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5` and each pixel's
+/// local background, into `out`.
+fn noise_map_into(
+    m5: &[f32],
+    local: &(dyn Fn(usize) -> LocalBackground + Sync),
+    noise: NoiseModel,
     out: &mut Vec<f32>,
 ) {
-    let denom = gain * full_scale;
-    let floor = QUANTIZATION_SIGMA_PER_STEP / full_scale;
-    out.clear();
-    out.extend(signal.iter().map(|&s| {
-        let adu = s.max(0.0) * full_scale;
-        ((gain * adu + read_noise * read_noise).sqrt() / denom).max(floor)
-    }));
+    out.resize(m5.len(), 0.0);
+    out.par_iter_mut()
+        .zip(m5)
+        .enumerate()
+        .for_each(|(index, (out, &signal))| *out = noise.noise(signal, local(index)));
 }
 
 /// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped);
@@ -343,10 +381,22 @@ pub(super) fn replace_flagged(
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::background_mesh::colour_mesh::LocalBackground;
+    use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+    use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
+    use crate::calibration_masters::cosmic_ray::mono::median_window_into;
     use crate::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
     use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+    use crate::io::image::image_metadata::ImageMetadata;
     use crate::math::size2us::Size2us;
+
+    /// The `(2r+1)²` window median of `data`, into a fresh plane.
+    pub(crate) fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
+        let mut out = Vec::new();
+        median_window_into(data, size, r, &mut out);
+        out
+    }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
     /// `mem_budget` weighs against
@@ -359,8 +409,14 @@ pub(crate) mod internals {
         size: Size2us,
         config: &CosmicRayConfig,
     ) -> usize {
-        let mut detector = MonoDetector::new(config, NoiseModel::Empirical);
-        detector.reject(data, size);
+        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
+            .expect("the measured model needs nothing from the frame");
+        let local = |_| LocalBackground {
+            sky: 0.1,
+            noise: 0.01,
+        };
+        let mut detector = MonoDetector::new(config, noise);
+        detector.reject(data, size, &local, &mut BitBuffer2::new_default(size));
         let MonoScratch {
             significance,
             fine,

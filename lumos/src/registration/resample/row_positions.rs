@@ -12,7 +12,8 @@ use crate::registration::transform::{TransformType, WarpTransform};
 /// A row of a model without SIP is affine in `x` in its numerators and, for a homography, its
 /// denominator, so the row's `y` terms are taken once and each pixel adds its `x` terms. The
 /// arithmetic is [`WarpTransform::apply`]'s, operation for operation, so the positions are the
-/// same bits. A SIP model is evaluated per pixel: its correction is not affine in anything.
+/// same bits. A SIP correction is not affine in `x`, but along one row it is a polynomial in `x`
+/// alone ([`SipPolynomial::row`](crate::registration::distortion::sip::SipPolynomial::row)).
 #[derive(Debug, Default)]
 pub(super) struct RowPositions {
     positions: Vec<Option<SourcePosition>>,
@@ -28,14 +29,13 @@ impl RowPositions {
         source: Size2us,
     ) {
         self.positions.clear();
-        self.positions.reserve(width);
+        self.positions.reserve_exact(width);
         let y = y as f64;
-        if transform.has_sip() {
-            self.positions.extend(
-                (0..width).map(|x| {
-                    SourcePosition::within(transform.apply(DVec2::new(x as f64, y)), source)
-                }),
-            );
+        if let Some(sip) = &transform.sip {
+            let row = sip.row(y);
+            self.positions.extend((0..width).map(|x| {
+                SourcePosition::within(transform.transform.apply(row.correct(x as f64)), source)
+            }));
             return;
         }
         let m = transform.transform.matrix();
@@ -79,9 +79,11 @@ mod tests {
     use crate::registration::resample::source_position::SourcePosition;
     use crate::registration::transform::{Transform, WarpTransform};
 
-    /// Every row is the bits `WarpTransform::apply` gives, split by `SourcePosition::within`: for
-    /// an affine model, a homography, and one with a SIP correction — and positions past the
-    /// footprint are `None` in every case.
+    /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
+    /// by `SourcePosition::within`, and positions past the footprint are `None`. A SIP row sums its
+    /// polynomial in another order, so it agrees to rounding instead: the correction here reaches
+    /// `1e-6·180³` ≈ 6 px, so the reordering moves it by a few 1e-15 px, and the f32 fraction of
+    /// the split, under 1, rounds to half its 6e-8 spacing — 1e-7 holds both.
     #[test]
     fn a_row_is_what_apply_gives_pixel_by_pixel() {
         let source = Size2us::new(300, 200);
@@ -103,11 +105,14 @@ mod tests {
         let config = SipConfig {
             order: 3,
             reference_point: Some(center),
-            ..SipConfig::default()
         };
-        let sip = SipPolynomial::fit_from_transform(&reference, &target, &affine, &config)
-            .unwrap()
-            .polynomial;
+        let sip = SipPolynomial::fitted_under(
+            &affine,
+            &reference,
+            &target,
+            config.order,
+            config.reference_point.unwrap(),
+        );
         let transforms = [
             WarpTransform::new(affine),
             WarpTransform::new(Transform::homography([
@@ -122,11 +127,23 @@ mod tests {
                 row.fill(y, 320, transform, source);
                 assert_eq!(row.positions().len(), 320);
                 for (x, &position) in row.positions().iter().enumerate() {
-                    let expected = SourcePosition::within(
-                        transform.apply(DVec2::new(x as f64, y as f64)),
-                        source,
-                    );
-                    assert_eq!(position, expected, "x = {x}, y = {y}");
+                    let exact = transform.apply(DVec2::new(x as f64, y as f64));
+                    let expected = SourcePosition::within(exact, source);
+                    if transform.has_sip() {
+                        assert_eq!(position.is_some(), expected.is_some(), "x = {x}, y = {y}");
+                        if let Some(p) = position {
+                            let split = DVec2::new(
+                                f64::from(p.cell_x) + f64::from(p.fx),
+                                f64::from(p.cell_y) + f64::from(p.fy),
+                            );
+                            assert!(
+                                (split - exact).length() < 1e-7,
+                                "x = {x}, y = {y}: {split:?} against {exact:?}"
+                            );
+                        }
+                    } else {
+                        assert_eq!(position, expected, "x = {x}, y = {y}");
+                    }
                     outside += usize::from(position.is_none());
                 }
             }

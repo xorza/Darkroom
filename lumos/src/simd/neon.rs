@@ -80,17 +80,6 @@ impl Isa for Neon {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> NeonF32 {
-        unsafe {
-            let samples = vld1q_u16(lanes.as_ptr());
-            NeonF32 {
-                low: vcvtq_f32_u32(vmovl_u16(vget_low_u16(samples))),
-                high: vcvtq_f32_u32(vmovl_high_u16(samples)),
-            }
-        }
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: NeonF32) -> NeonF32 {
         let last = lookup_last(table);
         self.load_f32(
@@ -378,6 +367,22 @@ impl F64x4 for NeonF64 {
             let biased = vaddq_s64(vcvtq_s64_f64(n), vdupq_n_s64(1023));
             vreinterpretq_f64_s64(vshlq_n_s64::<52>(biased))
         })
+    }
+
+    #[inline(always)]
+    fn frexp(self) -> Frexp<Self> {
+        let mantissa = self.map(|x| unsafe {
+            let bits = vreinterpretq_u64_f64(x);
+            vreinterpretq_f64_u64(vorrq_u64(
+                vandq_u64(bits, vdupq_n_u64(0x800f_ffff_ffff_ffff)),
+                vdupq_n_u64(0x3fe0_0000_0000_0000),
+            ))
+        });
+        let exponent = self.map(|x| unsafe {
+            let field = vcvtq_f64_u64(vshrq_n_u64::<52>(vreinterpretq_u64_f64(x)));
+            vsubq_f64(field, vdupq_n_f64(1022.0))
+        });
+        Frexp { mantissa, exponent }
     }
 
     #[inline(always)]

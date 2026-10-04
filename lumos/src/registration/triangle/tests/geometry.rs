@@ -17,7 +17,7 @@ fn triangle_ratios_roles_and_orientation() {
         (moved, (0.6, 0.8), Orientation::Clockwise),
         (mirrored, (0.6, 0.8), Orientation::CounterClockwise),
     ] {
-        let tri = Triangle::from_positions([10, 20, 30], positions).unwrap();
+        let tri = Triangle::from_positions([10, 20, 30], positions, NOISE_SCALE).unwrap();
         assert_eq!(tri.ratios, ratios, "{positions:?}");
         assert_eq!(tri.indices, [30, 20, 10], "{positions:?}");
         assert_eq!(tri.orientation, orientation, "{positions:?}");
@@ -31,53 +31,62 @@ fn triangle_ratios_roles_and_orientation() {
             // Height `10·√3/2 = √75`.
             DVec2::new(5.0, 75.0f64.sqrt()),
         ],
+        NOISE_SCALE,
     )
     .unwrap();
     assert!((equilateral.ratios.0 - 1.0).abs() <= 4.0 * f64::EPSILON);
     assert!((equilateral.ratios.1 - 1.0).abs() <= 4.0 * f64::EPSILON);
 }
 
-/// Degenerate and unstable shapes are refused. The side-ratio limit is `longest/shortest > 10`:
-/// sides 1, √85 and exactly 10 — the shortest side `(0, 1)`, the longest `(6, 8)` — sit on it and
-/// are kept, while moving the far vertex a ten-millionth further out refuses them.
+/// A triangle must stand at least the noise scale high over its longest side, or the noise can
+/// turn it over. At a scale of 1 px over the side from (0, 0) to (100, 0), a far vertex at height
+/// 1 sits on the limit and is kept, and one at 0.99 is refused, though its side ratio is 2. A long
+/// thin triangle with a short side keeps its ratios, so it is kept while it stands high enough:
+/// (0, 0), (0, 1), (6, 8), sides 1, √85 and 10, is 0.6 high, refused at 1 px and kept at 0.5.
+/// Coincident and collinear points stand at no height.
 #[test]
-fn degenerate_and_elongated_triangles_are_refused() {
+fn triangles_too_flat_for_the_noise_are_refused() {
     let p = DVec2::new;
-    for (positions, kept, why) in [
-        ([p(0.0, 0.0), p(1.0, 1.0), p(2.0, 2.0)], false, "collinear"),
+    for (positions, noise, kept, why) in [
+        (
+            [p(0.0, 0.0), p(1.0, 1.0), p(2.0, 2.0)],
+            1.0,
+            false,
+            "collinear",
+        ),
         (
             [p(0.0, 0.0), p(0.0, 0.0), p(1.0, 1.0)],
+            1.0,
             false,
             "a repeated point",
         ),
         (
-            [p(0.0, 0.0), p(100.0, 0.0), p(50.0, 1e-10)],
-            false,
-            "area² 2.5e-17, under 1e-6",
-        ),
-        (
             [p(0.0, 0.0), p(100.0, 0.0), p(50.0, 1.0)],
+            1.0,
             true,
-            "thin but sound: area² 2500, side ratio 2",
+            "height exactly the noise",
         ),
         (
-            [p(0.0, 0.0), p(100.0, 0.0), p(100.0, 1.0)],
+            [p(0.0, 0.0), p(100.0, 0.0), p(50.0, 0.99)],
+            1.0,
             false,
-            "side ratio 100",
+            "height just under the noise",
         ),
         (
             [p(0.0, 0.0), p(0.0, 1.0), p(6.0, 8.0)],
-            true,
-            "side ratio exactly 10",
+            1.0,
+            false,
+            "0.6 high at a noise of 1",
         ),
         (
-            [p(0.0, 0.0), p(0.0, 1.0), p(6.000_000_6, 8.000_000_8)],
-            false,
-            "side ratio 10.000 001",
+            [p(0.0, 0.0), p(0.0, 1.0), p(6.0, 8.0)],
+            0.5,
+            true,
+            "0.6 high at a noise of 0.5",
         ),
     ] {
         assert_eq!(
-            Triangle::from_positions([0, 1, 2], positions).is_some(),
+            Triangle::from_positions([0, 1, 2], positions, noise).is_some(),
             kept,
             "{why}"
         );
@@ -118,11 +127,12 @@ fn vertex_ordering_is_the_same_for_every_input_order() {
         DVec2::new(2.0, 7.0),
     ];
     let indices = [100, 200, 300];
-    let reference = Triangle::from_positions(indices, points).unwrap();
+    let reference = Triangle::from_positions(indices, points, NOISE_SCALE).unwrap();
     for (a, b, c) in [(0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)] {
         let tri = Triangle::from_positions(
             [indices[a], indices[b], indices[c]],
             [points[a], points[b], points[c]],
+            NOISE_SCALE,
         )
         .unwrap();
         assert_eq!(tri.indices, reference.indices, "({a}, {b}, {c})");
@@ -144,13 +154,16 @@ fn the_invariant_tree_indexes_triangles_by_their_ratios() {
     }
 }
 
-/// The fixture the matching tests rely on: all ten of `IRREGULAR`'s triangles are valid, and no two
-/// are within 0.05 of each other on both ratios — the closest pair is 0.056 apart.
+/// The fixture the matching tests rely on: all ten of `IRREGULAR`'s triangles are valid, no two are
+/// within 0.05 of each other on both ratios — the closest pair is 0.098 apart — and none has two
+/// sides within 0.02 of each other.
 #[test]
 fn irregular_triangles_are_pairwise_dissimilar() {
     let triangles = triangles_of(&IRREGULAR, 4);
     assert_eq!(triangles.len(), 10);
     for (i, a) in triangles.iter().enumerate() {
+        let (r0, r1) = a.ratios;
+        assert!(r1 - r0 >= 0.02 && 1.0 - r1 >= 0.02, "{:?}", a.ratios);
         for b in &triangles[i + 1..] {
             assert!(
                 !a.is_similar(b, 0.05),

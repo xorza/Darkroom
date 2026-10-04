@@ -5,6 +5,10 @@
 //! definition of those profiles; [`PsfModel`](crate::internals::synthetic::camera::PsfModel)
 //! layers flux normalization on top of it rather than re-deriving the math.
 //!
+//! A pixel records the profile's mean over its area, as a sensor whose pixels collect all the light
+//! that falls on them does: [`StarPixels`]. [`SyntheticStar::value_at`] is the profile at one
+//! point, for the shape alone.
+//!
 //! Two rendering modes, and the difference is load-bearing:
 //!
 //! - [`SyntheticStar::add_to`] visits only the pixels within [`StarProfile::radius`]. Populated
@@ -18,7 +22,13 @@
 use glam::Vec2;
 use imaginarium::Buffer2;
 
+use crate::math::pixel_gaussian::PixelGaussian;
+use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::math::size2us::Size2us;
+
+/// How closely a pixel mean without a closed form is integrated, relative to the peak: far under
+/// the f32 rounding of a sample, and under any tolerance a test asserts.
+const PIXEL_MEAN_TOLERANCE: f64 = 1e-12;
 
 /// The analytic shape of a star profile, parameterized by peak amplitude.
 #[derive(Debug, Clone, Copy)]
@@ -49,15 +59,19 @@ pub(crate) enum StarProfile {
 
 impl StarProfile {
     /// Profile value at `(dx, dy)` pixels from the centre, as a fraction of the peak.
-    pub(crate) fn shape_at(self, dx: f32, dy: f32) -> f32 {
+    pub(crate) fn shape_at(self, dx: f64, dy: f64) -> f64 {
         match self {
-            StarProfile::Gaussian { sigma } => (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp(),
+            StarProfile::Gaussian { sigma } => {
+                let sigma = f64::from(sigma);
+                (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp()
+            }
             StarProfile::Elliptical {
                 sigma_x,
                 sigma_y,
                 angle,
             } => {
-                let (sin_a, cos_a) = angle.sin_cos();
+                let (sigma_x, sigma_y) = (f64::from(sigma_x), f64::from(sigma_y));
+                let (sin_a, cos_a) = f64::from(angle).sin_cos();
                 let x_rot = dx * cos_a + dy * sin_a;
                 let y_rot = -dx * sin_a + dy * cos_a;
                 let exponent = x_rot * x_rot / (2.0 * sigma_x * sigma_x)
@@ -65,9 +79,46 @@ impl StarProfile {
                 (-exponent).exp()
             }
             StarProfile::Moffat { alpha, beta } => {
-                (1.0 + (dx * dx + dy * dy) / (alpha * alpha)).powf(-beta)
+                let alpha = f64::from(alpha);
+                (1.0 + (dx * dx + dy * dy) / (alpha * alpha)).powf(-f64::from(beta))
             }
         }
+    }
+
+    /// The quadrature its pixel means take, by [`PixelQuadrature::sufficient_order`] at
+    /// [`PIXEL_MEAN_TOLERANCE`]; `None` for an axis-aligned Gaussian, whose means separate into
+    /// two closed forms.
+    fn pixel_rule(self) -> Option<PixelQuadrature> {
+        let analytic = match self {
+            StarProfile::Gaussian { .. } | StarProfile::Elliptical { angle: 0.0, .. } => {
+                return None;
+            }
+            StarProfile::Elliptical {
+                sigma_x,
+                sigma_y,
+                angle,
+            } => {
+                // The inverse covariance's diagonal: the curvature along each pixel axis at a fixed
+                // offset along the other.
+                let (sin_a, cos_a) = f64::from(angle).sin_cos();
+                let (wide, narrow) = (
+                    1.0 / f64::from(sigma_x).powi(2),
+                    1.0 / f64::from(sigma_y).powi(2),
+                );
+                let a = cos_a * cos_a * wide + sin_a * sin_a * narrow;
+                let c = sin_a * sin_a * wide + cos_a * cos_a * narrow;
+                AnalyticProfile::Gaussian {
+                    sigma: 1.0 / a.max(c).sqrt(),
+                }
+            }
+            StarProfile::Moffat { alpha, beta } => AnalyticProfile::Moffat {
+                alpha: f64::from(alpha),
+                beta: f64::from(beta),
+            },
+        };
+        let order = PixelQuadrature::sufficient_order(analytic, PIXEL_MEAN_TOLERANCE)
+            .expect("a fixture's profile is wide enough for a 16-point rule");
+        Some(PixelQuadrature::gauss_legendre(order))
     }
 
     /// Radius, in pixels, past which the profile contributes negligibly.
@@ -91,7 +142,8 @@ impl StarProfile {
 pub(crate) struct SyntheticStar {
     /// Centre, in pixel coordinates. Sub-pixel positions are meaningful.
     pub(crate) center: Vec2,
-    /// Peak value above the background.
+    /// The profile's peak above the background, at its centre point; a pixel holds the profile's
+    /// mean over its area, which is lower.
     pub(crate) amplitude: f32,
     pub(crate) profile: StarProfile,
 }
@@ -110,9 +162,18 @@ impl SyntheticStar {
         self.profile.radius()
     }
 
-    /// Value this star contributes at absolute pixel `(x, y)`.
+    /// The profile at the point `(x, y)`.
     pub(crate) fn value_at(self, x: f32, y: f32) -> f32 {
-        self.amplitude * self.profile.shape_at(x - self.center.x, y - self.center.y)
+        let (dx, dy) = (x - self.center.x, y - self.center.y);
+        (f64::from(self.amplitude) * self.profile.shape_at(f64::from(dx), f64::from(dy))) as f32
+    }
+
+    /// This star as its pixels record it.
+    pub(crate) fn pixels(self) -> StarPixels {
+        StarPixels {
+            star: self,
+            rule: self.profile.pixel_rule(),
+        }
     }
 
     /// Add into `pixels`, visiting only the pixels within [`Self::radius`].
@@ -131,11 +192,11 @@ impl SyntheticStar {
         let y_min = (cy - radius).max(0) as usize;
         let y_max = ((cy + radius).max(0) as usize).min(height - 1);
 
+        let star = self.pixels();
         for py in y_min..=y_max {
             let row = &mut pixels.row_mut(py)[x_min..=x_max];
             for (offset, sample) in row.iter_mut().enumerate() {
-                let px = x_min + offset;
-                *sample += self.value_at(px as f32, py as f32);
+                *sample += star.value(x_min + offset, py);
             }
         }
     }
@@ -143,9 +204,10 @@ impl SyntheticStar {
     /// Add into `pixels`, visiting every pixel — no truncation edge.
     pub(crate) fn add_exact(self, pixels: &mut Buffer2<f32>) {
         let height = pixels.height();
+        let star = self.pixels();
         for py in 0..height {
             for (px, sample) in pixels.row_mut(py).iter_mut().enumerate() {
-                *sample += self.value_at(px as f32, py as f32);
+                *sample += star.value(px, py);
             }
         }
     }
@@ -155,6 +217,46 @@ impl SyntheticStar {
         let mut pixels = Buffer2::new_filled(size.width, size.height, background);
         self.add_exact(&mut pixels);
         pixels
+    }
+}
+
+/// A star with the quadrature its pixel means take, chosen once for all of its pixels.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StarPixels {
+    star: SyntheticStar,
+    rule: Option<PixelQuadrature>,
+}
+
+impl StarPixels {
+    /// What the star adds to the pixel `(x, y)`: the amplitude times the profile's mean over it.
+    pub(crate) fn value(&self, x: usize, y: usize) -> f32 {
+        let dx = x as f64 - f64::from(self.star.center.x);
+        let dy = y as f64 - f64::from(self.star.center.y);
+        let mean = match (self.rule, self.star.profile) {
+            (Some(rule), profile) => rule.integrate(dx, dy, |x, y| profile.shape_at(x, y)),
+            (None, StarProfile::Gaussian { sigma }) => {
+                let gaussian = PixelGaussian {
+                    sigma: f64::from(sigma),
+                };
+                gaussian.mean_at(dx) * gaussian.mean_at(dy)
+            }
+            (
+                None,
+                StarProfile::Elliptical {
+                    sigma_x, sigma_y, ..
+                },
+            ) => {
+                let along = |sigma: f32, d: f64| {
+                    PixelGaussian {
+                        sigma: f64::from(sigma),
+                    }
+                    .mean_at(d)
+                };
+                along(sigma_x, dx) * along(sigma_y, dy)
+            }
+            (None, StarProfile::Moffat { .. }) => unreachable!("a Moffat's means take a rule"),
+        };
+        (f64::from(self.star.amplitude) * mean) as f32
     }
 }
 
@@ -212,8 +314,9 @@ mod tests {
     fn stamp_lays_the_star_over_a_flat_background() {
         let stamp =
             SyntheticStar::new(Vec2::splat(10.0), 0.5, GAUSSIAN_2).stamp(Size2us::new(21, 21), 0.1);
-        // Peak sits exactly amplitude above the background.
-        assert!((stamp[(10, 10)] - 0.6).abs() < 1e-6);
+        // The peak pixel holds the profile's mean over it, at σ 2 m(0) = 4·√(π/2)·erf(1/(4√2)) =
+        // 0.989680 per axis: 0.1 + 0.5·m(0)² = 0.589734, to the f32 rounding of the sum.
+        assert!((stamp[(10, 10)] - 0.589_733_5).abs() <= 1e-7);
         // A far corner is background plus a negligible wing.
         assert!(stamp[(0, 0)] >= 0.1 && stamp[(0, 0)] < 0.1 + 1e-4);
     }
@@ -242,6 +345,36 @@ mod tests {
         assert!(turned.value_at(32.0, 38.0) > turned.value_at(38.0, 32.0));
         // The rotation is rigid: the peak and the profile's extent are unchanged.
         assert!((turned.value_at(32.0, 38.0) - star.value_at(38.0, 32.0)).abs() < 1e-6);
+    }
+
+    /// A round Gaussian turned by any angle takes the quadrature, and the same Gaussian unturned
+    /// the closed form: their pixel means agree to 1e-12 of the peak, so their f32 values agree
+    /// within one rounding of each, at σ 0.6 and 2.
+    #[test]
+    fn the_quadrature_and_the_closed_form_agree() {
+        for sigma in [0.6f32, 2.0] {
+            let centre = Vec2::new(8.3, 7.6);
+            let closed = SyntheticStar::new(centre, 1.0, StarProfile::Gaussian { sigma }).pixels();
+            let turned = SyntheticStar::new(
+                centre,
+                1.0,
+                StarProfile::Elliptical {
+                    sigma_x: sigma,
+                    sigma_y: sigma,
+                    angle: 1.0,
+                },
+            )
+            .pixels();
+            for y in 0..16 {
+                for x in 0..16 {
+                    let (a, b) = (closed.value(x, y), turned.value(x, y));
+                    assert!(
+                        (a - b).abs() <= f32::EPSILON * a.max(b) + 1e-12,
+                        "σ {sigma} at ({x}, {y}): {a} vs {b}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

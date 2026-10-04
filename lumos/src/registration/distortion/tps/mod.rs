@@ -26,20 +26,15 @@ use crate::registration::distortion::SINGULAR_THRESHOLD;
 use crate::registration::point_normalization::PointNormalization;
 
 /// Configuration for thin-plate spline fitting.
+///
+/// No default: the right λ depends on how noisy the control points are. At 0 the spline passes
+/// through every one exactly, so it reproduces each centroid's error as distortion; measured star
+/// positions want λ > 0.
 #[derive(Debug, Clone, Copy)]
 struct TpsConfig {
-    /// Regularization parameter (lambda). Higher values produce smoother
-    /// interpolation but may not pass exactly through control points.
-    /// Default: 0.0 (exact interpolation)
+    /// Regularization parameter (λ). Higher values produce smoother interpolation that passes
+    /// less close to the control points.
     regularization: f64,
-}
-
-impl Default for TpsConfig {
-    fn default() -> Self {
-        Self {
-            regularization: 0.0,
-        }
-    }
 }
 
 /// Thin-plate spline for 2D coordinate transformation.
@@ -173,24 +168,21 @@ impl ThinPlateSpline {
     /// # Returns
     /// Transformed coordinates
     fn transform(&self, p: DVec2) -> DVec2 {
-        // Normalize input to the same space used during fitting
-        let pn = self.norm.normalize(p);
+        self.transform_normalized(self.norm.normalize(p))
+    }
 
-        // Affine component using dot product for linear terms
+    /// The spline at `pn`, a point already in the normalized coordinates the fit is held in, in
+    /// pixels.
+    fn transform_normalized(&self, pn: DVec2) -> DVec2 {
         let affine_coeffs_x = DVec2::new(self.affine_x[1], self.affine_x[2]);
         let affine_coeffs_y = DVec2::new(self.affine_y[1], self.affine_y[2]);
         let mut tx = self.affine_x[0] + affine_coeffs_x.dot(pn);
         let mut ty = self.affine_y[0] + affine_coeffs_y.dot(pn);
-
-        // Radial basis function component
         for (i, &cp) in self.control_points.iter().enumerate() {
-            let r = pn.distance(cp);
-            let u = tps_kernel(r);
+            let u = tps_kernel(pn.distance(cp));
             tx += self.weights_x[i] * u;
             ty += self.weights_y[i] * u;
         }
-
-        // Denormalize output back to pixel coordinates
         self.norm.denormalize(DVec2::new(tx, ty))
     }
 
@@ -243,24 +235,12 @@ impl ThinPlateSpline {
     /// and the original target points. With zero regularization,
     /// these should be very close to zero.
     fn compute_residuals(&self, target_points: &[DVec2]) -> Vec<f64> {
+        // The control points are held normalized, so they are evaluated as they are, without a
+        // round trip through pixels.
         self.control_points
             .iter()
             .zip(target_points.iter())
-            .map(|(&pn, &tgt)| {
-                // Evaluate TPS directly in normalized space (control points
-                // are already normalized, skip denormalize→renormalize roundtrip)
-                let affine_x = DVec2::new(self.affine_x[1], self.affine_x[2]);
-                let affine_y = DVec2::new(self.affine_y[1], self.affine_y[2]);
-                let mut tx = self.affine_x[0] + affine_x.dot(pn);
-                let mut ty = self.affine_y[0] + affine_y.dot(pn);
-                for (i, &cp) in self.control_points.iter().enumerate() {
-                    let u = tps_kernel(pn.distance(cp));
-                    tx += self.weights_x[i] * u;
-                    ty += self.weights_y[i] * u;
-                }
-                let result = self.norm.denormalize(DVec2::new(tx, ty));
-                result.distance(tgt)
-            })
+            .map(|(&pn, &tgt)| self.transform_normalized(pn).distance(tgt))
             .collect()
     }
 }
@@ -361,14 +341,15 @@ impl DistortionMap {
             .then(|| self.vectors[self.grid.index_of(point)])
     }
 
-    /// Interpolate the distortion at an arbitrary position.
+    /// Interpolate the distortion at an arbitrary position: bilinear inside the grid, and the
+    /// nearest edge's value past it, never a zero the map did not measure.
     #[expect(
         clippy::cast_sign_loss,
-        reason = "a point before the grid saturates to its first cell, which then extrapolates"
+        reason = "the grid coordinate is clamped to the grid, so it is non-negative"
     )]
     fn interpolate(&self, p: DVec2) -> DVec2 {
-        let gx = p.x / self.spacing;
-        let gy = p.y / self.spacing;
+        let gx = (p.x / self.spacing).clamp(0.0, (self.grid.width - 1) as f64);
+        let gy = (p.y / self.spacing).clamp(0.0, (self.grid.height - 1) as f64);
 
         let gx0 = gx.floor() as usize;
         let gy0 = gy.floor() as usize;
@@ -378,10 +359,8 @@ impl DistortionMap {
         let fx = gx - gx0 as f64;
         let fy = gy - gy0 as f64;
 
-        let v00 = self.get(Vec2us::new(gx0, gy0)).unwrap_or(DVec2::ZERO);
-        let v10 = self.get(Vec2us::new(gx1, gy0)).unwrap_or(DVec2::ZERO);
-        let v01 = self.get(Vec2us::new(gx0, gy1)).unwrap_or(DVec2::ZERO);
-        let v11 = self.get(Vec2us::new(gx1, gy1)).unwrap_or(DVec2::ZERO);
+        let at = |x, y| self.vectors[self.grid.index_of(Vec2us::new(x, y))];
+        let (v00, v10, v01, v11) = (at(gx0, gy0), at(gx1, gy0), at(gx0, gy1), at(gx1, gy1));
 
         // Bilinear interpolation
         (1.0 - fx) * (1.0 - fy) * v00

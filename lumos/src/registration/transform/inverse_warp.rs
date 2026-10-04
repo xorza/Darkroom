@@ -48,39 +48,44 @@ impl InverseWarp {
 
     /// The reference point `t` came from, and the Jacobian of the inverse there; `None` when the
     /// correction cannot be inverted at `t` — the Newton iteration met a singular Jacobian, left
-    /// the finite numbers, or did not converge in [`NEWTON_MAX_ITERATIONS`] steps. A position that
+    /// the finite numbers, or did not converge within its iteration cap. A position that
     /// did not converge is never returned.
     pub fn apply(&self, t: DVec2) -> Option<InverseMapped> {
-        let u = self.to_reference.apply(t);
         let linear = self.to_reference.jacobian(t);
+        let position = self.position(t)?;
+        let jacobian = match &self.sip {
+            // `r ↦ r + c(r)` has Jacobian `I + ∂c`, so its inverse at `u` has the inverse of that,
+            // and the chain rule puts `T⁻¹`'s own Jacobian after it.
+            Some(sip) => sip.jacobian(position).inverse() * linear,
+            None => linear,
+        };
+        Some(InverseMapped { position, jacobian })
+    }
+
+    /// [`Self::apply`]'s position alone, without the Jacobian a caller that only places points
+    /// would discard.
+    pub fn position(&self, t: DVec2) -> Option<DVec2> {
+        let u = self.to_reference.apply(t);
         let Some(sip) = &self.sip else {
-            return Some(InverseMapped {
-                position: u,
-                jacobian: linear,
-            });
+            return Some(u);
         };
         if !u.is_finite() {
             return None;
         }
         let mut r = u;
         for _ in 0..NEWTON_MAX_ITERATIONS {
-            let correction = sip.jacobian(r);
-            let determinant = correction.determinant();
+            let local = sip.local(r);
+            let determinant = local.jacobian.determinant();
             if determinant == 0.0 || !determinant.is_finite() {
                 return None;
             }
-            let step = correction.inverse() * (sip.correct(r) - u);
+            let step = local.jacobian.inverse() * (local.corrected - u);
             r -= step;
             if !r.is_finite() {
                 return None;
             }
             if step.length() < NEWTON_TOLERANCE_PX {
-                // `r ↦ r + c(r)` has Jacobian `I + ∂c`, so its inverse at `u` has the inverse of
-                // that, and the chain rule puts `T⁻¹`'s own Jacobian after it.
-                return Some(InverseMapped {
-                    position: r,
-                    jacobian: sip.jacobian(r).inverse() * linear,
-                });
+                return Some(r);
             }
         }
         None
@@ -110,17 +115,20 @@ mod tests {
         let config = SipConfig {
             order: 3,
             reference_point: Some(DVec2::ZERO),
-            clip_iterations: 0,
-            ..SipConfig::default()
         };
-        let sip = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config)
-            .unwrap()
-            .polynomial;
+        let sip = SipPolynomial::fitted_under(
+            &transform,
+            &reference,
+            &target,
+            config.order,
+            config.reference_point.unwrap(),
+        );
         WarpTransform::with_sip(transform, sip)
     }
 
-    /// Back through the inverse lands where the forward warp started, to the Newton tolerance; the
-    /// inverse's Jacobian is the inverse of the forward one; and without SIP it is `T⁻¹` exactly.
+    /// Back through the inverse lands where the forward warp started, to the Newton tolerance, and
+    /// the position alone is the same bits; the inverse's Jacobian is the inverse of the forward
+    /// one; and without SIP it is `T⁻¹` exactly.
     #[test]
     fn the_inverse_undoes_the_forward_warp() {
         let transform = Transform::similarity(DVec2::new(12.0, -7.0), 0.3, 1.05);
@@ -133,6 +141,7 @@ mod tests {
         ] {
             let t = warp.apply(r);
             let mapped = inverse.apply(t).unwrap();
+            assert_eq!(inverse.position(t), Some(mapped.position));
             assert!(
                 (mapped.position - r).length() < NEWTON_TOLERANCE_PX,
                 "{r:?} came back as {:?}",

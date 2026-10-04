@@ -14,8 +14,9 @@ use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::combine::config::StackConfig;
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::cache_key::DECODE_PINS;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
@@ -23,9 +24,10 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::progress::ProgressCallback;
-use crate::registration::config::Config as RegistrationConfig;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::register;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::{WarpResult, warp};
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::star_detection::config::Config as StarDetectionConfig;
@@ -189,12 +191,60 @@ fn calibrate_snapshot() {
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "21e8e831ef2cee0a");
+    assert_snapshot("calibration", &snapshot, "1ba31cc65bd2b343");
 
-    let demosaiced = light.demosaic(&CancelToken::never()).unwrap();
     let mut snapshot = Snapshot::default();
+    let xtrans = make_cfa(
+        size,
+        light.data.pixels().to_vec(),
+        CfaType::XTrans(XTRANS_PATTERN),
+    );
+    let demosaiced = light
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
     image_snapshot(&mut snapshot, &demosaiced);
-    assert_snapshot("demosaic", &snapshot, "0032183d7bf25121");
+    for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
+        let demosaiced = xtrans
+            .clone()
+            .demosaic(passes, &CancelToken::never())
+            .unwrap();
+        image_snapshot(&mut snapshot, &demosaiced);
+    }
+    assert_decode("demosaic", &snapshot, DECODE_PINS.demosaic);
+}
+
+/// The statistics a kept frame is committed with: the star field as a mono frame, as an RGGB
+/// mosaic, and as that mosaic demosaiced, whose noise is the mosaic's.
+#[test]
+fn frame_stats_snapshot() {
+    if !pinned_host() {
+        return;
+    }
+    let mono = field();
+    let mosaic = make_cfa(
+        Size2us::new(192, 192),
+        mono.channel(0).pixels().to_vec(),
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
+    let demosaiced = mosaic
+        .clone()
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    let mut snapshot = Snapshot::default();
+    for stats in [
+        FrameStats::measure(&mono),
+        FrameStats::measure(&mosaic),
+        FrameStats::measure(&demosaiced),
+    ] {
+        for channel in &stats.channels {
+            snapshot.f32s(&[channel.median, channel.mad]);
+        }
+        snapshot
+            .f32s(&stats.noise)
+            .f32s(&stats.sky)
+            .f32s(&[stats.quantization_sigma.unwrap_or(-1.0)]);
+    }
+    assert_decode("frame statistics", &snapshot, DECODE_PINS.frame_stats);
 }
 
 #[test]
@@ -215,7 +265,7 @@ fn detect_snapshot() {
             star.sharpness,
         ]);
     }
-    assert_snapshot("detection", &snapshot, "870701c96ed94f2e");
+    assert_snapshot("detection", &snapshot, "536e3d7473800503");
 }
 
 #[test]
@@ -226,14 +276,14 @@ fn register_snapshot() {
     let reference = field();
     let target = warped(&reference, dither()).image;
     let mut config = RegistrationConfig::default();
-    config.ransac.seed = Some(0x5EED);
+    config.ransac.seed = 0x5EED;
     let result = register(&detect(&reference), &detect(&target), &config).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "9b8bbf82f2547bef");
+    assert_snapshot("registration", &snapshot, "fa1468ef422397db");
 }
 
 #[test]
@@ -247,7 +297,7 @@ fn warp_snapshot() {
     snapshot
         .f32s(result.coverage.pixels())
         .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "c3a3ffd7c4f79056");
+    assert_snapshot("warp", &snapshot, "06b3630ad64c9632");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
@@ -273,7 +323,7 @@ fn combine_snapshot() {
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "e61d750aa51cc4d0");
+    assert_snapshot("combine", &snapshot, "77f0f067912e9a7f");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.
@@ -296,6 +346,7 @@ fn stretch_snapshot() {
         Stretch::auto_stf(),
         Stretch {
             method: StretchMethod::Ghs {
+                black_point: 0.0,
                 d: 5.0,
                 b: 0.0,
                 sp: 0.1,
@@ -309,7 +360,7 @@ fn stretch_snapshot() {
         stretch.apply(&mut image).unwrap();
         image_snapshot(&mut snapshot, &image);
     }
-    assert_snapshot("stretch", &snapshot, "1e8cd0a9f753d0ab");
+    assert_snapshot("stretch", &snapshot, "262d78318d67a2d8");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane.

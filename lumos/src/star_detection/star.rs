@@ -10,11 +10,18 @@ use crate::star_detection::roundness::Roundness;
 pub struct Star {
     /// Position (sub-pixel accurate).
     pub pos: DVec2,
+    /// The position's standard error, `√((σ_x² + σ_y²)/2)` in pixels: from the profile fit's
+    /// covariance `(JᵀWJ)⁻¹·χ²/(n − p)`, or from the windowed centroid's propagated pixel noise when
+    /// no fit ran or it failed.
+    pub position_sigma: f64,
     /// Total flux (sum of background-subtracted pixel values).
     pub flux: f32,
-    /// Full Width at Half Maximum in pixels.
+    /// The PSF's full width at half maximum, in pixels, before the pixel integrated it: the width
+    /// the profile fits model, and the moments read once the pixel's own variance is removed. 0
+    /// for a source the moments place inside one pixel.
     pub fwhm: f32,
-    /// Eccentricity (0 = circular, 1 = elongated). Used to reject non-stellar objects.
+    /// Eccentricity (0 = circular, 1 = elongated), of the same PSF. Used to reject non-stellar
+    /// objects; 0 for a source the moments place inside one pixel.
     pub eccentricity: f32,
     /// Signal-to-noise ratio.
     pub snr: f32,
@@ -22,25 +29,25 @@ pub struct Star {
     pub peak: f32,
     /// Whether the peak pixel reached the saturation level: its centroid and flux are unreliable.
     pub saturated: bool,
-    /// Sharpness metric (peak / `flux_in_core`). Cosmic rays have high sharpness (>0.8),
-    /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
+    /// Sharpness: the star's own peak, at its centre pixel, over the 3 × 3 core's flux about it.
+    /// A cosmic ray, a single pixel, reads near 1; a star spreads its light, 0.14 for a centred
+    /// Gaussian of FWHM 4.
     pub sharpness: f32,
     /// The DAOFIND roundness metrics.
     pub roundness: Roundness,
 }
 
 impl Star {
-    /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
-    ///
-    /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
-    pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
+    /// Check if star is likely a cosmic ray: sharper than `max_sharpness`, the filter's 0.7 by
+    /// default.
+    pub const fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
         self.sharpness > max_sharpness
     }
 
     /// Check if star passes roundness filters.
     ///
     /// Both roundness metrics should be close to zero for circular sources.
-    pub fn is_round(&self, max_roundness: f32) -> bool {
+    pub const fn is_round(&self, max_roundness: f32) -> bool {
         self.roundness.ground.abs() <= max_roundness && self.roundness.sround.abs() <= max_roundness
     }
 }
@@ -62,6 +69,7 @@ pub(crate) mod internals {
         pub(crate) fn at(pos: DVec2) -> Self {
             Self {
                 pos,
+                position_sigma: 0.01,
                 flux: 100.0,
                 fwhm: 3.0,
                 eccentricity: 0.1,

@@ -3,9 +3,10 @@
 //! This module provides a single `StackConfig` type that encapsulates all stacking
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
-use crate::combine::cache_config::CacheConfig;
 use crate::combine::error::StackConfigError;
 use crate::combine::rejection::Rejection;
+use crate::error::InvalidConfigField;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Method for combining pixel values across frames.
@@ -20,7 +21,7 @@ pub enum CombineMethod {
 }
 
 /// Default frames below which sigma-clip and linear-fit rejection are too unreliable to trust and
-/// the combine falls back to the median. GESD has its own stricter floor; Winsorized/Percentile are
+/// the combine falls back to the median. GESD has its own stricter floor; Winsorized and Trim are
 /// stable at smaller N.
 const MIN_FRAMES_FOR_REJECTION: usize = 5;
 const MIN_FRAMES_FOR_GESD: usize = 15;
@@ -39,8 +40,8 @@ pub struct SmallN {
 }
 
 impl SmallN {
-    /// No fallback — the method is reliable at any frame count (Winsorized, Percentile, Median,
-    /// plain mean).
+    /// No fallback — the method is reliable at any frame count (Winsorized, Trim, Median, plain
+    /// mean).
     pub const fn none() -> Self {
         Self {
             min_frames: 0,
@@ -82,9 +83,10 @@ pub enum Weighting {
     /// Equal weights for all frames (default).
     #[default]
     Equal,
-    /// Automatic weighting by inverse background noise variance: w = 1/sigma^2.
-    /// Frames with lower noise get higher weight. Uses per-frame MAD statistics
-    /// that are already computed during normalization.
+    /// Each frame's inverse noise variance per channel, `w = 1/(gain·σ)²`: σ is the white noise
+    /// measured on the frame (by the multiresolution estimator, or per colour on a mosaic) and
+    /// `gain` its normalization. Not normalized, so the weight plane is an inverse variance. A
+    /// frame with no measured noise is an error.
     Noise,
     /// Explicit per-frame weights provided by the user.
     Manual(Vec<f32>),
@@ -117,7 +119,7 @@ pub enum Normalization {
 /// // Simple sigma-clipped stacking (default)
 /// let result = stack(
 ///     &paths,
-///     StackConfig::default(),
+///     &StackConfig::default(),
 ///     ProgressCallback::default(),
 ///     CancelToken::never(),
 /// )?;
@@ -133,7 +135,7 @@ pub enum Normalization {
 /// };
 /// let result = stack(
 ///     &paths,
-///     config,
+///     &config,
 ///     ProgressCallback::default(),
 ///     CancelToken::never(),
 /// )?;
@@ -151,12 +153,20 @@ pub struct StackConfig {
     /// Combine method used when there are too few frames for `method`'s rejection (see [`SmallN`]).
     pub small_n: SmallN,
     /// Cache/memory behavior.
-    pub cache: CacheConfig,
-    /// Which ancillary per-pixel planes the combine should produce. Defaults to all of them —
-    /// they are what makes the stacked master measurable — but each is a full image-sized
-    /// allocation, so a caller that discards them should say so.
+    pub ingest: IngestConfig,
+    /// Which ancillary per-pixel planes the combine should produce. Defaults to coverage, weight
+    /// and variance — they are what makes the stacked master measurable — but each is a full
+    /// image-sized allocation, so a caller that discards them should say so.
     pub quality: QualityPlanes,
+    /// The fewest samples a pixel keeps when the combine leaves samples out: flagged ones today
+    /// (saturated, repaired, cosmic ray, defect, flat floor). A flagged sample is left out only
+    /// while this many unflagged samples remain at its pixel; otherwise every sample stays.
+    /// PixInsight keeps 3, Siril 4. At least 1.
+    pub min_survivors: usize,
 }
+
+/// [`StackConfig::min_survivors`] by default, as PixInsight's `ImageIntegration`.
+pub(crate) const DEFAULT_MIN_SURVIVORS: usize = 3;
 
 impl Default for StackConfig {
     fn default() -> Self {
@@ -166,8 +176,9 @@ impl Default for StackConfig {
             normalization: Normalization::None,
             // Default method is σ-clip, so the default fallback is the library σ-floor.
             small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
-            cache: CacheConfig::default(),
-            quality: QualityPlanes::ALL,
+            ingest: IngestConfig::default(),
+            quality: QualityPlanes::STANDARD,
+            min_survivors: DEFAULT_MIN_SURVIVORS,
         }
     }
 }
@@ -241,11 +252,11 @@ impl StackConfig {
         }
     }
 
-    /// Preset: percentile clipping (simple, for small stacks <10).
-    pub fn percentile(percent: f32) -> Self {
+    /// Preset: a trimmed mean, dropping `percent` of the samples from each end.
+    pub fn trim(percent: f32) -> Self {
         Self {
-            method: CombineMethod::Mean(Rejection::percentile(percent)),
-            // Percentile clips a fixed fraction — stable at small N, no median fallback.
+            method: CombineMethod::Mean(Rejection::trim(percent)),
+            // A trim measures no spread, so a small stack needs no median fallback.
             small_n: SmallN::none(),
             ..Default::default()
         }
@@ -261,18 +272,9 @@ impl StackConfig {
         }
     }
 
-    /// Preset for bias frames: Winsorized σ=3.0, no normalization.
-    pub fn bias() -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::winsorized(3.0)),
-            normalization: Normalization::None,
-            small_n: SmallN::none(),
-            ..Default::default()
-        }
-    }
-
-    /// Preset for dark frames: Winsorized σ=3.0, no normalization.
-    pub fn dark() -> Self {
+    /// Preset for bias and dark frames: Winsorized σ=3.0, no normalization. One preset, because
+    /// both measure a level that every frame shares, with nothing between frames to normalize.
+    pub fn bias_or_dark() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(3.0)),
             normalization: Normalization::None,
@@ -283,7 +285,7 @@ impl StackConfig {
 
     /// Preset for flat frames: σ-clip σ=3.0, multiplicative normalization.
     pub fn flat() -> Self {
-        // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats
+        // σ=3.0 matches the bias-or-dark preset and ccdproc's `combine` default (3σ low/high); flats
         // are smooth, so a permissive cut just trims clear outliers (dust shadows move between
         // flats).
         Self {
@@ -308,6 +310,12 @@ impl StackConfig {
 
     /// Validate configuration parameters.
     pub fn validate(&self) -> Result<(), StackConfigError> {
+        InvalidConfigField::check(
+            self.min_survivors >= 1,
+            "min_survivors",
+            "at least 1",
+            self.min_survivors as f64,
+        )?;
         if let CombineMethod::Mean(rejection) = &self.method {
             rejection.validate()?;
         }

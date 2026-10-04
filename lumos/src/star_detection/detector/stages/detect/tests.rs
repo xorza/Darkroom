@@ -1,6 +1,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::detector::stages::detect::internals::detect_test;
 use crate::star_detection::detector::stages::detect::*;
@@ -11,7 +12,9 @@ fn local_maxima_config() -> DetectionConfig {
             min_prominence: 0.3,
         },
         deblend_min_separation: 3,
+        min_area: 1,
         max_area: usize::MAX,
+        edge_margin: 0,
         ..Default::default()
     }
 }
@@ -19,6 +22,14 @@ fn local_maxima_config() -> DetectionConfig {
 /// A flat sky noise of 0.01 over `size`.
 fn flat_sky(size: Size2us) -> SkyNoise {
     background_map::uniform(size, 0.0, 0.01).sky_noise()
+}
+
+/// `values` as a detection plane under a flat noise of 0.01.
+fn flat_plane(values: &Buffer2<f32>) -> DetectionPlane {
+    DetectionPlane {
+        values: values.clone(),
+        noise: flat_sky(Size2us::new(values.width(), values.height())),
+    }
 }
 
 #[test]
@@ -51,10 +62,8 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         ],
     );
 
-    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
     let result = extract_candidates(
-        &pixels,
-        &sky,
+        &flat_plane(&pixels),
         &label_map,
         &local_maxima_config(),
         &JobScratchPool::default(),
@@ -87,10 +96,8 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         )],
     );
 
-    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
     let result = extract_candidates(
-        &pixels,
-        &sky,
+        &flat_plane(&pixels),
         &label_map,
         &local_maxima_config(),
         &JobScratchPool::default(),
@@ -126,9 +133,8 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             ..local_maxima_config()
         };
 
-        let result = extract_and_filter_candidates(
-            &pixels,
-            &flat_sky(Size2us::new(32, 32)),
+        let result = extract_candidates(
+            &flat_plane(&pixels),
             &label_map,
             &config,
             &JobScratchPool::default(),
@@ -174,7 +180,7 @@ fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
     }
     Rectangles {
         residual,
-        labels: LabelMap::from_raw(labels, rects.len()),
+        labels: LabelMap::from_raw(&labels, rects.len()),
     }
 }
 
@@ -260,9 +266,8 @@ fn region_filter_bounds() {
         ],
     );
 
-    let result = extract_and_filter_candidates(
-        &residual,
-        &flat_sky(size),
+    let result = extract_candidates(
+        &flat_plane(&residual),
         &label_map,
         &config,
         &JobScratchPool::default(),

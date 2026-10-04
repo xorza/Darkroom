@@ -10,13 +10,6 @@ use imaginarium::{ChannelCount, ColorFormat, Image};
 
 use crate::io::image::error::ImageError;
 
-pub(crate) fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
-    ImageError::ScientificInputRejected {
-        path: path.to_path_buf(),
-        reason: reason.into(),
-    }
-}
-
 pub(crate) fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
     Image::read_file(path).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),

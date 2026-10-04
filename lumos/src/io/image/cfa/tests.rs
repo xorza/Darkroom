@@ -1,13 +1,13 @@
+use crate::frame_store::frame_stats::FrameStats;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
+use crate::internals::fits::rewrite_fits;
+use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::*;
-use crate::io::image::image_provenance::{
-    DecoderProvenance, ImageProvenance, RowOrder, SourceContainer, TransferProvenance,
-};
-use crate::io::image::sample_domain::ScaleOrigin;
-use crate::io::raw::provenance::RawTransferProvenance;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::TempDir;
+use fits_well::header::Header;
 use std::fs;
 
 #[test]
@@ -23,83 +23,258 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     let mut nulls = vec![0.0f32; size.pixel_count()];
     nulls[5] = f32::NAN;
     let mut cfa = make_cfa(size, pixels, CfaType::Mono);
-    cfa.nulls = NullMask::of_non_finite(size, &[&nulls]);
+    cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
 
-    let demosaiced = cfa.demosaic(&CancelToken::never()).unwrap();
+    let demosaiced = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
     assert_eq!(demosaiced.channel(0).pixels()[5], 0.5);
     // The mask stays at its own extent: this pixel was reconstructed, not measured, and the combine
     // still has to gate on that.
-    assert!(demosaiced.nulls.as_ref().unwrap().bits().get(5));
-    assert_eq!(demosaiced.nulls.as_ref().unwrap().count(), 1);
+    assert!(
+        demosaiced
+            .flags
+            .as_ref()
+            .unwrap()
+            .mask_of(QualityFlags::NO_DATA)
+            .get(5)
+    );
+    assert_eq!(
+        demosaiced
+            .flags
+            .as_ref()
+            .unwrap()
+            .count(QualityFlags::NO_DATA),
+        1
+    );
 }
 
+/// Every flag survives the trip. `NO_DATA` goes back as NaN, the blank of the float `BITPIX`, so
+/// any reader finds it; without it the repaired sample would reload as a measurement. All of them
+/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`.
+///
+/// The 3×2 plane holds, row-major: nothing, `NO_DATA`, `SATURATED | DEFECT` (2 + 4 = 6), nothing,
+/// `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32).
 #[test]
-fn a_masters_nulls_survive_the_fits_round_trip() {
-    // Written back as NaN — the blank for the float BITPIX this writes — so a reload recovers the
-    // mask. Without it the repaired sample would come back as a measurement, which is exactly the
-    // fabrication the mask exists to prevent.
-    let cfa = CfaImage {
-        data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+fn a_masters_flags_survive_the_fits_round_trip() {
+    let size = Size2us::new(3, 2);
+    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let cfa = |bytes: [u8; 6]| CfaImage {
+        data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
         cfa_type: CfaType::Mono,
         metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
+        flags: PixelFlags::from_fn(size, |index| QualityFlags::from_byte(bytes[index])),
     };
-    let dir = TempDir::new("lumos-cfa-nulls");
+    let dir = TempDir::new("lumos-cfa-flags");
     let path = dir.join("master.fits");
-    cfa.save_fits(&path).unwrap();
+    let hdu_count = |path: &Path| {
+        let bytes = fs::read(path).unwrap();
+        fits_well::FitsReader::from_bytes(&bytes)
+            .unwrap()
+            .hdus()
+            .len()
+    };
 
+    cfa(bytes).save_fits(&path).unwrap();
+    assert_eq!(hdu_count(&path), 2);
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    let nulls = loaded.nulls.as_ref().expect("the mask must come back");
-    assert_eq!(nulls.count(), 1);
-    for index in 0..4 {
-        assert_eq!(nulls.bits().get(index), index == 1, "index {index}");
-    }
+    assert_eq!(loaded.flags().unwrap().bytes(), &bytes);
+    assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".
     let data = loaded.data.to_vec();
-    assert_eq!([data[0], data[2], data[3]], [0.1f32, 0.3, 0.4]);
+    assert_eq!(
+        [data[0], data[2], data[3], data[4], data[5]],
+        [0.1f32, 0.3, 0.4, 0.5, 0.6]
+    );
+
+    let nulls_only = [0u8, 1, 0, 0, 0, 0];
+    let nulls_path = dir.join("nulls.fits");
+    cfa(nulls_only).save_fits(&nulls_path).unwrap();
+    assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
+    let loaded = CfaImage::from_file(&nulls_path, &LoadContext::default()).unwrap();
+    assert_eq!(loaded.flags().unwrap().bytes(), &nulls_only);
 }
 
-/// A master records the span its samples were normalized by, so a reload keeps the domain it was
-/// stacked in — a RAW-sourced master is still a declared `maximum − black`, bit for bit, and still
-/// calibrates the RAW lights it was built for. Without the record, the float samples reload with an
-/// assumed scale of 1 and every light is refused.
+/// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
+/// the check behind it is what fires: a bit no flag has, a `NO_DATA` the NaNs do not state either
+/// way, another geometry, another version, and an extension that names no image of the file. Its
+/// checksum is judged before its bytes: a byte changed behind the stored checksum reads as that,
+/// not as the `NO_DATA` it also drops.
 #[test]
-fn a_masters_declared_sample_domain_survives_the_fits_round_trip() {
-    let directory = TempDir::new("lumos-cfa-domain");
-    for span in [15_360.0f32, 1_234.567_8] {
-        let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
-        master.metadata.provenance = Some(ImageProvenance {
-            container: SourceContainer::CameraRaw,
-            decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
-                physical_scale: span,
-            }),
-            color: ColorProvenance::Monochrome,
-            clipped: false,
-            demosaic: DemosaicProvenance::None,
-            row_order: RowOrder::TopDown,
+fn a_flags_extension_lumos_did_not_write_is_refused() {
+    type Edit = fn(&mut Header, &mut Vec<u8>);
+    let size = Size2us::new(3, 2);
+    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let dir = TempDir::new("lumos-cfa-flags-refused");
+    let path = dir.join("master.fits");
+    let write = || {
+        CfaImage {
+            data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            cfa_type: CfaType::Mono,
+            metadata: ImageMetadata::default(),
+            flags: PixelFlags::from_fn(size, |index| QualityFlags::from_byte(bytes[index])),
+        }
+        .save_fits(&path)
+        .unwrap();
+    };
+    let cases: [(&str, Edit, &str); 6] = [
+        (
+            "unknown bit",
+            |_, data| data[5] |= 0x40,
+            "(2, 1): byte 0x60 holds a bit no flag has",
+        ),
+        (
+            "NO_DATA lost",
+            |_, data| data[1] = 0,
+            "(1, 0): NO_DATA disagrees",
+        ),
+        (
+            "NO_DATA added",
+            |_, data| data[3] = 1,
+            "(0, 1): NO_DATA disagrees",
+        ),
+        (
+            "another geometry",
+            |header, _| {
+                header.set("NAXIS1", 2).unwrap();
+                header.set("NAXIS2", 3).unwrap();
+            },
+            "shape [2, 3] is not the image's 3x2",
+        ),
+        (
+            "another version",
+            |header, _| {
+                header.set("LUMOSVER", 2).unwrap();
+            },
+            "expected PIXFLAGS version 1",
+        ),
+        (
+            "no image named",
+            |header, _| {
+                header.set("LUMFOR", "SCI").unwrap();
+            },
+            "is for \"SCI\", which is no image of the file",
+        ),
+    ];
+    for (name, edit, expected) in cases {
+        write();
+        rewrite_fits(&path, |index, header, data| {
+            if index == 1 {
+                edit(header, data);
+            }
+            true
         });
-        let path = directory.path().join(format!("master_{span}.fits"));
-        master.save_fits(&path).unwrap();
-        let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+        let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+        assert!(
+            matches!(&error, ImageError::FitsUnsupported { reason, .. } if reason.contains(expected)),
+            "{name}: {error:?}"
+        );
+    }
 
-        let domain = loaded
-            .metadata
-            .sample_domain()
-            .expect("a FITS master has a domain");
-        assert_eq!(domain.scale.to_bits(), span.to_bits(), "span {span}");
-        assert_eq!(domain.origin, ScaleOrigin::Declared, "span {span}");
-        assert_eq!(
-            loaded.data.to_vec(),
-            vec![0.25; 4],
-            "samples are stored normalized"
+    // The flags are the last HDU, and their 6 bytes open its one 2880-byte data block.
+    write();
+    let mut file = fs::read(&path).unwrap();
+    let flags_start = file.len() - 2880;
+    file[flags_start + 1] = 0;
+    fs::write(&path, &file).unwrap();
+    let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+    assert!(
+        matches!(&error, ImageError::FitsUnsupported { reason, .. }
+            if reason.contains("HDU 1 requires valid DATASUM and CHECKSUM")),
+        "{error:?}"
+    );
+}
+
+/// The demosaic measures each colour's noise on the mosaic, before the interpolation correlates
+/// neighbours, and the frame's statistics take it from there: the demosaiced frame's noise, sky
+/// and quantization σ are the mosaic's own, bit for bit, though the demosaic cleared the frame's
+/// quantization σ. Measured on the frame's own correlated pixels instead, every channel reads less
+/// than its colour's σ. A 64 × 64 RGGB mosaic: red 0.125 ± 0.02, green 0.25 ± 0.01, blue
+/// 0.375 ± 0.03, with a step of 1/4096.
+#[test]
+fn a_demosaiced_frame_keeps_its_mosaics_noise() {
+    let size = Size2us::new(64, 64);
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
+    let mut rng = TestRng::new(7);
+    let pixels = (0..size.pixel_count())
+        .map(|index| {
+            let colour = usize::from(cfa_type.color_at(Vec2us::new(index % 64, index / 64)));
+            level[colour] + sigma[colour] * rng.next_gaussian_f32()
+        })
+        .collect();
+    let mut cfa = make_cfa(size, pixels, cfa_type);
+    cfa.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0);
+    let mosaic = FrameStats::measure(&cfa);
+
+    let mut demosaiced = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(demosaiced.metadata.quantization_sigma, None);
+    let frame = FrameStats::measure(&demosaiced);
+    assert_eq!(frame.noise, mosaic.noise);
+    assert_eq!(frame.sky, mosaic.sky);
+    assert_eq!(frame.quantization_sigma, mosaic.quantization_sigma);
+
+    demosaiced.metadata.mosaic_noise = None;
+    let correlated = FrameStats::measure(&demosaiced);
+    for colour in 0..3 {
+        assert!(
+            correlated.noise[colour] < mosaic.noise[colour],
+            "colour {colour}: {} against the mosaic's {}",
+            correlated.noise[colour],
+            mosaic.noise[colour]
         );
-        assert_eq!(
-            domain.conversion_to(&master.metadata.sample_domain().unwrap()),
-            Some(1.0)
-        );
+    }
+}
+
+/// A master records its whole domain and its quantization σ, so a reload gives back exactly what
+/// was saved, for every origin and every pedestal: the σ is not divided by the span a second time
+/// (15360× too small for a RAW master), and an assumed scale reloads as assumed rather than as a
+/// scale of 1 the master would be refused for.
+#[test]
+fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
+    let directory = TempDir::new("lumos-cfa-domain");
+    let mut case = 0;
+    for origin in [ScaleOrigin::Declared, ScaleOrigin::Assumed] {
+        for pedestal in [Pedestal::Removed, Pedestal::Kept(2048.0), Pedestal::Unknown] {
+            for (scale, unit) in [
+                (15_360.0, None),
+                (1_234.567_8, Some("ADU")),
+                (65_535.0, None),
+            ] {
+                case += 1;
+                let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
+                let domain = SampleDomain {
+                    scale,
+                    origin,
+                    pedestal,
+                    unit: unit.map(str::to_owned),
+                };
+                master.metadata.domain = Some(domain.clone());
+                master.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 15_360.0);
+                let path = directory.path().join(format!("master_{case}.fits"));
+                master.save_fits(&path).unwrap();
+                let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+
+                assert_eq!(loaded.metadata.domain, Some(domain.clone()), "{domain}");
+                assert_eq!(
+                    loaded.metadata.quantization_sigma, master.metadata.quantization_sigma,
+                    "{domain}"
+                );
+                assert_eq!(
+                    loaded.data.to_vec(),
+                    vec![0.25; 4],
+                    "samples are stored normalized"
+                );
+                assert_eq!(
+                    loaded.metadata.domain.unwrap().conversion_to(&domain),
+                    Some(DomainMap::IDENTITY),
+                    "{domain}"
+                );
+            }
+        }
     }
 }
 
@@ -110,10 +285,10 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         cfa_type: CfaType::Bayer(CfaPattern::Bggr),
         metadata: ImageMetadata {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            quantization_sigma: Some(0.000_01),
             ..Default::default()
         },
-        quantization_sigma: Some(0.000_01),
-        nulls: None,
+        flags: None,
     };
     let dir = TempDir::new("lumos-cfa-roundtrip");
     let path = dir.join("master.fits");
@@ -130,7 +305,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         loaded.metadata.camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
     );
-    assert_eq!(loaded.quantization_sigma, Some(0.000_01));
+    assert_eq!(loaded.metadata.quantization_sigma, Some(0.000_01));
 
     let original = fs::read(&path).unwrap();
     let mut invalid_version = original.clone();
@@ -179,8 +354,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
             cfa_type,
             metadata: ImageMetadata::default(),
-            quantization_sigma: None,
-            nulls: None,
+            flags: None,
         };
         let path = dir.join(format!("master_{name}.fits"));
 
@@ -197,7 +371,7 @@ fn subtract_takes_the_dark_off_every_sample() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
     let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
 
-    light.subtract(&dark, 1.0);
+    light.subtract(&dark, DomainMap::IDENTITY);
 
     assert_close!(light.data[0], 0.4, 1e-6);
     assert_close!(light.data[1], 0.5, 1e-6);
@@ -206,7 +380,8 @@ fn subtract_takes_the_dark_off_every_sample() {
 }
 
 /// The dark is expressed in the light's domain before it is subtracted: on a span four times the
-/// light's, a dark sample of 0.125 is worth 0.5. Dyadic values, so the result is exact.
+/// light's, a dark sample of 0.125 is worth 0.5, and an offset of −0.25 moves its pedestal onto the
+/// light's. Dyadic values, so the result is exact.
 #[test]
 fn subtract_converts_the_dark_into_the_lights_domain_first() {
     let mut light = make_cfa(
@@ -216,9 +391,28 @@ fn subtract_converts_the_dark_into_the_lights_domain_first() {
     );
     let dark = make_cfa(Size2us::new(2, 2), vec![0.125; 4], CfaType::Mono);
 
-    light.subtract(&dark, 4.0);
-
+    light.subtract(
+        &dark,
+        DomainMap {
+            gain: 4.0,
+            offset: 0.0,
+        },
+    );
     assert_eq!(light.data.pixels(), &[0.25, 0.5, 0.0, 0.125]);
+
+    let mut light = make_cfa(
+        Size2us::new(2, 2),
+        vec![0.75, 1.0, 0.5, 0.625],
+        CfaType::Mono,
+    );
+    light.subtract(
+        &dark,
+        DomainMap {
+            gain: 4.0,
+            offset: -0.25,
+        },
+    );
+    assert_eq!(light.data.pixels(), &[0.5, 0.75, 0.25, 0.375]);
 }
 
 #[test]
@@ -226,7 +420,7 @@ fn subtract_converts_the_dark_into_the_lights_domain_first() {
 fn subtract_dimension_mismatch() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5; 4], CfaType::Mono);
     let dark = make_cfa(Size2us::new(3, 3), vec![0.1; 9], CfaType::Mono);
-    light.subtract(&dark, 1.0);
+    light.subtract(&dark, DomainMap::IDENTITY);
 }
 
 #[test]
@@ -237,7 +431,7 @@ fn data_len() {
         ImageMetadata::default(),
     );
     assert_eq!(img.data.len(), 200);
-    assert_eq!(img.quantization_sigma, None);
+    assert_eq!(img.metadata.quantization_sigma, None);
 }
 
 /// LibRaw's `filters` and `colors` classify a sensor: one colour is mono whatever the word says,
@@ -290,11 +484,17 @@ fn each_pattern_names_its_demosaic() {
         ),
         (
             CfaType::XTrans(XTRANS_PATTERN),
-            DemosaicProvenance::LumosMarkesteijn,
+            DemosaicProvenance::LumosMarkesteijn {
+                passes: MarkesteijnPasses::Three,
+            },
             ColorProvenance::SensorRgb,
         ),
     ] {
-        assert_eq!(cfa_type.demosaic_provenance(), demosaic, "{cfa_type:?}");
+        assert_eq!(
+            cfa_type.demosaic_provenance(MarkesteijnPasses::Three),
+            demosaic,
+            "{cfa_type:?}"
+        );
         assert_eq!(cfa_type.demosaiced_color(), color, "{cfa_type:?}");
     }
 }
@@ -334,6 +534,149 @@ fn every_pattern_names_the_colour_at_each_position() {
             assert_eq!(
                 CfaType::XTrans(XTRANS_PATTERN).color_at(pos),
                 XTRANS_PATTERN.rows()[y % 6][x % 6]
+            );
+        }
+    }
+}
+
+/// No input photosite moves an output pixel farther away than `CfaType::demosaic_support`. An
+/// impulse of 20 on random texture, at several phases of each pattern, changes no output pixel past
+/// the support by more than 2⁻¹⁶ of the impulse. A wider survey, 40 textures at 6 phases on 128²
+/// frames, reached exactly 10 for RCD and 11 and 16 for Markesteijn's one and three passes, by any
+/// change at all for Markesteijn; this sample reaches 9, 11 and 14.
+#[test]
+fn the_demosaic_support_bounds_every_impulse_response() {
+    const SIDE: usize = 64;
+    for (cfa_type, passes) in [
+        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
+    ] {
+        let size = Size2us::new(SIDE, SIDE);
+        let mut reach = 0usize;
+        for seed in 1..=6u64 {
+            let mut rng = TestRng::new(seed);
+            let base: Vec<f32> = (0..size.pixel_count())
+                .map(|_| 0.2 + 0.3 * rng.next_f32())
+                .collect();
+            let reference = make_cfa(size, base.clone(), cfa_type)
+                .demosaic(passes, &CancelToken::never())
+                .unwrap();
+            for (cx, cy) in [(30usize, 30usize), (31, 30), (31, 31), (33, 32)] {
+                let mut pixels = base.clone();
+                pixels[cy * SIDE + cx] = 20.0;
+                let threshold = (20.0 - base[cy * SIDE + cx]) / 65_536.0;
+                let hit = make_cfa(size, pixels, cfa_type)
+                    .demosaic(passes, &CancelToken::never())
+                    .unwrap();
+                for channel in 0..3 {
+                    for y in 0..SIDE {
+                        for x in 0..SIDE {
+                            let moved = (hit.channel(channel)[(x, y)]
+                                - reference.channel(channel)[(x, y)])
+                                .abs();
+                            if moved > threshold {
+                                reach = reach.max(x.abs_diff(cx).max(y.abs_diff(cy)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            reach <= cfa_type.demosaic_support(passes),
+            "{cfa_type:?}, {passes:?}: {reach}"
+        );
+    }
+}
+
+/// A flag on one photosite covers every output pixel the demosaic reads it into, and `NO_DATA`
+/// stays where it was: a saturated photosite at (20, 20) flags the 21 × 21 square around it.
+#[test]
+fn demosaic_spreads_flags_by_its_support() {
+    let size = Size2us::new(48usize, 48usize);
+    let mut cfa = make_cfa(
+        size,
+        vec![0.25; size.pixel_count()],
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
+    cfa.flags = PixelFlags::from_fn(size, |index| match index {
+        index if index == 20 * 48 + 20 => QualityFlags::SATURATED,
+        index if index == 40 * 48 + 40 => QualityFlags::NO_DATA,
+        _ => QualityFlags::default(),
+    });
+    let flags = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap()
+        .flags
+        .unwrap();
+    assert_eq!(flags.count(QualityFlags::SATURATED), 21 * 21);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+    assert!(
+        flags
+            .at_pos(Vec2us::new(10, 30))
+            .intersects(QualityFlags::SATURATED)
+    );
+    assert!(
+        !flags
+            .at_pos(Vec2us::new(31, 20))
+            .intersects(QualityFlags::SATURATED)
+    );
+}
+
+/// Neutral detail through a sensor whose channels respond with gains 1/2, 1 and 1/1.5 keeps less
+/// false colour when the camera balance is applied before the demosaic: the direction decisions
+/// compare neighbours of different colours, and on the unbalanced mosaic the cast reads as
+/// structure. Balanced back up, red and blue should equal green; their RMS difference over the
+/// interior, measured, is 0.0013 against 0.0156 for RCD on a star of σ 1.3 px and 0.0008 against
+/// 0.0032 on a soft edge, and 0.0045 against 0.023 and 0.0008 against 0.0094 for Markesteijn. The
+/// test asks for a third of the unbalanced error at most, below the least ratio measured, 4.2.
+#[test]
+fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
+    let size = Size2us::new(48, 48);
+    let gains = [2.0f32, 1.0, 1.5];
+    let star = |x: usize, y: usize| {
+        let (dx, dy) = (x as f32 - 23.6, y as f32 - 24.3);
+        0.1 + 0.8 * (-(dx * dx + dy * dy) / (2.0 * 1.3 * 1.3)).exp()
+    };
+    let soft_edge =
+        |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).tanh();
+    let scenes: [&dyn Fn(usize, usize) -> f32; 2] = [&star, &soft_edge];
+    for cfa_type in [
+        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::XTrans(XTRANS_PATTERN),
+    ] {
+        for (scene_index, scene) in scenes.iter().enumerate() {
+            let samples: Vec<f32> = (0..size.pixel_count())
+                .map(|index| {
+                    let (x, y) = (index % size.width, index / size.width);
+                    scene(x, y) / gains[cfa_type.color_at(Vec2us::new(x, y)) as usize]
+                })
+                .collect();
+            let false_colour = |balance: Option<[f32; 4]>| {
+                let mut cfa = make_cfa(size, samples.clone(), cfa_type);
+                cfa.metadata.camera_white_balance = balance;
+                let image = cfa
+                    .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+                    .unwrap();
+                let (mut sum, mut count) = (0.0f64, 0);
+                for y in 12..36 {
+                    for x in 12..36 {
+                        let green = image.channel(1)[(x, y)];
+                        for (channel, gain) in [(0, gains[0]), (2, gains[2])] {
+                            let error = image.channel(channel)[(x, y)] * gain - green;
+                            sum += f64::from(error * error);
+                            count += 1;
+                        }
+                    }
+                }
+                (sum / f64::from(count)).sqrt()
+            };
+            let balanced = false_colour(Some([2.0, 1.0, 1.5, 1.0]));
+            let unbalanced = false_colour(None);
+            assert!(
+                balanced * 3.0 < unbalanced,
+                "{cfa_type:?} scene {scene_index}: balanced {balanced}, unbalanced {unbalanced}"
             );
         }
     }

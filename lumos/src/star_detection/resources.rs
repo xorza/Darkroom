@@ -4,10 +4,12 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::buffer_pool::BufferPool;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::star_detection::background::workspace::BackgroundWorkspace;
+use crate::star_detection::convolution::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::detector::stages::filter::DuplicateScratch;
 use crate::star_detection::labeling::labeler::Labeler;
 use imaginarium::Buffer2;
 
@@ -18,17 +20,17 @@ use imaginarium::Buffer2;
 ///
 /// This recycles planes between the *sequential* stages of one detection, which is why
 /// `acquire_*`/`release_*` take `&mut self` — unlike
-/// [`JobScratchPool`](crate::concurrency::JobScratchPool) it never hands scratch to concurrent
+/// [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) it never hands scratch to concurrent
 /// jobs. A stage acquires its planes, is free to work them across rayon workers itself, and
 /// releases them before the next stage runs.
 ///
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 ///
-/// The three accessor pairs stay written out rather than collapsing into one generic
+/// The two accessor pairs stay written out rather than collapsing into one generic
 /// `acquire::<B>()` over [`BufferPool`]: the pools differ only in element type, so selecting one
 /// generically would need a trait mapping the type back to its field, and a turbofish at each of
-/// the ~35 call sites, to save six one-line methods.
+/// the ~35 call sites, to save four one-line methods.
 #[derive(Debug)]
 pub(crate) struct DetectionResources {
     pub(crate) dimensions: Size2us,
@@ -36,13 +38,16 @@ pub(crate) struct DetectionResources {
     floats: BufferPool<Buffer2<f32>>,
     /// Threshold masks, dilation scratch.
     bitmasks: BufferPool<BitBuffer2>,
-    /// Label maps. Only one is live at a time, but pooling rather than holding a single slot
-    /// means a second release keeps both instead of dropping one on the floor.
-    labels: BufferPool<Buffer2<u32>>,
     pub(crate) labeler: Labeler,
     pub(crate) background: BackgroundWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
     pub(crate) deblend: JobScratchPool<DeblendBuffers>,
+    /// The per-tile and per-star values a detection's medians sort, refilled for each.
+    pub(crate) values: Vec<f32>,
+    /// Their absolute deviations from the median, for a MAD that keeps the values.
+    pub(crate) deviations: Vec<f32>,
+    pub(crate) duplicates: DuplicateScratch,
+    pub(crate) kernels: FilterKernels,
 }
 
 impl DetectionResources {
@@ -52,10 +57,13 @@ impl DetectionResources {
             dimensions,
             floats: BufferPool::default(),
             bitmasks: BufferPool::default(),
-            labels: BufferPool::default(),
             labeler: Labeler::default(),
             background: BackgroundWorkspace::default(),
             deblend: JobScratchPool::default(),
+            values: Vec::new(),
+            deviations: Vec::new(),
+            duplicates: DuplicateScratch::default(),
+            kernels: FilterKernels::default(),
         }
     }
 
@@ -79,21 +87,10 @@ impl DetectionResources {
         self.bitmasks.release(buffer, self.dimensions);
     }
 
-    /// Acquire a label map from the pool, or allocate a new one.
-    pub(crate) fn acquire_u32(&mut self) -> Buffer2<u32> {
-        self.labels.acquire(self.dimensions)
-    }
-
-    /// Return a label map to the pool for reuse. It must have the pool's dimensions.
-    pub(crate) fn release_u32(&mut self, buffer: Buffer2<u32>) {
-        self.labels.release(buffer, self.dimensions);
-    }
-
     /// Clear all pooled buffers, freeing memory.
     pub(crate) fn clear(&mut self) {
         self.floats.clear();
         self.bitmasks.clear();
-        self.labels.clear();
         self.labeler = Labeler::default();
         self.background.clear();
         self.deblend = JobScratchPool::default();
@@ -117,7 +114,6 @@ pub(crate) mod internals {
     pub(crate) struct BufferCounts {
         pub floats: usize,
         pub bitmasks: usize,
-        pub labels: usize,
     }
 
     /// The pools' occupancy, for readers outside this module — `dimensions` is already
@@ -126,7 +122,6 @@ pub(crate) mod internals {
         BufferCounts {
             floats: pooled_count(&resources.floats),
             bitmasks: pooled_count(&resources.bitmasks),
-            labels: pooled_count(&resources.labels),
         }
     }
 }
@@ -149,7 +144,6 @@ mod tests {
             BufferCounts {
                 floats: 0,
                 bitmasks: 0,
-                labels: 0,
             }
         );
     }
@@ -159,52 +153,35 @@ mod tests {
     /// every step, the reuse by address.
     #[test]
     fn acquire_reuses_what_release_returned() {
-        let counts = |floats, bitmasks, labels| BufferCounts {
-            floats,
-            bitmasks,
-            labels,
-        };
+        let counts = |floats, bitmasks| BufferCounts { floats, bitmasks };
         let mut pool = DetectionResources::new(Size2us::new(64, 32));
 
         let first = pool.acquire_f32();
         assert_eq!((first.width(), first.height()), (64, 32));
         let address = first.as_ptr();
         pool.release_f32(first);
-        assert_eq!(buffer_counts(&pool), counts(1, 0, 0));
+        assert_eq!(buffer_counts(&pool), counts(1, 0));
         let again = pool.acquire_f32();
         assert_eq!(again.as_ptr(), address);
         let fresh = pool.acquire_f32();
         assert_ne!(fresh.as_ptr(), address);
-        assert_eq!(buffer_counts(&pool), counts(0, 0, 0));
+        assert_eq!(buffer_counts(&pool), counts(0, 0));
         pool.release_f32(again);
         pool.release_f32(fresh);
-        assert_eq!(buffer_counts(&pool), counts(2, 0, 0));
+        assert_eq!(buffer_counts(&pool), counts(2, 0));
 
         let first = pool.acquire_bit();
         assert_eq!(first.size, Size2us::new(64, 32));
         let address = first.words.as_ptr();
         pool.release_bit(first);
-        assert_eq!(buffer_counts(&pool), counts(2, 1, 0));
+        assert_eq!(buffer_counts(&pool), counts(2, 1));
         let again = pool.acquire_bit();
         assert_eq!(again.words.as_ptr(), address);
         let fresh = pool.acquire_bit();
         assert_ne!(fresh.words.as_ptr(), address);
         pool.release_bit(again);
         pool.release_bit(fresh);
-        assert_eq!(buffer_counts(&pool), counts(2, 2, 0));
-
-        let first = pool.acquire_u32();
-        assert_eq!((first.width(), first.height()), (64, 32));
-        let address = first.as_ptr();
-        pool.release_u32(first);
-        assert_eq!(buffer_counts(&pool), counts(2, 2, 1));
-        let again = pool.acquire_u32();
-        assert_eq!(again.as_ptr(), address);
-        let fresh = pool.acquire_u32();
-        assert_ne!(fresh.as_ptr(), address);
-        pool.release_u32(again);
-        pool.release_u32(fresh);
-        assert_eq!(buffer_counts(&pool), counts(2, 2, 2));
+        assert_eq!(buffer_counts(&pool), counts(2, 2));
     }
 
     #[test]
@@ -213,17 +190,14 @@ mod tests {
 
         let buf1 = pool.acquire_f32();
         let buf2 = pool.acquire_bit();
-        let buf3 = pool.acquire_u32();
 
         pool.release_f32(buf1);
         pool.release_bit(buf2);
-        pool.release_u32(buf3);
         assert_eq!(
             buffer_counts(&pool),
             BufferCounts {
                 floats: 1,
                 bitmasks: 1,
-                labels: 1,
             }
         );
 
@@ -233,7 +207,6 @@ mod tests {
             BufferCounts {
                 floats: 0,
                 bitmasks: 0,
-                labels: 0,
             }
         );
     }

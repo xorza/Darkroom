@@ -8,7 +8,7 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
@@ -17,9 +17,9 @@ use crate::star_detection::background::simd::SegmentRamp;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::background::workspace::InterpolateScratch;
 use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::mask_dilation::dilate_mask;
+use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
+use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -34,6 +34,21 @@ pub(crate) struct BackgroundEstimate {
     /// The floor every threshold built from [`Self::noise`] applies to it. See
     /// [`noise_floor_from`] for why it is measured from the frame rather than fixed.
     pub(crate) noise_floor: f32,
+}
+
+/// The parameters of `BackgroundRefinement::Iterative`, once a refinement is known to run.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Refinement {
+    pub(crate) iterations: usize,
+    pub(crate) mask_dilation: usize,
+    pub(crate) mask_sigma: f32,
+}
+
+/// A refined estimate, and the sources it was measured around with the pixels the caller masked.
+#[derive(Debug)]
+pub(crate) struct RefinedBackground {
+    pub(crate) estimate: BackgroundEstimate,
+    pub(crate) sources: BitBuffer2,
 }
 
 /// A per-pixel σ is floored at this fraction of the frame's typical tile σ: far enough below the
@@ -63,36 +78,36 @@ pub(crate) fn noise_floor_for(scale: f32) -> f32 {
 /// does not reproduce a constant sky exactly, and without a margin above that jitter every pixel
 /// clears `bg` and the whole frame labels as one component. The sky carries the frame's magnitude,
 /// so a fraction of it stays above the jitter in any domain.
-fn noise_floor_from(grid: &TileGrid) -> f32 {
+fn noise_floor_from(grid: &TileGrid, values: &mut Vec<f32>) -> f32 {
     let stats = grid.stats.pixels();
-    let mut sigmas: Vec<f32> = stats
-        .iter()
-        .map(|tile| tile.sigma)
-        .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
-        .collect();
-    let scale = if sigmas.is_empty() {
-        let mut skies: Vec<f32> = stats
+    values.clear();
+    values.extend(
+        stats
             .iter()
-            .map(|tile| tile.sky.abs())
-            .filter(|sky| sky.is_finite() && *sky > 0.0)
-            .collect();
-        if skies.is_empty() {
+            .map(|tile| tile.sigma)
+            .filter(|sigma| sigma.is_finite() && *sigma > 0.0),
+    );
+    if values.is_empty() {
+        values.extend(
+            stats
+                .iter()
+                .map(|tile| tile.sky.abs())
+                .filter(|sky| sky.is_finite() && *sky > 0.0),
+        );
+        if values.is_empty() {
             return f32::MIN_POSITIVE;
         }
-        median_mut(&mut skies)
-    } else {
-        median_mut(&mut sigmas)
-    };
-    noise_floor_for(scale)
+    }
+    noise_floor_for(median_mut(values))
 }
 
 impl BackgroundEstimate {
-    /// Estimate background and noise for the image.
+    /// Estimate background and noise for the image, leaving out the pixels `mask` sets.
     ///
     /// Performs tiled sigma-clipped statistics with natural bicubic spline interpolation.
-    /// All buffer management is contained within this function.
     pub(crate) fn estimate(
         pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
         config: &BackgroundConfig,
         resources: &mut DetectionResources,
     ) -> Self {
@@ -102,15 +117,15 @@ impl BackgroundEstimate {
         let workspace = &mut resources.background;
         let tile_grid = workspace.mesh.compute(
             pixels,
-            None,
+            mask,
             config.tile_size,
             config.sigma_clip_iterations,
             true,
         );
-        let noise_floor = noise_floor_from(tile_grid);
+        let noise_floor = noise_floor_from(tile_grid, &mut resources.values);
         interpolate_from_grid(
             tile_grid,
-            &mut background,
+            Some(&mut background),
             &mut noise,
             &workspace.interpolation,
         );
@@ -122,59 +137,88 @@ impl BackgroundEstimate {
         }
     }
 
-    /// Refine the estimate by masking the sources it finds and re-estimating the sky around them,
-    /// `iterations` times, the mask dilated by `mask_dilation`.
-    pub(crate) fn refine(
-        &mut self,
+    /// The noise of `pixels` alone, by the same mesh, leaving out the pixels `mask` sets: for a
+    /// plane whose sky is already out, whose σ is all a threshold needs.
+    pub(crate) fn noise_of(
         pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
         config: &BackgroundConfig,
-        refinement: Refinement,
-        detection_sigma: f32,
         resources: &mut DetectionResources,
-    ) {
-        let Refinement {
-            iterations,
-            mask_dilation,
-        } = refinement;
+    ) -> SkyNoise {
+        let mut noise = resources.acquire_f32();
+        let workspace = &mut resources.background;
+        let tile_grid = workspace.mesh.compute(
+            pixels,
+            mask,
+            config.tile_size,
+            config.sigma_clip_iterations,
+            true,
+        );
+        let floor = noise_floor_from(tile_grid, &mut resources.values);
+        interpolate_from_grid(tile_grid, None, &mut noise, &workspace.interpolation);
+        SkyNoise { noise, floor }
+    }
 
-        let mut mask = resources.acquire_bit();
+    /// `pixels` less this background, into `residual`.
+    pub(crate) fn residual_into(&self, pixels: &Buffer2<f32>, residual: &mut Buffer2<f32>) {
+        residual
+            .pixels_mut()
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(pixels.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .zip(self.background.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|((out, values), sky)| {
+                for ((out, &value), &sky) in out.iter_mut().zip(values).zip(sky) {
+                    *out = value - sky;
+                }
+            });
+    }
+
+    /// Refine the estimate around the sources `refinement` finds: `iterations` times, threshold
+    /// the detection plane of the residual at `mask_sigma` of its own σ, dilate the mask by a disk
+    /// of `mask_dilation`, add `filters.mask`, and measure the sky again around it. photutils masks
+    /// its sources on the convolved data, at 2σ, with a circular footprint.
+    pub(crate) fn refine(
+        mut self,
+        pixels: &Buffer2<f32>,
+        refinement: Refinement,
+        filters: PlaneFilters<'_>,
+        config: &BackgroundConfig,
+        resources: &mut DetectionResources,
+    ) -> RefinedBackground {
+        let mut sources = resources.acquire_bit();
         let mut scratch = resources.acquire_bit();
-
-        for _iter in 0..iterations {
-            create_object_mask(
-                pixels,
-                &self.background,
-                &self.noise,
+        for _ in 0..refinement.iterations {
+            let mut residual = resources.acquire_f32();
+            self.residual_into(pixels, &mut residual);
+            self.release_to_pool(resources);
+            let detect = DetectionPlane::from_residual(residual, filters, config, resources);
+            create_residual_threshold_mask(
+                &detect.values,
+                &detect.noise.noise,
                 ThresholdParams {
-                    sigma: detection_sigma,
-                    min_noise: self.noise_floor,
+                    sigma: refinement.mask_sigma,
+                    min_noise: detect.noise.floor,
                 },
-                mask_dilation,
-                &mut mask,
-                &mut scratch,
+                &mut sources,
             );
-
-            let workspace = &mut resources.background;
-            let tile_grid = workspace.mesh.compute(
-                pixels,
-                Some(&mask),
-                config.tile_size,
-                config.sigma_clip_iterations,
-                true,
-            );
-            // Re-measured from the refined grid: masking objects out changes the tile σ set the
-            // floor is derived from.
-            self.noise_floor = noise_floor_from(tile_grid);
-            interpolate_from_grid(
-                tile_grid,
-                &mut self.background,
-                &mut self.noise,
-                &workspace.interpolation,
-            );
+            detect.release_to_pool(resources);
+            sources.dilate(refinement.mask_dilation, &mut scratch);
+            if let Some(mask) = filters.mask {
+                sources.or_with(mask);
+            }
+            self = Self::estimate(pixels, Some(&sources), config, resources);
         }
-
         resources.release_bit(scratch);
-        resources.release_bit(mask);
+        RefinedBackground {
+            estimate: self,
+            sources,
+        }
+    }
+
+    /// Return both planes to `pool`.
+    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
+        pool.release_f32(self.background);
+        pool.release_f32(self.noise);
     }
 
     /// Subtract the sky from `pixels` in place, leaving the residual every later stage reads, and
@@ -201,60 +245,52 @@ impl BackgroundEstimate {
     }
 }
 
-/// The parameters of `BackgroundRefinement::Iterative`, once a refinement is known to run.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Refinement {
-    pub(crate) iterations: usize,
-    pub(crate) mask_dilation: usize,
-}
-
-/// Interpolate background map from tile grid into output buffers.
+/// Interpolate the tile grid into the noise plane, and into the background plane when one is
+/// given.
 fn interpolate_from_grid(
     grid: &TileGrid,
-    background: &mut Buffer2<f32>,
+    background: Option<&mut Buffer2<f32>>,
     noise: &mut Buffer2<f32>,
     interpolation: &JobScratchPool<InterpolateScratch>,
 ) {
-    let width = background.width();
+    let width = noise.width();
     let tiles_x = grid.stats.width();
     let sigma_range = grid.sigma_range();
+    let background_rows =
+        background.map(|background| background.pixels_mut().par_chunks_mut(width));
 
-    background
-        .pixels_mut()
-        .par_chunks_mut(width)
-        .zip(noise.pixels_mut().par_chunks_mut(width))
-        .enumerate()
-        .for_each_init(
+    let interpolate = |scratch: &mut InterpolateScratch,
+                       y: usize,
+                       bg_row: Option<&mut [f32]>,
+                       noise_row: &mut [f32]| {
+        scratch.resize(tiles_x);
+        if let Some(bg_row) = bg_row {
+            interpolate_row(bg_row, noise_row, y, grid, scratch);
+        } else {
+            let mut discarded = std::mem::take(&mut scratch.discarded_row);
+            discarded.resize(width, 0.0);
+            interpolate_row(&mut discarded, noise_row, y, grid, scratch);
+            scratch.discarded_row = discarded;
+        }
+        // The spline overshoots its nodes, and past the outer tiles it extrapolates: on a field
+        // whose σ changes fast it reaches below zero. photutils clips its maps to the mesh's range
+        // for that reason. Only the noise is clipped here: the sky's extrapolation is what follows
+        // a gradient past the outer tiles.
+        for sigma in noise_row.iter_mut() {
+            *sigma = sigma.clamp(*sigma_range.start(), *sigma_range.end());
+        }
+    };
+    let noise_rows = noise.pixels_mut().par_chunks_mut(width).enumerate();
+    match background_rows {
+        Some(background_rows) => background_rows.zip(noise_rows).for_each_init(
             || interpolation.acquire(),
-            |scratch, (y, (bg_row, noise_row))| {
-                scratch.resize(tiles_x);
-                interpolate_row(bg_row, noise_row, y, grid, scratch);
-                // The spline overshoots its nodes, and past the outer tiles it extrapolates: on a
-                // field whose σ changes fast it reaches below zero. photutils clips its maps to
-                // the mesh's range for that reason. Only the noise is clipped here: the sky's
-                // extrapolation is what follows a gradient past the outer tiles.
-                for sigma in noise_row.iter_mut() {
-                    *sigma = sigma.clamp(*sigma_range.start(), *sigma_range.end());
-                }
-            },
-        );
-}
-
-/// Create a mask of pixels that are likely objects (above threshold).
-///
-/// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
-fn create_object_mask(
-    pixels: &Buffer2<f32>,
-    background: &Buffer2<f32>,
-    noise: &Buffer2<f32>,
-    threshold: ThresholdParams,
-    dilation_radius: usize,
-    output: &mut BitBuffer2,
-    scratch: &mut BitBuffer2,
-) {
-    create_threshold_mask(pixels, background, noise, threshold, output);
-
-    dilate_mask(output, dilation_radius, scratch);
+            |scratch, (bg_row, (y, noise_row))| interpolate(scratch, y, Some(bg_row), noise_row),
+        ),
+        None => noise_rows.for_each_init(
+            || interpolation.acquire(),
+            |scratch, (y, noise_row)| interpolate(scratch, y, None, noise_row),
+        ),
+    }
 }
 
 /// Interpolate an entire row using natural bicubic spline interpolation.
@@ -362,7 +398,6 @@ pub(crate) mod internals {
 
     use crate::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::star_detection::background::sky_noise::SkyNoise;
-    use crate::star_detection::resources::DetectionResources;
 
     impl BackgroundEstimate {
         /// `pixels` less this background: the residual the stages after the subtraction read.
@@ -376,12 +411,6 @@ pub(crate) mod internals {
                 *value -= sky;
             }
             residual
-        }
-
-        /// Return both planes to `pool` without subtracting them from anything.
-        pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
-            pool.release_f32(self.background);
-            pool.release_f32(self.noise);
         }
 
         /// This estimate's noise, as [`BackgroundEstimate::subtract_from`] hands it on.

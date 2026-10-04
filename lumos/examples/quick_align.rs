@@ -19,9 +19,9 @@
     reason = "an example reports to the terminal"
 )]
 
+use lumos::detection::StarDetector;
 use lumos::{
-    InterpolationMethod, LinearImage, LoadContext, RegistrationConfig, StarDetector, WarpParams,
-    register, warp,
+    InterpolationMethod, LinearImage, LoadContext, RegistrationConfig, WarpParams, register, warp,
 };
 use std::env;
 use std::path::Path;

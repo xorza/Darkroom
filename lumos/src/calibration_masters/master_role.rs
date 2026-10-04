@@ -55,9 +55,8 @@ impl MasterRole {
     /// frames. Each preset carries its own small-frame fallback (`StackConfig::small_n`).
     pub fn stack_config(self) -> StackConfig {
         match self {
-            Self::Dark | Self::FlatDark => StackConfig::dark(),
+            Self::Dark | Self::FlatDark | Self::Bias => StackConfig::bias_or_dark(),
             Self::Flat => StackConfig::flat(),
-            Self::Bias => StackConfig::bias(),
         }
     }
 }

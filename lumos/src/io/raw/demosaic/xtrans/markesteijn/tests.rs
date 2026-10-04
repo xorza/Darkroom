@@ -1,354 +1,275 @@
 use crate::internals::prelude::*;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::internals::{
-    make_xtrans, test_pattern, test_pattern_array, to_u16,
-};
+use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern};
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
-use crate::io::raw::demosaic::xtrans::markesteijn_steps::MARK_INFO_BORDER;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
-#[derive(Clone, Copy, Debug)]
-enum SyntheticScene {
-    ColorEdge,
-    Impulse,
-    Star,
-    ColorGrating,
-}
+const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasses::Three];
 
-#[derive(Debug)]
-struct GoldenSample {
-    pos: Vec2us,
-    rgb: [f32; 3],
-}
-
-#[derive(Debug)]
-struct GoldenCase {
-    scene: SyntheticScene,
-    samples: [GoldenSample; 4],
-}
-
-/// The regions tile the arena in the documented order — A 4P, E 8P, B 4P, C P, D P words — so
-/// each step's scratch is exactly the region its doc names, and the last ends where the arena does.
+/// The interior of every scene, at one pass and at three, is librtprocess's Markesteijn to the bit.
+///
+/// `internals/reference/markesteijn_librtprocess.py` builds librtprocess's `markesteijn.cc` at a
+/// pinned commit, on its scalar paths and with YPbPr at both pass counts, and prints each case's
+/// FNV-1a 64 digest of the output inside the pass count's border: the planes in order, then rows,
+/// then columns, each f32's little-endian bytes. The script changes two lines: the 2×2 green
+/// blocks take red and blue in all four of one pass's directions, not two, and one tile covers the
+/// frame, whose seams would differ from an untiled run. The 160×120 frame spans several of lumos's
+/// tiles, so their seams are in the digest. The scenes use only correctly rounded operations, so
+/// their samples are the same bits on every platform. The two pass counts give different digests,
+/// so the count reaches the output.
 #[test]
-fn arena_regions_tile_the_arena_in_order() {
-    let width = 5;
-    let height = 3;
-    let pixels = width * height;
-    let bytes_per_word = size_of::<f32>();
-    let mut arena = DemosaicArena::new(Size2us::new(width, height));
-    let arena_start = arena.storage.as_ptr() as usize;
-    let arena_end = arena_start + arena.storage.len() * bytes_per_word;
-
-    let regions = arena.regions();
-    let mut offset = 0;
-    for (name, region, words) in [
-        ("A", &*regions.a, 4),
-        ("E", &*regions.e, 8),
-        ("B", &*regions.b, 4),
-        ("C", &*regions.c, 1),
-        ("D", &*regions.d, 1),
-    ] {
-        assert_eq!(region.len(), words * pixels, "{name}");
-        assert_eq!(
-            region.as_ptr() as usize,
-            arena_start + offset * bytes_per_word,
-            "{name}"
-        );
-        offset += words * pixels;
-    }
-    assert_eq!(arena_start + offset * bytes_per_word, arena_end);
-}
-
-fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
-    const WIDTH: usize = 96;
-    const HEIGHT: usize = 96;
-
-    match scene {
-        SyntheticScene::ColorEdge => {
-            let left = [0.1, 0.3, 0.8];
-            let right = [0.9, 0.6, 0.2];
-            if pos.x < WIDTH / 2 {
+fn markesteijn_matches_librtprocess_bit_for_bit() {
+    /// A scene's sample of `channel` at `(x, y)`.
+    type Scene = fn(usize, usize, usize) -> f32;
+    const WIDTH: usize = 160;
+    const HEIGHT: usize = 120;
+    const DIGESTS: [[u64; 4]; 2] = [
+        [
+            0x6ce19c3e3aaefce5,
+            0xbe8c9f31a4aed927,
+            0x67eea713c538876b,
+            0x7a207fa29d1a84e5,
+        ],
+        [
+            0xb2fecff3b5416a2d,
+            0x949566b3f3644e3e,
+            0x261009dc275379eb,
+            0x9cefbe2bac38b375,
+        ],
+    ];
+    let scenes: [(&str, Scene); 4] = [
+        ("colour edge", |channel, x, _| {
+            let (left, right) = ([0.1, 0.3, 0.8], [0.9, 0.6, 0.2]);
+            if x < WIDTH / 2 {
                 left[channel]
             } else {
                 right[channel]
             }
-        }
-        SyntheticScene::Impulse => {
-            if pos.x == WIDTH / 2 && pos.y == HEIGHT / 2 {
+        }),
+        ("impulse", |channel, x, y| {
+            if x == WIDTH / 2 && y == HEIGHT / 2 {
                 [1.0, 0.7, 0.4][channel]
             } else {
                 0.05
             }
-        }
-        SyntheticScene::Star => {
-            let dx = pos.x as f32 - (WIDTH - 1) as f32 * 0.5;
-            let dy = pos.y as f32 - (HEIGHT - 1) as f32 * 0.5;
-            let sigma = [1.2_f32, 1.6, 2.0][channel];
-            let amplitude = [0.9_f32, 0.7, 0.5][channel];
-            0.02 + amplitude * (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp()
-        }
-        SyntheticScene::ColorGrating => {
-            let phase = [0.0_f32, 2.094_395_2, 4.188_790_3][channel];
-            0.5 + 0.4 * (0.47 * pos.x as f32 + 0.31 * pos.y as f32 + phase).sin()
-        }
-    }
-}
-
-#[test]
-#[expect(
-    clippy::excessive_precision,
-    reason = "the reference values are pasted as librtprocess printed them"
-)]
-fn markesteijn_matches_librtprocess_reference_scenes() {
-    const WIDTH: usize = 96;
-    const HEIGHT: usize = 96;
-    const TOLERANCE: f32 = 5e-6;
-    // These scalar golden values avoid librtprocess's SSE YPbPr coefficient-order bug.
-    let cases = [
-        GoldenCase {
-            scene: SyntheticScene::ColorEdge,
-            samples: [
-                GoldenSample {
-                    pos: Vec2us::new(47, 48),
-                    rgb: [0.099_999_994, 0.300_000_012, 0.800_000_012],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(48, 48),
-                    rgb: [0.899_999_976, 0.600_000_024, 0.199_999_988],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(49, 48),
-                    rgb: [0.899_999_976, 0.600_000_024, 0.200_000_018],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(50, 48),
-                    rgb: [0.899_999_976, 0.600_000_024, 0.199_999_988],
-                },
-            ],
-        },
-        GoldenCase {
-            scene: SyntheticScene::Impulse,
-            samples: [
-                GoldenSample {
-                    pos: Vec2us::new(48, 48),
-                    rgb: [0.552_734_375, 0.699_999_988, 0.552_734_375],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(48, 47),
-                    rgb: [0.050_000_000_7, 0.270_898_432, 0.270_898_432],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(47, 48),
-                    rgb: [0.270_898_432, 0.270_898_432, 0.050_000_000_7],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(49, 49),
-                    rgb: [0.050_000_004_5, 0.050_000_000_7, 0.050_000_004_5],
-                },
-            ],
-        },
-        GoldenCase {
-            scene: SyntheticScene::Star,
-            samples: [
-                GoldenSample {
-                    pos: Vec2us::new(47, 47),
-                    rgb: [0.653_244_376, 0.654_872_417, 0.588_915_467],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(50, 47),
-                    rgb: [0.110_830_717, 0.216_674_328, 0.257_652_014],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(47, 52),
-                    rgb: [0.029_506_173, 0.032_290_011_6, 0.058_555_860_1],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(48, 48),
-                    rgb: [0.673_444_748, 0.654_872_417, 0.579_427_004],
-                },
-            ],
-        },
-        GoldenCase {
-            scene: SyntheticScene::ColorGrating,
-            samples: [
-                GoldenSample {
-                    pos: Vec2us::new(31, 24),
-                    rgb: [0.405_019_253, 0.157_421_41, 0.712_104_738],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(48, 48),
-                    rgb: [0.447_177_649, 0.886_090_875, 0.324_239_552],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(65, 70),
-                    rgb: [0.694_080_234, 0.141_468_421, 0.456_137_031],
-                },
-                GoldenSample {
-                    pos: Vec2us::new(63, 32),
-                    rgb: [0.886_546_731, 0.217_050_105, 0.379_481_941],
-                },
-            ],
-        },
+        }),
+        ("star", |channel, x, y| {
+            let dx = x as f32 - (WIDTH - 1) as f32 * 0.5;
+            let dy = y as f32 - (HEIGHT - 1) as f32 * 0.5;
+            let width = [1.2f32, 1.6, 2.0][channel];
+            let amplitude = [0.9f32, 0.7, 0.5][channel];
+            0.02 + amplitude / (1.0 + (dx * dx + dy * dy) / (width * width))
+        }),
+        ("colour grating", |channel, x, y| {
+            let phase = [0.0f32, 0.333_333_34, 0.666_666_7][channel];
+            let t = 0.075 * x as f32 + 0.05 * y as f32 + phase;
+            0.1 + 1.6 * (t - t.floor() - 0.5).abs()
+        }),
     ];
-    let pattern = test_pattern_array();
-
-    for case in cases {
-        let mut data = vec![0.0; WIDTH * HEIGHT];
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let channel = pattern[y % 6][x % 6] as usize;
-                data[y * WIDTH + x] = synthetic_value(case.scene, channel, Vec2us::new(x, y));
+    let size = Size2us::new(WIDTH, HEIGHT);
+    let pattern = test_pattern();
+    for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
+        for ((name, scene), expected) in scenes.into_iter().zip(digests) {
+            let data: Vec<f32> = (0..size.pixel_count())
+                .map(|index| {
+                    let (x, y) = (index % WIDTH, index / WIDTH);
+                    scene(usize::from(pattern.color_at(Vec2us::new(x, y))), x, y)
+                })
+                .collect();
+            let planes = demosaic(
+                &XTransImage::new(&data, size, pattern),
+                passes,
+                &CancelToken::never(),
+            )
+            .unwrap();
+            let border = passes.border();
+            let mut digest = 0xcbf2_9ce4_8422_2325u64;
+            for plane in &planes {
+                for row in border..HEIGHT - border {
+                    let interior = &plane[row * WIDTH + border..(row + 1) * WIDTH - border];
+                    for byte in interior.iter().flat_map(|value| value.to_le_bytes()) {
+                        digest = (digest ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+                    }
+                }
             }
-        }
-        let size = Size2us::new(WIDTH, HEIGHT);
-        let xtrans =
-            XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
-        let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
-        for sample in case.samples {
-            let index = size.index_of(sample.pos);
-            for (channel, plane) in planes.iter().enumerate() {
-                let actual = plane[index];
-                let expected = sample.rgb[channel];
-                assert!(
-                    (actual - expected).abs() <= TOLERANCE,
-                    "{:?} ({}, {}) channel {}: {actual} != {expected}",
-                    case.scene,
-                    sample.pos.x,
-                    sample.pos.y,
-                    channel,
-                );
-            }
+            assert_eq!(digest, expected, "{name}, {passes:?}: {digest:#018x}");
         }
     }
 }
 
 /// A constant colour per channel — uniform grey and two distinct (R, G, B) — comes back as itself
-/// at every pixel, border included, with and without masked margins. Every stage averages or
-/// blends equal values, so each output is the input to a few f32 roundings: under 2e-7, where one
-/// rounding of a value below 1 is up to 6e-8.
+/// at every pixel, border included, at every frame size: 12 and 24 have no tile and are all border
+/// fill, 25 one tile cut short by the frame at one pass and none at three, 37 one at both, 130 two
+/// tiles each way. The output starts as
+/// zeros, so a pixel nobody writes fails. Every stage averages or blends equal values, so each
+/// output is the input to a few f32 roundings: under 2e-7, where one rounding of a value below 1 is
+/// up to 6e-8.
 #[test]
-fn constant_colour_reconstructs_to_rounding() {
-    let active = Size2us::new(36, 36);
+fn constant_colour_reconstructs_to_rounding_at_every_size() {
     let pattern = test_pattern();
-    for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
-        // Margins of 6 keep the 6×6 layout's phase at the raw origin.
-        for margin in [0, 6] {
-            let raw = Size2us::new(active.width + 2 * margin, active.height + 2 * margin);
-            let data: Vec<f32> = (0..raw.pixel_count())
-                .map(|index| colour[pattern.color_at(raw.point_of(index)) as usize])
+    for side in [12, 24, 25, 37, 130] {
+        let size = Size2us::new(side, side);
+        for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
+            let data: Vec<f32> = (0..size.pixel_count())
+                .map(|index| colour[usize::from(pattern.color_at(size.point_of(index)))])
                 .collect();
-            let layout = SensorLayout {
-                raw,
-                active,
-                margin: Vec2us::new(margin, margin),
-            };
-            let planes = demosaic(
-                &XTransImage::with_margins_f32(&data, layout, pattern),
-                &CancelToken::never(),
-            )
-            .unwrap();
-            for (channel, plane) in planes.iter().enumerate() {
-                for (index, &value) in plane.iter().enumerate() {
-                    assert_close!(
-                        value,
-                        colour[channel],
-                        2e-7,
-                        "{colour:?} margin {margin} channel {channel} at {index}: {value}"
-                    );
+            for passes in PASSES {
+                let planes = demosaic(
+                    &XTransImage::new(&data, size, pattern),
+                    passes,
+                    &CancelToken::never(),
+                )
+                .unwrap();
+                for (channel, plane) in planes.iter().enumerate() {
+                    for (index, &value) in plane.iter().enumerate() {
+                        assert_close!(
+                            value,
+                            colour[channel],
+                            2e-7,
+                            "{side}, {colour:?}, {passes:?}, channel {channel} at {index}: {value}"
+                        );
+                    }
                 }
             }
         }
     }
 }
 
+/// A ramp stays finite, and all zeros stay zero exactly: no stage divides by a sum of differences
+/// that a flat field makes zero.
 #[test]
-fn markesteijn_no_nan() {
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
-    let data: Vec<u16> = (0..raw_w * raw_h)
-        .map(|i| to_u16(i as f32 / (raw_w * raw_h) as f32))
+fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
+    let size = Size2us::new(40, 40);
+    let ramp: Vec<f32> = (0..size.pixel_count())
+        .map(|i| i as f32 / size.pixel_count() as f32)
         .collect();
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
-
-    for (i, &v) in planes.iter().flatten().enumerate() {
-        assert!(v.is_finite(), "NaN/Inf at pixel {i}");
+    let zeros = vec![0.0f32; size.pixel_count()];
+    for passes in PASSES {
+        let planes = demosaic(&make_xtrans(&ramp, size), passes, &CancelToken::never()).unwrap();
+        for (i, &v) in planes.iter().flatten().enumerate() {
+            assert!(v.is_finite(), "{passes:?}: {v} at {i}");
+        }
+        let planes = demosaic(&make_xtrans(&zeros, size), passes, &CancelToken::never()).unwrap();
+        for &v in planes.iter().flatten() {
+            assert_eq!(v.to_bits(), 0, "{passes:?}");
+        }
     }
 }
 
+/// Each pass count's margin is the least that keeps every pixel a tile writes clear of what its
+/// passes leave uncomputed.
+///
+/// The tile runs twice, with every channel no sample gives seeded at +1000 and at −1000: a cell
+/// whose colours differ reads, through some chain of stages, a value no stage computed. A pixel's
+/// output reads the colours of every direction within 4 of it — the second differences reach 1, the
+/// 3×3 homogeneity counts 1 more, their 5×5 sums 2 more — so a margin `m` holds when no such cell
+/// lies within 4 of the part `[m, M − m)` a tile of extent `M` writes. The reads repeat every three
+/// rows and columns, so three tiles, starting at each phase and cut short by the frame at each,
+/// meet every case at both edges. Random samples, so opposite colours take both of their axes
+/// often at every phase.
 #[test]
-fn markesteijn_all_zeros() {
-    let raw_w = 24;
-    let raw_h = 24;
-    let w = 12;
-    let h = 12;
-    let data = vec![0u16; raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
-    for &v in planes.iter().flatten() {
-        assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
+fn margin_is_the_least_that_reads_only_computed_colours() {
+    const POISON: f32 = 1000.0;
+    const READ_REACH: usize = 4;
+    let pattern = test_pattern();
+    let mut rng = TestRng::new(5);
+    for passes in PASSES {
+        let mut least = 0;
+        for phase in 0..3 {
+            let place = TilePlace {
+                top: 3 + phase,
+                left: 3 + phase,
+            };
+            let extent = Size2us::new(TILE - 1, TILE - 3);
+            let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
+            let data: Vec<f32> = (0..size.pixel_count())
+                .map(|_| 0.1 + 0.8 * rng.next_f32())
+                .collect();
+            let xtrans = XTransImage::new(&data, size, pattern);
+            let hex = HexTable::new(pattern, size.width);
+            let mut tile = Tile::new(passes.directions());
+            let high = tile
+                .interpolate_poisoned(&xtrans, &hex, place, passes.count(), POISON)
+                .to_vec();
+            let low = tile.interpolate_poisoned(&xtrans, &hex, place, passes.count(), -POISON);
+            let plane = TILE * TILE;
+            for (index, (a, b)) in high
+                .iter()
+                .zip(low)
+                .enumerate()
+                .take(passes.directions() * plane)
+            {
+                if a == b {
+                    continue;
+                }
+                let (row, col) = ((index % plane) / TILE, index % TILE);
+                // Below `row + READ_REACH + 1`, above `M − row + READ_REACH`, or likewise for the
+                // column, the written part keeps clear of the cell.
+                let clear = (row + READ_REACH + 1)
+                    .min((extent.height + READ_REACH).saturating_sub(row))
+                    .min(col + READ_REACH + 1)
+                    .min((extent.width + READ_REACH).saturating_sub(col));
+                least = least.max(clear);
+            }
+        }
+        assert_eq!(least, passes.margin(), "{passes:?}");
     }
 }
 
-/// From the border fill in, a frame demosaics bit for bit as the same pixels inside a larger
-/// frame: no stage reads a value it did not compute from the frame's own samples. Random samples,
-/// so no stencil can hide behind equal neighbours; an offset of 12 keeps the 6×6 layout's phase.
+/// Inside its border, every frame demosaics bit for bit as the same pixels inside a larger frame,
+/// though its tiles lie elsewhere on the pixels: the tiles cover the frame, no two write a pixel,
+/// and a seam changes nothing. The crops start at three offsets, with the 6×6 layout shifted to
+/// match, and their sizes vary, so the tiles' edges and the frame's meet each phase of the reads.
+/// Random samples, so no stencil can hide behind equal neighbours.
 #[test]
-fn markesteijn_beyond_the_border_matches_a_larger_frame() {
-    let large = Size2us::new(96, 96);
-    let offset = 12;
+fn markesteijn_inside_the_border_matches_a_larger_frame() {
+    let large = Size2us::new(152, 144);
     let mut rng = TestRng::new(7);
     let samples: Vec<f32> = (0..large.pixel_count())
         .map(|_| 0.1 + 0.8 * rng.next_f32())
         .collect();
-    let small = Size2us::new(60, 60);
-    let crop: Vec<f32> = (0..small.pixel_count())
-        .map(|index| {
-            let pos = small.point_of(index);
-            samples[large.index_of(Vec2us::new(pos.x + offset, pos.y + offset))]
-        })
-        .collect();
-    let run = |data: &[f32], size| {
-        let xtrans =
-            XTransImage::with_margins_f32(data, SensorLayout::cropped(size), test_pattern());
-        demosaic(&xtrans, &CancelToken::never()).unwrap()
-    };
-    let whole = run(&samples, large);
-    let part = run(&crop, small);
-    for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
-        for (index, value) in part_plane.iter().enumerate() {
-            let pos = small.point_of(index);
-            let distance = pos
-                .x
-                .min(pos.y)
-                .min(small.width - 1 - pos.x)
-                .min(small.height - 1 - pos.y);
-            if distance < MARK_INFO_BORDER {
-                continue;
+    let rows = *test_pattern().rows();
+    for passes in PASSES {
+        let whole = demosaic(
+            &XTransImage::new(&samples, large, test_pattern()),
+            passes,
+            &CancelToken::never(),
+        )
+        .unwrap();
+        for (ox, oy) in [(12, 12), (13, 14), (14, 13)] {
+            let small = Size2us::new(128 + (ox + 2 * oy) % 3, 120 + (2 * ox + oy) % 3);
+            let mut shifted = [[0u8; 6]; 6];
+            for (y, row) in shifted.iter_mut().enumerate() {
+                for (x, colour) in row.iter_mut().enumerate() {
+                    *colour = rows[(y + oy) % 6][(x + ox) % 6];
+                }
             }
-            let outer = large.index_of(Vec2us::new(pos.x + offset, pos.y + offset));
-            assert_eq!(
-                value.to_bits(),
-                whole_plane[outer].to_bits(),
-                "channel {channel} at {pos:?}"
-            );
+            let crop: Vec<f32> = (0..small.pixel_count())
+                .map(|index| {
+                    let pos = small.point_of(index);
+                    samples[large.index_of(Vec2us::new(pos.x + ox, pos.y + oy))]
+                })
+                .collect();
+            let pattern = XTransPattern::new(shifted).unwrap();
+            let part = demosaic(
+                &XTransImage::new(&crop, small, pattern),
+                passes,
+                &CancelToken::never(),
+            )
+            .unwrap();
+            let border = passes.border();
+            for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
+                for y in border..small.height - border {
+                    for x in border..small.width - border {
+                        let value = part_plane[small.index_of(Vec2us::new(x, y))];
+                        let outer = whole_plane[large.index_of(Vec2us::new(x + ox, y + oy))];
+                        assert_eq!(
+                            value.to_bits(),
+                            outer.to_bits(),
+                            "{passes:?}, offset ({ox}, {oy}), channel {channel} at ({x}, {y})"
+                        );
+                    }
+                }
+            }
         }
     }
 }

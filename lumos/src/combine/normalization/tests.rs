@@ -5,10 +5,12 @@ use crate::combine::rejection::Rejection;
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::frame_quality::FrameQuality;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
-use crate::progress::ProgressCallback;
+use crate::math::statistics::mad_to_sigma;
+use crate::progress::progress_callback::ProgressCallback;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
@@ -17,11 +19,15 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
             .iter()
             .map(|&(median, mad)| MedianMad { median, mad })
             .collect(),
+        noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
+        sky: channels.iter().map(|&(median, _)| median).collect(),
         quantization_sigma: None,
+        electrons_per_unit: None,
         facts: FrameFacts {
             domain: None,
             row_order: None,
             cfa_type: None,
+            saturation_flagged: false,
         },
     }
 }
@@ -68,28 +74,61 @@ fn affine_rgb_frames(mads: [f32; 3]) -> Vec<StoredFrame> {
         .collect()
 }
 
+/// The reference is the frame of the lowest mean noise variance over its channels, in the shared
+/// domain. The fixtures' noise is 1.4826 × the stated MAD.
+/// - One channel, MADs 2, 0.5, 1: frame 1.
+/// - RGB, MADs (1, 1, 5) against (2, 2, 2): mean variances 27/3 = 9 and 4, so frame 1, although
+///   frame 0 is quieter in two channels.
+/// - Equal noise at different levels: the first.
+/// - MADs 2 and 1, the second frame's units 4 of the first's: in the shared domain its σ is 4,
+///   above 2, so frame 0; compared raw, frame 1 would win.
 #[test]
-fn reference_selection_uses_lowest_average_channel_noise() {
-    let single_channel = [
+fn reference_selection_uses_lowest_channel_noise_in_one_domain() {
+    let select = |stats: Vec<FrameStats>, gains: &[f64]| {
+        let frames: Vec<StoredFrame> = stats
+            .into_iter()
+            .map(|stats| {
+                let channels = stats.channels.len();
+                StoredFrame::from_memory(
+                    LinearImage::from_pixels(
+                        ImageDimensions::new((1, 1), channels),
+                        vec![0.0; channels],
+                    ),
+                    FrameQuality::None,
+                    stats,
+                )
+            })
+            .collect();
+        let maps: Vec<DomainMap> = gains
+            .iter()
+            .map(|&gain| DomainMap { gain, offset: 0.0 })
+            .collect();
+        select_reference_frame(&frames, &maps)
+    };
+    let single_channel = vec![
         frame_stats(100.0, 2.0),
         frame_stats(100.0, 0.5),
         frame_stats(100.0, 1.0),
     ];
-    assert_eq!(select_reference_frame(single_channel.iter()), 1);
+    assert_eq!(select(single_channel, &[1.0; 3]), 1);
 
-    let rgb = [
+    let rgb = vec![
         channel_stats(&[(100.0, 1.0), (100.0, 1.0), (100.0, 5.0)]),
         channel_stats(&[(100.0, 2.0); 3]),
     ];
-    assert_eq!(select_reference_frame(rgb.iter()), 1);
+    assert_eq!(select(rgb, &[1.0; 2]), 1);
 
-    assert_eq!(select_reference_frame([frame_stats(50.0, 3.0)].iter()), 0);
-    let equal = [
+    assert_eq!(select(vec![frame_stats(50.0, 3.0)], &[1.0]), 0);
+    let equal = vec![
         frame_stats(100.0, 1.5),
         frame_stats(200.0, 1.5),
         frame_stats(300.0, 1.5),
     ];
-    assert_eq!(select_reference_frame(equal.iter()), 0);
+    assert_eq!(select(equal, &[1.0; 3]), 0);
+
+    let scaled = vec![frame_stats(100.0, 2.0), frame_stats(100.0, 1.0)];
+    assert_eq!(select(scaled.clone(), &[1.0, 4.0]), 0);
+    assert_eq!(select(scaled, &[1.0, 1.0]), 1);
 }
 
 /// A noiseless line `2x + 5` with one pair thrown far off it: the window drops that pair and the
@@ -138,6 +177,51 @@ fn deming_gain_weighs_each_sides_noise() {
     assert_eq!(gain(0.0, 0.0), gain(1.0, 1.0));
 }
 
+/// Pairs that fall where the frame rises carry no positive covariance, and the Deming fit cannot
+/// move the gain: it stays at the seed. Frame [8, 9, 10, 11, 12] against reference
+/// [15, 12, 10, 9, 5]: too few pairs to seed from stars, so the seed is the ratio of the MADs, 2/1.
+/// Off it the residuals are 9, 4, 0, −3, −9, MAD 4, so the 4σ window admits all five, whose
+/// covariance is negative. The old fallback replaced the seed with unit gain.
+#[test]
+fn a_fit_without_positive_covariance_keeps_the_seed() {
+    let frame = [8.0, 9.0, 10.0, 11.0, 12.0];
+    let reference = [15.0, 12.0, 10.0, 9.0, 5.0];
+    let cancel = CancelToken::never();
+    let reference_stats = sample_stats(&reference, &cancel).unwrap();
+    let gain =
+        paired_photometric_gain(&frame, &reference, reference_stats, 1.0, 1.0, &cancel).unwrap();
+    assert_eq!(gain, 2.0);
+}
+
+/// A multiplicative normalization divides by each frame's median, so a frame at a median of 0 is
+/// refused, by index and channel, rather than combined at unit gain. Uniform frames tie for the
+/// reference, which frame 0 takes.
+#[test]
+fn a_multiplicative_norm_refuses_a_non_positive_median() {
+    let cache = FrameCache::from_images(
+        [1.0, 0.0]
+            .map(|level| {
+                LinearImage::from_pixels(ImageDimensions::new((16, 1), 1), vec![level; 16])
+            })
+            .to_vec(),
+        Normalization::None,
+    );
+    let result = FrameNorm::measure(
+        &cache.frames,
+        cache.core.dimensions,
+        Normalization::Multiplicative,
+        &CancelToken::never(),
+    );
+    assert!(matches!(
+        result,
+        Err(StackError::NonPositiveMedian {
+            index: 1,
+            channel: 0,
+            median: 0.0
+        })
+    ));
+}
+
 /// The norms of whole frames, measured as the cache measures them, as `(gain, offset)` per frame
 /// and channel.
 fn norms(images: Vec<LinearImage>, normalization: Normalization) -> Vec<(f32, f32)> {
@@ -168,9 +252,10 @@ fn norms(images: Vec<LinearImage>, normalization: Normalization) -> Vec<(f32, f3
 /// - Two 4×4 ramps 100 + i and 200 + i have the same MAD, 4, so the seed is 1 and every residual
 ///   is 0: gain 1, offset −100.
 /// - Ramps 80 + i/2, 198 + i/16 and 140 + i/8 over 100 pixels are dyadic, so every step is exact.
-///   Their MADs are 25 steps, 12.5, 1.5625 and 3.125, so frame 1 is the reference, and the seeds
-///   1.5625/12.5 = 1/8 and 1.5625/3.125 = 1/2 leave every residual 0. The offsets put the medians
-///   104.75, 201.09375 and 146.1875 together: 201.09375 − 104.75/8 = 188, and − 146.1875/2 = 128.
+///   A ramp has no white noise, so the three tie for the reference and frame 0 takes it. Their
+///   MADs are 25 steps, 12.5, 1.5625 and 3.125, so the seeds 12.5/1.5625 = 8 and 12.5/3.125 = 4
+///   leave every residual 0. The offsets put the medians 104.75, 201.09375 and 146.1875 together:
+///   104.75 − 8·201.09375 = −1504, and 104.75 − 4·146.1875 = −480.
 /// - Multiplicative never shifts, whatever the frames.
 #[test]
 fn frames_related_exactly_normalize_exactly() {
@@ -219,7 +304,7 @@ fn frames_related_exactly_normalize_exactly() {
     };
     assert_eq!(
         norms(dyadic(), Normalization::Global),
-        [(0.125, 188.0), (1.0, 0.0), (0.5, 128.0)]
+        [(1.0, 0.0), (8.0, -1504.0), (4.0, -480.0)]
     );
     assert!(
         norms(dyadic(), Normalization::Multiplicative)
@@ -334,7 +419,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     let dimensions = ImageDimensions::new((5, 1), 3);
     let frames = affine_rgb_frames([3.0, 2.0, 1.0]);
     assert_eq!(
-        select_reference_frame(frames.iter().map(|frame| &frame.source_stats)),
+        select_reference_frame(&frames, &[DomainMap::IDENTITY; 3]),
         2,
         "the fixture must not select frame 0, or it proves nothing"
     );
@@ -416,7 +501,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     cancel.cancel();
     let error =
         FrameNorm::measure(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
-    assert!(matches!(error, Error::Cancelled));
+    assert!(matches!(error, StackError::Cancelled));
 }
 
 /// A star field seen through three frames of known gain, offset and noise: `x_k = (truth −

@@ -1,115 +1,93 @@
 //! Per-thread working buffers the rejection methods refill for every pixel.
 
-/// Working buffers for [`ScratchBuffers::sort_with_indices`]' large-N path, which sorts a
-/// permutation rather than moving values and so needs a copy of each input beside it.
-#[derive(Debug, Default)]
-pub(crate) struct SortScratch {
-    /// The value copy it permutes from.
-    pub(crate) values: Vec<f32>,
-    /// The position permutation it sorts.
-    pub(crate) permutation: Vec<usize>,
-    /// The frame-index copy it permutes from.
-    pub(crate) indices: Vec<usize>,
-}
+use std::ops::Range;
 
-/// Working state for the GESD test: the per-iteration statistics, the critical values they are
-/// compared against, and the shape those critical values were computed for — a pixel with the
-/// same sample count and alpha reuses them instead of recomputing the whole ladder.
+use statrs::distribution::{ContinuousCDF, StudentsT};
+
+use crate::combine::rejection::normal_scores::NormalScores;
+use crate::combine::rejection::sorted_samples::SortedSamples;
+
+/// Working state for the GESD test: each removal's statistic, and the critical values by the count
+/// of samples a removal is made from.
+///
+/// A critical value depends only on that count and alpha, not on the pixel, so one table serves
+/// every pixel of a run whatever its coverage. Entries are NaN until a pixel needs them.
 #[derive(Debug, Default)]
 pub(crate) struct GesdScratch {
     pub(crate) statistics: Vec<f64>,
-    pub(crate) critical_values: Vec<f64>,
-    pub(crate) sample_count: usize,
-    pub(crate) alpha_bits: u32,
+    critical_values: Vec<f64>,
+    alpha: f32,
 }
 
-/// Per-thread scratch buffers for stacking combine closures.
-///
-/// Leased from a [`JobScratchPool`](crate::concurrency::JobScratchPool) per job and reused
-/// across all of its pixels.
-///
-/// One lease carries every rejection method's working set, because the pool hands out one object
-/// and the method is chosen per pixel. Grouping each method's buffers into its own field keeps
-/// that visible: only `indices` and `estimate_values` are shared, and a reader can see at a glance
-/// which fields a given method touches.
+impl GesdScratch {
+    /// Forget the critical values when alpha changed.
+    pub(crate) fn prepare(&mut self, alpha: f32) {
+        if self.alpha.to_bits() != alpha.to_bits() {
+            self.critical_values.clear();
+            self.alpha = alpha;
+        }
+    }
+
+    /// Rosner's critical value for a removal from `live ≥ 3` samples:
+    /// `λ = (L − 1)·t / √((L − 2 + t²)·L)`, with `t` the `1 − α/(2L)` quantile of Student's t at
+    /// `L − 2` degrees of freedom. At an α no t quantile resolves, t is infinite and λ is its limit
+    /// `(L − 1)/√L`.
+    pub(crate) fn critical_value(&mut self, live: usize) -> f64 {
+        debug_assert!(live >= 3);
+        if self.critical_values.len() <= live {
+            self.critical_values.resize(live + 1, f64::NAN);
+        }
+        if self.critical_values[live].is_nan() {
+            let count = live as f64;
+            let probability = 1.0 - f64::from(self.alpha) / (2.0 * count);
+            let t = StudentsT::new(0.0, 1.0, count - 2.0)
+                .expect("three samples leave one degree of freedom")
+                .inverse_cdf(probability);
+            self.critical_values[live] =
+                (count - 1.0) / (count * (1.0 + (count - 2.0) / (t * t))).sqrt();
+        }
+        self.critical_values[live]
+    }
+}
+
+/// The buffers a rejection method works in while the driver holds the sorted samples.
 #[derive(Debug, Default)]
-pub(crate) struct ScratchBuffers {
-    /// Tracks original frame indices after rejection reordering.
-    pub(crate) indices: Vec<usize>,
-    /// Values copied out for a robust centre/spread estimate, leaving the originals untouched.
-    pub(crate) estimate_values: Vec<f32>,
-    pub(crate) sort: SortScratch,
+pub(crate) struct MethodScratch {
+    /// The winsorized estimate's clamped copy of the window.
+    pub(crate) clamped: Vec<f32>,
+    pub(crate) scores: NormalScores,
     pub(crate) gesd: GesdScratch,
 }
 
+/// Per-thread scratch buffers for the combine.
+///
+/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) per job and reused across
+/// all of its pixels, so after the first pixel nothing here allocates.
+#[derive(Debug, Default)]
+pub(crate) struct ScratchBuffers {
+    pub(crate) sorted: SortedSamples,
+    /// The survivors' weights, in sorted order, for the weighted mean.
+    pub(crate) weights: Vec<f32>,
+    /// The last pixel's survivors as a window of `sorted`, or `None` when every sample survived
+    /// without a sort.
+    pub(crate) survivors: Option<Range<usize>>,
+    pub(crate) methods: MethodScratch,
+}
+
 impl ScratchBuffers {
-    /// Reserve room for `frame_count` samples. The rejection methods clear and refill these per
-    /// pixel, so only capacity carries over — a lease reused from the pool is already big enough
-    /// and every call after the first is a no-op.
+    /// Reserve room for `frame_count` samples, so the per-pixel refills never allocate.
     pub(crate) fn reserve(&mut self, frame_count: usize) {
-        self.indices.reserve(frame_count);
-        self.estimate_values.reserve(frame_count);
-        self.sort.values.reserve(frame_count);
-        self.sort.permutation.reserve(frame_count);
-        self.sort.indices.reserve(frame_count);
-        // A quarter because that is GESD's automatic outlier ceiling before its cap:
-        // `GesdConfig::max_outliers_for_size` is `(n / 4).min(2 or 10)`, so one entry per tested
-        // candidate never exceeds this. An explicit `max_outliers` above it simply grows these on
-        // first use — `reserve` is a hint, and these buffers are refilled per pixel regardless.
-        self.gesd.statistics.reserve(frame_count / 4);
-        self.gesd.critical_values.reserve(frame_count / 4);
+        self.sorted.reserve(frame_count);
+        self.weights.reserve(frame_count);
+        self.methods.clamped.reserve(frame_count);
+        self.methods.gesd.statistics.reserve(frame_count);
     }
 
-    /// Restart `indices` as the identity permutation over `n` frames, which is what every
-    /// rejection pass starts from before it reorders survivors to the front.
-    pub(crate) fn reset_indices(&mut self, n: usize) {
-        self.indices.clear();
-        self.indices.extend(0..n);
-    }
-
-    /// Sort `values[..n]` and `self.indices[..n]` together by value.
-    ///
-    /// Insertion sort for small N (optimal for typical 10–50 frame stacks) and introsort via
-    /// `sort_unstable_by` for large N to avoid O(N^2). [`SortScratch`] exists for the large-N
-    /// branch alone; it lives on the struct rather than in the function so the allocation survives
-    /// from one pixel to the next.
-    pub(crate) fn sort_with_indices(&mut self, values: &mut [f32], n: usize) {
-        const INSERTION_SORT_THRESHOLD: usize = 64;
-
-        let Self {
-            indices,
-            sort:
-                SortScratch {
-                    values: sort_values,
-                    permutation: sort_permutation,
-                    indices: sort_indices,
-                },
-            ..
-        } = self;
-
-        if n <= INSERTION_SORT_THRESHOLD {
-            for i in 1..n {
-                let mut j = i;
-                while j > 0 && values[j - 1] > values[j] {
-                    values.swap(j - 1, j);
-                    indices.swap(j - 1, j);
-                    j -= 1;
-                }
-            }
-        } else {
-            // Build position permutation, sort by values, apply to both arrays.
-            sort_permutation.clear();
-            sort_permutation.extend(0..n);
-            sort_permutation.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
-
-            sort_values.clear();
-            sort_values.extend_from_slice(&values[..n]);
-            sort_indices.clear();
-            sort_indices.extend_from_slice(&indices[..n]);
-            for (dst, &src) in sort_permutation.iter().enumerate() {
-                values[dst] = sort_values[src];
-                indices[dst] = sort_indices[src];
-            }
-        }
+    /// The gather positions of the last pixel's survivors, or `None` when all of its samples
+    /// survived.
+    pub(crate) fn survivor_positions(&self) -> Option<&[u32]> {
+        self.survivors
+            .clone()
+            .map(|window| &self.sorted.positions()[window])
     }
 }
