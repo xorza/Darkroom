@@ -228,10 +228,9 @@ mod tests {
     use crate::star_detection::detector::*;
     use crate::star_detection::tests::{Placement, Scenario};
 
-    /// Review item 9.1. A Gaussian star of FWHM 2 keeps all its flux on a demosaiced frame: the
+    /// A Gaussian star of FWHM 2 keeps all its flux on a demosaiced frame: the
     /// detection plane takes the 3×3 median there, and measurement reads the plane no filter
     /// touched, so the frame read as demosaiced and as measured gives the same star, bit for bit.
-    /// The median used to keep 56% of it.
     ///
     /// Amplitude 1 on a sky of 0.1, the same in all three channels with a noise of 0.001. The flux
     /// is the rendered star's sum, 4.53, plus the noise over the 15 × 15 stamp of FWHM 4,

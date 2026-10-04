@@ -699,7 +699,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     ));
 }
 
-/// A pixel the source holds no measurement for deposits nothing (review item 8.1). The last
+/// A pixel the source holds no measurement for deposits nothing. The last
 /// column of a 6 × 4 frame is null, with a fill of 5.0 under it. Drizzled at scale 1 with a
 /// whole-pixel square drop on the identity, every other output pixel is exactly its 1.0, and the
 /// last column takes the fill value with no weight. Before, the 5.0 deposited at full weight.

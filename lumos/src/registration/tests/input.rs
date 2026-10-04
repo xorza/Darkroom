@@ -103,7 +103,7 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
     }
 }
 
-/// Review item 11.10: every float a star carries is checked, in both catalogs.
+/// Every float a star carries is checked, in both catalogs.
 #[test]
 fn register_rejects_non_finite_fields_in_both_catalogs() {
     for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {

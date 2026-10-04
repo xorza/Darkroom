@@ -339,7 +339,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     }
 }
 
-/// Review item 4.4. A dark that kept its pedestal of 2048 ADU on a 65536 span, applied to a RAW
+/// A dark that kept its pedestal of 2048 ADU on a 65536 span, applied to a RAW
 /// light with the black removed on a 16384 span: the map is gain 4 and offset −2048/16384 = −0.125,
 /// so a dark holding only the pedestal, 2048/65536 = 0.03125, maps to 4 × 0.03125 − 0.125 = 0 and
 /// leaves the light as it was. Before, the scale alone was applied, and the light lost 0.125.
@@ -540,7 +540,7 @@ fn new_constructor() {
             .components()
             .map(|component| component.to_string())
             .collect::<Vec<_>>(),
-        // The flat-dark is spent on the flat and not kept (review 26.1).
+        // The flat-dark is spent on the flat and not kept.
         vec!["dark", "flat", "bias", "defects"]
     );
     assert_eq!(
@@ -845,6 +845,11 @@ fn defect_detection_zero_median_no_false_positives() {
 /// 0.5 − 0.0625 = 0.4375 if every neighbour it took the median of was red — a green or blue one
 /// would pull it toward 0.2375 or 0.1375. The hot light pixel reads 0.9, under the saturation level,
 /// so the repair is the one flag it gets.
+///
+/// Neither repair reads a pixel with no measurement. With the four nearest of the hot pixel's eight
+/// red neighbours null in the light, each filled with 0.9, a median over all eight would be
+/// (0.4375 + 0.8375)/2 = 0.6375; over the four measured ones it is 0.4375. Each null is then
+/// repaired from its own measured reds, the repaired hot pixel left out: 0.4375 too.
 #[test]
 fn calibrate_hot_pixel_correction() {
     let (w, h) = (6, 6);
@@ -872,7 +877,7 @@ fn calibrate_hot_pixel_correction() {
         }
     }
     light_pixels[(2, 2)] = 0.9;
-    let mut light = cfa_from_plane(light_pixels, pattern);
+    let mut light = cfa_from_plane(light_pixels.clone(), pattern);
     masters.calibrate(&mut light).unwrap();
     assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
     // The repaired pixel says so, and no other does.
@@ -882,6 +887,24 @@ fn calibrate_hot_pixel_correction() {
         flags.at_pos(Vec2us::new(2, 2)),
         QualityFlags::DEFECT.union(QualityFlags::REPAIRED)
     );
+
+    let nulls = [(0, 2), (4, 2), (2, 0), (2, 4)].map(|(x, y)| y * w + x);
+    for &index in &nulls {
+        light_pixels.pixels_mut()[index] = 0.9;
+    }
+    let mut light = cfa_from_plane(light_pixels, pattern);
+    light.flags = PixelFlags::from_fn(Size2us::new(w, h), |index| {
+        if nulls.contains(&index) {
+            QualityFlags::NO_DATA
+        } else {
+            QualityFlags::default()
+        }
+    });
+    masters.calibrate(&mut light).unwrap();
+    assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
+    for index in nulls {
+        assert_eq!(light.data[index], 0.5 - 0.0625, "null at {index}");
+    }
 }
 
 #[test]
@@ -1221,8 +1244,8 @@ fn with_pedestal(mut frame: CfaImage, pedestal: Pedestal) -> CfaImage {
     frame
 }
 
-/// A flat or a light that may still hold an offset is never divided without a subtractor
-/// (review 4.2): `(S + b)/flat` puts the offset under the vignetting. A flat whose pedestal the
+/// A flat or a light that may still hold an offset is never divided without a subtractor:
+/// `(S + b)/flat` puts the offset under the vignetting. A flat whose pedestal the
 /// decoder removed, as a RAW decode does, needs none; one that kept it or does not say is refused.
 /// The light's rule is the same, once the bundle holds a flat and no bias or dark that holds the
 /// offset: a dark marked calibrated lost its bias when it was stacked, and removes none. A bias or
@@ -1352,7 +1375,7 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
     assert_eq!(saturated(&decoded), [] as [usize; 0]);
 }
 
-/// A dark is matched to the light (review 4.3). Lights of 300 s at 0.5, a bias of 0.125 and a dark
+/// A dark is matched to the light. Lights of 300 s at 0.5, a bias of 0.125 and a dark
 /// of 120 s holding the bias and a thermal signal of 0.0625.
 /// - Without the bias the dark cannot be separated, and is refused.
 /// - With it, the dark keeps 0.0625 of thermal signal, scaled by 300/120 = 2.5 to 0.15625: the
@@ -1462,7 +1485,7 @@ fn a_dark_is_matched_to_the_light() {
     }
 }
 
-/// Each flat takes its bias before the flats are normalized and combined (review 4.1). Two 8 × 8
+/// Each flat takes its bias before the flats are normalized and combined. Two 8 × 8
 /// flats of a field `f` that is 1 everywhere but 0.5 at the four corners, at 0.5·f and 0.25·f, both
 /// on an offset of 1/32, with that offset as the bias.
 /// - Subtracted per frame they are 0.5·f and 0.25·f; the second's median 0.25 against the first's

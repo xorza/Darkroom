@@ -1,8 +1,10 @@
 //! [`CacheKey`]: what a kept frame cache was decoded from and how, so a later run reuses only planes
 //! it would have decoded the same way.
 
-use common::FileIdentity;
+use common::{FileIdentity, SerdeFormat};
 use serde::{Deserialize, Serialize};
+
+use crate::io::image::load_context::LoadContext;
 
 /// Which decoder produced a cached frame's planes.
 ///
@@ -27,8 +29,9 @@ impl DecoderKind {
     }
 }
 
-/// The digest the characterization tests pin for each decode a frame cache can hold — see
-/// `internals::characterization`. They are bit patterns of an `x86_64` AVX2/FMA host.
+/// The digest the characterization tests pin for each decode a frame cache can hold, and for the
+/// statistics it keeps beside the planes — see `internals::characterization`. They are bit
+/// patterns of an `x86_64` AVX2/FMA host.
 #[derive(Debug)]
 pub(crate) struct DecodePins {
     /// [`LinearImage::from_file`](crate::LinearImage::from_file) on a FITS image.
@@ -40,6 +43,13 @@ pub(crate) struct DecodePins {
     /// [`CfaImage::from_file`](crate::CfaImage::from_file) on a camera RAW, pinned on the
     /// `real-data` dataset and checked only with that feature.
     pub(crate) raw_cfa: &'static str,
+    /// [`CfaImage::demosaic`](crate::CfaImage), which
+    /// [`LinearImage::from_file`](crate::LinearImage::from_file) runs on a camera RAW and on a
+    /// mosaic FITS, of a calibrated Bayer light and of an X-Trans one at each pass count.
+    pub(crate) demosaic: &'static str,
+    /// `FrameStats::measure`, which a kept frame is committed with, on a mono, a mosaic and a
+    /// demosaiced frame.
+    pub(crate) frame_stats: &'static str,
 }
 
 pub(crate) const DECODE_PINS: DecodePins = DecodePins {
@@ -47,6 +57,8 @@ pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     float_tiff: "029c2cc11944e24e",
     fits_cfa: "ab330c08a5153ba9",
     raw_cfa: "b6144af28244502b",
+    demosaic: "355d39076b12df81",
+    frame_stats: "612f3781e4aad045",
 };
 
 /// The decode version every cache key carries: derived from [`DECODE_PINS`], not bumped by hand.
@@ -57,6 +69,8 @@ pub(crate) const DECODE_VERSION: u64 = pins_fingerprint(&[
     DECODE_PINS.float_tiff,
     DECODE_PINS.fits_cfa,
     DECODE_PINS.raw_cfa,
+    DECODE_PINS.demosaic,
+    DECODE_PINS.frame_stats,
 ]);
 
 /// FNV-1a 64's starting state.
@@ -89,21 +103,32 @@ pub(crate) const fn pins_fingerprint(pins: &[&str]) -> u64 {
 ///
 /// The cache file names come from the source's canonical path and the [`DecoderKind`]; this is the
 /// record beside them that says whether the planes under those names are still the ones a decode
-/// now would give. The stacking load always decodes with the default FITS options, so the options
-/// are not part of the key.
+/// now would give: from the same file, by the same decoder at the same version, under the same
+/// options — another HDU, null policy, float scale or X-Trans pass count decodes other planes from
+/// the same bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKey {
     pub(crate) source: FileIdentity,
     pub(crate) decoder: DecoderKind,
     pub(crate) decode_version: u64,
+    /// FNV-1a of the decode options of the [`LoadContext`], as bitcode.
+    pub(crate) options: u64,
 }
 
 impl CacheKey {
-    pub(crate) const fn new(source: FileIdentity, decoder: DecoderKind) -> Self {
+    pub(crate) fn new(source: FileIdentity, decoder: DecoderKind, context: &LoadContext) -> Self {
+        // Every field of the options, the checksum policy too: a frame cached without a check
+        // would otherwise pass for one that a required checksum admitted.
+        let options = common::serialize(
+            &(&context.fits, context.xtrans_passes),
+            SerdeFormat::Bitcode,
+        )
+        .expect("decode options of plain enums and scalars always serialize");
         Self {
             source,
             decoder,
             decode_version: DECODE_VERSION,
+            options: fnv1a(FNV1A_OFFSET, &options),
         }
     }
 }

@@ -29,6 +29,7 @@ mod tile;
 
 use common::CancelToken;
 use rayon::prelude::*;
+use serde::Serialize;
 
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::cancelled::Cancelled;
@@ -46,7 +47,7 @@ const TILE: usize = 96;
 
 /// How many passes the X-Trans demosaic makes: four directions, or eight with the green computed
 /// again from nearer pixels — LibRaw's default and RawTherapee's best, at about twice the time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub enum MarkesteijnPasses {
     #[default]
     One,

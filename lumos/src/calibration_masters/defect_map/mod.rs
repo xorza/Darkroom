@@ -224,9 +224,9 @@ impl DefectMap {
     }
 
     /// Correct defective pixels on raw CFA data by replacing with median of
-    /// same-color CFA neighbors, and flag them [`QualityFlags::DEFECT`] and [`QualityFlags::REPAIRED`]: the value
-    /// left there is the neighbours', and a combine with other frames at that pixel can leave it
-    /// out.
+    /// same-color CFA neighbors, and flag them [`QualityFlags::DEFECT`] and
+    /// [`QualityFlags::REPAIRED`]: the value left there is the neighbours', and a combine with
+    /// other frames at that pixel can leave it out.
     ///
     /// # Panics
     ///
@@ -236,17 +236,28 @@ impl DefectMap {
         if self.count == 0 {
             return;
         }
-        // Every defect is masked, so each repair draws only on good neighbours: a clustered
-        // defect (hot column, adjacent same-color pixels) cannot pull a bad or half-corrected
-        // value into a neighbour's median, and the order of the lists does not matter. A pixel
-        // in both lists is repaired twice to the same value.
+        // Every defect is masked, and every pixel that holds no measurement, so each repair draws
+        // only on measured neighbours: a clustered defect (hot column, adjacent same-color pixels)
+        // cannot pull a bad or half-corrected value into a neighbour's median, a fill cannot pass
+        // for a measurement, and the order of the lists does not matter. A pixel in both lists is
+        // repaired twice to the same value.
+        let with_nulls = image
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
+            .map(|flags| {
+                let mut mask = flags.mask_of(QualityFlags::NO_DATA);
+                mask.or_with(&self.mask);
+                mask
+            });
+        let mask = with_nulls.as_ref().unwrap_or(&self.mask);
         let lattice = CfaLattice::new(&image.cfa_type);
         let mut scratch = Gathered::default();
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             image.data[idx] = lattice.median(
                 &image.data,
                 self.dimensions.point_of(idx),
-                Some(&self.mask),
+                Some(mask),
                 &mut scratch,
             );
         }

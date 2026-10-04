@@ -474,7 +474,7 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 }
 
 /// A faint hit on a steep sky gradient is caught: the noise is each pixel's local σ about the
-/// mesh's tile planes, which the gradient does not inflate (review 6.5). A 128 × 128 mono frame
+/// mesh's tile planes, which the gradient does not inflate. A 128 × 128 mono frame
 /// with the sky rising from 0.05 to 0.45 across it and white noise of σ 0.002; a hit of +0.04,
 /// 20σ, at (70, 70). The whole frame's MAD reads the gradient, about 0.1 in σ, and against that the
 /// hit is under half a σ: the old whole-frame model would never flag it.

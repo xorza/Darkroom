@@ -115,7 +115,7 @@ fn rosenbrock_reaches_its_minimum() {
     assert!((fit.params[1] - 1.0).abs() < 1e-8, "{:?}", fit.params);
 }
 
-/// Review item 2.5: the fit does not depend on the data's scale. `2·e^(−x/2)` at x = 0..9 from
+/// The fit does not depend on the data's scale. `2·e^(−x/2)` at x = 0..9 from
 /// (1, 1), and the same data and start scaled by 2⁻⁴⁰: every Hessian entry, gradient and χ² scales
 /// by a power of two, the scaled system and both stop tests not at all, so the decay rate is the
 /// same bit for bit and the amplitude scaled exactly. An absolute pivot of 1e-15 called the scaled

@@ -326,7 +326,7 @@ fn invalid_camera_white_balance_is_absent() {
     }
 }
 
-/// The raw values settle two flags at decode (review items 8.3 and 9.3). LibRaw's `open_bayer`
+/// The raw values settle two flags at decode. LibRaw's `open_bayer`
 /// stands in for a camera file: it sets `zero_is_bad` from `procflags & 2`, `maximum` to
 /// 65536 − 2⁰ = 65535 and black to its argument, here 1000. The saturation level is then
 /// 1000 + 0.95 × (65535 − 1000) = 62308.25.
