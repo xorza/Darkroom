@@ -183,9 +183,18 @@ impl LinearImage {
         self.pixels.channel(c)
     }
 
-    /// Get channel as mutable Buffer2 reference.
+    /// Get channel as mutable Buffer2 reference. The metadata's quantization σ and mosaic noise
+    /// are dropped: they describe the samples as they were.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
-        self.pixels.channel_mut(c)
+        self.samples_mut().channel_mut(c)
+    }
+
+    /// The samples, mutably, with the noise facts that described them dropped. Every mutable path
+    /// to the samples comes through here, so no change to them keeps a stale noise.
+    const fn samples_mut(&mut self) -> &mut LinearPixels {
+        self.metadata.quantization_sigma = None;
+        self.metadata.mosaic_noise = None;
+        &mut self.pixels
     }
 
     /// The data-quality flags of the pixels; `None` when no pixel carries one.
@@ -195,7 +204,7 @@ impl LinearImage {
 
     /// Iterate the channel planes in channel order: one for grayscale, three for RGB.
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
-        self.pixels.planes_mut()
+        self.samples_mut().planes_mut()
     }
 
     /// The three channel planes' samples, borrowed at once — what a cross-channel per-pixel op
@@ -204,7 +213,7 @@ impl LinearImage {
     /// # Panics
     /// On a grayscale image; callers gate on [`Self::is_rgb`].
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
-        self.pixels.rgb_planes_mut()
+        self.samples_mut().rgb_planes_mut()
     }
 
     /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.

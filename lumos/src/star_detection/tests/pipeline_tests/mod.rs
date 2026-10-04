@@ -16,7 +16,6 @@ use crate::star_detection::config::fwhm_config::FwhmMode;
 use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::stages::prepared_frame::internals::saturation_level_of;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
 
 mod challenging_tests;
@@ -99,7 +98,7 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
         )
         .collect();
     let background = background_map::estimate(pixels, &config.background);
-    let saturation = saturation_level_of(&frame.image);
+    let saturation = frame.image.metadata.saturation_level();
     let k = config.detection.sigma_threshold;
     let sigma_at = |x: usize, y: usize| background.noise[(x, y)].max(background.noise_floor);
     let residual_at =

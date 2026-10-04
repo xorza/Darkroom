@@ -179,7 +179,7 @@ pub(crate) fn read_cfa_hdu(
     let selected = selection::selected_hdu(path, reader.hdus(), index)?;
     let mut decoded = pixels::read_decoded_hdu(
         &header,
-        plan,
+        &plan,
         selected,
         path,
         context,

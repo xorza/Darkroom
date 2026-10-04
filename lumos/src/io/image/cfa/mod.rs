@@ -292,8 +292,9 @@ impl CfaImage {
     ///
     /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
     /// reason and through the same neighbour search — mask included, so a cluster of nulls is never
-    /// repaired from its own members.
-    fn repair_nulls(&mut self) {
+    /// repaired from its own members. Calibration runs it once its arithmetic is done, so a pixel a
+    /// master left without a measurement holds a fill, not a difference against a bound.
+    pub(crate) fn repair_nulls(&mut self) {
         let Some(flags) = self
             .flags
             .as_ref()
@@ -424,6 +425,9 @@ impl CfaImage {
     /// When both frames declare a domain, this frame's pedestal becomes what
     /// [`SampleDomain::after_subtracting`](crate::SampleDomain::after_subtracting) says.
     ///
+    /// Where `dark` holds no measurement, this frame is flagged [`QualityFlags::NO_DATA`]: what is
+    /// left there is not one either.
+    ///
     /// May produce negative pixel values when dark noise exceeds signal.
     /// This is intentional: the f32 pipeline preserves negatives, and stacking
     /// averages them out correctly. Clamping to zero would introduce a positive
@@ -460,9 +464,42 @@ impl CfaImage {
             .par_iter_mut()
             .zip(dark.data.par_iter())
             .for_each(|(l, d)| *l -= d * gain + offset);
+        self.take_master_flags(dark);
         if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
             light.pedestal = light.after_subtracting(dark);
         }
+    }
+
+    /// Flag [`QualityFlags::SATURATED`] at the samples' saturation level, unless the decoder
+    /// flagged saturation, and drop `data_max`: calibration runs this on a light before it moves
+    /// the samples, after which no level marks the saturated ones and the flags are the record.
+    /// The level is the one the detector applies to a frame as decoded; a master is not tested
+    /// against it, since a ceiling no file declared is a guess the detector makes for lights alone.
+    pub(crate) fn record_saturation(&mut self) {
+        if !self.metadata.saturation_flagged {
+            let level = self.metadata.saturation_level();
+            let size = self.size();
+            let samples = self.data.pixels();
+            PixelFlags::add_where(&mut self.flags, size, QualityFlags::SATURATED, |index| {
+                samples[index] >= level
+            });
+            self.metadata.saturation_flagged = true;
+        }
+        self.metadata.data_max = None;
+    }
+
+    /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
+    /// measurement — a fill, or a saturated bound: the calibrated value there is not one either.
+    pub(crate) fn take_master_flags(&mut self, master: &CfaImage) {
+        let Some(flags) = master.flags.as_ref().filter(|flags| {
+            flags.contains(QualityFlags::NO_DATA) || flags.contains(QualityFlags::SATURATED)
+        }) else {
+            return;
+        };
+        let size = self.size();
+        PixelFlags::add_where(&mut self.flags, size, QualityFlags::NO_DATA, |index| {
+            flags.at(index).intersects(QualityFlags::UNMEASURED)
+        });
     }
 }
 

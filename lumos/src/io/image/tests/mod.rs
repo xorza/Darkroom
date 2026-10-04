@@ -43,7 +43,6 @@ fn preview_extensions_are_fits_then_raw_then_imaginarium() {
 fn metadata_default() {
     let meta = ImageMetadata::default();
     assert!(meta.object.is_none());
-    assert!(meta.header_dimensions.is_empty());
     assert!(meta.camera_white_balance.is_none());
     assert!(meta.provenance.is_none());
 }
@@ -127,7 +126,6 @@ fn load_full_example_fits() {
     assert!(image.is_grayscale());
     assert_eq!(image.pixel_count(), 10000);
     assert_eq!(image.metadata.sample_type, Some(SampleType::I32));
-    assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
     // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
     // the domain carries that span back: the physical ADU value stays recoverable.

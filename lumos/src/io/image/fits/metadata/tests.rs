@@ -229,7 +229,7 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     header.set("LUMCAL", 1).unwrap();
     header.set("GAIN", 120.0).unwrap();
     header.set("CCDTEMP", -10.0).unwrap();
-    let metadata = read_metadata(&header, vec![4, 4], SampleType::U16);
+    let metadata = read_metadata(&header, SampleType::U16);
     assert_eq!(metadata.xbinning, None);
     assert_eq!(metadata.exposure_time, None);
     assert!(!metadata.calibrated);
@@ -256,7 +256,7 @@ fn wcs_pointing_follows_the_axis_types() {
         header.set("CTYPE2", types[1]).unwrap();
         header.set("CRVAL1", 83.8).unwrap();
         header.set("CRVAL2", -5.4).unwrap();
-        let metadata = read_metadata(&header, vec![4, 4], SampleType::F32);
+        let metadata = read_metadata(&header, SampleType::F32);
         [metadata.ra_deg, metadata.dec_deg]
     };
     assert_eq!(wcs(["RA---TAN", "DEC--TAN"]), [Some(83.8), Some(-5.4)]);
@@ -269,10 +269,10 @@ fn wcs_pointing_follows_the_axis_types() {
 /// `PIXSIZE1`, `FRAMETYP`, `FILT-1`, `BLKLEVEL`, …) all land where the standard keyword does.
 #[test]
 fn every_alias_reads_into_its_field() {
-    use crate::io::image::fits::metadata::{MetadataField, write_image_metadata};
+    use crate::io::image::fits::metadata::{MetadataField, read_data_max, write_image_metadata};
 
     let read = |header: &Header, field: MetadataField| -> Option<String> {
-        let metadata = read_metadata(header, vec![4, 4], SampleType::U16);
+        let metadata = read_metadata(header, SampleType::U16);
         let text = |value: Option<String>| value;
         let real = |value: Option<f64>| value.map(|value| format!("{value}"));
         let integer = |value: Option<i64>| value.map(|value| format!("{value}"));
@@ -292,7 +292,7 @@ fn every_alias_reads_into_its_field() {
             MetadataField::Airmass => real(metadata.airmass),
             MetadataField::PixelSizeX => real(metadata.pixel_size_x),
             MetadataField::PixelSizeY => real(metadata.pixel_size_y),
-            MetadataField::DataMax => real(metadata.data_max),
+            MetadataField::DataMax => real(read_data_max(header)),
             MetadataField::Iso => integer(metadata.iso.map(i64::from)),
             MetadataField::XBinning => integer(metadata.xbinning.map(i64::from)),
             MetadataField::YBinning => integer(metadata.ybinning.map(i64::from)),
@@ -347,7 +347,7 @@ fn every_alias_reads_into_its_field() {
     let mut header = Header::new();
     header.set("EXPOSURE", 30.0).unwrap();
     header.set("TEMPERAT", -10.0).unwrap();
-    let metadata = read_metadata(&header, vec![4, 4], SampleType::U16);
+    let metadata = read_metadata(&header, SampleType::U16);
     let mut written = Header::new();
     write_image_metadata(&mut written, &metadata, None).unwrap();
     assert_eq!(written.get_real("EXPTIME").unwrap(), Some(30.0));

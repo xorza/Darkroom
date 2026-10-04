@@ -638,7 +638,11 @@ fn new_no_dark_no_hot_pixels() {
 }
 
 /// A light loses the dark, or the bias when there is no dark — never both. Dyadic levels keep
-/// every subtraction exact: 0.5 − 0.125 = 0.375 and 0.5 − 0.0625 = 0.4375.
+/// every subtraction exact: 0.5 − 0.125 = 0.375 and 0.5 − 0.0625 = 0.4375. Where a master holds no
+/// measurement, the light holds none either: a dark saturated at pixel 5 and a bias with no data at
+/// pixel 9 leave the light `NO_DATA` at both, through the bias the dark lost, and nowhere else. A
+/// bias whose pixel 9 holds a meaningless 0.5 would leave the light 0 there; the light holds the
+/// median of its neighbours instead, 0.4375.
 #[test]
 fn calibrate_subtracts_the_dark_or_else_the_bias() {
     let size = Size2us::new(4, 4);
@@ -660,7 +664,41 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
             "dark {dark:?}, bias {bias:?}: {:?}",
             light.data.pixels()
         );
+        assert!(light.flags.is_none());
     }
+
+    let flagged = |value, index, flag| {
+        let mut master = constant_cfa(size, value, CfaType::Mono);
+        master.flags = PixelFlags::from_fn(size, |at| {
+            if at == index {
+                flag
+            } else {
+                QualityFlags::default()
+            }
+        });
+        master
+    };
+    let masters = bundle(CalibrationSet {
+        dark: Some(flagged(0.125, 5, QualityFlags::SATURATED)),
+        bias: Some(flagged(0.0625, 9, QualityFlags::NO_DATA)),
+        ..Default::default()
+    });
+    let mut light = constant_cfa(size, 0.5, CfaType::Mono);
+    masters.calibrate(&mut light).unwrap();
+    let flags = light.flags.as_ref().unwrap();
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
+    assert_eq!(flags.at(5), QualityFlags::NO_DATA);
+    assert_eq!(flags.at(9), QualityFlags::NO_DATA);
+
+    let mut bias = flagged(0.0625, 9, QualityFlags::NO_DATA);
+    bias.data[9] = 0.5;
+    let masters = bundle(CalibrationSet {
+        bias: Some(bias),
+        ..Default::default()
+    });
+    let mut light = constant_cfa(size, 0.5, CfaType::Mono);
+    masters.calibrate(&mut light).unwrap();
+    assert_eq!(light.data.pixels(), &[0.4375; 16]);
 }
 
 /// The flat divides out the vignetting `v` and leaves `signal · mean(v)`, whichever masters are
@@ -805,7 +843,8 @@ fn defect_detection_zero_median_no_false_positives() {
 /// A hot pixel is repaired from its own colour. The light's red, green and blue sit at 0.5, 0.3 and
 /// 0.2 over a dark of 0.0625, so after subtraction the hot red at (2, 2) can only come back as
 /// 0.5 − 0.0625 = 0.4375 if every neighbour it took the median of was red — a green or blue one
-/// would pull it toward 0.2375 or 0.1375.
+/// would pull it toward 0.2375 or 0.1375. The hot light pixel reads 0.9, under the saturation level,
+/// so the repair is the one flag it gets.
 #[test]
 fn calibrate_hot_pixel_correction() {
     let (w, h) = (6, 6);
@@ -832,7 +871,7 @@ fn calibrate_hot_pixel_correction() {
             light_pixels[(x, y)] = baseline[pattern.color_at(Vec2us::new(x, y)) as usize];
         }
     }
-    light_pixels[(2, 2)] = 0.99;
+    light_pixels[(2, 2)] = 0.9;
     let mut light = cfa_from_plane(light_pixels, pattern);
     masters.calibrate(&mut light).unwrap();
     assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
@@ -1254,6 +1293,63 @@ fn an_offset_is_never_divided_by_the_flat() {
         Ok(CalibrationOutcome::default())
     );
     assert_eq!(removed.data.pixels(), &[0.5; 16]);
+}
+
+/// Calibration flags saturation before it moves the samples, so no level is applied after it. A
+/// light with no decoder flags saturates at 0.95:
+/// - its saturated 1.0, less a dark of 1/8, reads 0.875 and stays flagged;
+/// - its 0.92 under a flat of 0.9 reads 1.022 and is not flagged.
+///
+/// A light whose decoder flagged saturation keeps the decoder's flags: its unflagged 0.97 stays
+/// unflagged. Either way the light records that its flags are complete, drops the `DATAMAX` the
+/// samples moved away from, and keeps both through a FITS save and reload.
+#[test]
+fn calibration_records_saturation_before_it_moves_the_samples() {
+    let size = Size2us::new(2, 2);
+    let saturated = |light: &CfaImage| {
+        (0..4)
+            .filter(|&index| {
+                light
+                    .flags
+                    .as_ref()
+                    .is_some_and(|flags| flags.at(index).intersects(QualityFlags::SATURATED))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let dark = bundle(CalibrationSet {
+        dark: Some(constant_cfa(size, 0.125, CfaType::Mono)),
+        ..Default::default()
+    });
+    let mut light = make_cfa(size, vec![1.0, 0.5, 0.5, 0.5], CfaType::Mono);
+    light.metadata.data_max = Some(1.0);
+    dark.calibrate(&mut light).unwrap();
+    assert_eq!(light.data.pixels()[0], 0.875);
+    assert_eq!(saturated(&light), [0]);
+    assert!(light.metadata.saturation_flagged);
+    assert_eq!(light.metadata.data_max, None);
+
+    let directory = TempDir::new("lumos-calibrated-saturation");
+    let path = directory.path().join("light.fits");
+    light.save_fits(&path).unwrap();
+    let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+    assert!(loaded.metadata.saturation_flagged);
+    assert_eq!(saturated(&loaded), [0]);
+
+    let flat = bundle(CalibrationSet {
+        flat: Some(make_cfa(size, vec![1.0, 0.9, 1.05, 1.05], CfaType::Mono)),
+        ..Default::default()
+    });
+    let mut light = make_cfa(size, vec![0.5, 0.92, 0.5, 0.5], CfaType::Mono);
+    flat.calibrate(&mut light).unwrap();
+    assert_eq!(light.data.pixels()[1], 0.92f32 / 0.9);
+    assert_eq!(saturated(&light), [] as [usize; 0]);
+    assert!(light.metadata.saturation_flagged);
+
+    let mut decoded = make_cfa(size, vec![0.5, 0.5, 0.97, 0.5], CfaType::Mono);
+    decoded.metadata.saturation_flagged = true;
+    dark.calibrate(&mut decoded).unwrap();
+    assert_eq!(saturated(&decoded), [] as [usize; 0]);
 }
 
 /// A dark is matched to the light (review 4.3). Lights of 300 s at 0.5, a bias of 0.125 and a dark

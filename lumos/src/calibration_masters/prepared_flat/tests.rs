@@ -1,6 +1,6 @@
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 use crate::CfaType;
 use crate::calibration_masters::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
@@ -39,6 +39,37 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
     let flags = light.flags.as_ref().unwrap();
     assert_eq!(flags.count(QualityFlags::FLAT_FLOOR), 1);
     assert_eq!(flags.at(0), QualityFlags::FLAT_FLOOR);
+}
+
+/// A flat's mean leaves out the photosites that hold no measurement, and the light holds none
+/// where the flat does not. A flat of 1, 3, a saturated 5 and a 9 with no data has the mean
+/// (1 + 3)/2 = 2, not 18/4 = 4.5: divisors 0.5, 1.5, 2.5 and 4.5, so a light of 1 reads 2 at the
+/// first photosite, and `NO_DATA` at the last two.
+#[test]
+fn a_flats_mean_leaves_out_what_it_did_not_measure() {
+    let size = Size2us::new(2, 2);
+    let mut flat = make_cfa(size, vec![1.0, 3.0, 5.0, 9.0], CfaType::Mono);
+    flat.flags = PixelFlags::from_fn(size, |index| match index {
+        2 => QualityFlags::SATURATED,
+        3 => QualityFlags::NO_DATA,
+        _ => QualityFlags::default(),
+    });
+    let prepared = prepare(flat, None);
+    assert_eq!(prepared.divisor().data.pixels(), &[0.5, 1.5, 2.5, 4.5]);
+
+    let mut light = make_cfa(size, vec![1.0; 4], CfaType::Mono);
+    prepared.apply(&mut light);
+    assert_eq!(light.data.pixels()[0], 2.0);
+    let flags = light.flags.as_ref().unwrap();
+    assert_eq!(
+        (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        [
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::NO_DATA,
+            QualityFlags::NO_DATA
+        ]
+    );
 }
 
 #[test]

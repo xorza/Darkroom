@@ -8,6 +8,9 @@
 //!   for work that treats every sample alike, `map_rgb` for work that needs a whole pixel at once
 //!   (SCNR, the colour-preserving stretch), and `remap_intensity` for the display enhancers.
 //!
+//! Every path to the samples goes through the image's mutators, which drop the metadata's
+//! quantization σ and mosaic noise: neither describes the samples an op leaves.
+//!
 //! The submodules below are the image operations themselves (each an op-named config struct with an
 //! in-place `apply`), plus their shared support: [`error`] (the `OpError` contract) and [`wavelet`]
 //! (the multiscale primitive `denoise`/`hdr` build on).
@@ -37,6 +40,8 @@ pub(crate) mod stretching;
 mod bench;
 #[cfg(test)]
 mod mem_budget_probe;
+#[cfg(test)]
+mod tests;
 
 /// Samples per rayon work item. Parallelizing per sample drowns a cheap per-pixel op in rayon's
 /// recursive split/join overhead (it dominated SCNR); a coarse block amortizes that while staying

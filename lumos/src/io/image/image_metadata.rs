@@ -4,6 +4,7 @@ use fits_well::image::SampleType;
 
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::mosaic_noise::MosaicNoise;
+use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
@@ -18,7 +19,6 @@ pub struct ImageMetadata {
     /// The type a FITS source stored its samples as, after its unsigned-offset convention;
     /// `None` for a source with no such declaration.
     pub sample_type: Option<SampleType>,
-    pub header_dimensions: Vec<usize>,
     /// The multipliers that balance the samples as stored, `[R, G1, B, G2]`, normalized so the
     /// smallest is `1.0`: the camera's as-shot balance, or unity for a RAW file whose samples
     /// already carry it (LibRaw's `as_shot_wb_applied`). X-Trans and RAW metadata without a second
@@ -81,8 +81,9 @@ pub struct ImageMetadata {
     /// frame would understate. Set by the demosaic; `None` for any frame not demosaiced, and for a
     /// master, which the combine made.
     pub mosaic_noise: Option<MosaicNoise>,
-    /// Whether the decoder flagged every saturated pixel in the image's flags. A RAW decode and a
-    /// FITS with a `DATAMAX` can; anything else leaves a consumer to test the samples itself.
+    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS with a
+    /// `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
+    /// leaves a consumer to test the samples itself.
     pub saturation_flagged: bool,
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
@@ -99,6 +100,13 @@ impl ImageMetadata {
         self.provenance
             .as_ref()
             .map(|provenance| provenance.row_order)
+    }
+
+    /// The level a sample saturates at when the decoder flagged nothing: [`SATURATION_FRACTION`] of
+    /// its declared ceiling, `DATAMAX` in the normalized domain, or of that domain's 1 when it
+    /// declares none. It describes the samples as decoded, before any calibration moves them.
+    pub(crate) fn saturation_level(&self) -> f32 {
+        SATURATION_FRACTION * self.data_max.map_or(1.0, |max| max as f32)
     }
 
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts. A

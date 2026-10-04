@@ -8,6 +8,7 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
 
+use crate::io::image::fits::metadata;
 use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -57,8 +58,12 @@ pub(super) struct FitsDecodePlan {
     pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
     pub(super) sample_scale: SampleScale,
+    /// The header's `DATAMAX`, in the file's sample units: the decode flags saturation against it.
+    pub(super) data_max: Option<f64>,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
+    /// The flag plane the decode builds when the header allows a null or declares a `DATAMAX`.
+    flag_plane_bytes: u64,
     pub(super) peak_bytes: u64,
     pub(super) rows_per_chunk: usize,
 }
@@ -75,7 +80,7 @@ impl FitsDecodePlan {
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
     pub(super) const fn may_carry_nulls(&self) -> bool {
-        !self.sample_type.is_integer() || self.scaling.blank.is_some()
+        may_carry_nulls(self.sample_type, &self.scaling)
     }
 
     /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
@@ -85,15 +90,19 @@ impl FitsDecodePlan {
         path: &Path,
         memory_limit_bytes: u64,
     ) -> Result<(), ImageError> {
-        let flag_bytes = checked_size_bytes(
+        let extension_bytes = checked_size_bytes(
             path,
             self.dimensions.pixel_count(),
-            2,
+            1,
             "FITS flags extension",
         )?;
-        let required = self.decoded_bytes.checked_add(flag_bytes).ok_or_else(|| {
-            ImageError::fits_unsupported(path, "FITS flags memory size overflows u64")
-        })?;
+        let required = self
+            .decoded_bytes
+            .checked_add(extension_bytes)
+            .and_then(|bytes| bytes.checked_add(self.flag_plane_bytes))
+            .ok_or_else(|| {
+                ImageError::fits_unsupported(path, "FITS flags memory size overflows u64")
+            })?;
         enforce_fits_budget(
             path,
             "decoded output with its flags",
@@ -101,6 +110,12 @@ impl FitsDecodePlan {
             memory_limit_bytes,
         )
     }
+}
+
+/// Whether a decode of samples stored as `sample_type` under `scaling` could produce pixels with no
+/// measurement; see [`FitsDecodePlan::may_carry_nulls`].
+const fn may_carry_nulls(sample_type: SampleType, scaling: &Scaling) -> bool {
+    !sample_type.is_integer() || scaling.blank.is_some()
 }
 
 /// What one full-scale span of the stored integer type measures, in physical units.
@@ -278,11 +293,21 @@ pub(super) fn preflight_fits_image(
         stored_bitpix.elem_size(),
         "FITS native decode chunk",
     )?;
+    let data_max = metadata::read_data_max(hdu.header);
+    // A byte per pixel, which the decode builds beside the planes once it meets a null or a
+    // saturation level to flag against.
+    let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || data_max.is_some() {
+        checked_size_bytes(path, dimensions.pixel_count(), 1, "FITS flag plane")?
+    } else {
+        0
+    };
     // The reader's copy of a chunk as stored, and the scratch it byte-swaps or decodes it into,
-    // which the conversion writes straight into the output.
+    // which the conversion writes straight into the output and which is still held while the flag
+    // plane is built.
     let peak_bytes = decoded_bytes
         .checked_add(native_chunk_bytes)
         .and_then(|bytes| bytes.checked_add(native_chunk_bytes))
+        .and_then(|bytes| bytes.checked_add(flag_plane_bytes))
         .and_then(|bytes| {
             if hdu.kind == HduKind::CompressedImage {
                 bytes.checked_add(hdu.source_bytes.checked_mul(2)?)
@@ -312,8 +337,10 @@ pub(super) fn preflight_fits_image(
         sample_type,
         scaling,
         sample_scale,
+        data_max,
         source_bytes: hdu.source_bytes,
         decoded_bytes,
+        flag_plane_bytes,
         peak_bytes,
         rows_per_chunk,
     })

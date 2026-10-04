@@ -1,7 +1,2 @@
 # Open issues
 
-- **The detector's saturation level ignores a pedestal** — `star_detection/detector/stages/prepared_frame/mod.rs` (`saturation_level`): without decoder flags a pixel is saturated at 0.95 of `DATAMAX` (or of 1), whatever pedestal the samples carry. On a frame whose pedestal is large against its span, the level falls under the pedestal and every pixel reads saturated.
-- **`header_dimensions` has two axis orders** — `io/image/image_metadata.rs`: it holds `(width, height, channels)` from a FITS file (its `NAXIS` order) and `(height, width, channels)` from a RAW file, and the field has no documentation that settles which is meant.
-- **Calibration does not carry a master's flags into the light** — `calibration_masters/mod.rs` (`calibrate`): a light subtracted by a dark with `NO_DATA` or `SATURATED` pixels, or divided by a flat with them, keeps no flag at those pixels, so the calibrated value reads as a measurement.
-- **The FITS peak-memory estimate omits the decode's flag plane** — `io/image/fits/decode/plan.rs` (`preflight_fits_image`): `resolve_flags` builds a byte per pixel when the HDU holds a null or a `DATAMAX`, and `peak_bytes` does not count it.
-- **Image operations keep the noise facts of the samples they change** — `image_ops` (`Stretch::apply`, `Denoise::apply`, `ExtractBackground::apply` and the others): each changes a `LinearImage`'s samples in place and leaves `metadata.quantization_sigma` and `metadata.mosaic_noise` as they were, so a frame measured after an operation reads the noise of the samples before it.

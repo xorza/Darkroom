@@ -420,6 +420,7 @@ impl CalibrationMasters {
             return Err(CalibrationError::LightWithoutSubtractor);
         }
 
+        image.record_saturation();
         image.metadata.calibrated = true;
         if let Some((bias, map)) = bias {
             image.subtract(bias, map);
@@ -433,6 +434,7 @@ impl CalibrationMasters {
         if let Some(defect_map) = &self.defect_map {
             defect_map.correct(image);
         }
+        image.repair_nulls();
         Ok(outcome)
     }
 

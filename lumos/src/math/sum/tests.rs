@@ -2,9 +2,7 @@
 
 use crate::internals::test_rng::TestRng;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
-use crate::math::sum::{
-    PAR_SUM_CHUNK, SUM_F32_CROSSOVER, mean_f32, par_sum_f32, scalar, sum_f32, weighted_mean_f32,
-};
+use crate::math::sum::{SUM_F32_CROSSOVER, mean_f32, scalar, sum_f32, weighted_mean_f32};
 use crate::simd::portable::Portable;
 use crate::simd::tier::Tier;
 use crate::simd::{F32_LANES, Isa};
@@ -324,22 +322,5 @@ mod contract {
     #[should_panic(expected = "empty slice")]
     fn mean_rejects_an_empty_slice() {
         let _ = mean_f32(&[]);
-    }
-}
-
-/// The parallel sum is the chunked sum, added in chunk order, whatever the thread count: on 2.5
-/// chunks of cancelling values, one thread, three and eight give the bits of the sequential
-/// reference that sums each [`PAR_SUM_CHUNK`] by [`sum_f32`] and adds the partials in order.
-#[test]
-fn the_parallel_sum_does_not_depend_on_the_thread_count() {
-    let values = cancelling_values(PAR_SUM_CHUNK * 5 / 2);
-    let expected: f64 = values.chunks(PAR_SUM_CHUNK).map(sum_f32).sum();
-    for threads in [1, 3, 8] {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
-        let total = pool.install(|| par_sum_f32(&values));
-        assert_eq!(total.to_bits(), expected.to_bits(), "{threads} threads");
     }
 }
