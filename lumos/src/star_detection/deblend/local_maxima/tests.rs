@@ -322,7 +322,7 @@ fn plateau_no_local_max() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(3, 3), Vec2us::new(7, 7)),
         label: 1,
@@ -346,7 +346,7 @@ fn single_pixel_is_local_max() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
@@ -375,7 +375,7 @@ fn voronoi_assignment_and_its_tie() {
     pixels[(20, 50)] = 1.0;
     pixels[(80, 50)] = 1.0;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(20, 50), Vec2us::new(81, 51)),
         label: 1,
@@ -420,7 +420,7 @@ fn noise_component(size: Size2us, seed: u64) -> (Buffer2<f32>, LabelMap, Compone
             .map(|_| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0)
             .collect(),
     );
-    let labels = LabelMap::from_raw(Buffer2::new_filled(size.width, size.height, 1u32), 1);
+    let labels = LabelMap::from_raw(&Buffer2::new_filled(size.width, size.height, 1u32), 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
         label: 1,

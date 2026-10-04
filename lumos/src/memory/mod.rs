@@ -87,9 +87,9 @@ pub(crate) const FRAME_QUALITY_PLANES: usize = 2;
 
 /// Image-sized planes the star detector's pool holds at its high-water mark over every preset:
 /// four f32 planes (the measurement plane, its sky noise, the detection plane and the filter's
-/// pass scratch, which the detection plane's noise takes over), the u32 label map, and four
-/// bitmasks (saturation, threshold, the sources a refined sky was measured around, and the pixels
-/// with no data). A bitmask is a thirty-second of an f32 plane; charging each as a whole one keeps
+/// pass scratch, which the detection plane's noise takes over), the labeling's runs, under a plane
+/// for a mask of sources, and four bitmasks (saturation, threshold, the sources a refined sky was
+/// measured around, and the pixels with no data). A bitmask is a thirty-second of an f32 plane; charging each as a whole one keeps
 /// this integral and errs high.
 ///
 /// `star_detection::mem_budget` pins the detector's actual pool and checks it against this,

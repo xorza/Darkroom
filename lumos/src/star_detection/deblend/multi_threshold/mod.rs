@@ -120,6 +120,9 @@ pub(crate) struct TreeBuffers {
     object_of: Vec<u32>,
     /// Per pixel: the level it was last reached at.
     visited: Vec<u32>,
+    /// The pixels the current level may seed a region from, in index order: those of the level
+    /// below at or above its threshold and in an object, which shrink level by level.
+    active: Vec<u32>,
     /// The region being grown, as pixel indices.
     members: Vec<u32>,
     queue: Vec<u32>,
@@ -174,16 +177,22 @@ impl TreeBuffers {
             flux_above: 0.0,
         });
 
+        self.active.clear();
+        self.active
+            .extend(0..u32::try_from(count).expect("a component cannot exceed u32 pixels"));
         for level in 1..ladder.n_thresholds {
             let threshold = ladder.level(level);
             let stamp = u32::try_from(level).expect("the ladder holds at most u32 levels");
             let before = self.objects.len();
-            for seed in 0..count {
+            let object_of = &self.object_of;
+            self.active.retain(|&index| {
+                pixels.pixels[index as usize].value >= threshold
+                    && object_of[index as usize] != NO_OBJECT
+            });
+            for active in 0..self.active.len() {
+                let seed = self.active[active] as usize;
                 let parent = self.object_of[seed];
-                if pixels.pixels[seed].value < threshold
-                    || parent == NO_OBJECT
-                    || self.visited[seed] == stamp
-                {
+                if self.visited[seed] == stamp {
                     continue;
                 }
                 self.grow(pixels, seed, threshold, stamp, params.connectivity);

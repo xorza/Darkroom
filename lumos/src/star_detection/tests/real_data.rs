@@ -200,7 +200,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     // 5. Label map, of the mask as it stands — the stage labels it undilated.
     let label_map = LabelMap::from_pool(&mask, config.detection.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
-    let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
+    let labels_buf = Buffer2::new(width, height, label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
     visual::save_rgb(&labels_rgb, &out("06_label_map"));
     println!("Saved: 06_label_map ({num_labels} components)");
