@@ -1,15 +1,12 @@
-//! The frame carrier the registered-stacking pipeline moves between stages.
+//! [`PipelineFrame`]: the frame carrier the registered-stacking pipeline moves between stages.
 
 use std::borrow::Cow;
 
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_image::StoredImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
-use crate::star_detection::detector::Diagnostics;
-use crate::star_detection::star::Star;
 
 /// A calibrated frame waiting to be registered, held wherever the memory tier put it.
 ///
@@ -56,17 +53,6 @@ impl PipelineFrame {
     }
 }
 
-/// One frame whose pixels and detected stars advance through the pipeline together.
-#[derive(Debug)]
-pub(crate) struct DetectedFrame {
-    pub(crate) image: PipelineFrame,
-    pub(crate) stars: Vec<Star>,
-    /// The detection funnel for this frame, carried through to the caller rather than only logged.
-    pub(crate) diagnostics: Diagnostics,
-    /// The frame's statistics, measured on its pixels as decoded.
-    pub(crate) stats: FrameStats,
-}
-
 #[cfg(test)]
 mod tests {
     use common::TempDir;
@@ -76,7 +62,7 @@ mod tests {
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::linear::LinearImage;
     use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-    use crate::pipeline::frame::PipelineFrame;
+    use crate::pipeline::pipeline_frame::PipelineFrame;
 
     /// A parked frame reaches the warp as its map: the source's planes are the map's own memory,
     /// not a copy, and its flags come with it.

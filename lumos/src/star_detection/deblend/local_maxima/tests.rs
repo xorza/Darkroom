@@ -59,13 +59,11 @@ fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32)
 /// [`deblend_local_maxima`] into a fresh list.
 fn deblended(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Region> {
     let mut regions = Vec::new();
-    deblend_local_maxima(
-        component,
+    LocalMaximaParams {
         min_separation,
         min_prominence,
-        &mut DeblendBuffers::default(),
-        &mut regions,
-    );
+    }
+    .deblend(component, &mut DeblendBuffers::default(), &mut regions);
     regions
 }
 

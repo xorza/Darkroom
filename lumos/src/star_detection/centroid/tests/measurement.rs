@@ -415,7 +415,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
     let sky_at_fit =
-        compute_annulus_background(&measured.residual, star.pos, MeasureGrid::new(4.0).annulus)
+        LocalBackground::measure(&measured.residual, star.pos, MeasureGrid::new(4.0).annulus)
             .expect("annulus has samples");
     let expected = compute_star(
         &measured.residual,

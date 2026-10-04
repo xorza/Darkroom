@@ -164,17 +164,76 @@ impl Denoise {
                 }
                 None => PlaneNoise::White(MrsNoise::estimate(plane.pixels(), size, excluded)),
             };
-            denoise_plane(
-                plane.pixels_mut(),
-                scales,
-                self.k,
-                self.threshold,
-                self.strength,
-                noise,
-                &mut scratch,
-            );
+            self.denoise_plane(plane.pixels_mut(), scales, noise, &mut scratch);
         }
         Ok(())
+    }
+
+    /// Denoise one channel in place. Reconstructs `c_J + Σ thresh(w_j)` without ever materializing all
+    /// planes: it starts from the original (`c_0`) and subtracts only the *removed* noise per scale, so
+    /// the coarse residual `c_J` is preserved implicitly (the telescoping sum `c_0 = c_J + Σ w_j`).
+    fn denoise_plane(
+        &self,
+        plane: &mut [f32],
+        scales: usize,
+        noise: PlaneNoise<'_>,
+        scratch: &mut DenoiseScratch,
+    ) {
+        let Self {
+            k,
+            threshold,
+            strength,
+            ..
+        } = *self;
+        let DenoiseScratch {
+            c_curr,
+            c_next,
+            tmp,
+        } = scratch;
+
+        c_curr.pixels_mut().copy_from_slice(plane);
+        for j in 0..scales {
+            let step = 1usize << j;
+            atrous_smooth(c_curr, c_next, tmp, step); // c_next = c_{j+1}
+
+            // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed part
+            // is computed inline, saving a full read+write pass over the plane each scale.
+            let per_sigma = k * wavelet::white_noise_sigma(j) as f32;
+            let removed = |p: &mut f32, cc: f32, cn: f32, t: f32| {
+                let w = cc - cn;
+                *p -= strength * (w - threshold.apply(w, t));
+            };
+            match noise {
+                PlaneNoise::White(sigma) => {
+                    let t = per_sigma * sigma;
+                    plane
+                        .par_chunks_mut(SAMPLES_PER_BLOCK)
+                        .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .for_each(|((plane, curr), next)| {
+                            for ((p, &cc), &cn) in plane.iter_mut().zip(curr).zip(next) {
+                                removed(p, cc, cn, t);
+                            }
+                        });
+                }
+                PlaneNoise::Variance(variance) => {
+                    plane
+                        .par_chunks_mut(SAMPLES_PER_BLOCK)
+                        .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .zip(variance.par_chunks(SAMPLES_PER_BLOCK))
+                        .for_each(|(((plane, curr), next), variance)| {
+                            for (((p, &cc), &cn), &v) in
+                                plane.iter_mut().zip(curr).zip(next).zip(variance)
+                            {
+                                removed(p, cc, cn, per_sigma * v.max(0.0).sqrt());
+                            }
+                        });
+                }
+            }
+
+            mem::swap(c_curr, c_next); // c_curr = c_{j+1}
+        }
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
@@ -223,69 +282,6 @@ impl DenoiseScratch {
             c_next: Buffer2::new_default(size.width, size.height),
             tmp: Buffer2::new_default(size.width, size.height),
         }
-    }
-}
-
-/// Denoise one channel in place. Reconstructs `c_J + Σ thresh(w_j)` without ever materializing all
-/// planes: it starts from the original (`c_0`) and subtracts only the *removed* noise per scale, so
-/// the coarse residual `c_J` is preserved implicitly (the telescoping sum `c_0 = c_J + Σ w_j`).
-fn denoise_plane(
-    plane: &mut [f32],
-    scales: usize,
-    k: f32,
-    threshold: Threshold,
-    strength: f32,
-    noise: PlaneNoise<'_>,
-    scratch: &mut DenoiseScratch,
-) {
-    let DenoiseScratch {
-        c_curr,
-        c_next,
-        tmp,
-    } = scratch;
-
-    c_curr.pixels_mut().copy_from_slice(plane);
-    for j in 0..scales {
-        let step = 1usize << j;
-        atrous_smooth(c_curr, c_next, tmp, step); // c_next = c_{j+1}
-
-        // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed part
-        // is computed inline, saving a full read+write pass over the plane each scale.
-        let per_sigma = k * wavelet::white_noise_sigma(j) as f32;
-        let removed = |p: &mut f32, cc: f32, cn: f32, t: f32| {
-            let w = cc - cn;
-            *p -= strength * (w - threshold.apply(w, t));
-        };
-        match noise {
-            PlaneNoise::White(sigma) => {
-                let t = per_sigma * sigma;
-                plane
-                    .par_chunks_mut(SAMPLES_PER_BLOCK)
-                    .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                    .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                    .for_each(|((plane, curr), next)| {
-                        for ((p, &cc), &cn) in plane.iter_mut().zip(curr).zip(next) {
-                            removed(p, cc, cn, t);
-                        }
-                    });
-            }
-            PlaneNoise::Variance(variance) => {
-                plane
-                    .par_chunks_mut(SAMPLES_PER_BLOCK)
-                    .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                    .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                    .zip(variance.par_chunks(SAMPLES_PER_BLOCK))
-                    .for_each(|(((plane, curr), next), variance)| {
-                        for (((p, &cc), &cn), &v) in
-                            plane.iter_mut().zip(curr).zip(next).zip(variance)
-                        {
-                            removed(p, cc, cn, per_sigma * v.max(0.0).sqrt());
-                        }
-                    });
-            }
-        }
-
-        mem::swap(c_curr, c_next); // c_curr = c_{j+1}
     }
 }
 

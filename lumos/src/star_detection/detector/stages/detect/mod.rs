@@ -5,17 +5,15 @@
 
 use rayon::prelude::*;
 
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
-use crate::star_detection::deblend::local_maxima::deblend_local_maxima;
-use crate::star_detection::deblend::multi_threshold::{
-    MultiThresholdParams, deblend_multi_threshold,
-};
+use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
+use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detection_plane::DetectionPlane;
 use crate::star_detection::labeling::LabelMap;
@@ -137,28 +135,26 @@ fn extract_candidates(
                     Deblend::MultiThreshold {
                         n_thresholds,
                         min_contrast,
-                    } => deblend_multi_threshold(
+                    } => MultiThresholdParams {
+                        n_thresholds,
+                        min_contrast,
+                        min_separation: config.deblend_min_separation,
+                        min_area: config.min_area,
+                        connectivity: config.connectivity,
+                    }
+                    .deblend(
                         &component,
                         plane
                             .noise
                             .threshold_at(component.peak().pos, config.sigma_threshold),
-                        MultiThresholdParams {
-                            n_thresholds,
-                            min_contrast,
-                            min_separation: config.deblend_min_separation,
-                            min_area: config.min_area,
-                            connectivity: config.connectivity,
-                        },
                         &mut buffers,
                         &mut acc.regions,
                     ),
-                    Deblend::LocalMaxima { min_prominence } => deblend_local_maxima(
-                        &component,
-                        config.deblend_min_separation,
+                    Deblend::LocalMaxima { min_prominence } => LocalMaximaParams {
+                        min_separation: config.deblend_min_separation,
                         min_prominence,
-                        &mut buffers,
-                        &mut acc.regions,
-                    ),
+                    }
+                    .deblend(&component, &mut buffers, &mut acc.regions),
                 };
                 acc.deblended_components += usize::from(pushed > 1);
                 (acc, buffers)

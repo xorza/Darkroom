@@ -93,9 +93,7 @@ pub(crate) mod internals {
     use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::deblend::component::Component;
     use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
-    use crate::star_detection::deblend::multi_threshold::{
-        MultiThresholdParams, deblend_multi_threshold,
-    };
+    use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
     use crate::star_detection::deblend::region::Region;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
@@ -222,16 +220,16 @@ pub(crate) mod internals {
         min_contrast: f32,
     ) -> Vec<Region> {
         let mut regions = Vec::new();
-        deblend_multi_threshold(
+        MultiThresholdParams {
+            n_thresholds,
+            min_contrast,
+            min_separation,
+            min_area: 1,
+            connectivity: Connectivity::Eight,
+        }
+        .deblend(
             component,
             floor,
-            MultiThresholdParams {
-                n_thresholds,
-                min_contrast,
-                min_separation,
-                min_area: 1,
-                connectivity: Connectivity::Eight,
-            },
             &mut DeblendBuffers::default(),
             &mut regions,
         );

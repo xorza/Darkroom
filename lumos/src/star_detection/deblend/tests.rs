@@ -9,7 +9,7 @@ use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component, separated_pair,
 };
-use crate::star_detection::deblend::local_maxima::deblend_local_maxima;
+use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::region::Region;
 
 /// [`deblend_local_maxima`] at the default config's separation and prominence, into a fresh list.
@@ -19,13 +19,11 @@ fn local_maxima_regions(component: &Component<'_>) -> Vec<Region> {
         unreachable!("the default deblends by local maxima")
     };
     let mut regions = Vec::new();
-    deblend_local_maxima(
-        component,
-        config.deblend_min_separation,
+    LocalMaximaParams {
+        min_separation: config.deblend_min_separation,
         min_prominence,
-        &mut DeblendBuffers::default(),
-        &mut regions,
-    );
+    }
+    .deblend(component, &mut DeblendBuffers::default(), &mut regions);
     regions
 }
 

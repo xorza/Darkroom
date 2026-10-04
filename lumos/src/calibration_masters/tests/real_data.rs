@@ -28,7 +28,7 @@ use crate::calibration_masters::stack_cfa_master;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::io::raw;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
 #[test]

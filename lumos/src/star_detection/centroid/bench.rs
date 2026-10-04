@@ -12,7 +12,7 @@ use std::hint::black_box;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::centroid::covariance::windowed_covariance;
+use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::measure_star;
 use crate::star_detection::centroid::star_noise::StarNoise;
@@ -290,7 +290,7 @@ fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
     let seed_sigma_sq = 6.25;
 
     b.bench(|| {
-        black_box(windowed_covariance(
+        black_box(Cov2::windowed(
             black_box(&residual),
             0.0,
             black_box(DVec2::new(32.3, 32.7)),
@@ -307,7 +307,7 @@ fn bench_windowed_covariance_batch_1000(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         for _ in 0..1000 {
-            black_box(windowed_covariance(
+            black_box(Cov2::windowed(
                 black_box(&residual),
                 0.0,
                 black_box(DVec2::new(32.3, 32.7)),

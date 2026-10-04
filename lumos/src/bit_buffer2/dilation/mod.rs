@@ -1,7 +1,4 @@
-//! Morphological dilation for binary masks.
-//!
-//! This module provides efficient dilation operations on bit buffers,
-//! used for connecting nearby pixels in star detection and background masking.
+//! The disk dilation [`BitBuffer2::dilate`] runs.
 
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -18,16 +15,13 @@ use crate::bit_buffer2::BitBuffer2;
 /// Each output row ORs the rows within `radius` of it, each smeared horizontally by the disk's
 /// half-width at that offset, `⌊√(radius² − dy²)⌋`, on packed 64-bit words. Rows run in parallel
 /// over contiguous memory.
-pub(crate) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut BitBuffer2) {
+pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut BitBuffer2) {
     assert_eq!(mask.size, scratch.size, "size mismatch");
     if radius == 0 {
         return;
     }
     // The word kernel smears within a 64-bit word, so a single pass covers radius ≤ 63.
-    assert!(
-        radius <= 63,
-        "dilate_mask radius must be <= 63, got {radius}"
-    );
+    assert!(radius <= 63, "dilation radius must be <= 63, got {radius}");
 
     let width = mask.size.width;
     let height = mask.size.height;

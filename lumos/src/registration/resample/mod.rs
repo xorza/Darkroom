@@ -5,7 +5,8 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 use std::slice;
 
-use crate::concurrency::{JobScratchPool, UnsafeSendPtr};
+use crate::concurrency::job_scratch_pool::JobScratchPool;
+use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;

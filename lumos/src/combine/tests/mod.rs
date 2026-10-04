@@ -16,7 +16,7 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 
 const W: usize = 128;
 const H: usize = 128;

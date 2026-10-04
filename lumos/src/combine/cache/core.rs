@@ -12,9 +12,10 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::memory::ChunkMemoryLayout;
+use crate::memory::chunk_memory_layout::ChunkMemoryLayout;
 use crate::memory::run_memory::RunMemory;
-use crate::progress::{ProgressCallback, StackingStage};
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::StackingStage;
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
 /// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier.
@@ -166,7 +167,7 @@ pub(crate) mod internals {
     use crate::combine::cache::core::{CacheCore, CacheTier};
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::image_metadata::ImageMetadata;
-    use crate::progress::ProgressCallback;
+    use crate::progress::progress_callback::ProgressCallback;
 
     impl CacheCore {
         /// A core over frames of `dimensions` on `tier`, with default metadata, no progress

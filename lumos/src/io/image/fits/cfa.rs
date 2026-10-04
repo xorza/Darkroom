@@ -8,7 +8,7 @@ use fits_well::image::Image;
 
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::error::{fits_err, fits_to_io, fits_unsupported};
+use crate::io::image::fits::error::fits_to_io;
 use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata};
 use crate::io::image::pixel_flags::QualityFlags;
@@ -38,10 +38,10 @@ pub(super) fn validate_cfa_container_format(
     if let Some(primary) = primary
         && let Some(format) = primary
             .get_text("LUMOSFMT")
-            .map_err(|source| fits_err(path, source))?
+            .map_err(|source| ImageError::fits(path, source))?
         && format != CFA_FITS_FORMAT
     {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("Lumos {format} FITS is not a standalone {CFA_FITS_FORMAT} image"),
         ));
@@ -52,14 +52,14 @@ pub(super) fn validate_cfa_container_format(
 pub(crate) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<bool, ImageError> {
     let is_lumos_cfa = image
         .get_text("LUMOSFMT")
-        .map_err(|source| fits_err(path, source))?
+        .map_err(|source| ImageError::fits(path, source))?
         .is_some_and(|format| format == CFA_FITS_FORMAT);
     if is_lumos_cfa {
         let version = image
             .get_integer("LUMOSVER")
-            .map_err(|source| fits_err(path, source))?;
+            .map_err(|source| ImageError::fits(path, source))?;
         if version != Some(CFA_FITS_VERSION) {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 format!(
                     "unsupported Lumos CFA FITS version {version:?}; expected {CFA_FITS_VERSION}"

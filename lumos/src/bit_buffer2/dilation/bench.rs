@@ -1,8 +1,8 @@
 //! Benchmarks for morphological dilation.
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::bit_buffer2::dilation::dilate_mask;
 use crate::internals::prelude::*;
-use crate::star_detection::mask_dilation::dilate_mask;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 

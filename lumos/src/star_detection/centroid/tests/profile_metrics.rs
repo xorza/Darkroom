@@ -147,7 +147,7 @@ fn windowed_covariance_deconvolves_to_the_source() {
         let measured = Measured::flat(&pixels, 0.0, 1.0);
         let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
         for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {
-            let cov = windowed_covariance(&measured.residual, 0.0, pos, radius, seed)
+            let cov = Cov2::windowed(&measured.residual, 0.0, pos, radius, seed)
                 .expect("a clean Gaussian converges");
             let name = format!("σ ({sigma_x}, {sigma_y}) from seed {seed}");
             assert!((cov.xx / xx - 1.0).abs() <= 1e-7, "{name}: xx {}", cov.xx);
@@ -189,7 +189,7 @@ fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
     }
     let scatter = 2.0 * f64::from(NOISE) * spread.sqrt() / (sigma_sq * weighted_signal);
 
-    let cov = windowed_covariance(&measured.residual, 0.0, pos, radius, sigma_sq)
+    let cov = Cov2::windowed(&measured.residual, 0.0, pos, radius, sigma_sq)
         .expect("a noisy Gaussian converges");
     let ratio = (cov.yy / cov.xx).sqrt();
     assert!(

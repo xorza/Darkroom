@@ -59,9 +59,9 @@ use crate::internals::mem_probe::{
 };
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
-use crate::memory;
-use crate::memory::{MemoryPlan, RunShape};
-use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
+use crate::memory::memory_plan::{MemoryPlan, RunShape};
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::{StackingProgress, StackingStage};
 use crate::stack_product::quality_planes::QualityPlanes;
 
 fn build_config(
@@ -129,7 +129,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     if let Some(avail) = budget.memory_override {
         // The loader's own plan for this set: plain mono frames, every quality plane requested.
         let dimensions = ImageDimensions::new(size, 1);
-        let frame = memory::frame_bytes(dimensions);
+        let frame = dimensions.frame_bytes();
         let plan = MemoryPlan::plan(
             RunShape::decoded_stack(
                 n,

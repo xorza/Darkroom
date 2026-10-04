@@ -78,20 +78,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
   - Rename the types, so rustc and docs show the public names. `[C]`
-- [ ] `26.25` **Exposed free fns that belong as methods**
-  - `memory/mod.rs` `frame_bytes`/`quality_plane_bytes` → `ImageDimensions`
-  - `frame_store/frame_spill.rs` `write_file`/`map_file`
-  - `compute_annulus_background`, `windowed_covariance`, `stamp_centre`, `compute_stamp_radius`, `fit_is_plausible` (centroid)
-  - `dilate_mask` → `BitBuffer2`
-  - `deblend_local_maxima` and `deblend_multi_threshold` → `Component`
-  - `denoise_plane` (6 args) → `Denoise`
-  - FITS error constructors (`fits/error.rs`, `standard.rs:13`). `pixels.rs:295` builds `ImageError::Cancelled` inline. `[C]`
-- [ ] `26.26` **Several files hold more than one major struct, or are not named after their struct**
-  - `memory/mod.rs` (4 structs)
-  - `pipeline/tier.rs` (`FrameTier`, `StagePlan`, `StoredWarp`)
-  - `pipeline/frame.rs` (`PipelineFrame`, `DetectedFrame`)
-  - `progress/mod.rs`
-  - `concurrency/mod.rs` `[C]`
 
 
 ---
@@ -532,6 +518,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 2. Done: every doc example compiles: the seven marked `ignore` are `no_run` with their setup hidden, and the two that no longer compiled take the current signatures (`cargo test -p lumos --doc`: 10 pass, none ignored). The SIP docs say what the polynomial is — SIP's form between two frames, normalized about the matched stars' centroid, with no `AP`/`BP` and no header — and not a WCS SIP solution. The RANSAC scorer is named for its loss, a truncated Welsch loss (`ransac/welsch`, `WelschScorer`), and the docs that called it MAGSAC++ or said it integrates over noise scales are corrected. The drizzle Gaussian's FWHM is the drop size; the denoise default is Soft; detection's prepare stage and spline background, the matched filter's relation to SEP, the centroid fits' reported error in place of a fixed accuracy, the stamp's 99.98% (Gaussian) and 91% (Moffat) flux, the memory figure several stacks share, the frame-store module's scope and the misplaced mesh doc are as the code is; the Markesteijn time target is gone. Group 25 is closed.
 
 3. Done: the bias and dark presets are one, `StackConfig::bias_or_dark`. Drizzle's `KernelPlan` has its own file and is built once per run. The two error enums carry their public names, `StackError` and `AlignStackError`, the latter in `pipeline/error.rs`. TPS has no default λ (0 fits the centroids' noise), its distortion map holds its edge past the grid rather than reading zero, and its residuals reuse the transform. The dead code is gone (`DMat3`'s `IndexMut`, a `fill` the threshold kernel overwrites, `let planar = image`). The cancel check is `Cancelled::check`, with `From<Cancelled>` for `StackError`. Duplicate stars are removed in one pass over the stars sorted by cell, held to the brute force by a test. The `Region` fields are `pub(crate)`, the listed fns are `const`, the warp row buffer takes `reserve_exact`; the comments 26.30 named were rewritten in earlier phases. `parking_lot` gave way to `std::sync::Mutex`, `smallvec` is gone (the k-nearest heap lives in the caller's buffer, which allocates once), and `blake3` is a dev-dependency: frame-cache file names are FNV-1a, which is safe because the commit's `CacheKey` is checked before a byte is reused. Items 26.4, 26.13, 26.19, 26.20, 26.22, 26.24, 26.27 to 26.30 and group 27 are closed. Deviation: of 26.16, only the two errors are renamed — see Pending item 4.
+
+4. Done: each of the five files with several major types holds one: `memory/` has `ChunkMemoryLayout` and `MemoryPlan` (with its inputs `RunShape` and `PerFrameBytes`) in their own files; `pipeline/` has `PipelineFrame`, `DetectedFrame` and `FrameTier` (with its satellites `StagePlan` and `StoredWarp`); `progress/` has `StackingProgress` (with `StackingStage`) and `ProgressCallback`; `concurrency/` has `UnsafeSendPtr` and `JobScratchPool` (with its lease). The free fns 26.25 named are methods where a type owns them: the frame footprints are `ImageDimensions::{frame_bytes, quality_plane_bytes, flag_plane_bytes}`, the FITS error constructors `ImageError::{fits, fits_unsupported, scientific_rejection}` (and a cancellation the decode built inline uses `ImageError::cancelled`), `Denoise::denoise_plane`, `MultiThresholdParams::deblend` and the new `LocalMaximaParams::deblend`, `LocalBackground::measure`, `Cov2::windowed` and `BitBuffer2::dilate`. Items 26.25 and 26.26 are closed. Deviation: `stamp_centre`, and the spill's `write_file` and `map_file`, stay module functions: they take a position, a size and a path, which no lumos type owns.
 
 # Decisions
 

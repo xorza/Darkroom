@@ -18,7 +18,7 @@ use crate::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;

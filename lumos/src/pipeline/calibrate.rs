@@ -14,7 +14,7 @@ use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_source::{LightSource, RawLights};
 use crate::pipeline::result::AlignStackResult;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::run_report::RunReport;
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.

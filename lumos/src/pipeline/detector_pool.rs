@@ -8,7 +8,7 @@ use crate::star_detection::detector::StarDetector;
 /// One [`StarDetector`] per concurrency slot, reused across batches so each batch inherits the
 /// previous one's warmed buffer pools.
 ///
-/// Deliberately not a [`JobScratchPool`](crate::concurrency::JobScratchPool), and the type system
+/// Deliberately not a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool), and the type system
 /// will not stop you: `StarDetector` implements `Default`, so `JobScratchPool<StarDetector>`
 /// compiles — and then quietly hands out detectors built from `Config::default()` instead of the
 /// caller's detection config, because the pool fills gaps with `T::default()`. Building every

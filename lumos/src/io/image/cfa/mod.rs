@@ -26,7 +26,6 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::DomainMap;
-use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::rcd;
@@ -159,7 +158,7 @@ impl CfaFrameInfo {
         match InputFormat::of(path)? {
             InputFormat::Fits => fits_decode::fits_cfa_frame_info(path, context),
             InputFormat::CameraRaw => raw::raw_cfa_frame_info(path, context),
-            InputFormat::Raster(_) => Err(scientific_rejection(
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 "scientific CFA input must be camera RAW or FITS",
             )),
@@ -252,7 +251,7 @@ impl CfaImage {
         match InputFormat::of(path)? {
             InputFormat::Fits => fits_decode::load_cfa_fits(path, context),
             InputFormat::CameraRaw => raw::load_raw_cfa(path, context),
-            InputFormat::Raster(_) => Err(scientific_rejection(
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 "generic raster decoders do not establish a scientific CFA contract",
             )),

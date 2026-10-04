@@ -13,7 +13,7 @@ use crate::internals::synthetic::fixtures::cluster_field;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::label_above;
-use crate::star_detection::deblend::local_maxima::{Kept, deblend_local_maxima, find_local_maxima};
+use crate::star_detection::deblend::local_maxima::{Kept, LocalMaximaParams, find_local_maxima};
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
@@ -64,13 +64,17 @@ fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
     b.bench(|| {
         for component in components {
             regions.clear();
-            black_box(deblend_local_maxima(
-                &Component::new(black_box(component), &pixels, &labels),
-                black_box(3),
-                black_box(0.3),
-                &mut buffers,
-                &mut regions,
-            ));
+            black_box(
+                LocalMaximaParams {
+                    min_separation: black_box(3),
+                    min_prominence: black_box(0.3),
+                }
+                .deblend(
+                    &Component::new(black_box(component), &pixels, &labels),
+                    &mut buffers,
+                    &mut regions,
+                ),
+            );
         }
     });
 }
@@ -88,13 +92,17 @@ fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
     b.bench(|| {
         for component in components {
             regions.clear();
-            black_box(deblend_local_maxima(
-                &Component::new(black_box(component), &pixels, &labels),
-                black_box(3),
-                black_box(0.3),
-                &mut buffers,
-                &mut regions,
-            ));
+            black_box(
+                LocalMaximaParams {
+                    min_separation: black_box(3),
+                    min_prominence: black_box(0.3),
+                }
+                .deblend(
+                    &Component::new(black_box(component), &pixels, &labels),
+                    &mut buffers,
+                    &mut regions,
+                ),
+            );
         }
     });
 }

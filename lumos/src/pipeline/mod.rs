@@ -8,15 +8,16 @@
 pub(crate) mod align;
 pub(crate) mod calibrate;
 pub(crate) mod config;
+pub(crate) mod detected_frame;
 pub(crate) mod detector_pool;
 pub(crate) mod error;
-pub(crate) mod frame;
 pub(crate) mod frame_registrar;
 pub(crate) mod frame_registration;
+pub(crate) mod frame_tier;
 pub(crate) mod light_source;
+pub(crate) mod pipeline_frame;
 pub(crate) mod registered_set;
 pub(crate) mod result;
-pub(crate) mod tier;
 
 #[cfg(all(test, feature = "bench"))]
 mod bench;

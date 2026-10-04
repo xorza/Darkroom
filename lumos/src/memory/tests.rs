@@ -1,6 +1,11 @@
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::math::size2us::Size2us;
+use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, MIN_CHUNK_ROWS};
+use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::*;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -39,17 +44,17 @@ fn quality_planes_are_charged_per_pixel_not_per_sample() {
     // for planes it never allocates.
     let mono = ImageDimensions::new((100, 50), 1);
     let rgb = ImageDimensions::new((100, 50), 3);
-    assert_eq!(quality_plane_bytes(mono), 2 * 100 * 50 * 4);
-    assert_eq!(quality_plane_bytes(rgb), quality_plane_bytes(mono));
+    assert_eq!(mono.quality_plane_bytes(), 2 * 100 * 50 * 4);
+    assert_eq!(rgb.quality_plane_bytes(), mono.quality_plane_bytes());
 
     // Against the frame's own pixels, which *are* per sample: a masked mono frame is three
     // planes resident and a masked RGB one is five, not six.
     assert_eq!(
-        frame_bytes(mono) + quality_plane_bytes(mono),
+        mono.frame_bytes() + mono.quality_plane_bytes(),
         3 * 100 * 50 * 4
     );
     assert_eq!(
-        frame_bytes(rgb) + quality_plane_bytes(rgb),
+        rgb.frame_bytes() + rgb.quality_plane_bytes(),
         5 * 100 * 50 * 4
     );
 }

@@ -1,6 +1,6 @@
 //! Dimension-checked reuse of image-sized buffers.
 //!
-//! The crate's other pool, [`JobScratchPool`](crate::concurrency::JobScratchPool), is not a
+//! The crate's other pool, [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool), is not a
 //! competing take on this one — the two differ in a way that forces everything else about their
 //! APIs, and it is worth saying once here rather than rediscovering it:
 //!

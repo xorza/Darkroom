@@ -32,7 +32,7 @@ use crate::drizzle::accumulator::DrizzleFrame;
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::stack::drizzle_images;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;

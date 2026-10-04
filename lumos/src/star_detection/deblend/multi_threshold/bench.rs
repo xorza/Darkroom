@@ -12,9 +12,7 @@ use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::label_above;
-use crate::star_detection::deblend::multi_threshold::{
-    MultiThresholdParams, deblend_multi_threshold,
-};
+use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
@@ -38,19 +36,21 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
     b.bench(|| {
         for component in &reasonable_components {
             regions.clear();
-            black_box(deblend_multi_threshold(
-                &Component::new(black_box(component), &pixels, &labels),
-                0.05,
+            black_box(
                 MultiThresholdParams {
                     n_thresholds,
                     min_contrast,
                     min_separation,
                     min_area: 5,
                     connectivity: Connectivity::Four,
-                },
-                &mut buffers,
-                &mut regions,
-            ));
+                }
+                .deblend(
+                    &Component::new(black_box(component), &pixels, &labels),
+                    0.05,
+                    &mut buffers,
+                    &mut regions,
+                ),
+            );
         }
     });
 }
@@ -79,19 +79,21 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
     b.bench(|| {
         for component in &reasonable_components {
             regions.clear();
-            black_box(deblend_multi_threshold(
-                &Component::new(black_box(component), &pixels, &labels),
-                0.05,
+            black_box(
                 MultiThresholdParams {
                     n_thresholds,
                     min_contrast,
                     min_separation,
                     min_area: 5,
                     connectivity: Connectivity::Four,
-                },
-                &mut buffers,
-                &mut regions,
-            ));
+                }
+                .deblend(
+                    &Component::new(black_box(component), &pixels, &labels),
+                    0.05,
+                    &mut buffers,
+                    &mut regions,
+                ),
+            );
         }
     });
 }
@@ -117,19 +119,21 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
     b.bench(|| {
         for component in &reasonable_components {
             regions.clear();
-            black_box(deblend_multi_threshold(
-                &Component::new(black_box(component), &pixels, &labels),
-                0.05,
+            black_box(
                 MultiThresholdParams {
                     n_thresholds,
                     min_contrast,
                     min_separation,
                     min_area: 5,
                     connectivity: Connectivity::Four,
-                },
-                &mut buffers,
-                &mut regions,
-            ));
+                }
+                .deblend(
+                    &Component::new(black_box(component), &pixels, &labels),
+                    0.05,
+                    &mut buffers,
+                    &mut regions,
+                ),
+            );
         }
     });
 }

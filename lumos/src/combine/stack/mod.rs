@@ -28,7 +28,7 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_run::IngestRun;
 use crate::math;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpResult;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;

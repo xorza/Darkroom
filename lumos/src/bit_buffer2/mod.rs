@@ -11,6 +11,8 @@
 //! a shift and a mask to every read. Measured at +49% on star-detection's O(n²) deduplication and
 //! +82% on registration's fill-scatter-scan, which is why those stay `Vec<bool>`.
 
+mod dilation;
+
 use std::ops::Index;
 
 use crate::buffer_pool::PooledBuffer;
@@ -290,6 +292,19 @@ impl BitBuffer2 {
                 }
             }
         }
+    }
+
+    /// Dilate in place by a disk of `radius`: a pixel is set when a set pixel lies within Euclidean
+    /// distance `radius` of it. `scratch`, of any contents and this buffer's size, holds the source
+    /// while the buffer is rewritten.
+    ///
+    /// A disk rather than a square, as photutils dilates its source masks: a square reaches √2
+    /// times further along the diagonals and masks sky that no source touches.
+    ///
+    /// # Panics
+    /// If `scratch` is another size, or `radius` exceeds 63.
+    pub(crate) fn dilate(&mut self, radius: usize, scratch: &mut Self) {
+        dilation::dilate_mask(self, radius, scratch);
     }
 }
 

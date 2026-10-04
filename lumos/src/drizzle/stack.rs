@@ -16,7 +16,8 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::progress::{ProgressCallback, StackingStage};
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::StackingStage;
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,

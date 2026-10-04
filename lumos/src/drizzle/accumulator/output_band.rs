@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use glam::DVec2;
 
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::PlaneSpan;
 use crate::drizzle::accumulator::frame_source::{Drop, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_A};

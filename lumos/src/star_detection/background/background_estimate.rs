@@ -8,7 +8,7 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
@@ -18,7 +18,6 @@ use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::background::workspace::InterpolateScratch;
 use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
-use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 
@@ -203,7 +202,7 @@ impl BackgroundEstimate {
                 &mut sources,
             );
             detect.release_to_pool(resources);
-            dilate_mask(&mut sources, refinement.mask_dilation, &mut scratch);
+            sources.dilate(refinement.mask_dilation, &mut scratch);
             if let Some(mask) = filters.mask {
                 sources.or_with(mask);
             }

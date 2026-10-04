@@ -1,7 +1,7 @@
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::tile_stats::{Eligible, TileStats};
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
@@ -180,7 +180,7 @@ mod tests {
     use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::concurrency::internals::{all_by, job_count};
+    use crate::concurrency::job_scratch_pool::internals::{all_by, job_count};
     use crate::math::size2us::Size2us;
     use imaginarium::Buffer2;
 
