@@ -514,7 +514,7 @@ fn single_pixel_component() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
@@ -549,7 +549,7 @@ fn flat_profile_no_deblend() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox,
         label: 1,
@@ -616,7 +616,7 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox,
         label: 1,
@@ -906,7 +906,7 @@ fn the_scratch_follows_the_pixels_not_the_box() {
         labels[(i, i)] = 1;
         bbox.include(Vec2us::new(i, i));
     }
-    let labels = LabelMap::from_raw(labels, 1);
+    let labels = LabelMap::from_raw(&labels, 1);
     let data = ComponentData {
         bbox,
         label: 1,

@@ -32,12 +32,16 @@ use crate::star_detection::resources::internals::BufferCounts;
 const WORKING_SET: BufferCounts = BufferCounts {
     floats: 4,
     bitmasks: 3,
-    labels: 1,
 };
 
 /// The bitmask a frame with pixels of no data adds to [`WORKING_SET`], which these synthetic fields
 /// do not carry.
 const NO_DATA_MASK: usize = 1;
+
+/// The plane the labeling's runs are charged: a run is 16 bytes in its strip and 12 in the label
+/// map, so the runs hold under one f32 plane while fewer than one pixel in seven starts a run — a
+/// mask of sources a few σ above the sky starts far fewer.
+const LABEL_RUNS: usize = 1;
 
 /// The memory planner charges [`DETECTION_WORKING_PLANES`] image-sized planes for a frame in
 /// detection, which only means anything while that matches what the pool actually holds. Tying the
@@ -46,17 +50,12 @@ const NO_DATA_MASK: usize = 1;
 /// raising `WORKING_SET` to match then fails this until the planner is raised too.
 #[test]
 fn pinned_working_set_matches_what_the_memory_planner_charges() {
-    let BufferCounts {
-        floats,
-        bitmasks,
-        labels,
-    } = WORKING_SET;
+    let BufferCounts { floats, bitmasks } = WORKING_SET;
 
-    // The label map is u32, the same width as an f32 plane. A bitmask is one bit per pixel
-    // against those 32, and the planner rounds each up to a whole plane rather than model a
-    // fraction — so a plain sum is the figure it should carry.
+    // A bitmask is one bit per pixel against an f32 plane's 32, and the planner rounds each up to
+    // a whole plane rather than model a fraction — so a plain sum is the figure it should carry.
     assert_eq!(
-        floats + labels + bitmasks + NO_DATA_MASK,
+        floats + LABEL_RUNS + bitmasks + NO_DATA_MASK,
         DETECTION_WORKING_PLANES
     );
 }
@@ -106,9 +105,7 @@ fn buffer_working_set_stays_flat_in_frame_count() {
                 detector.detect(frame);
                 let c = buffer_counts_for(&detector).unwrap();
                 assert!(
-                    c.floats <= baseline.floats
-                        && c.bitmasks <= baseline.bitmasks
-                        && c.labels <= baseline.labels,
+                    c.floats <= baseline.floats && c.bitmasks <= baseline.bitmasks,
                     "{name}: pool grew on detection {i}: {c:?} exceeds the warmed baseline \
                      {baseline:?} — a scratch buffer leaked per frame, so star detection's memory \
                      would scale with the frame count"
@@ -121,12 +118,10 @@ fn buffer_working_set_stays_flat_in_frame_count() {
         BufferCounts {
             floats: 0,
             bitmasks: 0,
-            labels: 0,
         },
         |peak, baseline| BufferCounts {
             floats: peak.floats.max(baseline.floats),
             bitmasks: peak.bitmasks.max(baseline.bitmasks),
-            labels: peak.labels.max(baseline.labels),
         },
     );
     assert_eq!(

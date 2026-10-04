@@ -9,7 +9,9 @@ use crate::star_detection::deblend::component::Component;
 ///
 /// A position finds its pixel by a search in its row, so the memory is in proportion to the
 /// component's pixels, not to its box: a satellite trail across the frame has a box of the whole
-/// frame and pixels along one line.
+/// frame and pixels along one line. Each pixel's first possible neighbour in the rows above and
+/// below is found once, when the pixels are filled, so a walk over neighbours, which a deblend
+/// repeats at every level, reads them without a search.
 #[derive(Debug, Default)]
 pub(crate) struct ComponentPixels {
     pub(crate) pixels: Vec<Pixel>,
@@ -17,6 +19,11 @@ pub(crate) struct ComponentPixels {
     row_starts: Vec<u32>,
     /// The box's top row.
     top: usize,
+    /// Per pixel: the first pixel of the row above at or right of its left neighbour's column,
+    /// or that row's end.
+    above: Vec<u32>,
+    /// The same in the row below.
+    below: Vec<u32>,
 }
 
 impl ComponentPixels {
@@ -39,6 +46,49 @@ impl ComponentPixels {
             }
         }
         self.row_starts.push(cursor as u32);
+        self.link_rows();
+    }
+
+    /// Fill [`Self::above`] and [`Self::below`], walking each pair of rows together.
+    fn link_rows(&mut self) {
+        let Self {
+            pixels,
+            row_starts,
+            above,
+            below,
+            ..
+        } = self;
+        above.clear();
+        above.resize(pixels.len(), 0);
+        below.clear();
+        below.resize(pixels.len(), 0);
+        let rows = row_starts.len() - 1;
+        let span = |row: usize| row_starts[row] as usize..row_starts[row + 1] as usize;
+        for row in 0..rows {
+            let current = span(row);
+            let up = if row > 0 {
+                span(row - 1)
+            } else {
+                current.start..current.start
+            };
+            let down = if row + 1 < rows {
+                span(row + 1)
+            } else {
+                current.end..current.end
+            };
+            let (mut j, mut k) = (up.start, down.start);
+            for i in current {
+                let low = pixels[i].pos.x.saturating_sub(1);
+                while j < up.end && pixels[j].pos.x < low {
+                    j += 1;
+                }
+                while k < down.end && pixels[k].pos.x < low {
+                    k += 1;
+                }
+                above[i] = j as u32;
+                below[i] = k as u32;
+            }
+        }
     }
 
     /// The pixels of row `y` and the index of the first, empty outside the box.
@@ -85,18 +135,25 @@ impl ComponentPixels {
             Connectivity::Four => (pos.x, pos.x),
             Connectivity::Eight => (pos.x.saturating_sub(1), pos.x + 1),
         };
-        for y in [pos.y.checked_sub(1), Some(pos.y + 1)]
-            .into_iter()
-            .flatten()
-        {
-            let (start, row) = self.row(y);
-            let first = row.partition_point(|pixel| pixel.pos.x < low);
-            for (offset, pixel) in row.iter().enumerate().skip(first) {
-                if pixel.pos.x > high {
-                    break;
-                }
-                visit(start + offset);
+        let row = pos.y - self.top;
+        let rows = self.row_starts.len() - 1;
+        let mut scan = |mut at: usize, end: usize| {
+            while at < end && self.pixels[at].pos.x < low {
+                at += 1;
             }
+            while at < end && self.pixels[at].pos.x <= high {
+                visit(at);
+                at += 1;
+            }
+        };
+        if row > 0 {
+            scan(self.above[index] as usize, self.row_starts[row] as usize);
+        }
+        if row + 1 < rows {
+            scan(
+                self.below[index] as usize,
+                self.row_starts[row + 2] as usize,
+            );
         }
     }
 }
@@ -130,7 +187,7 @@ mod tests {
             labels[(x, y)] = 1;
             bbox.include(Vec2us::new(x, y));
         }
-        let labels = LabelMap::from_raw(labels, 1);
+        let labels = LabelMap::from_raw(&labels, 1);
         let data = ComponentData {
             bbox,
             label: 1,

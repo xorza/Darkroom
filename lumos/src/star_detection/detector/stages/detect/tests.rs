@@ -180,7 +180,7 @@ fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
     }
     Rectangles {
         residual,
-        labels: LabelMap::from_raw(labels, rects.len()),
+        labels: LabelMap::from_raw(&labels, rects.len()),
     }
 }
 

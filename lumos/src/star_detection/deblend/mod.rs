@@ -167,7 +167,7 @@ pub(crate) mod internals {
 
         TestComponent {
             pixels,
-            labels: LabelMap::from_raw(labels, 1),
+            labels: LabelMap::from_raw(&labels, 1),
             data: ComponentData {
                 bbox,
                 label: 1,

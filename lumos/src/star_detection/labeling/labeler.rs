@@ -6,16 +6,14 @@ use std::ops::Range;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::detection_config::Connectivity;
-use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::labeling::run::{
     Run, extract_runs_from_row, merge_runs_with_prev, runs_connected,
 };
 use crate::star_detection::labeling::union_find::UnionFind;
-use imaginarium::Buffer2;
+use crate::star_detection::labeling::{LabelMap, LabelRun};
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose
 /// per-strip overhead and boundary stitching outweigh the labeling. An image under this height
@@ -24,8 +22,8 @@ const MIN_ROWS_PER_STRIP: usize = 64;
 
 /// RLE-based connected-component labeling: strip the mask into horizontal bands, label each in
 /// parallel against one shared union-find, stitch the labels across the band boundaries, then
-/// write the dense relabeling back in parallel and collect each component's box and area from
-/// its runs. Components are numbered in raster order of their first pixel, whatever the strips.
+/// gather each component's runs, and its box and area from them. Components are numbered in
+/// raster order of their first pixel, whatever the strips.
 ///
 /// Every buffer this needs lives here and is refilled, never reallocated once it is large
 /// enough, so a frame after the first allocates nothing.
@@ -35,10 +33,8 @@ pub(crate) struct Labeler {
     strips: Vec<Strip>,
     /// Provisional label → final label; see [`UnionFind::build_label_map`].
     mapping: Vec<u32>,
-    /// The component list the last label map gave back, refilled by the next.
-    components: Vec<ComponentData>,
-    /// How many labelings this labeler has made; the strips hold the last one's runs.
-    generation: u64,
+    /// The buffers the last label map gave back, refilled by the next.
+    spare: LabelMap,
 }
 
 /// One horizontal band of the mask and the runs found in it.
@@ -55,19 +51,14 @@ struct Strip {
 }
 
 impl Labeler {
-    /// Label the foreground of `mask` into `labels`, which must be zeroed and the mask's size.
+    /// Label the foreground of `mask`.
     ///
     /// One band for an image under [`MIN_ROWS_PER_STRIP`] rows, where the boundary stitch has
     /// nothing to do — small inputs take the same path as large ones.
-    pub(crate) fn label(
-        &mut self,
-        mask: &BitBuffer2,
-        connectivity: Connectivity,
-        labels: Buffer2<u32>,
-    ) -> LabelMap {
+    pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> LabelMap {
         let height = mask.size.height;
         let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
-        self.label_in_strips(mask, connectivity, labels, num_strips)
+        self.label_in_strips(mask, connectivity, num_strips)
     }
 
     /// [`Self::label`] cut into `num_strips` bands of `height / num_strips` rows, the last taking
@@ -76,29 +67,19 @@ impl Labeler {
         &mut self,
         mask: &BitBuffer2,
         connectivity: Connectivity,
-        mut labels: Buffer2<u32>,
         num_strips: usize,
     ) -> LabelMap {
         let width = mask.size.width;
         let height = mask.size.height;
-        // Release asserts: the label writes below are unchecked off these dimensions. Once per
-        // frame.
-        assert_eq!(width, labels.width());
-        assert_eq!(height, labels.height());
 
-        let mut components = mem::take(&mut self.components);
-        components.clear();
-        self.generation += 1;
-        let generation = self.generation;
-        for strip in &mut self.strips {
-            strip.runs.clear();
-        }
+        let mut map = mem::take(&mut self.spare);
+        map.size = mask.size;
+        map.components.clear();
+        map.runs.clear();
+        map.run_starts.clear();
+        map.run_starts.push(0);
         if width == 0 || height == 0 {
-            return LabelMap {
-                labels,
-                components,
-                generation,
-            };
+            return map;
         }
 
         let Self {
@@ -160,31 +141,19 @@ impl Labeler {
             mapping,
         );
         if count == 0 {
-            return LabelMap {
-                labels,
-                components,
-                generation,
-            };
+            return map;
         }
 
-        let labels_ptr = UnsafeSendPtr::new(labels.pixels_mut().as_mut_ptr());
-        let mapping = &*mapping;
-        strips.par_iter().for_each(|strip| {
-            for &(y, run) in &strip.runs {
-                let row_start = y as usize * width;
-                let final_label = mapping[run.label as usize];
-                let ptr = labels_ptr.get();
-                for x in run.start..run.end {
-                    // SAFETY: runs cover disjoint pixels, all inside the `width × height` plane
-                    // the asserts above bound.
-                    unsafe {
-                        *ptr.add(row_start + x as usize) = final_label;
-                    }
-                }
-            }
-        });
-
+        // Each component's runs counted, its slice placed after the ones before it, then filled
+        // in the strips' raster order, which each slice keeps.
+        let LabelMap {
+            components,
+            runs,
+            run_starts,
+            ..
+        } = &mut map;
         components.resize(count, ComponentData::default());
+        run_starts.resize(count + 1, 0);
         for strip in strips.iter() {
             for &(y, run) in &strip.runs {
                 let label = mapping[run.label as usize];
@@ -197,36 +166,39 @@ impl Labeler {
                     .bbox
                     .include(Vec2us::new(run.end as usize - 1, y as usize));
                 component.area += (run.end - run.start) as usize;
+                run_starts[label as usize] += 1;
             }
         }
-
-        LabelMap {
-            labels,
-            components,
-            generation,
+        for index in 1..=count {
+            run_starts[index] += run_starts[index - 1];
         }
-    }
-
-    /// Zero `labels` again: the runs of the labeling `generation` wrote, while this labeler still
-    /// holds them, else every pixel.
-    pub(crate) fn erase(&self, labels: &mut Buffer2<u32>, generation: u64) {
-        if generation != self.generation {
-            labels.pixels_mut().fill(0);
-            return;
-        }
-        let width = labels.width();
-        let pixels = labels.pixels_mut();
-        for strip in &self.strips {
+        let total = run_starts[count] as usize;
+        runs.resize(total, LabelRun::default());
+        // `cursor[i]` is where component `i`'s next run goes: its start, moving on.
+        let cursor = &mut run_starts[..count];
+        let mut placed = 0;
+        for strip in strips.iter() {
             for &(y, run) in &strip.runs {
-                let row_start = y as usize * width;
-                pixels[row_start + run.start as usize..row_start + run.end as usize].fill(0);
+                let index = mapping[run.label as usize] as usize - 1;
+                runs[cursor[index] as usize] = LabelRun {
+                    y,
+                    start: run.start,
+                    end: run.end,
+                };
+                cursor[index] += 1;
+                placed += 1;
             }
         }
+        debug_assert_eq!(placed, total);
+        // Each cursor now holds its component's end, the next one's start: shift them back.
+        run_starts.copy_within(0..count, 1);
+        run_starts[0] = 0;
+        map
     }
 
-    /// Take back a label map's component list for the next frame to refill.
-    pub(crate) fn recycle(&mut self, components: Vec<ComponentData>) {
-        self.components = components;
+    /// Take back a label map's buffers for the next frame to refill.
+    pub(crate) fn recycle(&mut self, map: LabelMap) {
+        self.spare = map;
     }
 }
 
@@ -326,8 +298,6 @@ fn stitch_boundary(
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
-
     use crate::bit_buffer2::BitBuffer2;
     use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::labeling::LabelMap;
@@ -340,7 +310,6 @@ pub(crate) mod internals {
         connectivity: Connectivity,
         num_strips: usize,
     ) -> LabelMap {
-        let labels = Buffer2::new_filled(mask.size.width, mask.size.height, 0u32);
-        Labeler::default().label_in_strips(mask, connectivity, labels, num_strips)
+        Labeler::default().label_in_strips(mask, connectivity, num_strips)
     }
 }

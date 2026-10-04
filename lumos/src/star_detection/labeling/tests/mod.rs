@@ -125,9 +125,9 @@ fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
 
 /// The box and area the labeling collected from its runs against a scan of every labelled pixel.
 fn verify_components(label_map: &LabelMap) {
-    let size = Size2us::new(label_map.width(), label_map.height());
+    let size = label_map.size();
     let scanned = LabelMap::from_raw(
-        Buffer2::new(size.width, size.height, label_map.labels().to_vec()),
+        &Buffer2::new(size.width, size.height, label_map.labels()),
         label_map.num_labels(),
     );
     assert_eq!(label_map.components().len(), scanned.components().len());
@@ -174,36 +174,23 @@ fn check(mask: &Mask) -> Labelings {
     }
 }
 
-/// A label map goes back to the pool all zeros, its runs erased, so the next frame's labeling
-/// needs no clear: two masks of different foregrounds in turn through one pool. A map released
-/// after its labeler labeled again no longer has its runs held, and the whole plane is cleared.
+/// A labeler that takes its maps back relabels from them as from fresh buffers: two masks of
+/// different foregrounds in turn, each held to a fresh labeler's map, the second refilling the
+/// buffers the first gave back.
 #[test]
-fn released_labels_return_to_the_pool_as_zeros() {
+fn a_recycled_map_relabels_as_a_fresh_one() {
     let size = Size2us::new(40, 30);
     let mut pool = DetectionResources::new(size);
     let masks = [
         Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),
         Mask::from_fn(size, |x, y| (x * y) % 5 == 0).bits(),
     ];
-    let assert_zeros = |pool: &mut DetectionResources, when: &str| {
-        let labels = pool.acquire_u32();
-        assert!(labels.pixels().iter().all(|&label| label == 0), "{when}");
-        pool.release_u32(labels);
-    };
     for (index, mask) in masks.iter().enumerate() {
-        let map = LabelMap::from_pool(mask, Connectivity::Eight, &mut pool);
-        assert!(map.num_labels() > 0);
-        map.release_to_pool(&mut pool);
-        assert_zeros(&mut pool, &format!("after mask {index}"));
+        let recycled = LabelMap::from_pool(mask, Connectivity::Eight, &mut pool);
+        let fresh = LabelMap::from_mask(mask, Connectivity::Eight);
+        assert!(fresh.num_labels() > 0);
+        assert_eq!(recycled.labels(), fresh.labels(), "mask {index}");
+        assert_eq!(recycled.num_labels(), fresh.num_labels(), "mask {index}");
+        recycled.release_to_pool(&mut pool);
     }
-
-    let first = LabelMap::from_pool(&masks[0], Connectivity::Eight, &mut pool);
-    let other = pool.labeler.label(
-        &masks[1],
-        Connectivity::Eight,
-        Buffer2::new_filled(40, 30, 0),
-    );
-    assert!(other.num_labels() > 0);
-    first.release_to_pool(&mut pool);
-    assert_zeros(&mut pool, "after a labeling in between");
 }

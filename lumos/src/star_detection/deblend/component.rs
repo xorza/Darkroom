@@ -2,20 +2,20 @@
 
 use imaginarium::Buffer2;
 
+use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::deblend::{Pixel, dist_sq, nearest_peak_index};
-use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
+use crate::star_detection::labeling::{LabelMap, LabelRun};
 
-/// One connected component of the residual: the pixels its label covers, read through its
-/// bounding box, and the brightest of them.
+/// One connected component of the residual: the pixels of its runs, and the brightest of them.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Component<'a> {
     data: &'a ComponentData,
     residual: &'a Buffer2<f32>,
-    labels: &'a LabelMap,
+    runs: &'a [LabelRun],
     /// The brightest pixel, the first in raster order among equals.
     peak: Pixel,
 }
@@ -27,16 +27,17 @@ impl<'a> Component<'a> {
         labels: &'a LabelMap,
     ) -> Self {
         debug_assert_eq!(
-            (residual.width(), residual.height()),
-            (labels.width(), labels.height()),
+            Size2us::new(residual.width(), residual.height()),
+            labels.size(),
             "residual and labels must have same dimensions"
         );
-        let peak = Pixel::brightest(Self::scan(data, residual, labels))
+        let runs = labels.runs_of(data.label);
+        let peak = Pixel::brightest(Self::scan(residual, runs))
             .expect("a component holds at least one pixel");
         Self {
             data,
             residual,
-            labels,
+            runs,
             peak,
         }
     }
@@ -55,7 +56,7 @@ impl<'a> Component<'a> {
 
     /// Every pixel of the component, in raster order.
     pub(crate) fn pixels(&self) -> impl Iterator<Item = Pixel> + 'a {
-        Self::scan(self.data, self.residual, self.labels)
+        Self::scan(self.residual, self.runs)
     }
 
     /// The component undivided: one region with its brightest pixel as the peak.
@@ -106,21 +107,15 @@ impl<'a> Component<'a> {
         out.len() - before
     }
 
-    fn scan(
-        data: &'a ComponentData,
-        residual: &'a Buffer2<f32>,
-        labels: &'a LabelMap,
-    ) -> impl Iterator<Item = Pixel> + 'a {
+    /// The pixels of `runs` in `residual`, in raster order: in proportion to the component's
+    /// pixels, not to its box.
+    fn scan(residual: &'a Buffer2<f32>, runs: &'a [LabelRun]) -> impl Iterator<Item = Pixel> + 'a {
         let width = residual.width();
-        let bbox = data.bbox;
-        let label = data.label;
-        (bbox.min.y..bbox.max.y).flat_map(move |y| {
-            (bbox.min.x..bbox.max.x).filter_map(move |x| {
-                let idx = y * width + x;
-                (labels[idx] == label).then(|| Pixel {
-                    pos: Vec2us::new(x, y),
-                    value: residual[idx],
-                })
+        runs.iter().flat_map(move |run| {
+            let y = run.y as usize;
+            (run.start as usize..run.end as usize).map(move |x| Pixel {
+                pos: Vec2us::new(x, y),
+                value: residual[y * width + x],
             })
         })
     }
