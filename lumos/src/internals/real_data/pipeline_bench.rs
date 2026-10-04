@@ -1,5 +1,6 @@
 //! Full pipeline benchmark: CFA master creation -> calibration -> registration -> stacking.
 
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -131,7 +132,10 @@ fn bench_full_pipeline() {
         concurrency::try_par_map_limited(&light_paths, 3, |_index, p| {
             let mut cfa = load_raw_cfa(p, &LoadContext::default()).unwrap();
             masters.calibrate(&mut cfa).unwrap();
-            Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
+            Ok::<_, ()>(
+                cfa.demosaic(MarkesteijnPasses::One, &CancelToken::never())
+                    .unwrap(),
+            )
         })
         .unwrap();
 

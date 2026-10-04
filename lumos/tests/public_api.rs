@@ -10,8 +10,8 @@ use lumos::{
     FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
     FlagCounts, FrameRegistration, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
     IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
-    LoadContext, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap, QualityPlanes,
-    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap,
+    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
     RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
     SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -38,6 +38,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             unstated_bayer_pattern: Some(CfaPattern::Grbg),
             pedestal: Pedestal::Unknown,
         },
+        xtrans_passes: MarkesteijnPasses::Three,
     };
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.

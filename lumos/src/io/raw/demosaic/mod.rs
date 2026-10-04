@@ -35,6 +35,7 @@ mod memory_tests {
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::raw::demosaic::xtrans::markesteijn;
 
     #[test]
     fn demosaic_memory_counts_each_plane_the_kernel_holds() {
@@ -56,8 +57,12 @@ mod memory_tests {
         assert_eq!(bayer_odd.output_bytes, 3 * 15 * 4);
         assert_eq!(bayer_odd.peak_bytes, 108 * 4);
 
+        // The input and the three output planes, and the pool's tile buffers, whatever the frame.
         let xtrans = CfaType::XTrans(XTRANS_PATTERN).demosaic_memory(even);
         assert_eq!(xtrans.output_bytes, 3 * 80 * 4);
-        assert_eq!(xtrans.peak_bytes, 22 * 80 * 4);
+        assert_eq!(
+            xtrans.peak_bytes,
+            4 * 80 * 4 + markesteijn::workspace_bytes()
+        );
     }
 }

@@ -4,6 +4,7 @@
 //! decision — which container, which decoder, what transfer function, what colour interpretation,
 //! which demosaic.
 
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use imaginarium::FileFormat;
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +66,7 @@ pub enum ColorProvenance {
 pub enum DemosaicProvenance {
     None,
     LumosRcd,
-    LumosMarkesteijn,
+    LumosMarkesteijn { passes: MarkesteijnPasses },
     LibRaw,
 }
 

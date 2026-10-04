@@ -24,8 +24,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 16. RAW: the preview is a second decoder, and LibRaw facts are lost
 
-- [ ] `16.12` **X-Trans uses Markesteijn 1-pass** — `io/raw/demosaic/xtrans/markesteijn/mod.rs:1-14,44`
-  - The LibRaw default and RawTherapee "best" are 3-pass. It costs ≈2–3× the time. `[P]`
 
 
 
@@ -37,12 +35,12 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 24. Hot-path performance
 
-- [ ] `24.1` **Markesteijn step 6 is mostly serial** — `io/raw/demosaic/xtrans/markesteijn_steps/mod.rs:932-951,1031-1087`
-  - It takes 335 of 956 ms. It builds 4 serial SATs, and `demosaic_border` walks all W×H pixels. `[C]`
-- [ ] `24.2` **Markesteijn step 3 does three integer divisions per element** — `io/raw/demosaic/xtrans/markesteijn_steps/mod.rs:509-595`
-  - It takes 273 ms. Use row-parallel loops. `[P]`
-- [ ] `24.3` **The demosaics use full-frame arenas, not tiles** — `io/raw/demosaic/xtrans/markesteijn/mod.rs:82-96`, `io/raw/demosaic/bayer/rcd/mod.rs:146-176,329-332`
-  - Markesteijn uses 1668 MB for 24 MP. dcraw tiles at 512 and RawTherapee RCD at 194. RCD is fully scalar. `[P]`
+- [ ] `24.1` **The X-Trans border fill is serial and visits every pixel** — `io/raw/demosaic/xtrans/markesteijn/border.rs:8-16`
+  - It fills a band of 12 or 18 px, but its loop walks all W×H pixels and skips the interior. `[C]`
+- [ ] `24.2` **The tiled Markesteijn has no bench** — `io/raw/demosaic/xtrans/markesteijn/tile.rs`
+  - Its loops are scalar, and it reads the pattern through `% 3` and `% 6` per pixel. Measure it before a change. `[P]`
+- [ ] `24.3` **RCD uses a full-frame arena, not tiles** — `io/raw/demosaic/bayer/rcd/mod.rs:146-176,329-332`
+  - RawTherapee's RCD tiles at 194. RCD is fully scalar. `[P]`
 - [ ] `24.7` **The elliptical matched filter is a full k² 2-D convolution** — `star_detection/convolution/mod.rs:125-163`
   - It is 289 taps at FWHM 6. It is separable at 0/π/2. Geusebroek 2003 handles general angles. `[C]`
 - [ ] `24.8` **`Component::scan` walks the whole bbox 3–4 times** — `star_detection/deblend/component.rs:394-410`
@@ -513,6 +511,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 6. Done: a star whose stamp holds a pixel with no data is not measured, checked at its peak and again at the centre it moves to (`BitBuffer2::any_in_square`), and the sky annulus leaves such pixels out — as photutils masks them and SExtractor flags such objects; for a registration catalogue the star is better gone than measured on a fill. `measure_star` takes its frame planes as one `MeasurePlanes`. Item 8.2 is closed.
 
 7. Done: SCNR has PixInsight's four protections — Average Neutral, Maximum Neutral, Additive Mask and Maximum Mask — and one `amount` for each, the blend `(1 − amount)·G + amount·G_full` toward the protection's full-strength green; for the masks that is PixInsight's own formula. Every constructor takes the amount, the default is Average Neutral at 1, and `lens` offers all four with the amount as its own knob. Item 19.8 is closed.
+
+8. Done: Markesteijn runs one pass or three (`MarkesteijnPasses`, on `LoadContext` and `IngestConfig`; the provenance records the count), ported from librtprocess in tiles of 114 with YPbPr at both counts. Every tile writes only the part its passes compute in full: 9 px inside its edges for one pass, 15 for three, the least at which no written pixel reads a colour no stage computed, which a test finds by seeding the uncomputed channels with ±1000 at every phase of the pattern. librtprocess writes all but 8 px, so its pixels beside a seam depend on where the tiles lie; here a crop demosaics bit for bit as inside a larger frame, at shifted phases. The 2×2 green blocks take red and blue in all four of one pass's directions: dcraw's loop runs to the direction count in steps of two, so it fills two and leaves the other two at zero (LibRaw issue 441). The interior is librtprocess's to the bit at both counts, with those two lines changed and one tile over the frame (`internals/reference/markesteijn_librtprocess.py`). The demosaic holds the input, the output and a tile per worker, about 2 MB, in place of the full-frame arena of 22 planes; the planner's tests take a fixed 22-plane decode for their heavy case. The flag spread follows the pass count: an impulse changes pixels up to 11 px away at one pass and 16 at three (10 before the green-block fix). Item 16.12 is closed, and of 24.3 the Markesteijn part; 24.1 and 24.2 name the tiled code. Deviations: the margins are wider than librtprocess's, so a tile writes 96² or 84² of its 114², not 98².
 
 # Decisions
 

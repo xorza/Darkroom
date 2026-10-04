@@ -125,7 +125,7 @@ pub(crate) fn load_preview_fits(
     if decoded.cfa_type.is_some() {
         Ok(decoded
             .into_cfa(path)?
-            .demosaic(&context.cancel)
+            .demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| ImageError::cancelled(path))?)
     } else {
         decoded.into_linear(path)

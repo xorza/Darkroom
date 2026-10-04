@@ -11,6 +11,7 @@
 //! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in
 //!   `image_ops/ml/tests/`.
 
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::path::{Path, PathBuf};
 
 use common::CancelToken;
@@ -66,7 +67,7 @@ pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
 pub(crate) fn raw_light(path: &Path) -> LinearImage {
     load_raw_cfa(path, &LoadContext::default())
         .expect("load a RAW light")
-        .demosaic(&CancelToken::never())
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .expect("demosaic a RAW light")
 }
 

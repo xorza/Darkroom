@@ -32,6 +32,7 @@ use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::io::raw::demosaic::xtrans;
 use crate::io::raw::demosaic::xtrans::markesteijn;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -99,7 +100,7 @@ impl CfaType {
     }
 
     /// The memory a demosaic of a `dimensions` frame of this pattern holds at once.
-    pub(crate) const fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
+    pub(crate) fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
         match self {
             Self::Mono => {
                 let bytes = dimensions.pixel_count().saturating_mul(size_of::<f32>());
@@ -113,24 +114,28 @@ impl CfaType {
         }
     }
 
-    /// The demosaic lumos runs for this pattern.
-    pub(crate) const fn demosaic_provenance(self) -> DemosaicProvenance {
+    /// The demosaic lumos runs for this pattern, an X-Trans one with `passes`.
+    pub(crate) const fn demosaic_provenance(self, passes: MarkesteijnPasses) -> DemosaicProvenance {
         match self {
             Self::Mono => DemosaicProvenance::None,
             Self::Bayer(_) => DemosaicProvenance::LumosRcd,
-            Self::XTrans(_) => DemosaicProvenance::LumosMarkesteijn,
+            Self::XTrans(_) => DemosaicProvenance::LumosMarkesteijn { passes },
         }
     }
 
-    /// How far the demosaic of this pattern reads from an output pixel: an input photosite this far
-    /// away can change it. Both demosaics decide directions from neighbourhoods of interpolated
-    /// values, so the reach is the chained steps', not one kernel's. An impulse on random texture
-    /// moves pixels up to 10 away by more than 2⁻¹⁶ of itself, for both
+    /// How far the demosaic of this pattern, an X-Trans one with `passes`, reads from an output
+    /// pixel: an input photosite this far away can change it. Both demosaics decide directions
+    /// from neighbourhoods of interpolated values, so the reach is the chained steps', not one
+    /// kernel's, and each further Markesteijn pass interpolates again from interpolated colours.
+    /// An impulse on random texture moves pixels up to 10 away by more than 2⁻¹⁶ of itself for
+    /// RCD, and changes pixels up to 11 and 16 away for one and three Markesteijn passes
     /// (`the_demosaic_support_bounds_every_impulse_response`).
-    pub(crate) const fn demosaic_support(self) -> usize {
-        match self {
-            Self::Mono => 0,
-            Self::Bayer(_) | Self::XTrans(_) => 10,
+    pub(crate) const fn demosaic_support(self, passes: MarkesteijnPasses) -> usize {
+        match (self, passes) {
+            (Self::Mono, _) => 0,
+            (Self::Bayer(_), _) => 10,
+            (Self::XTrans(_), MarkesteijnPasses::One) => 11,
+            (Self::XTrans(_), MarkesteijnPasses::Three) => 16,
         }
     }
 
@@ -306,9 +311,13 @@ impl CfaImage {
         });
     }
 
-    /// Demosaic this CFA image into a 3-channel `LinearImage`.
+    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`.
     /// Consumes self.
-    pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, Cancelled> {
+    pub(crate) fn demosaic(
+        mut self,
+        passes: MarkesteijnPasses,
+        cancel: &CancelToken,
+    ) -> Result<LinearImage, Cancelled> {
         self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
@@ -316,7 +325,7 @@ impl CfaImage {
         let cfa_type = self.cfa_type;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = cfa_type.demosaiced_color();
-            provenance.demosaic = cfa_type.demosaic_provenance();
+            provenance.demosaic = cfa_type.demosaic_provenance(passes);
         }
         // Interpolation mixes samples, so one step's σ no longer bounds any of them. A mono sensor's
         // samples pass through untouched and keep it.
@@ -348,7 +357,7 @@ impl CfaImage {
         // Every other fact spreads as far as the demosaic reads.
         let mut flags = self.flags;
         if let Some(flags) = &mut flags {
-            flags.dilate(cfa_type.demosaic_support(), QualityFlags::NO_DATA);
+            flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
         }
 
         let unbalance = |planes: &mut [Vec<f32>; 3]| {
@@ -379,8 +388,13 @@ impl CfaImage {
                 image
             }
             CfaType::XTrans(pattern) => {
-                let mut planes =
-                    xtrans::demosaic(&pixels, Size2us::new(width, height), pattern, cancel)?;
+                let mut planes = xtrans::demosaic(
+                    &pixels,
+                    Size2us::new(width, height),
+                    pattern,
+                    passes,
+                    cancel,
+                )?;
                 unbalance(&mut planes);
 
                 let dims = ImageDimensions::new((width, height), 3);

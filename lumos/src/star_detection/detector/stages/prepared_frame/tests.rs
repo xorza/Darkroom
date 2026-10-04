@@ -3,6 +3,7 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::star_detection::detector::stages::prepared_frame::*;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
@@ -253,7 +254,7 @@ fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
         .map(|_| 0.1 + 0.01 * rng.next_gaussian_f32())
         .collect();
     let mut image = make_cfa(size, pixels, CfaType::Bayer(CfaPattern::Rggb))
-        .demosaic(&CancelToken::never())
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
     image.metadata.provenance = Some(ImageProvenance {
         container: SourceContainer::CameraRaw,
