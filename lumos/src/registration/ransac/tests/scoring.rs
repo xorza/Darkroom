@@ -1,6 +1,6 @@
 use super::*;
 
-/// The score is the negated MAGSAC loss, and the inliers are the points within the threshold: two
+/// The score is the negated Welsch loss, and the inliers are the points within the threshold: two
 /// exact points lose nothing, and a third 475 px off loses the outlier loss `σ²/2` = 0.5.
 #[test]
 fn score_hypothesis_hand_values() {
@@ -15,7 +15,7 @@ fn score_hypothesis_hand_values() {
         DVec2::new(500.0, 0.0),
     ];
     let transform = Transform::translation(DVec2::new(5.0, 0.0));
-    let scorer = MagsacScorer::new(1.0);
+    let scorer = WelschScorer::new(1.0);
     let mut inliers = Vec::new();
     for (count, score, expected_inliers) in [(2, 0.0, vec![0, 1]), (3, -0.5, vec![0, 1])] {
         let actual = score_hypothesis(
@@ -49,7 +49,7 @@ fn score_hypothesis_stops_once_it_cannot_win() {
             }
         })
         .collect();
-    let scorer = MagsacScorer::new(1.0);
+    let scorer = WelschScorer::new(1.0);
     let mut inliers = Vec::new();
     let score = score_hypothesis(
         &ref_pts,

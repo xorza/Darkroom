@@ -7,6 +7,7 @@ pub(crate) mod quality_planes;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
+use crate::run_report::RunReport;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
 
@@ -32,37 +33,46 @@ pub struct StackProduct {
     pub coverage: Option<Coverage>,
     /// WHT map: `Σwᵢ` over whatever formed the pixel.
     ///
-    /// Unlike [`Self::coverage`], this is *not* one quantity across producers, and cannot be — the
-    /// two weight different things:
-    ///
     /// - A statistical combine sums, per channel, each surviving frame's weight times its
-    ///   confidence at that pixel. `Equal` weighting leaves unit frame weights, so the sum is the
-    ///   survivor count scaled by confidence; `Noise` and `Manual` normalize the frame weights to
-    ///   1 across the set first. Per channel because rejection can retain different samples in
-    ///   each.
+    ///   confidence at that pixel. `Equal` weighting gives unit frame weights, so the sum is the
+    ///   survivor count scaled by confidence. `Noise` weighting gives each frame its inverse noise
+    ///   variance, not normalized, so with unit confidence the sum is the inverse variance of the
+    ///   mean. `Manual` weights are relative, and so is the sum.
     /// - Drizzle sums one shared plane of geometric drop weights: how much of each input pixel's
     ///   flux landed here, times the frame weight.
     ///
-    /// So the values are comparable *within* a product but not between producers, and a reader
-    /// should treat this as relative rather than absolute. What does hold either way: it is the
-    /// denominator the image was divided by, and [`Self::linear_variance`] is `Σwᵢ²/(Σwᵢ)²` over
-    /// these same weights, so the two planes are always mutually consistent.
+    /// It is the denominator the image was divided by, under the same weights as [`Self::variance`].
     pub weight: Option<QualityMap>,
-    /// Conditional linear-combine variance factor `Σwᵢ² / (Σwᵢ)²`.
+    /// The variance of each pixel's value, in the image's units squared: `Σwᵢ²·vᵢ / (Σwᵢ)²` over
+    /// the samples that formed it.
     ///
-    /// Present for weighted means and drizzle, using their actual surviving/contributing samples.
-    /// Absent for median output because a median is not a linear combination.
-    pub linear_variance: Option<QualityMap>,
-    /// Source-quantization uncertainty carried through the combine, in the stacked image's
-    /// sample units.
+    /// `vᵢ` is the sample's CCD noise model: the frame's measured background noise, plus the photon
+    /// noise of the signal above the sky when the frame states its gain
+    /// ([`RunReport::variance_background_only`] says when one did not), carried through
+    /// normalization and divided by the warp's confidence. A statistical combine takes it at the
+    /// combined value; drizzle takes it at each input pixel's value. Drizzle spreads one input
+    /// pixel over several output pixels, so its noise correlates between neighbours (Fruchter &
+    /// Hook 2002): this plane is each pixel's own variance, not their covariance.
     ///
-    /// Present when every input frame declared one and the frame set carries no coverage, which
-    /// is what lets a surviving sample be traced back to the frame whose sigma and normalization
-    /// gain it inherited. `None` otherwise.
-    pub quantization_sigma: Option<f32>,
+    /// Absent for median output, which has no exact variance.
+    pub variance: Option<QualityMap>,
+    /// The variance of each pixel's value as its surviving samples' scatter shows it, in the
+    /// image's units squared: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model.
+    ///
+    /// Unbiased where each sample's variance is inversely proportional to its weight — as `Noise`
+    /// weighting makes it at the sky — and with equal weights the squared standard error of the
+    /// mean. It checks [`Self::variance`]: where the two disagree beyond the scatter of a
+    /// scatter, the noise model or the frames are off. Rejection trims the tails, so a clipped
+    /// pixel reads below the frames' full scatter. NaN where fewer than two samples survive.
+    ///
+    /// Absent for median output and for drizzle, and unless asked for.
+    pub dispersion: Option<QualityMap>,
     /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
+    /// What the combine decided on its own: the samples it left out for their flags, and the
+    /// flagged ones it had to keep.
+    pub report: RunReport,
 }
 
 impl StackProduct {
@@ -86,8 +96,7 @@ impl StackProduct {
                 .cfa_type
                 .expect("a CFA master is stacked from mosaic frames"),
             metadata: self.image.metadata,
-            quantization_sigma: self.quantization_sigma,
-            nulls: self.image.nulls,
+            flags: self.image.flags,
         }
     }
 }
@@ -97,6 +106,7 @@ mod tests {
     use crate::internals::prelude::*;
     use crate::io::image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::run_report::RunReport;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
 
@@ -107,13 +117,15 @@ mod tests {
             (0..dimensions.sample_count()).map(|i| i as f32).collect(),
         );
         image.metadata.exposure_time = Some(30.0);
+        image.metadata.quantization_sigma = Some(0.25);
         StackProduct {
             image,
             coverage: None,
             weight: None,
-            linear_variance: None,
-            quantization_sigma: Some(0.25),
+            variance: None,
+            dispersion: None,
             cfa_type,
+            report: RunReport::default(),
         }
     }
 
@@ -126,8 +138,8 @@ mod tests {
         assert_eq!(master.data.pixels(), &[0.0, 1.0]);
         assert_eq!(master.cfa_type, pattern);
         assert_eq!(master.metadata.exposure_time, Some(30.0));
-        assert_eq!(master.quantization_sigma, Some(0.25));
-        assert!(master.nulls.is_none());
+        assert_eq!(master.metadata.quantization_sigma, Some(0.25));
+        assert!(master.flags.is_none());
     }
 
     #[test]

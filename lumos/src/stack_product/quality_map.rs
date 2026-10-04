@@ -1,5 +1,6 @@
 //! A stacked master's ancillary quality plane: one shared, or one per channel.
 
+use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
@@ -21,6 +22,26 @@ impl QualityMap {
             LinearPixels::Rgb(planes) => Self::PerChannel(planes),
         }
     }
+
+    /// The quality plane of an image channel.
+    pub const fn channel(&self, channel: usize) -> &Buffer2<f32> {
+        match self {
+            Self::Shared(plane) => plane,
+            Self::PerChannel(planes) => &planes[channel],
+        }
+    }
+
+    /// One plane per image channel: shared for one channel, per channel for three.
+    ///
+    /// # Panics
+    /// For any other count, which no image has.
+    pub(crate) fn from_planes(planes: ArrayVec<Buffer2<f32>, 3>) -> Self {
+        match planes.len() {
+            1 => Self::Shared(planes.into_iter().next().expect("one plane")),
+            3 => Self::PerChannel(planes.into_inner().expect("three planes")),
+            count => panic!("an image has one or three channels, not {count}"),
+        }
+    }
 }
 
 impl From<QualityMap> for LinearImage {
@@ -28,23 +49,6 @@ impl From<QualityMap> for LinearImage {
         match map {
             QualityMap::Shared(plane) => plane.into(),
             QualityMap::PerChannel(planes) => planes.into(),
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use imaginarium::Buffer2;
-
-    use crate::stack_product::quality_map::QualityMap;
-
-    impl QualityMap {
-        /// The quality plane applicable to an image channel.
-        pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
-            match self {
-                Self::Shared(plane) => plane,
-                Self::PerChannel(planes) => &planes[channel],
-            }
         }
     }
 }

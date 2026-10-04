@@ -59,6 +59,7 @@ fn stretch_stacked_light() {
             "ghs",
             Stretch {
                 method: StretchMethod::Ghs {
+                    black_point: 0.0,
                     d: 5000.0,
                     b: -1.0,
                     sp: 0.0,
@@ -90,7 +91,7 @@ fn stretch_stacked_light() {
             "{name} spreads contrast across the range: {out:?}"
         );
 
-        Scnr::average_neutral().apply(&mut stretched).unwrap();
+        Scnr::average_neutral(1.0).apply(&mut stretched).unwrap();
         visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}"));
     }
 
@@ -103,6 +104,7 @@ fn stretch_stacked_light() {
     Stretch::auto_asinh().apply(&mut staged).unwrap();
     Stretch {
         method: StretchMethod::Ghs {
+            black_point: 0.0,
             d: 3.0,
             b: 0.0,
             sp: 0.3,
@@ -119,6 +121,6 @@ fn stretch_stacked_light() {
         out.min >= 0.0 && out.max <= 1.0 + 1e-3,
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
-    Scnr::average_neutral().apply(&mut staged).unwrap();
+    Scnr::average_neutral(1.0).apply(&mut staged).unwrap();
     visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs");
 }

@@ -6,25 +6,30 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use crate::registration::config::{self, InterpolationMethod};
-use crate::registration::resample::internals::warp_plane;
-use crate::registration::resample::kernel::LanczosOrder;
+use crate::registration::registration_config::{self, InterpolationMethod};
+use crate::registration::resample;
+use crate::registration::resample::frame_sampler::{
+    FrameSampler, RowOutput, SampleMethod, WindowAxes,
+};
 use crate::registration::resample::row_positions::RowPositions;
-use crate::registration::resample::{self, quality, row};
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::transform::{Transform, WarpTransform};
 
-/// One plane of a `side`-square gradient warped by the test transform with `method`.
+/// A mono `side`-square gradient warped by the test transform with `method`, into buffers a
+/// previous frame left: the pixels and the quality maps one plane costs.
 fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMethod) {
-    let input = patterns::diagonal_gradient(Size2us::new(side, side));
-    let mut output = Buffer2::new_default(side, side);
-    let transform = create_test_transform();
-    let params = config::internals::warp_params(method);
-
+    let size = Size2us::new(side, side);
+    let image = LinearImage::from_pixels(
+        ImageDimensions::new((side, side), 1),
+        patterns::diagonal_gradient(size).pixels().to_vec(),
+    );
+    let transform = WarpTransform::new(create_test_transform());
+    let params = registration_config::internals::warp_params(method);
+    let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
-        warp_plane(
-            black_box(&input),
-            black_box(&mut output),
-            &black_box(WarpTransform::new(transform)),
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&transform),
             params,
         );
     });
@@ -60,27 +65,36 @@ fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
 /// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
-    let input = patterns::diagonal_gradient(Size2us::new(1024, 1024));
-    let mut output = Buffer2::new_default(1024, 1024);
-    let transform = create_test_transform();
-    let wt = WarpTransform::new(transform);
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-
-    let size = Size2us::new(input.width(), input.height());
+    let size = Size2us::new(1024, 1024);
+    let image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        patterns::diagonal_gradient(size).pixels().to_vec(),
+    );
+    let mut output = Buffer2::new_default(size.width, size.height);
+    let mut coverage = vec![0.0; size.width];
+    let mut confidence = vec![0.0; size.width];
+    let transform = WarpTransform::new(create_test_transform());
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let method = SampleMethod::for_frame(params, &transform, size);
+    let source = SourceImage::of(&image);
+    let sampler = FrameSampler::new(method, &source, None, params.border_value);
     let mut positions = RowPositions::default();
+    let mut axes = WindowAxes::default();
     b.bench(|| {
         for (y, output_row) in black_box(&mut output)
             .pixels_mut()
             .chunks_mut(size.width)
             .enumerate()
         {
-            positions.fill(y, size.width, &wt, size);
-            row::sample_row(
-                black_box(&input),
+            positions.fill(y, size.width, &transform, size);
+            sampler.sample_row(
                 positions.positions(),
-                params.method,
-                params.border_value,
-                output_row,
+                &mut axes,
+                RowOutput {
+                    channels: &mut [output_row],
+                    coverage: &mut coverage,
+                    confidence: &mut confidence,
+                },
             );
         }
     });
@@ -101,37 +115,6 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
     bench_plane_warp(b, 2048, InterpolationMethod::Lanczos2);
 }
 
-/// The quality maps against the plane warp beside them, at the same size and method.
-///
-/// `warp` pays this once per frame and the plane warp once per channel, so the ratio between these
-/// two is what decides how much of a registered frame's warp time is spent on the quality planes —
-/// see `bench_warp_with_quality_lanczos3_1k` for the combined figure a mono frame actually pays.
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_quality_maps_lanczos3_1k(b: quickbench::Bencher) {
-    let transform = create_test_transform();
-
-    b.bench(|| {
-        quality::internals::maps(
-            black_box(Size2us::new(1024, 1024)),
-            &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Lanczos3,
-        )
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_quality_maps_bilinear_1k(b: quickbench::Bencher) {
-    let transform = create_test_transform();
-
-    b.bench(|| {
-        quality::internals::maps(
-            black_box(Size2us::new(1024, 1024)),
-            &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Bilinear,
-        )
-    });
-}
-
 /// One whole frame through the public entry point: the plane warp plus the quality maps, which is
 /// what the pipeline pays per registered frame. Single-channel, so the maps are charged against one
 /// plane warp rather than three.
@@ -142,7 +125,7 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
 
     b.bench(|| {
         resample::warp(
@@ -150,20 +133,6 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
             &black_box(WarpTransform::new(transform)),
             params,
         )
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_lut_lookup(b: quickbench::Bencher) {
-    let lut = LanczosOrder::Three.lut();
-    let test_values: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) * 3.0 - 1.5).collect();
-
-    b.bench(|| {
-        let mut sum = 0.0f32;
-        for &x in black_box(&test_values) {
-            sum += lut.lookup(x);
-        }
-        black_box(sum)
     });
 }
 
@@ -181,11 +150,11 @@ fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     b.bench(|| {
         let mut buffers = resample::WarpBuffers::new(image.dimensions());
         buffers.warp_into(
-            black_box(&image),
+            black_box(&SourceImage::of(&image)),
             &black_box(WarpTransform::new(transform)),
             params,
         );
@@ -200,11 +169,11 @@ fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(
-            black_box(&image),
+            black_box(&SourceImage::of(&image)),
             &black_box(WarpTransform::new(transform)),
             params,
         );
@@ -222,9 +191,15 @@ fn bench_warp_into_rgb_sip_2k(b: quickbench::Bencher) {
         [plane.clone(), plane.clone(), plane],
     );
     let warp = sip_warp(size);
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&warp),
+            params,
+        );
+    });
 }
 
 /// A 2k RGB frame through `warp_into` with a homography: numerators and denominator are affine in
@@ -240,14 +215,20 @@ fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
     let warp = WarpTransform::new(Transform::homography([
         1.0, 0.003, 4.0, -0.002, 1.0, 2.5, 1e-7, -2e-7,
     ]));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&warp),
+            params,
+        );
+    });
 }
 
 /// The test transform with an order-3 SIP fitted to a mild radial field over `size`.
 fn sip_warp(size: Size2us) -> WarpTransform {
-    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::registration::distortion::sip::SipPolynomial;
     let transform = create_test_transform();
     let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
     let mut reference = Vec::new();
@@ -263,11 +244,6 @@ fn sip_warp(size: Size2us) -> WarpTransform {
             transform.apply(r + d * 2e-9 * d.length_squared())
         })
         .collect();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..SipConfig::default()
-    };
-    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
-    WarpTransform::with_sip(transform, fit.polynomial)
+    let sip = SipPolynomial::fitted_under(&transform, &reference, &target, 3, center);
+    WarpTransform::with_sip(transform, sip)
 }

@@ -1,8 +1,8 @@
 use crate::combine::config::*;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
-use crate::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
+use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 
 #[test]
@@ -114,9 +114,9 @@ fn presets_configure_as_documented() {
             floor,
         ),
         (
-            "percentile",
-            StackConfig::percentile(15.0),
-            mean(Rejection::percentile(15.0)),
+            "trim",
+            StackConfig::trim(15.0),
+            mean(Rejection::trim(15.0)),
             Weighting::Equal,
             Normalization::None,
             SmallN::none(),
@@ -130,16 +130,8 @@ fn presets_configure_as_documented() {
             SmallN::median_below(MIN_FRAMES_FOR_GESD),
         ),
         (
-            "bias",
-            StackConfig::bias(),
-            mean(Rejection::winsorized(3.0)),
-            Weighting::Equal,
-            Normalization::None,
-            SmallN::none(),
-        ),
-        (
-            "dark",
-            StackConfig::dark(),
+            "bias or dark",
+            StackConfig::bias_or_dark(),
             mean(Rejection::winsorized(3.0)),
             Weighting::Equal,
             Normalization::None,
@@ -183,6 +175,14 @@ fn validate_invalid_config_returns_exact_errors() {
         (StackConfig::sigma_clipped(-1.0), "sigma_low", -1.0),
         (
             StackConfig {
+                min_survivors: 0,
+                ..Default::default()
+            },
+            "min_survivors",
+            0.0,
+        ),
+        (
+            StackConfig {
                 method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, f32::INFINITY)),
                 ..Default::default()
             },
@@ -215,25 +215,21 @@ fn validate_invalid_config_returns_exact_errors() {
             "sigma_high",
             0.0,
         ),
-        (StackConfig::percentile(60.0), "low_percentile", 60.0),
+        (StackConfig::trim(60.0), "low_percent", 60.0),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
-                    10.0, 60.0,
-                ))),
+                method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(10.0, 60.0))),
                 ..Default::default()
             },
-            "high_percentile",
+            "high_percent",
             60.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
-                    50.0, 50.0,
-                ))),
+                method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(50.0, 50.0))),
                 ..Default::default()
             },
-            "low_percentile + high_percentile",
+            "low_percent + high_percent",
             100.0,
         ),
         (

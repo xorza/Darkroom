@@ -8,8 +8,8 @@ use quickbench::quick_bench;
 use std::array;
 use std::hint::black_box;
 
-use crate::Stretch;
-use crate::image_ops::stretching::{self, AsinhCurve};
+use crate::image_ops::stretching::{self, AsinhCurve, BlackPoint};
+use crate::{ColorMode, Stretch, StretchMethod};
 
 const W: usize = 3000;
 const H: usize = 2000;
@@ -21,9 +21,22 @@ const H: usize = 2000;
 fn bench_stretch_rgb(b: ::quickbench::Bencher) {
     let master = patterns::linear_rgb_master(ImageDimensions::new((W, H), 3));
     b.bench_labeled("clone", || black_box(master.clone()));
+    let ghs = |b: f32| Stretch {
+        method: StretchMethod::Ghs {
+            black_point: 0.02,
+            d: 5.0,
+            b,
+            sp: 0.05,
+            lp: 0.01,
+            hp: 0.9,
+        },
+        color: ColorMode::ColorPreserving,
+    };
     for (label, stretch) in [
         ("auto_stf", Stretch::auto_stf()),
         ("auto_asinh", Stretch::auto_asinh()),
+        ("ghs_hyperbolic", ghs(2.0)),
+        ("ghs_logarithmic", ghs(-1.4)),
     ] {
         b.bench_labeled(label, || {
             let mut img = master.clone();
@@ -42,6 +55,7 @@ fn bench_stretch_rgb(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let curve = AsinhCurve::new(0.05);
+    let black = BlackPoint::new(0.02);
     let n_px = W * H;
     // One hashed level per pixel, scaled per channel.
     let planes: [Vec<f32>; 3] = array::from_fn(|channel| {
@@ -59,7 +73,7 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         let [r, g, bch] = &mut planes;
         // The same entry point `apply_color_preserving_asinh` calls, so the bench times whichever
         // kernel production picks on this machine.
-        stretching::simd::asinh_color_preserve(r, g, bch, curve);
+        stretching::simd::asinh_color_preserve(r, g, bch, black, curve);
         black_box(&planes);
     });
 }

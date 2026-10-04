@@ -12,20 +12,30 @@ use crate::registration::triangle::voting::{
     PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };
 
-/// The triangles over each point's `k_neighbors` nearest neighbours in `tree`: O(n·k²).
-pub(super) fn form_triangles_kdtree(tree: &KdTree, k_neighbors: usize) -> Vec<Triangle> {
+/// The triangles over each point's `k_neighbors` nearest neighbours in `tree`, each at least
+/// `min_height` high over its longest side: O(n·k²).
+pub(super) fn form_triangles_kdtree(
+    tree: &KdTree,
+    k_neighbors: usize,
+    min_height: f64,
+) -> Vec<Triangle> {
     let positions = tree.points();
     let triangle_indices = form_triangles_from_neighbors(tree, k_neighbors);
 
     triangle_indices
         .into_iter()
         .filter_map(|[i, j, k]| {
-            Triangle::from_positions([i, j, k], [positions[i], positions[j], positions[k]])
+            Triangle::from_positions(
+                [i, j, k],
+                [positions[i], positions[j], positions[k]],
+                min_height,
+            )
         })
         .collect()
 }
 
 /// Match the points of two trees by triangle pattern: the matched pairs, with confidence scores.
+/// Only triangles at least `noise_scale` high over their longest side take part.
 ///
 /// Takes the trees rather than the points so the caller's target tree, which match recovery
 /// queries again afterwards, is built once.
@@ -33,6 +43,7 @@ pub(crate) fn match_triangles(
     ref_tree: &KdTree,
     target_tree: &KdTree,
     config: &TriangleConfig,
+    noise_scale: f64,
 ) -> Vec<PointMatch> {
     let n_ref = ref_tree.len();
     let n_target = target_tree.len();
@@ -47,8 +58,8 @@ pub(crate) fn match_triangles(
     // with diminishing returns (k=20 → C(20,2)=190, 4.2× more triangles).
     let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 10);
 
-    let ref_triangles = form_triangles_kdtree(ref_tree, k_neighbors);
-    let target_triangles = form_triangles_kdtree(target_tree, k_neighbors);
+    let ref_triangles = form_triangles_kdtree(ref_tree, k_neighbors, noise_scale);
+    let target_triangles = form_triangles_kdtree(target_tree, k_neighbors, noise_scale);
 
     if ref_triangles.is_empty() || target_triangles.is_empty() {
         return Vec::new();
@@ -60,15 +71,9 @@ pub(crate) fn match_triangles(
     };
 
     // Vote for point correspondences and resolve conflicts
-    let vote_matrix = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        config,
-        n_ref,
-        n_target,
-    );
-    resolve_matches(&vote_matrix, n_ref, n_target, config.min_votes)
+    let mut vote_matrix =
+        vote_for_correspondences(&target_triangles, &ref_triangles, &invariant_tree, config);
+    resolve_matches(&mut vote_matrix, n_ref, n_target, config.min_votes)
 }
 
 /// Form triangles using k-nearest neighbors from a k-d tree.

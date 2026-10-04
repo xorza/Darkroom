@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::io::raw;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 pub(crate) mod rcd;
@@ -115,18 +115,6 @@ impl CfaPattern {
         }
     }
 
-    /// Convert LibRaw's visible-origin pattern for consumers indexing the full raw buffer.
-    pub(crate) const fn at_raw_origin(self, top_margin: usize, left_margin: usize) -> Self {
-        let mut pattern = self;
-        if top_margin & 1 != 0 {
-            pattern = pattern.flip_vertical();
-        }
-        if left_margin & 1 != 0 {
-            pattern = pattern.flip_horizontal();
-        }
-        pattern
-    }
-
     /// Get color index at position (y, x) in the Bayer pattern.
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
@@ -142,38 +130,34 @@ impl CfaPattern {
     }
 }
 
-/// Raw Bayer image data with metadata needed for demosaicing.
+/// A Bayer frame the demosaic reads: its samples row by row — calibration may put them outside
+/// `[0, 1]` — its size, and its pattern anchored at its first pixel.
 #[derive(Debug)]
 pub(crate) struct BayerImage<'a> {
-    /// Decoded or calibrated linear samples; calibration may put values outside `[0, 1]`.
     pub(crate) data: &'a [f32],
-    /// Where the visible window sits in the data.
-    pub(crate) layout: SensorLayout,
-    /// CFA pattern anchored at the full raw buffer origin.
-    pub(crate) raw_cfa_pattern: CfaPattern,
+    pub(crate) size: Size2us,
+    pub(crate) pattern: CfaPattern,
 }
 
 impl<'a> BayerImage<'a> {
-    /// Create a `BayerImage` with margins (libraw style).
-    ///
     /// # Panics
-    /// Panics under the conditions [`SensorLayout::validate`] names.
-    pub(crate) fn with_margins(
-        data: &'a [f32],
-        layout: SensorLayout,
-        raw_cfa_pattern: CfaPattern,
-    ) -> Self {
-        layout.validate(data.len());
-
+    /// When `data` does not hold one sample per pixel of `size`, or `size` is empty.
+    pub(crate) fn new(data: &'a [f32], size: Size2us, pattern: CfaPattern) -> Self {
+        assert!(
+            size.width > 0 && size.height > 0 && data.len() == size.pixel_count(),
+            "a Bayer frame of {}x{} holds {} samples",
+            size.width,
+            size.height,
+            data.len()
+        );
         debug_assert!(
             data.iter().all(|v| v.is_finite()),
             "BayerImage data contains NaN or Infinity values"
         );
-
         Self {
             data,
-            layout,
-            raw_cfa_pattern,
+            size,
+            pattern,
         }
     }
 }

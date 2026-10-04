@@ -237,8 +237,9 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
 
     let mut scratch = TileScratch::default();
     for mask in [None, Some(&star)] {
-        let mut stats =
-            |pixels: &Buffer2<f32>| TileStats::compute(pixels, mask, tile, 3, &mut scratch);
+        let mut stats = |pixels: &Buffer2<f32>| {
+            TileStats::compute(pixels, mask, None, tile, 3, &mut scratch).unwrap()
+        };
         let masked = mask.is_some();
         assert_eq!(
             stats(&frame(&plane, 0.0)).sky,

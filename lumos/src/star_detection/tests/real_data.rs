@@ -11,11 +11,11 @@ use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::register;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformModel;
 use crate::star_detection::config::Config;
-use crate::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
+use crate::star_detection::config::measurement_config::CentroidMethod;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::threshold_mask::ThresholdParams;
 use glam::Vec2;
@@ -134,11 +134,9 @@ fn detect_rho_opiuchi() {
 #[test]
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::internals::visual;
-    use crate::star_detection::background::background_estimate::BackgroundEstimate;
-    use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::star_detection::detector::stages::detect::DetectResult;
     use crate::star_detection::detector::stages::fwhm;
-    use crate::star_detection::detector::stages::prepare;
+    use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::threshold_mask::create_residual_threshold_mask;
@@ -149,137 +147,79 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let linear_image = rho_opiuchi();
     let width = linear_image.width();
     let height = linear_image.height();
+    let size = Size2us::new(width, height);
     println!("Image size: {width}x{height}");
 
     let config = Config::precise_ground();
-    let mut pool = DetectionResources::new(Size2us::new(width, height));
+    let mut pool = DetectionResources::new(size);
 
     let out = |name: &str| format!("rho-opiuchi-inspect/{name}");
+    let save = |pixels: &Buffer2<f32>, name: &str| {
+        visual::save(
+            pixels.pixels(),
+            size,
+            &out(name),
+            visual::ToneMap::AutoRange,
+        );
+        println!("Saved: {name}");
+    };
 
-    // 1. Grayscale
-    let grayscale = prepare::prepare(&linear_image, &mut pool);
-    visual::save(
-        grayscale.pixels(),
-        Size2us::new(width, height),
-        &out("01_grayscale"),
-        visual::ToneMap::AutoRange,
-    );
-    println!("Saved: 01_grayscale");
+    // 1. The measurement plane, the sky out, and the sky's noise.
+    let frame = PreparedFrame::new(&linear_image, &config, &mut pool);
+    save(&frame.measure, "01_measure");
+    save(&frame.sky.noise, "02_sky_noise");
 
-    // 2. Background
-    let background = BackgroundEstimate::estimate(&grayscale, &config.background, &mut pool);
-    visual::save(
-        background.background.pixels(),
-        Size2us::new(width, height),
-        &out("02_background"),
-        visual::ToneMap::AutoRange,
-    );
-    println!("Saved: 02_background");
-
-    // 3. Noise
-    visual::save(
-        background.noise.pixels(),
-        Size2us::new(width, height),
-        &out("03_noise"),
-        visual::ToneMap::AutoRange,
-    );
-    println!("Saved: 03_noise");
-
-    // 4. Background-subtracted image
-    let subtracted: Vec<f32> = grayscale
-        .pixels()
-        .iter()
-        .zip(background.background.pixels().iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-    visual::save(
-        &subtracted,
-        Size2us::new(width, height),
-        &out("04_subtracted"),
-        visual::ToneMap::AutoRange,
-    );
-    println!("Saved: 04_subtracted");
-
-    // 5. FWHM estimation, on the residual with nothing marked saturated
-    let residual = background.residual_of(&grayscale);
-    let sky = background.sky_noise();
-    let mut saturation = pool.acquire_bit();
-    saturation.fill(false);
-    let fwhm_source = fwhm::estimate(&residual, &sky, &saturation, &config, &mut pool);
-    pool.release_bit(saturation);
+    // 2. FWHM estimation.
+    let fwhm_source = fwhm::estimate(&frame, &config, &mut pool);
     let fwhm = fwhm_source.value();
     println!("Estimated FWHM: {fwhm:?} ({fwhm_source:?})");
 
-    // 6. Matched filter (if FWHM available)
-    let filtered: Option<Buffer2<f32>> = fwhm.map(|fwhm_val| {
-        let mut output = pool.acquire_f32();
-        let mut temp = pool.acquire_f32();
-        matched_filter(
-            &residual,
-            fwhm_val,
-            config.detection.psf_axis_ratio,
-            config.detection.psf_angle,
-            &mut MatchedFilterBuffers {
-                output: &mut output,
-                temp: &mut temp,
-            },
-        );
-        pool.release_f32(temp);
-        visual::save(
-            output.pixels(),
-            Size2us::new(width, height),
-            &out("05_matched_filter"),
-            visual::ToneMap::AutoRange,
-        );
-        println!("Saved: 05_matched_filter");
-        output
-    });
-    if filtered.is_none() {
-        println!("No FWHM — matched filter skipped");
-    }
+    // 3. The detection plane and the noise measured on it.
+    let plane = frame.detection_plane(fwhm, &config, &mut pool);
+    save(&plane.values, "03_detection_plane");
+    save(&plane.noise.noise, "04_detection_noise");
 
-    // 7. Threshold mask
+    // 4. Threshold mask.
     let mut mask = pool.acquire_bit();
-    mask.fill(false);
-    let threshold = ThresholdParams {
-        sigma: config.detection.sigma_threshold,
-        min_noise: sky.floor,
-    };
     create_residual_threshold_mask(
-        filtered.as_ref().unwrap_or(&residual),
-        &sky.noise,
-        threshold,
+        &plane.values,
+        &plane.noise.noise,
+        ThresholdParams {
+            sigma: config.detection.sigma_threshold,
+            min_noise: plane.noise.floor,
+        },
         &mut mask,
     );
-    if let Some(filtered) = filtered {
-        pool.release_f32(filtered);
+    if let Some(no_data) = &frame.no_data {
+        mask.and_not(no_data);
     }
     let pixels_above = mask.count_ones();
-    visual::save_mask(&mask, &out("06_threshold_mask"));
-    println!("Saved: 06_threshold_mask ({pixels_above} pixels above threshold)");
+    visual::save_mask(&mask, &out("05_threshold_mask"));
+    println!("Saved: 05_threshold_mask ({pixels_above} pixels above threshold)");
 
-    // 8. Label map, of the mask as it stands — the stage labels it undilated
+    // 5. Label map, of the mask as it stands — the stage labels it undilated.
     let label_map = LabelMap::from_pool(&mask, config.detection.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
-    let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
+    let labels_buf = Buffer2::new(width, height, label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
-    visual::save_rgb(&labels_rgb, &out("07_label_map"));
-    println!("Saved: 07_label_map ({num_labels} components)");
+    visual::save_rgb(&labels_rgb, &out("06_label_map"));
+    println!("Saved: 06_label_map ({num_labels} components)");
     label_map.release_to_pool(&mut pool);
     pool.release_bit(mask);
 
-    // The stage itself, on the same residual and FWHM, saw what these images show.
-    let stage = DetectResult::from_image(&residual, &sky, fwhm, &config.detection, &mut pool);
+    // The stage itself, on the same plane, saw what these images show.
+    let stage =
+        DetectResult::from_plane(&plane, frame.no_data.as_ref(), &config.detection, &mut pool);
     assert_eq!(stage.pixels_above_threshold, pixels_above);
     assert_eq!(stage.connected_components, num_labels);
-    background.release_to_pool(&mut pool);
-    pool.release_f32(grayscale);
+    plane.release_to_pool(&mut pool);
+    frame.release_to_pool(&mut pool);
 }
 
 /// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
 /// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
 /// centroids. Runs the pair of lights through `GaussianFit` with and without a
-/// `NoiseModel`, registers each, and compares.
+/// gain, registers each, and compares.
 #[test]
 fn weighted_fit_registration_rms() {
     /// What one registration of the pair reported.
@@ -295,12 +235,12 @@ fn weighted_fit_registration_rms() {
     } = first_and_last_lights();
 
     // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
-    let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);
+    let noise_model = 30_000.0;
 
-    let register_with = |noise: Option<NoiseModel>| {
+    let register_with = |noise: Option<f32>| {
         let mut config = Config::precise_ground();
         config.measurement.centroid_method = CentroidMethod::GaussianFit;
-        config.measurement.noise_model = noise;
+        config.measurement.electrons_per_unit = noise;
         let mut detector = StarDetector::from_config(config).unwrap();
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
@@ -310,7 +250,7 @@ fn weighted_fit_registration_rms() {
             ..RegistrationConfig::default()
         };
         // Seeded, so the two runs differ only in their centroids.
-        reg_config.ransac.seed = Some(0x5EED);
+        reg_config.ransac.seed = 0x5EED;
         let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
         Registered {
             rms: r.rms_error(),

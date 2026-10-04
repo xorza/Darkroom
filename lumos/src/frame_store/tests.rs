@@ -1,148 +1,132 @@
 use crate::frame_store::cache_key::{CacheKey, DecoderKind};
+use crate::frame_store::decode_cache::DecodeCache;
+use crate::frame_store::disk_root::DiskRoot;
+use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::spill_directory::SpillDirectory;
-use crate::frame_store::spill_directory::internals::{marker, stale_run_directory};
+use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::io::image::fits::options::{FitsHduSelector, FitsLoadOptions};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::load_context::LoadContext;
+use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::mount_table::MountTable;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
 use std::fs;
 use std::path::Path;
 
-/// A spilled image reads back with its pixels, metadata and null mask, over whatever stale file
-/// held its name; one with no nulls writes no mask and reads back with none.
+/// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
+/// back with none. Its files have no name while it lives, on Unix, and none outlive it anywhere.
 #[test]
-fn stored_image_roundtrip_overwrites_stale_pixels() {
+fn a_parked_image_reads_back_and_leaves_no_file() {
     let directory = TempDir::new("frame_store_image");
+    let scratch = RunScratch::create(directory.path()).unwrap();
     let dimensions = ImageDimensions::new((3, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.exposure_time = Some(30.0);
-    let spill = FrameSpill::new(directory.path(), "calibrated");
-    let path = spill.channel_path(0);
-    StoredPlane::write(&path, &[9.0; 6]).unwrap();
 
-    let stored = StoredImage::spill(&spill, &image).unwrap();
-    let loaded = stored.load();
-    assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
-    assert_eq!(loaded.metadata.exposure_time, Some(30.0));
-    assert!(loaded.nulls.is_none());
-    assert!(!spill.nulls_path().exists());
-
-    // Dropping the image does not remove its planes: the spill directory owns that decision, so
-    // that `keep_cache` can hold them. See `spill_directory_removes_planes_unless_asked_to_keep`.
-    drop(stored);
-    assert!(path.exists());
+    let stored = StoredImage::spill(&scratch, &image).unwrap();
+    if cfg!(unix) {
+        assert_eq!(directory.entry_count(), 0, "a parked plane kept its name");
+    }
+    assert_eq!(
+        stored.planes().collect::<Vec<_>>(),
+        [&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6][..]]
+    );
+    assert_eq!(stored.metadata.exposure_time, Some(30.0));
+    assert!(stored.flags().is_none());
 
     // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
-    let masked_spill = FrameSpill::new(directory.path(), "masked");
-    image.nulls = NullMask::of_non_finite(
+    image.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
     );
-    let loaded = StoredImage::spill(&masked_spill, &image).unwrap().load();
-    let nulls = loaded.nulls.expect("the mask is spilled with the planes");
-    assert_eq!(nulls.count(), 2);
+    let masked = StoredImage::spill(&scratch, &image).unwrap();
+    let nulls = masked.flags().expect("the mask is spilled with the planes");
+    assert_eq!(nulls.count(QualityFlags::NO_DATA), 2);
     assert_eq!(
         (0..6)
-            .map(|index| nulls.bits().get(index))
+            .map(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index))
             .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
+    drop((stored, masked));
+    assert_eq!(
+        directory.entry_count(),
+        0,
+        "a parked plane outlived its frame"
+    );
 }
 
-/// The one owner of spilled-file cleanup, and the only thing `keep_cache` acts through.
-///
-/// Both `StoredImage::spill` and `StoredFrame::spill` write into a directory owned here and keep no
-/// per-file guard of their own. A guard on either would delete planes the user asked to keep, and
-/// would do it the moment that frame dropped rather than at the end of the run.
-///
-/// The root is a directory the caller already uses for something else: a run must remove only the
-/// subdirectory it created there, whatever `keep_cache` says.
+/// Two runs scratching in one root — a root the caller also keeps files in — each read back their
+/// own planes, never see the other's, and leave the caller's file and nothing else. The decode
+/// cache under the same root is one directory for every run, so a later run finds what an earlier
+/// one kept.
 #[test]
-fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
-    let scratch = TempDir::new("frame_store_keep");
-    let dimensions = ImageDimensions::new((2, 2), 1);
-    let image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
-
-    for (keep, should_survive) in [(false, false), (true, true)] {
-        let root = scratch.join(format!("keep_{keep}"));
-        fs::create_dir_all(&root).unwrap();
-        let sentinel = root.join("user_file.txt");
-        fs::write(&sentinel, b"not lumos's").unwrap();
-
-        let directory = SpillDirectory::create(&root, keep).unwrap();
-        assert_eq!(directory.path().parent(), Some(root.as_path()));
-        assert!(directory.path().join(marker()).is_file());
-
-        let spill = FrameSpill::new(directory.path(), "calibrated");
-        let stored = StoredImage::spill(&spill, &image).unwrap();
-        let plane = spill.channel_path(0);
-        assert!(plane.exists(), "keep={keep}: plane was not written");
-
-        // The frame going away must not take the file with it — only the directory decides.
-        drop(stored);
-        assert!(
-            plane.exists(),
-            "keep={keep}: dropping the frame removed its plane"
-        );
-
-        let spill_path = directory.path().to_path_buf();
-        drop(directory);
-        assert_eq!(
-            plane.exists(),
-            should_survive,
-            "keep={keep}: plane survival is wrong after the directory dropped"
-        );
-        assert_eq!(spill_path.exists(), should_survive);
-        assert!(root.is_dir(), "keep={keep}: the caller's root was removed");
-        assert!(
-            sentinel.is_file(),
-            "keep={keep}: a file lumos did not write was removed"
-        );
+fn runs_scratch_privately_beside_a_shared_decode_cache() {
+    let root = TempDir::new("frame_store_runs");
+    let sentinel = root.join("user_file.txt");
+    fs::write(&sentinel, b"not lumos's").unwrap();
+    let first = RunScratch::create(root.path()).unwrap();
+    let second = RunScratch::create(root.path()).unwrap();
+    let planes: Vec<StoredPlane> = (0..4)
+        .map(|i| {
+            let scratch = if i % 2 == 0 { &first } else { &second };
+            scratch.store(&[i as f32; 6]).unwrap()
+        })
+        .collect();
+    for (i, plane) in planes.iter().enumerate() {
+        assert_eq!(plane.chunk(0, 6), &[i as f32; 6]);
     }
+    if cfg!(unix) {
+        assert_eq!(root.entry_count(), 1, "a scratch file is visible by name");
+    }
+    drop((planes, first, second));
+    assert_eq!(root.entry_count(), 1);
+    assert!(sentinel.is_file(), "a file lumos did not write was removed");
+
+    let kept = DecodeCache::open(root.path()).unwrap();
+    assert_eq!(kept.path(), DecodeCache::open(root.path()).unwrap().path());
+    assert_eq!(
+        kept.path().parent(),
+        Some(fs::canonicalize(root.path()).unwrap().as_path())
+    );
 }
 
-/// Two runs without `keep_cache` never share a directory, so one run's drop cannot remove the
-/// other's planes; two runs with it always share one, so the second can reuse the first's planes.
+/// A root on a file system that keeps its files in memory is refused, naming the path and the
+/// file system; one on disk is taken. The mount table is a fixture: `/tmp` is tmpfs over an ext4
+/// root.
 #[test]
-fn spill_directories_are_per_run_unless_kept() {
-    let scratch = TempDir::new("frame_store_per_run");
-    let root = scratch.join("root");
-
-    let first = SpillDirectory::create(&root, false).unwrap();
-    let second = SpillDirectory::create(&root, false).unwrap();
-    assert_ne!(first.path(), second.path());
-    let second_path = second.path().to_path_buf();
-    drop(first);
-    assert!(second_path.is_dir(), "dropping one run removed another");
-    drop(second);
-
-    let first = SpillDirectory::create(&root, true).unwrap();
-    let second = SpillDirectory::create(&root, true).unwrap();
-    assert_eq!(first.path(), second.path());
-}
-
-/// A run killed before its drop leaves a marked directory behind; the next run removes it. An
-/// unmarked directory of the same shape belongs to someone else and stays.
-#[test]
-fn stale_run_directories_are_removed_only_when_marked() {
-    let scratch = TempDir::new("frame_store_stale");
-    let root = scratch.join("root");
-    let stale = stale_run_directory(&root);
-    let foreign = root.join(format!("run-{}-1", u32::MAX));
-    fs::create_dir_all(&foreign).unwrap();
-
-    let directory = SpillDirectory::create(&root, false).unwrap();
-    assert!(!stale.exists(), "a dead run's marked directory was kept");
-    assert!(foreign.is_dir(), "an unmarked directory was removed");
-    drop(directory);
+fn a_memory_backed_root_is_refused() {
+    let disk = TempDir::new("frame_store_disk_root");
+    let resolved = fs::canonicalize(disk.path()).unwrap();
+    let mounts = |filesystem: &str| {
+        MountTable::parse(&format!(
+            "22 1 8:2 / / rw - ext4 /dev/sda2 rw\n\
+             28 22 0:30 / {} rw - {filesystem} {filesystem} rw\n",
+            resolved.display()
+        ))
+    };
+    let error = DiskRoot::create(disk.path(), &mounts("tmpfs")).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            FrameStoreError::MemoryBackedDirectory { path, filesystem }
+                if path == disk.path() && filesystem == "tmpfs"
+        ),
+        "{error:?}"
+    );
+    assert!(DiskRoot::create(disk.path(), &mounts("ramfs")).is_err());
+    let root = DiskRoot::create(&disk.join("below"), &mounts("ext4")).unwrap();
+    assert_eq!(root.path(), resolved.join("below"));
 }
 
 #[test]
@@ -233,7 +217,7 @@ fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     let dimensions = ImageDimensions::new((8, 1), 1);
     let samples = vec![1.0f32, 3.0, 5.0, 7.0, 4.0, 4.0, 4.0, 4.0];
     let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
-    masked.nulls = NullMask::of_non_finite(
+    masked.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
     );
@@ -250,7 +234,7 @@ fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
     // set would panic rather than say so.
     let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
-    all_null.nulls = NullMask::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
+    all_null.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
     let empty = FrameStats::measure(&all_null);
     assert_eq!(empty.channels[0].median, 0.0);
     assert_eq!(empty.channels[0].mad, 0.0);
@@ -268,7 +252,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
     // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
     // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let quality = FrameQuality::for_unwarped(&image);
     assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
     assert_eq!(
@@ -280,22 +264,21 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 /// A cached frame comes back whole or not at all. Its quality planes return with its channels —
 /// reusing the channels without them would put the fill under its nulls into the stack as data on
 /// every run after the first — and a frame committed with them is rebuilt when one or both are
-/// gone, rather than read as a frame with no nulls. Another key finds nothing.
+/// gone, rather than read as a frame with no nulls. Another key finds nothing: another decode
+/// version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let directory = TempDir::new("frame_store_cached_quality");
     let dimensions = ImageDimensions::new((2, 2), 1);
-    let key = CacheKey::new(
-        FileIdentity {
-            len: 16,
-            mtime_ns: 1,
-        },
-        DecoderKind::Linear,
-    );
+    let identity = FileIdentity {
+        len: 16,
+        mtime_ns: 1,
+    };
+    let key = CacheKey::new(identity, DecoderKind::Linear, &LoadContext::default());
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let cache = |name, image: &LinearImage| {
-        let spill = FrameSpill::new(directory.path(), name);
+        let spill = FrameSpill::named(directory.path(), name);
         let quality = FrameQuality::for_unwarped(image);
         drop(StoredFrame::cache(&spill, key, image, &quality, FrameStats::measure(image)).unwrap());
         spill
@@ -324,7 +307,23 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         decoder: DecoderKind::Cfa,
         ..key
     };
-    for other in [other_version, other_decoder] {
+    let three_passes = LoadContext {
+        xtrans_passes: MarkesteijnPasses::Three,
+        ..LoadContext::default()
+    };
+    let second_hdu = LoadContext {
+        fits: FitsLoadOptions {
+            hdu: FitsHduSelector::Index(1),
+            ..FitsLoadOptions::default()
+        },
+        ..LoadContext::default()
+    };
+    let other_options = [three_passes, second_hdu]
+        .map(|context| CacheKey::new(identity, DecoderKind::Linear, &context));
+    for other in [other_version, other_decoder]
+        .into_iter()
+        .chain(other_options)
+    {
         assert!(
             StoredFrame::reuse(&spill, other, dimensions)
                 .unwrap()
@@ -379,7 +378,7 @@ fn plane_persistence_roundtrips_pixels() {
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
     StoredPlane::write(&path, &pixels).unwrap();
 
-    let mapped = StoredPlane::map(&path.clone()).unwrap();
+    let mapped = StoredPlane::<f32>::map(&path.clone()).unwrap();
     assert_eq!(mapped.chunk(0, pixels.len()), pixels);
 
     drop(mapped);
@@ -401,7 +400,7 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         .strip_suffix("_c0.bin")
         .unwrap()
         .to_owned();
-    assert_eq!(stem.len(), 64);
+    assert_eq!(stem.len(), 16);
     assert!(
         stem.bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
@@ -425,20 +424,20 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         cache_dir.join(format!("{stem}_coverage.bin"))
     );
 
-    let plain = FrameSpill::new(cache_dir, "frame");
+    let plain = FrameSpill::named(cache_dir, "frame");
     assert_eq!(plain.channel_path(2), cache_dir.join("frame_c2.bin"));
     assert_eq!(
         plain.quality_path(FramePlane::Confidence),
         cache_dir.join("frame_confidence.bin")
     );
-    assert_eq!(plain.nulls_path(), cache_dir.join("frame_nulls.bin"));
+    assert_eq!(plain.flags_path(), cache_dir.join("frame_flags.bin"));
 }
 
 #[test]
 fn channels_on_disk_requires_every_plane_at_the_expected_size() {
     let directory = TempDir::new("frame_store_reuse");
     let dimensions = ImageDimensions::new((4, 3), 3);
-    let spill = FrameSpill::new(directory.path(), "reuse");
+    let spill = FrameSpill::named(directory.path(), "reuse");
 
     // 4×3 f32 = 48 bytes per plane, three planes. Nothing on disk yet.
     assert!(!spill.channels_on_disk(dimensions));

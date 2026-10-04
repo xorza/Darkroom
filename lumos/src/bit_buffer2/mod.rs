@@ -11,6 +11,8 @@
 //! a shift and a mask to every read. Measured at +49% on star-detection's O(n²) deduplication and
 //! +82% on registration's fill-scatter-scan, which is why those stay `Vec<bool>`.
 
+mod dilation;
+
 use std::ops::Index;
 
 use crate::buffer_pool::PooledBuffer;
@@ -250,12 +252,53 @@ impl BitBuffer2 {
         }
     }
 
+    /// Set every bit `other` has set: `self |= other`, a word at a time.
+    pub(crate) fn or_with(&mut self, other: &Self) {
+        debug_assert_eq!(self.size, other.size, "size mismatch");
+        for (word, &other) in self.words.iter_mut().zip(&other.words) {
+            *word |= other;
+        }
+    }
+
     /// Clear every bit `other` has set: `self &= !other`, a word at a time.
     pub(crate) fn and_not(&mut self, other: &Self) {
         debug_assert_eq!(self.size, other.size, "size mismatch");
         for (word, &other) in self.words.iter_mut().zip(&other.words) {
             *word &= !other;
         }
+    }
+
+    /// Whether any pixel of the square `radius` either side of `centre`, clipped to the buffer, is
+    /// set: word by word along each of its rows.
+    pub(crate) fn any_in_square(&self, centre: Vec2us, radius: usize) -> bool {
+        if self.size.width == 0 || self.size.height == 0 {
+            return false;
+        }
+        let (x0, x1) = (
+            centre.x.saturating_sub(radius),
+            (centre.x + radius).min(self.size.width - 1),
+        );
+        let (y0, y1) = (
+            centre.y.saturating_sub(radius),
+            (centre.y + radius).min(self.size.height - 1),
+        );
+        (y0..=y1).any(|y| {
+            let (first, last) = (y * self.stride + x0, y * self.stride + x1);
+            (first / BITS_PER_WORD..=last / BITS_PER_WORD).any(|word| {
+                let low = if word == first / BITS_PER_WORD {
+                    first % BITS_PER_WORD
+                } else {
+                    0
+                };
+                let high = if word == last / BITS_PER_WORD {
+                    last % BITS_PER_WORD
+                } else {
+                    BITS_PER_WORD - 1
+                };
+                let mask = (u64::MAX >> (BITS_PER_WORD - 1 - high)) & (u64::MAX << low);
+                self.words[word] & mask != 0
+            })
+        })
     }
 
     /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
@@ -282,6 +325,19 @@ impl BitBuffer2 {
                 }
             }
         }
+    }
+
+    /// Dilate in place by a disk of `radius`: a pixel is set when a set pixel lies within Euclidean
+    /// distance `radius` of it. `scratch`, of any contents and this buffer's size, holds the source
+    /// while the buffer is rewritten.
+    ///
+    /// A disk rather than a square, as photutils dilates its source masks: a square reaches √2
+    /// times further along the diagonals and masks sky that no source touches.
+    ///
+    /// # Panics
+    /// If `scratch` is another size, or `radius` exceeds 63.
+    pub(crate) fn dilate(&mut self, radius: usize, scratch: &mut Self) {
+        dilation::dilate_mask(self, radius, scratch);
     }
 }
 

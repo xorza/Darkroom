@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
-use crate::combine::error::{Error as StackError, StackConfigError};
+use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
@@ -17,11 +17,15 @@ use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
-use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
-use crate::pipeline::result::Error;
-use crate::pipeline::tier::{FrameTier, StagePlan};
-use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
-use crate::registration::config::Config as RegistrationConfig;
+use crate::pipeline::detected_frame::DetectedFrame;
+use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_registration::FrameRegistration;
+use crate::pipeline::frame_tier::{FrameTier, StagePlan};
+use crate::pipeline::pipeline_frame::PipelineFrame;
+use crate::pipeline::result::AlignStackResult;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::{StackingProgress, StackingStage};
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::{Transform, TransformModel, TransformType, WarpTransform};
 use crate::star_detection::config::Config as StarDetectionConfig;
@@ -74,14 +78,41 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 
     assert_eq!(result.alignment.reference, 0);
     assert_eq!(
-        result.alignment.registered, 3,
+        result.alignment.registered(),
+        3,
         "all three frames should stack"
     );
     assert!(
-        result.alignment.dropped.is_empty(),
+        result.alignment.dropped().is_empty(),
         "dropped: {:?}",
-        result.alignment.dropped
+        result.alignment.dropped()
     );
+    // Each light's registration reaches the caller: the reference as itself, and each other light
+    // with the warp it was resampled through, which carries the reference's grid onto the light:
+    // `shifted` resamples the base through `p + shift`, so a star moves by `−shift` in the light.
+    // A fit of ~30 stars centred to a few thousandths of a pixel lands within 0.05 px.
+    assert!(matches!(
+        result.alignment.frames[0],
+        FrameRegistration::Reference
+    ));
+    for (frame, shift) in [(1, DVec2::new(8.0, -5.0)), (2, DVec2::new(-6.0, 7.0))] {
+        let FrameRegistration::Registered {
+            warp,
+            inliers,
+            rms_error,
+        } = &result.alignment.frames[frame]
+        else {
+            panic!("frame {frame}: {:?}", result.alignment.frames[frame]);
+        };
+        assert!(*inliers >= config.registration.matching.min_matches);
+        assert!(*rms_error <= config.registration.max_rms_error);
+        for p in [DVec2::new(20.0, 20.0), DVec2::new(100.0, 140.0)] {
+            assert!(
+                warp.apply(p).distance(p - shift) <= 0.05,
+                "frame {frame} at {p}"
+            );
+        }
+    }
 
     // The detection funnel reaches the caller instead of only the log: one entry per input frame,
     // in input order, each one internally consistent.
@@ -181,12 +212,13 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     .expect("stack");
 
     assert_eq!(
-        result.alignment.dropped,
+        result.alignment.dropped(),
         vec![1, 3],
         "both blank frames should be dropped, in ascending index order"
     );
     assert_eq!(
-        result.alignment.registered, 3,
+        result.alignment.registered(),
+        3,
         "reference + two aligned frames"
     );
 
@@ -213,7 +245,17 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         CancelToken::never(),
     )
     .expect("manual weights follow the survivors");
-    assert_eq!(result.alignment.dropped, vec![1, 3]);
+    assert_eq!(result.alignment.dropped(), vec![1, 3]);
+    for frame in [1, 3] {
+        assert!(
+            matches!(
+                result.alignment.frames[frame],
+                FrameRegistration::Dropped(_)
+            ),
+            "{:?}",
+            result.alignment.frames[frame]
+        );
+    }
 }
 
 #[test]
@@ -273,7 +315,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     )
     .unwrap_err();
 
-    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -319,7 +361,7 @@ fn an_invalid_registration_config_is_reported_as_one() {
     )
     .unwrap_err();
     assert!(
-        matches!(error, Error::RegistrationConfig(_)),
+        matches!(error, AlignStackError::RegistrationConfig(_)),
         "expected the config to be blamed, got {error:?}"
     );
 }
@@ -374,7 +416,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         CancelToken::never(),
     )
     .unwrap_err();
-    let Error::RegistrationConfig(invalid) = error else {
+    let AlignStackError::RegistrationConfig(invalid) = error else {
         panic!("expected the config to be blamed, got {error:?}")
     };
     assert_eq!(invalid.field, "min_matches");
@@ -410,7 +452,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::Config(StackConfigError::Field(invalid)))
+            AlignStackError::Stack(StackError::Config(StackConfigError::Field(invalid)))
                 if invalid.field == "sigma_low"
         ),
         "expected the stack config to be blamed rather than the frames, got {error:?}"
@@ -439,7 +481,7 @@ fn all_non_reference_frames_dropped_errors() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::AllFramesDropped { count: 2 }),
+        matches!(err, AlignStackError::AllFramesDropped { count: 2 }),
         "all non-reference frames dropped → AllFramesDropped {{ count: 2 }}, got {err:?}"
     );
 }
@@ -465,7 +507,7 @@ fn auto_reference_picks_the_richest_frame() {
         "Auto must not anchor on the near-blank frame"
     );
     assert_eq!(
-        result.alignment.dropped,
+        result.alignment.dropped(),
         vec![0],
         "the near-blank frame can't register"
     );
@@ -480,7 +522,7 @@ fn public_input_errors() {
         CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::NoFrames));
+    assert!(matches!(err, AlignStackError::NoFrames));
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
@@ -500,7 +542,7 @@ fn public_input_errors() {
         CancelToken::never(),
     )
     .unwrap_err();
-    let Error::DetectionConfig(invalid) = error else {
+    let AlignStackError::DetectionConfig(invalid) = error else {
         panic!("expected a detection config error, got {error:?}")
     };
     assert_eq!((invalid.field, invalid.value), ("sigma_threshold", 0.0));
@@ -529,7 +571,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::Config(
+            AlignStackError::Stack(StackError::Config(
                 StackConfigError::ManualWeightCountMismatch {
                     expected: 2,
                     actual: 1
@@ -546,7 +588,7 @@ fn public_input_errors() {
         }),
         ..AlignStackConfig::default()
     };
-    let Error::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
+    let AlignStackError::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
         panic!("expected a cosmic-ray config error")
     };
     assert_eq!(invalid.field, "cosmic-ray niter");
@@ -560,7 +602,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::NonFiniteImageSample {
+            AlignStackError::Stack(StackError::NonFiniteImageSample {
                 index: 1,
                 channel: 0,
                 pixel: 5,
@@ -616,7 +658,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     };
 
     let error = run(&paths, &AlignStackConfig::default());
-    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -635,16 +677,15 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 
     let parametric = AlignStackConfig {
         cosmic_ray: Some(CosmicRayConfig {
-            noise: NoiseEstimation::Parametric {
-                gain: 1.5,
-                read_noise: 5.0,
+            noise: NoiseEstimation::Gain {
+                electrons_per_adu: 1.5,
             },
             ..Default::default()
         }),
         ..AlignStackConfig::default()
     };
     let error = run(&paths[..1], &parametric);
-    let Error::CosmicRay { path, .. } = error else {
+    let AlignStackError::CosmicRay { path, .. } = error else {
         panic!("expected the light without an ADC step to be named, got {error:?}");
     };
     assert_eq!(path, paths[0]);
@@ -693,7 +734,7 @@ fn both_front_ends_report_the_same_stages() {
     };
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(0x5EED_0F5E);
+    config.registration.ransac.seed = 0x5EED_0F5E;
 
     let (raw_reports, raw_progress) = recorder();
     let paths: Vec<PathBuf> = frames
@@ -730,10 +771,11 @@ fn both_front_ends_report_the_same_stages() {
     );
 }
 
-/// The all-RAM and memory-bounded runs must produce the same stack. Both tiers run one body,
-/// `align::register_warp_and_stack`, and [`FrameTier`] decides only where a frame lives: a
-/// resident frame moves out of `PipelineFrame`, a spilled one is read back from its memory map, and
-/// the combined result has to be bit-identical either way.
+/// The all-RAM and memory-bounded runs must produce the same stack, in two passes and in one.
+/// [`FrameTier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
+/// spilled one is read back from its memory map, and the combined result has to be bit-identical
+/// either way. A named reference takes each light through one pass, and a found one through two,
+/// and they too agree.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `memory_override`, the input
 /// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
@@ -741,7 +783,8 @@ fn both_front_ends_report_the_same_stages() {
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {
     let scratch = TempDir::new("lumos_tier_equivalence");
-    let base = base_field();
+    // Smaller than `base_field`, since the lights are stacked four times.
+    let base = star_field(Size2us::new(160, 160), 24, 66666).image;
 
     // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
     // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without
@@ -778,123 +821,186 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         .collect();
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(0x5EED_0F5E);
+    config.registration.ransac.seed = 0x5EED_0F5E;
 
     let mut ram_config = config.clone();
-    ram_config.stack.cache.memory_override = Some(u64::MAX);
-    ram_config.stack.cache.cache_dir = scratch.join("ram_cache");
+    ram_config.stack.ingest.memory_override = Some(u64::MAX);
+    ram_config.stack.ingest.cache_dir = scratch.join("ram_cache");
 
     let mut streaming_config = config;
-    streaming_config.stack.cache.memory_override = Some(1);
-    streaming_config.stack.cache.cache_dir = scratch.join("streaming_cache");
-    // Kept so the premise assertion below can observe that the spill tier really ran; the whole
-    // scratch tree goes away when `scratch` drops.
-    streaming_config.stack.cache.keep_cache = true;
+    streaming_config.stack.ingest.memory_override = Some(1);
+    streaming_config.stack.ingest.cache_dir = scratch.join("streaming_cache");
 
     let masters = CalibrationMasters::default();
-    let ram = calibrate_align_stack(
-        &paths,
-        &masters,
-        &ram_config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("RAM-tier stack");
-    let streaming = calibrate_align_stack(
-        &paths,
-        &masters,
-        &streaming_config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("streaming-tier stack");
+    let run = |config: &AlignStackConfig| {
+        calibrate_align_stack(
+            &paths,
+            &masters,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack the lights")
+    };
+    let ram = run(&ram_config);
+    let streaming = run(&streaming_config);
 
-    // Premise: the two budgets must straddle the tier boundary. Only the streaming path creates a
-    // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
-    // exercised two code paths rather than the same one twice.
-    assert!(
-        streaming_config.stack.cache.cache_dir.is_dir(),
-        "streaming tier never spilled; both runs took the RAM path"
-    );
-    assert!(
-        !ram_config.stack.cache.cache_dir.exists(),
-        "RAM tier spilled to disk; both runs took the streaming path"
-    );
-
-    assert_eq!(ram.alignment.reference, streaming.alignment.reference);
-    assert_eq!(ram.alignment.registered, streaming.alignment.registered);
-    assert_eq!(ram.alignment.dropped, streaming.alignment.dropped);
+    // Premise: the two budgets must straddle the tier boundary. The report says which frames went
+    // to disk, which is what proves this test exercised two code paths rather than the same one
+    // twice: the streaming run parks every light before the reference is known, then reads every
+    // registered frame back; the RAM run writes nothing. Neither leaves a file in its cache root.
+    let report = |result: &AlignStackResult| {
+        (
+            result.product.report.parked_lights,
+            result.product.report.spilled_frames,
+        )
+    };
+    assert_eq!(report(&ram), (0, 0), "RAM tier spilled to disk");
     assert_eq!(
-        ram.alignment.dropped,
+        report(&streaming),
+        (paths.len() as u64, ram.alignment.registered() as u64),
+        "streaming tier did not park every light and read back every registered frame"
+    );
+    for config in [&ram_config, &streaming_config] {
+        let root = &config.stack.ingest.cache_dir;
+        assert!(
+            !root.exists() || std::fs::read_dir(root).unwrap().next().is_none(),
+            "{} kept a file",
+            root.display()
+        );
+    }
+    assert_eq!(
+        ram.alignment.dropped(),
         vec![2, 5],
         "the two starless frames should drop, in ascending index order"
     );
     assert_eq!(
-        ram.alignment.registered, 5,
+        ram.alignment.registered(),
+        5,
         "every dithered frame should register against the reference"
     );
-
-    assert_eq!(
-        ram.product.image.dimensions(),
-        streaming.product.image.dimensions()
-    );
-    let channels = ram.product.image.channels();
-    for channel in 0..channels {
-        assert_eq!(
-            bits(ram.product.image.channel(channel).pixels()),
-            bits(streaming.product.image.channel(channel).pixels()),
-            "image channel {channel} differs between the RAM and streaming tiers"
-        );
-        assert_eq!(
-            bits(ram.product.weight.as_ref().unwrap().channel(channel)),
-            bits(streaming.product.weight.as_ref().unwrap().channel(channel)),
-            "weight channel {channel} differs between the RAM and streaming tiers"
-        );
-    }
-    assert_eq!(
-        bits(ram.product.coverage.as_ref().unwrap().to_plane().pixels()),
-        bits(
-            streaming
-                .product
-                .coverage
-                .as_ref()
-                .unwrap()
-                .to_plane()
-                .pixels()
-        ),
-        "coverage differs between the RAM and streaming tiers"
-    );
-
-    let ram_variance = ram
-        .product
-        .linear_variance
-        .as_ref()
-        .expect("a σ-clipped mean emits a linear-variance plane");
-    let streaming_variance = streaming
-        .product
-        .linear_variance
-        .as_ref()
-        .expect("a σ-clipped mean emits a linear-variance plane");
-    for channel in 0..channels {
-        assert_eq!(
-            bits(ram_variance.channel(channel).pixels()),
-            bits(streaming_variance.channel(channel).pixels()),
-            "linear-variance channel {channel} differs between the RAM and streaming tiers"
-        );
-    }
-
-    // The master inherits the reference frame's metadata, and the two tiers reach that by
-    // different routes — the RAM path overwrites it after combining, the streaming path threads it
-    // in. Distinct per-frame exposure times make the comparison non-vacuous.
-    let inherited = ram.product.image.metadata.exposure_time;
+    // The master inherits the reference frame's metadata. Distinct per-frame exposure times make
+    // the comparison below non-vacuous.
     assert!(
-        inherited.is_some(),
+        ram.product.image.metadata.exposure_time.is_some(),
         "per-frame exposure time did not survive the FITS round-trip; \
-         the metadata comparison below would be vacuous"
+         the metadata comparison would be vacuous"
+    );
+
+    // Naming the reference the automatic choice found takes each light through one pass, on both
+    // tiers, and the stack is the same. The spilled one-pass run writes each light once, warped:
+    // no calibrated light is parked before its registration, as the two-pass run parks every one.
+    let one_pass = |config: &AlignStackConfig| {
+        let mut config = config.clone();
+        config.reference = Reference::Index(ram.alignment.reference);
+        run(&config)
+    };
+    let ram_one_pass = one_pass(&ram_config);
+    let streaming_one_pass = one_pass(&streaming_config);
+    assert_eq!(
+        report(&streaming_one_pass),
+        (0, ram.alignment.registered() as u64)
+    );
+
+    for (other, label) in [
+        (&streaming, "streaming"),
+        (&ram_one_pass, "RAM one-pass"),
+        (&streaming_one_pass, "streaming one-pass"),
+    ] {
+        assert_same_stack(&ram, other, label);
+    }
+}
+
+/// Two runs of the default configuration on the same lights give the same stack, bit for bit:
+/// the reference choice, every registration and every plane. RANSAC's seed is fixed, and nothing
+/// downstream depends on the order threads finish in.
+#[test]
+fn two_default_runs_stack_bit_for_bit() {
+    let base = base_field();
+    let frames = || {
+        vec![
+            shifted(&base, 3.0, -2.0),
+            base.clone(),
+            shifted(&base, -5.0, 4.0),
+            shifted(&base, 1.5, 6.5),
+        ]
+    };
+    let run = || {
+        align_and_stack(
+            frames(),
+            &AlignStackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack")
+    };
+    assert_same_stack(&run(), &run(), "second run");
+}
+
+/// Two runs stack the same lights against the same reference, bit for bit: every plane, the
+/// alignment, the detection funnels and the inherited metadata.
+fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, label: &str) {
+    assert_eq!(
+        expected.alignment.reference, actual.alignment.reference,
+        "{label}"
+    );
+    // `Debug` prints every float in its shortest round-trip form, so equal text is equal bits.
+    assert_eq!(
+        format!("{:?}", expected.alignment.frames),
+        format!("{:?}", actual.alignment.frames),
+        "{label}"
+    );
+    assert_eq!(expected.detection, actual.detection, "{label}");
+    let (expected, actual) = (&expected.product, &actual.product);
+    assert_eq!(
+        expected.image.dimensions(),
+        actual.image.dimensions(),
+        "{label}"
+    );
+    for channel in 0..expected.image.channels() {
+        assert_eq!(
+            bits(expected.image.channel(channel).pixels()),
+            bits(actual.image.channel(channel).pixels()),
+            "{label}: image channel {channel}"
+        );
+        // A plane the combine emits for one run it emits for the other, bit for bit.
+        assert_eq!(
+            expected
+                .weight
+                .as_ref()
+                .map(|weight| bits(weight.channel(channel))),
+            actual
+                .weight
+                .as_ref()
+                .map(|weight| bits(weight.channel(channel))),
+            "{label}: weight channel {channel}"
+        );
+        assert_eq!(
+            expected
+                .variance
+                .as_ref()
+                .map(|variance| bits(variance.channel(channel).pixels())),
+            actual
+                .variance
+                .as_ref()
+                .map(|variance| bits(variance.channel(channel).pixels())),
+            "{label}: variance channel {channel}"
+        );
+    }
+    assert_eq!(
+        expected
+            .coverage
+            .as_ref()
+            .map(|coverage| bits(coverage.to_plane().pixels())),
+        actual
+            .coverage
+            .as_ref()
+            .map(|coverage| bits(coverage.to_plane().pixels())),
+        "{label}: coverage"
     );
     assert_eq!(
-        inherited, streaming.product.image.metadata.exposure_time,
-        "master metadata came from a different frame on each tier"
+        expected.image.metadata.exposure_time, actual.image.metadata.exposure_time,
+        "{label}: the master inherits another frame's metadata"
     );
 }
 
@@ -920,8 +1026,8 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 
     // Three lights of one field a few minutes apart all register, and the stack has a light's
     // geometry and only finite samples.
-    assert_eq!(result.alignment.dropped, Vec::<usize>::new());
-    assert_eq!(result.alignment.registered, lights.len());
+    assert_eq!(result.alignment.dropped(), Vec::<usize>::new());
+    assert_eq!(result.alignment.registered(), lights.len());
     assert_eq!(result.product.image.dimensions(), frame.dimensions());
     for channel in 0..frame.channels() {
         assert!(
@@ -940,12 +1046,15 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 #[test]
 fn combine_failures_arrive_on_one_path() {
     assert!(matches!(
-        Error::from(StackError::Cancelled),
-        Error::Cancelled
+        AlignStackError::from(StackError::Cancelled),
+        AlignStackError::Cancelled
     ));
-    assert!(matches!(Error::from(StackError::NoFrames), Error::NoFrames));
     assert!(matches!(
-        Error::from(StackError::NoCommonCoverage),
-        Error::Stack(StackError::NoCommonCoverage)
+        AlignStackError::from(StackError::NoFrames),
+        AlignStackError::NoFrames
+    ));
+    assert!(matches!(
+        AlignStackError::from(StackError::NoCommonCoverage),
+        AlignStackError::Stack(StackError::NoCommonCoverage)
     ));
 }

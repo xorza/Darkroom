@@ -12,6 +12,8 @@
 //! pollution is coloured), and runs on the linear master *before* colour calibration and the
 //! stretch.
 
+use crate::math::lstsq::Lstsq;
+use arrayvec::ArrayVec;
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
@@ -81,16 +83,62 @@ impl Default for ExtractBackground {
 impl ExtractBackground {
     /// Model and remove the smooth background of `image` in place, per channel.
     ///
+    /// Every channel's model is fitted before any is removed, so a channel that fails leaves the
+    /// image as it was.
+    ///
     /// # Errors
     /// [`OpError::InvalidConfig`] on out-of-range parameters; [`OpError::RankDeficient`] when the
-    /// sample geometry cannot determine the requested polynomial.
+    /// sample geometry cannot determine the requested polynomial;
+    /// [`OpError::NonPositiveBackground`] when [`BackgroundMode::Divide`] meets a model whose mean
+    /// is not positive.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         let mut workspace = MeshWorkspace::default();
-        for plane in image.planes_mut() {
-            extract_background_plane(plane, self, &mut workspace)?;
+        let surfaces = (0..image.channels())
+            .map(|channel| self.fit_plane(image.channel(channel), &mut workspace))
+            .collect::<Result<ArrayVec<Surface, 3>, OpError>>()?;
+        for (plane, surface) in image.planes_mut().zip(&surfaces) {
+            self.remove_from(plane, surface);
         }
         Ok(())
+    }
+
+    /// Fit one channel's background surface. A divide needs a positive model mean to normalize
+    /// the model by, and anything else would leave the channel silently unchanged.
+    fn fit_plane(
+        &self,
+        plane: &Buffer2<f32>,
+        workspace: &mut MeshWorkspace,
+    ) -> Result<Surface, OpError> {
+        let samples = collect_samples(plane, self.tile_size, workspace);
+        let terms = poly_terms(effective_degree(samples.len(), self.degree));
+        let coeffs = fit_surface(&samples, &terms, self.rejection_sigma, self.iterations)?;
+        let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
+        let mean = surface.mean();
+        if self.mode == BackgroundMode::Divide && mean <= 0.0 {
+            return Err(OpError::NonPositiveBackground { mean });
+        }
+        Ok(surface)
+    }
+
+    /// Remove a fitted surface from its channel, in place. The model is evaluated on the fly inside
+    /// the removal pass ([`Surface::remove`]) — a degree ≤ 4 polynomial needs no full-resolution
+    /// model plane.
+    fn remove_from(&self, plane: &mut Buffer2<f32>, surface: &Surface) {
+        let mean = surface.mean() as f32;
+        match self.mode {
+            BackgroundMode::Subtract => {
+                // Only the model's variation is removed; its mean stays as the sky pedestal, as
+                // Siril does. Without it the sky sits at ≈0 and the next step that measures the
+                // background against zero (an auto stretch) has nothing to place. Each channel
+                // keeps its own level, like `Divide` — neutralizing the sky colour is a separate op.
+                surface.remove(plane, |p, m| p - (m - mean));
+            }
+            BackgroundMode::Divide => {
+                let floor = self.divide_floor;
+                surface.remove(plane, |p, m| p / (m / mean).max(floor));
+            }
+        }
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
@@ -119,39 +167,6 @@ impl ExtractBackground {
             |value| value > 0.0 && value <= 1.0,
         )
     }
-}
-
-/// Fit and remove the background surface of one channel plane, in place. The model is
-/// evaluated on the fly inside the removal pass ([`Surface::remove`]) — a degree ≤ 4
-/// polynomial needs no full-resolution model plane.
-fn extract_background_plane(
-    plane: &mut Buffer2<f32>,
-    config: &ExtractBackground,
-    workspace: &mut MeshWorkspace,
-) -> Result<(), OpError> {
-    let samples = collect_samples(plane, config.tile_size, workspace);
-    let terms = poly_terms(effective_degree(samples.len(), config.degree));
-    let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations)?;
-    let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
-    match config.mode {
-        BackgroundMode::Subtract => {
-            // Only the model's variation is removed; its mean stays as the sky pedestal, as Siril
-            // does. Without it the sky sits at ≈0 and the next step that measures the background
-            // against zero (an auto stretch) has nothing to place. Each channel keeps its own
-            // level, like `Divide` — neutralizing the sky colour is a separate op.
-            let pedestal = surface.mean() as f32;
-            surface.remove(plane, |p, m| p - (m - pedestal));
-        }
-        BackgroundMode::Divide => {
-            let mean = surface.mean();
-            if mean <= 0.0 {
-                return Ok(()); // degenerate model (mean ≤ 0) — leave the channel untouched
-            }
-            let (mean, floor) = (mean as f32, config.divide_floor);
-            surface.remove(plane, |p, m| p / (m / mean).max(floor));
-        }
-    }
-    Ok(())
 }
 
 /// One robust sky sample per tile, at the tile centre, with coordinates normalized to `[-1, 1]`.
@@ -237,21 +252,14 @@ fn solve_ls(samples: &[Sample], terms: &[(u8, u8)]) -> Result<DVector<f64>, OpEr
         let (i, j) = terms[c];
         samples[r].x.powi(i32::from(i)) * samples[r].y.powi(i32::from(j))
     });
-    let z = DVector::from_fn(m, |r, _| samples[r].z);
-    let svd = a.svd(true, true);
-    let largest_singular_value = svd.singular_values.iter().copied().fold(0.0, f64::max);
-    let tolerance = f64::EPSILON * m.max(k) as f64 * largest_singular_value;
-    let rank = svd.rank(tolerance);
-    if rank < k {
-        return Err(OpError::RankDeficient {
-            operation: "background surface fit",
-            rank,
-            required_rank: k,
-        });
-    }
-    Ok(svd
-        .solve(&z, tolerance)
-        .expect("SVD was constructed with both singular-vector matrices"))
+    let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
+    let lstsq = Lstsq::new(a);
+    let solution = lstsq.solve(&z).ok_or_else(|| OpError::RankDeficient {
+        operation: "background surface fit",
+        rank: lstsq.rank(),
+        required_rank: k,
+    })?;
+    Ok(DVector::from_column_slice(solution.as_slice()))
 }
 
 /// Fit the surface, then iteratively reject samples whose residual exceeds `kappa·σ` and refit

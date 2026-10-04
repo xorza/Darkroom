@@ -4,7 +4,7 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
-pub(crate) mod same_color;
+pub(crate) mod cfa_lattice;
 
 use std::io;
 use std::path::Path;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::same_color::SameColorMedian;
+use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -24,19 +24,21 @@ use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::scientific_rejection;
+use crate::io::image::mosaic_noise::MosaicNoise;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::io::image::sample_domain::DomainMap;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
+use crate::io::raw::demosaic::xtrans;
 use crate::io::raw::demosaic::xtrans::markesteijn;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -108,19 +110,33 @@ impl CfaType {
                     peak_bytes: bytes,
                 }
             }
-            // Raw and active extents coincide here: the caller has already cropped to the
-            // visible area, so the margins the RCD arena would need are gone.
-            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size(), dimensions.size()),
+            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size()),
             Self::XTrans(_) => markesteijn::demosaic_memory(dimensions.size()),
         }
     }
 
-    /// The demosaic lumos runs for this pattern.
-    pub(crate) const fn demosaic_provenance(self) -> DemosaicProvenance {
+    /// The demosaic lumos runs for this pattern, an X-Trans one with `passes`.
+    pub(crate) const fn demosaic_provenance(self, passes: MarkesteijnPasses) -> DemosaicProvenance {
         match self {
             Self::Mono => DemosaicProvenance::None,
             Self::Bayer(_) => DemosaicProvenance::LumosRcd,
-            Self::XTrans(_) => DemosaicProvenance::LumosMarkesteijn,
+            Self::XTrans(_) => DemosaicProvenance::LumosMarkesteijn { passes },
+        }
+    }
+
+    /// How far the demosaic of this pattern, an X-Trans one with `passes`, reads from an output
+    /// pixel: an input photosite this far away can change it. Both demosaics decide directions
+    /// from neighbourhoods of interpolated values, so the reach is the chained steps', not one
+    /// kernel's, and each further Markesteijn pass interpolates again from interpolated colours.
+    /// An impulse on random texture moves pixels up to 10 away by more than 2⁻¹⁶ of itself for
+    /// RCD, and changes pixels up to 11 and 16 away for one and three Markesteijn passes
+    /// (`the_demosaic_support_bounds_every_impulse_response`).
+    pub(crate) const fn demosaic_support(self, passes: MarkesteijnPasses) -> usize {
+        match (self, passes) {
+            (Self::Mono, _) => 0,
+            (Self::Bayer(_), _) => 10,
+            (Self::XTrans(_), MarkesteijnPasses::One) => 11,
+            (Self::XTrans(_), MarkesteijnPasses::Three) => 16,
         }
     }
 
@@ -148,7 +164,7 @@ impl CfaFrameInfo {
         match InputFormat::of(path)? {
             InputFormat::Fits => fits_decode::fits_cfa_frame_info(path, context),
             InputFormat::CameraRaw => raw::raw_cfa_frame_info(path, context),
-            InputFormat::Raster(_) => Err(scientific_rejection(
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 "scientific CFA input must be camera RAW or FITS",
             )),
@@ -165,11 +181,9 @@ pub struct CfaImage {
     pub data: Buffer2<f32>,
     pub cfa_type: CfaType,
     pub metadata: ImageMetadata,
-    /// Source-quantization uncertainty in the current CFA sample units.
-    pub(crate) quantization_sigma: Option<f32>,
-    /// Which pixels carry no measurement, for a source that declared any. The samples at those
-    /// positions are a finite fill, not data — see [`NullMask`].
-    pub(crate) nulls: Option<NullMask>,
+    /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
+    /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
+    pub(crate) flags: Option<PixelFlags>,
 }
 
 impl StackableImage for CfaImage {
@@ -179,8 +193,8 @@ impl StackableImage for CfaImage {
         ImageDimensions::new((self.data.width(), self.data.height()), 1)
     }
 
-    fn nulls(&self) -> Option<&NullMask> {
-        self.nulls.as_ref()
+    fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     fn channel(&self, c: usize) -> &[f32] {
@@ -196,10 +210,6 @@ impl StackableImage for CfaImage {
         Some(self.cfa_type)
     }
 
-    fn quantization_sigma(&self) -> Option<f32> {
-        self.quantization_sigma
-    }
-
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         CfaImage::from_file(path, context)
     }
@@ -210,10 +220,13 @@ impl StackableImage for CfaImage {
             .map(FramePeek::from)
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
+    fn into_parts(self) -> ImageParts {
         let mut planes = arrayvec::ArrayVec::new();
         planes.push(self.data);
-        planes
+        ImageParts {
+            planes,
+            flags: self.flags,
+        }
     }
 }
 
@@ -233,8 +246,7 @@ impl CfaImage {
             data,
             cfa_type,
             metadata,
-            quantization_sigma: None,
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -245,7 +257,7 @@ impl CfaImage {
         match InputFormat::of(path)? {
             InputFormat::Fits => fits_decode::load_cfa_fits(path, context),
             InputFormat::CameraRaw => raw::load_raw_cfa(path, context),
-            InputFormat::Raster(_) => Err(scientific_rejection(
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 "generic raster decoders do not establish a scientific CFA contract",
             )),
@@ -258,7 +270,13 @@ impl CfaImage {
         self.data.width() * self.data.height() * size_of::<f32>()
     }
 
-    /// Save this sensor-domain image as a checksummed floating-point FITS file.
+    /// The data-quality flags of the pixels; `None` when no pixel carries one.
+    pub const fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
+    }
+
+    /// Save this sensor-domain image as a checksummed floating-point FITS file, with its flags
+    /// in a `LUMFLAGS` extension when they hold more than the NaN of a sample with no data.
     pub fn save_fits(&self, path: &Path) -> io::Result<()> {
         fits_cfa::save_cfa_fits(path, self)
     }
@@ -266,32 +284,45 @@ impl CfaImage {
     /// Replace every null with the median of its same-colour neighbours.
     ///
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
-    /// mask does not cover. The resampler answers the same problem by dividing the warped image by
-    /// the warped validity plane — `resample::masked_warp` — but an adaptive kernel like RCD or
-    /// Markesteijn offers no such plane to divide by. Leaving the decoder's frame-median fill there
-    /// would spread a value with no local meaning; a same-colour neighbour median spreads a
-    /// plausible one, so what escapes the mask is interpolation error rather than fabrication.
+    /// mask does not cover. The resampler answers the same problem by sampling over the taps that
+    /// hold data and normalizing by their weight — `resample::masked_sources` — but an adaptive
+    /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's
+    /// frame-median fill there would spread a value with no local meaning; a same-colour neighbour
+    /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
+    /// fabrication.
     ///
     /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
-    /// reason and through the same neighbour search — mask included, so a cluster of nulls is never
-    /// repaired from its own members.
-    fn repair_nulls(&mut self) {
-        let Some(nulls) = self.nulls.as_ref() else {
+    /// reason and through the same neighbour search — mask included, so a null is never repaired
+    /// from another null, nor from a value another repair made. Calibration runs it once its
+    /// arithmetic is done, so a pixel a master left without a measurement holds a fill, not a
+    /// difference against a bound.
+    pub(crate) fn repair_nulls(&mut self) {
+        let Some(flags) = self
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
+        else {
             return;
         };
-        let neighbors = SameColorMedian::new(&self.cfa_type);
+        let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let mask = nulls.bits();
+        let nulls = flags.mask_of(QualityFlags::NO_DATA);
+        let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
+        let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
-        mask.for_each_set(|pos| {
-            let repaired = neighbors.at(&self.data, pos, Some(mask));
+        nulls.for_each_set(|pos| {
+            let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
         });
     }
 
-    /// Demosaic this CFA image into a 3-channel `LinearImage`.
+    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`.
     /// Consumes self.
-    pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, Cancelled> {
+    pub(crate) fn demosaic(
+        mut self,
+        passes: MarkesteijnPasses,
+        cancel: &CancelToken,
+    ) -> Result<LinearImage, Cancelled> {
         self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
@@ -299,13 +330,57 @@ impl CfaImage {
         let cfa_type = self.cfa_type;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = cfa_type.demosaiced_color();
-            provenance.demosaic = cfa_type.demosaic_provenance();
+            provenance.demosaic = cfa_type.demosaic_provenance(passes);
+        }
+        // Interpolation correlates neighbouring samples, which hides part of their noise from any
+        // later measurement, and mixes them, so one step's σ no longer bounds any of them. A mono
+        // sensor's samples pass through untouched and keep it.
+        if cfa_type != CfaType::Mono {
+            let flags = self.flags.as_ref();
+            metadata.mosaic_noise = Some(MosaicNoise::measure(
+                self.data.pixels(),
+                Size2us::new(width, height),
+                &cfa_type,
+                |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
+                metadata.quantization_sigma,
+            ));
+            metadata.quantization_sigma = None;
+        }
+        // The direction decisions compare neighbours of different colours, so they read a colour
+        // cast as structure: dcraw, RawTherapee, darktable and ART all balance before they
+        // demosaic. The gains are relative to green, and come back out after, so the samples keep
+        // the sensor's balance.
+        let gains = (cfa_type != CfaType::Mono)
+            .then_some(metadata.camera_white_balance)
+            .flatten()
+            .map(|[red, green, blue, _]| [red / green, 1.0, blue / green]);
+        if let Some(gains) = gains {
+            self.data
+                .pixels_mut()
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each(|(y, row)| {
+                    for (x, sample) in row.iter_mut().enumerate() {
+                        *sample *= gains[cfa_type.color_at(Vec2us::new(x, y)) as usize];
+                    }
+                });
         }
         let pixels = self.data.into_vec();
-        // The mask travels at its own extent, which `repair_nulls` above is what makes honest:
-        // these pixels were reconstructed rather than measured, and the combine still has to know
-        // that.
-        let nulls = self.nulls;
+        // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest: these
+        // pixels were reconstructed rather than measured, and the combine still has to know that.
+        // Every other fact spreads as far as the demosaic reads.
+        let mut flags = self.flags;
+        if let Some(flags) = &mut flags {
+            flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
+        }
+
+        let unbalance = |planes: &mut [Vec<f32>; 3]| {
+            if let Some(gains) = gains {
+                for (plane, gain) in planes.iter_mut().zip(gains) {
+                    plane.par_iter_mut().for_each(|sample| *sample /= gain);
+                }
+            }
+        };
 
         Ok(match cfa_type {
             CfaType::Mono => {
@@ -313,46 +388,60 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 1);
                 let mut image = LinearImage::from_pixels(dims, pixels);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
-                use crate::io::raw::demosaic::bayer::BayerImage;
-
-                let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let bayer = BayerImage::with_margins(&pixels, layout, cfa_pattern);
-                let planes = rcd::demosaic(&bayer, cancel)?;
+                let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern);
+                let mut planes = rcd::demosaic(&bayer, cancel)?;
+                unbalance(&mut planes);
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
             CfaType::XTrans(pattern) => {
-                use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
-
-                let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let planes = process_xtrans_f32(&pixels, layout, pattern, cancel)?;
+                let mut planes = xtrans::demosaic(
+                    &pixels,
+                    Size2us::new(width, height),
+                    pattern,
+                    passes,
+                    cancel,
+                )?;
+                unbalance(&mut planes);
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
         })
     }
 
     /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
-    /// multiplied by `dark_scale` — the factor that expresses it in this frame's domain
-    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)). A factor of exactly
-    /// one subtracts the samples as they are.
+    /// mapped through `map` — the map that expresses it in this frame's domain
+    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)), which also moves its
+    /// pedestal onto this frame's. The identity map subtracts the samples as they are.
+    ///
+    /// When both frames declare a domain, this frame's pedestal becomes what
+    /// [`SampleDomain::after_subtracting`](crate::SampleDomain::after_subtracting) says.
+    ///
+    /// Where `dark` holds no measurement, this frame is flagged [`QualityFlags::NO_DATA`]: what is
+    /// left there is not one either.
     ///
     /// May produce negative pixel values when dark noise exceeds signal.
     /// This is intentional: the f32 pipeline preserves negatives, and stacking
     /// averages them out correctly. Clamping to zero would introduce a positive
     /// bias in the stacked result.
-    pub fn subtract(&mut self, dark: &CfaImage, dark_scale: f32) {
+    pub fn subtract(&mut self, dark: &CfaImage, map: DomainMap) {
+        self.subtract_scaled(dark, map, 1.0);
+    }
+
+    /// [`Self::subtract`] with `dark`'s signal scaled by `scale` first, as a bias-removed dark is
+    /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not signal.
+    pub(crate) fn subtract_scaled(&mut self, dark: &CfaImage, map: DomainMap, scale: f64) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
@@ -361,22 +450,59 @@ impl CfaImage {
             dark.data.width(),
             dark.data.height()
         );
-        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the factor
+        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the map
         // from the two domains and refuses a pair with none. Only checked when both declare a
         // domain — a synthesized frame has none.
         debug_assert!(
-            match (self.metadata.sample_domain(), dark.metadata.sample_domain()) {
-                (Some(light), Some(dark)) => dark.conversion_to(&light) == Some(dark_scale),
+            match (&self.metadata.domain, &dark.metadata.domain) {
+                (Some(light), Some(dark)) => dark.conversion_to(light) == Some(map),
                 _ => true,
             },
-            "dark_scale {dark_scale} does not convert {:?} into {:?}",
-            dark.metadata.sample_domain(),
-            self.metadata.sample_domain()
+            "{map:?} does not convert {:?} into {:?}",
+            dark.metadata.domain,
+            self.metadata.domain
         );
+        let (gain, offset) = ((map.gain * scale) as f32, map.offset as f32);
         self.data
             .par_iter_mut()
             .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l -= d * dark_scale);
+            .for_each(|(l, d)| *l -= d * gain + offset);
+        self.take_master_flags(dark);
+        if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
+            light.pedestal = light.after_subtracting(dark);
+        }
+    }
+
+    /// Flag [`QualityFlags::SATURATED`] at the samples' saturation level, unless the decoder
+    /// flagged saturation, and drop `data_max`: calibration runs this on a light before it moves
+    /// the samples, after which no level marks the saturated ones and the flags are the record.
+    /// The level is the one the detector applies to a frame as decoded; a master is not tested
+    /// against it, since a ceiling no file declared is a guess the detector makes for lights alone.
+    pub(crate) fn record_saturation(&mut self) {
+        if !self.metadata.saturation_flagged {
+            let level = self.metadata.saturation_level();
+            let size = self.size();
+            let samples = self.data.pixels();
+            PixelFlags::add_where(&mut self.flags, size, QualityFlags::SATURATED, |index| {
+                samples[index] >= level
+            });
+            self.metadata.saturation_flagged = true;
+        }
+        self.metadata.data_max = None;
+    }
+
+    /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
+    /// measurement — a fill, or a saturated bound: the calibrated value there is not one either.
+    pub(crate) fn take_master_flags(&mut self, master: &CfaImage) {
+        let Some(flags) = master.flags.as_ref().filter(|flags| {
+            flags.contains(QualityFlags::NO_DATA) || flags.contains(QualityFlags::SATURATED)
+        }) else {
+            return;
+        };
+        let size = self.size();
+        PixelFlags::add_where(&mut self.flags, size, QualityFlags::NO_DATA, |index| {
+            flags.at(index).intersects(QualityFlags::UNMEASURED)
+        });
     }
 }
 

@@ -40,8 +40,11 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
 /// [`find_local_maxima`] into a fresh list.
 fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Pixel> {
     let mut peaks = Vec::new();
+    let mut pixels = ComponentPixels::default();
+    pixels.fill(component);
     find_local_maxima(
         component,
+        &pixels,
         min_separation,
         min_prominence,
         &mut Vec::new(),
@@ -56,13 +59,11 @@ fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32)
 /// [`deblend_local_maxima`] into a fresh list.
 fn deblended(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Region> {
     let mut regions = Vec::new();
-    deblend_local_maxima(
-        component,
+    LocalMaximaParams {
         min_separation,
         min_prominence,
-        &mut DeblendBuffers::default(),
-        &mut regions,
-    );
+    }
+    .deblend(component, &mut DeblendBuffers::default(), &mut regions);
     regions
 }
 
@@ -78,14 +79,13 @@ fn single_star_is_one_whole_region() {
 
     let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(50, 50)]);
-    assert_eq!(peaks[0].value, 1.0);
+    assert_eq!(peaks[0].value, fixture.pixels[(50, 50)]);
 
     let regions = deblended(&component, default_separation(), default_prominence());
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].bbox, fixture.data.bbox);
     assert_eq!(regions[0].area, fixture.data.area);
     assert_eq!(regions[0].peak, Vec2us::new(50, 50));
-    assert_eq!(regions[0].peak_value, fixture.pixels[(50, 50)]);
 }
 
 #[test]
@@ -101,7 +101,10 @@ fn two_separated_stars() {
 
     let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
-    assert_eq!((peaks[0].value, peaks[1].value), (1.0, 0.8));
+    assert_eq!(
+        (peaks[0].value, peaks[1].value),
+        (fixture.pixels[(30, 50)], fixture.pixels[(70, 50)])
+    );
 
     let regions = deblended(&component, default_separation(), default_prominence());
     let blob_area = |left: bool| {
@@ -110,15 +113,12 @@ fn two_separated_stars() {
             .filter(|p| (p.pos.x < 50) == left)
             .count()
     };
-    let summary: Vec<(Vec2us, f32, usize)> = regions
-        .iter()
-        .map(|r| (r.peak, r.peak_value, r.area))
-        .collect();
+    let summary: Vec<(Vec2us, usize)> = regions.iter().map(|r| (r.peak, r.area)).collect();
     assert_eq!(
         summary,
         [
-            (Vec2us::new(30, 50), 1.0, blob_area(true)),
-            (Vec2us::new(70, 50), 0.8, blob_area(false)),
+            (Vec2us::new(30, 50), blob_area(true)),
+            (Vec2us::new(70, 50), blob_area(false)),
         ]
     );
     assert!(regions.iter().all(|r| r.bbox.contains(r.peak)));
@@ -322,7 +322,7 @@ fn plateau_no_local_max() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(3, 3), Vec2us::new(7, 7)),
         label: 1,
@@ -346,7 +346,7 @@ fn single_pixel_is_local_max() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
@@ -375,7 +375,7 @@ fn voronoi_assignment_and_its_tie() {
     pixels[(20, 50)] = 1.0;
     pixels[(80, 50)] = 1.0;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(20, 50), Vec2us::new(81, 51)),
         label: 1,
@@ -420,7 +420,7 @@ fn noise_component(size: Size2us, seed: u64) -> (Buffer2<f32>, LabelMap, Compone
             .map(|_| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0)
             .collect(),
     );
-    let labels = LabelMap::from_raw(Buffer2::new_filled(size.width, size.height, 1u32), 1);
+    let labels = LabelMap::from_raw(&Buffer2::new_filled(size.width, size.height, 1u32), 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
         label: 1,

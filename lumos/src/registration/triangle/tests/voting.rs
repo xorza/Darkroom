@@ -1,70 +1,34 @@
 use super::*;
 
-/// A vote matrix is dense below 250 000 cells and sparse from there, and either way it counts each
-/// pair's votes at the pair it was given: `ref·n_target + target` in the dense layout, corners
-/// included.
+/// A vote matrix counts each pair's votes at the pair it was given, at any star count — corners
+/// of a 600×600 field and of a 3×4 one alike — and visits the pairs in `(reference, target)`
+/// order, whatever order the votes came in. 70 000 votes on one pair count exactly.
 #[test]
-fn vote_matrices_count_each_pair() {
-    for (n_ref, n_target, dense) in [
-        (10, 10, true),
-        (3, 4, true),
-        (499, 500, true),
-        (500, 500, false),
-        (600, 600, false),
-    ] {
-        let mut matrix = VoteMatrix::new(n_ref, n_target);
-        assert_eq!(
-            matches!(matrix, VoteMatrix::Dense { .. }),
-            dense,
-            "{n_ref}×{n_target}"
-        );
+fn vote_matrices_count_each_pair_in_order() {
+    for (n_ref, n_target) in [(10, 10), (3, 4), (600, 600)] {
+        let mut matrix = VoteMatrix::default();
         assert!(matrix.nonzero_entries().is_empty());
         let entries = [
-            (0, 0, 1),
-            (0, n_target - 1, 2),
-            (n_ref - 1, 0, 3),
             (n_ref - 1, n_target - 1, 4),
+            (0, n_target - 1, 2),
             (n_ref / 2, n_target / 3, 5),
+            (n_ref - 1, 0, 3),
+            (0, 0, 1),
         ];
         for &(r, t, votes) in &entries {
             for _ in 0..votes {
                 matrix.increment(r, t);
             }
         }
-        let mut counted = matrix.nonzero_entries();
-        counted.sort_unstable();
         let mut expected = entries.to_vec();
         expected.sort_unstable();
-        assert_eq!(counted, expected, "{n_ref}×{n_target}");
+        assert_eq!(matrix.nonzero_entries(), expected, "{n_ref}×{n_target}");
     }
-}
-
-/// A dense cell holds a `u16`: 65 534 votes count exactly, and the next is past what the dense
-/// layout promises to hold — a debug build stops on it. The sparse layout counts in `u32`, past
-/// the dense limit.
-#[test]
-fn a_dense_cell_holds_65_534_votes_and_a_sparse_one_more() {
-    let mut dense = VoteMatrix::new(2, 2);
-    for _ in 0..65_534 {
-        dense.increment(1, 0);
-    }
-    assert_eq!(dense.nonzero_entries(), [(1, 0, 65_534)]);
-
-    let mut sparse = VoteMatrix::new(600, 600);
+    let mut matrix = VoteMatrix::default();
     for _ in 0..70_000 {
-        sparse.increment(599, 3);
+        matrix.increment(599, 3);
     }
-    assert_eq!(sparse.nonzero_entries(), [(599, 3, 70_000)]);
-}
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "Vote overflow")]
-fn the_65_535th_dense_vote_is_refused_in_debug() {
-    let mut dense = VoteMatrix::new(2, 2);
-    for _ in 0..65_535 {
-        dense.increment(0, 0);
-    }
+    assert_eq!(matrix.nonzero_entries(), [(599, 3, 70_000)]);
 }
 
 /// Greedy resolution, case by case: the pairs that survive `min_votes` are taken in descending vote
@@ -109,7 +73,7 @@ fn resolve_matches_claims_each_star_once_by_votes() {
         (&[], 1, &[]),
     ];
     for (entries, min_votes, expected) in cases {
-        let matches = resolve_matches(&vote_matrix_from_entries(5, 5, entries), 5, 5, min_votes);
+        let matches = resolve_matches(&mut vote_matrix_from_entries(entries), 5, 5, min_votes);
         let resolved: Vec<(usize, usize, f64)> = matches
             .iter()
             .map(|m| (m.indices.reference, m.indices.target, m.confidence))
@@ -138,18 +102,44 @@ fn similar_triangles_vote_for_their_vertices() {
             check_orientation,
             ..Default::default()
         };
-        let votes = vote_for_correspondences(
+        let mut votes = vote_for_correspondences(
             &triangles_of(&target, 4),
             &reference,
             &invariant_tree,
             &config,
-            5,
-            5,
         );
-        let mut counted = votes.nonzero_entries();
-        counted.sort_unstable();
-        assert_eq!(counted, expected, "orientation check {check_orientation}");
+        assert_eq!(
+            votes.nonzero_entries(),
+            expected,
+            "orientation check {check_orientation}"
+        );
     }
+}
+
+/// A near-isosceles triangle whose two shorter sides trade places under noise still votes for its
+/// true vertices. Over (0, 0)–(10, 0), the apex 0.01 px left of the axis, (4.99, 3), makes the
+/// side from the origin the shortest, √33.9001 against √34.1001; 0.01 px right, the other side is.
+/// The roles of the base vertices swap, and with them the orientation each triangle reads, so the
+/// order alone pairs each base vertex with the other, and the orientation check refuses even that.
+/// The sides differ by 0.0017 of the longest, inside the 0.01 tolerance: the swapped order votes,
+/// once for each true pair.
+#[test]
+fn a_near_isosceles_triangle_votes_in_both_orders() {
+    let base = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
+    let with_apex = |x: f64| [base[0], base[1], DVec2::new(x, 3.0)];
+    let reference = triangles_of(&with_apex(4.99), 3);
+    let target = triangles_of(&with_apex(5.01), 3);
+    let invariant_tree = build_invariant_tree(&reference).unwrap();
+    let mut votes = vote_for_correspondences(
+        &target,
+        &reference,
+        &invariant_tree,
+        &TriangleConfig::default(),
+    );
+    assert_eq!(
+        votes.nonzero_entries(),
+        vec![(0, 0, 1), (1, 1, 1), (2, 2, 1)]
+    );
 }
 
 /// A triangle only votes for one within the ratio tolerance: an equilateral one, ratios (1, 1),
@@ -167,13 +157,11 @@ fn dissimilar_triangles_do_not_vote() {
         DVec2::new(50.0, 1.0),
     ];
     let reference = triangles_of(&equilateral, 3);
-    let votes = vote_for_correspondences(
+    let mut votes = vote_for_correspondences(
         &triangles_of(&thin, 3),
         &reference,
         &build_invariant_tree(&reference).unwrap(),
         &TriangleConfig::default(),
-        3,
-        3,
     );
     assert!(votes.nonzero_entries().is_empty());
 }

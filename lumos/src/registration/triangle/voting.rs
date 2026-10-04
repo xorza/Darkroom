@@ -3,7 +3,6 @@
 //! Every pair of matching triangles votes for the three vertex correspondences it implies;
 //! the accumulated votes are then resolved greedily so each point is claimed at most once.
 
-use std::collections::HashMap;
 use std::f64::consts::SQRT_2;
 
 use glam::DVec2;
@@ -13,23 +12,9 @@ use crate::registration::spatial::KdTree;
 use crate::registration::triangle::TriangleConfig;
 use crate::registration::triangle::geometry::Triangle;
 
-/// Threshold for switching between dense and sparse vote matrix storage.
-///
-/// When `n_ref * n_target < DENSE_VOTE_THRESHOLD`, use a dense Vec<u16> matrix.
-/// Otherwise, use a sparse `HashMap` for memory efficiency.
-///
-/// Memory analysis at threshold (250,000 entries):
-/// - Dense: 250,000 * 2 bytes (u16) = 500 KB
-/// - Sparse: Only stores non-zero votes, but each entry costs ~40 bytes
-///   (key: 16 bytes + value: 8 bytes + `HashMap` overhead)
-///
-/// Dense is faster for small point counts due to direct indexing (O(1) vs hash lookup).
-/// For 500x500 points (250K entries), dense is still preferred. Beyond that, sparse wins.
-const DENSE_VOTE_THRESHOLD: usize = 250_000;
-
 /// A reference star paired with a target star, by index into their respective slices.
 ///
-/// The bare pair, shared by everything that carries one: [`PointMatch`] adds the vote evidence
+/// The bare pair, shared by everything that carries one: `PointMatch` adds the vote evidence
 /// that produced it, and `StarMatch` adds the residual only measurable once a transform exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatchIndices {
@@ -47,74 +32,40 @@ pub(crate) struct PointMatch {
     pub(crate) confidence: f64,
 }
 
-/// Vote matrix storage - either dense (Vec) or sparse (`HashMap`).
-#[derive(Debug)]
-pub(super) enum VoteMatrix {
-    /// Dense storage for small point counts: votes[`ref_idx` * `n_target` + `target_idx`]
-    Dense { votes: Vec<u16>, n_target: usize },
-    /// Sparse storage for large point counts (u32 saves memory vs usize)
-    Sparse(HashMap<(usize, usize), u32>),
+/// Every vote cast, one entry per vote: the pair packed as `reference << 32 | target`.
+///
+/// Sorted, equal pairs sit together and a run's length is the pair's count: one flat buffer at any
+/// star count, visited in `(reference, target)` order. A dense matrix costs `n_ref·n_target` cells
+/// whatever the votes, and a hash map visits in an order its seed sets.
+#[derive(Debug, Default)]
+pub(super) struct VoteMatrix {
+    votes: Vec<u64>,
 }
 
 impl VoteMatrix {
-    pub(super) fn new(n_ref: usize, n_target: usize) -> Self {
-        let size = n_ref * n_target;
-        if size < DENSE_VOTE_THRESHOLD {
-            VoteMatrix::Dense {
-                votes: vec![0u16; size],
-                n_target,
-            }
-        } else {
-            VoteMatrix::Sparse(HashMap::new())
-        }
-    }
-
     #[inline]
     pub(super) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
-        match self {
-            VoteMatrix::Dense { votes, n_target } => {
-                let idx = ref_idx * *n_target + target_idx;
-                let new_val = votes[idx].saturating_add(1);
-                debug_assert!(
-                    new_val < u16::MAX,
-                    "Vote overflow: too many matching triangles for point pair ({ref_idx}, {target_idx})"
-                );
-                votes[idx] = new_val;
-            }
-            VoteMatrix::Sparse(map) => {
-                *map.entry((ref_idx, target_idx)).or_insert(0u32) += 1;
-            }
-        }
+        debug_assert!(
+            u32::try_from(ref_idx).is_ok() && u32::try_from(target_idx).is_ok(),
+            "star indices fit in 32 bits"
+        );
+        self.votes
+            .push(((ref_idx as u64) << 32) | target_idx as u64);
     }
 
-    /// Hand every pair that drew votes to `visit`, with how many it drew.
+    /// Hand every pair that drew votes to `visit`, with how many it drew, in `(reference, target)`
+    /// order.
     ///
     /// The pair travels as a [`MatchIndices`] rather than two `usize`s, which are the same type
     /// and so could be handed over transposed without the compiler noticing.
-    ///
-    /// A callback rather than an iterator: the two storages have unrelated iterator types, so
-    /// handing one back means either a second `Iterator` impl per storage plus an either-enum to
-    /// join them, or a boxed iterator paying a virtual call per entry — and a dense matrix sized
-    /// just under the sparse threshold holds 250k of them. The only caller fills a `Vec`, which a
-    /// callback does just as well.
-    pub(super) fn for_each_nonzero(&self, mut visit: impl FnMut(MatchIndices, usize)) {
-        match self {
-            VoteMatrix::Dense { votes, n_target } => {
-                for (index, &count) in votes.iter().enumerate() {
-                    if count > 0 {
-                        let pair = MatchIndices {
-                            reference: index / n_target,
-                            target: index % n_target,
-                        };
-                        visit(pair, count as usize);
-                    }
-                }
-            }
-            VoteMatrix::Sparse(map) => {
-                for (&(reference, target), &count) in map {
-                    visit(MatchIndices { reference, target }, count as usize);
-                }
-            }
+    pub(super) fn for_each_nonzero(&mut self, mut visit: impl FnMut(MatchIndices, usize)) {
+        self.votes.sort_unstable();
+        for run in self.votes.chunk_by(|a, b| a == b) {
+            let pair = MatchIndices {
+                reference: (run[0] >> 32) as usize,
+                target: (run[0] & u64::from(u32::MAX)) as usize,
+            };
+            visit(pair, run.len());
         }
     }
 }
@@ -131,22 +82,43 @@ pub(super) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
     KdTree::build(invariants)
 }
 
+/// The vertex permutations of a triangle: role `i` of one takes role `roles[i]` of the other, and
+/// an odd permutation reverses the orientation.
+const PERMUTATIONS: [([usize; 3], bool); 6] = [
+    ([0, 1, 2], false),
+    ([1, 2, 0], false),
+    ([2, 0, 1], false),
+    ([1, 0, 2], true),
+    ([0, 2, 1], true),
+    ([2, 1, 0], true),
+];
+
+/// Whether sides `i` and `j` of either triangle are equal within `tolerance` of the longest, so
+/// noise can trade their vertices' roles.
+fn tied(a: &Triangle, b: &Triangle, i: usize, j: usize, tolerance: f64) -> bool {
+    let ratio = |triangle: &Triangle, side: usize| match side {
+        0 => triangle.ratios.0,
+        1 => triangle.ratios.1,
+        _ => 1.0,
+    };
+    (ratio(a, i) - ratio(a, j)).abs() < tolerance || (ratio(b, i) - ratio(b, j)).abs() < tolerance
+}
+
 /// Vote for point correspondences based on matching triangles.
 ///
 /// For each pair of similar triangles, votes for vertex correspondences
-/// based on the sorted side lengths (vertices correspond by position in sorted order).
+/// based on the sorted side lengths (vertices correspond by position in sorted order). Where two
+/// sides are equal within the ratio tolerance, noise can swap their order, and with it the vertex
+/// roles and the orientation the triangle reads; every permutation that trades only such roles
+/// votes too, its orientation test reversed when it is odd.
 ///
-/// Uses dense matrix for small point counts (faster due to direct indexing),
-/// sparse `HashMap` for large counts (memory efficient).
 pub(super) fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],
     invariant_tree: &KdTree,
     config: &TriangleConfig,
-    n_ref: usize,
-    n_target: usize,
 ) -> VoteMatrix {
-    let mut vote_matrix = VoteMatrix::new(n_ref, n_target);
+    let mut vote_matrix = VoteMatrix::default();
 
     // Pre-allocate candidate buffer to avoid per-triangle allocations
     let mut candidates: Vec<usize> = Vec::new();
@@ -168,17 +140,17 @@ pub(super) fn vote_for_correspondences(
                 continue;
             }
 
-            // Check orientation if required
-            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
-                continue;
-            }
-
-            // Vote for all three vertex correspondences
-            // Since sides are sorted by length, vertices should correspond in order
-            for i in 0..3 {
-                let ref_pt = ref_tri.indices[i];
-                let target_pt = target_tri.indices[i];
-                vote_matrix.increment(ref_pt, target_pt);
+            let tolerance = config.ratio_tolerance;
+            for (roles, odd) in PERMUTATIONS {
+                let admissible = (0..3)
+                    .all(|i| roles[i] == i || tied(ref_tri, target_tri, i, roles[i], tolerance));
+                let same_orientation = ref_tri.orientation == target_tri.orientation;
+                if !admissible || (config.check_orientation && same_orientation == odd) {
+                    continue;
+                }
+                for (i, &role) in roles.iter().enumerate() {
+                    vote_matrix.increment(ref_tri.indices[i], target_tri.indices[role]);
+                }
             }
         }
     }
@@ -191,7 +163,7 @@ pub(super) fn vote_for_correspondences(
 /// Filters matches by minimum votes, sorts by vote count, and greedily assigns
 /// matches ensuring each reference and target point is used at most once.
 pub(super) fn resolve_matches(
-    vote_matrix: &VoteMatrix,
+    vote_matrix: &mut VoteMatrix,
     n_ref: usize,
     n_target: usize,
     min_votes: usize,
@@ -204,25 +176,15 @@ pub(super) fn resolve_matches(
         }
     });
 
-    // Sort by votes (descending), with a total-order tiebreak on the pair so the greedy
-    // resolution below is deterministic regardless of vote-matrix storage — the sparse HashMap
-    // iterates in randomized order, which would otherwise make tied matches resolve differently
-    // run-to-run.
-    voted.sort_by(|(a, a_votes), (b, b_votes)| {
-        b_votes
-            .cmp(a_votes)
-            .then(a.reference.cmp(&b.reference))
-            .then(a.target.cmp(&b.target))
-    });
+    // By votes, descending; the stable sort keeps the matrix's `(reference, target)` order among
+    // ties, so the greedy resolution below takes them the same way every run.
+    voted.sort_by(|(_, a_votes), (_, b_votes)| b_votes.cmp(a_votes));
 
     // Resolve one-to-many conflicts (greedy approach)
     let mut used_ref = vec![false; n_ref];
     let mut used_target = vec![false; n_target];
     voted.retain(|(pair, _)| {
-        let free = pair.reference < n_ref
-            && pair.target < n_target
-            && !used_ref[pair.reference]
-            && !used_target[pair.target];
+        let free = !used_ref[pair.reference] && !used_target[pair.target];
         if free {
             used_ref[pair.reference] = true;
             used_target[pair.target] = true;
@@ -248,7 +210,7 @@ pub(super) mod internals {
     impl VoteMatrix {
         /// Every non-zero entry as an owned `(ref_idx, target_idx, votes)` list — the shape the
         /// tests assert against, which production has no use for.
-        pub(crate) fn nonzero_entries(&self) -> Vec<(usize, usize, usize)> {
+        pub(crate) fn nonzero_entries(&mut self) -> Vec<(usize, usize, usize)> {
             let mut entries = Vec::new();
             self.for_each_nonzero(|pair, votes| entries.push((pair.reference, pair.target, votes)));
             entries

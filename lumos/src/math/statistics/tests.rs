@@ -614,50 +614,6 @@ fn median_fast_matches_median_mut_at_both_parities() {
     }
 }
 
-/// [`mad_fast`] over odd and even lengths, a uniform run, both degenerate lengths, and data whose
-/// outlier the MAD is supposed to ignore.
-///
-/// One table at both widths, because [`mad_fast`] is one implementation. The cases run in order
-/// against one scratch buffer, so a shorter call after a longer one also proves the buffer is
-/// truncated rather than left holding the previous call's tail.
-#[test]
-fn mad_fast_truth_table_holds_at_both_widths() {
-    let cases: [(&[f32], f32, f32); 8] = [
-        // |r - 3| over [2, 3, 4] = [1, 0, 1]; ranked [0, 1, 1], index 1 = 1.
-        (&[2.0, 3.0, 4.0], 3.0, 1.0),
-        // |r - 3| over [1, 2, 3, 4, 5] = [2, 1, 0, 1, 2]; ranked [0, 1, 1, 2, 2], index 2 = 1.
-        (&[1.0, 2.0, 3.0, 4.0, 5.0], 3.0, 1.0),
-        // |r - 3| over [1, 2, 3, 4, 100] = [2, 1, 0, 1, 97]; ranked [0, 1, 1, 2, 97], index 2 = 1.
-        (&[1.0, 2.0, 3.0, 4.0, 100.0], 3.0, 1.0),
-        // Even count averages the two middles: [2, 1, 1, 97] ranked [1, 1, 2, 97] → (1 + 2)/2.
-        (&[1.0, 2.0, 4.0, 100.0], 3.0, 1.5),
-        // A short call after the long ones above measures only its own deviations:
-        // |r - 20| = [10, 0, 10] ranked [0, 10, 10], index 1 = 10.
-        (&[10.0, 20.0, 30.0], 20.0, 10.0),
-        // Every deviation zero.
-        (&[7.0; 10], 7.0, 0.0),
-        (&[5.0], 5.0, 0.0),
-        (&[], 0.0, 0.0),
-    ];
-
-    let mut single_scratch = Vec::new();
-    let mut double_scratch = Vec::new();
-    for (values, median, expected) in cases {
-        assert_eq!(
-            mad_fast(values, median, &mut single_scratch),
-            expected,
-            "f32 {values:?} about {median}"
-        );
-
-        let double: Vec<f64> = values.iter().copied().map(f64::from).collect();
-        assert_eq!(
-            mad_fast(&double, f64::from(median), &mut double_scratch),
-            f64::from(expected),
-            "f64 {values:?} about {median}"
-        );
-    }
-}
-
 #[test]
 fn sigma_clipped_stats_iterations_improve_result() {
     // Good values: 41 at 0.30, 40 at 0.32 (true median = 0.30, odd count = 81)

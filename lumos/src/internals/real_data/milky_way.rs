@@ -51,7 +51,7 @@ fn milky_way_best_pipeline() {
     }
     .apply(&mut img)
     .unwrap();
-    Scnr::average_neutral().apply(&mut img).unwrap();
+    Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
@@ -74,7 +74,7 @@ fn milky_way_best_pipeline() {
     }
     .apply(&mut img)
     .unwrap();
-    Scnr::average_neutral().apply(&mut img).unwrap(); // final green touch-up after the enhancement
+    Scnr::average_neutral(1.0).apply(&mut img).unwrap(); // final green touch-up after the enhancement
 
     eprintln!("enhanced: median {:.3}", median(&img));
     assert_displayable(&img, "enhanced");

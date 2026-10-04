@@ -13,6 +13,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm::sigma_to_fwhm;
+use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
 
 /// `pixels` less `background`: the residual the matched filter takes.
@@ -97,7 +98,10 @@ fn gaussian_convolve_keeps_a_uniform_image() {
         let pixels = Buffer2::new_filled(side, side, 0.5f32);
         let mut result = Buffer2::new_default(side, side);
         let mut temp = Buffer2::new_default(side, side);
-        gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
+        {
+            result.pixels_mut().copy_from_slice(pixels.pixels());
+            gaussian_convolve(&mut result, sigma, &mut temp)
+        };
 
         let bound = 0.5 * 2.0 * gaussian_kernel_1d(sigma).len() as f32 * f32::EPSILON;
         for (i, v) in result.iter().enumerate() {
@@ -120,7 +124,10 @@ fn gaussian_convolve_preserves_total_flux() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
+    {
+        result.pixels_mut().copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result, 2.0, &mut temp)
+    };
 
     let n = gaussian_kernel_1d(2.0).len() as f32;
     let output_sum: f32 = result.iter().sum();
@@ -142,7 +149,10 @@ fn gaussian_convolve_spreads_point_source() {
 
     for sigma in [1.0f32, 2.0, 3.0] {
         let mut result = Buffer2::new_default(width, height);
-        gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
+        {
+            result.pixels_mut().copy_from_slice(pixels.pixels());
+            gaussian_convolve(&mut result, sigma, &mut temp)
+        };
 
         let kernel = gaussian_kernel_1d(sigma);
         let c = kernel.len() / 2;
@@ -166,7 +176,10 @@ fn gaussian_convolve_symmetry() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
+    {
+        result.pixels_mut().copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result, 2.0, &mut temp)
+    };
 
     for dy in 1..8 {
         for dx in 1..8 {
@@ -190,7 +203,10 @@ fn gaussian_convolve_edge_handling() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 1.5, &mut result, &mut temp);
+    {
+        result.pixels_mut().copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result, 1.5, &mut temp)
+    };
 
     let kernel = gaussian_kernel_1d(1.5);
     assert_eq!(kernel.len(), 11);
@@ -208,7 +224,10 @@ fn gaussian_convolve_non_square_image() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
+    {
+        result.pixels_mut().copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result, 2.0, &mut temp)
+    };
 
     assert_eq!(result.len(), width * height);
 
@@ -232,15 +251,15 @@ fn matched_filter_of_a_zero_residual_is_zero() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    matched_filter(
-        &residual,
-        3.0,
-        1.0,
-        0.0,
-        &mut MatchedFilterBuffers {
-            output: &mut result,
-            temp: &mut temp,
+    result.pixels_mut().copy_from_slice(residual.pixels());
+    matched_filter_fresh(
+        &mut result,
+        MatchedFilter {
+            fwhm: 3.0,
+            axis_ratio: 1.0,
+            angle: 0.0,
         },
+        &mut temp,
     );
 
     // Every tap multiplies a zero: the sums are exactly zero, scaled or not.
@@ -260,15 +279,17 @@ fn matched_filter_detects_star() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    matched_filter(
-        &less(&pixels, &background),
-        3.0,
-        1.0,
-        0.0,
-        &mut MatchedFilterBuffers {
-            output: &mut result,
-            temp: &mut temp,
+    result
+        .pixels_mut()
+        .copy_from_slice(less(&pixels, &background).pixels());
+    matched_filter_fresh(
+        &mut result,
+        MatchedFilter {
+            fwhm: 3.0,
+            axis_ratio: 1.0,
+            angle: 0.0,
         },
+        &mut temp,
     );
 
     let kernel = gaussian_kernel_1d(fwhm_to_sigma(3.0));
@@ -298,15 +319,15 @@ fn matched_filter_peaks_at_the_star() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    matched_filter(
-        &residual,
-        sigma_to_fwhm(sigma),
-        1.0,
-        0.0,
-        &mut MatchedFilterBuffers {
-            output: &mut result,
-            temp: &mut temp,
+    result.pixels_mut().copy_from_slice(residual.pixels());
+    matched_filter_fresh(
+        &mut result,
+        MatchedFilter {
+            fwhm: sigma_to_fwhm(sigma),
+            axis_ratio: 1.0,
+            angle: 0.0,
         },
+        &mut temp,
     );
 
     let max_val = result.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -323,15 +344,17 @@ fn matched_filter_preserves_negative_residuals() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
-    matched_filter(
-        &less(&pixels, &background),
-        2.0,
-        1.0,
-        0.0,
-        &mut MatchedFilterBuffers {
-            output: &mut result,
-            temp: &mut temp,
+    result
+        .pixels_mut()
+        .copy_from_slice(less(&pixels, &background).pixels());
+    matched_filter_fresh(
+        &mut result,
+        MatchedFilter {
+            fwhm: 2.0,
+            axis_ratio: 1.0,
+            angle: 0.0,
         },
+        &mut temp,
     );
 
     // Negative residuals are preserved for correct noise statistics.
@@ -363,15 +386,17 @@ fn matched_filter_noise_normalization() {
     let mut temp = Buffer2::new_default(width, height);
 
     for axis_ratio in [1.0, 0.7] {
-        matched_filter(
-            &less(&pixels, &background),
-            4.0,
-            axis_ratio,
-            0.5,
-            &mut MatchedFilterBuffers {
-                output: &mut result,
-                temp: &mut temp,
+        result
+            .pixels_mut()
+            .copy_from_slice(less(&pixels, &background).pixels());
+        matched_filter_fresh(
+            &mut result,
+            MatchedFilter {
+                fwhm: 4.0,
+                axis_ratio,
+                angle: 0.5,
             },
+            &mut temp,
         );
 
         // Exclude the border region affected by mirror sampling.
@@ -420,14 +445,17 @@ fn separable_matches_outer_product_2d() {
         let mut result_sep = Buffer2::new_default(side, side);
         let mut result_2d = Buffer2::new_default(side, side);
         let mut temp = Buffer2::new_default(side, side);
-        gaussian_convolve(&pixels, sigma, &mut result_sep, &mut temp);
+        {
+            result_sep.pixels_mut().copy_from_slice(pixels.pixels());
+            gaussian_convolve(&mut result_sep, sigma, &mut temp)
+        };
         let kernel = gaussian_kernel_1d(sigma);
         let size = kernel.len();
-        let weights = kernel
+        let weights: Vec<f32> = kernel
             .iter()
             .flat_map(|&ky| kernel.iter().map(move |&kx| ky * kx))
             .collect();
-        convolve_2d(&pixels, &GaussianKernel2d { weights, size }, &mut result_2d);
+        convolve_2d(&pixels, &weights, size, &mut result_2d);
 
         let tolerance = (size * size) as f32 * f32::EPSILON;
         for (i, (&a, &b)) in result_sep.iter().zip(result_2d.iter()).enumerate() {
@@ -436,6 +464,91 @@ fn separable_matches_outer_product_2d() {
                 "{side}x{side}, σ = {sigma}: separable and 2D differ at {i}: {a} vs {b}"
             );
         }
+    }
+}
+
+/// An ellipse along the pixel axes filters in two passes as its 2D kernel does, and with the same
+/// `sqrt(ΣK²)`: at no turn, a half turn, and a quarter turn each way, which sets the major axis on
+/// the columns. The 2D weights are the quadrature's pixel means of the rotated profile, the 1D ones
+/// exact, both to well under f32's rounding, and the f32 nearest π/2 turns the 2D kernel 4e-8 off
+/// the axis, which moves a weight by under 1e-6 of itself; a 2D tap sum adds n² products of values
+/// ≤ 1, so the two agree to n²·ε. A quarter turn that took the major axis on the rows would differ
+/// by far more.
+#[test]
+fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
+    let (side, sigma, axis_ratio) = (24, 1.5f32, 0.6f32);
+    let mut pixels = Buffer2::new_filled(side, side, 0.0f32);
+    for (i, p) in pixels.iter_mut().enumerate() {
+        *p = ((i * 7 + 3) % 100) as f32 / 100.0;
+    }
+    let radius = kernel_radius(sigma);
+    let size = 2 * radius + 1;
+    let tolerance = (size * size) as f32 * f32::EPSILON;
+    for (angle, sigmas) in [
+        (0.0f32, [sigma, sigma * axis_ratio]),
+        (std::f32::consts::PI, [sigma, sigma * axis_ratio]),
+        (FRAC_PI_2, [sigma * axis_ratio, sigma]),
+        (-FRAC_PI_2, [sigma * axis_ratio, sigma]),
+    ] {
+        let mut separable = pixels.clone();
+        let mut temp = Buffer2::new_default(side, side);
+        let separable_norm = separable_convolve(
+            &mut separable,
+            sigmas,
+            radius,
+            &mut temp,
+            &mut FilterKernels::default(),
+        );
+        let mut full = Buffer2::new_default(side, side);
+        let full_norm = elliptical_gaussian_convolve(&pixels, sigma, axis_ratio, angle, &mut full);
+        assert!(
+            (separable_norm - full_norm).abs() <= tolerance * full_norm,
+            "angle {angle}: sqrt(ΣK²) {separable_norm} vs {full_norm}"
+        );
+        for (i, (&a, &b)) in separable.iter().zip(full.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < tolerance,
+                "angle {angle} at {i}: {a} vs {b}"
+            );
+        }
+        if angle == FRAC_PI_2 {
+            let mut swapped = pixels.clone();
+            separable_convolve(
+                &mut swapped,
+                [sigma, sigma * axis_ratio],
+                radius,
+                &mut temp,
+                &mut FilterKernels::default(),
+            );
+            let largest = swapped
+                .iter()
+                .zip(full.iter())
+                .map(|(&a, &b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                largest > 100.0 * tolerance,
+                "the axes would not matter: {largest}"
+            );
+        }
+    }
+}
+
+/// The quarter turns of an angle stored as the f32 nearest a multiple of π/2, and none for an
+/// angle an ulp away from one, or between.
+#[test]
+fn quarter_turns_are_the_angles_nearest_the_axes() {
+    use std::f32::consts::PI;
+    for (angle, turns) in [
+        (0.0f32, Some(0)),
+        (FRAC_PI_2, Some(1)),
+        (-FRAC_PI_2, Some(-1)),
+        (PI, Some(2)),
+        (3.0 * FRAC_PI_2, Some(3)),
+        (FRAC_PI_2.next_up(), None),
+        (0.0f32.next_up(), None),
+        (0.3, None),
+    ] {
+        assert_eq!(quarter_turns(angle), turns, "{angle}");
     }
 }
 
@@ -565,7 +678,12 @@ fn elliptical_convolve_axis_ratio_1_matches_circular() {
     let mut result_elliptical = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels, sigma, &mut result_circular, &mut temp);
+    {
+        result_circular
+            .pixels_mut()
+            .copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result_circular, sigma, &mut temp)
+    };
     elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical);
 
     // The same kernel, once as a product of normalized rows and once normalized whole: equal
@@ -670,22 +788,19 @@ fn elliptical_convolve_various_axis_ratios() {
     }
 }
 
+/// Each weight is the Gaussian's mean over its pixel. At σ 1 the centre pixel holds
+/// `erf(1/(2√2))` of the light, 0.382925, and the next one `(erf(3/(2√2)) − erf(1/(2√2)))/2`,
+/// 0.241730: a ratio of 0.631273. Both weights carry one f32 rounding of the division by the shared
+/// sum and the ratio one more: 2ε.
 #[test]
 fn gaussian_kernel_known_values() {
-    // For sigma=1.0, the 1D Gaussian at x=0 is 1/(sqrt(2*pi)*sigma) ≈ 0.3989
-    // After normalization, center should be the largest
     let kernel = gaussian_kernel_1d(1.0);
     let center = kernel.len() / 2;
-
-    // The kernel is normalized, so we check relative values
-    // At x=1, G(1)/G(0) = exp(-0.5) ≈ 0.6065
     let ratio = kernel[center + 1] / kernel[center];
-    let expected_ratio = (-0.5f32).exp();
-
-    // Both weights carry one rounding from the shared division and the ratio one more: 2ε.
+    let expected_ratio = 0.631_273_4f32;
     assert!(
         (ratio - expected_ratio).abs() <= 2.0 * f32::EPSILON,
-        "Gaussian ratio at x=1 should be exp(-0.5): {ratio} vs {expected_ratio}"
+        "ratio of the pixels at 1 and 0: {ratio} vs {expected_ratio}"
     );
 }
 
@@ -711,9 +826,18 @@ fn convolution_linearity() {
     let mut result_sum = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels_a, sigma, &mut result_a, &mut temp);
-    gaussian_convolve(&pixels_b, sigma, &mut result_b, &mut temp);
-    gaussian_convolve(&pixels_sum, sigma, &mut result_sum, &mut temp);
+    {
+        result_a.pixels_mut().copy_from_slice(pixels_a.pixels());
+        gaussian_convolve(&mut result_a, sigma, &mut temp)
+    };
+    {
+        result_b.pixels_mut().copy_from_slice(pixels_b.pixels());
+        gaussian_convolve(&mut result_b, sigma, &mut temp)
+    };
+    {
+        result_sum.pixels_mut().copy_from_slice(pixels_sum.pixels());
+        gaussian_convolve(&mut result_sum, sigma, &mut temp)
+    };
 
     // Deltas 8 px apart, kernel radius 6: an output between them reads both, and sums the two
     // terms it has alone before scaling rather than after — two products and a sum, 4ε relative.
@@ -749,8 +873,16 @@ fn convolution_scaling() {
     let mut result_scaled = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
-    gaussian_convolve(&pixels_scaled, sigma, &mut result_scaled, &mut temp);
+    {
+        result.pixels_mut().copy_from_slice(pixels.pixels());
+        gaussian_convolve(&mut result, sigma, &mut temp)
+    };
+    {
+        result_scaled
+            .pixels_mut()
+            .copy_from_slice(pixels_scaled.pixels());
+        gaussian_convolve(&mut result_scaled, sigma, &mut temp)
+    };
 
     // Each output is one product, K[x]·K[y] against 3.5·K[x]·K[y]: a few roundings apart, 4ε
     // relative.

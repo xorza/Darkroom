@@ -1,13 +1,15 @@
-//! SIP (Simple Imaging Polynomial) distortion correction.
+//! Polynomial distortion correction in the form of SIP (Simple Imaging Polynomial).
 //!
-//! The SIP convention is the standard in astronomy for representing non-linear
-//! geometric distortion in FITS image headers. It is used by Spitzer, HST,
-//! Astrometry.net, Siril, and ASTAP.
+//! FITS WCS headers carry SIP's polynomials (Shupe et al. 2005) from pixels to intermediate world
+//! coordinates. This uses their form between two frames instead: it corrects reference pixels
+//! before the linear transform to a target frame, holds the coefficients in coordinates normalized
+//! about the matched stars' centroid, and has no inverse polynomial (`AP`/`BP`). It is not a WCS
+//! SIP solution, and no header is written from it.
 //!
 //! # Model
 //!
 //! Pixel coordinates (u, v) relative to a reference point are corrected by a 2D
-//! polynomial before the linear (CD matrix / homography) transform:
+//! polynomial before the linear (homography) transform:
 //!
 //! ```text
 //! u' = u + Σ A_pq * u^p * v^q    (for 2 ≤ p+q ≤ order)
@@ -15,7 +17,7 @@
 //! ```
 //!
 //! Linear terms (p+q < 2) are excluded because they are already captured by
-//! the homography / CD matrix.
+//! the homography.
 //!
 //! # Coefficient counts by order
 //!
@@ -28,25 +30,17 @@
 
 use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
-
 use nalgebra::DMatrix;
 
 use crate::error::InvalidConfigField;
-use crate::math::statistics::{MAD_TO_SIGMA, mad_fast, median_fast};
-use crate::registration::point_normalization::{PointNormalization, centroid};
-use crate::registration::result::RegistrationError;
-use crate::registration::transform::Transform;
+use crate::math::lstsq::Lstsq;
+use crate::registration::point_normalization::PointNormalization;
+use crate::registration::transform::{Transform, TransformType};
 
 /// The highest polynomial order [`SipConfig::order`] accepts.
 const MAX_ORDER: usize = 5;
 
-/// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
-const MAX_TERMS: usize = 18;
-
-/// The corrected-residual scale below which clipping stops: a mapped coordinate up to 2²⁰ px is
-/// resolved to `u·2²⁰` ≈ 1.2e-10 px in f64, and a corrected residual takes a handful of operations
-/// at that scale, so a spread under 1e-9 px is rounding rather than outliers.
-const RESIDUAL_RESOLUTION_PX: f64 = 1e-9;
+const MAX_TERMS: usize = SipPolynomial::term_count(MAX_ORDER);
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -55,17 +49,10 @@ pub struct SipConfig {
     /// order 3 handles mustache distortion.
     pub order: usize,
 
-    /// Reference point for the polynomial (typically image center).
-    /// Coordinates are relative to this point before polynomial evaluation.
-    /// If None, the centroid of the input points is used.
+    /// The polynomial's origin, typically the image centre: coordinates are taken relative to it.
+    /// `None` takes the centre of the reference catalog's bounding box, which every frame
+    /// registered to that reference shares.
     pub reference_point: Option<DVec2>,
-
-    /// Sigma threshold for iterative outlier rejection (default 3.0).
-    /// Points with residuals beyond `clip_sigma * MAD_sigma` are rejected.
-    pub clip_sigma: f64,
-
-    /// Number of sigma-clipping iterations (default 3). Set to 0 to disable.
-    pub clip_iterations: usize,
 }
 
 impl Default for SipConfig {
@@ -73,8 +60,6 @@ impl Default for SipConfig {
         Self {
             order: 3,
             reference_point: None,
-            clip_sigma: 3.0,
-            clip_iterations: 3,
         }
     }
 }
@@ -86,12 +71,6 @@ impl SipConfig {
             "SIP order",
             "between 2 and 5",
             self.order as f64,
-        )?;
-        InvalidConfigField::finite(
-            "SIP clip_sigma",
-            "finite and positive",
-            self.clip_sigma,
-            |value| value > 0.0,
         )?;
         if let Some(reference_point) = self.reference_point {
             InvalidConfigField::finite_only("SIP reference_point x", reference_point.x)?;
@@ -117,198 +96,318 @@ pub struct SipPolynomial {
     coeffs_v: ArrayVec<f64, MAX_TERMS>,
 }
 
-/// Result of a SIP polynomial fit, including quality diagnostics.
-#[derive(Debug, Clone)]
-pub struct SipFitResult {
-    /// The fitted polynomial.
-    pub(crate) polynomial: SipPolynomial,
-    /// RMS residual in pixels (after SIP correction, across surviving points).
-    pub rms_residual: f64,
-    /// Maximum residual in pixels (worst surviving point).
-    pub max_residual: f64,
-    /// Number of points used in the final fit (after sigma-clipping).
-    pub points_used: usize,
-    /// Number of points rejected by sigma-clipping.
-    pub points_rejected: usize,
-    /// Maximum correction magnitude in pixels (across fitted points).
-    pub max_correction: f64,
+/// A fit with its linear part held, and the derivative of its χ² in a rotation's angle.
+#[derive(Debug)]
+struct FixedLinearFit {
+    fit: SipFit,
+    angle_derivative: f64,
 }
 
+/// Matched pairs as the SIP fits take them, each with its weight.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SipPairs<'a> {
+    pub(crate) reference: &'a [DVec2],
+    pub(crate) target: &'a [DVec2],
+    pub(crate) weights: &'a [f64],
+}
+
+/// A transform and the SIP correction fitted together with it.
+#[derive(Debug, Clone)]
+pub(crate) struct SipFit {
+    pub(crate) transform: Transform,
+    pub(crate) sip: SipPolynomial,
+}
+
+/// The secant steps a rotation's joint fit may take: it converges superlinearly from the
+/// unconstrained fit's angle, to rounding within a handful.
+const MAX_SECANT_STEPS: usize = 50;
+
 impl SipPolynomial {
-    /// Fit a SIP polynomial to matched point pairs under `transform`.
+    /// The pairs a fit of `order` needs: three per term, astrometry.net's practice against
+    /// overfitting (order 4, 12 terms, about 36 points).
+    pub(crate) const fn required_points(order: usize) -> usize {
+        3 * Self::term_count(order)
+    }
+
+    /// The terms of each axis's polynomial at `order`, every `u^p·v^q` with `2 ≤ p + q ≤ order`:
+    /// the `(order + 1)(order + 2)/2` monomials up to `order` less the three of degree 0 and 1.
+    pub(crate) const fn term_count(order: usize) -> usize {
+        (order + 1) * (order + 2) / 2 - 3
+    }
+
+    /// A transform of `model` and its correction of `order` about `origin`, fitted together to the
+    /// joint optimum, as astrometry.net's `fit_sip_wcs` fits a linear part and its correction: a
+    /// correction `c` carried through a linear part `A` adds `A·c`, so with `H = A·c` the warp
+    /// `A·r + t₀ + H(u)` is linear in everything but a rotation's angle, and `c` is `A⁻¹·H`.
     ///
-    /// The SIP convention corrects reference pixels before the linear transform: a target is
-    /// predicted at `T(r + c(r))`. Each fit target is therefore the reference-frame correction that
-    /// carries `r` onto its target, `J(r)⁻¹·(t − T(r))` with `J` the Jacobian of `T` at `r` — exact
-    /// for every model up to affine, whose `J` is the constant linear part, and a first-order
-    /// linearization for a homography. The corrected residuals `|T(r + c(r)) − t|` are then
-    /// measured through `T` itself, in target pixels, and sigma clipping and the reported metrics
-    /// both use them.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `config` fails validation, the point counts differ, there are too few
-    /// points for a stable fit, `T` is singular at a reference point, or the polynomial system is
-    /// singular.
-    pub fn fit_from_transform(
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        transform: &Transform,
-        config: &SipConfig,
-    ) -> Result<SipFitResult, RegistrationError> {
-        config.validate()?;
-        if ref_points.len() != target_points.len() {
-            return Err(RegistrationError::SipPointCountMismatch {
-                reference: ref_points.len(),
-                target: target_points.len(),
-            });
-        }
-
-        let n = ref_points.len();
-        let terms = term_exponents(config.order);
-        // Require at least 3x as many points as polynomial terms to prevent overfitting.
-        // Astrometry.net practice: order 4 (12 terms) needs ~36 points minimum. Held after every
-        // clipping pass too, which keeps the previous fit rather than refit on fewer.
-        let required_points = 3 * terms.len();
-        if n < required_points {
-            return Err(RegistrationError::InsufficientSipPoints {
-                found: n,
-                required: required_points,
-            });
-        }
-
-        let ref_pt = config
-            .reference_point
-            .unwrap_or_else(|| centroid(ref_points));
-        let norm = PointNormalization::around(ref_points, ref_pt);
-
-        let mut targets = Vec::with_capacity(n);
-        for (&r, &t) in ref_points.iter().zip(target_points) {
-            let jacobian = transform.jacobian(r);
-            let determinant = jacobian.determinant();
-            if determinant == 0.0 || !determinant.is_finite() {
-                return Err(RegistrationError::SingularSipSystem);
+    /// A translation holds `A = I` and a similarity `A = [a −b; b a]`, both linear; an affine map
+    /// frees `A`. A rotation's angle is not linear: for a fixed angle the rest is, and by the
+    /// envelope theorem the derivative of the optimum's χ² in the angle is `2·Σ wᵢ·eᵢ·R′·rᵢ` at it,
+    /// which a secant iteration drives to zero from the similarity's angle. A homography has no
+    /// SIP fit: its perspective terms act to first order as the correction's quadratic ones, and
+    /// the two are not determined together — which is why the SIP convention puts an affine map
+    /// under the polynomial, and why validation refuses the pairing. `None` when the pairs do not
+    /// determine the fit, or its linear part is singular.
+    pub(crate) fn fit_with(
+        model: TransformType,
+        pairs: SipPairs<'_>,
+        order: usize,
+        origin: DVec2,
+    ) -> Option<SipFit> {
+        let terms = term_exponents(order);
+        let norm = PointNormalization::around(pairs.reference, origin);
+        match model {
+            TransformType::Translation => Self::fit_with_fixed(
+                TransformType::Translation,
+                pairs,
+                &terms,
+                norm,
+                DMat2::IDENTITY,
+            )
+            .map(|fixed| fixed.fit),
+            TransformType::Euclidean => Self::fit_with_rotation(pairs, &terms, norm),
+            TransformType::Similarity => Self::fit_with_similarity(pairs, &terms, norm),
+            TransformType::Affine => Self::fit_with_affine(pairs, &terms, norm),
+            TransformType::Homography => {
+                unreachable!("validation refuses a homography with a SIP correction")
             }
-            targets.push(norm.normalize_delta(jacobian.inverse() * (t - transform.apply(r))));
         }
+    }
 
-        let mut mask = vec![true; n];
-        let mut polynomial = Self::solve(ref_points, &targets, &mask, norm, &terms)
-            .ok_or(RegistrationError::SingularSipSystem)?;
-        let mut residuals = Vec::with_capacity(n);
-        polynomial.residuals_into(ref_points, target_points, transform, &mut residuals);
-
-        // Iterative sigma clipping on the corrected residuals. The buffers live outside the loop
-        // and are refilled each pass, so the iteration allocates nothing but the refit.
-        let mut active: Vec<f64> = Vec::with_capacity(n);
-        let mut deviations: Vec<f64> = Vec::with_capacity(n);
-        let mut candidate_mask = mask.clone();
-        for _ in 0..config.clip_iterations {
-            active.clear();
-            active.extend(
-                residuals
-                    .iter()
-                    .zip(&mask)
-                    .filter(|(_, kept)| **kept)
-                    .map(|(residual, _)| *residual),
-            );
-            let median = median_fast(&mut active);
-            let mad = mad_fast(&active, median, &mut deviations);
-            let threshold = config.clip_sigma * mad * MAD_TO_SIGMA;
-            if threshold < RESIDUAL_RESOLUTION_PX {
-                break;
-            }
-
-            for ((candidate, &kept), &residual) in
-                candidate_mask.iter_mut().zip(&mask).zip(&residuals)
-            {
-                *candidate = kept && residual <= median + threshold;
-            }
-            let survivors = candidate_mask.iter().filter(|&&kept| kept).count();
-            if candidate_mask == mask || survivors < required_points {
-                break;
-            }
-            let Some(refit) = Self::solve(ref_points, &targets, &candidate_mask, norm, &terms)
-            else {
-                break;
-            };
-            polynomial = refit;
-            mask.copy_from_slice(&candidate_mask);
-            polynomial.residuals_into(ref_points, target_points, transform, &mut residuals);
+    /// The warp `A·r + t₀ + H(u)` and its correction `A⁻¹·H`, from the pixel linear part
+    /// `linear`, the pixel constant and the terms' coefficients `h` per basis function, the
+    /// transform typed as the `model` it was fitted as.
+    fn from_linear(
+        model: TransformType,
+        linear: DMat2,
+        constant: DVec2,
+        h: &[DVec2],
+        terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+        norm: PointNormalization,
+    ) -> Option<SipFit> {
+        let determinant = linear.determinant();
+        if determinant == 0.0 || !determinant.is_finite() {
+            return None;
         }
-
-        let points_used = mask.iter().filter(|&&kept| kept).count();
-        let mut sum_sq = 0.0;
-        let mut max_residual = 0.0f64;
-        let mut max_correction = 0.0f64;
-        for ((&r, &residual), _) in ref_points
-            .iter()
-            .zip(&residuals)
-            .zip(&mask)
-            .filter(|(_, kept)| **kept)
-        {
-            sum_sq += residual * residual;
-            max_residual = max_residual.max(residual);
-            max_correction = max_correction.max(polynomial.correction_at(r).length());
+        // The correction is held in normalized units, `scale` times smaller than in pixels.
+        let inverse = linear.inverse() * (1.0 / norm.scale());
+        let mut coeffs_u = ArrayVec::new();
+        let mut coeffs_v = ArrayVec::new();
+        for &term in h {
+            let coefficient = inverse * term;
+            coeffs_u.push(coefficient.x);
+            coeffs_v.push(coefficient.y);
         }
-
-        Ok(SipFitResult {
-            polynomial,
-            rms_residual: (sum_sq / points_used as f64).sqrt(),
-            max_residual,
-            points_used,
-            points_rejected: n - points_used,
-            max_correction,
+        let angle = linear.x_axis.y.atan2(linear.x_axis.x);
+        let transform = match model {
+            TransformType::Translation => Transform::translation(constant),
+            TransformType::Euclidean => Transform::euclidean(constant, angle),
+            TransformType::Similarity => {
+                Transform::similarity(constant, angle, linear.x_axis.length())
+            }
+            TransformType::Affine | TransformType::Homography => Transform::affine([
+                linear.x_axis.x,
+                linear.y_axis.x,
+                constant.x,
+                linear.x_axis.y,
+                linear.y_axis.y,
+                constant.y,
+            ]),
+        };
+        transform.is_valid().then(|| SipFit {
+            transform,
+            sip: Self {
+                norm,
+                terms: terms.clone(),
+                coeffs_u,
+                coeffs_v,
+            },
         })
     }
 
-    /// The least-squares polynomial through the masked-in fit targets, or `None` when the design
-    /// matrix is rank-deficient.
-    ///
-    /// Solved on the rectangular design matrix by SVD rather than through its normal equations,
-    /// whose condition number is the square of the matrix's. The rank test is the usual numerical
-    /// one: a singular value at or below `max(rows, columns)·ε·σ_max` is indistinguishable from
-    /// zero in f64.
-    fn solve(
-        points: &[DVec2],
-        targets: &[DVec2],
-        mask: &[bool],
-        norm: PointNormalization,
+    /// With the pixel linear part held at `linear`, the constant and the terms by one weighted
+    /// solve per axis on `t − A·r`, and the solved warp's weighted χ² and its residuals' first
+    /// moment against `rotate(r)`: the angle derivative a rotation's fit needs.
+    fn fit_with_fixed(
+        model: TransformType,
+        pairs: SipPairs<'_>,
         terms: &ArrayVec<(usize, usize), MAX_TERMS>,
-    ) -> Option<Self> {
-        let n_terms = terms.len();
-        let rows = mask.iter().filter(|&&kept| kept).count();
-        let mut design = DMatrix::zeros(rows, n_terms);
-        let mut rhs = DMatrix::zeros(rows, 2);
+        norm: PointNormalization,
+        linear: DMat2,
+    ) -> Option<FixedLinearFit> {
+        let k = terms.len();
+        let n = pairs.reference.len();
+        let mut design = DMatrix::zeros(n, 1 + k);
+        let mut rhs = DMatrix::zeros(n, 2);
         let mut basis = [0.0; MAX_TERMS];
-        let kept = points
+        for (row, ((&r, &t), &w)) in pairs
+            .reference
             .iter()
-            .zip(targets)
-            .zip(mask)
-            .filter(|(_, kept)| **kept);
-        for (row, ((&point, &target), _)) in kept.enumerate() {
-            evaluate_basis(norm.normalize(point), terms, &mut basis[..n_terms]);
-            for (column, &value) in basis[..n_terms].iter().enumerate() {
-                design[(row, column)] = value;
+            .zip(pairs.target)
+            .zip(pairs.weights)
+            .enumerate()
+        {
+            let root = w.sqrt();
+            evaluate_basis(norm.normalize(r), terms, &mut basis[..k]);
+            design[(row, 0)] = root;
+            for (column, &value) in basis[..k].iter().enumerate() {
+                design[(row, 1 + column)] = root * value;
             }
-            rhs[(row, 0)] = target.x;
-            rhs[(row, 1)] = target.y;
+            let rest = t - linear * r;
+            rhs[(row, 0)] = root * rest.x;
+            rhs[(row, 1)] = root * rest.y;
         }
-
-        let svd = design.svd(true, true);
-        let rank_tolerance = rows.max(n_terms) as f64 * f64::EPSILON * svd.singular_values.max();
-        if svd.singular_values.min() <= rank_tolerance {
-            return None;
+        let solution = Lstsq::new(design).solve(&rhs)?;
+        let constant = DVec2::new(solution[(0, 0)], solution[(0, 1)]);
+        let h: Vec<DVec2> = (0..k)
+            .map(|i| DVec2::new(solution[(1 + i, 0)], solution[(1 + i, 1)]))
+            .collect();
+        let mut angle_derivative = 0.0;
+        for ((&r, &t), &w) in pairs.reference.iter().zip(pairs.target).zip(pairs.weights) {
+            evaluate_basis(norm.normalize(r), terms, &mut basis[..k]);
+            let correction = h
+                .iter()
+                .zip(&basis[..k])
+                .fold(DVec2::ZERO, |sum, (&term, &value)| sum + term * value);
+            let residual = linear * r + constant + correction - t;
+            // `R′(θ)·r` is the quarter turn of `R(θ)·r`.
+            angle_derivative += 2.0 * w * residual.dot((linear * r).perp());
         }
-        let solution = svd
-            .solve(&rhs, rank_tolerance)
-            .expect("an SVD computed with both singular-vector sets can solve");
-        Some(Self {
-            norm,
-            terms: terms.clone(),
-            coeffs_u: solution.column(0).iter().copied().collect(),
-            coeffs_v: solution.column(1).iter().copied().collect(),
+        Some(FixedLinearFit {
+            fit: Self::from_linear(model, linear, constant, &h, terms, norm)?,
+            angle_derivative,
         })
+    }
+
+    /// The rotation's angle by the secant method on the derivative of the optimum's χ², from the
+    /// similarity's angle, to the rounding of the angle.
+    fn fit_with_rotation(
+        pairs: SipPairs<'_>,
+        terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+        norm: PointNormalization,
+    ) -> Option<SipFit> {
+        let start = Self::fit_with_similarity(pairs, terms, norm)?
+            .transform
+            .rotation_angle();
+        let at = |angle: f64| {
+            let (sin, cos) = angle.sin_cos();
+            Self::fit_with_fixed(
+                TransformType::Euclidean,
+                pairs,
+                terms,
+                norm,
+                DMat2::from_cols_array(&[cos, sin, -sin, cos]),
+            )
+        };
+        let (mut previous_angle, mut previous) = (start, at(start)?);
+        let mut angle = start + 1e-6;
+        let mut current = at(angle)?;
+        for _ in 0..MAX_SECANT_STEPS {
+            let slope = current.angle_derivative - previous.angle_derivative;
+            if current.angle_derivative == 0.0 || slope == 0.0 {
+                break;
+            }
+            let next = angle - current.angle_derivative * (angle - previous_angle) / slope;
+            let step = (next - angle).abs();
+            previous_angle = angle;
+            previous = current;
+            angle = next;
+            current = at(angle)?;
+            if step <= 4.0 * f64::EPSILON * angle.abs().max(1.0) {
+                break;
+            }
+        }
+        Some(current.fit)
+    }
+
+    /// `A = [a −b; b a]`: the two shared coefficients couple the axes, so both rows of every pair
+    /// enter one solve.
+    fn fit_with_similarity(
+        pairs: SipPairs<'_>,
+        terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+        norm: PointNormalization,
+    ) -> Option<SipFit> {
+        let k = terms.len();
+        let n = pairs.reference.len();
+        let mut design = DMatrix::zeros(2 * n, 4 + 2 * k);
+        let mut rhs = DMatrix::zeros(2 * n, 1);
+        let mut basis = [0.0; MAX_TERMS];
+        for (i, ((&r, &t), &w)) in pairs
+            .reference
+            .iter()
+            .zip(pairs.target)
+            .zip(pairs.weights)
+            .enumerate()
+        {
+            let root = w.sqrt();
+            let u = norm.normalize(r);
+            evaluate_basis(u, terms, &mut basis[..k]);
+            let (x, y) = (2 * i, 2 * i + 1);
+            design[(x, 0)] = root;
+            design[(y, 1)] = root;
+            design[(x, 2)] = root * u.x;
+            design[(x, 3)] = -root * u.y;
+            design[(y, 2)] = root * u.y;
+            design[(y, 3)] = root * u.x;
+            for (column, &value) in basis[..k].iter().enumerate() {
+                design[(x, 4 + column)] = root * value;
+                design[(y, 4 + k + column)] = root * value;
+            }
+            rhs[(x, 0)] = root * t.x;
+            rhs[(y, 0)] = root * t.y;
+        }
+        let solution = Lstsq::new(design).solve(&rhs)?;
+        let (a, b) = (solution[(2, 0)], solution[(3, 0)]);
+        let linear = DMat2::from_cols(DVec2::new(a, b), DVec2::new(-b, a)) * (1.0 / norm.scale());
+        let constant = DVec2::new(solution[(0, 0)], solution[(1, 0)]) - linear * norm.center();
+        let h: Vec<DVec2> = (0..k)
+            .map(|i| DVec2::new(solution[(4 + i, 0)], solution[(4 + k + i, 0)]))
+            .collect();
+        Self::from_linear(TransformType::Similarity, linear, constant, &h, terms, norm)
+    }
+
+    /// A free `A`: one weighted solve per axis of the full polynomial, constant and linear terms
+    /// included.
+    fn fit_with_affine(
+        pairs: SipPairs<'_>,
+        terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+        norm: PointNormalization,
+    ) -> Option<SipFit> {
+        let k = terms.len();
+        let n = pairs.reference.len();
+        let mut design = DMatrix::zeros(n, 3 + k);
+        let mut rhs = DMatrix::zeros(n, 2);
+        let mut basis = [0.0; MAX_TERMS];
+        for (row, ((&r, &t), &w)) in pairs
+            .reference
+            .iter()
+            .zip(pairs.target)
+            .zip(pairs.weights)
+            .enumerate()
+        {
+            let root = w.sqrt();
+            let u = norm.normalize(r);
+            evaluate_basis(u, terms, &mut basis[..k]);
+            design[(row, 0)] = root;
+            design[(row, 1)] = root * u.x;
+            design[(row, 2)] = root * u.y;
+            for (column, &value) in basis[..k].iter().enumerate() {
+                design[(row, 3 + column)] = root * value;
+            }
+            rhs[(row, 0)] = root * t.x;
+            rhs[(row, 1)] = root * t.y;
+        }
+        let solution = Lstsq::new(design).solve(&rhs)?;
+        // In pixels the linear part is the normalized one over the scale, about the origin.
+        let linear = DMat2::from_cols(
+            DVec2::new(solution[(1, 0)], solution[(1, 1)]),
+            DVec2::new(solution[(2, 0)], solution[(2, 1)]),
+        ) * (1.0 / norm.scale());
+        let constant = DVec2::new(solution[(0, 0)], solution[(0, 1)]) - linear * norm.center();
+        let h: Vec<DVec2> = (0..k)
+            .map(|i| DVec2::new(solution[(3 + i, 0)], solution[(3 + i, 1)]))
+            .collect();
+        Self::from_linear(TransformType::Affine, linear, constant, &h, terms, norm)
     }
 
     /// Apply the SIP correction to a point.
@@ -316,35 +415,25 @@ impl SipPolynomial {
         p + self.correction_at(p)
     }
 
-    /// The corrected residual of each pair, `|T(r + c(r)) − t|` in target pixels, into a caller's
-    /// buffer.
-    fn residuals_into(
-        &self,
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        transform: &Transform,
-        residuals: &mut Vec<f64>,
-    ) {
-        residuals.clear();
-        residuals.extend(
-            ref_points
-                .iter()
-                .zip(target_points)
-                .map(|(&r, &t)| (transform.apply(self.correct(r)) - t).length()),
-        );
+    /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
+    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+        self.local(p).jacobian
     }
 
-    /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
+    /// [`Self::correct`] and [`Self::jacobian`] at `p` from one set of powers, as a Newton step
+    /// takes both.
     ///
     /// The correction is `s·P((p − p₀)/s)` in the normalized coordinates the polynomial is held in,
     /// so the scale cancels and its derivative is `P`'s: `∂(uᵖvᵠ)/∂u = p·uᵖ⁻¹vᵠ`, from the same
     /// [`MonomialPowers`] [`evaluate_basis`] reads. Columns are the images of the x and y steps.
-    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+    pub(crate) fn local(&self, p: DVec2) -> SipLocal {
         let powers = MonomialPowers::at(self.norm.normalize(p));
+        let mut value = DVec2::ZERO;
         let mut d_du = DVec2::ZERO;
         let mut d_dv = DVec2::ZERO;
         for (i, &(pu, pv)) in self.terms.iter().enumerate() {
             let coefficients = DVec2::new(self.coeffs_u[i], self.coeffs_v[i]);
+            value += coefficients * (powers.u[pu] * powers.v[pv]);
             if pu > 0 {
                 d_du += coefficients * (pu as f64 * powers.u[pu - 1] * powers.v[pv]);
             }
@@ -352,7 +441,41 @@ impl SipPolynomial {
                 d_dv += coefficients * (pv as f64 * powers.u[pu] * powers.v[pv - 1]);
             }
         }
-        DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv)
+        SipLocal {
+            corrected: p + self.norm.denormalize_delta(value),
+            jacobian: DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv),
+        }
+    }
+
+    /// The correction along pixel row `y`, as two polynomials in `u` alone.
+    ///
+    /// With `v` fixed, `Σ cₚᵩ·uᵖ·vᵠ` is `Σₚ (Σᵩ cₚᵩ·vᵠ)·uᵖ`: the inner sums are taken once per row,
+    /// and each pixel costs one Horner pass of `order` steps per axis instead of every monomial.
+    /// Exact as algebra; the reordered sums round differently from [`Self::correct`] in the last
+    /// bits.
+    pub(crate) fn row(&self, y: f64) -> SipRow {
+        let v = self.norm.normalize(DVec2::new(0.0, y)).y;
+        let order = self
+            .terms
+            .iter()
+            .map(|&(p, q)| p + q)
+            .max()
+            .expect("a SIP polynomial has terms");
+        let mut v_powers = [1.0; MAX_ORDER + 1];
+        for k in 1..=MAX_ORDER {
+            v_powers[k] = v_powers[k - 1] * v;
+        }
+        let mut coefficients = [DVec2::ZERO; MAX_ORDER + 1];
+        for (i, &(p, q)) in self.terms.iter().enumerate() {
+            coefficients[p] += DVec2::new(self.coeffs_u[i], self.coeffs_v[i]) * v_powers[q];
+        }
+        SipRow {
+            y,
+            center_x: self.norm.center().x,
+            scale: self.norm.scale(),
+            order,
+            coefficients,
+        }
     }
 
     /// Compute the correction vector at a point (without applying it).
@@ -372,6 +495,37 @@ impl SipPolynomial {
         }
 
         self.norm.denormalize_delta(DVec2::new(du, dv))
+    }
+}
+
+/// [`SipPolynomial::local`]: the corrected point and the correction's Jacobian there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SipLocal {
+    pub(crate) corrected: DVec2,
+    pub(crate) jacobian: DMat2,
+}
+
+/// [`SipPolynomial::row`]: the correction along one pixel row, its coefficients collapsed to `u`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SipRow {
+    y: f64,
+    center_x: f64,
+    scale: f64,
+    order: usize,
+    /// `Σᵩ cₚᵩ·vᵠ` for each power `p` of `u`, both axes.
+    coefficients: [DVec2; MAX_ORDER + 1],
+}
+
+impl SipRow {
+    /// The corrected point of pixel column `x` on this row.
+    #[inline]
+    pub(crate) fn correct(&self, x: f64) -> DVec2 {
+        let u = (x - self.center_x) / self.scale;
+        let correction = self.coefficients[..=self.order]
+            .iter()
+            .rev()
+            .fold(DVec2::ZERO, |sum, &coefficient| sum * u + coefficient);
+        DVec2::new(x, self.y) + correction * self.scale
     }
 }
 
@@ -423,13 +577,144 @@ fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use glam::DVec2;
-
+    use super::*;
     use crate::math::size2us::Size2us;
-    use crate::registration::distortion::sip::SipPolynomial;
-    use crate::registration::transform::Transform;
+
+    /// A fit's u and v coefficients.
+    type Coefficients = (ArrayVec<f64, MAX_TERMS>, ArrayVec<f64, MAX_TERMS>);
 
     impl SipPolynomial {
+        /// The correction of `order` about `origin` that `transform` warps the pairs best by: the
+        /// weighted least squares of `T(r) + J(r)·c(r) − t` in target pixels. Exact for an affine `T`,
+        /// whose `T(r + c)` is `T(r) + J·c`; first order for a homography. `None` when the pairs do not
+        /// determine it.
+        ///
+        /// A conformal `T` — translation, rotation, similarity — has `JᵀJ = s²·I`, so the residual
+        /// separates exactly into the reference frame, `c − J⁻¹·(t − T(r))` at weight `w·s²`, and the u
+        /// and v coefficients solve apart. Any other `T` couples them through `J`, and the system
+        /// carries both.
+        pub(crate) fn fit_under(
+            transform: &Transform,
+            pairs: SipPairs<'_>,
+            order: usize,
+            origin: DVec2,
+        ) -> Option<Self> {
+            let terms = term_exponents(order);
+            let norm = PointNormalization::around(pairs.reference, origin);
+            let conformal = matches!(
+                transform.transform_type(),
+                TransformType::Translation | TransformType::Euclidean | TransformType::Similarity
+            );
+            let (coeffs_u, coeffs_v) = if conformal {
+                Self::solve_conformal(transform, pairs, &terms, norm)?
+            } else {
+                Self::solve_coupled(transform, pairs, &terms, norm)?
+            };
+            Some(Self {
+                norm,
+                terms,
+                coeffs_u,
+                coeffs_v,
+            })
+        }
+
+        /// The u and v coefficients apart, on the reference-frame targets `J⁻¹·(t − T(r))` at weights
+        /// `w·|det J|`.
+        fn solve_conformal(
+            transform: &Transform,
+            pairs: SipPairs<'_>,
+            terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+            norm: PointNormalization,
+        ) -> Option<Coefficients> {
+            let k = terms.len();
+            let n = pairs.reference.len();
+            let mut design = DMatrix::zeros(n, k);
+            let mut rhs = DMatrix::zeros(n, 2);
+            let mut basis = [0.0; MAX_TERMS];
+            for (row, ((&r, &t), &w)) in pairs
+                .reference
+                .iter()
+                .zip(pairs.target)
+                .zip(pairs.weights)
+                .enumerate()
+            {
+                let jacobian = transform.jacobian(r);
+                let root = (w * jacobian.determinant().abs()).sqrt();
+                evaluate_basis(norm.normalize(r), terms, &mut basis[..k]);
+                let target = norm.normalize_delta(jacobian.inverse() * (t - transform.apply(r)));
+                for (column, &value) in basis[..k].iter().enumerate() {
+                    design[(row, column)] = root * value;
+                }
+                rhs[(row, 0)] = root * target.x;
+                rhs[(row, 1)] = root * target.y;
+            }
+            let solution = Lstsq::new(design).solve(&rhs)?;
+            Some((
+                solution.column(0).iter().copied().collect(),
+                solution.column(1).iter().copied().collect(),
+            ))
+        }
+
+        /// Both coefficient sets in one system: each pair's two rows are `√w·J` applied to the
+        /// correction's basis, against `√w·(t − T(r))`.
+        fn solve_coupled(
+            transform: &Transform,
+            pairs: SipPairs<'_>,
+            terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+            norm: PointNormalization,
+        ) -> Option<Coefficients> {
+            let k = terms.len();
+            let n = pairs.reference.len();
+            let mut design = DMatrix::zeros(2 * n, 2 * k);
+            let mut rhs = DMatrix::zeros(2 * n, 1);
+            let mut basis = [0.0; MAX_TERMS];
+            for (i, ((&r, &t), &w)) in pairs
+                .reference
+                .iter()
+                .zip(pairs.target)
+                .zip(pairs.weights)
+                .enumerate()
+            {
+                let root = w.sqrt();
+                evaluate_basis(norm.normalize(r), terms, &mut basis[..k]);
+                let jacobian = transform.jacobian(r);
+                // A correction held in normalized units is `scale` times larger in pixels, so the
+                // residual is divided by the scale instead of every column multiplied by it.
+                let residual = norm.normalize_delta(t - transform.apply(r));
+                for (column, &value) in basis[..k].iter().enumerate() {
+                    design[(2 * i, column)] = root * jacobian.x_axis.x * value;
+                    design[(2 * i, k + column)] = root * jacobian.y_axis.x * value;
+                    design[(2 * i + 1, column)] = root * jacobian.x_axis.y * value;
+                    design[(2 * i + 1, k + column)] = root * jacobian.y_axis.y * value;
+                }
+                rhs[(2 * i, 0)] = root * residual.x;
+                rhs[(2 * i + 1, 0)] = root * residual.y;
+            }
+            let solution = Lstsq::new(design).solve(&rhs)?;
+            Some((
+                (0..k).map(|i| solution[(i, 0)]).collect(),
+                (0..k).map(|i| solution[(k + i, 0)]).collect(),
+            ))
+        }
+
+        /// The correction of `order` about `origin` that `transform` warps `reference` onto
+        /// `target` best by, every pair weighed alike: the fixture a warp test starts from.
+        pub(crate) fn fitted_under(
+            transform: &Transform,
+            reference: &[DVec2],
+            target: &[DVec2],
+            order: usize,
+            origin: DVec2,
+        ) -> Self {
+            let weights = vec![1.0; reference.len()];
+            let pairs = SipPairs {
+                reference,
+                target,
+                weights: &weights,
+            };
+            Self::fit_under(transform, pairs, order, origin).expect("a fixture's pairs fit")
+        }
+
         /// The corrected residual of each pair: `|T(r + c(r)) − t|`, in target pixels.
         pub(crate) fn corrected_residuals(
             &self,
@@ -437,9 +722,11 @@ pub(crate) mod internals {
             target_points: &[DVec2],
             transform: &Transform,
         ) -> Vec<f64> {
-            let mut residuals = Vec::with_capacity(ref_points.len());
-            self.residuals_into(ref_points, target_points, transform, &mut residuals);
-            residuals
+            ref_points
+                .iter()
+                .zip(target_points)
+                .map(|(&r, &t)| (transform.apply(self.correct(r)) - t).length())
+                .collect()
         }
 
         /// The largest correction over a grid of `grid_spacing` across `size`, its far edges

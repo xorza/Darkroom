@@ -14,20 +14,21 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::combine::cache::core::{CacheCore, CacheTier};
-use crate::combine::cache::sample::CombinedSample;
-use crate::combine::cache::{CombineOutput, FrameCache};
+use crate::combine::cache::frame_weights::FrameWeights;
+use crate::combine::cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::cache::sample_noise::SampleNoise;
+use crate::combine::cache::slots::Slots;
+use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
-use crate::combine::error::{Error, StackConfigError};
-use crate::combine::normalization::FrameNorm;
-use crate::combine::rejection::Rejection;
+use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_run::IngestRun;
 use crate::math;
-use crate::memory::run_memory::RunMemory;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpResult;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -86,7 +87,7 @@ impl From<LinearImage> for StackFrame {
 /// # Returns
 ///
 /// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its per-channel weight map describes the surviving samples; `linear_variance` is
+/// pixel. Its per-channel weight map describes the surviving samples; `variance` is
 /// available for mean output and absent for median output.
 ///
 /// # Errors
@@ -103,23 +104,30 @@ impl From<LinearImage> for StackFrame {
 ///
 /// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
 ///
-/// ```ignore
-/// use lumos::{stack, StackConfig, ProgressCallback};
+/// ```no_run
+/// use common::CancelToken;
+/// use lumos::{ProgressCallback, StackConfig, stack};
 ///
-/// let result = stack(&paths, StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
-/// let result = stack(&paths, StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
+/// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
+/// let result = stack(&paths, &StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
+/// let result = stack(&paths, &StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
+/// # Ok::<(), lumos::StackError>(())
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     combine_cached(config, paths.len(), "paths", || {
-        let memory = RunMemory::read(config.cache.memory_override);
-        FrameCache::from_paths(paths, config, memory, progress, cancel)
+        FrameCache::from_paths(
+            paths,
+            config,
+            IngestRun::new(&config.ingest, cancel),
+            progress,
+        )
     })
 }
 
@@ -142,7 +150,7 @@ pub fn stack_images(
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let frame_count = frames.len();
     combine_cached(config, frame_count, "memory", || {
         FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
@@ -158,7 +166,7 @@ pub(crate) fn stack_stored_frames(
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let frame_count = frames.len();
     combine_cached(config, frame_count, "frame store", || {
         FrameCache::from_stored_frames(
@@ -184,16 +192,16 @@ pub(crate) fn stack_stored_frames(
 /// entry point has to remember.
 ///
 /// `build` is deferred rather than taken as a built cache so that validation runs before a
-/// potentially long load, and so the cache — which owns the spill directory — drops at the end of
-/// this scope on every path.
+/// potentially long load, and so the cache — whose spilled planes hold their disk space — drops at
+/// the end of this scope on every path.
 pub(crate) fn combine_cached(
     config: &StackConfig,
     frame_count: usize,
     source: &'static str,
-    build: impl FnOnce() -> Result<FrameCache, Error>,
-) -> Result<StackProduct, Error> {
+    build: impl FnOnce() -> Result<FrameCache, StackError>,
+) -> Result<StackProduct, StackError> {
     if frame_count == 0 {
-        return Err(Error::NoFrames);
+        return Err(StackError::NoFrames);
     }
     config.validate()?;
     validate_manual_weights(config, frame_count)?;
@@ -220,49 +228,6 @@ pub(crate) fn combine_cached(
     run_stacking(&cache, config)
 }
 
-/// Resolve weights from the weighting strategy and pre-computed channel stats.
-///
-/// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
-fn resolve_weights<'a>(
-    weighting: &Weighting,
-    stats: impl IntoIterator<Item = &'a FrameStats>,
-    frame_norms: Option<&[FrameNorm]>,
-) -> Option<Vec<f32>> {
-    match weighting {
-        Weighting::Equal => None,
-        Weighting::Noise => {
-            let mut stats = stats.into_iter().peekable();
-            assert!(stats.peek().is_some(), "noise weighting requires frames");
-            // Inverse variance of the frame *as combined*: normalization multiplies the frame by
-            // `gain`, scaling its noise to `gain·σ`, so w = 1/(gain·σ)² — the "pscale²" term.
-            // Without it a frame scaled up to match the reference is over-weighted by gain².
-            let weights: Vec<f32> = stats
-                .enumerate()
-                .map(|(frame_idx, fs)| {
-                    let sigma_sum: f32 = fs
-                        .channels
-                        .iter()
-                        .enumerate()
-                        .map(|(channel, c)| {
-                            let gain =
-                                frame_norms.map_or(1.0, |n| n[frame_idx].channels[channel].gain);
-                            gain * math::statistics::mad_to_sigma(c.mad)
-                        })
-                        .sum();
-                    let avg_sigma = sigma_sum / fs.channels.len() as f32;
-                    if avg_sigma > f32::EPSILON {
-                        1.0 / (avg_sigma * avg_sigma)
-                    } else {
-                        0.0
-                    }
-                })
-                .collect();
-            normalize_weights(&weights)
-        }
-        Weighting::Manual(w) => normalize_weights(w),
-    }
-}
-
 const fn validate_manual_weights(
     config: &StackConfig,
     frame_count: usize,
@@ -276,16 +241,6 @@ const fn validate_manual_weights(
         });
     }
     Ok(())
-}
-
-/// Normalize weights to sum to 1.0. Returns `None` if the total cannot be normalized.
-fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
-    let sum: f32 = weights.iter().sum();
-    if sum.is_finite() && sum > 0.0 {
-        Some(weights.iter().map(|w| w / sum).collect())
-    } else {
-        None
-    }
 }
 
 /// Warn when frame weighting was requested but the resolved combine is a median, which has no
@@ -310,7 +265,7 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
 ///
 /// # Errors
 ///
-/// [`Error::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
+/// [`StackError::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
 /// chunks rather than unwinding, so a cancelled run still produces a `StackProduct` — one holding
 /// zeros wherever it stopped. Returning that as an error is what keeps the partial image from
 /// being mistaken for a stack; the alternative, handing it back and trusting each caller to
@@ -318,88 +273,124 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
 pub(crate) fn run_stacking(
     cache: &FrameCache,
     config: &StackConfig,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
     let method = config.small_n.resolve(config.method, frame_count);
     warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
     let norms = cache.frame_norms.as_deref();
-    let weights = weighted_combine
-        .then(|| resolve_weights(&config.weighting, stats(), norms))
-        .flatten();
+    let slots = Slots::new(
+        cache.frames[0].source_stats.facts.cfa_type,
+        cache.core.dimensions.channels(),
+    );
+    let weights = if weighted_combine {
+        FrameWeights::resolve(&config.weighting, stats(), norms, slots)?
+    } else {
+        None
+    };
 
-    // A median is not a linear combination, so it has no variance factor to report whatever the
-    // caller asked for. Resolving here means the reducer never allocates a plane it would drop.
+    // A median is not a linear combination, so it has no variance to report whatever the caller
+    // asked for. Resolving here means the reducer never allocates a plane it would drop.
     let planes = config.quality.resolve(weighted_combine);
-    let measure_quality = planes.weight || planes.variance;
+    let measure_quality = planes.weight || planes.variance || planes.dispersion;
 
-    let source_sigmas = SourceSigmas::measure(stats());
-    // Propagating quantization noise through rejection needs each surviving sample's *frame*
-    // index, to reach that frame's source sigma and normalization gain. Under partial coverage
-    // the reducer sees a compacted subset whose indices no longer name frames, so the tracking is
-    // limited to frame sets where every frame contributes at every pixel.
-    //
-    // Coverage is not only the warp's: a frame whose source declared pixels with no measurement
-    // carries it too, so one edge-masked panel costs the whole set its sigma propagation. Blunt
-    // but not wrong — the compaction that breaks the mapping is the same either way.
-    let frame_indices_are_stable = cache.frames.iter().all(|frame| frame.quality.is_none());
-    let sigmas = source_sigmas.filter(|_| frame_indices_are_stable);
+    let sigmas = SourceSigmas::measure(stats());
+    let min_survivors = config.min_survivors;
 
     let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
             let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
-            let combined = cache.process_chunked(None, planes, |values, w, _| {
-                let value = math::statistics::median_mut(values);
+            let request = CombineRequest {
+                weights: None,
+                planes,
+                min_survivors,
+                noise: None,
+                slots,
+            };
+            let combined = cache.process_chunked(request, |samples, _| {
+                let count = samples.values.len();
+                let value = math::statistics::median_mut(samples.values);
                 if measure_quality {
-                    CombinedSample::from_all(value, w)
+                    CombinedSample::from_survivors(
+                        value,
+                        samples.values,
+                        samples.weights,
+                        0..count,
+                        None,
+                    )
                 } else {
-                    CombinedSample::value_only(value, values.len())
+                    CombinedSample::value_only(value, count)
                 }
             });
             (combined, sigma)
         }
         CombineMethod::Mean(rejection) => {
-            let reduce = move |values: &mut [f32], w: &[f32], scratch: &mut ScratchBuffers| {
-                rejection.combine_mean(values, w, scratch, measure_quality)
+            let noise = (rejection.measures_spread() || planes.variance)
+                .then(|| SampleNoise::new(stats(), norms, slots));
+            let request = CombineRequest {
+                weights: weights.as_ref(),
+                planes,
+                min_survivors,
+                noise: noise.as_ref(),
+                slots,
             };
-            // Winsorization replaces samples with order statistics, so it has no fixed linear
-            // coefficient set to propagate quantization variance through: it takes the
-            // conservative bound instead of tracking survivors.
-            let winsorized = matches!(rejection, Rejection::Winsorized(_));
+            let reduce = move |samples: PixelSamples<'_>, scratch: &mut ScratchBuffers| {
+                rejection.combine_mean(samples, min_survivors, scratch, measure_quality)
+            };
             match sigmas {
-                Some(sigmas) if !winsorized => {
-                    // Rejection keeps a different survivor set at every pixel, so the master's
-                    // floor is the least-reduced pixel: seed with "nothing rejected" and raise it
-                    // wherever a pixel lost frames.
-                    let all_survivors = sigmas
-                        .combined_mean(weights.as_deref(), norms, 0..frame_count)
-                        .expect("a validated stack has positive total weight");
-                    let max_sigma = MaxSigma::seeded(all_survivors);
-                    let frame_weights = weights.as_deref();
-                    let combined =
-                        cache.process_chunked(weights.as_deref(), planes, |values, w, scratch| {
-                            let sample = reduce(values, w, scratch);
-                            if sample.survivor_count != frame_count {
-                                max_sigma.record(sigmas.combined_mean(
-                                    frame_weights,
+                Some(sigmas) => {
+                    // Rejection and coverage keep a different set of frames at every pixel, so the
+                    // master's figure is the least-reduced pixel's: seed with every frame and raise
+                    // it wherever a pixel had fewer.
+                    let all_frames = (0..slots.count())
+                        .map(|slot| {
+                            sigmas
+                                .combined_mean(
                                     norms,
-                                    scratch.indices[..sample.survivor_count].iter().copied(),
-                                ));
-                            }
-                            sample
-                        });
+                                    slots.channel(slot),
+                                    (0..frame_count).map(|frame| {
+                                        let weight = weights
+                                            .as_ref()
+                                            .map_or(1.0, |weights| weights.weight(frame, slot));
+                                        (frame, weight)
+                                    }),
+                                )
+                                .expect("a validated stack has positive total weight")
+                        })
+                        .fold(0.0, f32::max);
+                    let max_sigma = MaxSigma::seeded(all_frames);
+                    let combined = cache.process_chunked(request, |samples, scratch| {
+                        let PixelSamples {
+                            frame_ids,
+                            weights,
+                            channel,
+                            ..
+                        } = samples;
+                        let sample = reduce(samples, scratch);
+                        if sample.survivor_count != frame_count {
+                            let survivor =
+                                |position: usize| (frame_ids[position] as usize, weights[position]);
+                            max_sigma.record(match scratch.survivor_positions() {
+                                Some(positions) => sigmas.combined_mean(
+                                    norms,
+                                    channel,
+                                    positions
+                                        .iter()
+                                        .map(|&position| survivor(position as usize)),
+                                ),
+                                None => sigmas.combined_mean(
+                                    norms,
+                                    channel,
+                                    (0..frame_ids.len()).map(survivor),
+                                ),
+                            });
+                        }
+                        sample
+                    });
                     (combined, max_sigma.get())
                 }
-                sigmas => {
-                    let sigma = sigmas
-                        .filter(|_| winsorized)
-                        .and_then(|sigmas| sigmas.conservative(norms));
-                    (
-                        cache.process_chunked(weights.as_deref(), planes, reduce),
-                        sigma,
-                    )
-                }
+                None => (cache.process_chunked(request, reduce), None),
             }
         }
     };
@@ -414,9 +405,9 @@ fn finish_unless_cancelled(
     combined: CombineOutput,
     planes: QualityPlanes,
     quantization_sigma: Option<f32>,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(StackError::Cancelled);
     }
     Ok(cache.finish_product(combined, planes, quantization_sigma))
 }

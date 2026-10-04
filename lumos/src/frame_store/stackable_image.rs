@@ -13,7 +13,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::PixelFlags;
 
 /// Image operations needed by the shared frame store.
 pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
@@ -27,15 +27,11 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     fn cfa_type(&self) -> Option<CfaType>;
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError>;
 
-    fn quantization_sigma(&self) -> Option<f32> {
-        None
-    }
-
-    /// Which of the image's pixels carry no measurement, for a source that declared any.
+    /// The image's data-quality flags, for an image that carries any.
     ///
     /// No default: both implementors know the answer, and a default of "none" would let a decoder
-    /// that starts recording nulls have them silently dropped here.
-    fn nulls(&self) -> Option<&NullMask>;
+    /// that starts recording flags have them silently dropped here.
+    fn flags(&self) -> Option<&PixelFlags>;
 
     /// What a header alone settles about a frame, for a format that can answer without decoding.
     /// `None` when it cannot, which leaves the caller to decode the frame and read the answer off
@@ -44,5 +40,13 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
         None
     }
 
-    fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
+    /// The image's channel planes and its flags, moved out.
+    fn into_parts(self) -> ImageParts;
+}
+
+/// What [`StackableImage::into_parts`] moves out of an image.
+#[derive(Debug)]
+pub(crate) struct ImageParts {
+    pub(crate) planes: ArrayVec<Buffer2<f32>, 3>,
+    pub(crate) flags: Option<PixelFlags>,
 }

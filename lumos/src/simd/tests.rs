@@ -79,6 +79,10 @@ impl Kernel for Battery {
                 f64s.push((format!("sqrt {half} {i}"), v.sqrt()));
                 f64s.push((format!("floor {half} {i}"), v.floor()));
                 f64s.push((format!("exp {half} {i}"), isa.exp_f64(v)));
+                f64s.push((format!("ln {half} {i}"), isa.ln_f64(v)));
+                let split = v.frexp();
+                f64s.push((format!("frexp mantissa {half} {i}"), split.mantissa));
+                f64s.push((format!("frexp exponent {half} {i}"), split.exponent));
                 scalars.push((format!("reduce {half} {i}"), v.reduce_sum()));
             }
 
@@ -122,10 +126,6 @@ impl Kernel for Battery {
                 isa.load_f32_at(&concatenated, start),
             );
         }
-        f32s(
-            "u16".to_string(),
-            isa.load_u16(&[0, 1, 2, 255, 256, 4095, 65_534, 65_535]),
-        );
         let integers = isa.load_f64(&[-1022.0, -1.0, 0.0, 1023.0]);
         f64s.push(("pow2i".to_string(), integers.pow2i()));
         f64s.push((
@@ -319,4 +319,78 @@ fn dispatch_runs_on_the_widest_supported_tier() {
         .expect("Portable is always supported");
     assert_eq!(IsaName.dispatch(), widest.run(IsaName));
     assert_eq!(Tier::widest().run(IsaName), widest.run(IsaName));
+}
+
+/// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³` and the smallest normal `0.5 · 2⁻¹⁰²¹` in
+/// f64 lanes, on every tier.
+#[test]
+fn f64_frexp_splits_off_the_exponent() {
+    #[derive(Debug)]
+    struct Split;
+
+    impl Kernel for Split {
+        type Output = [[f64; F64_LANES]; 2];
+
+        #[inline(always)]
+        fn run<S: Isa>(self, isa: S) -> [[f64; F64_LANES]; 2] {
+            let split = isa.load_f64(&[6.0, 1.0, 0.1, f64::MIN_POSITIVE]).frexp();
+            [split.mantissa.to_array(), split.exponent.to_array()]
+        }
+    }
+
+    for tier in Tier::supported() {
+        assert_eq!(
+            tier.run(Split),
+            [[0.75, 0.5, 0.1 / 0.125, 0.5], [3.0, 1.0, -3.0, -1021.0]],
+            "{tier}"
+        );
+    }
+}
+
+/// `ln` holds 4e-16 relative, a few ulp, from the smallest normal to the largest finite value and
+/// across the mantissa's switch at √½, on every tier; at 1 it is exactly 0.
+#[test]
+fn ln_f64_is_accurate_at_every_magnitude() {
+    #[derive(Debug)]
+    struct Ln<'a>(&'a [f64]);
+
+    impl Kernel for Ln<'_> {
+        type Output = Vec<f64>;
+
+        #[inline(always)]
+        fn run<S: Isa>(self, isa: S) -> Vec<f64> {
+            let (chunks, []) = self.0.as_chunks::<F64_LANES>() else {
+                unreachable!("the sweep is whole vectors")
+            };
+            chunks
+                .iter()
+                .flat_map(|chunk| isa.ln_f64(isa.load_f64(chunk)).to_array())
+                .collect()
+        }
+    }
+
+    let mut xs: Vec<f64> = (-1020..1020).map(|e| 1.37 * 2f64.powi(e)).collect();
+    xs.extend((0..1000).map(|i| 0.5 + f64::from(i) * 5e-4));
+    xs.extend([
+        f64::MIN_POSITIVE,
+        f64::MAX,
+        std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2.next_up(),
+        std::f64::consts::FRAC_1_SQRT_2.next_down(),
+        1.0 + 1e-12,
+        1.0 - 1e-12,
+        PI,
+    ]);
+    xs.resize(xs.len().next_multiple_of(F64_LANES), 1.0);
+    for tier in Tier::supported() {
+        for (&x, got) in xs.iter().zip(tier.run(Ln(&xs))) {
+            let want = x.ln();
+            if want == 0.0 {
+                assert_eq!(got, 0.0, "{tier} ln({x})");
+            } else {
+                let error = (got - want).abs() / want.abs();
+                assert!(error < 4e-16, "{tier} ln({x}) = {got}, {error:e} off");
+            }
+        }
+    }
 }

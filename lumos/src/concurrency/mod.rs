@@ -1,99 +1,45 @@
 //! Concurrency helpers for Rayon work and reusable per-job resources.
 
-use std::mem::ManuallyDrop;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+pub(crate) mod job_scratch_pool;
+pub(crate) mod unsafe_send_ptr;
 
-use parking_lot::Mutex;
+use std::mem::MaybeUninit;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Wrapper to send raw pointers across thread boundaries in Rayon closures.
-///
-/// SAFETY: Caller must ensure disjoint access from each thread.
-///
-/// Access the inner value via `.get()` — never `.0` — so that Edition 2024
-/// closures capture `&UnsafeSendPtr` (which is Sync) rather than the inner
-/// pointer field.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct UnsafeSendPtr<T: Copy>(T);
-unsafe impl<T: Copy> Send for UnsafeSendPtr<T> {}
-unsafe impl<T: Copy> Sync for UnsafeSendPtr<T> {}
+use rayon::prelude::*;
 
-impl<T: Copy> UnsafeSendPtr<T> {
-    pub(crate) const fn new(ptr: T) -> Self {
-        Self(ptr)
-    }
+/// The `f32` samples of a 2 MiB transparent huge page.
+const HUGE_PAGE_SAMPLES: usize = 2 * 1024 * 1024 / size_of::<f32>();
 
-    pub(crate) const fn get(&self) -> T {
-        self.0
-    }
+/// `len` zeros, written by the workers a 2 MiB block each, for a plane workers then fill in
+/// contiguous pieces smaller than a page. A fresh plane's pages are zeroed by the kernel at the
+/// first write to each; when such pieces make those first writes, several workers fault on one
+/// huge page and wait on each other, which took two thirds of a 24 MP FITS decode. Where the first
+/// writes already spread over the pages, as a demosaic's tiles do, this pass only adds work.
+pub(crate) fn zeroed_in_parallel(len: usize) -> Vec<f32> {
+    let mut plane = Vec::with_capacity(len);
+    plane.spare_capacity_mut()[..len]
+        .par_chunks_mut(HUGE_PAGE_SAMPLES)
+        .for_each(|block| block.fill(MaybeUninit::new(0.0)));
+    // SAFETY: every one of the `len` samples was written above.
+    unsafe { plane.set_len(len) };
+    plane
 }
 
-/// The `for_each_init` init for scratch that has to outlive the parallel call.
-///
-/// Rayon runs an init closure once per worker and drops what it returns when the call ends,
-/// which is the right shape when the call *is* the operation — a demosaic pass allocates its row
-/// buffers straight into the init (`io/raw/demosaic/xtrans/markesteijn_steps.rs`) because nothing
-/// in the RAW path outlives one frame. Reach for a pool only when the same loop runs many times
-/// over: once per chunk per channel in the combine, once per tile row in the background mesh.
-/// Then the init becomes `|| pool.acquire()` and the lease hands its value back on drop, so the
-/// next call finds it warm. Both are the same mechanism; the pool is just a smarter init.
-///
-/// Values come back with **unspecified contents** — a fresh one is `Default`, a reused one keeps
-/// whatever the last holder left in it. Size or clear on acquire.
+/// What one slot of a bounded map finished with: the values of the indices it took, and the
+/// failure that stopped it, if one did.
 #[derive(Debug)]
-pub(crate) struct JobScratchPool<T> {
-    values: Mutex<Vec<T>>,
+struct SlotOutcome<R, E> {
+    values: Vec<(usize, R)>,
+    failure: Option<Failure<E>>,
 }
 
-impl<T> Default for JobScratchPool<T> {
-    fn default() -> Self {
-        Self {
-            values: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl<T: Default> JobScratchPool<T> {
-    /// Take a value from the pool, or build a fresh one when it is empty.
-    pub(crate) fn acquire(&self) -> JobScratchLease<'_, T> {
-        let value = self.values.lock().pop().unwrap_or_default();
-        JobScratchLease {
-            value: ManuallyDrop::new(value),
-            pool: &self.values,
-        }
-    }
-}
-
-/// A value on loan from a [`JobScratchPool`], returned to it when dropped.
+/// A job's failure and the index it failed at.
 #[derive(Debug)]
-pub(crate) struct JobScratchLease<'a, T> {
-    /// Held for the lease's whole life and moved back into the pool by `drop`, which is why it is
-    /// not dropped in place.
-    value: ManuallyDrop<T>,
-    pool: &'a Mutex<Vec<T>>,
-}
-
-impl<T> Deref for JobScratchLease<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T> DerefMut for JobScratchLease<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T> Drop for JobScratchLease<'_, T> {
-    fn drop(&mut self) {
-        // SAFETY: `value` is taken exactly once, here, and the lease is never read after its drop.
-        let value = unsafe { ManuallyDrop::take(&mut self.value) };
-        self.pool.lock().push(value);
-    }
+struct Failure<E> {
+    index: usize,
+    error: E,
 }
 
 /// Run `job` over `0..len` with one slot bound to each in-flight index, at most `slots.len()` of
@@ -103,9 +49,12 @@ impl<T> Drop for JobScratchLease<'_, T> {
 /// window is the point: batching the indices instead would make every window wait on its slowest
 /// member, and these jobs are RAW decodes and warps whose costs differ by a lot.
 ///
-/// The first failure stops workers from *taking* further indices. Ones already running still
-/// finish, and a worker that read the index counter just before the failure landed may run one
-/// more — so the bound on wasted work is a slot's worth, not zero.
+/// A failure stops workers from running indices past it. Ones already running still finish, so
+/// the bound on wasted work is a slot's worth, not zero.
+///
+/// Of several failures the one at the lowest index is returned, the failure a sequential map
+/// would return: a worker skips only an index above the lowest failure seen, so every index below
+/// the lowest runs to its end.
 pub(crate) fn try_par_map_bounded<S, R, E>(
     len: usize,
     slots: &mut [S],
@@ -119,42 +68,56 @@ where
     assert!(!slots.is_empty(), "a bounded map needs at least one slot");
 
     let next = AtomicUsize::new(0);
-    let failed = AtomicBool::new(false);
-    let mut outcomes: Vec<Result<Vec<(usize, R)>, E>> =
-        slots.iter().map(|_| Ok(Vec::new())).collect();
+    let lowest_failure = AtomicUsize::new(usize::MAX);
+    let mut outcomes: Vec<SlotOutcome<R, E>> = slots
+        .iter()
+        .map(|_| SlotOutcome {
+            values: Vec::new(),
+            failure: None,
+        })
+        .collect();
 
     // `scope` + one `spawn` per slot rather than `slots.par_iter_mut()`: rayon splits a parallel
     // iterator only while threads are idle, so on a busy pool it could hand every slot to a
     // single task, whose worker loop would then drain the whole index range by itself.
     rayon::scope(|scope| {
         for (slot, outcome) in slots.iter_mut().zip(outcomes.iter_mut()) {
-            let (next, failed, job) = (&next, &failed, &job);
+            let (next, lowest_failure, job) = (&next, &lowest_failure, &job);
             scope.spawn(move |_| {
-                let mut mine = Vec::new();
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= len || failed.load(Ordering::Acquire) {
+                    if index >= len || index > lowest_failure.load(Ordering::Acquire) {
                         break;
                     }
                     match job(slot, index) {
-                        Ok(value) => mine.push((index, value)),
+                        Ok(value) => outcome.values.push((index, value)),
                         Err(error) => {
-                            failed.store(true, Ordering::Release);
-                            *outcome = Err(error);
+                            lowest_failure.fetch_min(index, Ordering::AcqRel);
+                            outcome.failure = Some(Failure { index, error });
                             return;
                         }
                     }
                 }
-                *outcome = Ok(mine);
             });
         }
     });
 
     let mut ordered: Vec<Option<R>> = (0..len).map(|_| None).collect();
+    let mut first_failure: Option<Failure<E>> = None;
     for outcome in outcomes {
-        for (index, value) in outcome? {
+        for (index, value) in outcome.values {
             ordered[index] = Some(value);
         }
+        if let Some(failure) = outcome.failure
+            && first_failure
+                .as_ref()
+                .is_none_or(|first| failure.index < first.index)
+        {
+            first_failure = Some(failure);
+        }
+    }
+    if let Some(failure) = first_failure {
+        return Err(failure.error);
     }
     Ok(ordered
         .into_iter()
@@ -216,23 +179,11 @@ where
     try_par_map_bounded(cells.len(), slots, |slot, index| {
         let item = cells[index]
             .lock()
+            .expect("no holder of this lock panicked")
             .take()
             .expect("each index is claimed by exactly one worker");
         operation(slot, index, item)
     })
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::concurrency::JobScratchPool;
-
-    pub(crate) fn job_count<T>(pool: &JobScratchPool<T>) -> usize {
-        pool.values.lock().len()
-    }
-
-    pub(crate) fn all_by<T>(pool: &JobScratchPool<T>, predicate: impl Fn(&T) -> bool) -> bool {
-        pool.values.lock().iter().all(predicate)
-    }
 }
 
 #[cfg(test)]

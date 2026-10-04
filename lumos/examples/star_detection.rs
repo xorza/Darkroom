@@ -21,7 +21,8 @@ use std::env;
 use std::path::Path;
 use std::process;
 
-use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
+use lumos::detection::{self, StarDetector};
+use lumos::{LinearImage, LoadContext};
 
 fn main() {
     // Get image path from command line
@@ -53,7 +54,7 @@ fn main() {
     print_diagnostics(&result.diagnostics);
 
     println!("\n--- Detection with wide-field preset ---");
-    let mut config = StarDetectionConfig::wide_field();
+    let mut config = detection::Config::wide_field();
     config.filter.min_snr = 15.0;
     let mut detector = StarDetector::from_config(config).unwrap();
     let result = detector.detect(&image);
@@ -62,7 +63,7 @@ fn main() {
     print_diagnostics(&result.diagnostics);
 
     println!("\n--- Detection with high-resolution preset ---");
-    let config = StarDetectionConfig::high_resolution();
+    let config = detection::Config::high_resolution();
     let mut detector = StarDetector::from_config(config).unwrap();
     let result = detector.detect(&image);
 
@@ -70,7 +71,7 @@ fn main() {
     print_diagnostics(&result.diagnostics);
 
     println!("\n--- Detection with crowded field preset ---");
-    let mut config = StarDetectionConfig::crowded_field();
+    let mut config = detection::Config::crowded_field();
     config.filter.min_snr = 8.0;
     let mut detector = StarDetector::from_config(config).unwrap();
     let result = detector.detect(&image);
@@ -100,7 +101,7 @@ fn main() {
     }
 }
 
-fn print_diagnostics(diag: &lumos::StarDetectionDiagnostics) {
+fn print_diagnostics(diag: &detection::Diagnostics) {
     match (diag.median_fwhm, diag.median_snr) {
         (Some(fwhm), Some(snr)) => {
             println!("  Median FWHM: {fwhm:.2} px");

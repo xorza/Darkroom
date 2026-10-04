@@ -19,6 +19,7 @@ use crate::internals::prelude::*;
 use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
+use crate::star_detection::resources::DetectionResources;
 
 mod parallel;
 mod property_based;
@@ -124,9 +125,9 @@ fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
 
 /// The box and area the labeling collected from its runs against a scan of every labelled pixel.
 fn verify_components(label_map: &LabelMap) {
-    let size = Size2us::new(label_map.width(), label_map.height());
+    let size = label_map.size();
     let scanned = LabelMap::from_raw(
-        Buffer2::new(size.width, size.height, label_map.labels().to_vec()),
+        &Buffer2::new(size.width, size.height, label_map.labels()),
         label_map.num_labels(),
     );
     assert_eq!(label_map.components().len(), scanned.components().len());
@@ -170,5 +171,26 @@ fn check(mask: &Mask) -> Labelings {
     Labelings {
         four: label(Connectivity::Four),
         eight: label(Connectivity::Eight),
+    }
+}
+
+/// A labeler that takes its maps back relabels from them as from fresh buffers: two masks of
+/// different foregrounds in turn, each held to a fresh labeler's map, the second refilling the
+/// buffers the first gave back.
+#[test]
+fn a_recycled_map_relabels_as_a_fresh_one() {
+    let size = Size2us::new(40, 30);
+    let mut pool = DetectionResources::new(size);
+    let masks = [
+        Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),
+        Mask::from_fn(size, |x, y| (x * y) % 5 == 0).bits(),
+    ];
+    for (index, mask) in masks.iter().enumerate() {
+        let recycled = LabelMap::from_pool(mask, Connectivity::Eight, &mut pool);
+        let fresh = LabelMap::from_mask(mask, Connectivity::Eight);
+        assert!(fresh.num_labels() > 0);
+        assert_eq!(recycled.labels(), fresh.labels(), "mask {index}");
+        assert_eq!(recycled.num_labels(), fresh.num_labels(), "mask {index}");
+        recycled.release_to_pool(&mut pool);
     }
 }

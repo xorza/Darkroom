@@ -5,7 +5,7 @@ use crate::error::InvalidConfigField;
 /// Where the matched filter's FWHM comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FwhmMode {
-    /// This FWHM, in pixels.
+    /// This FWHM, in pixels: the PSF's, before the pixel integrates it.
     Fixed(f32),
     /// Measured from a first pass of bright stars, which `fallback` seeds and which falls back to
     /// it when too few stars pass.
@@ -33,6 +33,19 @@ pub struct FwhmConfig {
     pub min_stars: usize,
     /// Multiplier applied to the detection threshold during the first pass.
     pub estimation_sigma_factor: f32,
+    /// Minor-to-major axis ratio of the matched filter's PSF.
+    pub psf_axis_ratio: f32,
+    /// Angle of the matched filter's PSF, in radians.
+    pub psf_angle: f32,
+}
+
+/// The matched filter's PSF: a Gaussian of `fwhm` along its major axis, before the pixel integrates
+/// it, as [`Star::fwhm`](crate::star_detection::star::Star::fwhm) reports it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MatchedFilter {
+    pub(crate) fwhm: f32,
+    pub(crate) axis_ratio: f32,
+    pub(crate) angle: f32,
 }
 
 impl Default for FwhmConfig {
@@ -41,11 +54,22 @@ impl Default for FwhmConfig {
             mode: Some(FwhmMode::Fixed(4.0)),
             min_stars: 10,
             estimation_sigma_factor: 2.0,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
         }
     }
 }
 
 impl FwhmConfig {
+    /// The matched filter at `fwhm`, in this config's shape.
+    pub(crate) const fn filter_at(&self, fwhm: f32) -> MatchedFilter {
+        MatchedFilter {
+            fwhm,
+            axis_ratio: self.psf_axis_ratio,
+            angle: self.psf_angle,
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         if let Some(mode) = self.mode {
             InvalidConfigField::finite(
@@ -70,6 +94,13 @@ impl FwhmConfig {
             self.estimation_sigma_factor,
             |value| value >= 1.0,
         )?;
+        InvalidConfigField::finite(
+            "psf_axis_ratio",
+            "finite and in (0, 1]",
+            self.psf_axis_ratio,
+            |value| value > 0.0 && value <= 1.0,
+        )?;
+        InvalidConfigField::finite_only("psf_angle", self.psf_angle)?;
         Ok(())
     }
 }

@@ -9,8 +9,8 @@
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
+use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::calibration_masters::defect_map::MAX_MEDIAN_SAMPLES;
-use crate::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -29,31 +29,18 @@ pub(super) fn collect_color_residual_samples(
     data: &Buffer2<f32>,
     cfa_type: CfaType,
     target_color: u8,
-    background: &DarkBackground,
+    background: &ColourMesh,
 ) -> Vec<f32> {
     let size = Size2us::new(data.width(), data.height());
     collect_color_sample_indices(size, cfa_type, target_color)
         .into_iter()
-        .map(|index| data[index] - background.at(size.point_of(index), target_color as usize))
+        .map(|index| {
+            data[index]
+                - background
+                    .at(usize::from(target_color), size.point_of(index))
+                    .sky
+        })
         .collect()
-}
-
-/// Collect pixel samples for a specific CFA color channel.
-///
-/// Large channels are stratified across CFA phases, rows, and columns.
-pub(super) fn collect_color_samples(
-    data: &Buffer2<f32>,
-    cfa_type: CfaType,
-    target_color: u8,
-) -> Vec<f32> {
-    collect_color_sample_indices(
-        Size2us::new(data.width(), data.height()),
-        cfa_type,
-        target_color,
-    )
-    .into_iter()
-    .map(|index| data[index])
-    .collect()
 }
 
 pub(super) fn collect_color_sample_indices(
@@ -152,4 +139,29 @@ const fn scaled_partition(part: usize, part_count: usize, length: usize) -> usiz
 
 const fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
     ((2 * part as u128 + 1) * length as u128 / (2 * part_count as u128)) as usize
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::calibration_masters::defect_map::sampling::collect_color_sample_indices;
+    use crate::io::image::cfa::CfaType;
+    use crate::math::size2us::Size2us;
+
+    /// The values of [`collect_color_sample_indices`]' stratified sample of one colour.
+    pub(crate) fn collect_color_samples(
+        data: &Buffer2<f32>,
+        cfa_type: CfaType,
+        target_color: u8,
+    ) -> Vec<f32> {
+        collect_color_sample_indices(
+            Size2us::new(data.width(), data.height()),
+            cfa_type,
+            target_color,
+        )
+        .into_iter()
+        .map(|index| data[index])
+        .collect()
+    }
 }

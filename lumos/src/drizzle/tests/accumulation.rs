@@ -9,7 +9,7 @@ use std::ptr;
 use common::TempDir;
 
 use super::*;
-use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+use crate::registration::distortion::sip::SipPolynomial;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -28,23 +28,37 @@ fn a_flat_frame_at_scale_2_covers_every_cell() {
     assert!(weight_plane(&product).pixels().iter().all(|&w| w == 0.25));
 }
 
+/// No frames is `NoFrames`, and an invalid config is refused before the first frame is decoded:
+/// the path here does not exist, so a decode would have reported `ImageLoad` instead.
 #[test]
-fn drizzle_stack_empty_paths() {
-    let config = DrizzleConfig::default();
-
+fn drizzle_stack_refuses_before_decoding() {
     let result = drizzle_stack(
         Vec::<DrizzleFrame<PathBuf>>::new(),
-        &config,
-        &LoadContext::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        &DrizzleConfig::default(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+
+    let invalid = DrizzleConfig {
+        pixfrac: 0.0,
+        ..DrizzleConfig::default()
+    };
+    let result = drizzle_stack(
+        vec![DrizzleFrame::new(
+            PathBuf::from("does-not-exist.tiff"),
+            warp_of(Transform::identity()),
+        )],
+        &invalid,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    );
+    assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
 }
 
 /// From paths, a drizzle gives what the same frames give in memory once loaded; a file that does
-/// not load is `ImageLoad`; and the run's token, not the context's, governs the decode — a
-/// cancelled run reports `Cancelled`, and a cancelled context under a live run is ignored.
+/// not load is `ImageLoad`; and the run's token governs the decode — a cancelled run reports
+/// `Cancelled`.
 #[test]
 fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let scratch = TempDir::new("lumos_drizzle_stack");
@@ -83,23 +97,18 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let in_memory = drizzle_images(
         drizzle_frames(loaded, &transforms),
         &config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap()
     .product;
     let cancelled = CancelToken::new();
     cancelled.cancel();
-    let cancelled_context = LoadContext {
-        cancel: cancelled.clone(),
-        ..LoadContext::default()
-    };
     let from_paths = drizzle_stack(
         frames(&paths),
         &config,
-        &cancelled_context,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap()
     .product;
@@ -113,9 +122,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         drizzle_stack(
             frames(&missing),
             &config,
-            &LoadContext::default(),
-            &ProgressCallback::default(),
-            &CancelToken::never(),
+            ProgressCallback::default(),
+            CancelToken::never(),
         ),
         Err(DrizzleError::ImageLoad(_))
     ));
@@ -123,9 +131,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         drizzle_stack(
             frames(&paths),
             &config,
-            &LoadContext::default(),
-            &ProgressCallback::default(),
-            &cancelled,
+            ProgressCallback::default(),
+            cancelled,
         ),
         Err(DrizzleError::Cancelled)
     ));
@@ -136,8 +143,8 @@ fn drizzle_images_empty() {
     let result = drizzle_images(
         Vec::new(),
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -160,8 +167,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let result = drizzle_images(
         frames,
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &cancel,
+        ProgressCallback::default(),
+        cancel,
     );
     assert!(
         matches!(result.unwrap_err(), DrizzleError::Cancelled),
@@ -181,8 +188,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
         drizzle_images(
             frames,
             &DrizzleConfig::default(),
-            &ProgressCallback::default(),
-            &CancelToken::never(),
+            ProgressCallback::default(),
+            CancelToken::never(),
         )
         .is_ok()
     );
@@ -202,14 +209,8 @@ fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2)
         .iter()
         .map(|&r| transform.apply(r + field(r - center)))
         .collect();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..SipConfig::default()
-    };
-    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
-    WarpTransform::with_sip(transform, fit.polynomial)
+    let sip = SipPolynomial::fitted_under(&transform, &reference, &target, 3, center);
+    WarpTransform::with_sip(transform, sip)
 }
 
 /// A frame registered with SIP drizzles through the warp's inverse: `drizzle_images` and the
@@ -235,8 +236,8 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     let from_images = drizzle_images(
         vec![DrizzleFrame::new(image.clone(), warp.clone())],
         &config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap();
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
@@ -322,8 +323,8 @@ fn drizzle_images_dimension_mismatch() {
     let result = drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(
         result.unwrap_err(),
@@ -331,9 +332,10 @@ fn drizzle_images_dimension_mismatch() {
     ));
 }
 
-/// An RGB drizzle shares one weight plane and one variance plane between its channels.
+/// An RGB drizzle shares one weight plane between its channels, and gives each its own variance:
+/// the channels' noise differs.
 #[test]
-fn drizzle_rgb_uses_shared_quality_planes() {
+fn drizzle_rgb_shares_the_weight_and_not_the_variance() {
     let size = Size2us::new(50, 50);
     let image = rgb_image(
         size,
@@ -346,24 +348,22 @@ fn drizzle_rgb_uses_shared_quality_planes() {
     let result = acc.finalize().product;
 
     assert!(matches!(result.weight, Some(QualityMap::Shared(_))));
-    assert!(matches!(
-        result.linear_variance,
-        Some(QualityMap::Shared(_))
-    ));
+    assert!(matches!(result.variance, Some(QualityMap::PerChannel(_))));
     assert!(ptr::eq(
         result.weight.as_ref().unwrap().channel(0),
         result.weight.as_ref().unwrap().channel(2)
     ));
 }
 
-/// The weight and linear-variance planes at scale 1 and pixfrac 1, where every input pixel is its
-/// own output pixel at weight equal to its frame weight. Three frames of weight 1 give `Σw` = 3 and
-/// `Σw²/(Σw)²` = 3/9 — an average of three, the noise reduction the identical frames' zero RMS
-/// cannot show. Frames of weight 1 and 3 give `Σw` = 4 and (1 + 9)/16 = 0.625, above the 1/2 of an
-/// equal pair: concentrating weight on fewer frames costs. Every value is a correctly rounded
-/// quotient of small integers.
+/// The weight and variance planes at scale 1 and pixfrac 1, where every input pixel is its own
+/// output pixel at weight equal to its frame weight. The frames are constant, so their measured
+/// noise is 0, and a quantization σ of 1 gives each sample unit variance. Three frames of weight 1
+/// give `Σw` = 3 and `Σw²·1/(Σw)²` = 3/9 — an average of three, the noise reduction the identical
+/// frames' zero RMS cannot show. Frames of weight 1 and 3 give `Σw` = 4 and (1 + 9)/16 = 0.625,
+/// above the 1/2 of an equal pair: concentrating weight on fewer frames costs. Every value is a
+/// correctly rounded quotient of small integers.
 #[test]
-fn weight_and_linear_variance_maps() {
+fn weight_and_variance_maps() {
     let size = Size2us::new(4, 4);
     let at = (2, 2);
     for (frames, weight, variance) in [
@@ -375,17 +375,14 @@ fn weight_and_linear_variance_maps() {
             kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
         );
         for &frame_weight in frames {
-            acc.add_image(
-                constant_image(size, 5.0),
-                &Transform::identity(),
-                frame_weight,
-                None,
-            );
+            let mut image = constant_image(size, 5.0);
+            image.metadata.quantization_sigma = Some(1.0);
+            acc.add_image(image, &Transform::identity(), frame_weight, None);
         }
         let product = acc.finalize().product;
         assert_eq!(weight_plane(&product)[at], weight, "{frames:?}");
         assert_eq!(
-            product.linear_variance.as_ref().unwrap().channel(0)[at],
+            product.variance.as_ref().unwrap().channel(0)[at],
             variance,
             "{frames:?}"
         );
@@ -414,20 +411,23 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         drizzle_one(size, config, image.clone(), &transform, None)
     };
 
+    // Drizzle has no survivors to scatter, so even a request for every plane gets no dispersion.
     let all = product(QualityPlanes::ALL);
-    assert!(all.coverage.is_some() && all.weight.is_some() && all.linear_variance.is_some());
+    assert!(all.coverage.is_some() && all.weight.is_some() && all.variance.is_some());
+    assert!(all.dispersion.is_none());
 
     let bare = product(QualityPlanes::IMAGE_ONLY);
-    assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.linear_variance.is_none());
+    assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.variance.is_none());
 
     // Each is independent of the others, and `variance` is the one that also drops an accumulator.
     let coverage_only = product(QualityPlanes {
         coverage: true,
         weight: false,
         variance: false,
+        dispersion: false,
     });
     assert!(coverage_only.coverage.is_some());
-    assert!(coverage_only.weight.is_none() && coverage_only.linear_variance.is_none());
+    assert!(coverage_only.weight.is_none() && coverage_only.variance.is_none());
 
     // The fill gate has to have fired, or the min_weight_fraction path is untested here.
     let filled = all
@@ -582,25 +582,29 @@ fn band_count_does_not_change_the_result() {
             );
             for (label, single, many) in [
                 ("weight", &single.weight, &many.weight),
-                ("variance", &single.linear_variance, &many.linear_variance),
+                ("variance", &single.variance, &many.variance),
             ] {
-                let plane = |map: &Option<QualityMap>| {
-                    map.as_ref().map(|map| map.channel(0).pixels().to_vec())
-                };
-                assert_eq!(plane(single), plane(many), "{case}: {label}");
+                for channel in 0..dimensions.channels() {
+                    let plane = |map: &Option<QualityMap>| {
+                        map.as_ref()
+                            .map(|map| map.channel(channel).pixels().to_vec())
+                    };
+                    assert_eq!(plane(single), plane(many), "{case}: {label} {channel}");
+                }
             }
         }
     }
 }
 
-/// A band straddling the transform's vanishing line scans the whole frame.
+/// The input-row estimate covers every drop that can reach the band, and a band straddling the
+/// transform's vanishing line scans the whole frame.
 ///
 /// `input_rows` bounds the input by inverse-mapping the band's four corners, which encloses the
 /// interior only while the homogeneous divisor keeps one sign across the band. Where it changes
 /// sign the mapped region is unbounded and four corners bound nothing, so the estimate has to widen
 /// to the frame — a tight answer there drops flux with no diagnostic.
 #[test]
-fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
+fn input_row_estimate_covers_every_reaching_drop() {
     let image = constant_image(Size2us::new(16, 12), 1.0);
 
     // Inverse divisor `1 − 0.01·x`, which is zero at output column 100 and so takes both signs over
@@ -628,6 +632,20 @@ fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
     let shifted = WarpTransform::new(Transform::translation(DVec2::new(0.0, -2.0)));
     assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 0.0), 0..3);
     assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 1.5), 0..4);
+
+    // A quarter turn sends output column x to input row x − 2.25, so the input rows come from the
+    // band's horizontal extent. A Lanczos-3 drop reaches 3.5 output pixels, so the columns widen to
+    // [−3.5, 8.5] on a 6-wide grid and the rows to [−5.75, 6.25]: rows 0 to 7. Without the column
+    // margin they stop at [−2.25, 2.75], rows 0 to 3, and the drops centred just right of the
+    // grid's last column lose the taps that land inside it.
+    let quarter_turn = WarpTransform::new(Transform::euclidean(
+        DVec2::new(0.0, -2.25),
+        std::f64::consts::FRAC_PI_2,
+    ));
+    assert_eq!(
+        input_rows(&image, &quarter_turn, 1.0, 0..4, 6, 3.5, 0.0),
+        0..8
+    );
 }
 
 #[test]
@@ -679,4 +697,43 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
             value: -0.25,
         }
     ));
+}
+
+/// A pixel the source holds no measurement for deposits nothing. The last
+/// column of a 6 × 4 frame is null, with a fill of 5.0 under it. Drizzled at scale 1 with a
+/// whole-pixel square drop on the identity, every other output pixel is exactly its 1.0, and the
+/// last column takes the fill value with no weight. Before, the 5.0 deposited at full weight.
+#[test]
+fn a_null_pixel_deposits_nothing() {
+    let size = Size2us::new(6, 4);
+    let mut pixels = vec![1.0f32; size.pixel_count()];
+    let mut nulls = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        pixels[y * size.width + 5] = 5.0;
+        nulls[y * size.width + 5] = f32::NAN;
+    }
+    let mut image = gray_image(size, pixels);
+    image.flags = PixelFlags::of_non_finite(size, &[&nulls]);
+    let product = drizzle_one(
+        size,
+        kernel_config(DrizzleKernel::Square, 1.0, 1.0),
+        image,
+        &Transform::identity(),
+        None,
+    );
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let null = x == 5;
+            assert_eq!(
+                product.image.channel(0)[(x, y)],
+                if null { 0.0 } else { 1.0 },
+                "({x}, {y})"
+            );
+            assert_eq!(
+                weight_plane(&product)[(x, y)],
+                if null { 0.0 } else { 1.0 },
+                "({x}, {y})"
+            );
+        }
+    }
 }

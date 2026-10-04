@@ -93,10 +93,9 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
     );
 }
 
-/// The X-Trans detector's `f32` scratch is six frame-sized planes, the colour buckets sized
-/// exactly to their colours rather than grown by pushing.
+/// The X-Trans detector's `f32` scratch is five frame-sized planes, each sized exactly.
 #[test]
-fn cosmic_ray_xtrans_scratch_is_six_frame_planes() {
+fn cosmic_ray_xtrans_scratch_is_five_frame_planes() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(66, 66);
     let mut data = vec![0.05f32; size.pixel_count()];
@@ -111,8 +110,8 @@ fn cosmic_ray_xtrans_scratch_is_six_frame_planes() {
 /// 64-wide mask row pads to 128 bits, two words, so a 64×64 mask is 1024 B and three are 3072.
 /// Mono: 5 planes of 4096 px = 81 920 B, plus the masks. Bayer runs on its 32×32 phases: the
 /// phase plane, 4096 B, and the mono scratch over it, 20 480 B plus three 512 B masks. X-Trans at
-/// 66×66: 6 planes of 4356 px = 104 544 B, plus three 66-row masks of 1056 B. A frame too small
-/// to scan allocates nothing.
+/// 66×66: 5 planes of 4356 px = 87 120 B, plus three 66-row masks of 1056 B. A frame too small to
+/// scan allocates nothing.
 #[test]
 fn cosmic_ray_heap_bytes_count_planes_and_masks() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
@@ -120,7 +119,7 @@ fn cosmic_ray_heap_bytes_count_planes_and_masks() {
     for (cfa, side, expected) in [
         (CfaType::Mono, 64, 81_920 + 3_072),
         (bayer, 64, 4_096 + 20_480 + 1_536),
-        (xtrans, 66, 104_544 + 3_168),
+        (xtrans, 66, 87_120 + 3_168),
         (CfaType::Mono, 2, 0),
         (bayer, 4, 0),
         (xtrans, 6, 0),

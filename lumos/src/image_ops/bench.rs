@@ -63,7 +63,10 @@ fn bench_stretch_asinh_explicit(b: ::quickbench::Bencher) {
     let master = real_data::linear_master();
     bench_op(b, &master, |img| {
         Stretch {
-            method: StretchMethod::Asinh { beta: 0.05 },
+            method: StretchMethod::Asinh {
+                black_point: 0.0,
+                beta: 0.05,
+            },
             color: ColorMode::ColorPreserving,
         }
         .apply(img)
@@ -87,7 +90,7 @@ fn bench_denoise(b: ::quickbench::Bencher) {
 fn bench_scnr(b: ::quickbench::Bencher) {
     let master = real_data::display_master();
     bench_op(b, &master, |img| {
-        Scnr::average_neutral().apply(img).unwrap();
+        Scnr::average_neutral(1.0).apply(img).unwrap();
     });
 }
 

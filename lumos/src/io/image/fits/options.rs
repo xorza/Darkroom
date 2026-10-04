@@ -1,7 +1,10 @@
+use serde::Serialize;
+
+use crate::io::image::sample_domain::Pedestal;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// Selects the image HDU decoded from a FITS container.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum FitsHduSelector {
     /// Accept the file only when it contains exactly one image-bearing HDU.
     Auto,
@@ -17,7 +20,7 @@ pub enum FitsHduSelector {
 }
 
 /// Declares how a three-plane FITS image is interpreted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FitsCubeInterpretation {
     /// Reject three-plane data because shape alone does not establish color semantics.
     Reject,
@@ -36,7 +39,7 @@ pub enum FitsCubeInterpretation {
 /// input range, Siril scans the pixel data, and astropy does not normalize at all. Scanning is the
 /// one option ruled out here — a divisor read off each frame's own extrema differs frame to frame,
 /// which is what [`crate::StackError::SampleDomainMismatch`] exists to reject.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum FitsFloatScale {
     /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are
     /// ADU and they are divided by the 16-bit full scale; anything else — a `DATAMAX` of about 1,
@@ -56,7 +59,7 @@ pub enum FitsFloatScale {
 /// undefined-value flag for a floating-point `BITPIX`, and the `BLANK` keyword's value the flag for
 /// an integer one. A conforming file with a mosaic edge, a coverage gap, or a masked bad pixel
 /// carries them by design, and cfitsio, astropy and Siril all read it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FitsNullPolicy {
     /// Carry them: the samples are replaced with a finite fill and their positions recorded, so the
     /// file opens and the missing pixels stay identifiable.
@@ -66,7 +69,7 @@ pub enum FitsNullPolicy {
 }
 
 /// Controls checksum validation for the selected FITS HDU.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FitsChecksumPolicy {
     /// Do not compute `DATASUM` or `CHECKSUM`.
     Ignore,
@@ -79,7 +82,7 @@ pub enum FitsChecksumPolicy {
 /// FITS-specific selection and validation policy.
 ///
 /// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f32`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FitsLoadOptions {
     /// Image HDU selection policy.
     pub hdu: FitsHduSelector,
@@ -95,6 +98,11 @@ pub struct FitsLoadOptions {
     /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
     /// four.
     pub unstated_bayer_pattern: Option<CfaPattern>,
+    /// The pedestal a frame's values carry, in its physical units, when the header records none.
+    /// Only a lumos-written file records one; a third-party file usually keeps the camera offset in
+    /// the data and says nothing, so the default is [`Pedestal::Unknown`], which calibration then
+    /// refuses to relate to a frame whose pedestal is known.
+    pub pedestal: Pedestal,
 }
 
 impl Default for FitsLoadOptions {
@@ -110,6 +118,7 @@ impl Default for FitsLoadOptions {
             // the standard defines.
             nulls: FitsNullPolicy::Mask,
             unstated_bayer_pattern: None,
+            pedestal: Pedestal::Unknown,
         }
     }
 }

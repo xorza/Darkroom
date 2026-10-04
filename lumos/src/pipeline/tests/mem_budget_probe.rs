@@ -61,13 +61,13 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::memory;
-use crate::memory::{DETECTION_WORKING_PLANES, PerFrameBytes};
+use crate::memory::DETECTION_WORKING_PLANES;
+use crate::memory::memory_plan::PerFrameBytes;
 use crate::pipeline::align::align_and_stack;
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
-use crate::progress::ProgressCallback;
-use crate::registration::config::Config as RegistrationConfig;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -148,12 +148,13 @@ fn pipeline_budget_probe() -> io::Result<()> {
     let start = Instant::now();
     let master = |k: usize, role: MasterRole| {
         let mut config = role.stack_config();
-        config.cache.memory_override = budget.memory_override;
-        config.cache.cache_dir = base.join(format!("cache_{k}"));
+        config.ingest.memory_override = budget.memory_override;
+        config.ingest.cache_dir = base.join(format!("cache_{k}"));
         let stage_start = Instant::now();
         let master = stack_cfa_master(
             &calibration,
             config,
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -180,8 +181,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     .expect("assemble the masters");
 
     let mut config = AlignStackConfig::default();
-    config.stack.cache.memory_override = budget.memory_override;
-    config.stack.cache.cache_dir = base.join("cache_2");
+    config.stack.ingest.memory_override = budget.memory_override;
+    config.stack.ingest.cache_dir = base.join("cache_2");
     let stage_start = Instant::now();
     let result = calibrate_align_stack(
         &lights,
@@ -194,8 +195,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     println!(
         "  [3/3] lights ({:.2}s), {} registered, {} dropped",
         stage_start.elapsed().as_secs_f64(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     black_box(&result);
     let total_secs = start.elapsed().as_secs_f64();
@@ -214,7 +215,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     println!("masters held  {held_mb} MB");
 
     assert_eq!(
-        result.alignment.registered, n,
+        result.alignment.registered(),
+        n,
         "every dithered light should register (probe misconfigured?)"
     );
     // The budget stands for the memory each stage may take. The masters are outside it: the caller
@@ -330,8 +332,8 @@ fn align_stack_memory_probe() {
         result.product.image.width(),
         result.product.image.height(),
         result.product.image.channels(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     println!(
         "time          {total_secs:.2}s  ({:.0} Mpix/s over the stream)",
@@ -351,17 +353,18 @@ fn align_stack_memory_probe() {
     // per-frame buffer leak in detection, warp, or the combine would push it over.
     let threads = rayon::current_num_threads();
     let dimensions = ImageDimensions::new(size, channels);
-    let output_bytes = memory::frame_bytes(dimensions);
+    let output_bytes = dimensions.frame_bytes();
     let per_frame = PerFrameBytes::new(frame_bytes as usize, output_bytes);
     let detection = DETECTION_WORKING_PLANES * frame_bytes as usize + output_bytes;
-    let resident = (n * per_frame.warped + QualityPlanes::ALL.resident_bytes(dimensions)) as u64;
+    let resident =
+        (n * per_frame.warped + QualityPlanes::STANDARD.resident_bytes(dimensions)) as u64;
     let working = (threads * per_frame.working.max(detection)) as u64;
     let ceiling_mb = two_x_ceiling_mb(resident, working);
 
     assert!(
-        result.alignment.registered >= 2,
+        result.alignment.registered() >= 2,
         "expected the dithered frames to register; only {} stacked (probe misconfigured?)",
-        result.alignment.registered
+        result.alignment.registered()
     );
     if measured(anon_mb, "ceiling check") {
         assert!(
@@ -382,7 +385,7 @@ fn align_stack_memory_probe() {
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn raw_lights_memory_probe() {
     use crate::internals::real_data;
-    use crate::progress::StackingStage;
+    use crate::progress::stacking_progress::StackingStage;
 
     let n: usize = env_parse("LUMOS_RAW_FRAMES", usize::MAX);
     let budget = parse_budget("LUMOS_RAW_BUDGET", BudgetChoice::mb(4096));
@@ -394,8 +397,8 @@ fn raw_lights_memory_probe() {
     println!("budget        {}", budget.label);
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(1);
-    config.stack.cache.memory_override = budget.memory_override;
+    config.registration.ransac.seed = 1;
+    config.stack.ingest.memory_override = budget.memory_override;
     // The gate opens as the preparing pass reports its last frame, so the peak splits into the
     // decode and detect pass and the register, warp and combine passes after it.
     let sampler = RssSampler::start();
@@ -425,8 +428,8 @@ fn raw_lights_memory_probe() {
         image.width(),
         image.height(),
         image.channels(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
     println!(
@@ -443,7 +446,7 @@ fn raw_lights_memory_probe() {
     );
     black_box(&result);
 
-    assert_eq!(result.alignment.registered, lights.len());
+    assert_eq!(result.alignment.registered(), lights.len());
     if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, frame_bytes) {
         assert!(
             anon_mb <= budget_mb,

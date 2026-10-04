@@ -10,7 +10,6 @@ use std::hint::black_box;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
-use crate::star_detection::centroid::gaussian_fit::GaussianFitConfig;
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_fit_small(b: quickbench::Bencher) {
@@ -21,7 +20,6 @@ fn bench_gaussian_fit_small(b: quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(17, 17), 0.1);
-    let config = GaussianFitConfig::default();
 
     b.bench(|| {
         black_box(GaussianFit::new(
@@ -30,7 +28,6 @@ fn bench_gaussian_fit_small(b: quickbench::Bencher) {
             black_box(&StampGrid::new(8)),
             black_box(0.1),
             None,
-            black_box(&config),
         ))
     });
 }
@@ -44,7 +41,6 @@ fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(25, 25), 0.1);
-    let config = GaussianFitConfig::default();
 
     b.bench(|| {
         black_box(GaussianFit::new(
@@ -53,7 +49,6 @@ fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
             black_box(&StampGrid::new(12)),
             black_box(0.1),
             None,
-            black_box(&config),
         ))
     });
 }
@@ -67,7 +62,6 @@ fn bench_gaussian_fit_large(b: quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(31, 31), 0.1);
-    let config = GaussianFitConfig::default();
 
     b.bench(|| {
         black_box(GaussianFit::new(
@@ -76,7 +70,6 @@ fn bench_gaussian_fit_large(b: quickbench::Bencher) {
             black_box(&StampGrid::new(15)),
             black_box(0.1),
             None,
-            black_box(&config),
         ))
     });
 }

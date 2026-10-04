@@ -120,7 +120,6 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
             (scaled.peak, scaled.bbox, scaled.area),
             (native.peak, native.bbox, native.area)
         );
-        assert_eq!(scaled.peak_value, native.peak_value * scale);
     }
 }
 

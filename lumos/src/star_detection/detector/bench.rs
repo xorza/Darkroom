@@ -7,7 +7,6 @@ use crate::internals::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::StarDetector;
 use crate::internals::init_tracing;
 use crate::internals::synthetic::fixtures::{cluster_field, star_field};
 use crate::star_detection::config::Config;
@@ -18,6 +17,7 @@ use crate::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
+use crate::star_detection::detector::StarDetector;
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
@@ -34,13 +34,12 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
             refinement: BackgroundRefinement::Iterative {
                 iterations: 2,
                 mask_dilation: 3,
+                mask_sigma: 2.0,
             },
         },
         detection: DetectionConfig {
             sigma_threshold: 4.0,
             connectivity: Connectivity::Eight,
-            psf_axis_ratio: 1.0,
-            psf_angle: 0.0,
             deblend: Deblend::MultiThreshold {
                 n_thresholds: 32,
                 min_contrast: 0.005,
@@ -54,17 +53,19 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
             mode: Some(FwhmMode::Fixed(4.0)),
             min_stars: 10,
             estimation_sigma_factor: 2.0,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
         },
         measurement: MeasurementConfig {
             centroid_method: CentroidMethod::WeightedMoments,
             local_background: LocalBackgroundMethod::GlobalMap,
-            noise_model: None,
+            electrons_per_unit: None,
         },
         filter: FilterConfig {
             min_snr: 10.0,
             max_eccentricity: 0.6,
             max_sharpness: 0.7,
-            max_roundness: 1.0,
+            max_roundness: 2.0,
             max_fwhm_deviation: Some(3.0),
             duplicate_min_separation: 8.0,
         },

@@ -1,16 +1,16 @@
-//! Error types for stacking operations.
+//! StackError types for stacking operations.
 
 use thiserror::Error;
-
-use common::CancelToken;
 
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FramePlane;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
+use crate::math::size2us::Size2us;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -36,7 +36,7 @@ pub enum StackConfigError {
 
 /// Errors that can occur during stacking operations.
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum StackError {
     #[error(transparent)]
     Config(#[from] StackConfigError),
 
@@ -51,6 +51,42 @@ pub enum Error {
 
     #[error("registered frames have no pixels with common valid warp support")]
     NoCommonCoverage,
+
+    /// Multiplicative normalization divides by each frame's median, and this one is not positive.
+    #[error(
+        "frame {index} has median {median} in channel {channel}; a multiplicative normalization needs a positive one"
+    )]
+    NonPositiveMedian {
+        index: usize,
+        channel: usize,
+        median: f32,
+    },
+
+    /// The master a calibration stack subtracts from every frame is of another sensor shape or
+    /// pattern than frame `index`.
+    #[error(
+        "frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}, or of another pattern"
+    )]
+    SubtractorShape {
+        index: usize,
+        frame: Size2us,
+        subtractor: Size2us,
+    },
+
+    /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
+    #[error(
+        "frame {index} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
+    )]
+    SubtractorDomain {
+        index: usize,
+        frame: Box<SampleDomain>,
+        subtractor: Box<SampleDomain>,
+    },
+
+    /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
+    /// none: only synthetic data has no noise at all.
+    #[error("frame {index} has no measured noise to weight by; use Equal or Manual weighting")]
+    NoNoiseToWeigh { index: usize },
 
     /// A file that could not be decoded, held as the decoder's own error — which already names the
     /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
@@ -94,9 +130,9 @@ pub enum Error {
     )]
     SampleDomainMismatch {
         index: usize,
-        actual: SampleDomain,
+        actual: Box<SampleDomain>,
         reference_index: usize,
-        expected: SampleDomain,
+        expected: Box<SampleDomain>,
     },
 
     /// Two frames store their rows from opposite ends, so they are mirrored views of one field.
@@ -170,13 +206,10 @@ pub enum Error {
     },
 }
 
-/// `Err(Error::Cancelled)` once the token is set, so a long walk can `?` its way out between
-/// chunks. Free rather than a method because `CancelToken` is another crate's type.
-pub(crate) fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
-    if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+impl From<Cancelled> for StackError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -224,10 +257,10 @@ mod tests {
 
     #[test]
     fn no_frames_error_message() {
-        let err = Error::NoFrames;
+        let err = StackError::NoFrames;
         assert_eq!(err.to_string(), "No frames provided for stacking");
         assert_eq!(
-            Error::NoCommonCoverage.to_string(),
+            StackError::NoCommonCoverage.to_string(),
             "registered frames have no pixels with common valid warp support"
         );
     }
@@ -239,7 +272,7 @@ mod tests {
     #[test]
     fn a_load_failure_states_the_path_once_and_stays_typed() {
         let path = PathBuf::from("/path/to/image.fits");
-        let error = Error::from(ImageError::Io {
+        let error = StackError::from(ImageError::Io {
             path: path.clone(),
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
         });
@@ -250,7 +283,10 @@ mod tests {
             "Failed to read file '/path/to/image.fits': file not found"
         );
         assert_eq!(message.matches("/path/to/image.fits").count(), 1);
-        assert!(matches!(error, Error::ImageLoad(ImageError::Io { .. })));
+        assert!(matches!(
+            error,
+            StackError::ImageLoad(ImageError::Io { .. })
+        ));
 
         let source = error.source().expect("the decode's own cause");
         assert!(source.downcast_ref::<io::Error>().is_some(), "{source}");
@@ -260,7 +296,7 @@ mod tests {
     /// lives with the type that owns it, not copied into each subsystem's error.
     #[test]
     fn shared_payloads_are_reported_transparently() {
-        let store = Error::from(FrameStoreError::WriteFile {
+        let store = StackError::from(FrameStoreError::WriteFile {
             path: PathBuf::from("/tmp/cache/frame.bin"),
             source: io::Error::other("disk full"),
         });
@@ -276,14 +312,14 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            Error::from(mismatch).to_string(),
+            StackError::from(mismatch).to_string(),
             "frame 5 is 200x100x3, expected 100x100x3"
         );
     }
 
     #[test]
     fn error_is_debug() {
-        let err = Error::NoFrames;
+        let err = StackError::NoFrames;
         let debug_str = format!("{err:?}");
         assert!(debug_str.contains("NoFrames"));
     }

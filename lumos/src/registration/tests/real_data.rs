@@ -7,9 +7,10 @@ use std::time::Instant;
 
 use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::math::size2us::Size2us;
-use crate::registration::config::Config as RegistrationConfig;
-use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+use crate::registration::distortion::sip::SipPolynomial;
+use crate::registration::point_normalization::centroid;
 use crate::registration::register;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::TransformModel;
 use crate::star_detection::config::Config;
@@ -95,23 +96,12 @@ fn register_two_lights() {
         .map(|star_match| result2.stars[star_match.indices.target].pos)
         .collect();
 
-    let sip_config = SipConfig {
-        order: 4,
-        reference_point: None,
-        ..Default::default()
-    };
-
-    let sip = SipPolynomial::fit_from_transform(
-        &inlier_ref,
-        &inlier_target,
-        &result.transform(),
-        &sip_config,
-    )
-    .unwrap();
+    let origin = centroid(&inlier_ref);
+    let sip =
+        SipPolynomial::fitted_under(&result.transform(), &inlier_ref, &inlier_target, 4, origin);
 
     let corrected_residuals =
-        sip.polynomial
-            .corrected_residuals(&inlier_ref, &inlier_target, &result.transform());
+        sip.corrected_residuals(&inlier_ref, &inlier_target, &result.transform());
     let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
         / corrected_residuals.len() as f64)
         .sqrt();
@@ -124,8 +114,7 @@ fn register_two_lights() {
     println!("  Improvement:       {improvement:.1}%");
     println!(
         "  Max SIP correction: {:.4} pixels",
-        sip.polynomial
-            .max_grid_correction(Size2us::new(img1.width(), img1.height()), 50.0)
+        sip.max_grid_correction(Size2us::new(img1.width(), img1.height()), 50.0)
     );
 
     assert!(

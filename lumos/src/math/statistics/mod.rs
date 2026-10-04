@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::float::Float;
+use crate::math::statistics::spread::Spread;
 use crate::math::sum::mean_f32;
 use std::iter;
 
 pub(crate) mod float;
+pub(crate) mod spread;
 pub(crate) mod subsample;
 
 /// A distribution's location and spread — what one pass over the values measures.
@@ -80,8 +82,8 @@ const MAD_TO_SIGMA_F32: f32 = MAD_TO_SIGMA as f32;
 /// here `−2·ln(0.01)`.
 ///
 /// Lives here rather than beside either caller because registration gates 2-D residuals twice, at
-/// the same confidence: MAGSAC's outlier boundary uses it squared, match recovery uses its square
-/// root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
+/// the same confidence: the RANSAC scorer's outlier boundary uses it squared, match recovery uses
+/// its square root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
 pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
 
 /// Convert MAD to standard deviation (assuming normal distribution).
@@ -165,28 +167,10 @@ fn fill_abs_deviations<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) 
     scratch.extend(values.iter().map(|&value| (value - median).abs()));
 }
 
-/// MAD of `values` about `median`, through [`median_fast`].
-///
-/// For rejection hot paths whose data is guaranteed NaN-free — see [`median_fast`] for what a NaN
-/// would cost and why the check is debug-only. Checked here as well as there so a violation names
-/// the caller's data rather than the derived deviations.
-#[inline]
-pub(crate) fn mad_fast<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
-    debug_assert!(
-        !median.is_nan() && !values.iter().any(|value| value.is_nan()),
-        "mad_fast requires a NaN-free median and values; use mad_with_scratch otherwise"
-    );
-    if values.is_empty() {
-        return F::ZERO;
-    }
-    fill_abs_deviations(values, median, scratch);
-    median_fast(scratch)
-}
-
 /// MAD of `values` about `median`, through [`median_mut`].
 ///
-/// `MAD = median(|x_i - median(x)|)`. The NaN-tolerant twin of [`mad_fast`]: same shape, but the
-/// deviations are ranked under a total order, so data that may hold NaN still measures.
+/// `MAD = median(|x_i - median(x)|)`, the deviations ranked under a total order, so data that may
+/// hold NaN still measures.
 #[inline]
 pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
     if values.is_empty() {
@@ -319,13 +303,7 @@ fn sigma_clip_iteration(
     let mad = median_fast(&mut deviations[..*len]);
     let sigma = mad_to_sigma(mad);
 
-    // Degenerate against the data's own magnitude, not against a fixed number: one `f32` step at
-    // `median` is the smallest spread the samples can even represent, so a σ below it is genuinely
-    // unmeasurable — whatever span the decoder divided by. A bare `sigma < f32::EPSILON` instead
-    // declares any frame whose whole noise range sits under 1.2e-7 to be flat, which is what a
-    // 32-bit integer FITS becomes once it is normalized, and hands back a zero σ that collapses
-    // every threshold built from it.
-    if sigma <= median.abs() * f32::EPSILON {
+    if sigma <= Spread::resolution(median) {
         return ClipResult::Converged(MedianMad { median, mad: 0.0 });
     }
 

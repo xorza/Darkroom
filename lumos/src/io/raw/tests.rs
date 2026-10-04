@@ -1,10 +1,11 @@
 use common::TempDir;
 
-use crate::internals::assertions::{assert_close, assert_close_slice};
-use crate::internals::cfa::XTRANS_PATTERN;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use common::CancelToken;
 
+use crate::internals::cfa::XTRANS_PATTERN;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::*;
-use std::array;
 
 #[test]
 fn load_raw_invalid_path() {
@@ -90,53 +91,111 @@ fn load_raw_rejects_invalid_files() {
     }
 }
 
-#[test]
-fn interpolated_planes_clamp_to_the_light_frame_range() {
-    let mut planes = [
-        vec![-0.25, 0.5, 1.25],
-        vec![1.5, -0.5, 0.25],
-        vec![0.0, 1.0, 2.0],
-    ];
-
-    clamp_interpolated(&mut planes);
-
-    assert_eq!(planes[0], [0.0, 0.5, 1.0]);
-    assert_eq!(planes[1], [1.0, 0.0, 0.25]);
-    assert_eq!(planes[2], [0.0, 1.0, 1.0]);
+/// A synthetic camera file through LibRaw's `open_bayer`: `samples` laid out `side` square under
+/// one-pixel masked margins, RGGB, black `black`, maximum 65535; `procflags` 2 marks zeros dead.
+fn bayer_dump(samples: &[u16], side: usize, procflags: u8, black: u32) -> UnpackedRaw {
+    let mut bytes: Vec<u8> = samples
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect();
+    let data = bytes.as_mut_ptr();
+    let len = bytes.len() as u32;
+    // SAFETY: libraw_init returns a valid pointer or null.
+    let inner = unsafe { sys::libraw_init(0) };
+    assert!(!inner.is_null());
+    // The state owns the bytes LibRaw reads in place, as it does a file read into memory: moving
+    // the vector leaves its buffer where `data` points.
+    let state = LibrawState {
+        inner,
+        buf: Some(bytes),
+    };
+    // SAFETY: the handle is valid, and the buffer lives as long as the state.
+    let opened = unsafe {
+        sys::libraw_open_bayer(
+            state.as_ptr(),
+            data,
+            len,
+            side as u16,
+            side as u16,
+            1,
+            1,
+            1,
+            1,
+            procflags,
+            0x94, // RGGB in LibRaw's filter byte
+            0,
+            0,
+            black,
+        )
+    };
+    assert_eq!(opened, 0);
+    unpack(state, Path::new("bayer-dump")).unwrap()
 }
 
+/// The preview is the science frame demosaicked and clamped, bit for bit, and what lies in the
+/// masked margins reaches neither: the same visible samples under black margins and under
+/// saturated ones give the same image, its first rows and columns included, which the old preview
+/// demosaicked across the margins. A bright square on a floor near black makes the demosaic
+/// overshoot past 1 and the noise reach below 0 in the science frame; the preview holds both to
+/// `[0, 1]`.
 #[test]
-fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
-    use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
-
-    // A saturated square on black: the sharpest edge a CFA can carry, and the case RCD's ratio
-    // correction overshoots on. Pins why `clamp_interpolated` exists — if the kernel ever starts
-    // bounding its own output, this fails and the clamp becomes dead weight to remove.
-    let size = Size2us::new(32, 32);
-    let mut cfa = vec![0.0f32; size.pixel_count()];
-    for y in 12..20 {
-        for x in 12..20 {
-            cfa[y * size.width + x] = 1.0;
+fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
+    const SIDE: usize = 26;
+    let visible = |x: usize, y: usize| -> u16 {
+        if (9..17).contains(&x) && (9..17).contains(&y) {
+            60_000
+        } else {
+            1000 + ((x * 7 + y * 13) % 5) as u16 * 3
+        }
+    };
+    let samples = |margin: u16| -> Vec<u16> {
+        (0..SIDE * SIDE)
+            .map(|index| {
+                let (x, y) = (index % SIDE, index / SIDE);
+                if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
+                    margin
+                } else {
+                    visible(x - 1, y - 1)
+                }
+            })
+            .collect()
+    };
+    let context = LoadContext::default();
+    let preview = |margin| bayer_dump(&samples(margin), SIDE, 0, 1004).into_linear_image(&context);
+    let dark = preview(0).unwrap();
+    let bright = preview(65_535).unwrap();
+    let science = bayer_dump(&samples(0), SIDE, 0, 1004)
+        .into_cfa_image()
+        .unwrap()
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(
+        dark.dimensions(),
+        ImageDimensions::new((SIDE - 2, SIDE - 2), 3)
+    );
+    let mut outside = 0;
+    for channel in 0..3 {
+        for ((&a, &b), &s) in dark
+            .channel(channel)
+            .pixels()
+            .iter()
+            .zip(bright.channel(channel).pixels())
+            .zip(science.channel(channel).pixels())
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "the margins reached channel {channel}"
+            );
+            assert_eq!(a.to_bits(), s.clamp(0.0, 1.0).to_bits());
+            outside += usize::from(!(0.0..=1.0).contains(&s));
         }
     }
-
-    let bayer = BayerImage::with_margins(&cfa, SensorLayout::cropped(size), CfaPattern::Rggb);
-    let mut planes = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();
-
-    let peak = planes
-        .iter()
-        .flatten()
-        .copied()
-        .fold(f32::NEG_INFINITY, f32::max);
-    assert!(peak > 1.0, "expected an overshoot, got a peak of {peak}");
-
-    clamp_interpolated(&mut planes);
-    for (channel, plane) in planes.iter().enumerate() {
-        assert!(
-            plane.iter().all(|&sample| (0.0..=1.0).contains(&sample)),
-            "channel {channel} still leaves [0, 1]"
-        );
-    }
+    assert!(
+        outside > 0,
+        "the science frame leaves [0, 1], so the clamp is tested"
+    );
+    assert!(dark.metadata.provenance.as_ref().unwrap().clipped);
 }
 
 #[cfg(feature = "real-data")]
@@ -181,384 +240,70 @@ fn load_raw_valid_file() {
     assert!(mean < 1.0, "Mean is >= 1.0, image may be overexposed");
 }
 
+/// LibRaw's own processing hands back the sensor's rows and columns: the visible area's width and
+/// height, not turned by the EXIF orientation nor stretched by the pixel aspect — the settings
+/// the fallback sets. LibRaw turns by the flip it saved at unpack unless `user_flip` overrides it,
+/// and no sample is stored turned, so each is given a portrait one (flip 6, a quarter turn) first.
 #[cfg(feature = "real-data")]
 #[test]
-fn load_raw_dimensions_match() {
+fn the_fallback_keeps_the_sensors_rows_and_columns() {
     use crate::internals::real_data::raw_frames;
 
-    let path = raw_frames("Lights").swap_remove(0);
-
-    let image = load_raw(&path, &LoadContext::default()).unwrap();
-
-    // Header dimensions should match actual dimensions
-    assert_eq!(image.metadata.header_dimensions.len(), 3);
-    assert_eq!(
-        image.metadata.header_dimensions[0],
-        image.dimensions().height()
-    );
-    assert_eq!(
-        image.metadata.header_dimensions[1],
-        image.dimensions().width()
-    );
-    assert_eq!(
-        image.metadata.header_dimensions[2],
-        image.dimensions().channels()
-    );
-}
-
-#[test]
-fn normalize_active_area_crops_and_applies_bayer_deltas() {
-    let layout = SensorLayout {
-        raw: Size2us::new(6, 4),
-        active: Size2us::new(3, 2),
-        margin: Vec2us::new(2, 1),
-    };
-    let black = 100.0;
-    let span = 1000.0;
-    let filters = 0x9494_9494;
-    let channel_delta = [0.1, 0.2, 0.3, 0.4];
-    let mut raw_data = vec![65_535; layout.raw.width * 4];
-    raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[50, 100, 200]);
-    raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5]
-        .copy_from_slice(&[300, 1100, 1200]);
-
-    let without_delta = normalize_active_area::<true>(&raw_data, layout, black, span, None, None);
-    assert_eq!(without_delta, [0.0, 0.0, 0.1, 0.2, 1.0, 1.0]);
-
-    let clamped = normalize_active_area::<true>(
-        &raw_data,
-        layout,
-        black,
-        span,
-        Some(ChannelBlackDelta::LibRawFilter {
-            visible_filters: filters,
-            values: channel_delta,
-        }),
-        None,
-    );
-    let unclamped = normalize_active_area::<false>(
-        &raw_data,
-        layout,
-        black,
-        span,
-        Some(ChannelBlackDelta::LibRawFilter {
-            visible_filters: filters,
-            values: channel_delta,
-        }),
-        None,
-    );
-    let clamped_expected = [0.0, 0.0, 0.0, 0.0, 0.7, 0.8];
-    let unclamped_expected = [-0.15, -0.2, 0.0, 0.0, 0.7, 0.9];
-    assert_close_slice!(clamped, clamped_expected, 1e-6, "clamped");
-    assert_close_slice!(unclamped, unclamped_expected, 1e-6, "unclamped");
-}
-
-#[test]
-fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
-    let raw_width = 3;
-    let raw_data = [600; 9];
-    let black = 100.0;
-    let span = 1000.0;
-    let filters = 0x9494_9494;
-    let channel_delta = [0.1, 0.02, 0.03, 0.04];
-    let visible_pattern = CfaPattern::Rggb;
-    let active_cfa = CfaType::Bayer(visible_pattern);
-
-    for top_margin in 0..2 {
-        for left_margin in 0..2 {
-            let raw_pattern = visible_pattern.at_raw_origin(top_margin, left_margin);
-            for raw_y in 0..3 {
-                for raw_x in 0..3 {
-                    assert_eq!(
-                        raw_filter_color(
-                            filters,
-                            raw_y,
-                            raw_x,
-                            Vec2us::new(left_margin, top_margin)
-                        ),
-                        raw_pattern.color_at(Vec2us::new(raw_x, raw_y))
-                    );
-                }
-            }
-
-            let mut direct = normalize_u16_to_f32_parallel(&raw_data, black, span);
-            apply_bayer_black_corrections(
-                &mut direct,
-                raw_width,
-                Vec2us::new(left_margin, top_margin),
-                filters,
-                &channel_delta,
-                None,
-            );
-            let layout = SensorLayout {
-                raw: Size2us::new(raw_width, 3),
-                active: Size2us::new(2, 2),
-                margin: Vec2us::new(left_margin, top_margin),
-            };
-            let calibration = normalize_active_area::<false>(
-                &raw_data,
-                layout,
-                black,
-                span,
-                Some(ChannelBlackDelta::LibRawFilter {
-                    visible_filters: filters,
-                    values: channel_delta,
-                }),
-                None,
-            );
-
-            for y in 0..layout.active.height {
-                for x in 0..layout.active.width {
-                    let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
-                    assert_eq!(active_channel, libraw_filter_color(filters, y, x));
-                    let expected = 0.5 - channel_delta[active_channel];
-                    let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
-                    let calibration_value = calibration[y * layout.active.width + x];
-                    assert_close!(
-                        direct_value,
-                        expected,
-                        1e-6,
-                        "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
-                    );
-                    assert_close!(
-                        calibration_value,
-                        expected,
-                        1e-6,
-                        "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
-                    );
-                }
-            }
-        }
+    for path in raw_frames("raw_samples") {
+        let raw = open_raw(&path).unwrap();
+        let visible = raw.layout.active;
+        assert_ne!(
+            visible.width, visible.height,
+            "a square frame cannot show a turn"
+        );
+        // SAFETY: the instance is open and unpacked.
+        unsafe { (*raw.libraw.as_ptr()).rawdata.sizes.flip = 6 };
+        let processed = raw.demosaic_libraw_fallback().unwrap();
+        assert_eq!(
+            (processed.dimensions.width(), processed.dimensions.height()),
+            (visible.width, visible.height),
+            "{}",
+            path.display()
+        );
     }
-}
-
-#[test]
-fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
-    let mut cblack = no_black();
-    cblack[..4].copy_from_slice(&[10, 20, 30, 20]);
-    cblack[4] = 2;
-    cblack[5] = 3;
-    cblack[6..12].copy_from_slice(&[5, 7, 9, 11, 13, 15]);
-    let black = consolidate_black_levels(&cblack, 100, 1115, 0x9494_9494).unwrap();
-
-    assert_eq!(black.common, 115.0);
-    assert_eq!(black.per_channel, [115.0, 125.0, 135.0, 125.0]);
-    assert_eq!(black.span, 1000.0);
-    for (&actual, expected) in black.channel_delta_norm.iter().zip([0.0, 0.01, 0.02, 0.01]) {
-        assert_close!(actual, expected, 1e-8);
-    }
-    let repeat = black.repeat.as_ref().unwrap();
-    assert_eq!(repeat.size, Size2us::new(3, 2));
-    for (&actual, expected) in repeat
-        .delta_norm
-        .iter()
-        .zip([0.0, 0.002, 0.004, 0.006, 0.008, 0.010])
-    {
-        assert_close!(actual, expected, 1e-8);
-    }
-
-    let layout = SensorLayout {
-        raw: Size2us::new(7, 4),
-        active: Size2us::new(3, 2),
-        margin: Vec2us::new(2, 1),
-    };
-    let mut raw_data = vec![0u16; layout.raw.width * 4];
-    raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[315, 327, 319]);
-    raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5].copy_from_slice(&[331, 343, 335]);
-
-    let mut direct = normalize_u16_to_f32_parallel(&raw_data, black.common, black.span);
-    apply_bayer_black_corrections(
-        &mut direct,
-        layout.raw.width,
-        layout.margin,
-        0x9494_9494,
-        &black.channel_delta_norm,
-        black.repeat.as_ref(),
-    );
-    let calibration = normalize_active_area::<false>(
-        &raw_data,
-        layout,
-        black.common,
-        black.span,
-        Some(ChannelBlackDelta::LibRawFilter {
-            visible_filters: 0x9494_9494,
-            values: black.channel_delta_norm,
-        }),
-        black.repeat.as_ref(),
-    );
-
-    for y in 0..layout.active.height {
-        for x in 0..layout.active.width {
-            let direct_value =
-                direct[(y + layout.margin.y) * layout.raw.width + x + layout.margin.x];
-            let calibration_value = calibration[y * layout.active.width + x];
-            assert_close!(direct_value, 0.2, 1e-7, "direct ({x}, {y})");
-            assert_close!(calibration_value, 0.2, 1e-7, "calibration ({x}, {y})");
-        }
-    }
-}
-
-#[test]
-fn xtrans_direct_and_calibration_black_corrections_match() {
-    use crate::io::raw::demosaic::xtrans::XTransImage;
-    use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
-    use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
-
-    let raw_width = 11;
-    let raw_height = 11;
-    let raw_pattern = test_pattern_array();
-    let common_black = 100.0;
-    let channel_black = [110.0, 120.0, 130.0];
-    let span = 1000.0;
-    let raw_data = vec![600u16; raw_width * raw_height];
-    let repeat = BlackRepeat {
-        size: Size2us::new(3, 2),
-        delta_norm: [0.0, 0.002, 0.004, 0.006, 0.008, 0.010].into(),
-    };
-
-    for top_margin in 0..6 {
-        for left_margin in 0..6 {
-            let layout = SensorLayout {
-                raw: Size2us::new(raw_width, raw_height),
-                active: Size2us::new(6, 6),
-                margin: Vec2us::new(left_margin, top_margin),
-            };
-            let visible_pattern = array::from_fn(|y| {
-                array::from_fn(|x| raw_pattern[(y + top_margin) % 6][(x + left_margin) % 6])
-            });
-            let visible_pattern = XTransPattern::new(visible_pattern).unwrap();
-            let active_cfa = CfaType::XTrans(visible_pattern);
-            let direct = XTransImage::with_margins(
-                &raw_data,
-                layout,
-                XTransPattern::new(raw_pattern).unwrap(),
-                XTransNormalization {
-                    channel_black,
-                    span,
-                    black_repeat: Some(&repeat),
-                },
-            );
-            let calibration = normalize_active_area::<false>(
-                &raw_data,
-                layout,
-                common_black,
-                span,
-                Some(ChannelBlackDelta::XTrans {
-                    visible_pattern,
-                    values: [0.01, 0.02, 0.03],
-                }),
-                Some(&repeat),
-            );
-
-            for y in 0..layout.active.height {
-                for x in 0..layout.active.width {
-                    let raw_y = y + layout.margin.y;
-                    let raw_x = x + layout.margin.x;
-                    let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
-                    let visible_channel = visible_pattern.color_at(Vec2us::new(x, y)) as usize;
-                    let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
-                    assert_eq!(raw_channel, visible_channel);
-                    assert_eq!(raw_channel, active_channel);
-
-                    let expected = [0.49, 0.48, 0.47][raw_channel] - repeat.at_visible(y, x);
-                    let direct_value = direct.read_normalized(raw_y, raw_x);
-                    let calibration_value = calibration[y * layout.active.width + x];
-                    assert_close!(
-                        direct_value,
-                        expected,
-                        1e-7,
-                        "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
-                    );
-                    assert_close!(
-                        calibration_value,
-                        expected,
-                        1e-7,
-                        "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "real-data")]
-#[test]
-fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
-    use crate::internals::real_data::raw_frames;
-    use crate::io::raw::demosaic::xtrans::XTransImage;
-
-    let paths = raw_frames("Lights");
-    let Some(raw) = paths
-        .iter()
-        .filter_map(|path| open_raw(path).ok())
-        .find(|raw| {
-            matches!(raw.cfa_type, Some(CfaType::XTrans(_)))
-                && raw
-                    .black_level
-                    .channel_delta_norm
-                    .iter()
-                    .take(3)
-                    .any(|delta| delta.abs() > f32::EPSILON)
-        })
-    else {
-        eprintln!("No X-Trans test file with nonzero channel black deltas");
-        return;
-    };
-    let raw_data = raw.raw_image_slice().unwrap();
-    let direct = XTransImage::with_margins(
-        raw_data,
-        raw.layout,
-        raw.raw_xtrans_pattern.unwrap(),
-        XTransNormalization {
-            channel_black: [
-                raw.black_level.per_channel[0],
-                raw.black_level.per_channel[1],
-                raw.black_level.per_channel[2],
-            ],
-            span: raw.black_level.span,
-            black_repeat: raw.black_level.repeat.as_ref(),
-        },
-    );
-    let calibration = raw.extract_cfa_pixels::<false>().unwrap();
-    let mut compared = 0usize;
-
-    for y in (0..raw.layout.active.height).step_by(101) {
-        for x in (0..raw.layout.active.width).step_by(113) {
-            let raw_y = y + raw.layout.margin.y;
-            let raw_x = x + raw.layout.margin.x;
-            let calibration_value = calibration[y * raw.layout.active.width + x];
-            if (0.0..=1.0).contains(&calibration_value) {
-                let direct_value = direct.read_normalized(raw_y, raw_x);
-                assert_close!(direct_value, calibration_value, 1e-7);
-                compared += 1;
-            }
-        }
-    }
-    assert!(compared > 100);
 }
 
 #[test]
 fn camera_white_balance_is_canonicalized() {
     let bayer = Some(CfaType::Bayer(CfaPattern::Rggb));
     assert_eq!(
-        canonical_camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0]),
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0]),
+        camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(Some(CfaType::XTrans(XTRANS_PATTERN)), [2.0, 1.0, 1.5, 9.0]),
+        camera_white_balance(
+            Some(CfaType::XTrans(XTRANS_PATTERN)),
+            [2.0, 1.0, 1.5, 9.0],
+            0
+        ),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0]),
+        camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0], 0),
+        None
+    );
+    // Samples that already carry the as-shot balance have unity left to apply, whatever the
+    // multipliers say; a monochrome sensor has none either way.
+    assert_eq!(
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 1),
+        Some([1.0; 4])
+    );
+    assert_eq!(
+        camera_white_balance(Some(CfaType::Mono), [4.0, 2.0, 3.0, 2.0], 1),
         None
     );
     // A sensor LibRaw processes itself (a linear DNG) still reports its multipliers.
     assert_eq!(
-        canonical_camera_white_balance(None, [4.0, 2.0, 3.0, 2.0]),
+        camera_white_balance(None, [4.0, 2.0, 3.0, 2.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
 }
@@ -575,173 +320,46 @@ fn invalid_camera_white_balance_is_absent() {
 
     for input in invalid {
         assert!(
-            canonical_camera_white_balance(cfa_type, input).is_none(),
+            camera_white_balance(cfa_type, input, 0).is_none(),
             "{input:?}"
         );
     }
 }
 
-/// Uniform black: all cblack zero, scalar black only.
+/// The raw values settle two flags at decode. LibRaw's `open_bayer`
+/// stands in for a camera file: it sets `zero_is_bad` from `procflags & 2`, `maximum` to
+/// 65536 − 2⁰ = 65535 and black to its argument, here 1000. The saturation level is then
+/// 1000 + 0.95 × (65535 − 1000) = 62308.25.
+///
+/// The 24 × 24 buffer reads 2000 everywhere, under one-pixel margins, except:
+/// - a zero at raw (5, 7), visible (4, 6): `NO_DATA` when the camera says zeros are dead;
+/// - a zero at raw (0, 0) in the masked margin, which is not part of the image;
+/// - 62309 at raw (10, 10), visible (9, 9): saturated;
+/// - 62308 at raw (12, 12), visible (11, 11): just below the level.
 #[test]
-fn consolidate_black_levels_uniform() {
-    let cblack = no_black();
-    // No per-channel, no spatial pattern
-    let bl = consolidate_black_levels(&cblack, 512, 16383, 0x9494_9494).unwrap();
+fn the_raw_values_settle_no_data_and_saturation() {
+    const SIDE: usize = 24;
+    let flags_for = |procflags: u8| {
+        let mut samples = vec![2000u16; SIDE * SIDE];
+        samples[7 * SIDE + 5] = 0;
+        samples[0] = 0;
+        samples[10 * SIDE + 10] = 62_309;
+        samples[12 * SIDE + 12] = 62_308;
+        bayer_dump(&samples, SIDE, procflags, 1000)
+            .decode_flags()
+            .unwrap()
+            .unwrap()
+    };
 
-    assert_eq!(bl.common, 512.0);
-    assert_eq!(bl.per_channel, [512.0; 4]);
-    assert_eq!(bl.channel_delta_norm, [0.0; 4]);
-    assert_eq!(bl.span, 16383.0 - 512.0);
-}
-
-/// Per-channel cblack[0..3] nonzero, no spatial pattern.
-#[test]
-fn consolidate_black_levels_per_channel() {
-    let mut cblack = no_black();
-    cblack[0] = 10; // R
-    cblack[1] = 5; // G1
-    cblack[2] = 15; // B
-    cblack[3] = 5; // G2
-    // No spatial pattern (cblack[4]==0, cblack[5]==0)
-
-    let bl = consolidate_black_levels(&cblack, 100, 4096, 0x9494_9494).unwrap();
-
-    // Common minimum across channels is 5, moved to black: 100+5=105
-    assert_eq!(bl.common, 105.0);
-    // Per-channel: cblack[c]-5 + 105
-    assert_eq!(bl.per_channel[0], 110.0); // R: 10-5+105
-    assert_eq!(bl.per_channel[1], 105.0); // G1: 5-5+105
-    assert_eq!(bl.per_channel[2], 115.0); // B: 15-5+105
-    assert_eq!(bl.per_channel[3], 105.0); // G2: 5-5+105
-
-    assert_eq!(bl.span, 4096.0 - 105.0);
-    // delta_norm[c] = (per_channel[c] - common) / span, divided once
-    assert_eq!(bl.channel_delta_norm[0], 5.0 / 3991.0);
-    assert_eq!(bl.channel_delta_norm[1], 0.0);
-    assert_eq!(bl.channel_delta_norm[2], 10.0 / 3991.0);
-    assert!(bl.channel_delta_norm[3].abs() < 1e-10);
-}
-
-/// Bayer 2x2 spatial pattern folded into per-channel values.
-#[test]
-fn consolidate_black_levels_bayer_2x2_fold() {
-    let mut cblack = no_black();
-    // 2x2 spatial pattern
-    cblack[4] = 2;
-    cblack[5] = 2;
-    // Pattern values at spatial positions:
-    cblack[6] = 4; // (0,0)
-    cblack[7] = 8; // (0,1)
-    cblack[8] = 12; // (1,0)
-    cblack[9] = 16; // (1,1)
-
-    // RGGB Bayer pattern filter
-    // FC mapping for RGGB: (0,0)=R=0, (0,1)=G=1, (1,0)=G->G2=3, (1,1)=B=2
-    // Folding: cblack[0]+=4(R), cblack[1]+=8(G1), cblack[3]+=12(G2), cblack[2]+=16(B)
-    // After fold: cblack = [4, 8, 16, 12]
-    // Common min = 4, subtract: cblack = [0, 4, 12, 8], black = 200+4 = 204
-    let filters = 0x9494_9494_u32;
-    let bl = consolidate_black_levels(&cblack, 200, 16383, filters).unwrap();
-
-    assert_eq!(bl.common, 204.0);
-    assert_eq!(bl.per_channel[0], 204.0); // R: 0 + 204
-    assert_eq!(bl.per_channel[1], 208.0); // G1: 4 + 204
-    assert_eq!(bl.per_channel[2], 216.0); // B: 12 + 204
-    assert_eq!(bl.per_channel[3], 212.0); // G2: 8 + 204
-
-    assert_eq!(bl.span, 16383.0 - 204.0);
-    assert_eq!(bl.channel_delta_norm[0], 0.0); // R: no delta
-    assert_eq!(bl.channel_delta_norm[1], 4.0 / 16179.0); // G1
-    assert_eq!(bl.channel_delta_norm[2], 12.0 / 16179.0); // B
-    assert_eq!(bl.channel_delta_norm[3], 8.0 / 16179.0); // G2
-}
-
-/// X-Trans 1x1 spatial pattern folded into all channels.
-#[test]
-fn consolidate_black_levels_xtrans_1x1_fold() {
-    let mut cblack = no_black();
-    cblack[4] = 1;
-    cblack[5] = 1;
-    cblack[6] = 20; // Added to all channels
-
-    // X-Trans filter value (typically 9 for 6x6 pattern)
-    let bl = consolidate_black_levels(&cblack, 256, 4096, 9).unwrap();
-
-    // 1x1 pattern: cblack[6]=20 added to all cblack[0..3]
-    // Then common minimum extracted (all equal = 20), moved to black: 256+20=276
-    assert_eq!(bl.common, 276.0);
-    assert_eq!(bl.per_channel, [276.0; 4]);
-    assert_eq!(bl.channel_delta_norm, [0.0; 4]);
-}
-
-#[test]
-fn consolidate_black_levels_rejects_invalid_metadata() {
-    let cblack = no_black();
-    let error = consolidate_black_levels(&cblack, 512, 512, 0x9494_9494).unwrap_err();
-    assert!(matches!(
-        error,
-        BlackLevelError::BlackExceedsMaximum {
-            black: 512,
-            maximum: 512
-        }
-    ));
-
-    let mut oversized = no_black();
-    oversized[4] = 64;
-    oversized[5] = 65;
-    let error = consolidate_black_levels(&oversized, 0, 4096, 0x9494_9494).unwrap_err();
-    assert!(matches!(
-        error,
-        BlackLevelError::SpatialPatternTooLarge {
-            width: 65,
-            height: 64,
-            capacity: 4098
-        }
-    ));
-}
-
-#[test]
-fn apply_bayer_black_corrections_identity() {
-    let mut data = vec![0.5f32; 4];
-    let delta = [0.0; 4];
-
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
-
-    // No change expected
-    for &v in &data {
-        assert_close!(v, 0.5, 1e-6);
-    }
-}
-
-#[test]
-fn bayer_black_corrections_apply_a_delta_per_colour() {
-    // 2x2 RGGB: positions (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
-    let mut data = vec![0.5f32; 4];
-    let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
-
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
-
-    assert_close!(data[0], 0.4, 1e-6, "R: 0.5-0.1=0.4, got {}", data[0]);
-    assert_close!(data[1], 0.5, 1e-6, "G: no delta, got {}", data[1]);
-    assert_close!(data[2], 0.5, 1e-6, "G: no delta, got {}", data[2]);
-    assert_close!(data[3], 0.45, 1e-6, "B: 0.5-0.05=0.45, got {}", data[3]);
-}
-
-#[test]
-fn apply_bayer_black_corrections_clamp_negative() {
-    let mut data = vec![0.05f32; 4];
-    let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
-
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
-
-    // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
-    assert_eq!(data[0], 0.0, "Should clamp to 0.0");
-}
-
-/// libraw's `color.cblack`, every entry zero, on the heap: 16 KiB is too large for the stack.
-fn no_black() -> Box<[u32; 4104]> {
-    vec![0; 4104]
-        .into_boxed_slice()
-        .try_into()
-        .expect("4104 entries")
+    let flags = flags_for(2);
+    assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::NO_DATA);
+    assert_eq!(flags.count(QualityFlags::SATURATED), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(9, 9)), QualityFlags::SATURATED);
+    assert_eq!(flags.at_pos(Vec2us::new(11, 11)), QualityFlags::default());
+    // A camera without the convention reads its zero as a value: not missing, not saturated.
+    let flags = flags_for(0);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::default());
 }

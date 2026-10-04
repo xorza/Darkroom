@@ -33,14 +33,15 @@ impl Preset for BackgroundMode {
     }
 }
 
-/// Which green-removal protection [`ScnrKnobs`] builds. The lumos enum carries
-/// the additive mask's blend amount in its variant, so the editor picks the
-/// method here and supplies the amount as its own field.
+/// Which green-removal protection [`ScnrKnobs`] builds; the amount is its own
+/// field, which every protection reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
 pub(crate) enum ScnrMethodChoice {
     AverageNeutral,
     AdditiveMask,
+    MaximumNeutral,
+    MaximumMask,
 }
 
 impl Preset for ScnrMethodChoice {
@@ -56,9 +57,8 @@ impl Preset for ScnrMethodChoice {
     }
 }
 
-/// The editable knobs behind a [`Scnr`]. `amount` is read only by
-/// [`ScnrMethodChoice::AdditiveMask`]; average-neutral is a full-strength clamp
-/// with nothing to tune.
+/// The editable knobs behind a [`Scnr`]: the protection, and the blend toward
+/// its full strength.
 #[derive(Debug, Clone, Introspect)]
 #[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056", name = "ScnrConfig")]
 pub(crate) struct ScnrKnobs {
@@ -67,11 +67,11 @@ pub(crate) struct ScnrKnobs {
 }
 
 impl Default for ScnrKnobs {
-    /// Average-neutral; the additive mask, when picked, at half strength.
+    /// Average-neutral at full strength, as [`Scnr::default`].
     fn default() -> Self {
         Self {
             method: ScnrMethodChoice::AverageNeutral,
-            amount: 0.5,
+            amount: 1.0,
         }
     }
 }
@@ -79,8 +79,10 @@ impl Default for ScnrKnobs {
 impl From<ScnrKnobs> for Scnr {
     fn from(knobs: ScnrKnobs) -> Self {
         match knobs.method {
-            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(),
+            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(knobs.amount),
             ScnrMethodChoice::AdditiveMask => Scnr::additive_mask(knobs.amount),
+            ScnrMethodChoice::MaximumNeutral => Scnr::maximum_neutral(knobs.amount),
+            ScnrMethodChoice::MaximumMask => Scnr::maximum_mask(knobs.amount),
         }
     }
 }
@@ -111,8 +113,7 @@ impl Preset for StretchMethodChoice {
 }
 
 /// The editable knobs behind a [`Stretch`]. Both methods take a
-/// `target_background`; `shadow_sigmas` is read only by
-/// [`StretchMethodChoice::AutoStf`].
+/// `target_background` and a `shadow_sigmas`, which sets their black point.
 #[derive(Debug, Clone, Introspect)]
 #[config(type_id = "b08bb9a1-db12-43d4-aa57-fe3e3732e917", name = "Stretch")]
 pub(crate) struct StretchKnobs {
@@ -123,13 +124,13 @@ pub(crate) struct StretchKnobs {
 }
 
 impl Default for StretchKnobs {
-    /// Lumos's automatic presets: [`Stretch::default`]'s auto-asinh, and the
-    /// STF preset's black point should STF be picked.
+    /// Lumos's automatic presets: [`Stretch::default`]'s auto-asinh, with the
+    /// black point and target both automatic methods share.
     fn default() -> Self {
         Self {
             method: StretchMethodChoice::AutoAsinh,
             target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
-            shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+            shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
             color: Stretch::default().color,
         }
     }
@@ -139,6 +140,7 @@ impl From<StretchKnobs> for Stretch {
     fn from(knobs: StretchKnobs) -> Self {
         let method = match knobs.method {
             StretchMethodChoice::AutoAsinh => StretchMethod::AutoAsinh {
+                shadow_sigmas: knobs.shadow_sigmas,
                 target_background: knobs.target_background,
             },
             StretchMethodChoice::AutoStf => StretchMethod::AutoStf {
@@ -234,5 +236,21 @@ mod tests {
         assert_eq!(shadow_sigmas, 2.0);
         assert_eq!(target_background, 0.25);
         assert_eq!(stretch.color, ColorMode::PerChannel);
+
+        let stretch: Stretch = StretchKnobs {
+            method: StretchMethodChoice::AutoAsinh,
+            target_background: 0.3,
+            shadow_sigmas: 1.5,
+            color: ColorMode::ColorPreserving,
+        }
+        .into();
+        let StretchMethod::AutoAsinh {
+            shadow_sigmas,
+            target_background,
+        } = stretch.method
+        else {
+            panic!("expected auto-asinh");
+        };
+        assert_eq!((shadow_sigmas, target_background), (1.5, 0.3));
     }
 }

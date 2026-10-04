@@ -50,11 +50,6 @@ impl Isa for Portable {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> PortableF32 {
-        PortableF32(lanes.map(f32::from))
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: PortableF32) -> PortableF32 {
         let last = lookup_last(table);
         PortableF32(index.0.map(|index| lookup_lane(table, last, index)))
@@ -277,6 +272,16 @@ impl F64x4 for PortableF64 {
             self.0
                 .map(|n| f64::from_bits(((n as i64 + 1023) << 52).cast_unsigned())),
         )
+    }
+
+    #[inline(always)]
+    fn frexp(self) -> Frexp<Self> {
+        Frexp {
+            mantissa: Self(self.0.map(|x| {
+                f64::from_bits((x.to_bits() & 0x800f_ffff_ffff_ffff) | 0x3fe0_0000_0000_0000)
+            })),
+            exponent: Self(self.0.map(|x| (x.to_bits() >> 52) as f64 - 1022.0)),
+        }
     }
 
     #[inline(always)]

@@ -4,9 +4,9 @@
 //! X-Trans 6×6 CFA layout. The pattern has a 3×3 sub-symmetry, so the hex
 //! neighbors repeat every 3 rows and 3 columns.
 //!
-//! The `allhex[row%3][col%3][set][0..8]` table stores 8 relative offsets per
-//! position per set. Set 0 uses image stride for offsets, set 1 uses tile stride.
-//! We only need set 0 (full-image processing, no tiles).
+//! dcraw's `allhex[row%3][col%3][set][0..8]` stores 8 relative offsets per
+//! position, set 0 in the image's stride and set 1 in the tile's. These are the
+//! offsets as `(dy, dx)`, which `HexTable` flattens into both strides.
 //!
 //! Reference: Frank Markesteijn's algorithm as implemented in dcraw/libraw.
 

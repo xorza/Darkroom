@@ -28,7 +28,7 @@ use crate::calibration_masters::stack_cfa_master;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::io::raw;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
 #[test]
@@ -66,11 +66,14 @@ fn builds_full_master_set() {
         DEFAULT_SIGMA_THRESHOLD,
     );
 
-    // Every supplied role yields a master; the un-supplied flat-dark stays `None`.
-    let dark = masters.masters.dark.as_ref().expect("master dark");
-    let flat = masters.masters.flat.as_ref().expect("prepared master flat");
-    let bias = masters.masters.bias.as_ref().expect("master bias");
-    assert!(masters.masters.flat_dark.is_none());
+    // Every supplied role yields a master; the flat-dark is spent on the flat and not kept.
+    let dark = &masters.dark.as_ref().expect("master dark").image;
+    let flat = masters
+        .flat
+        .as_ref()
+        .expect("prepared master flat")
+        .divisor();
+    let bias = masters.bias.as_ref().expect("master bias");
 
     // All masters share the single sensor geometry (one CFA plane each).
     let size = Size2us::new(dark.data.width(), dark.data.height());
@@ -222,7 +225,8 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     let detect = |dark_paths: &[&PathBuf]| {
         let dark = stack_cfa_master(
             dark_paths,
-            StackConfig::dark(),
+            StackConfig::bias_or_dark(),
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -315,7 +319,8 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.darks,
-                StackConfig::dark(),
+                StackConfig::bias_or_dark(),
+                None,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )
@@ -333,6 +338,7 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
             stack_cfa_master(
                 &paths.flats,
                 StackConfig::flat(),
+                None,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )
@@ -349,7 +355,8 @@ fn bench_stack_master_bias(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.bias,
-                StackConfig::bias(),
+                StackConfig::bias_or_dark(),
+                None,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )

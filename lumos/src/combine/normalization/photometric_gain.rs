@@ -16,8 +16,9 @@
 use common::CancelToken;
 
 use crate::combine::CANCEL_POLL_CHUNK;
-use crate::combine::error::Error;
-use crate::combine::error::check_cancel;
+use crate::combine::error::StackError;
+use crate::io::cancelled::Cancelled;
+use crate::math::statistics::spread::Spread;
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 
 /// Pairs further than this many σ above their median on both sides carry the lever arm the gain
@@ -52,7 +53,7 @@ impl PairedMoments {
         reference: &[f32],
         window: ResidualWindow,
         cancel: &CancelToken,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         let mut moments = Self {
             count: 0,
             mean_frame: 0.0,
@@ -65,7 +66,7 @@ impl PairedMoments {
             .chunks(CANCEL_POLL_CHUNK)
             .zip(reference.chunks(CANCEL_POLL_CHUNK))
         {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
             for (&frame_value, &reference_value) in frame_chunk.iter().zip(reference_chunk) {
                 if !window.admits(frame_value, reference_value) {
                     continue;
@@ -88,17 +89,18 @@ impl PairedMoments {
     }
 
     /// The Deming slope for the noise ratio `λ = σ²_ref / σ²_frame`, in the branch of the root
-    /// that does not cancel; unit gain when the inliers carry no covariance to fit.
-    fn deming_gain(self, frame_noise_variance: f64, reference_noise_variance: f64) -> f32 {
-        if self.count < 2 || self.covariance <= f64::EPSILON {
-            return 1.0;
+    /// that does not cancel; `None` when the inliers carry no positive covariance to fit. A ratio
+    /// with a side of no measured noise is undefined, and the slope takes λ = 1: total least
+    /// squares.
+    fn deming_gain(self, frame_noise_variance: f64, reference_noise_variance: f64) -> Option<f32> {
+        if self.count < 2 || self.covariance <= 0.0 {
+            return None;
         }
-        let noise_ratio =
-            if frame_noise_variance > f64::EPSILON && reference_noise_variance > f64::EPSILON {
-                reference_noise_variance / frame_noise_variance
-            } else {
-                1.0
-            };
+        let noise_ratio = if frame_noise_variance > 0.0 && reference_noise_variance > 0.0 {
+            reference_noise_variance / frame_noise_variance
+        } else {
+            1.0
+        };
         let delta = self.reference_variance - noise_ratio * self.frame_variance;
         let root = (delta * delta + 4.0 * noise_ratio * self.covariance * self.covariance).sqrt();
         let gain = if delta >= 0.0 {
@@ -106,11 +108,7 @@ impl PairedMoments {
         } else {
             2.0 * noise_ratio * self.covariance / (root - delta)
         };
-        if gain.is_finite() && gain > f64::EPSILON {
-            gain as f32
-        } else {
-            1.0
-        }
+        (gain.is_finite() && gain > 0.0).then_some(gain as f32)
     }
 }
 
@@ -131,7 +129,7 @@ impl Seed {
         frame_stats: MedianMad,
         reference_stats: MedianMad,
         cancel: &CancelToken,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         let frame_floor = LEVER_SIGMAS * mad_to_sigma(frame_stats.mad);
         let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
         let mut ratios = Vec::new();
@@ -139,7 +137,7 @@ impl Seed {
             .chunks(CANCEL_POLL_CHUNK)
             .zip(reference.chunks(CANCEL_POLL_CHUNK))
         {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
             ratios.extend(frame_chunk.iter().zip(reference_chunk).filter_map(
                 |(&frame_value, &reference_value)| {
                     let x = frame_value - frame_stats.median;
@@ -155,8 +153,10 @@ impl Seed {
                 scatter: mad_to_sigma(ratio_stats.mad),
             });
         }
+        // A frame whose samples tie to its own precision has no spread to compare: unit gain, which
+        // the fit then moves if the pairs say otherwise.
         Ok(Self {
-            gain: if frame_stats.mad > f32::EPSILON {
+            gain: if frame_stats.mad > Spread::resolution(frame_stats.median) {
                 reference_stats.mad / frame_stats.mad
             } else {
                 1.0
@@ -190,20 +190,20 @@ impl ResidualWindow {
         frame_stats: MedianMad,
         reference_stats: MedianMad,
         cancel: &CancelToken,
-    ) -> Result<Option<Self>, Error> {
+    ) -> Result<Option<Self>, StackError> {
         let offset = reference_stats.median - frame_stats.median * gain;
         let mut residuals = Vec::with_capacity(frame.len());
         for (frame_chunk, reference_chunk) in frame
             .chunks(CANCEL_POLL_CHUNK)
             .zip(reference.chunks(CANCEL_POLL_CHUNK))
         {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
             residuals.extend(frame_chunk.iter().zip(reference_chunk).map(
                 |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
             ));
         }
         let residual_stats = MedianMad::of_mut(&mut residuals);
-        if residual_stats.mad <= f32::EPSILON && seed.scatter == 0.0 {
+        if residual_stats.mad <= Spread::resolution(reference_stats.median) && seed.scatter == 0.0 {
             return Ok(None);
         }
         let sky_sigma = f64::from(mad_to_sigma(residual_stats.mad));
@@ -235,7 +235,7 @@ pub(super) fn paired_photometric_gain(
     frame_noise_variance: f64,
     reference_noise_variance: f64,
     cancel: &CancelToken,
-) -> Result<f32, Error> {
+) -> Result<f32, StackError> {
     let frame_stats = sample_stats(frame, cancel)?;
     let seed = Seed::of(frame, reference, frame_stats, reference_stats, cancel)?;
     let mut gain = seed.gain;
@@ -252,8 +252,12 @@ pub(super) fn paired_photometric_gain(
         else {
             return Ok(gain);
         };
-        let fitted = PairedMoments::from_inliers(frame, reference, window, cancel)?
-            .deming_gain(frame_noise_variance, reference_noise_variance);
+        // Inliers with no positive covariance cannot move the gain from where the window started.
+        let Some(fitted) = PairedMoments::from_inliers(frame, reference, window, cancel)?
+            .deming_gain(frame_noise_variance, reference_noise_variance)
+        else {
+            break;
+        };
         if fitted == gain {
             break;
         }
@@ -263,7 +267,7 @@ pub(super) fn paired_photometric_gain(
 }
 
 /// The median and MAD of a sample set, leaving the samples as they were.
-pub(super) fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<MedianMad, Error> {
-    check_cancel(cancel)?;
+pub(super) fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<MedianMad, StackError> {
+    Cancelled::check(cancel)?;
     Ok(MedianMad::of_mut(&mut samples.to_vec()))
 }

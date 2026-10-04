@@ -1,5 +1,4 @@
 use crate::star_detection::config::detection_config::MAX_DEBLEND_N_THRESHOLDS;
-use crate::star_detection::config::measurement_config::NoiseModel;
 use crate::star_detection::config::*;
 
 fn multi_threshold(n_thresholds: usize) -> Deblend {
@@ -13,48 +12,6 @@ fn configured(update: impl FnOnce(&mut Config)) -> Config {
     let mut config = Config::default();
     update(&mut config);
     config
-}
-
-#[test]
-fn noise_model_uses_normalized_signal_units() {
-    let model = NoiseModel::from_normalized(1_000.0, 10.0);
-    assert_eq!(model.electrons_per_normalized_unit, 1_000.0);
-    assert_eq!(model.read_noise_electrons, 10.0);
-    assert_eq!(model.validate(), Ok(()));
-
-    // 2/1000 + 4 × (0.02² + (10/1000)²) = 0.004 normalized².
-    let variance = model.variance_normalized(2.0, 0.02, 4);
-    assert!((variance - 0.004).abs() < 1e-12);
-}
-
-#[test]
-fn noise_model_invalid_parameters_return_exact_errors() {
-    let cases = [
-        (
-            NoiseModel::from_normalized(0.0, 5.0),
-            "electrons_per_normalized_unit",
-            0.0,
-        ),
-        (
-            NoiseModel::from_normalized(f32::INFINITY, 5.0),
-            "electrons_per_normalized_unit",
-            f64::INFINITY,
-        ),
-        (
-            NoiseModel::from_normalized(1.0, -1.0),
-            "read_noise_electrons",
-            -1.0,
-        ),
-        (
-            NoiseModel::from_normalized(1.0, f32::INFINITY),
-            "read_noise_electrons",
-            f64::INFINITY,
-        ),
-    ];
-    for (model, field, value) in cases {
-        let invalid = model.validate().unwrap_err();
-        assert_eq!((invalid.field, invalid.value), (field, value));
-    }
 }
 
 #[test]
@@ -78,7 +35,7 @@ fn centroid_method_invalid_beta_returns_exact_error() {
 #[test]
 fn config_default() {
     let config = Config::default();
-    assert!(config.measurement.noise_model.is_none());
+    assert!(config.measurement.electrons_per_unit.is_none());
     assert_eq!(config.validate(), Ok(()));
 }
 
@@ -111,11 +68,11 @@ fn inclusive_bounds_accept_their_edges() {
     // still pass. Every bound is expressed as the accepted half, so an inverted comparison
     // shows up here rather than as a config that silently stops working.
     type Edge = (&'static str, fn(&mut Config));
-    let edges: [Edge; 11] = [
-        ("read_noise 0", |c| {
-            c.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, 0.0));
+    let edges: [Edge; 12] = [
+        ("electrons_per_unit at the smallest positive f32", |c| {
+            c.measurement.electrons_per_unit = Some(f32::MIN_POSITIVE);
         }),
-        ("psf_axis_ratio 1", |c| c.detection.psf_axis_ratio = 1.0),
+        ("psf_axis_ratio 1", |c| c.fwhm.psf_axis_ratio = 1.0),
         ("deblend min_prominence 0", |c| {
             c.detection.deblend = Deblend::LocalMaxima {
                 min_prominence: 0.0,
@@ -142,12 +99,14 @@ fn inclusive_bounds_accept_their_edges() {
             c.background.refinement = BackgroundRefinement::Iterative {
                 iterations: 10,
                 mask_dilation: 50,
+                mask_sigma: 2.0,
             };
         }),
         ("estimation_sigma_factor 1", |c| {
             c.fwhm.estimation_sigma_factor = 1.0;
         }),
         ("max_sharpness 1", |c| c.filter.max_sharpness = 1.0),
+        ("max_roundness 2", |c| c.filter.max_roundness = 2.0),
         ("max_fwhm_deviation None", |c| {
             c.filter.max_fwhm_deviation = None;
         }),
@@ -180,6 +139,7 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 0,
                     mask_dilation: 3,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement iterations",
@@ -190,6 +150,7 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 11,
                     mask_dilation: 3,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement iterations",
@@ -200,10 +161,22 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 1,
                     mask_dilation: 51,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement mask_dilation",
             51.0,
+        ),
+        (
+            configured(|config| {
+                config.background.refinement = BackgroundRefinement::Iterative {
+                    iterations: 1,
+                    mask_dilation: 3,
+                    mask_sigma: 0.0,
+                };
+            }),
+            "background refinement mask_sigma",
+            0.0,
         ),
         (
             configured(|config| config.detection.sigma_threshold = 0.0),
@@ -226,12 +199,12 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
-            configured(|config| config.detection.psf_axis_ratio = 0.0),
+            configured(|config| config.fwhm.psf_axis_ratio = 0.0),
             "psf_axis_ratio",
             0.0,
         ),
         (
-            configured(|config| config.detection.psf_angle = f32::INFINITY),
+            configured(|config| config.fwhm.psf_angle = f32::INFINITY),
             "psf_angle",
             f64::INFINITY,
         ),
@@ -338,18 +311,9 @@ fn config_invalid_parameters_return_exact_errors() {
             -1.0,
         ),
         (
-            configured(|config| {
-                config.measurement.noise_model = Some(NoiseModel::from_normalized(0.0, 1.0));
-            }),
-            "electrons_per_normalized_unit",
+            configured(|config| config.measurement.electrons_per_unit = Some(0.0)),
+            "electrons_per_unit",
             0.0,
-        ),
-        (
-            configured(|config| {
-                config.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, -1.0));
-            }),
-            "read_noise_electrons",
-            -1.0,
         ),
     ];
 
@@ -389,10 +353,10 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
 #[test]
 fn config_rejects_non_finite_float_parameters() {
     type Field = (&'static str, fn(&mut Config, f32));
-    let fields: [Field; 17] = [
+    let fields: [Field; 16] = [
         ("sigma_threshold", |c, v| c.detection.sigma_threshold = v),
-        ("psf_axis_ratio", |c, v| c.detection.psf_axis_ratio = v),
-        ("psf_angle", |c, v| c.detection.psf_angle = v),
+        ("psf_axis_ratio", |c, v| c.fwhm.psf_axis_ratio = v),
+        ("psf_angle", |c, v| c.fwhm.psf_angle = v),
         ("fwhm Fixed", |c, v| c.fwhm.mode = Some(FwhmMode::Fixed(v))),
         ("fwhm Auto fallback", |c, v| {
             c.fwhm.mode = Some(FwhmMode::Auto { fallback: v });
@@ -419,11 +383,8 @@ fn config_rejects_non_finite_float_parameters() {
         ("Moffat beta", |c, v| {
             c.measurement.centroid_method = CentroidMethod::MoffatFit { beta: v };
         }),
-        ("electrons_per_normalized_unit", |c, v| {
-            c.measurement.noise_model = Some(NoiseModel::from_normalized(v, 5.0));
-        }),
-        ("read_noise_electrons", |c, v| {
-            c.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, v));
+        ("electrons_per_unit", |c, v| {
+            c.measurement.electrons_per_unit = Some(v);
         }),
         ("duplicate_min_separation", |c, v| {
             c.filter.duplicate_min_separation = v;

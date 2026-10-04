@@ -199,9 +199,18 @@ fn from_stars_over_every_case() {
         ),
     ];
 
+    // One pair of scratch buffers for every case, as a detector keeps them: each case refills them.
+    let (mut fwhms, mut deviations) = (Vec::new(), Vec::new());
     for (name, stars, min_stars, expected) in cases {
         assert_eq!(
-            from_stars(&stars, &fwhm_config(min_stars), FALLBACK, &filter_config()),
+            from_stars(
+                &stars,
+                &fwhm_config(min_stars),
+                FALLBACK,
+                &filter_config(),
+                &mut fwhms,
+                &mut deviations,
+            ),
             expected,
             "{name}"
         );

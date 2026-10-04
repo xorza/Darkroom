@@ -15,6 +15,10 @@ pub enum OpError {
         rank: usize,
         required_rank: usize,
     },
+    /// A background division met a model whose mean is not positive, so it has no level to
+    /// normalize the model to.
+    #[error("background division needs a positive model mean, got {mean}")]
+    NonPositiveBackground { mean: f64 },
     /// An auto stretch cannot map the measured background onto its target: the median sits at or
     /// below zero (nothing for a brightening curve to lift), or the curve's range does not reach
     /// the target from it.
@@ -112,7 +116,10 @@ mod tests {
         });
         rejects("asinh beta", |image| {
             Stretch {
-                method: StretchMethod::Asinh { beta: 0.0 },
+                method: StretchMethod::Asinh {
+                    black_point: 0.0,
+                    beta: 0.0,
+                },
                 color: ColorMode::ColorPreserving,
             }
             .apply(image)
@@ -120,6 +127,7 @@ mod tests {
         rejects("ghs d", |image| {
             Stretch {
                 method: StretchMethod::Ghs {
+                    black_point: 0.0,
                     d: -1.0,
                     b: 0.0,
                     sp: 0.5,

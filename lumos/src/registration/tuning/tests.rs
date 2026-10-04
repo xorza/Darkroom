@@ -1,6 +1,5 @@
 use crate::math::statistics::CHI2_99_2DOF;
-use crate::registration::config::Config;
-use crate::registration::tuning::{AUTO_UPGRADE_THRESHOLD, max_sigma_from_fwhm, recovery_radius};
+use crate::registration::tuning::{max_sigma_from_fwhm, recovery_radius};
 
 /// The scales have to keep their documented relationship to the FWHM, since every threshold
 /// downstream is quoted in those terms.
@@ -28,19 +27,8 @@ fn sigma_and_recovery_radius_track_the_psf_width() {
     // ...including the degenerate catalog that would otherwise trip RansacEstimator's assert.
     assert_eq!(max_sigma_from_fwhm(0.0), 0.5);
 
-    // Squaring the radius must land on the boundary MAGSAC scores against, or the two gates
+    // Squaring the radius must land on the boundary the RANSAC scorer judges by, or the two gates
     // disagree about the same point: a square root and a square apart, a few ulps.
     let boundary_sq = CHI2_99_2DOF * sigma * sigma;
     assert!((radius * radius - boundary_sq).abs() <= 4.0 * f64::EPSILON * boundary_sq);
-}
-
-/// The ladder bar is stricter than the default accuracy gate; if that inverted, `Auto` would
-/// accept rungs `register` then rejects.
-#[test]
-fn the_ladder_bar_is_stricter_than_the_default_accuracy_gate() {
-    let default_gate = Config::default().max_rms_error;
-    assert!(
-        AUTO_UPGRADE_THRESHOLD < default_gate,
-        "ladder bar {AUTO_UPGRADE_THRESHOLD} must be stricter than the {default_gate} gate"
-    );
 }

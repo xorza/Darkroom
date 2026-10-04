@@ -3,7 +3,7 @@ use super::*;
 /// At the reference point every SIP monomial is zero, so the correction is exactly nothing.
 #[test]
 fn correct_at_reference_point_is_identity() {
-    let sip = fit_field(&barrel(), 3, 3).polynomial;
+    let sip = fit_field(&barrel(), 3);
     assert_eq!(sip.correct(barrel().centre), barrel().centre);
 }
 
@@ -29,7 +29,7 @@ fn an_order_3_fit_recovers_a_cubic_field() {
         },
     ];
     for field in fields {
-        let sip = fit_field(&field, 3, 3).polynomial;
+        let sip = fit_field(&field, 3);
         for p in [
             DVec2::new(700.0, 300.0),
             DVec2::new(123.4, 876.5),
@@ -47,25 +47,21 @@ fn an_order_3_fit_recovers_a_cubic_field() {
 /// to the rounding of each fit.
 #[test]
 fn the_fit_is_linear_in_the_field() {
-    let one = fit_field(&barrel(), 3, 3).polynomial;
+    let one = fit_field(&barrel(), 3);
     let negated = fit_field(
         &RadialField {
             k: -1e-7,
             ..barrel()
         },
         3,
-        3,
-    )
-    .polynomial;
+    );
     let fivefold = fit_field(
         &RadialField {
             k: 5e-7,
             ..barrel()
         },
         3,
-        3,
-    )
-    .polynomial;
+    );
     for p in [DVec2::new(800.0, 200.0), DVec2::new(0.0, 0.0)] {
         let base = one.correct(p) - p;
         let opposite = negated.correct(p) - p;
@@ -90,9 +86,7 @@ fn jacobian_is_the_derivative_of_correct() {
             ..barrel()
         },
         5,
-        3,
-    )
-    .polynomial;
+    );
     let h = 1e-2;
     for p in [
         DVec2::new(500.0, 500.0),

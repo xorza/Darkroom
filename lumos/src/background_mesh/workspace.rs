@@ -1,7 +1,7 @@
 use crate::background_mesh::TileGrid;
-use crate::background_mesh::tile_stats::TileStats;
+use crate::background_mesh::tile_stats::{Eligible, TileStats};
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
@@ -40,6 +40,7 @@ impl MeshWorkspace {
         self.fill_tile_stats(
             pixels,
             mask,
+            None,
             tile_size,
             sigma_clip_iterations,
             median_filter,
@@ -70,6 +71,27 @@ impl MeshWorkspace {
         self.fill_tile_stats(
             pixels,
             mask,
+            None,
+            tile_size,
+            sigma_clip_iterations,
+            median_filter,
+        );
+        self.grid.as_ref().unwrap()
+    }
+
+    /// [`Self::tile_stats`] over the pixels `eligible` takes alone, such as one colour of a mosaic.
+    pub(crate) fn tile_stats_where(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        eligible: &Eligible<'_>,
+        tile_size: usize,
+        sigma_clip_iterations: usize,
+        median_filter: bool,
+    ) -> &TileGrid {
+        self.fill_tile_stats(
+            pixels,
+            None,
+            Some(eligible),
             tile_size,
             sigma_clip_iterations,
             median_filter,
@@ -81,6 +103,7 @@ impl MeshWorkspace {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
+        eligible: Option<&Eligible<'_>>,
         tile_size: usize,
         sigma_clip_iterations: usize,
         median_filter: bool,
@@ -109,7 +132,13 @@ impl MeshWorkspace {
             self.median_filter_scratch = Some(Buffer2::new_default(tiles_x, tiles_y));
         }
         let grid = self.grid.as_mut().unwrap();
-        grid.fill_tile_stats(pixels, mask, sigma_clip_iterations, &self.tile_scratch);
+        grid.fill_tile_stats(
+            pixels,
+            mask,
+            eligible,
+            sigma_clip_iterations,
+            &self.tile_scratch,
+        );
         if median_filter {
             grid.apply_median_filter(self.median_filter_scratch.as_mut().unwrap());
         }
@@ -151,7 +180,7 @@ mod tests {
     use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::concurrency::internals::{all_by, job_count};
+    use crate::concurrency::job_scratch_pool::internals::{all_by, job_count};
     use crate::math::size2us::Size2us;
     use imaginarium::Buffer2;
 
@@ -222,13 +251,14 @@ mod tests {
         let second_pixels = Buffer2::new_filled(64, 32, 0.25);
         let mut workspace = MeshWorkspace::default();
 
+        // 100 × 70 in 32s: remainders of 4 and 6, under half a tile, join their neighbours.
         let grid = workspace.compute(&first_pixels, None, 32, SIGMA_CLIP_ITERATIONS, false);
-        assert_eq!(grid.stats.width(), 4);
-        assert_eq!(grid.stats.height(), 3);
+        assert_eq!(grid.stats.width(), 3);
+        assert_eq!(grid.stats.height(), 2);
 
         let grid = workspace.compute(&first_pixels, None, 50, SIGMA_CLIP_ITERATIONS, false);
         assert_eq!(grid.stats.width(), 2);
-        assert_eq!(grid.stats.height(), 2);
+        assert_eq!(grid.stats.height(), 1);
 
         let grid = workspace.compute(&second_pixels, None, 16, SIGMA_CLIP_ITERATIONS, false);
         assert_eq!(grid.stats.width(), 4);

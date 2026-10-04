@@ -1,17 +1,10 @@
 //! One triangle and the scale-invariant descriptor it is matched by.
 //!
 //! A triangle is characterized by its two side ratios, which survive translation, rotation and
-//! scale, plus the orientation that distinguishes it from its mirror image. Degenerate shapes —
-//! too small, too flat, too elongated to give stable ratios — are rejected at construction.
+//! scale, plus the orientation that distinguishes it from its mirror image. A triangle too flat
+//! for its orientation to outlast the noise is rejected at construction.
 
 use glam::DVec2;
-
-/// Minimum side length for valid triangles.
-const MIN_TRIANGLE_SIDE: f64 = 1e-10;
-
-/// Minimum area squared for valid triangles (Heron's formula).
-/// Prevents very flat/degenerate triangles.
-const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,23 +25,25 @@ pub(super) struct Triangle {
 }
 
 impl Triangle {
-    /// Create a triangle from three positions.
+    /// Create a triangle from three positions; `None` when it stands lower than `min_height` over
+    /// its longest side, where noise of that scale can turn it over.
     ///
-    /// Returns None if the triangle is degenerate (collinear points).
-    pub(super) fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
+    /// The ratios move by about `σ/longest` under positional noise σ whatever the shape, so a
+    /// short side costs them nothing; Groth's (1986) limit on the side ratio protects invariants
+    /// built on the shortest side, which these are not. What a flat triangle loses is its
+    /// orientation, which a height within the noise does not fix.
+    pub(super) fn from_positions(
+        indices: [usize; 3],
+        positions: [DVec2; 3],
+        min_height: f64,
+    ) -> Option<Self> {
         let p0 = positions[0];
         let p1 = positions[1];
         let p2 = positions[2];
 
-        // Compute side lengths
         let d01 = (p1 - p0).length();
         let d12 = (p2 - p1).length();
         let d20 = (p0 - p2).length();
-
-        // Check for degenerate triangle (sides too short)
-        if d01 < MIN_TRIANGLE_SIDE || d12 < MIN_TRIANGLE_SIDE || d20 < MIN_TRIANGLE_SIDE {
-            return None;
-        }
 
         // Sort sides and track which vertices are at each position.
         // Tiebreak equal sides by original vertex index for deterministic ordering.
@@ -65,28 +60,14 @@ impl Triangle {
             side_vertex_pairs[2].0,
         ];
 
-        // Compute invariant ratios
+        // Twice the area over the longest side is the height onto it; a coincident pair leaves
+        // both at zero, and the test rejects it too.
         let longest = sides[2];
-        if longest < MIN_TRIANGLE_SIDE {
+        let twice_area = (p1 - p0).perp_dot(p2 - p0).abs();
+        if longest == 0.0 || twice_area < min_height * longest {
             return None;
         }
-
-        // Reject very elongated triangles (Groth 1986, R=10 threshold).
-        // Small perturbations in the shortest side cause large ratio changes,
-        // producing imprecise matches.
-        if longest / sides[0] > 10.0 {
-            return None;
-        }
-
         let ratios = (sides[0] / longest, sides[1] / longest);
-
-        // Check for very flat triangles using Heron's formula for area
-        // area² = s(s-a)(s-b)(s-c) where s = (a+b+c)/2
-        let s = (sides[0] + sides[1] + sides[2]) / 2.0;
-        let area_sq = s * (s - sides[0]) * (s - sides[1]) * (s - sides[2]);
-        if area_sq < MIN_TRIANGLE_AREA_SQ {
-            return None; // Too flat / nearly collinear
-        }
 
         // Reorder indices by geometric role:
         // indices[0] = vertex opposite shortest side
@@ -102,14 +83,7 @@ impl Triangle {
         let rp0 = positions[side_vertex_pairs[0].1];
         let rp1 = positions[side_vertex_pairs[1].1];
         let rp2 = positions[side_vertex_pairs[2].1];
-        let rv01 = rp1 - rp0;
-        let rv02 = rp2 - rp0;
-        let cross = rv01.x * rv02.y - rv01.y * rv02.x;
-        if cross.abs() < 1e-10 * longest * longest {
-            return None; // Degenerate
-        }
-
-        let orientation = if cross > 0.0 {
+        let orientation = if (rp1 - rp0).perp_dot(rp2 - rp0) > 0.0 {
             Orientation::CounterClockwise
         } else {
             Orientation::Clockwise

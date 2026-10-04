@@ -8,6 +8,8 @@ use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::inverse_warp::InverseWarp;
@@ -24,8 +26,13 @@ const JACOBIAN_MIN: f64 = 1e-30;
 /// under 0.1 input row — inside the extra row [`FrameSource::input_rows`] adds for it.
 const SIP_BOUNDARY_STRIDE: usize = 8;
 
-/// One input pixel's samples, one per channel.
-pub(super) type Fluxes = ArrayVec<f32, MAX_CHANNELS>;
+/// One input pixel's samples, one per channel, and each one's model variance when the drizzle
+/// measures a variance.
+#[derive(Debug)]
+pub(super) struct Fluxes {
+    pub(super) values: ArrayVec<f32, MAX_CHANNELS>,
+    pub(super) variances: ArrayVec<f32, MAX_CHANNELS>,
+}
 
 /// One input pixel, as both the coordinate the transform takes and the flat index its samples live
 /// at.
@@ -124,8 +131,8 @@ impl InputMap {
             Self::Transform { to_output, .. } => Some(to_output.apply(p)),
             Self::Sip(sip) => sip
                 .inverse
-                .apply(p)
-                .map(|mapped| sip.grid.apply(mapped.position)),
+                .position(p)
+                .map(|position| sip.grid.apply(position)),
         }
     }
 
@@ -195,7 +202,18 @@ pub(super) struct FrameSource<'a> {
     grid_area: f64,
     weight: f32,
     pixel_weights: Option<&'a [f32]>,
+    /// The frame's flags, when it carries one that excludes a pixel from deposit.
+    flags: Option<&'a PixelFlags>,
+    /// Each channel's noise model, or none when the drizzle measures no variance.
+    noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
 }
+
+/// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
+/// neighbours, not a measurement. Another frame's drop measures it. A saturated sample still
+/// deposits: it is a lower bound, and the only value some cores have.
+const EXCLUDED: QualityFlags = QualityFlags::NO_DATA
+    .union(QualityFlags::COSMIC_RAY)
+    .union(QualityFlags::REPAIRED);
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
@@ -206,7 +224,9 @@ impl<'a> FrameSource<'a> {
         scale: f64,
         weight: f32,
         pixel_weights: Option<&'a Buffer2<f32>>,
+        noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
     ) -> Self {
+        debug_assert!(noise.is_empty() || noise.len() == image.channels());
         Self {
             planes: (0..image.channels())
                 .map(|channel| image.channel(channel).pixels())
@@ -216,6 +236,8 @@ impl<'a> FrameSource<'a> {
             grid_area: scale * scale,
             weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
+            flags: image.flags.as_ref(),
+            noise,
         }
     }
 
@@ -225,7 +247,15 @@ impl<'a> FrameSource<'a> {
 
     #[inline]
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
-        self.planes.iter().map(|plane| plane[pixel.index]).collect()
+        let values: ArrayVec<f32, MAX_CHANNELS> =
+            self.planes.iter().map(|plane| plane[pixel.index]).collect();
+        let variances = self
+            .noise
+            .iter()
+            .zip(&values)
+            .map(|(model, &value)| model.variance_at(value))
+            .collect();
+        Fluxes { values, variances }
     }
 
     /// The drop at `pixel`.
@@ -282,8 +312,9 @@ impl<'a> FrameSource<'a> {
     /// The input rows whose drops can reach output `rows`: a drop reaching `output_margin` output
     /// rows, or `input_margin` input rows, from its pixel's centre.
     ///
-    /// The output rows widened by `output_margin`, taken back to the input, and the input rows
-    /// they span widened by `input_margin`. Exact rather than estimated: a drop that reaches the
+    /// The output rows widened by `output_margin` — and the columns too, since a rotated drop
+    /// reaches the band from beside the grid as well as from above and below it — taken back to
+    /// the input, and the input rows they span widened by `input_margin`. Exact rather than estimated: a drop that reaches the
     /// band has a point inside it, and that point's input row lies within `input_margin` of its
     /// pixel's, or its output row within `output_margin` of the band. Deliberately generous at the
     /// row level — over-scanning costs one transform and a rejected row test per pixel, measured at
@@ -301,8 +332,9 @@ impl<'a> FrameSource<'a> {
     ) -> Range<usize> {
         let low = rows.start as f64 - output_margin;
         let high = rows.end as f64 - 1.0 + output_margin;
-        let right = output_width as f64 - 1.0;
-        let Some(extent) = self.input_row_extent(low, high, right) else {
+        let left = -output_margin;
+        let right = output_width as f64 - 1.0 + output_margin;
+        let Some(extent) = self.input_row_extent(low, high, left, right) else {
             return 0..self.size.height;
         };
 
@@ -314,19 +346,19 @@ impl<'a> FrameSource<'a> {
         start..end.min(height).max(start)
     }
 
-    /// The lowest and highest input row the output rectangle `[0, right] × [low, high]` maps onto,
-    /// or `None` when no bound exists and the whole frame has to be scanned.
+    /// The lowest and highest input row the output rectangle `[left, right] × [low, high]` maps
+    /// onto, or `None` when no bound exists and the whole frame has to be scanned.
     #[expect(
         clippy::cast_sign_loss,
-        reason = "an output rectangle's right edge and height are non-negative, and an empty one saturates to 0"
+        reason = "an output rectangle's width and height are non-negative, and an empty one saturates to 0"
     )]
-    fn input_row_extent(&self, low: f64, high: f64, right: f64) -> Option<RowExtent> {
+    fn input_row_extent(&self, low: f64, high: f64, left: f64, right: f64) -> Option<RowExtent> {
         match &self.map {
             InputMap::Transform { to_input, .. } => {
                 let corners = [
-                    DVec2::new(0.0, low),
+                    DVec2::new(left, low),
                     DVec2::new(right, low),
-                    DVec2::new(0.0, high),
+                    DVec2::new(left, high),
                     DVec2::new(right, high),
                 ];
                 // The corner hull bounds the interior only while the inverse's homogeneous divisor
@@ -354,9 +386,9 @@ impl<'a> FrameSource<'a> {
                 // region for any map without folds, which a converging inverse guarantees here.
                 let from_grid = sip.grid.inverse();
                 let back = |p: DVec2| sip.warp.apply(from_grid.apply(p)).y;
-                let columns = (0..=right as usize)
+                let columns = (0..=(right - left).ceil() as usize)
                     .step_by(SIP_BOUNDARY_STRIDE)
-                    .map(|x| x as f64)
+                    .map(|dx| (left + dx as f64).min(right))
                     .chain([right]);
                 let rows = (0..=(high - low).ceil() as usize)
                     .step_by(SIP_BOUNDARY_STRIDE)
@@ -365,7 +397,7 @@ impl<'a> FrameSource<'a> {
                 let horizontal =
                     columns.flat_map(|x| [back(DVec2::new(x, low)), back(DVec2::new(x, high))]);
                 let vertical =
-                    rows.flat_map(|y| [back(DVec2::new(0.0, y)), back(DVec2::new(right, y))]);
+                    rows.flat_map(|y| [back(DVec2::new(left, y)), back(DVec2::new(right, y))]);
                 let extent = RowExtent::of(horizontal.chain(vertical));
                 Some(RowExtent {
                     first: extent.first - 1.0,
@@ -375,13 +407,21 @@ impl<'a> FrameSource<'a> {
         }
     }
 
-    /// Frame weight × pixel weight at `pixel`, or `None` when the product is zero.
+    /// Frame weight × pixel weight at `pixel`, or `None` when the product is zero or the pixel's
+    /// flags exclude it.
     ///
     /// Zero is the one value worth testing for: it deposits nothing anywhere, and letting it
     /// through would have a frame that carries no weight still counted as covering every pixel it
-    /// reached.
+    /// reached. An excluded pixel is the same case: the decoder's fill under a null would otherwise
+    /// pull every output pixel it reaches toward the frame's median.
     #[inline]
     fn deposit_weight(&self, pixel: InputPixel) -> Option<f64> {
+        if self
+            .flags
+            .is_some_and(|flags| flags.at(pixel.index).intersects(EXCLUDED))
+        {
+            return None;
+        }
         let pixel_weight = self
             .pixel_weights
             .map_or(1.0, |weights| weights[pixel.index]);
@@ -406,6 +446,8 @@ fn output_grid(scale: f64) -> Transform {
 pub(crate) mod internals {
     use std::ops::Range;
 
+    use arrayvec::ArrayVec;
+
     use crate::drizzle::accumulator::frame_source::FrameSource;
     use crate::io::image::linear::LinearImage;
     use crate::registration::transform::WarpTransform;
@@ -420,7 +462,7 @@ pub(crate) mod internals {
         output_margin: f64,
         input_margin: f64,
     ) -> Range<usize> {
-        FrameSource::new(image, warp, scale, 1.0, None).input_rows(
+        FrameSource::new(image, warp, scale, 1.0, None, ArrayVec::new()).input_rows(
             &rows,
             output_width,
             output_margin,

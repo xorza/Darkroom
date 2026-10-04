@@ -33,7 +33,7 @@ pub enum Deblend {
     /// own star when it holds at least `min_contrast` of the component's residual flux above
     /// that threshold.
     MultiThreshold {
-        /// Levels in the tree, between 2 and [`MAX_DEBLEND_N_THRESHOLDS`].
+        /// Levels in the tree, between 2 and 256.
         n_thresholds: usize,
         /// A branch's share of the component's residual flux, in `[0, 1]`.
         min_contrast: f32,
@@ -56,10 +56,6 @@ pub struct DetectionConfig {
     pub sigma_threshold: f32,
     /// Pixel connectivity used to form candidate regions.
     pub connectivity: Connectivity,
-    /// Minor-to-major axis ratio for the matched-filter PSF.
-    pub psf_axis_ratio: f32,
-    /// Matched-filter PSF angle in radians.
-    pub psf_angle: f32,
     /// How components are split into stars.
     pub deblend: Deblend,
     /// Minimum separation between deblended peaks in pixels.
@@ -77,8 +73,6 @@ impl Default for DetectionConfig {
         Self {
             sigma_threshold: 4.0,
             connectivity: Connectivity::Eight,
-            psf_axis_ratio: 1.0,
-            psf_angle: 0.0,
             deblend: Deblend::LocalMaxima {
                 min_prominence: 0.3,
             },
@@ -98,13 +92,6 @@ impl DetectionConfig {
             self.sigma_threshold,
             |value| value > 0.0,
         )?;
-        InvalidConfigField::finite(
-            "psf_axis_ratio",
-            "finite and in (0, 1]",
-            self.psf_axis_ratio,
-            |value| value > 0.0 && value <= 1.0,
-        )?;
-        InvalidConfigField::finite_only("psf_angle", self.psf_angle)?;
         InvalidConfigField::check(
             self.deblend_min_separation >= 1,
             "deblend_min_separation",

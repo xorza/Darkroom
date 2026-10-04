@@ -1,8 +1,8 @@
 use crate::image_ops::hdr::Hdr;
-use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
+use crate::math::wavelet::{atrous_smooth, max_scales};
 use std::mem;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
@@ -113,10 +113,34 @@ fn hdr_preserves_fine_detail() {
     );
 }
 
-/// The literal reference: materialize every detail layer, flatten the residual toward its
-/// mean, re-sum — the computation `hdr_map` collapses algebraically.
+/// The starlet residual of `plane` over `scales`, as `hdr_map` smooths it.
+fn residual(plane: &[f32], size: Size2us, scales: usize) -> Vec<f32> {
+    let mut c_curr = Buffer2::new(size.width, size.height, plane.to_vec());
+    let mut c_next = Buffer2::new_default(size.width, size.height);
+    let mut tmp = Buffer2::new_default(size.width, size.height);
+    for j in 0..scales {
+        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        mem::swap(&mut c_curr, &mut c_next);
+    }
+    c_curr.pixels().to_vec()
+}
+
+/// What compressing a linear base by subtraction gives: `I − amount·(residual − mean)`, the
+/// approach the log domain replaces.
+fn linear_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32> {
+    let residual = residual(px, size, scales);
+    let mean = (residual.iter().map(|&v| f64::from(v)).sum::<f64>() / residual.len() as f64) as f32;
+    px.iter()
+        .zip(&residual)
+        .map(|(&i, &r)| i - amount * (r - mean))
+        .collect()
+}
+
+/// The literal reference: materialize every detail layer of the log intensity, flatten the
+/// residual toward its mean, re-sum and exponentiate — the computation `hdr_map` collapses
+/// algebraically. Every input here is above the log floor.
 fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32> {
-    let mut c_curr = Buffer2::new(size.width, size.height, px.to_vec());
+    let mut c_curr = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
     let mut c_next = Buffer2::new_default(size.width, size.height);
     let mut tmp = Buffer2::new_default(size.width, size.height);
     let mut layers: Vec<Vec<f32>> = Vec::new();
@@ -139,7 +163,7 @@ fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f
         .map(|i| {
             let flattened = mean + keep * (residual[i] - mean);
             let details: f32 = layers.iter().map(|l| l[i]).sum();
-            (flattened + details).clamp(0.0, 1.0)
+            (flattened + details).exp().clamp(0.0, 1.0)
         })
         .collect()
 }
@@ -153,22 +177,25 @@ fn hdr_matches_explicit_pyramid_reference() {
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = img.channel(0);
     let expected = reference_hdr(&px, size, scales, amount);
-    // Both sides hold values ≤ 1. The reference rounds each of its three layer differences, their
-    // two sums, the residual's flattening twice and the final sum; the collapse rounds a handful
-    // of times on its own: under 8ε absolute between them.
+    // The log plane lies in [ln 0.1, 0], under 2.31 in size. The reference rounds each of its three
+    // layer differences, their two sums, the residual's flattening twice and the final sum, each
+    // by up to an ulp of 2.31 (2ε of it); the collapse rounds a handful of times on its own. Each
+    // absolute error δ of the log is a relative δ of the output, which is at most 1, and `exp`
+    // and the clamp add 2ε: under (10·2·2.31 + 2)ε ≈ 48ε absolute.
     assert_close_slice!(
         out.pixels(),
         expected,
-        8.0 * f32::EPSILON,
+        48.0 * f32::EPSILON,
         "collapsed vs pyramid"
     );
 }
 
 /// A flat plane has no large-scale contrast to compress: whatever the amount, it comes back as
-/// itself. Its residual is the plane to the smoothing's rounding, so its mean is too — when the
+/// itself. Its log residual is `ln 0.2` to the smoothing's rounding, so its mean is too — when the
 /// mean is taken in f64. A sequential f32 fold over these 262 144 samples drifts by about n·ε/2
-/// = 1.6% of 0.2, which `amount` = 0.9 would carry into every pixel; the smoothing's own rounding
-/// is a few ulps of 0.2, held here to 8.
+/// = 1.6% of ln 0.2, which `amount` = 0.9 would carry into every pixel; the smoothing's own
+/// rounding is a few ulps of |ln 0.2| = 1.61, two of which move the factor by 2·2ε·1.61, held here
+/// with the product's rounding to 8ε relative.
 #[test]
 fn a_flat_plane_comes_back_as_itself() {
     let size = Size2us::new(512, 512);
@@ -219,4 +246,95 @@ fn scales_change_the_output_up_to_the_frame_limit() {
     assert_eq!(max_scales(size), 5);
     assert_ne!(run(2), run(4));
     assert_eq!(run(20), run(5));
+}
+
+/// A faint halo beside a bright core keeps its light. The core, a disk of radius 6 at 1.0 on a sky
+/// of 0.02, fills the residual around it, so a halo pixel 8 px from its centre sits far below its
+/// local base. Subtracting the compressed base takes such a pixel below black — the control shows
+/// it — while the log domain scales it by a positive factor: every pixel comes out above 0.
+#[test]
+fn a_halo_pixel_stays_above_black() {
+    let size = Size2us::new(64, 64);
+    let centre = Vec2us::new(32, 32);
+    let px: Vec<f32> = (0..size.pixel_count())
+        .map(|index| {
+            let p = size.point_of(index);
+            let (dx, dy) = (p.x as f32 - centre.x as f32, p.y as f32 - centre.y as f32);
+            if dx * dx + dy * dy <= 36.0 { 1.0 } else { 0.02 }
+        })
+        .collect();
+    let (scales, amount) = (4, 0.8);
+    let halo = size.index_of(Vec2us::new(40, 32));
+    assert!(
+        linear_hdr(&px, size, scales, amount)[halo] < 0.0,
+        "the control: subtraction takes the halo below black"
+    );
+    let mut img = gray(size, px);
+    Hdr { scales, amount }.apply(&mut img).unwrap();
+    let out = img.channel(0).pixels();
+    assert!(
+        out.iter().all(|&v| v > 0.0),
+        "min {}",
+        out.iter().fold(1.0f32, |a, &b| a.min(b))
+    );
+}
+
+/// A near-black pixel keeps its ratio to its neighbour: both take the factor of the base around
+/// them, so 1e-3 beside 1e-4 in a dark corner stays near ten times brighter. Their bases differ
+/// only through their own logs, which the composite kernel weighs near its centre; the output
+/// ratio is `10·exp(−amount·Δ)` for the difference `Δ` of their log residuals, to the roundings
+/// of the two factors and the quotient (8ε), and here 0.8% from 10. Subtraction instead lifts both
+/// by the same amount, which turns the noise of a near-black region into bright speckle: the
+/// control's ratio is near 1.
+#[test]
+fn near_black_pixels_keep_their_ratio() {
+    let size = Size2us::new(64, 64);
+    let mut px = dome(size);
+    let (dim, bright) = (
+        size.index_of(Vec2us::new(2, 2)),
+        size.index_of(Vec2us::new(3, 2)),
+    );
+    px[dim] = 1e-4;
+    px[bright] = 1e-3;
+    let (scales, amount) = (4, 0.8);
+    let control = linear_hdr(&px, size, scales, amount);
+    assert!(
+        control[bright] / control[dim] < 1.5,
+        "the control: subtraction lifts both alike"
+    );
+    let logs: Vec<f32> = px.iter().map(|v| v.ln()).collect();
+    let base = residual(&logs, size, scales);
+    let expected = (px[bright] / px[dim]) * (-amount * (base[bright] - base[dim])).exp();
+    let mut img = rgb(size, px.clone(), px.clone(), px);
+    Hdr { scales, amount }.apply(&mut img).unwrap();
+    let out = img.channel(0).pixels();
+    let ratio = out[bright] / out[dim];
+    assert!(
+        (ratio - expected).abs() <= 8.0 * f32::EPSILON * expected,
+        "{ratio} vs {expected}"
+    );
+    assert!((ratio - 10.0).abs() <= 0.1, "{ratio}");
+}
+
+/// A pixel with no positive intensity is black on grey and on colour alike.
+#[test]
+fn no_positive_intensity_is_black_on_grey_and_colour() {
+    let size = Size2us::new(16, 16);
+    let mut px = vec![0.3f32; size.pixel_count()];
+    px[0] = -0.01;
+    px[1] = 0.0;
+    let mut grey = gray(size, px.clone());
+    let mut colour = rgb(size, px.clone(), px.clone(), px);
+    let hdr = Hdr {
+        scales: 2,
+        amount: 0.5,
+    };
+    hdr.apply(&mut grey).unwrap();
+    hdr.apply(&mut colour).unwrap();
+    for index in [0, 1] {
+        assert_eq!(grey.channel(0).pixels()[index], 0.0);
+        for channel in 0..3 {
+            assert_eq!(colour.channel(channel).pixels()[index], 0.0);
+        }
+    }
 }

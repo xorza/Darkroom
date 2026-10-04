@@ -26,15 +26,15 @@ impl Default for CosmicRayConfig {
             objlim: 5.0,
             sigfrac: 0.3,
             niter: 4,
-            noise: NoiseEstimation::Empirical,
+            noise: NoiseEstimation::Measured,
         }
     }
 }
 
 impl CosmicRayConfig {
     /// Check every field against the range the detector can run with: positive thresholds, a
-    /// growth fraction of the detection threshold, at least one pass, and a camera model with a
-    /// positive gain and a read noise that is not negative.
+    /// growth fraction of the detection threshold, at least one pass, and a positive gain when one
+    /// is given.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite(
             "cosmic-ray sigclip",
@@ -60,42 +60,34 @@ impl CosmicRayConfig {
             "at least 1",
             self.niter as f64,
         )?;
-        if let NoiseEstimation::Parametric { gain, read_noise } = self.noise {
-            InvalidConfigField::finite("cosmic-ray gain", "finite and positive", gain, |v| {
-                v > 0.0
-            })?;
+        if let NoiseEstimation::Gain { electrons_per_adu } = self.noise {
             InvalidConfigField::finite(
-                "cosmic-ray read_noise",
-                "finite and not negative",
-                read_noise,
-                |v| v >= 0.0,
+                "cosmic-ray electrons_per_adu",
+                "finite and positive",
+                electrons_per_adu,
+                |v| v > 0.0,
             )?;
         }
         Ok(())
     }
 }
 
-/// Per-pixel noise `N` for the significance image `S = L⁺/N` (the mono path adds a ½ for its ×2
-/// subsample). Shared by all CFA paths.
+/// Where the per-pixel noise `N` of the significance image `S = L⁺/N` takes the camera's gain from
+/// (the mono path adds a ½ for its ×2 subsample).
+///
+/// Either way `N² = σ² + max(m₅ − sky, 0)·k`, as astroscrappy's `√(m₅ + rn² + bkg)` in electrons:
+/// `sky` and `σ` are the local background of the pixel's colour, read from a tile mesh of the frame,
+/// so σ already holds the read noise, the subtracted dark's and sky's photon noise and the
+/// quantization; `m₅` is the median-filtered signal, and `k` is the variance one unit of signal
+/// above the sky adds, `1/electrons_per_unit`.
 #[derive(Debug, Clone)]
 pub enum NoiseEstimation {
-    /// Self-calibrating: a robust background σ (MAD) as the read-noise floor, scaled by the
-    /// median-filtered signal for the Poisson term. Needs no camera parameters (default).
-    ///
-    /// This is a pragmatic approximation, **not** the canonical L.A.Cosmic noise model — ccdproc/
-    /// astroscrappy always work in electrons (use [`NoiseEstimation::Parametric`] for that). It
-    /// assumes a **sky-Poisson-dominated background** (the Poisson slope is anchored at the
-    /// background, `σ_bg²/bg`), so on read-noise-dominated frames it over-estimates noise in bright
-    /// regions and therefore slightly *under*-flags there. Chosen as the default because `gain`/
-    /// `read_noise` are often unknown or unreliable for normalized data.
-    Empirical,
-    /// Exact Poisson + read noise `N_e = √(gain·I_ADU + read_noise²)`. The ADU one sample unit is
-    /// worth comes from the frame: its decoder records the ADC step as the frame's quantization
-    /// σ, and a frame without one cannot use this model.
-    Parametric {
-        /// e⁻/ADU.
-        gain: f32,
-        /// Read noise, e⁻.
-        read_noise: f32,
-    },
+    /// The gain the frame states (its `EGAIN` over a declared scale). Without one, `k` is
+    /// `σ²/max(sky, σ)`, which takes the background as sky-photon-dominated: on read-noise-dominated
+    /// frames it over-estimates the noise in bright regions and under-flags there slightly.
+    Measured,
+    /// A gain the caller states, in e⁻/ADU. The ADU one sample unit is worth comes from the frame:
+    /// its declared scale, else the ADC step its decoder recorded as the quantization σ, and a frame
+    /// with neither cannot use this.
+    Gain { electrons_per_adu: f32 },
 }

@@ -2,27 +2,29 @@
 
 use crate::drizzle::error::DrizzleConfigError;
 use crate::error::InvalidConfigField;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrizzleKernel {
-    /// Square kernel: true polygon clipping via Sutherland-Hodgman / Green's theorem.
-    /// Transforms all 4 corners of each input pixel drop, computes exact quadrilateral-
-    /// to-output-pixel overlap area. Correct for any transform including rotation and shear.
+    /// Square kernel: the exact overlap area of each drop's transformed quadrilateral with every
+    /// output pixel, by STScI's `boxer` / `sgarea` edge integration. Correct for any transform,
+    /// rotation and shear included. Default, as in DrizzlePac, PixInsight and Siril.
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
+    #[default]
     Square,
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
-    /// of rotation. Fast and adequate when rotation between frames is small. Default.
-    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there uses full polygon clipping.)
-    #[default]
+    /// of rotation, so it is exact only at rotations of 0°, 90° and 180°.
+    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there integrates the transformed polygon's
+    /// edges, as [`Self::Square`] does.)
     Turbo,
     /// Point kernel - single pixel contribution.
     /// Fastest but requires very good dithering.
     Point,
-    /// Gaussian droplet with configurable FWHM.
-    /// Smoother output, slight flux redistribution.
+    /// Gaussian droplet whose FWHM is the drop size, `pixfrac·scale` output pixels, as in
+    /// `STScI` drizzle. Smoother output, slight flux redistribution.
     Gaussian,
     /// Lanczos kernel for high-quality interpolation.
     /// Best quality but slowest. Only valid at pixfrac=1.0, scale=1.0.
@@ -73,6 +75,9 @@ pub struct DrizzleConfig {
     ///
     /// [`StackConfig::quality`]: crate::StackConfig::quality
     pub quality: QualityPlanes,
+    /// How [`drizzle_stack`](crate::drizzle_stack) reads its frames. It streams them one at a time
+    /// and never spills, so only the decode policy and the memory reading apply.
+    pub ingest: IngestConfig,
 }
 
 impl Default for DrizzleConfig {
@@ -80,10 +85,11 @@ impl Default for DrizzleConfig {
         Self {
             scale: 2.0,
             pixfrac: 0.8,
-            kernel: DrizzleKernel::Turbo,
+            kernel: DrizzleKernel::Square,
             fill_value: 0.0,
             min_weight_fraction: 0.1,
-            quality: QualityPlanes::ALL,
+            quality: QualityPlanes::STANDARD,
+            ingest: IngestConfig::default(),
         }
     }
 }
@@ -125,7 +131,7 @@ impl DrizzleConfig {
         self
     }
 
-    /// Set minimum coverage threshold.
+    /// Set the fill gate, [`Self::min_weight_fraction`].
     #[must_use]
     pub const fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
         self.min_weight_fraction = min_weight_fraction;

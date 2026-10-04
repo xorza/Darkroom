@@ -7,8 +7,9 @@ use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::SAMPLE_SCALE_KEYWORD;
+
+use crate::io::image::fits::metadata;
+use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::ScaleOrigin;
@@ -35,8 +36,10 @@ pub(super) struct FitsHduDescription<'a> {
 impl<'a> FitsHduDescription<'a> {
     pub(super) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
         let image = hdu.image().map_err(|source| match source {
-            FitsError::NotAnImage => fits_unsupported(path, "selected HDU is not an image"),
-            source => fits_err(path, source),
+            FitsError::NotAnImage => {
+                ImageError::fits_unsupported(path, "selected HDU is not an image")
+            }
+            source => ImageError::fits(path, source),
         })?;
         Ok(Self {
             header: &hdu.header,
@@ -55,8 +58,12 @@ pub(super) struct FitsDecodePlan {
     pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
     pub(super) sample_scale: SampleScale,
+    /// The header's `DATAMAX`, in the file's sample units: the decode flags saturation against it.
+    pub(super) data_max: Option<f64>,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
+    /// The flag plane the decode builds when the header allows a null or declares a `DATAMAX`.
+    flag_plane_bytes: u64,
     pub(super) peak_bytes: u64,
     pub(super) rows_per_chunk: usize,
 }
@@ -73,8 +80,42 @@ impl FitsDecodePlan {
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
     pub(super) const fn may_carry_nulls(&self) -> bool {
-        !self.sample_type.is_integer() || self.scaling.blank.is_some()
+        may_carry_nulls(self.sample_type, &self.scaling)
     }
+
+    /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
+    /// as read, and the flag plane the decode may hold until the two are joined.
+    pub(super) fn admit_flags_extension(
+        &self,
+        path: &Path,
+        memory_limit_bytes: u64,
+    ) -> Result<(), ImageError> {
+        let extension_bytes = checked_size_bytes(
+            path,
+            self.dimensions.pixel_count(),
+            1,
+            "FITS flags extension",
+        )?;
+        let required = self
+            .decoded_bytes
+            .checked_add(extension_bytes)
+            .and_then(|bytes| bytes.checked_add(self.flag_plane_bytes))
+            .ok_or_else(|| {
+                ImageError::fits_unsupported(path, "FITS flags memory size overflows u64")
+            })?;
+        enforce_fits_budget(
+            path,
+            "decoded output with its flags",
+            required,
+            memory_limit_bytes,
+        )
+    }
+}
+
+/// Whether a decode of samples stored as `sample_type` under `scaling` could produce pixels with no
+/// measurement; see [`FitsDecodePlan::may_carry_nulls`].
+const fn may_carry_nulls(sample_type: SampleType, scaling: &Scaling) -> bool {
+    !sample_type.is_integer() || scaling.blank.is_some()
 }
 
 /// What one full-scale span of the stored integer type measures, in physical units.
@@ -94,13 +135,13 @@ impl FitsDecodePlan {
 /// Anything else — a `DATAMAX` of about 1, or none at all — is taken as already normalized, which
 /// is PixInsight's default for a float FITS and what keeps a Lumos-written master round-tripping.
 ///
-/// The test is on the *header*, never on the pixels, and that is where this departs from Siril:
-/// with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read path,
-/// which is why its full and partial reads can disagree about the same file). A divisor read off
-/// each frame's own extrema differs frame to frame, which is exactly what
-/// [`crate::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
-/// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
-/// rather than the decoder guessing one.
+/// The divisor comes from the *header*, never from the pixels, and that is where this departs from
+/// Siril: with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read
+/// path, which is why its full and partial reads can disagree about the same file). A divisor read
+/// off each frame's own extrema differs frame to frame, which is exactly what [`crate::combine`]
+/// rejects a frame set for. The scan still decides one thing: a frame taken as normalized whose
+/// samples reach past Siril's threshold is refused rather than loaded as it stands
+/// ([`SampleScale::verify_normalized`]).
 fn sample_scale(
     path: &Path,
     header: &Header,
@@ -110,8 +151,9 @@ fn sample_scale(
 ) -> Result<SampleScale, ImageError> {
     let divided_by = |divisor: f32, origin| SampleScale {
         divisor,
-        physical: divisor,
+        physical: f64::from(divisor),
         origin,
+        verify_normalized: false,
     };
     let steps = match stored {
         FitsBitpix::U8 => f64::from(u8::MAX),
@@ -122,19 +164,24 @@ fn sample_scale(
             // A lumos-written file stores its samples already normalized and records the scale
             // they were normalized by; that record beats every guess below.
             if let Some(recorded) = header
-                .get_real(SAMPLE_SCALE_KEYWORD)
-                .map_err(|source| fits_err(path, source))?
+                .get_real(domain_keywords::SAMPLE_SCALE)
+                .map_err(|source| ImageError::fits(path, source))?
             {
                 if !recorded.is_finite() || recorded <= 0.0 {
-                    return Err(fits_unsupported(
+                    return Err(ImageError::fits_unsupported(
                         path,
-                        format!("{SAMPLE_SCALE_KEYWORD} {recorded} must be finite and positive"),
+                        format!(
+                            "{} {recorded} must be finite and positive",
+                            domain_keywords::SAMPLE_SCALE
+                        ),
                     ));
                 }
                 return Ok(SampleScale {
                     divisor: 1.0,
-                    physical: recorded as f32,
-                    origin: ScaleOrigin::Declared,
+                    physical: recorded,
+                    origin: domain_keywords::read_origin(header)
+                        .map_err(|source| ImageError::fits(path, source))?,
+                    verify_normalized: false,
                 });
             }
             return match float_scale {
@@ -145,7 +192,7 @@ fn sample_scale(
                     // The caller's own figure, so it is checked here rather than trusted: a
                     // non-positive one would invert or erase the samples.
                     if !scale.is_finite() || scale <= 0.0 {
-                        return Err(fits_unsupported(
+                        return Err(ImageError::fits_unsupported(
                             path,
                             format!("declared floating-point full scale {scale} must be positive"),
                         ));
@@ -155,12 +202,16 @@ fn sample_scale(
                 FitsFloatScale::Auto => {
                     let data_max = header
                         .get_real("DATAMAX")
-                        .map_err(|source| fits_err(path, source))?;
-                    let divisor = match data_max {
-                        Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
-                        _ => 1.0,
-                    };
-                    Ok(divided_by(divisor, ScaleOrigin::Assumed))
+                        .map_err(|source| ImageError::fits(path, source))?;
+                    Ok(match data_max {
+                        Some(max) if max > FLOAT_ADU_DATAMAX_MIN => {
+                            divided_by(FLOAT_ADU_DIVISOR, ScaleOrigin::Assumed)
+                        }
+                        _ => SampleScale {
+                            verify_normalized: true,
+                            ..divided_by(1.0, ScaleOrigin::Assumed)
+                        },
+                    })
                 }
             };
         }
@@ -169,14 +220,14 @@ fn sample_scale(
     // non-finite one leaves no span to normalize into. Reject rather than emit infinities.
     let bscale = scaling.bscale;
     if !bscale.is_finite() || bscale == 0.0 {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("BSCALE {bscale} leaves no scale to normalize integer samples by"),
         ));
     }
     let divisor = bscale.abs() * steps;
     if !divisor.is_finite() || divisor <= 0.0 {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("BSCALE {bscale} overflows the normalization scale for {stored:?} samples"),
         ));
@@ -192,8 +243,20 @@ pub(super) struct SampleScale {
     pub(super) divisor: f32,
     /// Multiply a decoded sample by this to recover the file's physical value. Equal to `divisor`
     /// except for a lumos-written file, whose samples were stored already divided.
-    pub(super) physical: f32,
+    pub(super) physical: f64,
     pub(super) origin: ScaleOrigin,
+    /// The samples were taken as already normalized because nothing declared otherwise, so the
+    /// decode checks that they are: a maximum past [`FLOAT_ADU_DATAMAX_MIN`] is ADU, and loading it
+    /// as normalized would put the saturation level at 0.95 ADU.
+    pub(super) verify_normalized: bool,
+}
+
+impl SampleScale {
+    /// Whether a frame whose samples reach `maximum` after the division is what this scale says it
+    /// is. Only an unchecked "already normalized" can be wrong this way.
+    pub(super) fn accepts_maximum(&self, maximum: f32) -> bool {
+        !self.verify_normalized || f64::from(maximum) <= FLOAT_ADU_DATAMAX_MIN
+    }
 }
 
 pub(super) fn preflight_fits_image(
@@ -215,31 +278,36 @@ pub(super) fn preflight_fits_image(
         "decoded FITS output",
     )?;
     let row_samples = dimensions.width();
-    let row_f32_bytes = row_samples
-        .checked_mul(size_of::<f32>())
-        .ok_or_else(|| fits_unsupported(path, "FITS output row size overflows usize"))?;
+    let row_f32_bytes = row_samples.checked_mul(size_of::<f32>()).ok_or_else(|| {
+        ImageError::fits_unsupported(path, "FITS output row size overflows usize")
+    })?;
     let rows_per_chunk = (FITS_DECODE_CHUNK_BYTES / row_f32_bytes.max(1))
         .max(1)
         .min(dimensions.height());
-    let chunk_samples = row_samples
-        .checked_mul(rows_per_chunk)
-        .ok_or_else(|| fits_unsupported(path, "FITS decode chunk size overflows usize"))?;
+    let chunk_samples = row_samples.checked_mul(rows_per_chunk).ok_or_else(|| {
+        ImageError::fits_unsupported(path, "FITS decode chunk size overflows usize")
+    })?;
     let native_chunk_bytes = checked_size_bytes(
         path,
         chunk_samples,
         stored_bitpix.elem_size(),
         "FITS native decode chunk",
     )?;
-    let physical_chunk_bytes = checked_size_bytes(
-        path,
-        chunk_samples,
-        size_of::<f32>(),
-        "FITS physical decode chunk",
-    )?;
+    let data_max = metadata::read_data_max(hdu.header);
+    // A byte per pixel, which the decode builds beside the planes once it meets a null or a
+    // saturation level to flag against.
+    let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || data_max.is_some() {
+        checked_size_bytes(path, dimensions.pixel_count(), 1, "FITS flag plane")?
+    } else {
+        0
+    };
+    // The reader's copy of a chunk as stored, and the scratch it byte-swaps or decodes it into,
+    // which the conversion writes straight into the output and which is still held while the flag
+    // plane is built.
     let peak_bytes = decoded_bytes
         .checked_add(native_chunk_bytes)
         .and_then(|bytes| bytes.checked_add(native_chunk_bytes))
-        .and_then(|bytes| bytes.checked_add(physical_chunk_bytes))
+        .and_then(|bytes| bytes.checked_add(flag_plane_bytes))
         .and_then(|bytes| {
             if hdu.kind == HduKind::CompressedImage {
                 bytes.checked_add(hdu.source_bytes.checked_mul(2)?)
@@ -247,7 +315,7 @@ pub(super) fn preflight_fits_image(
                 Some(bytes)
             }
         })
-        .ok_or_else(|| fits_unsupported(path, "FITS peak memory size overflows u64"))?;
+        .ok_or_else(|| ImageError::fits_unsupported(path, "FITS peak memory size overflows u64"))?;
 
     enforce_fits_budget(
         path,
@@ -269,8 +337,10 @@ pub(super) fn preflight_fits_image(
         sample_type,
         scaling,
         sample_scale,
+        data_max,
         source_bytes: hdu.source_bytes,
         decoded_bytes,
+        flag_plane_bytes,
         peak_bytes,
         rows_per_chunk,
     })
@@ -285,7 +355,7 @@ fn checked_size_bytes(
     elements
         .checked_mul(element_bytes)
         .and_then(|bytes| u64::try_from(bytes).ok())
-        .ok_or_else(|| fits_unsupported(path, format!("{name} size overflows usize")))
+        .ok_or_else(|| ImageError::fits_unsupported(path, format!("{name} size overflows usize")))
 }
 
 fn enforce_fits_budget(
@@ -295,7 +365,7 @@ fn enforce_fits_budget(
     memory_limit_bytes: u64,
 ) -> Result<(), ImageError> {
     if required > memory_limit_bytes {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "{name} requires {required} bytes, exceeding the FITS load budget of {memory_limit_bytes} bytes"
@@ -312,7 +382,9 @@ fn padded_data_bytes(path: &Path, bytes: u64) -> Result<u64, ImageError> {
     bytes
         .checked_add(BLOCK_SIZE as u64 - 1)
         .map(|padded| padded / BLOCK_SIZE as u64 * BLOCK_SIZE as u64)
-        .ok_or_else(|| fits_unsupported(path, "FITS padded data-unit size overflows u64"))
+        .ok_or_else(|| {
+            ImageError::fits_unsupported(path, "FITS padded data-unit size overflows u64")
+        })
 }
 
 pub(super) fn dimensions_from_shape(
@@ -321,7 +393,7 @@ pub(super) fn dimensions_from_shape(
     cube: FitsCubeInterpretation,
 ) -> Result<ImageDimensions, ImageError> {
     if shape.contains(&0) {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("FITS image axes must be nonzero, got {shape:?}"),
         ));
@@ -329,23 +401,23 @@ pub(super) fn dimensions_from_shape(
     let (width, height, channels) = match shape {
         [width, height] | [width, height, 1] => (*width, *height, 1),
         [width, height, 3] if cube == FitsCubeInterpretation::Rgb => (*width, *height, 3),
-        [_, _, 3] => Err(fits_unsupported(
+        [_, _, 3] => Err(ImageError::fits_unsupported(
             path,
             "three-plane FITS cube requires FitsCubeInterpretation::Rgb",
         ))?,
-        [_, _, channels] => Err(fits_unsupported(
+        [_, _, channels] => Err(ImageError::fits_unsupported(
             path,
             format!("Unsupported channel count (NAXIS3): {channels}"),
         ))?,
         _ => {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 format!("Unsupported number of dimensions: {}", shape.len()),
             ));
         }
     };
     if width > ImageDimensions::MAX_SIDE || height > ImageDimensions::MAX_SIDE {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "FITS image {width}x{height} has a side past {} px",
@@ -353,12 +425,12 @@ pub(super) fn dimensions_from_shape(
             ),
         ));
     }
-    let pixel_count = width
-        .checked_mul(height)
-        .ok_or_else(|| fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}")))?;
-    pixel_count
-        .checked_mul(channels)
-        .ok_or_else(|| fits_unsupported(path, format!("FITS sample count overflows: {shape:?}")))?;
+    let pixel_count = width.checked_mul(height).ok_or_else(|| {
+        ImageError::fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}"))
+    })?;
+    pixel_count.checked_mul(channels).ok_or_else(|| {
+        ImageError::fits_unsupported(path, format!("FITS sample count overflows: {shape:?}"))
+    })?;
     Ok(ImageDimensions::new((width, height), channels))
 }
 

@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use crate::math::vec2us::Vec2us;
 
 pub(super) mod component;
+pub(super) mod component_pixels;
 pub(super) mod deblend_buffers;
 pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
@@ -92,9 +93,7 @@ pub(crate) mod internals {
     use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::deblend::component::Component;
     use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
-    use crate::star_detection::deblend::multi_threshold::{
-        MultiThresholdParams, deblend_multi_threshold,
-    };
+    use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
     use crate::star_detection::deblend::region::Region;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
@@ -140,6 +139,7 @@ pub(crate) mod internals {
 
         for &star in stars {
             let radius = star.radius();
+            let star_pixels = star.pixels();
             for offset_y in -radius..=radius {
                 for offset_x in -radius..=radius {
                     let x = (star.center.x as i32 + offset_x) as usize;
@@ -150,7 +150,7 @@ pub(crate) mod internals {
 
                     // The cutoff decides component membership, not just brightness: a pixel
                     // below it stays unlabelled, so it never joins the component's bbox or area.
-                    let value = star.value_at(x as f32, y as f32);
+                    let value = star_pixels.value(x, y);
                     if value <= 0.001 {
                         continue;
                     }
@@ -167,7 +167,7 @@ pub(crate) mod internals {
 
         TestComponent {
             pixels,
-            labels: LabelMap::from_raw(labels, 1),
+            labels: LabelMap::from_raw(&labels, 1),
             data: ComponentData {
                 bbox,
                 label: 1,
@@ -220,15 +220,16 @@ pub(crate) mod internals {
         min_contrast: f32,
     ) -> Vec<Region> {
         let mut regions = Vec::new();
-        deblend_multi_threshold(
+        MultiThresholdParams {
+            n_thresholds,
+            min_contrast,
+            min_separation,
+            min_area: 1,
+            connectivity: Connectivity::Eight,
+        }
+        .deblend(
             component,
             floor,
-            MultiThresholdParams {
-                n_thresholds,
-                min_contrast,
-                min_separation,
-                connectivity: Connectivity::Eight,
-            },
             &mut DeblendBuffers::default(),
             &mut regions,
         );

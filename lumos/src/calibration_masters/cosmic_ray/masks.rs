@@ -1,8 +1,9 @@
 //! The bit masks one detection accumulates, shared by the mono and X-Trans paths.
 
+use rayon::prelude::*;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::FINE_STRUCTURE_SIGMA_FLOOR;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
@@ -19,9 +20,10 @@ pub(crate) const CONCURRENT_MASKS: usize = 3;
 pub(super) struct CrMasks {
     /// Every CR pixel found so far: the in-painting mask, and the count the detector returns.
     pub(super) accumulated: BitBuffer2,
-    /// Pixels clearing the full `sigclip` this iteration, before growth.
+    /// Pixels clearing the full `sigclip` and the contrast this iteration, before growth.
     primary: BitBuffer2,
-    /// `primary` plus the wings grown onto it — what merges into `accumulated`.
+    /// The first growth of `primary`, from which the second grows back into `primary`, which
+    /// then merges into `accumulated`.
     flags: BitBuffer2,
 }
 
@@ -39,10 +41,12 @@ impl CrMasks {
         }
     }
 
-    /// Flag CRs: `S' > sigclip` **and** the fine-structure contrast `S' > objlim·(F/noise)`, then
-    /// grow onto neighbors clearing the lowered threshold `sigclip·sigfrac` and the same contrast
-    /// test (a flagged CR's fainter wings). Merges the result into `accumulated` and returns how
-    /// many pixels that added — zero ends the detect→replace loop.
+    /// Flag CRs, as astroscrappy does: `S' > sigclip` **and** the fine-structure contrast
+    /// `S' > objlim·(F/noise)`; then grow them by the 3×3 box, keeping the pixels where
+    /// `S' > sigclip`, and grow that by the box again, keeping those where `S' > sigclip·sigfrac`.
+    /// The growth takes no contrast test: a hit's wings carry its light, not a star's. Merges the
+    /// result into `accumulated` and returns how many pixels that added — zero ends the
+    /// detect→replace loop.
     ///
     /// The contrast is van Dokkum's `L⁺/F > objlim` written in astroscrappy's noise-normalized
     /// form: comparing the significance image `S'` against `objlim·(F/noise)` (rather than raw `L⁺`
@@ -61,35 +65,17 @@ impl CrMasks {
             primary,
             flags,
         } = self;
-        let size = accumulated.size;
-        let passes_contrast = |i: usize, sig_thresh: f32| {
+        primary.fill_from_predicate(|i| {
             let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
-            significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
-        };
-        primary.fill_from_predicate(|i| passes_contrast(i, cfg.sigclip));
+            significance[i] > cfg.sigclip && significance[i] > cfg.objlim * f_norm
+        });
         primary.and_not(accumulated);
-
+        grow_box(primary, flags, accumulated, |i| {
+            significance[i] > cfg.sigclip
+        });
         let lowered = cfg.sigclip * cfg.sigfrac;
-        flags.copy_from(primary);
-        for y in 0..size.height {
-            for x in 0..size.width {
-                if !primary.get_at(Vec2us::new(x, y)) {
-                    continue;
-                }
-                let y0 = y.saturating_sub(1);
-                let y1 = (y + 1).min(size.height - 1);
-                let x0 = x.saturating_sub(1);
-                let x1 = (x + 1).min(size.width - 1);
-                for ny in y0..=y1 {
-                    for nx in x0..=x1 {
-                        let j = size.index_of(Vec2us::new(nx, ny));
-                        if !flags.get(j) && !accumulated.get(j) && passes_contrast(j, lowered) {
-                            flags.set(j, true);
-                        }
-                    }
-                }
-            }
-        }
+        grow_box(flags, primary, accumulated, |i| significance[i] > lowered);
+        let flags = primary;
 
         // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`.
         // Counting whole words needs no per-row masking only because both buffers have their
@@ -105,6 +91,54 @@ impl CrMasks {
         }
         newly
     }
+}
+
+/// Into `dest`, the pixels of the 3×3 box about any pixel of `source` that `keep` passes, by
+/// row-major index, and that `accumulated` does not hold.
+///
+/// Word by word: a row's three neighbouring source rows, each smeared one pixel either way across
+/// word boundaries, give the box; `keep` is asked only of the bits that survive it, which a sparse
+/// mask keeps few.
+fn grow_box(
+    source: &BitBuffer2,
+    dest: &mut BitBuffer2,
+    accumulated: &BitBuffer2,
+    keep: impl Fn(usize) -> bool + Sync,
+) {
+    let Size2us { width, height } = source.size;
+    let words_per_row = source.words_per_row();
+    let used_words = width.div_ceil(64);
+    let last_bits = width - used_words.saturating_sub(1) * 64;
+    dest.words
+        .par_chunks_mut(words_per_row.max(1))
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            out_row.fill(0);
+            for (w, out) in out_row[..used_words].iter_mut().enumerate() {
+                let mut boxed = 0u64;
+                for source_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+                    let row = &source.words[source_y * words_per_row..][..used_words];
+                    boxed |= row[w] | (row[w] << 1) | (row[w] >> 1);
+                    if w > 0 {
+                        boxed |= row[w - 1] >> 63;
+                    }
+                    if w + 1 < used_words {
+                        boxed |= row[w + 1] << 63;
+                    }
+                }
+                if w + 1 == used_words && last_bits < 64 {
+                    boxed &= (1u64 << last_bits) - 1;
+                }
+                let mut candidates = boxed & !accumulated.words[y * words_per_row + w];
+                while candidates != 0 {
+                    let bit = candidates.trailing_zeros() as usize;
+                    if keep(y * width + w * 64 + bit) {
+                        *out |= 1 << bit;
+                    }
+                    candidates &= candidates - 1;
+                }
+            }
+        });
 }
 
 /// One cosmic-ray mask: one bit per pixel.

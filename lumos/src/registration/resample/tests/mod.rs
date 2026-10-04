@@ -1,13 +1,16 @@
 use crate::internals::prelude::*;
-use crate::io::image::null_mask::NullMask;
-use crate::registration::config::{InterpolationMethod, WarpParams};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::transform::{Transform, WarpTransform};
 
-/// A constant read back through normalized weights: the f32 sum of up to 64 terms of 3.25 rounds
-/// to at most 64·ε·3.25 = 2.5e-5.
-const TOL: f32 = 2.5e-5;
+/// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
+/// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
+/// sum to at most the square of its sum, over at most 64 taps), so the ratio is off by at most
+/// `2·64·ε·8·3.25`.
+const TOL: f32 = 2.0 * 64.0 * f32::EPSILON * 8.0 * 3.25;
 
 /// A `size` image of `channels` signed, unstructured planes, interleaved.
 fn signed_pixels(size: Size2us, channels: usize) -> Vec<f32> {
@@ -45,6 +48,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
                     WarpParams {
                         method,
                         border_value: BORDER,
+                        ..Default::default()
                     },
                 );
                 let y = HEIGHT / 2;
@@ -97,7 +101,7 @@ impl NullFixture {
         nulls[null_index] = f32::NAN;
 
         let mut declared = LinearImage::from_pixels(dimensions, pixels.clone());
-        declared.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
+        declared.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
         Self {
             declared,
             undeclared: LinearImage::from_pixels(dimensions, pixels),
@@ -116,14 +120,14 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
-    // The masked value is the ratio of two warps, each rounding to `(SIZE² + 3)·ε` of its absolute
-    // weight sum — under 2 for any kernel here — times its scale, `CONSTANT` and 1. One null takes
-    // one tap, at most `L(½)² ≈ 0.37` at this shift, so the denominator stays above 0.6.
-    let tolerance = 2.0 * 67.0 * f32::EPSILON * 2.0 * CONSTANT / 0.6;
+    // Without the clamp, which would hide the control's fill under a negative lobe: the
+    // positive lobes' mean it falls back to is the constant.
+    let tolerance = TOL;
     for method in InterpolationMethod::ALL {
         let params = WarpParams {
             method,
             border_value: BORDER,
+            clamping_threshold: None,
         };
         let masked = resample::warp(&fixture.declared, &transform, params);
         let plain = resample::warp(&fixture.undeclared, &transform, params);
@@ -155,24 +159,12 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             .count();
         assert!(smeared > 0, "{method:?}: the control must smear");
 
-        // Coverage falls across that same footprint — exactly across it for a kernel whose taps are
-        // all positive, and across part of it for one with negative lobes: a window that lost only
-        // a negative tap sums its survivors past one and clamps back to full. See
-        // `MaskedWarp::fold_into_quality`; the reconstructed value above is exact either way.
-        assert!(reduced > 0, "{method:?}: coverage must fall somewhere");
-        assert!(
-            reduced <= smeared,
-            "{method:?}: coverage fell at {reduced} pixels, more than the {smeared} the fill reached"
+        // Coverage falls across exactly that footprint: it is the share of the kernel's magnitude
+        // on data, so a lost tap of either sign costs it, and at this shift every tap weighs.
+        assert_eq!(
+            reduced, smeared,
+            "{method:?}: coverage fell at {reduced} pixels, the fill reached {smeared}"
         );
-        if matches!(
-            method,
-            InterpolationMethod::Nearest | InterpolationMethod::Bilinear
-        ) {
-            assert_eq!(
-                reduced, smeared,
-                "{method:?} has no negative lobes, so the two sets must coincide"
-            );
-        }
     }
 }
 
@@ -191,6 +183,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
         let params = WarpParams {
             method,
             border_value: 0.0,
+            ..Default::default()
         };
         let masked = resample::warp(&fixture.declared, &transform, params);
         let plain = resample::warp(&fixture.undeclared, &transform, params);
@@ -204,14 +197,9 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // ...and bilinear's 2x2 window in four: an output at (x, y) samples source (x - ½, y - ½), so
     // source column 8 is a tap for output columns 8 and 9, and likewise for rows.
     assert_eq!(reduced(InterpolationMethod::Bilinear), 4);
-    // Lanczos4 reaches 8 taps per axis, so the same null costs a far wider block. Only the taps it
-    // weights positively show up here, which is why this is an ordering rather than 64.
-    assert!(
-        reduced(InterpolationMethod::Lanczos4) > reduced(InterpolationMethod::Bilinear),
-        "Lanczos4 reduced {}, bilinear {}",
-        reduced(InterpolationMethod::Lanczos4),
-        reduced(InterpolationMethod::Bilinear)
-    );
+    // Lanczos4 reaches 8 taps per axis, every one weighing at this shift, so the same null costs
+    // an 8×8 block.
+    assert_eq!(reduced(InterpolationMethod::Lanczos4), 64);
 }
 
 #[test]
@@ -227,7 +215,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
         }
     }
     let mut image = LinearImage::from_pixels(dimensions, vec![3.25; dimensions.pixel_count()]);
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
 
     let result = resample::warp(
         &image,
@@ -235,6 +223,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
         WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: BORDER,
+            ..Default::default()
         },
     );
 
@@ -286,7 +275,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
         let dimensions = ImageDimensions::new((size.width, size.height), channels);
         let plain = LinearImage::from_pixels(dimensions, signed_pixels(size, channels));
         let mut masked = plain.clone();
-        masked.nulls = NullMask::of_non_finite(size, &[&nulls]);
+        masked.flags = PixelFlags::of_non_finite(size, &[&nulls]);
         let previous = LinearImage::from_pixels(
             dimensions,
             signed_pixels(size, channels)
@@ -300,6 +289,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     let params = WarpParams {
                         method,
                         border_value: -7.0,
+                        ..Default::default()
                     };
                     let fresh = resample::warp(image, transform, params);
 
@@ -309,11 +299,11 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(image, transform, params);
+                    sentinel.warp_into(&SourceImage::of(image), transform, params);
 
                     let mut reused = WarpBuffers::new(dimensions);
-                    reused.warp_into(&previous, &transforms[0], params);
-                    reused.warp_into(image, transform, params);
+                    reused.warp_into(&SourceImage::of(&previous), &transforms[0], params);
+                    reused.warp_into(&SourceImage::of(image), transform, params);
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {
@@ -350,6 +340,7 @@ fn an_rgb_warp_is_three_mono_warps() {
         let params = WarpParams {
             method,
             border_value: 0.0,
+            ..Default::default()
         };
         let warped = resample::warp(&rgb, &transform, params);
         for channel in 0..3 {
@@ -385,3 +376,40 @@ fn assert_bitwise(actual: &[f32], expected: &[f32], method: InterpolationMethod)
 }
 
 mod plane;
+
+/// A flag reaches every output pixel whose kernel window reads the flagged source pixel. Under a
+/// half-pixel shift output x samples source x + 0.5, whose cell is x, and a Lanczos-3 window reads
+/// cells x − 2 ..= x + 3. A saturated source pixel at (10, 10) is therefore read by the outputs
+/// x, y ∈ 7..=12: 6 × 6 = 36 of them, and no others. `NO_DATA` becomes coverage, not a flag.
+#[test]
+fn a_flag_reaches_every_output_its_kernel_window_reads() {
+    let size = Size2us::new(24, 24);
+    let mut image = gray_image(size, vec![0.25; size.pixel_count()]);
+    image.flags = PixelFlags::from_fn(size, |index| match index {
+        index if index == 10 * 24 + 10 => QualityFlags::SATURATED,
+        index if index == 20 * 24 + 20 => QualityFlags::NO_DATA,
+        _ => QualityFlags::default(),
+    });
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
+    let warped = resample::warp(
+        &image,
+        &transform,
+        WarpParams {
+            method: InterpolationMethod::Lanczos3,
+            border_value: 0.0,
+            ..Default::default()
+        },
+    );
+    let flags = warped.image.flags.unwrap();
+    assert_eq!(flags.count(QualityFlags::SATURATED), 36);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
+    for y in 7..=12 {
+        for x in 7..=12 {
+            assert_eq!(
+                flags.at_pos(Vec2us::new(x, y)),
+                QualityFlags::SATURATED,
+                "({x}, {y})"
+            );
+        }
+    }
+}

@@ -2,7 +2,7 @@
 mod real_data;
 
 use crate::image_ops::background_extraction::*;
-use crate::image_ops::stretching::Stretch;
+use crate::image_ops::stretching::{Stretch, StretchMethod};
 use crate::internals::images::rgb_image as rgb;
 use crate::internals::prelude::*;
 use crate::math::statistics::median_mut;
@@ -176,22 +176,31 @@ fn divide_floor_caps_the_gain() {
     assert!(floored > 0);
 }
 
-/// A model with no positive mean has no level to normalize by: `Divide` leaves the channel as it
-/// was rather than flip or blow it up.
+/// A model with no positive mean has no level to normalize by, so `Divide` refuses it. The model
+/// of `−0.25 + x/1024` over columns 0 to 63 averages `−0.25 + 31.5/1024`. Every channel is fitted
+/// before any is changed, so the red channel, which divides cleanly, is left as it was when green
+/// fails.
 #[test]
-fn divide_leaves_a_sky_with_no_positive_mean_untouched() {
+fn divide_refuses_a_sky_with_no_positive_mean_and_changes_nothing() {
     let size = Size2us::new(64, 64);
-    let sky = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
-    let mut img = gray_image(size, sky.clone());
-    ExtractBackground {
+    let negative = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
+    let positive = fill(size, |x, _| 0.25 + x as f32 / 1024.0);
+    let mut img = rgb(size, positive.clone(), negative.clone(), positive.clone());
+    let error = ExtractBackground {
         degree: 1,
         tile_size: 16,
         mode: BackgroundMode::Divide,
         ..Default::default()
     }
     .apply(&mut img)
-    .unwrap();
-    assert_eq!(img.channel(0).pixels(), sky.as_slice());
+    .unwrap_err();
+    // The tolerance absorbs the least-squares fit's rounding in f64.
+    assert!(
+        matches!(error, OpError::NonPositiveBackground { mean } if (mean - (-0.25 + 31.5 / 1024.0)).abs() < 1e-9),
+        "{error:?}"
+    );
+    assert_eq!(img.channel(0).pixels(), positive.as_slice());
+    assert_eq!(img.channel(1).pixels(), negative.as_slice());
 }
 
 /// A bright blob over four whole tiles of a 8 × 6 grid would pull the fit toward it. The residual
@@ -355,7 +364,7 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
 }
 
 /// The standard chain: remove the gradient, then auto-stretch. Each auto stretch must put the
-/// background median on its 0.2 target, from a sky subtracted to ≈0 — the input that sends a
+/// background median on its target, from a sky subtracted to ≈0 — the input that sends a
 /// stretch whose target depends on the median onto a degenerate branch.
 ///
 /// 129×129 is an odd count, so the median is one pixel and a monotone curve maps it exactly;
@@ -381,9 +390,10 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
         stretch.apply(&mut img).unwrap();
         let mut px = img.channel(0).pixels().to_vec();
         let median = median_mut(&mut px);
+        let target = StretchMethod::AUTO_TARGET_BACKGROUND;
         assert!(
-            (median - 0.2).abs() < 1e-4,
-            "{stretch:?}: background median {median}, want 0.2"
+            (median - target).abs() < 1e-4,
+            "{stretch:?}: background median {median}, want {target}"
         );
     }
 }

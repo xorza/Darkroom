@@ -47,7 +47,7 @@ impl Case {
         } else {
             self.confidences.clone()
         };
-        let result = seeded(self.max_sigma, config)
+        let result = estimator(self.max_sigma, config)
             .estimate(
                 &matches_with_confidence(&confidences),
                 &self.points,
@@ -252,7 +252,7 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
 /// and the failure says RANSAC never ran rather than that it found no inliers.
 #[test]
 fn too_few_matches_give_no_estimate() {
-    let estimator = seeded(1.0, RansacConfig::default());
+    let estimator = estimator(1.0, RansacConfig::default());
     let never_ran = Err(RansacFailure {
         reason: RansacFailureReason::TooFewMatches,
         iterations: 0,
@@ -283,10 +283,10 @@ fn a_seed_repeats_the_run() {
     target_points[7] += DVec2::new(40.0, -40.0);
     let run = || {
         estimate_uniform(
-            &seeded(
+            &estimator(
                 1.0,
                 RansacConfig {
-                    seed: Some(12345),
+                    seed: 12345,
                     ..Default::default()
                 },
             ),
@@ -317,7 +317,7 @@ fn ransac_stops_at_the_adaptive_bound_without_a_later_improvement() {
         target_points.push(p + DVec2::new(-500.0, 300.0 + i as f64));
     }
 
-    let estimator = seeded(
+    let estimator = estimator(
         0.33,
         RansacConfig {
             max_iterations: 10_000,
@@ -361,7 +361,7 @@ fn final_refit_does_not_degrade_robust_score() {
         point.x += 3.0;
     }
 
-    let scorer = MagsacScorer::new(1.0);
+    let scorer = WelschScorer::new(1.0);
     let mut inliers = Vec::new();
     let mut score = |transform| {
         score_hypothesis(
@@ -380,7 +380,7 @@ fn final_refit_does_not_degrade_robust_score() {
         "{robust_score} against {refit_score}"
     );
 
-    let estimator = seeded(
+    let estimator = estimator(
         1.0,
         RansacConfig {
             max_iterations: 1,
@@ -425,7 +425,7 @@ fn local_optimization_grows_the_consensus() {
         .collect();
     let max_sigma = 1.0 / CHI2_99_2DOF.sqrt();
     for (local_optimization, inliers, shift) in [(false, 5, 0.45), (true, 6, 0.75)] {
-        let estimator = seeded(
+        let estimator = estimator(
             max_sigma,
             RansacConfig {
                 max_iterations: 1,
@@ -487,7 +487,7 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
     let trusted: Vec<usize> = (80..100).collect();
 
     let weighted = [vec![0.01; 80], vec![1.0; 20]].concat();
-    let result = seeded(1.0, config.clone())
+    let result = estimator(1.0, config.clone())
         .estimate(
             &matches_with_confidence(&weighted),
             &ref_points,
@@ -497,7 +497,7 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
         .unwrap();
     assert_eq!(result.inliers, trusted);
 
-    let uniform = seeded(1.0, config).estimate(
+    let uniform = estimator(1.0, config).estimate(
         &matches_with_confidence(&[1.0; 100]),
         &ref_points,
         &target_points,
