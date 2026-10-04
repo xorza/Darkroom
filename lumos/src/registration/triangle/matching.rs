@@ -71,15 +71,9 @@ pub(crate) fn match_triangles(
     };
 
     // Vote for point correspondences and resolve conflicts
-    let vote_matrix = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        config,
-        n_ref,
-        n_target,
-    );
-    resolve_matches(&vote_matrix, n_ref, n_target, config.min_votes)
+    let mut vote_matrix =
+        vote_for_correspondences(&target_triangles, &ref_triangles, &invariant_tree, config);
+    resolve_matches(&mut vote_matrix, n_ref, n_target, config.min_votes)
 }
 
 /// Form triangles using k-nearest neighbors from a k-d tree.

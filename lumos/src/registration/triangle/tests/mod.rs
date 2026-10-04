@@ -64,13 +64,9 @@ fn triangles_of(points: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     form_triangles_kdtree(&tree(points), k_neighbors, NOISE_SCALE)
 }
 
-/// Build a dense `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.
-fn vote_matrix_from_entries(
-    n_ref: usize,
-    n_target: usize,
-    entries: &[(usize, usize, usize)],
-) -> VoteMatrix {
-    let mut vm = VoteMatrix::new(n_ref, n_target);
+/// Build a `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.
+fn vote_matrix_from_entries(entries: &[(usize, usize, usize)]) -> VoteMatrix {
+    let mut vm = VoteMatrix::default();
     for &(r, t, count) in entries {
         for _ in 0..count {
             vm.increment(r, t);
