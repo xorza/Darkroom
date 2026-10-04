@@ -40,8 +40,7 @@ use crate::registration::transform::{Transform, TransformType};
 /// The highest polynomial order [`SipConfig::order`] accepts.
 const MAX_ORDER: usize = 5;
 
-/// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
-const MAX_TERMS: usize = 18;
+const MAX_TERMS: usize = SipPolynomial::term_count(MAX_ORDER);
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -126,8 +125,14 @@ const MAX_SECANT_STEPS: usize = 50;
 impl SipPolynomial {
     /// The pairs a fit of `order` needs: three per term, astrometry.net's practice against
     /// overfitting (order 4, 12 terms, about 36 points).
-    pub(crate) fn required_points(order: usize) -> usize {
-        3 * term_exponents(order).len()
+    pub(crate) const fn required_points(order: usize) -> usize {
+        3 * Self::term_count(order)
+    }
+
+    /// The terms of each axis's polynomial at `order`, every `u^p·v^q` with `2 ≤ p + q ≤ order`:
+    /// the `(order + 1)(order + 2)/2` monomials up to `order` less the three of degree 0 and 1.
+    pub(crate) const fn term_count(order: usize) -> usize {
+        (order + 1) * (order + 2) / 2 - 3
     }
 
     /// A transform of `model` and its correction of `order` about `origin`, fitted together to the

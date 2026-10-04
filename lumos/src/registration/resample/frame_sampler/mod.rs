@@ -194,8 +194,8 @@ impl<'a> FrameSampler<'a> {
         }
     }
 
-    /// The filter's kernel over the window at `position`: the whole kernel where it lands on data; its taps
-    /// with data, normalized, where the source edge or a null cut it and what is left is
+    /// The filter's kernel over the window at `position`: the whole kernel where it lands on data;
+    /// its taps with data, normalized, where the source edge or a null cut it and what is left is
     /// [well conditioned](WindowWeights::well_conditioned); otherwise Bilinear at the same stretch
     /// over its own taps with data, whose weights are never negative and so always average.
     #[inline(always)]

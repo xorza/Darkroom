@@ -1,7 +1,6 @@
-use std::fs::File;
 use std::path::Path;
 
-use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu, StreamReader};
+use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu};
 
 use crate::io::image::error::ImageError;
 
@@ -11,7 +10,6 @@ use crate::io::image::fits::options::{FitsChecksumPolicy, FitsHduSelector};
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance,
 };
-use crate::io::image::load_context::LoadContext;
 
 pub(super) fn selected_hdu(
     path: &Path,
@@ -132,24 +130,6 @@ fn checksum_provenance(report: ChecksumReport) -> FitsChecksumProvenance {
         datasum: checksum_state(report.datasum),
         checksum: checksum_state(report.checksum),
     }
-}
-
-pub(super) fn verify_selected_checksum(
-    reader: &mut StreamReader<File>,
-    index: usize,
-    path: &Path,
-    policy: FitsChecksumPolicy,
-    context: &LoadContext,
-) -> Result<FitsChecksumProvenance, ImageError> {
-    if policy == FitsChecksumPolicy::Ignore {
-        return Ok(FitsChecksumProvenance::NOT_CHECKED);
-    }
-    context.check_cancelled(path)?;
-    let report = reader
-        .verify_checksum(index)
-        .map_err(|source| ImageError::fits(path, source))?;
-    context.check_cancelled(path)?;
-    judge_checksum(report, index, path, policy)
 }
 
 /// HDU `index`'s checksum `report` under `policy`: an error where the policy refuses it, else the

@@ -1,10 +1,9 @@
 //! RAW calibration front end for registered stacking.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
-
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;

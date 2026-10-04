@@ -1,4 +1,5 @@
 use super::*;
+use crate::registration::ransac::transforms::adaptive_iterations;
 
 /// A sample is degenerate at a noise scale of 1 px when two of its points are under 1 px apart —
 /// exactly 1 px is not — or when any three of them form a triangle less than 1 px high over its

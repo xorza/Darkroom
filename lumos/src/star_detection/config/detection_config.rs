@@ -33,7 +33,7 @@ pub enum Deblend {
     /// own star when it holds at least `min_contrast` of the component's residual flux above
     /// that threshold.
     MultiThreshold {
-        /// Levels in the tree, between 2 and [`MAX_DEBLEND_N_THRESHOLDS`].
+        /// Levels in the tree, between 2 and 256.
         n_thresholds: usize,
         /// A branch's share of the component's residual flux, in `[0, 1]`.
         min_contrast: f32,

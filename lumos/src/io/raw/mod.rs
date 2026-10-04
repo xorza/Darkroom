@@ -453,11 +453,15 @@ impl UnpackedRaw {
         // SAFETY: processed_ptr is valid, data_size tells us the valid range
         let data_ptr = unsafe { (*processed_ptr).data.as_ptr() };
 
-        // Use checked arithmetic to prevent overflow on extremely large images
         let pixel_count = img_width
             .checked_mul(img_height)
             .and_then(|v| v.checked_mul(img_colors))
-            .expect("libraw: image dimensions overflow");
+            .ok_or_else(|| {
+                raw_err(
+                    &self.path,
+                    format!("libraw: {img_width}x{img_height}x{img_colors} samples overflow usize"),
+                )
+            })?;
 
         // `output_bps = 16` above: anything else is not what was asked for.
         if img_bits != 16 {
@@ -466,9 +470,12 @@ impl UnpackedRaw {
                 format!("libraw: demosaic produced {img_bits}-bit samples, not 16"),
             ));
         }
-        let expected_size = pixel_count
-            .checked_mul(2)
-            .expect("libraw: expected_size overflow");
+        let expected_size = pixel_count.checked_mul(2).ok_or_else(|| {
+            raw_err(
+                &self.path,
+                format!("libraw: {pixel_count} 16-bit samples overflow usize"),
+            )
+        })?;
         if data_size < expected_size {
             return Err(raw_err(
                 &self.path,

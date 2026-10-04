@@ -174,7 +174,9 @@ impl PixelFlags {
         horizontal
             .par_chunks_mut(width)
             .zip(source.par_chunks(width))
-            .for_each(|(out, row)| or_window(row, out, reach));
+            .for_each_init(BlockOrs::default, |scratch, (out, row)| {
+                or_window(row, out, reach, scratch);
+            });
         // The vertical pass runs the same window over whole rows at once: a row is one element of
         // the column-wise sequence, and OR is element-wise.
         let mut prefix = horizontal.clone();
@@ -351,12 +353,23 @@ fn or_into(target: &mut [u8], source: &[u8]) {
     }
 }
 
-/// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row.
-fn or_window(row: &[u8], out: &mut [u8], reach: Reach) {
+/// One worker's block ORs of a row, from the start and from the end of each block.
+#[derive(Debug, Default)]
+struct BlockOrs {
+    prefix: Vec<u8>,
+    suffix: Vec<u8>,
+}
+
+/// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row, with
+/// `scratch` for the block ORs.
+fn or_window(row: &[u8], out: &mut [u8], reach: Reach, scratch: &mut BlockOrs) {
     let len = row.len();
     let block = reach.len();
-    let mut prefix = row.to_vec();
-    let mut suffix = row.to_vec();
+    let BlockOrs { prefix, suffix } = scratch;
+    prefix.clear();
+    prefix.extend_from_slice(row);
+    suffix.clear();
+    suffix.extend_from_slice(row);
     for i in 1..len {
         if i % block != 0 {
             prefix[i] |= prefix[i - 1];

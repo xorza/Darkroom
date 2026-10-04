@@ -14,7 +14,7 @@ use crate::registration::triangle::geometry::Triangle;
 
 /// A reference star paired with a target star, by index into their respective slices.
 ///
-/// The bare pair, shared by everything that carries one: [`PointMatch`] adds the vote evidence
+/// The bare pair, shared by everything that carries one: `PointMatch` adds the vote evidence
 /// that produced it, and `StarMatch` adds the residual only measurable once a transform exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatchIndices {

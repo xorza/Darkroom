@@ -1,4 +1,5 @@
 use super::*;
+use crate::registration::ransac::transforms::estimate_transform;
 
 /// Every model recovers its own transform from exact points, to rounding: from its minimal set,
 /// from more, and from points spread over 5000 px where an unnormalized solve would lose digits.

@@ -20,6 +20,7 @@ mod star_noise;
 mod windowed_centroid;
 
 use glam::DVec2;
+use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::lm_controller::LmFit;
@@ -27,8 +28,10 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ};
+use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::local_background::LocalBackground;
 use crate::star_detection::centroid::measure_grid::{MAX_STAMP_RADIUS, MeasureGrid};
+use crate::star_detection::centroid::moffat_fit::MoffatFit;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::config::measurement_config::{
@@ -37,9 +40,6 @@ use crate::star_detection::config::measurement_config::{
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::roundness::{Roundness, RoundnessStamp};
 use crate::star_detection::star::Star;
-use gaussian_fit::GaussianFit;
-use imaginarium::Buffer2;
-use moffat_fit::MoffatFit;
 
 /// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;

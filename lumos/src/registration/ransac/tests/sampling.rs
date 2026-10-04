@@ -1,4 +1,5 @@
 use super::*;
+use crate::registration::ransac::sampling::{random_sample_into, weighted_sample_into};
 
 #[test]
 fn random_sample_into_produces_unique_indices() {

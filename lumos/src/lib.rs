@@ -2,18 +2,20 @@
 //!
 //! The pipeline stages, in the order a set of sub-exposures passes through them:
 //!
-//! - [`io`] — RAW and FITS decode into linear planar images.
-//! - [`calibration_masters`] — master dark/flat/bias + defect maps, per-frame calibration.
-//! - [`star_detection`] — sub-pixel star detection feeding registration.
-//! - [`registration`] — star-pattern alignment + image warp into a common frame.
-//! - [`combine`] — statistical per-pixel frame combination (rejection/normalization/weighting).
-//! - [`drizzle`] — Fruchter & Hook variable-pixel reconstruction (dithered/super-resolution sets).
-//! - [`pipeline`] — end-to-end orchestration (`align_and_stack`, `calibrate_align_stack`).
-//! - [`image_ops`] — non-linear operations on the stacked master, strictly after the linear stages.
+//! - RAW and FITS decode into linear planar images ([`LinearImage`], [`CfaImage`]).
+//! - Master dark, flat and bias, defect maps, and per-frame calibration ([`CalibrationMasters`]).
+//! - Sub-pixel star detection that feeds registration ([`detection`]).
+//! - Star-pattern alignment and the warp into a common frame ([`register`], [`warp`]).
+//! - Statistical per-pixel combination, with rejection, normalization and weighting
+//!   ([`StackConfig`]).
+//! - Fruchter & Hook variable-pixel reconstruction of dithered sets ([`drizzle_stack`]).
+//! - End-to-end runs ([`align_and_stack`], [`calibrate_align_stack`]).
+//! - Non-linear operations on the stacked master, strictly after the linear stages ([`Stretch`],
+//!   [`Denoise`] and the others).
 //!
-//! What the stages share: [`frame_store`] (RAM/mmap frame storage), `memory` (what a run may
-//! hold, and the plan that keeps it there),
-//! [`stack_product`] (the combined image and the per-pixel planes beside it), and [`progress`].
+//! What the stages share: RAM and memory-mapped frame storage, the plan that keeps a run inside
+//! its memory, the combined image and the per-pixel planes beside it ([`StackProduct`]), and
+//! progress ([`ProgressCallback`]).
 //!
 //! # Quick Start
 //!

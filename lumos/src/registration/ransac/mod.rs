@@ -16,9 +16,6 @@ mod sampling;
 pub(super) mod transforms;
 mod welsch;
 
-use transforms::{adaptive_iterations, estimate_transform};
-use welsch::WelschScorer;
-
 use std::cmp::Ordering;
 use std::mem;
 
@@ -26,10 +23,8 @@ use glam::DVec2;
 
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::config::RansacConfig;
-use crate::registration::ransac::sampling::{
-    GUIDED_POOL_FRACTIONS, guided_phase_iterations, make_rng, random_sample_into,
-    weighted_sample_into,
-};
+use crate::registration::ransac::sampling::GUIDED_POOL_FRACTIONS;
+use crate::registration::ransac::welsch::WelschScorer;
 use crate::registration::result::RansacFailureReason;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::voting::PointMatch;
@@ -95,7 +90,10 @@ pub(super) struct RansacEstimator {
 impl RansacEstimator {
     /// Create a RANSAC estimator for the runtime-derived maximum noise scale.
     pub(super) fn new(config: RansacConfig, max_sigma: f64) -> Self {
-        assert!(max_sigma.is_finite() && max_sigma > 0.0);
+        assert!(
+            max_sigma.is_finite() && max_sigma > 0.0,
+            "a positive, finite noise scale, not {max_sigma}"
+        );
         Self { config, max_sigma }
     }
 
@@ -156,7 +154,7 @@ impl RansacEstimator {
                 .points
                 .gather(&buffers.inlier_buf, ref_points, target_points);
 
-            let Some(refined) = estimate_transform(
+            let Some(refined) = transforms::estimate_transform(
                 &buffers.points.reference,
                 &buffers.points.target,
                 transform_type,
@@ -245,7 +243,7 @@ impl RansacEstimator {
 
             // Estimate transformation from sample
             let Some(transform) =
-                estimate_transform(&sample.reference, &sample.target, transform_type)
+                transforms::estimate_transform(&sample.reference, &sample.target, transform_type)
             else {
                 continue;
             };
@@ -289,9 +287,12 @@ impl RansacEstimator {
 
             let inlier_ratio = candidate.inliers.len() as f64 / n as f64;
             if inlier_ratio >= self.config.min_inlier_ratio {
-                iteration_bound =
-                    adaptive_iterations(inlier_ratio, min_samples, self.config.confidence)
-                        .min(max_iter);
+                iteration_bound = transforms::adaptive_iterations(
+                    inlier_ratio,
+                    min_samples,
+                    self.config.confidence,
+                )
+                .min(max_iter);
             }
             if let Some(previous) = best.replace(candidate) {
                 scratch = previous.inliers;
@@ -311,7 +312,7 @@ impl RansacEstimator {
         lo_buffers
             .points
             .gather(&best.inliers, ref_points, target_points);
-        let refined = estimate_transform(
+        let refined = transforms::estimate_transform(
             &lo_buffers.points.reference,
             &lo_buffers.points.target,
             transform_type,
@@ -385,7 +386,7 @@ impl RansacEstimator {
         let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
 
         let n = ref_points.len();
-        let mut rng = make_rng(self.config.seed);
+        let mut rng = sampling::make_rng(self.config.seed);
 
         // Build sorted index by confidence (descending)
         let mut sorted_indices: Vec<usize> = (0..n).collect();
@@ -407,7 +408,7 @@ impl RansacEstimator {
         // Persistent key buffer for weighted A-Res sampling (avoids a per-iteration allocation).
         let mut weighted_scratch: Vec<(usize, f64)> = Vec::new();
 
-        let phase_length = guided_phase_iterations(min_samples, self.config.confidence);
+        let phase_length = sampling::guided_phase_iterations(min_samples, self.config.confidence);
         self.ransac_loop(
             &ref_points,
             &target_points,
@@ -416,7 +417,7 @@ impl RansacEstimator {
             |iteration, sample_buf| {
                 if let Some(&fraction) = GUIDED_POOL_FRACTIONS.get((iteration - 1) / phase_length) {
                     let pool_size = ((n as f64 * fraction).ceil() as usize).max(min_samples);
-                    weighted_sample_into(
+                    sampling::weighted_sample_into(
                         &mut rng,
                         &sorted_indices[..pool_size],
                         &weights,
@@ -425,7 +426,13 @@ impl RansacEstimator {
                         &mut weighted_scratch,
                     );
                 } else {
-                    random_sample_into(&mut rng, n, min_samples, sample_buf, &mut shuffle_indices);
+                    sampling::random_sample_into(
+                        &mut rng,
+                        n,
+                        min_samples,
+                        sample_buf,
+                        &mut shuffle_indices,
+                    );
                 }
             },
         )

@@ -11,7 +11,7 @@ use crate::math::statistics::spread::Spread;
 /// Configuration for linear fit clipping.
 ///
 /// The first pass is a sigma clip about the median. Each later pass fits the line `μ + σ·z` through
-/// the samples still kept, sorted, against `z`, their [`NormalScores`] among all of the pixel's
+/// the samples still kept, sorted, against `z`, their normal scores among all of the pixel's
 /// samples: a normal Q-Q plot. The rejected samples keep their places in the ranking, so the fit is
 /// a censored regression, and the slope stays an estimate of σ however much the ends lost. The
 /// pass then keeps the samples within `sigma` of `μ`, in units of that σ.
