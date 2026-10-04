@@ -2,6 +2,7 @@
 //! scatter the noise propagates to it, so the error falls with the star's amplitude as derived.
 
 use super::*;
+use rayon::prelude::*;
 
 /// One field of round Gaussians on a 0.1 sky with white noise σₙ = 0.01, its sky estimated at the
 /// default tile size, each star measured from its nearest pixel at the matched FWHM 4.0, lands
@@ -69,6 +70,15 @@ fn noisy_stars_land_within_their_reported_sigma() {
 /// carries a standard error of `√(2/2000)` = 3.2% of itself; the mean reported σ² must lie within
 /// 3 of those, 9.5%. The truth's own bias is far below the noise: a Gaussian is its own model
 /// and the windowed centre lands on it within 1e-5 px.
+/// One draw's squared error per axis and reported σ², from each source.
+#[derive(Debug, Clone, Copy)]
+struct Draw {
+    windowed_scatter: f64,
+    windowed_reported: f64,
+    fit_scatter: f64,
+    fit_reported: f64,
+}
+
 #[test]
 fn the_position_sigma_matches_the_scatter() {
     const DRAWS: u64 = 1000;
@@ -84,32 +94,40 @@ fn the_position_sigma_matches_the_scatter() {
     )
     .stamp(Size2us::new(32, 32), 0.1);
     let grid = MeasureGrid::new(fwhm);
-    let (mut windowed_scatter, mut windowed_reported) = (0.0f64, 0.0f64);
-    let (mut fit_scatter, mut fit_reported) = (0.0f64, 0.0f64);
-    for seed in 0..DRAWS {
-        let mut pixels = clean.clone();
-        patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);
-        let residual =
-            background_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
-        let windowed = WindowedCentroid::measure(
-            &residual,
-            truth.round(),
-            &grid,
-            WindowedInputs {
-                offset: 0.0,
-                noise: StarNoise {
-                    background_sigma: f64::from(NOISE),
-                    electrons_per_unit: None,
+    // The draws are independent, so they run in parallel; the sums run in seed order.
+    let draws: Vec<Draw> = (0..DRAWS)
+        .into_par_iter()
+        .map(|seed| {
+            let mut pixels = clean.clone();
+            patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);
+            let residual =
+                background_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
+            let windowed = WindowedCentroid::measure(
+                &residual,
+                truth.round(),
+                &grid,
+                WindowedInputs {
+                    offset: 0.0,
+                    noise: StarNoise {
+                        background_sigma: f64::from(NOISE),
+                        electrons_per_unit: None,
+                    },
                 },
-            },
-        )
-        .unwrap();
-        windowed_scatter += (windowed.pos - truth).length_squared() / 2.0;
-        windowed_reported += windowed.sigma * windowed.sigma;
-        let fit = GaussianFit::new(&residual, windowed.pos, &grid.stamp, 0.0, None).unwrap();
-        fit_scatter += (fit.pos - truth).length_squared() / 2.0;
-        fit_reported += fit.position_sigma * fit.position_sigma;
-    }
+            )
+            .unwrap();
+            let fit = GaussianFit::new(&residual, windowed.pos, &grid.stamp, 0.0, None).unwrap();
+            Draw {
+                windowed_scatter: (windowed.pos - truth).length_squared() / 2.0,
+                windowed_reported: windowed.sigma * windowed.sigma,
+                fit_scatter: (fit.pos - truth).length_squared() / 2.0,
+                fit_reported: fit.position_sigma * fit.position_sigma,
+            }
+        })
+        .collect();
+    let sum = |field: fn(&Draw) -> f64| draws.iter().map(field).sum::<f64>();
+    let (windowed_scatter, windowed_reported) =
+        (sum(|d| d.windowed_scatter), sum(|d| d.windowed_reported));
+    let (fit_scatter, fit_reported) = (sum(|d| d.fit_scatter), sum(|d| d.fit_reported));
     for (source, scatter, reported) in [
         ("windowed", windowed_scatter, windowed_reported),
         ("fit", fit_scatter, fit_reported),

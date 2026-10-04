@@ -269,8 +269,8 @@ fn measure_star_multiple_stars_independent() {
 
 /// A tail on one side breaks the symmetry SROUND measures: a 0.3 companion stretched along x, 4 px
 /// right of a round star that alone reads 0 (see `fitting`). The tail lies along x, so it reads
-/// negative: photutils' `roundness1` of the same f32 samples' DAOFIND cutout is −0.043 673 60,
-/// and its `roundness2` −0.335 960 91, to 1e-6 as in `fitting`.
+/// negative: photutils' `roundness1` of the same f32 samples' DAOFIND cutout is −0.041 660 31,
+/// and its `roundness2` −0.331 491 21, to 1e-6 as in `fitting`.
 #[test]
 fn a_one_sided_tail_moves_sround() {
     let mut pixels =
@@ -290,8 +290,8 @@ fn a_one_sided_tail_moves_sround() {
         .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
         .unwrap();
     assert!(
-        (star.roundness.sround + 0.043_673_6).abs() <= 1e-6
-            && (star.roundness.ground + 0.335_960_9).abs() <= 1e-6,
+        (star.roundness.sround + 0.041_660_31).abs() <= 1e-6
+            && (star.roundness.ground + 0.331_491_2).abs() <= 1e-6,
         "{:?}",
         star.roundness
     );

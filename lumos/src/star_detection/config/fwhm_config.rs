@@ -5,7 +5,7 @@ use crate::error::InvalidConfigField;
 /// Where the matched filter's FWHM comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FwhmMode {
-    /// This FWHM, in pixels.
+    /// This FWHM, in pixels: the PSF's, before the pixel integrates it.
     Fixed(f32),
     /// Measured from a first pass of bright stars, which `fallback` seeds and which falls back to
     /// it when too few stars pass.
@@ -39,7 +39,8 @@ pub struct FwhmConfig {
     pub psf_angle: f32,
 }
 
-/// The matched filter's PSF: a Gaussian of `fwhm` along its major axis.
+/// The matched filter's PSF: a Gaussian of `fwhm` along its major axis, before the pixel integrates
+/// it, as [`Star::fwhm`](crate::star_detection::star::Star::fwhm) reports it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct MatchedFilter {
     pub(crate) fwhm: f32,

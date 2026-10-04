@@ -141,6 +141,7 @@ pub(crate) mod internals {
 
         for &star in stars {
             let radius = star.radius();
+            let star_pixels = star.pixels();
             for offset_y in -radius..=radius {
                 for offset_x in -radius..=radius {
                     let x = (star.center.x as i32 + offset_x) as usize;
@@ -151,7 +152,7 @@ pub(crate) mod internals {
 
                     // The cutoff decides component membership, not just brightness: a pixel
                     // below it stays unlabelled, so it never joins the component's bbox or area.
-                    let value = star.value_at(x as f32, y as f32);
+                    let value = star_pixels.value(x, y);
                     if value <= 0.001 {
                         continue;
                     }

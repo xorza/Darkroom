@@ -16,9 +16,12 @@ pub struct Star {
     pub position_sigma: f64,
     /// Total flux (sum of background-subtracted pixel values).
     pub flux: f32,
-    /// Full Width at Half Maximum in pixels.
+    /// The PSF's full width at half maximum, in pixels, before the pixel integrated it: the width
+    /// the profile fits model, and the moments read once the pixel's own variance is removed. 0
+    /// for a source the moments place inside one pixel.
     pub fwhm: f32,
-    /// Eccentricity (0 = circular, 1 = elongated). Used to reject non-stellar objects.
+    /// Eccentricity (0 = circular, 1 = elongated), of the same PSF. Used to reject non-stellar
+    /// objects; 0 for a source the moments place inside one pixel.
     pub eccentricity: f32,
     /// Signal-to-noise ratio.
     pub snr: f32,

@@ -240,6 +240,14 @@ fn restamped<T>(
     ((centre(&second) - moved).abs().max_element() <= half).then_some(second)
 }
 
+/// How closely a profile fit integrates its model over each pixel, relative to the amplitude:
+/// half an ulp of the f32 samples it is fit to.
+const PIXEL_MEAN_TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
+
+/// The narrowest principal σ a profile fit may take, in px: a Gaussian's, and for a Moffat, the
+/// σ of a Gaussian of its FWHM, 1.18 px.
+const MIN_PROFILE_SIGMA: f64 = 0.5;
+
 /// What a star's metrics are measured against: the local sky the residual still carries, the noise
 /// of the star's pixels, and how many samples the sky was measured from, when an annulus measured
 /// it.
@@ -319,6 +327,9 @@ fn compute_star(
             yy: sum_y2 / weight_sum,
             xy: sum_xy / weight_sum,
         });
+    // The PSF's own shape, as the fits report it. A source the moments place inside a pixel is
+    // unresolved: FWHM 0, and no elongation to measure.
+    let shape = cov.less_pixel();
 
     let npix = stamp_size * stamp_size;
     let snr = background.noise.snr(flux, npix, background.sky_samples);
@@ -344,8 +355,8 @@ fn compute_star(
         // The caller's, from the centroid or the fit that found `pos`.
         position_sigma: f64::NAN,
         flux: flux as f32,
-        fwhm: cov.fwhm(),
-        eccentricity: cov.eccentricity(),
+        fwhm: shape.map_or(0.0, Cov2::fwhm),
+        eccentricity: shape.map_or(0.0, Cov2::eccentricity),
         snr: snr as f32,
         peak: peak as f32,
         saturated: false,

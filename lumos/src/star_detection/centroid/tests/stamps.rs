@@ -1,10 +1,12 @@
 use super::*;
+use crate::math::pixel_gaussian::PixelGaussian;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
 use crate::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
 
 /// The σ seed is the stamp's second moment about the centre, `σ² = Σw·r² / Σw / 2`: on a centred
-/// Gaussian truncated to the stamp's ±10 px it is S₂ / S with S = Σᵢ g(i), S₂ = Σᵢ i²·g(i) — the
-/// truncation under-reports σ, the more the wider the star — and a wider star seeds wider.
+/// Gaussian truncated to the stamp's ±10 px it is S₂ / S with S = Σᵢ m(i), S₂ = Σᵢ i²·m(i), `m(i)`
+/// the profile's mean over pixel `i` — the box adds its 1/12, the truncation under-reports σ, the
+/// more the wider the star — and a wider star seeds wider.
 ///
 /// Each f32 sample is off by at most ε of its value ≤ 1.1 (the profile, then the add onto the
 /// sky); over 441 samples with |r²/2 − σ²| ≤ 100 that moves σ² by ≤ 441 · ε · 100 / Σw, and σ by
@@ -25,8 +27,10 @@ fn sigma_seed_is_the_truncated_second_moment() {
         )
         .expect("21x21 stamp at its centre");
 
-        let two_sigma_sq = 2.0 * f64::from(sigma).powi(2);
-        let g = |i: i32| (-f64::from(i * i) / two_sigma_sq).exp();
+        let gaussian = PixelGaussian {
+            sigma: f64::from(sigma),
+        };
+        let g = |i: i32| gaussian.mean_at(f64::from(i));
         let arms = -(radius as i32)..=radius as i32;
         let sum: f64 = arms.clone().map(g).sum();
         let second: f64 = arms.map(|i| f64::from(i * i) * g(i)).sum();
@@ -38,8 +42,8 @@ fn sigma_seed_is_the_truncated_second_moment() {
             "σ {sigma}: seed {seed}, expected {expected} ± {rounding}"
         );
         assert!(
-            expected < f64::from(sigma),
-            "σ {sigma}: truncation under-reports"
+            expected < (f64::from(sigma).powi(2) + 1.0 / 12.0).sqrt(),
+            "σ {sigma}: truncation under-reports the sampled width"
         );
     }
 }

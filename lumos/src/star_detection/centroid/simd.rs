@@ -2,15 +2,19 @@
 //! samples a vector, weighted or not.
 //!
 //! A model takes part by [`BatchModel`]: at fixed parameters it gives each Isa a [`LaneProfile`],
-//! which evaluates the residual and the Jacobian row at four samples. Both kernels take the
-//! residual from that one evaluation, so the χ² the step test reads and the χ² the normal
-//! equations carry agree; the χ² kernel leaves the Jacobian unused, and the compiler drops it.
+//! which evaluates the profile and its Jacobian row at four points. A sample is a pixel, so the
+//! kernels integrate the profile over it by the fit's [`PixelQuadrature`]: the value and the
+//! Jacobian row are the weighted sums over the nodes, `wᵢ·wⱼ` fused into each, in the order
+//! [`PixelQuadrature::integrate`] sums them. Both kernels take the residual from that one
+//! evaluation, so the χ² the step test reads and the χ² the normal equations carry agree; the χ²
+//! kernel leaves the Jacobian unused, and the compiler drops it.
 //!
 //! An unweighted fit is a fit at unit weight, without the multiplies: `fma(1·j, j, h)` and
 //! `fma(j, j, h)` are one value. The last, partial vector pads its samples with zeros and its
 //! weights with zeros, so the padding lanes add exact zeros wherever the model is finite there.
 
 use crate::math::lm_controller::NormalEquations;
+use crate::math::pixel_quadrature::{MAX_ORDER, PixelQuadrature};
 use crate::simd::{F64_LANES, F64x4, Isa, Kernel};
 use crate::star_detection::centroid::lm_optimizer::FitData;
 
@@ -22,10 +26,10 @@ pub(super) struct Lanes<V> {
     pub(super) z: V,
 }
 
-/// The model at one vector of samples: the residual `z − f`, and the whole Jacobian row `∂f/∂p`.
+/// The model at one vector of points: its value `f`, and the whole Jacobian row `∂f/∂p`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Sample<V, const N: usize> {
-    pub(super) residual: V,
+    pub(super) value: V,
     pub(super) jacobian: [V; N],
 }
 
@@ -39,9 +43,68 @@ pub(super) trait BatchModel<const N: usize>: Copy {
 
 /// A model evaluated lane by lane on one Isa.
 pub(super) trait LaneProfile<S: Isa, const N: usize>: Copy {
-    /// The residual and the Jacobian row at four samples. Every implementation is
+    /// The value and the Jacobian row at four points. Every implementation is
     /// `#[inline(always)]`.
-    fn sample(self, isa: S, lanes: Lanes<S::F64>) -> Sample<S::F64, N>;
+    fn sample(self, isa: S, x: S::F64, y: S::F64) -> Sample<S::F64, N>;
+}
+
+/// A [`PixelQuadrature`]'s nodes and weights, splat across one Isa's lanes.
+#[derive(Debug, Clone, Copy)]
+struct PixelNodes<V> {
+    order: usize,
+    offsets: [V; MAX_ORDER],
+    weights: [V; MAX_ORDER],
+}
+
+impl<V: F64x4> PixelNodes<V> {
+    #[inline(always)]
+    fn splat<S: Isa<F64 = V>>(isa: S, quadrature: &PixelQuadrature) -> Self {
+        let zero = isa.splat_f64(0.0);
+        let mut nodes = Self {
+            order: quadrature.nodes().len(),
+            offsets: [zero; MAX_ORDER],
+            weights: [zero; MAX_ORDER],
+        };
+        for (i, (&offset, &weight)) in quadrature
+            .nodes()
+            .iter()
+            .zip(quadrature.weights())
+            .enumerate()
+        {
+            nodes.offsets[i] = isa.splat_f64(offset);
+            nodes.weights[i] = isa.splat_f64(weight);
+        }
+        nodes
+    }
+
+    /// `profile` integrated over the pixels centred at `(x, y)`.
+    #[inline(always)]
+    fn integrate<S: Isa<F64 = V>, P: LaneProfile<S, N>, const N: usize>(
+        &self,
+        isa: S,
+        profile: P,
+        x: V,
+        y: V,
+    ) -> Sample<V, N> {
+        let zero = isa.splat_f64(0.0);
+        let mut sum = Sample {
+            value: zero,
+            jacobian: [zero; N],
+        };
+        let order = self.order;
+        for (&dy, &wy) in self.offsets[..order].iter().zip(&self.weights[..order]) {
+            let y = y + dy;
+            for (&dx, &wx) in self.offsets[..order].iter().zip(&self.weights[..order]) {
+                let point = profile.sample(isa, x + dx, y);
+                let weight = wx * wy;
+                sum.value = weight.mul_add(point.value, sum.value);
+                for (total, &term) in sum.jacobian.iter_mut().zip(&point.jacobian) {
+                    *total = weight.mul_add(term, *total);
+                }
+            }
+        }
+        sum
+    }
 }
 
 /// The normal equations for one Levenberg-Marquardt step over the whole stamp.
@@ -49,6 +112,7 @@ pub(super) trait LaneProfile<S: Isa, const N: usize>: Copy {
 pub(super) struct NormalEquationsKernel<'a, M, const N: usize> {
     pub(super) model: M,
     pub(super) data: FitData<'a>,
+    pub(super) quadrature: &'a PixelQuadrature,
 }
 
 impl<M: BatchModel<N>, const N: usize> Kernel for NormalEquationsKernel<'_, M, N> {
@@ -59,6 +123,7 @@ impl<M: BatchModel<N>, const N: usize> Kernel for NormalEquationsKernel<'_, M, N
         let zero = isa.splat_f64(0.0);
         let mut sums = NormalSums {
             profile: self.model.profile(isa),
+            nodes: PixelNodes::splat(isa, self.quadrature),
             chi2: zero,
             gradient: [zero; N],
             hessian: [[zero; N]; N],
@@ -73,6 +138,7 @@ impl<M: BatchModel<N>, const N: usize> Kernel for NormalEquationsKernel<'_, M, N
 pub(super) struct Chi2Kernel<'a, M, const N: usize> {
     pub(super) model: M,
     pub(super) data: FitData<'a>,
+    pub(super) quadrature: &'a PixelQuadrature,
 }
 
 impl<M: BatchModel<N>, const N: usize> Kernel for Chi2Kernel<'_, M, N> {
@@ -82,6 +148,7 @@ impl<M: BatchModel<N>, const N: usize> Kernel for Chi2Kernel<'_, M, N> {
     fn run<S: Isa>(self, isa: S) -> f64 {
         let mut sum = Chi2Sum::<_, _, N> {
             profile: self.model.profile(isa),
+            nodes: PixelNodes::splat(isa, self.quadrature),
             chi2: isa.splat_f64(0.0),
         };
         sum.feed(isa, self.data);
@@ -148,13 +215,18 @@ fn load<S: Isa>(
 #[derive(Debug)]
 struct Chi2Sum<P, V, const N: usize> {
     profile: P,
+    nodes: PixelNodes<V>,
     chi2: V,
 }
 
 impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for Chi2Sum<P, S::F64, N> {
     #[inline(always)]
     fn sample(&mut self, isa: S, lanes: Lanes<S::F64>, weight: Option<S::F64>) {
-        let residual = self.profile.sample(isa, lanes).residual;
+        let residual = lanes.z
+            - self
+                .nodes
+                .integrate::<S, P, N>(isa, self.profile, lanes.x, lanes.y)
+                .value;
         let weighted = match weight {
             Some(w) => w * residual,
             None => residual,
@@ -168,6 +240,7 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for Chi2Sum<P, S:
 #[derive(Debug)]
 struct NormalSums<P, V, const N: usize> {
     profile: P,
+    nodes: PixelNodes<V>,
     chi2: V,
     gradient: [V; N],
     hessian: [[V; N]; N],
@@ -196,7 +269,8 @@ impl<P, V: F64x4, const N: usize> NormalSums<P, V, N> {
 impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P, S::F64, N> {
     #[inline(always)]
     fn sample(&mut self, isa: S, lanes: Lanes<S::F64>, weight: Option<S::F64>) {
-        let Sample { residual, jacobian } = self.profile.sample(isa, lanes);
+        let Sample { value, jacobian } = self.nodes.integrate(isa, self.profile, lanes.x, lanes.y);
+        let residual = lanes.z - value;
         let mut weighted = jacobian;
         let mut weighted_residual = residual;
         if let Some(w) = weight {
@@ -220,6 +294,7 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P,
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
+    use crate::math::pixel_quadrature::PixelQuadrature;
     use crate::simd::tier::Tier;
     use crate::star_detection::centroid::lm_optimizer::FitData;
     use crate::star_detection::centroid::simd::{BatchModel, Chi2Kernel, NormalEquationsKernel};
@@ -243,12 +318,19 @@ pub(crate) mod internals {
     pub(crate) fn assert_every_tier_matches_portable<M: BatchModel<N>, const N: usize>(
         model: M,
         stamp: FitData<'_>,
+        quadrature: &PixelQuadrature,
     ) {
         assert!(stamp.x.len() >= 16, "the sweep reads 16 samples");
         let ones = [1.0; 16];
         let weights: Vec<f64> = (0..16).map(|i| 0.5 + f64::from(i % 5) * 0.37).collect();
         for n in 9..=16 {
-            let portable = |data| Tier::portable().run(NormalEquationsKernel { model, data });
+            let portable = |data| {
+                Tier::portable().run(NormalEquationsKernel {
+                    model,
+                    data,
+                    quadrature,
+                })
+            };
             assert_eq!(
                 bits(&portable(prefix(stamp, n, Some(&ones)))),
                 bits(&portable(prefix(stamp, n, None))),
@@ -256,17 +338,30 @@ pub(crate) mod internals {
             );
             for data in [prefix(stamp, n, None), prefix(stamp, n, Some(&weights))] {
                 let equations = portable(data);
-                let chi2 = Tier::portable().run(Chi2Kernel { model, data });
+                let chi2 = Tier::portable().run(Chi2Kernel {
+                    model,
+                    data,
+                    quadrature,
+                });
                 assert_eq!(chi2.to_bits(), equations.chi2.to_bits(), "n={n}");
                 for tier in Tier::supported() {
                     assert_eq!(
-                        bits(&tier.run(NormalEquationsKernel { model, data })),
+                        bits(&tier.run(NormalEquationsKernel {
+                            model,
+                            data,
+                            quadrature
+                        })),
                         bits(&equations),
                         "{tier} n={n} weighted={}",
                         data.weights.is_some()
                     );
                     assert_eq!(
-                        tier.run(Chi2Kernel { model, data }).to_bits(),
+                        tier.run(Chi2Kernel {
+                            model,
+                            data,
+                            quadrature
+                        })
+                        .to_bits(),
                         chi2.to_bits(),
                         "{tier} n={n} weighted={}",
                         data.weights.is_some()

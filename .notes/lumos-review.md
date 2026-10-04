@@ -35,12 +35,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
   - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
-## 11. Centroids stop before they converge
-
-- [ ] `11.5` **The PSF is evaluated at pixel centres, not integrated over the pixel** — `star_detection/centroid/gaussian_fit/mod.rs:271-277`, `star_detection/centroid/moffat_fit/mod.rs:156-161`, `star_detection/centroid/covariance.rs`
-  - FWHM bias: +16% at FWHM 1.2, +5.9% at 2, +2.6% at 3. `MIN_SIGMA` allows fits down to FWHM 1.18, where this dominates.
-  - For a Gaussian, an erf-integrated model is exact. `[P]`
-
 ## 13. The final registration fit discards precision
 
 - [ ] `13.1` **Match recovery searches only the brightest `max_stars` (200)** — `registration/mod.rs:144-155,355-365`
@@ -593,6 +587,12 @@ Closes groups 10, 11 and 12, 2.3, 2.4, 2.6, 26.6 to 26.10 and 24.13. It uses S2,
 - A `MeasureGrid` holds what follows from the expected FWHM: the window σ, the stamp radius and the annulus radii (26.6, 26.9). The inner annulus radius encloses a stated flux fraction of a Moffat with β = 2.5 (11.7).
 - The windowed centroid subtracts the local sky first (11.3). It uses signed values (11.4) and the adaptive-moments Newton step `σ_w² / (σ_w² − C_obs)` (11.1). It stops on the bound `c/(1 − c)·‖Δ‖` of the remaining error.
 - The PSF models are integrated over the pixel. The Gaussian uses erf differences, which is exact (11.5). The Moffat uses Gauss–Legendre quadrature, with an order that keeps its error below 1% of the centroid noise at the minimum FWHM.
+  - As built: a rotated Gaussian has no closed-form pixel integral, so both models take a tensor Gauss–Legendre rule. Each fit chooses the order from its own width by a rigorous bound (Trefethen, ATAP theorem 19.3, on the Bernstein ellipse), so the quadrature errs under 2⁻²⁵ of the amplitude, half an ulp of the f32 samples. It starts at the order its seed needs and fits again at a higher order when it converges narrower. A FWHM-4 star takes order 5 with either model; the narrowest admitted profiles take 7 (Gaussian) and 11 (Moffat at β just above 1).
+  - Every width the detector reports is the PSF's before the pixel integrates it. The windowed moments remove the box's variance 1/12; the box's kurtosis leaves `1/(240·(σ_w² + s²))` px² per axis to first order, 0.0009 at σ 1.5. A source the moments place inside one pixel reads FWHM 0. The matched filter's kernels are the PSF's pixel means.
+  - Both fits admit the same narrowest profile, the FWHM of a Gaussian of σ 0.5 (1.18 px). The Gaussian now bounds its principal widths, not only the diagonal of its inverse covariance, which admitted a principal σ of 0.35. The Moffat β validates in (1, 10]: at β ≤ 1 the flux diverges.
+  - `erf` and `erfc` are a port of fdlibm's (`math/error_function.rs`): `statrs` 0.19.1 errs by up to 5e-11 on [0.5, 1], which a difference of two erfs amplifies.
+  - The synthetic fixtures render pixel means: the closed form for an axis-aligned Gaussian, otherwise a rule chosen by the same bound at 1e-12 of the peak.
+  - Cost, release: the Gaussian fit of a 17×17 stamp takes 133 µs (15 µs before), the Moffat 256 µs (10 µs before). The fits are opt-in; the default centroid is the windowed moment.
 - The fits run on `LmController` (S6), with fixed constants (26.7). A failure returns `None` (26.8). The IRLS pass runs only after a successful fit (11.9). The fit weight floor and the amplitude seed floor are fractions of the stamp's sky σ (2.4, 2.6).
 - A failed fit falls back to the converged windowed centroid (11.2). A fit that moves more than half the stamp radius is stamped again, once (11.6).
 - Every star gets `position_sigma` (12.4):
@@ -678,8 +678,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 ## Phase 8. Numerics kit and measurement (S6, C4)
 
 1. Done: `LmController` (Nielsen's λ update, a Cholesky solve of the Marquardt-scaled system with a relative pivot, and stop tests that hold at any scale — a negligible accepted or Gauss–Newton step in the scaled norm, a Gauss–Newton decrease of χ² under 1e-12 of it, or a gradient orthogonal to the residuals) carries the centroid fits, which now return `None` when they fail and reweight only after a success. `Lstsq` holds the one SVD rank rule the SIP fit and the background extraction share. `Irls` waits for its first robust consumer, the final registration fit (phase 9). Items 2.3, 2.5, 11.8, 11.9, 24.13, 26.7 and 26.8 are closed.
-2. Done except the integrated models: `MeasureGrid` holds the stamp, the window σ and the annulus (from where a β = 2.5 Moffat holds 99% of its flux). `WindowedCentroid` subtracts the local sky, weights the signed signal, takes the adaptive-moments Newton step and stops on the bound `c/(1 − c)·‖Δ‖`; a failed fit falls back to it, and a fit that moves more than half the stamp radius is stamped again once. Every star carries `position_sigma`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)` or the windowed centroid's propagated noise; both match the scatter of 1000 noise draws. The fits' weight and amplitude seed floors are relative. Items 2.4, 2.6, 11.1 to 11.4, 11.6, 11.7, 12.4, 26.6, 26.9 and 26.10 are closed.
-   Still open: the integrated models (11.5). A rotated Gaussian has no closed-form pixel integral; the exact route integrates along x by erf differences and along y by Gauss–Legendre, which changes the fits' vector kernels from per-pixel to per-sub-row accumulation.
+2. Done: `MeasureGrid` holds the stamp, the window σ and the annulus (from where a β = 2.5 Moffat holds 99% of its flux). `WindowedCentroid` subtracts the local sky, weights the signed signal, takes the adaptive-moments Newton step and stops on the bound `c/(1 − c)·‖Δ‖`; a failed fit falls back to it, and a fit that moves more than half the stamp radius is stamped again once. Every star carries `position_sigma`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)` or the windowed centroid's propagated noise; both match the scatter of 1000 noise draws. The fits' weight and amplitude seed floors are relative. Items 2.4, 2.6, 11.1 to 11.4, 11.6, 11.7, 12.4, 26.6, 26.9 and 26.10 are closed.
+   The integrated models (11.5) are built as C4 records. The characterization snapshots moved with the fixtures, which now render pixel means; detection on the characterization field finds 34 stars, and registration 32 inliers with a worst corner error of 3.5e-3 px.
 3. Done: the SNR is the CCD equation with the sky-estimate term, on the background σ held to the frame's floor, and the fits weigh by the same equation when the gain is known. GROUND and SROUND are photutils' `roundness2` and `roundness1` on DAOFIND's cutout, and the tests pin them to photutils' formulas reproduced in numpy. Sharpness reads the star's own centre pixel. `validate_catalog` checks every float field of a star. Items 10.1 to 10.4, 11.10 and 12.1 to 12.3 are closed. 24.12 needs a SIMD `ln`, so it moves to phase 14 with the rest of group 24.
    Effect on the characterization field: 34 stars pass, against 30. The 30 keep their positions, fluxes, FWHMs and eccentricities exactly. The 4 new ones are blended neighbours that the whole-stamp roundness rejected. Registration finds 32 inliers, against 27, and its worst corner error falls from 4.6e-3 px to 3.4e-3 px.
 - **Tests:**
@@ -753,5 +753,9 @@ Confirmed on 2026-10-03.
 4. **Flag storage (phase 3):** one byte plane.
 5. **Dark scaling (phase 6):** exposure-ratio scaling only, for a bias-removed dark.
 6. **Scope:** Markesteijn 3-pass as an option (16.12), and SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8) are in scope. CFA drizzle (20.3) waits.
+
+## Pending
+
+1. **The FWHM convention (phase 8).** Every width is now the PSF's before the pixel integrates it, as DAOPHOT and PSFEx report it. PixInsight and Siril fit point-sampled models, so their FWHM includes the pixel: about `√(σ² + 1/12)` in σ, 3% wider at FWHM 2.5. A `Fixed` FWHM in the config is read the same way. The alternative is to report the width with the pixel included and keep the integrated models inside.
 
 No phase needs a new dependency. `statrs` gives `Φ⁻¹` and `erf`. `sysinfo` gives the cgroup limits. `std` gives the Windows delete-on-close flags. `/proc/self/mountinfo` gives the file system type.

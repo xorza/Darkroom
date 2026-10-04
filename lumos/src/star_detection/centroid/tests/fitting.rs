@@ -1,7 +1,9 @@
 use super::*;
+use crate::math::error_function;
+use rayon::prelude::*;
 
 /// Every centroid method over a 10 × 10 grid of sub-pixel offsets in 0.1 px steps, each fit seeded
-/// at the pixel nearest the star.
+/// at the pixel nearest the star; the cells are independent, so they run in parallel.
 ///
 /// The profile fits are handed samples of their own model, so they must land on the truth to the
 /// f32 rounding of the samples (≤ 1e-6 px; see `gaussian_fit`'s `RecoveryCase`), and every one must
@@ -10,73 +12,74 @@ use super::*;
 /// 7.1e-3, with 1% for the sampling.
 #[test]
 fn every_method_on_a_sub_pixel_grid() {
-    let size = Size2us::new(64, 64);
+    let size = Size2us::new(32, 32);
     let fwhm = sigma_to_fwhm(2.5);
     let moments = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
     };
-    for dx in 0..10 {
-        for dy in 0..10 {
-            // The star sits where its f32 centre rounds 32 + 0.1·k to.
-            let truth = DVec2::new(32.0 + f64::from(dx) * 0.1, 32.0 + f64::from(dy) * 0.1)
-                .as_vec2()
-                .as_dvec2();
-            let seed = truth.round();
+    (0..100).into_par_iter().for_each(|cell| {
+        let (dx, dy) = (cell / 10, cell % 10);
+        // The star sits where its f32 centre rounds 16 + 0.1·k to.
+        let truth = DVec2::new(16.0 + f64::from(dx) * 0.1, 16.0 + f64::from(dy) * 0.1)
+            .as_vec2()
+            .as_dvec2();
+        let seed = truth.round();
 
-            let gaussian =
-                SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma: 2.5 })
-                    .stamp(size, 0.1);
-            let fit = GaussianFit::new(&gaussian, seed, &StampGrid::new(8), 0.1, None)
-                .expect("the Gaussian fit lands");
-            assert!(
-                (fit.pos - truth).length() <= 1e-6,
-                "Gaussian at {truth}: {}",
-                fit.pos
-            );
+        let gaussian =
+            SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma: 2.5 })
+                .stamp(size, 0.1);
+        let fit = GaussianFit::new(&gaussian, seed, &StampGrid::new(8), 0.1, None)
+            .expect("the Gaussian fit lands");
+        assert!(
+            (fit.pos - truth).length() <= 1e-6,
+            "Gaussian at {truth}: {}",
+            fit.pos
+        );
 
-            let moffat = SyntheticStar::new(
-                truth.as_vec2(),
-                1.0,
-                StarProfile::Moffat {
-                    alpha: 2.5,
-                    beta: 2.5,
-                },
-            )
-            .stamp(size, 0.1);
-            let beta = 2.5;
-            let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, beta)
-                .expect("the Moffat fit lands");
-            assert!(
-                (fit.pos - truth).length() <= 1e-6,
-                "Moffat at {truth}: {}",
-                fit.pos
-            );
+        let moffat = SyntheticStar::new(
+            truth.as_vec2(),
+            1.0,
+            StarProfile::Moffat {
+                alpha: 2.5,
+                beta: 2.5,
+            },
+        )
+        .stamp(size, 0.1);
+        let beta = 2.5;
+        let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, beta)
+            .expect("the Moffat fit lands");
+        assert!(
+            (fit.pos - truth).length() <= 1e-6,
+            "Moffat at {truth}: {}",
+            fit.pos
+        );
 
-            let measured = Measured::flat(&gaussian, 0.1, 0.01);
-            let star = measured
-                .measure(&measured.region_at(seed), &moments, fwhm)
-                .expect("the moments measure");
-            let bound = 1.01 * (seed - truth).length() * (1.0 / 1.64f64).powi(10);
-            assert!(
-                (star.pos - truth).length() <= bound,
-                "moments at {truth}: {} against {bound}",
-                star.pos
-            );
-        }
-    }
+        let measured = Measured::flat(&gaussian, 0.1, 0.01);
+        let star = measured
+            .measure(&measured.region_at(seed), &moments, fwhm)
+            .expect("the moments measure");
+        let bound = 1.01 * (seed - truth).length() * (1.0 / 1.64f64).powi(10);
+        assert!(
+            (star.pos - truth).length() <= bound,
+            "moments at {truth}: {} against {bound}",
+            star.pos
+        );
+    });
 }
 
 /// The moment metrics of noiseless Gaussian stars at the stamp `measure_star` would give them.
 ///
-/// The windowed covariance deconvolves its window exactly for a Gaussian, so FWHM and eccentricity
-/// come out to the f32 rounding of the samples: 2e-6 of the FWHM, measured ≤ 1.1e-6. A round star's
-/// eccentricity, √(1 − λ₂/λ₁), turns a rounding δ in the ratio into √δ: ≤ 3e-4. A round star reads
-/// 0 on both roundness metrics; an elongated one reads photutils' `roundness2` and `roundness1` of
-/// the same f32 samples' 7 × 7 DAOFIND cutout for the PSF of [`TEST_EXPECTED_FWHM`], from its
-/// marginal fit and its quadrant slices reproduced in numpy, to 1e-6: a ulp of f32 `exp` in a sample and the f32 result.
-/// Sharpness is the peak over the 3 × 3 core, 1/(1 + 2·e^(−1/2σ²))² for a round star on a pixel
-/// centre.
+/// The pixels hold the profile convolved with the unit box. The windowed covariance deconvolves its
+/// window exactly for a Gaussian and removes the box's variance 1/12; FWHM and eccentricity then
+/// read [`MomentReading`] to its second order: 1e-5 of the FWHM. A round star's eccentricity,
+/// √(1 − λ₂/λ₁), turns a rounding δ in the ratio into √δ: ≤ 3e-4, and an elongated one's moves with
+/// the second order, ≤ 1e-5. A round star reads 0 on both roundness metrics; an elongated one reads
+/// photutils' `roundness2` and `roundness1` of the same f32 samples' 7 × 7 DAOFIND cutout for the
+/// PSF of [`TEST_EXPECTED_FWHM`], from its marginal fit and its quadrant slices reproduced in
+/// numpy, to 1e-6: a ulp of f32 `exp` in a sample and the f32 result. Sharpness is the peak over
+/// the 3 × 3 core: for a round star on a pixel centre, each axis' mean over the centre pixel over
+/// its mean over three, `(erf(1/(2σ√2)) / erf(3/(2σ√2)))²`.
 #[test]
 fn moment_metrics_of_gaussian_stars() {
     let size = Size2us::new(128, 128);
@@ -88,9 +91,9 @@ fn moment_metrics_of_gaussian_stars() {
         (3.0, 3.0, 0.0, 0.0),
         (3.5, 3.5, 0.0, 0.0),
         (4.0, 4.0, 0.0, 0.0),
-        (3.0, 2.0, -0.662_517_3, -0.084_948_63),
-        (4.0, 2.0, -1.089_321_7, -0.114_288_59),
-        (2.0, 4.0, 1.089_321_7, 0.114_288_59),
+        (3.0, 2.0, -0.655_471, -0.082_431_98),
+        (4.0, 2.0, -1.081_322_3, -0.111_348_47),
+        (2.0, 4.0, 1.081_322_3, 0.111_348_47),
     ] {
         let profile = StarProfile::Elliptical {
             sigma_x,
@@ -104,17 +107,16 @@ fn moment_metrics_of_gaussian_stars() {
             .expect("a star");
 
         let label = format!("σ {sigma_x} × {sigma_y}");
-        let fwhm = sigma_to_fwhm((sigma_x * sigma_y).sqrt());
+        let MomentReading { fwhm, eccentricity } = MomentReading::of(sigma_x, sigma_y);
         assert!(
-            (star.fwhm - fwhm).abs() <= 2e-6 * fwhm,
-            "{label}: FWHM {}",
+            (star.fwhm - fwhm).abs() <= 1e-5 * fwhm,
+            "{label}: FWHM {} against {fwhm}",
             star.fwhm
         );
-        let (minor, major) = (sigma_x.min(sigma_y), sigma_x.max(sigma_y));
-        let eccentricity = (1.0 - (minor / major).powi(2)).sqrt();
+        let bound = if sigma_x == sigma_y { 3e-4 } else { 1e-5 };
         assert!(
-            (star.eccentricity - eccentricity).abs() <= 3e-4,
-            "{label}: eccentricity {}",
+            (star.eccentricity - eccentricity).abs() <= bound,
+            "{label}: eccentricity {} against {eccentricity}",
             star.eccentricity
         );
         assert!(
@@ -124,8 +126,9 @@ fn moment_metrics_of_gaussian_stars() {
             star.roundness
         );
         if sigma_x == sigma_y {
-            let core = 1.0 + 2.0 * (-1.0 / (2.0 * sigma_x * sigma_x)).exp();
-            let sharpness = 1.0 / (core * core);
+            let scale = 1.0 / (f64::from(sigma_x) * std::f64::consts::SQRT_2);
+            let axis = error_function::erf(0.5 * scale) / error_function::erf(1.5 * scale);
+            let sharpness = (axis * axis) as f32;
             assert!(
                 (star.sharpness - sharpness).abs() <= 1e-6,
                 "{label}: sharpness {}",

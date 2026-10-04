@@ -10,7 +10,7 @@ use std::f32::consts::FRAC_PI_4;
 
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::patterns;
-use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_to_sigma, sigma_to_fwhm};
+use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_to_sigma, sigma_to_fwhm};
 use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
@@ -51,6 +51,30 @@ fn global_background(sky: &SkyNoise, pos: DVec2) -> StarBackground {
             electrons_per_unit: None,
         },
         sky_samples: None,
+    }
+}
+
+/// What the moment metrics read for an axis-aligned Gaussian of `(σx, σy)` over pixels: its own
+/// variances plus the window's first-order response to the box's kurtosis `−1/120` on each axis,
+/// `1/(240·(σ_w² + s²))`, with `s² = σ² + 1/12` the axis' sampled variance and `σ_w²` the matched
+/// window, their mean. The second order is under 2.3e-5 px² from σ 1.5.
+#[derive(Debug, Clone, Copy)]
+struct MomentReading {
+    fwhm: f32,
+    eccentricity: f32,
+}
+
+impl MomentReading {
+    fn of(sigma_x: f32, sigma_y: f32) -> Self {
+        let sampled = |sigma: f32| f64::from(sigma).powi(2) + 1.0 / 12.0;
+        let window = f64::midpoint(sampled(sigma_x), sampled(sigma_y));
+        let read =
+            |sigma: f32| f64::from(sigma).powi(2) + 1.0 / (240.0 * (window + sampled(sigma)));
+        let (read_x, read_y) = (read(sigma_x), read(sigma_y));
+        Self {
+            fwhm: (FWHM_PER_SIGMA * (read_x * read_y).powf(0.25)) as f32,
+            eccentricity: (1.0 - read_x.min(read_y) / read_x.max(read_y)).sqrt() as f32,
+        }
     }
 }
 

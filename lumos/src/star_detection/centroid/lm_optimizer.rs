@@ -1,6 +1,7 @@
 //! The profile models' side of a fit: the samples, and the model as [`LmController`] reads it.
 
 use crate::math::lm_controller::{LmController, LmFit, LmProblem, NormalEquations};
+use crate::math::pixel_quadrature::PixelQuadrature;
 
 /// The samples a model is fit against, with optional per-pixel inverse-variance
 /// weights (`None` ≡ all 1). All three coordinate slices are indexed in lockstep.
@@ -30,10 +31,28 @@ impl<'a> FitData<'a> {
     }
 }
 
-/// Trait for models that can be fit with L-M optimization.
+/// A profile model that can be fit with L-M optimization. Its samples are pixels, so it is fit
+/// as the profile integrated over each by its [`PixelQuadrature`].
 pub(super) trait LMModel<const N: usize>: std::fmt::Debug {
-    /// Evaluate the model at a point.
-    fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
+    /// The profile at a point.
+    fn point(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
+
+    /// The quadrature the profile is integrated over a pixel by.
+    fn quadrature(&self) -> &PixelQuadrature;
+
+    /// Integrate the profile by the Gauss–Legendre rule of `order` from now on.
+    fn integrate_at(&mut self, order: usize);
+
+    /// The smallest order that integrates the profile at `params` over a pixel within
+    /// [`PIXEL_MEAN_TOLERANCE`](crate::star_detection::centroid::PIXEL_MEAN_TOLERANCE) of its
+    /// amplitude.
+    fn sufficient_order(&self, params: &[f64; N]) -> usize;
+
+    /// The profile integrated over the pixel centred at `(x, y)`.
+    fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64 {
+        self.quadrature()
+            .integrate(x, y, |x, y| self.point(x, y, params))
+    }
 
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
@@ -110,10 +129,31 @@ pub(crate) mod internals {
         pub(crate) jacobian: [f64; N],
     }
 
-    /// A model's scalar value and Jacobian row at one point: the definition each model's vector
-    /// lanes mirror, and the reference the batch kernels are tested against.
+    /// A model's scalar value and Jacobian row: the definition each model's vector lanes mirror,
+    /// and the reference the batch kernels are tested against.
     pub(crate) trait ModelJacobian<const N: usize>: LMModel<N> {
-        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
+        /// At one point.
+        fn point_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
+
+        /// Over the pixel centred at `(x, y)`, by the model's quadrature in its order.
+        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N> {
+            let quadrature = self.quadrature();
+            let mut sum = ModelSample {
+                value: 0.0,
+                jacobian: [0.0; N],
+            };
+            for (&dy, &wy) in quadrature.nodes().iter().zip(quadrature.weights()) {
+                for (&dx, &wx) in quadrature.nodes().iter().zip(quadrature.weights()) {
+                    let point = self.point_and_jacobian(x + dx, y + dy, params);
+                    let weight = wx * wy;
+                    sum.value = weight.mul_add(point.value, sum.value);
+                    for (total, term) in sum.jacobian.iter_mut().zip(point.jacobian) {
+                        *total = weight.mul_add(term, *total);
+                    }
+                }
+            }
+            sum
+        }
     }
 
     /// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and

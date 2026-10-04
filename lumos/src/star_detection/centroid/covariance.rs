@@ -46,6 +46,20 @@ impl Cov2 {
         }
     }
 
+    /// The covariance of the profile before the pixel integrated it, `None` when it is not
+    /// positive definite: the moments of pixel samples hold the profile convolved with the unit
+    /// box, which adds the box's variance 1/12 on each axis and nothing across them. Exact for
+    /// unweighted moments. Through the Gaussian window, the box's kurtosis leaves `1/(480·σ²)` px²
+    /// on each axis to first order: 0.0009 at σ 1.5.
+    pub(super) fn less_pixel(self) -> Option<Cov2> {
+        let less = Cov2 {
+            xx: self.xx - PIXEL_VARIANCE,
+            yy: self.yy - PIXEL_VARIANCE,
+            xy: self.xy,
+        };
+        (less.xx > 0.0 && less.det() > 0.0).then_some(less)
+    }
+
     /// Inverse of the symmetric matrix, or `None` if (near-)singular.
     pub(super) fn inverse(self) -> Option<Cov2> {
         let det = self.det();
@@ -60,6 +74,9 @@ impl Cov2 {
         })
     }
 }
+
+/// The variance of a unit box, px²: what a pixel adds to the profile it integrates, on each axis.
+const PIXEL_VARIANCE: f64 = 1.0 / 12.0;
 
 /// Window-scale bounds (px²): σ ∈ [0.5, 10] px.
 pub(super) const MIN_SIGMA_SQ: f64 = 0.25;

@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use crate::math::error_function;
 
 /// A lone star found by detection on an estimated sky and measured with the default config, as the
 /// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a moments
@@ -118,17 +119,20 @@ fn a_detected_star_measures_as_on_its_true_sky() {
             f64::from(reference.eccentricity).powi(2),
         );
 
-        // Each sample takes four f32 roundings of at most ε · (A + sky) — the profile's exp and
-        // scale, the add onto the sky and the subtraction from it — so the 225 of them move the
-        // sum by at most 225 · 4ε · 0.9.
+        // Each pixel holds the profile's mean over it, so the stamp's pixels together hold its
+        // integral over the stamp's span, `σ·√(π/2)·(erf(b/σ√2) − erf(a/σ√2))` per axis from `a`
+        // to `b` about the centre. Each sample takes three f32 roundings of at most ε · (A + sky)
+        // — the mean scaled, the add onto the sky and the subtraction from it — so the 225 of
+        // them move the sum by at most 225 · 3ε · 0.9.
         let centre = star.pos.round();
-        let samples = |c: f64, x0: f64| -> f64 {
-            (-(radius as i32)..=radius as i32)
-                .map(|d| (-(c + f64::from(d) - x0).powi(2) / (2.0 * sigma_sq)).exp())
-                .sum()
+        let span = |c: f64, x0: f64| -> f64 {
+            let scale = 1.0 / (2.0 * sigma_sq).sqrt();
+            let (low, high) = (c - radius as f64 - 0.5 - x0, c + radius as f64 + 0.5 - x0);
+            (std::f64::consts::PI * sigma_sq / 2.0).sqrt()
+                * (error_function::erf(high * scale) - error_function::erf(low * scale))
         };
-        let expected = AMPLITUDE * samples(centre.x, truth.x) * samples(centre.y, truth.y);
-        let rounding = npix as f64 * 4.0 * f64::from(f32::EPSILON) * (AMPLITUDE + f64::from(SKY));
+        let expected = AMPLITUDE * span(centre.x, truth.x) * span(centre.y, truth.y);
+        let rounding = npix as f64 * 3.0 * f64::from(f32::EPSILON) * (AMPLITUDE + f64::from(SKY));
         assert!(
             (f64::from(reference.flux) - expected).abs() <= rounding,
             "σ {sigma} at {truth}: flux {} vs {expected}",
