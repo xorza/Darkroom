@@ -38,14 +38,16 @@ impl UnionFind {
 
     #[inline]
     pub(super) fn make_set(&self) -> u32 {
-        // SeqCst: labels must be globally unique across threads.
-        let label = self.next_label.fetch_add(1, Ordering::SeqCst);
+        // Relaxed: a read-modify-write hands each caller a distinct value at any ordering. The new
+        // label's slot is read by its own strip, or by the stitch after the join that ends the
+        // parallel pass, which orders it.
+        let label = self.next_label.fetch_add(1, Ordering::Relaxed);
         debug_assert!(
             (label as usize) <= self.parent.len(),
             "UnionFind capacity exceeded: label {label} > capacity {}",
             self.parent.len()
         );
-        self.parent[label as usize - 1].store(label, Ordering::SeqCst);
+        self.parent[label as usize - 1].store(label, Ordering::Relaxed);
         label
     }
 
