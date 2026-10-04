@@ -19,7 +19,7 @@ fn cache_test_frame<I: StackableImage>(
     source: &Path,
     dimensions: ImageDimensions,
     index: usize,
-) -> Result<StoredFrame, Error> {
+) -> Result<StoredFrame, StackError> {
     // No frame 0 admitted: these tests are about one frame's cache files, not the set it belongs to.
     let cancel = CancelToken::never();
     FrameDiskCache::<I> {
@@ -138,7 +138,7 @@ fn cache_frame_validates_a_reused_frame() {
     let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
     assert!(matches!(
         error,
-        Error::NonFiniteImageSample {
+        StackError::NonFiniteImageSample {
             index: 1,
             channel: 0,
             pixel: 2,
@@ -166,7 +166,7 @@ fn cache_frame_validates_a_reused_frame() {
     assert!(
         matches!(
             error,
-            Error::FrameQualityPairMismatch {
+            StackError::FrameQualityPairMismatch {
                 index: 1,
                 pixel: 5,
                 ..
@@ -196,7 +196,7 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
         spill_of::<CfaImage>(&kept, &source).channel_path(0)
     );
     let error = cache_test_frame::<CfaImage>(temp_dir.path(), &source, dims, 0).unwrap_err();
-    assert!(matches!(error, Error::ImageLoad(_)), "{error:?}");
+    assert!(matches!(error, StackError::ImageLoad(_)), "{error:?}");
 }
 
 /// A kept cache serves a second run: frame 1's planes come back from the first run's files, and
@@ -284,7 +284,7 @@ fn cache_frame_dimension_mismatch() {
 
     assert!(matches!(
         result.unwrap_err(),
-        Error::DimensionMismatch(FrameDimensionMismatch {
+        StackError::DimensionMismatch(FrameDimensionMismatch {
             index: 5,
             expected,
             actual,

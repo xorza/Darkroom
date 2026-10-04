@@ -11,9 +11,9 @@ use crate::math::vec2us::Vec2us;
 #[derive(Debug)]
 pub(crate) struct Region {
     /// Bounding box of the region.
-    pub bbox: URect,
+    pub(crate) bbox: URect,
     /// Peak pixel coordinates within the region.
-    pub peak: Vec2us,
+    pub(crate) peak: Vec2us,
     /// Number of pixels in the region.
-    pub area: usize,
+    pub(crate) area: usize,
 }

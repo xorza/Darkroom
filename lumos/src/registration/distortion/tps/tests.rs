@@ -52,7 +52,14 @@ fn assert_dvec2_near(a: DVec2, b: DVec2, tol: f64, msg: &str) {
 
 /// Fit a TPS with default config and assert it succeeds.
 fn fit_default(source: &[DVec2], target: &[DVec2]) -> ThinPlateSpline {
-    ThinPlateSpline::fit(source, target, TpsConfig::default()).unwrap()
+    ThinPlateSpline::fit(
+        source,
+        target,
+        TpsConfig {
+            regularization: 0.0,
+        },
+    )
+    .unwrap()
 }
 
 /// Verify that all control points are interpolated exactly (within tol).
@@ -196,7 +203,16 @@ fn compute_normalization_coincident() {
 /// Empty input returns None.
 #[test]
 fn tps_fit_empty() {
-    assert!(ThinPlateSpline::fit(&[], &[], TpsConfig::default()).is_none());
+    assert!(
+        ThinPlateSpline::fit(
+            &[],
+            &[],
+            TpsConfig {
+                regularization: 0.0
+            }
+        )
+        .is_none()
+    );
 }
 
 /// One point returns None (need >= 3).
@@ -204,7 +220,16 @@ fn tps_fit_empty() {
 fn tps_fit_one_point() {
     let s = vec![DVec2::new(5.0, 5.0)];
     let t = vec![DVec2::new(6.0, 6.0)];
-    assert!(ThinPlateSpline::fit(&s, &t, TpsConfig::default()).is_none());
+    assert!(
+        ThinPlateSpline::fit(
+            &s,
+            &t,
+            TpsConfig {
+                regularization: 0.0
+            }
+        )
+        .is_none()
+    );
 }
 
 /// Two points returns None (need >= 3).
@@ -212,7 +237,16 @@ fn tps_fit_one_point() {
 fn tps_fit_two_points() {
     let s = vec![DVec2::new(0.0, 0.0), DVec2::new(100.0, 100.0)];
     let t = vec![DVec2::new(1.0, 1.0), DVec2::new(101.0, 101.0)];
-    assert!(ThinPlateSpline::fit(&s, &t, TpsConfig::default()).is_none());
+    assert!(
+        ThinPlateSpline::fit(
+            &s,
+            &t,
+            TpsConfig {
+                regularization: 0.0
+            }
+        )
+        .is_none()
+    );
 }
 
 /// Mismatched source/target lengths returns None.
@@ -224,7 +258,16 @@ fn tps_fit_mismatched_counts() {
         DVec2::new(0.0, 100.0),
     ];
     let target = vec![DVec2::new(1.0, 1.0), DVec2::new(101.0, 1.0)];
-    assert!(ThinPlateSpline::fit(&source, &target, TpsConfig::default()).is_none());
+    assert!(
+        ThinPlateSpline::fit(
+            &source,
+            &target,
+            TpsConfig {
+                regularization: 0.0
+            }
+        )
+        .is_none()
+    );
 }
 
 /// Collinear points produce a singular TPS matrix and return None.
@@ -242,7 +285,13 @@ fn tps_fit_collinear_returns_none() {
         DVec2::new(51.0, 0.0),
         DVec2::new(101.0, 0.0),
     ];
-    let result = ThinPlateSpline::fit(&source, &target, TpsConfig::default());
+    let result = ThinPlateSpline::fit(
+        &source,
+        &target,
+        TpsConfig {
+            regularization: 0.0,
+        },
+    );
     // The matrix is singular because the 3 points are collinear, so P has rank 2
     // (the y column is all zero). This should return None.
     assert!(
@@ -1014,9 +1063,21 @@ fn tps_extra_control_point_changes_behavior() {
     );
 }
 
-/// Default config has zero regularization.
+/// Past the grid the distortion is the nearest edge's, not zero: under a uniform shift of (10, 5)
+/// the map reads (10, 5) at points before, after and far outside its 100 × 100 grid.
 #[test]
-fn tps_config_default() {
-    let config = TpsConfig::default();
-    assert_eq!(config.regularization, 0.0);
+fn distortion_map_holds_its_edge_past_the_grid() {
+    let source = square_source_4();
+    let shift = DVec2::new(10.0, 5.0);
+    let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
+    let map = DistortionMap::from_tps(&fit_default(&source, &target), Size2us::new(100, 100), 25.0);
+    for p in [
+        DVec2::new(-30.0, 50.0),
+        DVec2::new(50.0, -30.0),
+        DVec2::new(130.0, 50.0),
+        DVec2::new(50.0, 1000.0),
+        DVec2::new(-1e6, 1e6),
+    ] {
+        assert_dvec2_near(map.interpolate(p), shift, EXACT_PX, &format!("{p}"));
+    }
 }

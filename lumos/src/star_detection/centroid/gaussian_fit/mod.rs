@@ -73,7 +73,7 @@ impl Gaussian2D {
     /// The range the inverse covariance's eigenvalues are held to: `1/σ²` for a principal σ
     /// between [`MIN_PROFILE_SIGMA`] and the stamp radius. Its diagonal lies between the eigenvalues, so
     /// `a` and `c` are held to it too.
-    fn curvature_range(&self) -> RangeInclusive<f64> {
+    const fn curvature_range(&self) -> RangeInclusive<f64> {
         1.0 / (self.max_sigma * self.max_sigma)..=1.0 / (MIN_PROFILE_SIGMA * MIN_PROFILE_SIGMA)
     }
 

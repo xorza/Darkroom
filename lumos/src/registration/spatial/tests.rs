@@ -225,15 +225,14 @@ fn k_nearest_over_every_layout() {
             k: 5,
             expected: ranked(&[(5, 0.0), (6, 0.02), (7, 0.08), (8, 0.18), (9, 0.32)]),
         },
-        // Past `SMALL_HEAP_CAPACITY` the search swaps to the large heap; the i-th nearest on the
-        // x-axis is idx i at i².
+        // A large k: the i-th nearest on the x-axis is idx i at i².
         KNearestCase {
-            name: "k past the small-heap capacity",
+            name: "a large k",
             points: on_x_axis(50),
             query: DVec2::new(0.0, 0.0),
-            k: SMALL_HEAP_CAPACITY + 5,
+            k: 37,
             expected: ranked(
-                &(0..SMALL_HEAP_CAPACITY + 5)
+                &(0..37)
                     .map(|rank| (rank, (rank * rank) as f64))
                     .collect::<Vec<_>>(),
             ),
@@ -419,28 +418,48 @@ fn queries_agree_with_a_brute_force_scan() {
     }
 }
 
+/// The heap lives in the caller's buffer: a second query of the same `k` into the same buffer
+/// reuses its allocation, which the per-star queries rely on.
 #[test]
-fn heap_stays_inline_up_to_its_inline_capacity() {
-    // The heap is built per k-nearest query, so a small k must not reach the allocator.
-    assert!(!BoundedMaxHeap::new(5).items.spilled());
-    assert!(!BoundedMaxHeap::new(SMALL_HEAP_CAPACITY).items.spilled());
-    assert!(BoundedMaxHeap::new(SMALL_HEAP_CAPACITY + 1).items.spilled());
+fn a_reused_buffer_allocates_once() {
+    let points: Vec<DVec2> = (0..50).map(|i| DVec2::new(f64::from(i), 0.0)).collect();
+    let tree = KdTree::build(points).unwrap();
+    let mut out = Vec::new();
+    tree.k_nearest_into(DVec2::new(0.0, 0.0), 8, &mut out);
+    let (address, capacity) = (out.as_ptr(), out.capacity());
+    tree.k_nearest_into(DVec2::new(20.0, 0.0), 8, &mut out);
+    assert_eq!((out.as_ptr(), out.capacity()), (address, capacity));
+    assert_eq!(out.len(), 8);
 }
 
 #[test]
 fn heap_empty_state() {
-    let heap_small = BoundedMaxHeap::new(5);
+    let mut heap_small_items = Vec::new();
+    let heap_small = BoundedMaxHeap {
+        capacity: 5,
+        items: &mut heap_small_items,
+    };
     assert!(!heap_small.is_full());
     assert_eq!(heap_small.max_distance(), f64::INFINITY);
 
-    let heap_large = BoundedMaxHeap::new(50);
+    let mut heap_large_items = Vec::new();
+
+    let heap_large = BoundedMaxHeap {
+        capacity: 50,
+
+        items: &mut heap_large_items,
+    };
     assert!(!heap_large.is_full());
     assert_eq!(heap_large.max_distance(), f64::INFINITY);
 }
 
 #[test]
 fn heap_small_push_and_eviction() {
-    let mut heap = BoundedMaxHeap::new(3);
+    let mut heap_items = Vec::new();
+    let mut heap = BoundedMaxHeap {
+        capacity: 3,
+        items: &mut heap_items,
+    };
 
     // Push 3 items: dist_sq = 10, 5, 15
     heap.push(Neighbor {
@@ -476,8 +495,7 @@ fn heap_small_push_and_eviction() {
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
     // Final contents: dist_sq = {10, 5, 2}, indices = {0, 1, 3}
-    let mut result = Vec::new();
-    heap.write_into(&mut result);
+    let result = heap_items;
     assert_eq!(result.len(), 3);
     let mut dist_sqs: Vec<u64> = result.iter().map(|n| n.dist_sq.to_bits()).collect();
     dist_sqs.sort_unstable();
@@ -491,9 +509,12 @@ fn heap_small_push_and_eviction() {
 
 #[test]
 fn heap_large_push_and_eviction() {
-    let capacity = SMALL_HEAP_CAPACITY + 5; // 37
-    let mut heap = BoundedMaxHeap::new(capacity);
-    assert!(heap.items.spilled());
+    let capacity = 37;
+    let mut heap_items = Vec::new();
+    let mut heap = BoundedMaxHeap {
+        capacity,
+        items: &mut heap_items,
+    };
 
     // Push capacity items with dist_sq = capacity, capacity-1, ..., 1
     for i in 0..capacity {
@@ -515,8 +536,7 @@ fn heap_large_push_and_eviction() {
     // New max should be capacity-1 = 36
     assert!((heap.max_distance() - (capacity - 1) as f64).abs() < 1e-10);
 
-    let mut result = Vec::new();
-    heap.write_into(&mut result);
+    let result = heap_items;
     assert_eq!(result.len(), capacity);
     // Should contain 0.5 and 1..36
     let has_half = result.iter().any(|n| (n.dist_sq - 0.5).abs() < 1e-10);
@@ -531,7 +551,11 @@ fn heap_large_push_and_eviction() {
 #[test]
 fn heap_capacity_one() {
     // Capacity 1: only keeps the single smallest
-    let mut heap = BoundedMaxHeap::new(1);
+    let mut heap_items = Vec::new();
+    let mut heap = BoundedMaxHeap {
+        capacity: 1,
+        items: &mut heap_items,
+    };
 
     heap.push(Neighbor {
         index: 0,
@@ -554,8 +578,7 @@ fn heap_capacity_one() {
     });
     assert!((heap.max_distance() - 3.0).abs() < 1e-10);
 
-    let mut result = Vec::new();
-    heap.write_into(&mut result);
+    let result = heap_items;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].index, 1);
     assert!((result[0].dist_sq - 3.0).abs() < 1e-10);

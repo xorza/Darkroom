@@ -9,6 +9,7 @@ pub(crate) mod align;
 pub(crate) mod calibrate;
 pub(crate) mod config;
 pub(crate) mod detector_pool;
+pub(crate) mod error;
 pub(crate) mod frame;
 pub(crate) mod frame_registrar;
 pub(crate) mod frame_registration;

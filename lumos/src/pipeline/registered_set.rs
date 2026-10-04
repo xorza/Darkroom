@@ -6,8 +6,9 @@ use crate::combine::stack::stack_stored_frames;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_registrar::ParkedFrame;
-use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::result::AlignStackResult;
 use crate::pipeline::tier::FrameTier;
 use crate::progress::ProgressCallback;
 use crate::star_detection::detector::Diagnostics;
@@ -34,9 +35,9 @@ impl RegisteredSet {
         config: &AlignStackConfig,
         progress: ProgressCallback,
         cancel: CancelToken,
-    ) -> Result<AlignStackResult, Error> {
+    ) -> Result<AlignStackResult, AlignStackError> {
         if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
+            return Err(AlignStackError::Cancelled);
         }
         let total = self.outcomes.len();
         let mut frames = Vec::with_capacity(total);
@@ -60,7 +61,7 @@ impl RegisteredSet {
         // Only the reference survived: every other frame dropped. A lone reference input is fine;
         // nothing aligned out of more than one input is an error.
         if frames.len() <= 1 && total > 1 {
-            return Err(Error::AllFramesDropped { count: total - 1 });
+            return Err(AlignStackError::AllFramesDropped { count: total - 1 });
         }
 
         let registered = frames.len();

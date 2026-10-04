@@ -104,7 +104,7 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 }
 
 /// Every frame of `frames` through the per-frame checks, in order.
-fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), Error> {
+fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), StackError> {
     let mut facts = SetFacts::default();
     for (index, frame) in frames.iter().enumerate() {
         FrameCheck {
@@ -137,7 +137,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            Error::StoredFramePlaneSamples {
+            StackError::StoredFramePlaneSamples {
                 index: 1,
                 plane: FramePlane::Channel,
                 expected: 8,
@@ -159,7 +159,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            Error::StoredFramePlaneSamples {
+            StackError::StoredFramePlaneSamples {
                 plane: FramePlane::Coverage,
                 expected: 8,
                 actual: 2,
@@ -227,7 +227,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
         assert!(
             matches!(
                 error,
-                Error::CfaPatternMismatch {
+                StackError::CfaPatternMismatch {
                     index: 1,
                     actual: a,
                     reference_index: 0,
@@ -279,7 +279,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     assert!(
         matches!(
             error,
-            Error::FrameQualityPairMismatch {
+            StackError::FrameQualityPairMismatch {
                 index: 0,
                 pixel: 2,
                 coverage: 1.0,

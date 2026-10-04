@@ -130,16 +130,8 @@ fn presets_configure_as_documented() {
             SmallN::median_below(MIN_FRAMES_FOR_GESD),
         ),
         (
-            "bias",
-            StackConfig::bias(),
-            mean(Rejection::winsorized(3.0)),
-            Weighting::Equal,
-            Normalization::None,
-            SmallN::none(),
-        ),
-        (
-            "dark",
-            StackConfig::dark(),
+            "bias or dark",
+            StackConfig::bias_or_dark(),
             mean(Rejection::winsorized(3.0)),
             Weighting::Equal,
             Normalization::None,

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
-use crate::combine::error::{Error as StackError, StackConfigError};
+use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
@@ -17,9 +17,10 @@ use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::result::AlignStackResult;
 use crate::pipeline::tier::{FrameTier, StagePlan};
 use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::registration::config::Config as RegistrationConfig;
@@ -312,7 +313,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     )
     .unwrap_err();
 
-    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -358,7 +359,7 @@ fn an_invalid_registration_config_is_reported_as_one() {
     )
     .unwrap_err();
     assert!(
-        matches!(error, Error::RegistrationConfig(_)),
+        matches!(error, AlignStackError::RegistrationConfig(_)),
         "expected the config to be blamed, got {error:?}"
     );
 }
@@ -413,7 +414,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         CancelToken::never(),
     )
     .unwrap_err();
-    let Error::RegistrationConfig(invalid) = error else {
+    let AlignStackError::RegistrationConfig(invalid) = error else {
         panic!("expected the config to be blamed, got {error:?}")
     };
     assert_eq!(invalid.field, "min_matches");
@@ -449,7 +450,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::Config(StackConfigError::Field(invalid)))
+            AlignStackError::Stack(StackError::Config(StackConfigError::Field(invalid)))
                 if invalid.field == "sigma_low"
         ),
         "expected the stack config to be blamed rather than the frames, got {error:?}"
@@ -478,7 +479,7 @@ fn all_non_reference_frames_dropped_errors() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::AllFramesDropped { count: 2 }),
+        matches!(err, AlignStackError::AllFramesDropped { count: 2 }),
         "all non-reference frames dropped → AllFramesDropped {{ count: 2 }}, got {err:?}"
     );
 }
@@ -519,7 +520,7 @@ fn public_input_errors() {
         CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::NoFrames));
+    assert!(matches!(err, AlignStackError::NoFrames));
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
@@ -539,7 +540,7 @@ fn public_input_errors() {
         CancelToken::never(),
     )
     .unwrap_err();
-    let Error::DetectionConfig(invalid) = error else {
+    let AlignStackError::DetectionConfig(invalid) = error else {
         panic!("expected a detection config error, got {error:?}")
     };
     assert_eq!((invalid.field, invalid.value), ("sigma_threshold", 0.0));
@@ -568,7 +569,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::Config(
+            AlignStackError::Stack(StackError::Config(
                 StackConfigError::ManualWeightCountMismatch {
                     expected: 2,
                     actual: 1
@@ -585,7 +586,7 @@ fn public_input_errors() {
         }),
         ..AlignStackConfig::default()
     };
-    let Error::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
+    let AlignStackError::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
         panic!("expected a cosmic-ray config error")
     };
     assert_eq!(invalid.field, "cosmic-ray niter");
@@ -599,7 +600,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::NonFiniteImageSample {
+            AlignStackError::Stack(StackError::NonFiniteImageSample {
                 index: 1,
                 channel: 0,
                 pixel: 5,
@@ -655,7 +656,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     };
 
     let error = run(&paths, &AlignStackConfig::default());
-    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -682,7 +683,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         ..AlignStackConfig::default()
     };
     let error = run(&paths[..1], &parametric);
-    let Error::CosmicRay { path, .. } = error else {
+    let AlignStackError::CosmicRay { path, .. } = error else {
         panic!("expected the light without an ADC step to be named, got {error:?}");
     };
     assert_eq!(path, paths[0]);
@@ -1043,12 +1044,15 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 #[test]
 fn combine_failures_arrive_on_one_path() {
     assert!(matches!(
-        Error::from(StackError::Cancelled),
-        Error::Cancelled
+        AlignStackError::from(StackError::Cancelled),
+        AlignStackError::Cancelled
     ));
-    assert!(matches!(Error::from(StackError::NoFrames), Error::NoFrames));
     assert!(matches!(
-        Error::from(StackError::NoCommonCoverage),
-        Error::Stack(StackError::NoCommonCoverage)
+        AlignStackError::from(StackError::NoFrames),
+        AlignStackError::NoFrames
+    ));
+    assert!(matches!(
+        AlignStackError::from(StackError::NoCommonCoverage),
+        AlignStackError::Stack(StackError::NoCommonCoverage)
     ));
 }

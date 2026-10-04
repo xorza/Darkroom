@@ -5,7 +5,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use parking_lot::Mutex;
+use std::sync::Mutex;
 
 /// A raw pointer that may cross into Rayon closures, for writes the caller keeps disjoint.
 ///
@@ -68,7 +68,12 @@ impl<T> Default for JobScratchPool<T> {
 impl<T: Default> JobScratchPool<T> {
     /// Take a value from the pool, or build a fresh one when it is empty.
     pub(crate) fn acquire(&self) -> JobScratchLease<'_, T> {
-        let value = self.values.lock().pop().unwrap_or_default();
+        let value = self
+            .values
+            .lock()
+            .expect("no holder of this lock panicked")
+            .pop()
+            .unwrap_or_default();
         JobScratchLease {
             value: ManuallyDrop::new(value),
             pool: &self.values,
@@ -103,7 +108,10 @@ impl<T> Drop for JobScratchLease<'_, T> {
     fn drop(&mut self) {
         // SAFETY: `value` is taken exactly once, here, and the lease is never read after its drop.
         let value = unsafe { ManuallyDrop::take(&mut self.value) };
-        self.pool.lock().push(value);
+        self.pool
+            .lock()
+            .expect("no holder of this lock panicked")
+            .push(value);
     }
 }
 
@@ -259,6 +267,7 @@ where
     try_par_map_bounded(cells.len(), slots, |slot, index| {
         let item = cells[index]
             .lock()
+            .expect("no holder of this lock panicked")
             .take()
             .expect("each index is claimed by exactly one worker");
         operation(slot, index, item)
@@ -270,11 +279,18 @@ pub(crate) mod internals {
     use crate::concurrency::JobScratchPool;
 
     pub(crate) fn job_count<T>(pool: &JobScratchPool<T>) -> usize {
-        pool.values.lock().len()
+        pool.values
+            .lock()
+            .expect("no holder of this lock panicked")
+            .len()
     }
 
     pub(crate) fn all_by<T>(pool: &JobScratchPool<T>, predicate: impl Fn(&T) -> bool) -> bool {
-        pool.values.lock().iter().all(predicate)
+        pool.values
+            .lock()
+            .expect("no holder of this lock panicked")
+            .iter()
+            .all(predicate)
     }
 }
 

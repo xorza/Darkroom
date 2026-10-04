@@ -24,8 +24,7 @@ use crate::combine::cache::sample_noise::{NoiseColumns, SampleNoise};
 use crate::combine::cache::set_facts::SetFacts;
 use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Normalization, StackConfig};
-use crate::combine::error::Error;
-use crate::combine::error::check_cancel;
+use crate::combine::error::StackError;
 use crate::combine::normalization::FrameNorm;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
@@ -36,6 +35,7 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
@@ -106,14 +106,14 @@ impl FrameCache {
         frames: Vec<StoredFrame>,
         core: CacheCore,
         normalization: Normalization,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         // The pipeline produced these frames: their geometry, samples and quality pair are its own
         // contracts, checked in debug builds only — on the spill tier a release check would fault
         // every plane in from disk once before the combine reads it again. What the frames' sources
         // stated (domain, row order, pattern) is the input's, and is checked here always.
         let mut facts = SetFacts::default();
         for (index, frame) in frames.iter().enumerate() {
-            check_cancel(&core.cancel)?;
+            Cancelled::check(&core.cancel)?;
             facts.admit(index, &frame.source_stats.facts)?;
             debug_assert!(
                 FrameCheck {
@@ -140,9 +140,9 @@ impl FrameCache {
         normalization: Normalization,
         progress: ProgressCallback,
         cancel: CancelToken,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         debug_assert!(!frames.is_empty(), "`combine_cached` refuses an empty set");
-        check_cancel(&cancel)?;
+        Cancelled::check(&cancel)?;
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata.clone();
 
@@ -152,7 +152,7 @@ impl FrameCache {
             FrameDimensionMismatch::check(index, dimensions, frame.image.dimensions())?;
             for (kind, plane) in frame.quality.present() {
                 if (plane.width(), plane.height()) != (dimensions.width(), dimensions.height()) {
-                    return Err(Error::WarpPlaneDimensionMismatch {
+                    return Err(StackError::WarpPlaneDimensionMismatch {
                         index,
                         plane: kind,
                         expected_width: dimensions.width(),
@@ -635,7 +635,7 @@ impl FrameCache {
         run: IngestRun,
         step: Option<&dyn FrameStep<CfaImage>>,
         progress: ProgressCallback,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
             loader::load_tiered::<CfaImage, P>(paths, config, run, step, progress)?,
             config.normalization,
@@ -650,14 +650,17 @@ impl FrameCache {
         config: &StackConfig,
         run: IngestRun,
         progress: ProgressCallback,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
             loader::load_tiered::<LinearImage, P>(paths, config, run, None, progress)?,
             config.normalization,
         )
     }
 
-    fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
+    fn from_tiered_paths(
+        loaded: LoadedCache,
+        normalization: Normalization,
+    ) -> Result<Self, StackError> {
         let LoadedCache { frames, core } = loaded;
         // The loader ran each frame's own checks as it decoded, and its facts against frame 0's;
         // the facts a later frame states first are compared here, in order.

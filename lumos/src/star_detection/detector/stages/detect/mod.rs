@@ -54,7 +54,6 @@ impl DetectResult {
         pool: &mut DetectionResources,
     ) -> Self {
         let mut mask = pool.acquire_bit();
-        mask.fill(false);
         create_residual_threshold_mask(
             &plane.values,
             &plane.noise.noise,

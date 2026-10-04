@@ -133,7 +133,7 @@ pub use registration::triangle::TriangleConfig;
 pub use registration::triangle::voting::MatchIndices;
 
 pub use combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
-pub use combine::error::{Error as StackError, StackConfigError};
+pub use combine::error::{StackConfigError, StackError};
 pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
 pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
@@ -155,8 +155,9 @@ pub use stack_product::quality_planes::QualityPlanes;
 pub use pipeline::align::align_and_stack;
 pub use pipeline::calibrate::calibrate_align_stack;
 pub use pipeline::config::{AlignStackConfig, Reference};
+pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;
-pub use pipeline::result::{AlignStackResult, AlignmentSummary, Error as AlignStackError};
+pub use pipeline::result::{AlignStackResult, AlignmentSummary};
 
 pub use drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};

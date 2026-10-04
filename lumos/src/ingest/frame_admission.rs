@@ -6,7 +6,7 @@ use common::CancelToken;
 
 use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::set_facts::SetFacts;
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::frame_stats::FrameStats;
@@ -46,7 +46,7 @@ impl<'a> FrameAdmission<'a> {
         &self,
         index: usize,
         image: &impl StackableImage,
-    ) -> Result<FrameStats, Error> {
+    ) -> Result<FrameStats, StackError> {
         FrameDimensionMismatch::check(index, self.dimensions, image.dimensions())?;
         self.check_facts(index, &FrameFacts::of(image))?;
         FrameCheck {
@@ -65,7 +65,7 @@ impl<'a> FrameAdmission<'a> {
 
     /// Check the facts of frame `index` against frame 0's, once they are known: for a frame read
     /// back from a kept cache, whose samples were checked when it was written.
-    pub(crate) fn check_facts(&self, index: usize, facts: &FrameFacts) -> Result<(), Error> {
+    pub(crate) fn check_facts(&self, index: usize, facts: &FrameFacts) -> Result<(), StackError> {
         match self.first_facts.get() {
             Some(first) => first.check(index, facts),
             None => Ok(()),

@@ -11,8 +11,9 @@ use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::ingest::ingest_run::IngestRun;
 use crate::pipeline::align::register_warp_and_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_source::{LightSource, RawLights};
-use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::result::AlignStackResult;
 use crate::progress::ProgressCallback;
 use crate::run_report::RunReport;
 
@@ -42,9 +43,9 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config: &AlignStackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<AlignStackResult, Error> {
+) -> Result<AlignStackResult, AlignStackError> {
     if light_paths.is_empty() {
-        return Err(Error::NoFrames);
+        return Err(AlignStackError::NoFrames);
     }
     config.validate(light_paths.len())?;
     let run = IngestRun::new(&config.stack.ingest, cancel.clone());

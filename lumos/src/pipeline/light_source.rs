@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use parking_lot::Mutex;
+use std::sync::Mutex;
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
@@ -24,10 +24,11 @@ use crate::pipeline::align::log_detection;
 use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::detector_pool::DetectorPool;
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark, ParkedFrame};
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::result::AlignStackResult;
 use crate::pipeline::tier::StagePlan;
 use crate::progress::stage_counter::StageCounter;
 use crate::progress::{ProgressCallback, StackingStage};
@@ -103,7 +104,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         config: &AlignStackConfig,
         run: &IngestRun,
         progress: &ProgressCallback,
-    ) -> Result<DetectedLights, Error> {
+    ) -> Result<DetectedLights, AlignStackError> {
         let total = self.len();
         debug_assert!(total > 0, "each entry refuses an empty set");
         let shape = self.shape(config, run)?;
@@ -138,12 +139,12 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         // is also what a cancel has to drain.
         let mut detectors =
             DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
-                .map_err(Error::DetectionConfig)?;
+                .map_err(AlignStackError::DetectionConfig)?;
         let frames = detectors.try_map(total, |detector, index| {
             // Cancelled: abort the batch rather than spend the rest of the budget preparing
             // frames the run will discard.
             if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(AlignStackError::Cancelled);
             }
             let image = lights.take(index, run)?;
             let stats = admission.admit(index, &image)?;
@@ -165,7 +166,11 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
 
     /// The run's shape, from the first held frame or the first file's header: no light is decoded
     /// before the tier is chosen.
-    fn shape(&self, config: &AlignStackConfig, run: &IngestRun) -> Result<LightShape, Error> {
+    fn shape(
+        &self,
+        config: &AlignStackConfig,
+        run: &IngestRun,
+    ) -> Result<LightShape, AlignStackError> {
         let quality = config.stack.quality;
         match self {
             Self::Held(frames) => {
@@ -194,10 +199,11 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
 }
 
 impl<P: AsRef<Path> + Sync> Lights<'_, P> {
-    fn take(&self, index: usize, run: &IngestRun) -> Result<LinearImage, Error> {
+    fn take(&self, index: usize, run: &IngestRun) -> Result<LinearImage, AlignStackError> {
         match self {
             Self::Held(cells) => Ok(cells[index]
                 .lock()
+                .expect("no holder of this lock panicked")
                 .take()
                 .expect("each light is taken once")),
             Self::Raw(raw) => raw.prepare(raw.paths[index].as_ref(), run),
@@ -207,11 +213,17 @@ impl<P: AsRef<Path> + Sync> Lights<'_, P> {
 
 impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
     /// The run's shape, from the first file's header.
-    fn shape(&self, config: &AlignStackConfig, run: &IngestRun) -> Result<LightShape, Error> {
+    fn shape(
+        &self,
+        config: &AlignStackConfig,
+        run: &IngestRun,
+    ) -> Result<LightShape, AlignStackError> {
         let first = self.paths[0].as_ref();
-        let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| Error::Load {
-            path: first.to_path_buf(),
-            source: Box::new(source),
+        let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| {
+            AlignStackError::Load {
+                path: first.to_path_buf(),
+                source: Box::new(source),
+            }
         })?;
         let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
         let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
@@ -246,10 +258,10 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         config: &AlignStackConfig,
         run: &IngestRun,
         progress: ProgressCallback,
-    ) -> Result<AlignStackResult, Error> {
+    ) -> Result<AlignStackResult, AlignStackError> {
         let total = self.paths.len();
         if reference >= total {
-            return Err(Error::ReferenceOutOfRange {
+            return Err(AlignStackError::ReferenceOutOfRange {
                 index: reference,
                 count: total,
             });
@@ -276,10 +288,10 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         let admission = FrameAdmission::new(shape.dimensions, cancel);
         let prepared = StageCounter::new(&progress, StackingStage::Preparing, total);
         let mut detectors = DetectorPool::from_config(&config.detection, workers.min(total))
-            .map_err(Error::DetectionConfig)?;
+            .map_err(AlignStackError::DetectionConfig)?;
 
         if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
+            return Err(AlignStackError::Cancelled);
         }
         let image = self.prepare(self.paths[reference].as_ref(), run)?;
         let stats = admission.admit(reference, &image)?;
@@ -290,7 +302,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             .matching
             .required_stars(config.registration.transform_type);
         if result.stars.len() < required {
-            return Err(Error::ReferenceInsufficientStars {
+            return Err(AlignStackError::ReferenceInsufficientStars {
                 index: reference,
                 found: result.stars.len(),
                 required,
@@ -324,7 +336,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
                 return Ok(PassedLight::default());
             }
             if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(AlignStackError::Cancelled);
             }
             let image = self.prepare(self.paths[index].as_ref(), run)?;
             let stats = admission.admit(index, &image)?;
@@ -368,12 +380,12 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
     }
 
     /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.
-    fn prepare(&self, path: &Path, run: &IngestRun) -> Result<LinearImage, Error> {
+    fn prepare(&self, path: &Path, run: &IngestRun) -> Result<LinearImage, AlignStackError> {
         let mut cfa = match CfaImage::from_file(path, &run.context) {
             Ok(image) => image,
-            Err(ImageError::Cancelled { .. }) => return Err(Error::Cancelled),
+            Err(ImageError::Cancelled { .. }) => return Err(AlignStackError::Cancelled),
             Err(source) => {
-                return Err(Error::Load {
+                return Err(AlignStackError::Load {
                     path: path.to_path_buf(),
                     source: Box::new(source),
                 });
@@ -381,15 +393,16 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         };
         self.notes.record(self.masters.calibrate(&mut cfa)?);
         if let Some(cosmic_ray) = self.cosmic_ray {
-            let removed =
-                reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| Error::CosmicRay {
+            let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
+                AlignStackError::CosmicRay {
                     path: path.to_path_buf(),
                     source,
-                })?;
+                }
+            })?;
             tracing::info!(removed, "rejected cosmic rays");
         }
         // The demosaic polls the cancel token between its passes.
         cfa.demosaic(&run.context.cancel)
-            .map_err(|Cancelled| Error::Cancelled)
+            .map_err(|Cancelled| AlignStackError::Cancelled)
     }
 }

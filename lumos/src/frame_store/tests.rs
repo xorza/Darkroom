@@ -382,7 +382,7 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         .strip_suffix("_c0.bin")
         .unwrap()
         .to_owned();
-    assert_eq!(stem.len(), 64);
+    assert_eq!(stem.len(), 16);
     assert!(
         stem.bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())

@@ -15,11 +15,12 @@ use crate::star_detection::detector::DetectionResult;
 use crate::star_detection::detector::Diagnostics;
 
 use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame::DetectedFrame;
 use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
 use crate::pipeline::light_source::LightSource;
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::result::AlignStackResult;
 use crate::pipeline::tier::StagePlan;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
@@ -44,9 +45,9 @@ pub fn align_and_stack(
     config: &AlignStackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<AlignStackResult, Error> {
+) -> Result<AlignStackResult, AlignStackError> {
     if lights.is_empty() {
-        return Err(Error::NoFrames);
+        return Err(AlignStackError::NoFrames);
     }
     config.validate(lights.len())?;
     let run = IngestRun::new(&config.stack.ingest, cancel.clone());
@@ -85,14 +86,14 @@ pub(crate) fn register_warp_and_stack(
     stage: StagePlan,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<AlignStackResult, Error> {
+) -> Result<AlignStackResult, AlignStackError> {
     let StagePlan {
         tier,
         warp_concurrency,
     } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(AlignStackError::Cancelled);
     }
     debug_assert!(
         detected
@@ -176,11 +177,11 @@ fn select_reference(
     median_fwhms: &[Option<f32>],
     reference: Reference,
     required: usize,
-) -> Result<usize, Error> {
+) -> Result<usize, AlignStackError> {
     let index = match reference {
         Reference::Index(index) => {
             if index >= star_counts.len() {
-                return Err(Error::ReferenceOutOfRange {
+                return Err(AlignStackError::ReferenceOutOfRange {
                     index,
                     count: star_counts.len(),
                 });
@@ -207,7 +208,7 @@ fn select_reference(
             ),
     };
     if star_counts[index] < required {
-        return Err(Error::ReferenceInsufficientStars {
+        return Err(AlignStackError::ReferenceInsufficientStars {
             index,
             found: star_counts[index],
             required,
@@ -235,7 +236,7 @@ mod tests {
         assert_eq!(auto(&[50, 30, 60], &[3.0, 2.0, 3.5]).unwrap(), 0);
         assert!(matches!(
             auto(&[10, 20, 15], &[3.0, 2.0, 3.5]),
-            Err(Error::ReferenceInsufficientStars {
+            Err(AlignStackError::ReferenceInsufficientStars {
                 index: 1,
                 found: 20,
                 required: 40
@@ -243,7 +244,7 @@ mod tests {
         ));
         assert!(matches!(
             select_reference(&[50, 60], &[Some(3.0), Some(3.0)], Reference::Index(5), 40),
-            Err(Error::ReferenceOutOfRange { index: 5, count: 2 })
+            Err(AlignStackError::ReferenceOutOfRange { index: 5, count: 2 })
         ));
     }
 }

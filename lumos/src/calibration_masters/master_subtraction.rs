@@ -1,6 +1,6 @@
 //! [`MasterSubtraction`]: a master taken from every frame of a calibration stack.
 
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::ingest::frame_step::FrameStep;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::sample_domain::DomainMap;
@@ -13,10 +13,10 @@ pub(crate) struct MasterSubtraction<'a> {
 }
 
 impl FrameStep<CfaImage> for MasterSubtraction<'_> {
-    fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), Error> {
+    fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), StackError> {
         let master = self.master;
         if master.cfa_type != frame.cfa_type || master.size() != frame.size() {
-            return Err(Error::SubtractorShape {
+            return Err(StackError::SubtractorShape {
                 index,
                 frame: frame.size(),
                 subtractor: master.size(),
@@ -25,7 +25,7 @@ impl FrameStep<CfaImage> for MasterSubtraction<'_> {
         let map = match (&frame.metadata.domain, &master.metadata.domain) {
             (Some(frame_domain), Some(master_domain)) => master_domain
                 .conversion_to(frame_domain)
-                .ok_or_else(|| Error::SubtractorDomain {
+                .ok_or_else(|| StackError::SubtractorDomain {
                     index,
                     frame: Box::new(frame_domain.clone()),
                     subtractor: Box::new(master_domain.clone()),

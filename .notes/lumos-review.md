@@ -76,25 +76,8 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 26. One fact in two places, wide signatures, and style deviations
 
-- [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
-- [ ] `26.13` **`KernelPlan` is rebuilt per frame, although the doc says "once per run"** — `drizzle/accumulator/mod.rs:182`, `drizzle/accumulator/output_band.rs:38-42`
-  - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
   - Rename the types, so rustc and docs show the public names. `[C]`
-- [ ] `26.19` **TPS defects** — `registration/distortion/tps/mod.rs`
-  - The default regularization 0 interpolates centroid noise exactly.
-  - `DistortionMap::interpolate` returns 0 past the grid.
-  - `compute_residuals` duplicates `transform`. `[C]`
-- [ ] `26.20` **Dead code**
-  - `DMat3` `IndexMut` (test-only, `math/dmat3/mod.rs:141-146`)
-  - the bounds check in `resolve_matches` (`registration/triangle/voting.rs:222-223`)
-  - `mask.fill(false)` (`star_detection/detector/stages/detect/mod.rs:83`)
-  - `.filter(|d| d.area > 0)` (`:178`)
-  - the 8-bit LibRaw branch (group 16)
-  - `let planar = image;` (`image_ops/ml/backend/mod.rs:282`)
-- [ ] `26.22` **`check_cancel` is a free fn in `combine/error.rs:175`** (rule: error.rs is for errors only). `[C]`
-- [ ] `26.24` **`compact_by_mask` reimplements `Vec::retain`, and the dedup has two paths (`_simple`, `_hashed`)** — `star_detection/detector/stages/filter/mod.rs:229-244`
-  - One sorted-cell pass replaces both paths. `[C]`
 - [ ] `26.25` **Exposed free fns that belong as methods**
   - `memory/mod.rs` `frame_bytes`/`quality_plane_bytes` → `ImageDimensions`
   - `frame_store/frame_spill.rs` `write_file`/`map_file`
@@ -109,19 +92,7 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `pipeline/frame.rs` (`PipelineFrame`, `DetectedFrame`)
   - `progress/mod.rs`
   - `concurrency/mod.rs` `[C]`
-- [ ] `26.27` **`Region` has `pub` fields inside a `pub(crate)` type** — `star_detection/deblend/region.rs:12-20` `[C]`
-- [ ] `26.28` **Missing `const fn`**
-  - `Cov2::trace`/`det`/`inverse`, `Gaussian2D::curvature_range`
-  - `safe_ratio`, `Star::is_cosmic_ray`, `is_round`
-- [ ] `26.29` **`reserve` where the count is exact** — `registration/resample/row_positions.rs:31` → `reserve_exact`.
-- [ ] `26.30` **Comments that narrate or restate names** — `star_detection/centroid/lm_optimizer.rs:18-27`, `star_detection/centroid/local_background.rs:279`, `star_detection/centroid/moffat_fit/mod.rs:207`.
 
-## 27. Dependencies
-
-- [ ] `27.1` **`parking_lot` (3 files) → `std::sync::Mutex`.**
-- [ ] `27.2` **`blake3` has one production use, a filename stem** (`frame_store/frame_spill.rs:63`).
-  - The crate's FNV-1a (`frame_store/cache_key.rs:62`) does the same job. Keep `blake3` as a dev-dependency for the pin tests.
-- [ ] `27.3` **`smallvec` has two uses.** One is a `HashMap<_, SmallVec>` grid (`star_detection/detector/stages/filter/mod.rs:169`), which breaks the flat-collections rule.
 
 ---
 
@@ -560,6 +531,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 2. Done: every doc example compiles: the seven marked `ignore` are `no_run` with their setup hidden, and the two that no longer compiled take the current signatures (`cargo test -p lumos --doc`: 10 pass, none ignored). The SIP docs say what the polynomial is — SIP's form between two frames, normalized about the matched stars' centroid, with no `AP`/`BP` and no header — and not a WCS SIP solution. The RANSAC scorer is named for its loss, a truncated Welsch loss (`ransac/welsch`, `WelschScorer`), and the docs that called it MAGSAC++ or said it integrates over noise scales are corrected. The drizzle Gaussian's FWHM is the drop size; the denoise default is Soft; detection's prepare stage and spline background, the matched filter's relation to SEP, the centroid fits' reported error in place of a fixed accuracy, the stamp's 99.98% (Gaussian) and 91% (Moffat) flux, the memory figure several stacks share, the frame-store module's scope and the misplaced mesh doc are as the code is; the Markesteijn time target is gone. Group 25 is closed.
 
+3. Done: the bias and dark presets are one, `StackConfig::bias_or_dark`. Drizzle's `KernelPlan` has its own file and is built once per run. The two error enums carry their public names, `StackError` and `AlignStackError`, the latter in `pipeline/error.rs`. TPS has no default λ (0 fits the centroids' noise), its distortion map holds its edge past the grid rather than reading zero, and its residuals reuse the transform. The dead code is gone (`DMat3`'s `IndexMut`, a `fill` the threshold kernel overwrites, `let planar = image`). The cancel check is `Cancelled::check`, with `From<Cancelled>` for `StackError`. Duplicate stars are removed in one pass over the stars sorted by cell, held to the brute force by a test. The `Region` fields are `pub(crate)`, the listed fns are `const`, the warp row buffer takes `reserve_exact`; the comments 26.30 named were rewritten in earlier phases. `parking_lot` gave way to `std::sync::Mutex`, `smallvec` is gone (the k-nearest heap lives in the caller's buffer, which allocates once), and `blake3` is a dev-dependency: frame-cache file names are FNV-1a, which is safe because the commit's `CacheKey` is checked before a byte is reused. Items 26.4, 26.13, 26.19, 26.20, 26.22, 26.24, 26.27 to 26.30 and group 27 are closed. Deviation: of 26.16, only the two errors are renamed — see Pending item 4.
+
 # Decisions
 
 Confirmed on 2026-10-03.
@@ -576,5 +549,6 @@ Confirmed on 2026-10-03.
 1. **The FWHM convention (phase 8).** Every width is now the PSF's before the pixel integrates it, as DAOPHOT and PSFEx report it. PixInsight and Siril fit point-sampled models, so their FWHM includes the pixel: about `√(σ² + 1/12)` in σ, 3% wider at FWHM 2.5. A `Fixed` FWHM in the config is read the same way. The alternative is to report the width with the pixel included and keep the integrated models inside.
 2. **Run scratch on macOS and Windows (phase 11).** The plan asks for the scratch deletion to be tested on the macOS laptop and on Windows. Unix unlink-after-create is POSIX and runs the same code on macOS, but it is untested there; the Windows path (`FILE_FLAG_DELETE_ON_CLOSE`, the handle held with the map) compiles only under `cfg(windows)` and is untested. I need the laptop's tmux session for the first, and a Windows host for the second.
 3. **The streamed checksum, 15.9 (phase 12).** The fix is in fits-well: `FitsReader::begin_data_checksum` and `finish_data_checksum`, and `read_image_section_summed`, which sums each chunk as the decode reads it. fits-well's chain passes (384 tests). The patch is `.notes/fits-well-streamed-checksum.patch`. I have no right to commit and push to xorza/fits-well, so the submodule is unchanged. Give me that right, or apply the patch, and I will connect lumos to it.
+4. **The renamed public re-exports, 26.16 (phase 14).** Ten config, result and diagnostics types are published under other names than they have (`star_detection::config::Config` as `StarDetectionConfig`, `BackgroundConfig` as `StarDetectionBackgroundConfig`, `registration::config::Config` as `RegistrationConfig`, …), so a compiler message names `Config` where the caller wrote `StarDetectionConfig`. Renaming the types meets the one-struct-one-file rule: the file must take the type's name, which gives paths like `star_detection::star_detection_config::star_detection_background_config`. The choices: (a) rename types and files and accept the long paths; (b) publish the detection and registration types under public modules (`lumos::detection::Config`), so the published name is the real one, and change `lens` and `darkroom` to match; (c) keep the renamed re-exports. I recommend (b).
 
 No phase needs a new dependency. `statrs` gives `Φ⁻¹` and `erf`. The cgroup limits are read from `/sys/fs/cgroup` directly (phase 11). `std` gives the Windows delete-on-close flags. `/proc/self/mountinfo` gives the file system type.

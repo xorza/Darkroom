@@ -21,12 +21,12 @@ use rayon::prelude::*;
 
 use crate::combine::CANCEL_POLL_CHUNK;
 use crate::combine::config::Normalization;
-use crate::combine::error::Error;
-use crate::combine::error::check_cancel;
+use crate::combine::error::StackError;
 use crate::combine::normalization::common_domain::CommonDomain;
 use crate::combine::normalization::photometric_gain::{paired_photometric_gain, sample_stats};
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
 use crate::math::statistics::{MedianMad, median_mut};
@@ -67,7 +67,7 @@ impl FrameNorm {
         dimensions: ImageDimensions,
         normalization: Normalization,
         cancel: &CancelToken,
-    ) -> Result<Option<Vec<Self>>, Error> {
+    ) -> Result<Option<Vec<Self>>, StackError> {
         let to_domain = domain_maps(frames);
         if normalization == Normalization::None {
             return Ok(to_domain
@@ -88,7 +88,7 @@ impl FrameNorm {
                         .collect()
                 }));
         }
-        check_cancel(cancel)?;
+        Cancelled::check(cancel)?;
         let reference = select_reference_frame(frames, &to_domain);
         let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
         // A fitted norm lands each frame on the reference frame's raw values; the reference's own
@@ -165,7 +165,7 @@ fn fitted_frame_norms(
     normalization: Normalization,
     reference: usize,
     cancel: &CancelToken,
-) -> Result<Vec<FrameNorm>, Error> {
+) -> Result<Vec<FrameNorm>, StackError> {
     let pixel_count = dimensions.pixel_count();
     let domain = frames
         .iter()
@@ -237,12 +237,12 @@ fn identity_norm(channel_count: usize) -> FrameNorm {
 /// `gain = median_ref / median`, per channel.
 ///
 /// # Errors
-/// [`Error::NonPositiveMedian`] when a median is not positive: a ratio to it scales nothing, and
+/// [`StackError::NonPositiveMedian`] when a median is not positive: a ratio to it scales nothing, and
 /// unit gain in its place would combine the frame at a scale no one measured.
 fn multiplicative_norms(
     medians: &[ArrayVec<f32, 3>],
     reference: usize,
-) -> Result<Vec<FrameNorm>, Error> {
+) -> Result<Vec<FrameNorm>, StackError> {
     medians
         .iter()
         .enumerate()
@@ -263,7 +263,7 @@ fn multiplicative_norms(
                         } else {
                             (index, median)
                         };
-                        Err(Error::NonPositiveMedian {
+                        Err(StackError::NonPositiveMedian {
                             index,
                             channel,
                             median,
@@ -282,7 +282,7 @@ fn domain_medians(
     pixel_count: usize,
     domain: &CommonDomain,
     cancel: &CancelToken,
-) -> Result<Vec<ArrayVec<f32, 3>>, Error> {
+) -> Result<Vec<ArrayVec<f32, 3>>, StackError> {
     let channel_count = frames[0].channels.len();
     let medians = (0..frames.len() * channel_count)
         .into_par_iter()
@@ -291,7 +291,7 @@ fn domain_medians(
             let measured = measure_plane(plane, pixel_count, Some(domain), &[], buffer, cancel)?;
             Ok(measured.median.expect("a domain was given"))
         })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .collect::<Result<Vec<_>, StackError>>()?;
     Ok(medians
         .chunks(channel_count)
         .map(|channels| channels.iter().copied().collect())
@@ -315,7 +315,7 @@ fn global_norms(
     domain: Option<&CommonDomain>,
     reference: usize,
     cancel: &CancelToken,
-) -> Result<Vec<FrameNorm>, Error> {
+) -> Result<Vec<FrameNorm>, StackError> {
     let channel_count = frames[0].channels.len();
     let indices = stratified_indices(pixel_count, domain, cancel)?;
     let reference_channels = (0..channel_count)
@@ -346,7 +346,7 @@ fn global_norms(
                 )?,
             })
         })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .collect::<Result<Vec<_>, StackError>>()?;
 
     let fitted = (0..frames.len() * channel_count)
         .into_par_iter()
@@ -382,7 +382,7 @@ fn global_norms(
                 offset: reference.median - median * gain,
             })
         })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .collect::<Result<Vec<_>, StackError>>()?;
 
     let mut norms = frames
         .iter()
@@ -405,7 +405,7 @@ fn measure_plane(
     indices: &[usize],
     buffer: &mut Vec<f32>,
     cancel: &CancelToken,
-) -> Result<PlaneMeasurement, Error> {
+) -> Result<PlaneMeasurement, StackError> {
     debug_assert!(indices.is_sorted(), "the sample indices ascend");
     let values = plane.chunk(0, pixel_count);
     buffer.clear();
@@ -415,7 +415,7 @@ fn measure_plane(
     let mut samples = Vec::with_capacity(indices.len());
     let mut next = 0;
     for (chunk, chunk_values) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
-        check_cancel(cancel)?;
+        Cancelled::check(cancel)?;
         let base = chunk * CANCEL_POLL_CHUNK;
         let end = base + chunk_values.len();
         while next < indices.len() && indices[next] < end {
@@ -439,7 +439,7 @@ fn measure_plane(
     }
     let median = match domain {
         Some(_) => {
-            check_cancel(cancel)?;
+            Cancelled::check(cancel)?;
             Some(median_mut(buffer))
         }
         None => None,
@@ -454,7 +454,7 @@ fn stratified_indices(
     pixel_count: usize,
     domain: Option<&CommonDomain>,
     cancel: &CancelToken,
-) -> Result<Vec<usize>, Error> {
+) -> Result<Vec<usize>, StackError> {
     let Some(domain) = domain else {
         let retained = pixel_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
         return Ok((0..retained).map(|k| k * pixel_count / retained).collect());
@@ -471,7 +471,7 @@ fn stratified_indices(
         .chunks(CANCEL_POLL_CHUNK / WORD_BITS)
         .enumerate()
     {
-        check_cancel(cancel)?;
+        Cancelled::check(cancel)?;
         for (offset, &word) in words.iter().enumerate() {
             let base = (group * (CANCEL_POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
             let mut bits = word;
@@ -498,7 +498,7 @@ fn source_noise_variance(
     indices: &[usize],
     pixel_count: usize,
     cancel: &CancelToken,
-) -> Result<f64, Error> {
+) -> Result<f64, StackError> {
     let sigma = f64::from(frame.source_stats.channel_noise(channel));
     let Some(confidence) = frame.quality.confidence() else {
         return Ok(sigma * sigma);
@@ -506,7 +506,7 @@ fn source_noise_variance(
     let values = confidence.chunk(0, pixel_count);
     let mut inverse_confidence = 0.0;
     for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
-        check_cancel(cancel)?;
+        Cancelled::check(cancel)?;
         for &index in chunk {
             let value = f64::from(values[index]);
             // `indices` are common-domain pixels, which clear the coverage floor, and a

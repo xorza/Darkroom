@@ -93,7 +93,6 @@ impl TiledOnnxConfig {
     /// begun writing the output.
     pub(crate) fn run(&self, image: &LinearImage) -> Result<LinearImage, MlError> {
         self.validate()?;
-        let planar = image;
         let size = Size2us::new(image.width(), image.height());
         if size.width < WINDOW || size.height < WINDOW {
             return Err(MlError::TooSmall(size));
@@ -115,7 +114,7 @@ impl TiledOnnxConfig {
         let ys = tile_starts(size.height, self.stride);
         for &ty in &ys {
             for &tx in &xs {
-                fill_tile_input(planar, Vec2us::new(tx, ty), &mut input);
+                fill_tile_input(image, Vec2us::new(tx, ty), &mut input);
                 let tensor =
                     TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
                         .map_err(model_err)?;
@@ -131,7 +130,7 @@ impl TiledOnnxConfig {
                 accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
             }
         }
-        Ok(build_output(planar.is_rgb(), &acc, &weight, size))
+        Ok(build_output(image.is_rgb(), &acc, &weight, size))
     }
 }
 

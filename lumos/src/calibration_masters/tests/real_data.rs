@@ -225,7 +225,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     let detect = |dark_paths: &[&PathBuf]| {
         let dark = stack_cfa_master(
             dark_paths,
-            StackConfig::dark(),
+            StackConfig::bias_or_dark(),
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -319,7 +319,7 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.darks,
-                StackConfig::dark(),
+                StackConfig::bias_or_dark(),
                 None,
                 ProgressCallback::default(),
                 CancelToken::never(),
@@ -355,7 +355,7 @@ fn bench_stack_master_bias(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.bias,
-                StackConfig::bias(),
+                StackConfig::bias_or_dark(),
                 None,
                 ProgressCallback::default(),
                 CancelToken::never(),

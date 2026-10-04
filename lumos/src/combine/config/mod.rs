@@ -272,18 +272,9 @@ impl StackConfig {
         }
     }
 
-    /// Preset for bias frames: Winsorized σ=3.0, no normalization.
-    pub fn bias() -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::winsorized(3.0)),
-            normalization: Normalization::None,
-            small_n: SmallN::none(),
-            ..Default::default()
-        }
-    }
-
-    /// Preset for dark frames: Winsorized σ=3.0, no normalization.
-    pub fn dark() -> Self {
+    /// Preset for bias and dark frames: Winsorized σ=3.0, no normalization. One preset, because
+    /// both measure a level that every frame shares, with nothing between frames to normalize.
+    pub fn bias_or_dark() -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(3.0)),
             normalization: Normalization::None,
@@ -294,7 +285,7 @@ impl StackConfig {
 
     /// Preset for flat frames: σ-clip σ=3.0, multiplicative normalization.
     pub fn flat() -> Self {
-        // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats
+        // σ=3.0 matches the bias-or-dark preset and ccdproc's `combine` default (3σ low/high); flats
         // are smooth, so a permissive cut just trims clear outliers (dust shadows move between
         // flats).
         Self {

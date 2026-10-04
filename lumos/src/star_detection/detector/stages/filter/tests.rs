@@ -411,8 +411,8 @@ fn remove_duplicate_stars_over_every_geometry() {
     ];
 
     let paths: [(&str, Path); 2] = [
-        ("simple", remove_duplicate_stars_simple),
-        ("hashed", remove_duplicate_stars_hashed),
+        ("brute force", brute_force_dedup),
+        ("cells", remove_duplicate_stars),
     ];
     for case in &cases {
         for (path, dedupe) in paths {
@@ -435,11 +435,11 @@ fn remove_duplicate_stars_over_every_geometry() {
     }
 }
 
-/// `duplicate_min_separation = 0` passes validation and means "no deduplication" on both paths —
-/// the spatial-hash one too, which must not divide every coordinate by a zero cell size.
+/// `duplicate_min_separation = 0` passes validation and means "no deduplication", at any count —
+/// the cells must not divide every coordinate by a zero size.
 #[test]
-fn zero_separation_removes_nothing_on_either_path() {
-    for count in [10, SPATIAL_HASH_CROSSOVER + 50] {
+fn zero_separation_removes_nothing() {
+    for count in [10, 150] {
         // Every star twice, at exactly the same spot.
         let mut stars: Vec<Star> = (0..count)
             .map(|i| Star::at(DVec2::new((i / 2) as f64 * 3.0, 7.0)).with_flux(1.0))
@@ -449,10 +449,9 @@ fn zero_separation_removes_nothing_on_either_path() {
     }
 }
 
-/// The two paths agree star for star on 500 random positions — the dispatcher's own choice, the
-/// hash at this count, against the brute force.
+/// The cell pass agrees star for star with the brute force on 500 random positions.
 #[test]
-fn remove_duplicate_stars_spatial_hash_consistency() {
+fn remove_duplicate_stars_matches_the_brute_force() {
     let mut rng = TestRng::new(12345);
     let base_stars: Vec<Star> = (0..500)
         .map(|i| {
@@ -465,7 +464,7 @@ fn remove_duplicate_stars_spatial_hash_consistency() {
     let mut stars_hash = base_stars.clone();
     let removed_hash = remove_duplicate_stars(&mut stars_hash, 10.0);
     let mut stars_simple = base_stars;
-    let removed_simple = remove_duplicate_stars_simple(&mut stars_simple, 10.0);
+    let removed_simple = brute_force_dedup(&mut stars_simple, 10.0);
 
     assert!(
         removed_hash > 0,
@@ -531,4 +530,35 @@ fn sort_by_flux_puts_nan_last() {
     let fluxes: Vec<f32> = stars.iter().map(|star| star.flux).collect();
     assert_eq!(&fluxes[..4], &[7.0, 5.0, 3.0, -1.0]);
     assert!(fluxes[4].is_nan() && fluxes[5].is_nan());
+}
+
+/// The reference the cell pass is held to: every pair, O(n²), each kept star dropping the later
+/// stars strictly closer than `min_separation`.
+fn brute_force_dedup(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    let min_sep_sq = f64::from(min_separation * min_separation);
+    let mut kept = vec![true; stars.len()];
+
+    for i in 0..stars.len() {
+        if !kept[i] {
+            continue;
+        }
+        for j in (i + 1)..stars.len() {
+            if !kept[j] {
+                continue;
+            }
+            let dx = stars[i].pos.x - stars[j].pos.x;
+            let dy = stars[i].pos.y - stars[j].pos.y;
+            if dx * dx + dy * dy < min_sep_sq {
+                kept[j] = false;
+            }
+        }
+    }
+
+    let removed = kept.iter().filter(|&&keep| !keep).count();
+    let mut index = 0;
+    stars.retain(|_| {
+        index += 1;
+        kept[index - 1]
+    });
+    removed
 }
