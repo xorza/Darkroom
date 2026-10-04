@@ -34,10 +34,12 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
     if cfg!(unix) {
         assert_eq!(directory.entry_count(), 0, "a parked plane kept its name");
     }
-    let loaded = stored.load();
-    assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
-    assert_eq!(loaded.metadata.exposure_time, Some(30.0));
-    assert!(loaded.flags.is_none());
+    assert_eq!(
+        stored.planes().collect::<Vec<_>>(),
+        [&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6][..]]
+    );
+    assert_eq!(stored.metadata.exposure_time, Some(30.0));
+    assert!(stored.flags().is_none());
 
     // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
     image.flags = PixelFlags::of_non_finite(
@@ -45,10 +47,7 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
         &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
     );
     let masked = StoredImage::spill(&scratch, &image).unwrap();
-    let nulls = masked
-        .load()
-        .flags
-        .expect("the mask is spilled with the planes");
+    let nulls = masked.flags().expect("the mask is spilled with the planes");
     assert_eq!(nulls.count(Flags::NO_DATA), 2);
     assert_eq!(
         (0..6)

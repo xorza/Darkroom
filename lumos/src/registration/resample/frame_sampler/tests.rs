@@ -10,6 +10,7 @@ use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::kernel::{self, LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::ringing_clamp::RingingClamp;
+use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::simd::tier::Tier;
@@ -27,8 +28,9 @@ struct Expected {
 /// A frame's planes, and its validity when it declares nulls: the sources the oracle reads.
 #[derive(Debug)]
 struct Oracle<'a> {
-    planes: Vec<&'a Buffer2<f32>>,
-    validity: Option<&'a Buffer2<f32>>,
+    planes: Vec<SourcePlane<'a>>,
+    validity: Option<SourcePlane<'a>>,
+    size: Size2us,
     border: f32,
 }
 
@@ -47,7 +49,11 @@ struct OracleSums {
 
 impl Oracle<'_> {
     fn size(&self) -> Size2us {
-        Size2us::new(self.planes[0].width(), self.planes[0].height())
+        self.size
+    }
+
+    fn at(plane: SourcePlane<'_>, (x, y): (usize, usize)) -> f32 {
+        plane.pixels[y * plane.width + x]
     }
 
     /// An in-bounds tap as a pixel index.
@@ -61,7 +67,7 @@ impl Oracle<'_> {
             && (0..size.height as i64).contains(&y)
             && self
                 .validity
-                .is_none_or(|validity| validity[Self::index(x, y)] == 1.0)
+                .is_none_or(|validity| Self::at(validity, Self::index(x, y)) == 1.0)
     }
 
     /// The taps of `filter` at `stretch` around `cell + frac` and their f32 weights, from the
@@ -125,7 +131,7 @@ impl Oracle<'_> {
 
     /// `Σ L·f` over the valid taps of `plane`, split as the clamp reads it: the light under each
     /// lobe and the part below zero.
-    fn data(&self, plane: &Buffer2<f32>, xs: &[(i64, f32)], ys: &[(i64, f32)]) -> [f64; 4] {
+    fn data(&self, plane: SourcePlane<'_>, xs: &[(i64, f32)], ys: &[(i64, f32)]) -> [f64; 4] {
         let [mut total, mut positive, mut negative, mut below] = [0.0; 4];
         for &(y, wy) in ys {
             for &(x, wx) in xs {
@@ -133,7 +139,7 @@ impl Oracle<'_> {
                     continue;
                 }
                 let weight = f64::from(wx) * f64::from(wy);
-                let value = f64::from(plane[Self::index(x, y)]);
+                let value = f64::from(Self::at(plane, Self::index(x, y)));
                 total += weight * value;
                 if weight > 0.0 {
                     positive += weight * value.max(0.0);
@@ -149,7 +155,7 @@ impl Oracle<'_> {
     fn largest(&self) -> f64 {
         self.planes
             .iter()
-            .flat_map(|plane| plane.pixels())
+            .flat_map(|plane| plane.pixels)
             .fold(0.0f64, |m, &v| m.max(f64::from(v).abs()))
     }
 
@@ -181,7 +187,7 @@ impl Oracle<'_> {
                 values: self
                     .planes
                     .iter()
-                    .map(|plane| f64::from(plane[(x, y)]))
+                    .map(|&plane| f64::from(Self::at(plane, (x, y))))
                     .collect(),
                 coverage: 1.0,
                 confidence: 1.0,
@@ -214,7 +220,7 @@ impl Oracle<'_> {
         let values = self
             .planes
             .iter()
-            .map(|plane| {
+            .map(|&plane| {
                 let [total, positive, negative, below] = self.data(plane, &xs, &ys);
                 let Some(threshold) = clamp else {
                     return total / sums.total;
@@ -398,11 +404,13 @@ fn every_pixel_follows_the_rules() {
                     planes[0].pixels().to_vec(),
                 ],
             );
-            let sources = masked.then(|| MaskedSources::new(&rgb, &flags, method.reach()));
-            let sampler = FrameSampler::new(method, &rgb, sources.as_ref(), -7.0);
+            let source = SourceImage::of(&rgb);
+            let sources = masked.then(|| MaskedSources::new(&source, &flags, method.reach()));
+            let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
             let oracle = Oracle {
                 planes: sampler.sources.iter().copied().collect(),
                 validity: sources.as_ref().map(MaskedSources::validity),
+                size,
                 border: -7.0,
             };
             let Sampled {
@@ -462,8 +470,9 @@ fn every_tier_samples_to_portables_bits() {
     let positions = positions(size);
     for Case { method, .. } in methods() {
         for masked in [false, true] {
-            let sources = masked.then(|| MaskedSources::new(&rgb, &flags, method.reach()));
-            let sampler = FrameSampler::new(method, &rgb, sources.as_ref(), -7.0);
+            let source = SourceImage::of(&rgb);
+            let sources = masked.then(|| MaskedSources::new(&source, &flags, method.reach()));
+            let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
             let reference = sample(Tier::portable(), &sampler, &positions);
             for tier in Tier::supported() {
                 let sampled = sample(tier, &sampler, &positions);
@@ -501,7 +510,8 @@ fn clamped_sample(values: &[f32], background: f32, position: DVec2, threshold: O
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
         clamp: threshold.map(RingingClamp::new),
     });
-    let sampler = FrameSampler::new(method, &image, None, 0.0);
+    let source = SourceImage::of(&image);
+    let sampler = FrameSampler::new(method, &source, None, 0.0);
     let positions = [SourcePosition::within(position, size)];
     sample(Tier::portable(), &sampler, &positions).channels[0][0]
 }
@@ -604,8 +614,9 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
         clamp: Some(RingingClamp::new(0.3)),
     });
-    let sources = MaskedSources::new(&image, image.flags.as_ref().unwrap(), method.reach());
-    let sampler = FrameSampler::new(method, &image, Some(&sources), -7.0);
+    let source = SourceImage::of(&image);
+    let sources = MaskedSources::new(&source, image.flags.as_ref().unwrap(), method.reach());
+    let sampler = FrameSampler::new(method, &source, Some(&sources), -7.0);
     let positions = [SourcePosition::within(DVec2::new(8.5, 8.5), size)];
     let Sampled {
         channels,
@@ -643,7 +654,8 @@ fn coverage_and_confidence_vanish_together() {
             &WarpTransform::new(Transform::identity()),
             size,
         );
-        let sampler = FrameSampler::new(sample_method, &rgb, None, 0.0);
+        let source = SourceImage::of(&rgb);
+        let sampler = FrameSampler::new(sample_method, &source, None, 0.0);
         let sampled = sample(Tier::portable(), &sampler, &positions);
         for (&coverage, &confidence) in sampled.coverage.iter().zip(&sampled.confidence) {
             assert_eq!(
@@ -705,7 +717,8 @@ fn a_halved_nyquist_grating_does_not_alias() {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
         clamp: Some(RingingClamp::new(0.3)),
     });
-    let sampler = FrameSampler::new(unstretched, &image, None, 0.0);
+    let source = SourceImage::of(&image);
+    let sampler = FrameSampler::new(unstretched, &source, None, 0.0);
     let positions = [SourcePosition::within(DVec2::new(20.0, 20.0), size)];
     let aliased = sample(Tier::portable(), &sampler, &positions).channels[0][0];
     assert!((aliased - 2.0).abs() < 1e-5, "{aliased}");
@@ -743,7 +756,8 @@ fn filters_reproduce_their_polynomials() {
         })
     };
     let at = |method, image: &LinearImage, p: DVec2| {
-        let sampler = FrameSampler::new(method, image, None, 0.0);
+        let source = SourceImage::of(image);
+        let sampler = FrameSampler::new(method, &source, None, 0.0);
         sample(
             Tier::portable(),
             &sampler,
@@ -803,7 +817,8 @@ fn filters_reproduce_their_polynomials() {
             &WarpTransform::new(Transform::identity()),
             size,
         );
-        let sampler = FrameSampler::new(sample_method, &constant, None, 9.0);
+        let source = SourceImage::of(&constant);
+        let sampler = FrameSampler::new(sample_method, &source, None, 9.0);
         let sampled = sample(Tier::portable(), &sampler, &positions(size));
         for (&value, &coverage) in sampled.channels[0].iter().zip(&sampled.coverage) {
             if coverage > 0.0 {

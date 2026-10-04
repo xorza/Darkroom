@@ -6,8 +6,8 @@ use common::CancelToken;
 
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::io::image::linear::LinearImage;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::frame::PipelineFrame;
 use crate::pipeline::frame_registration::FrameRegistration;
 use crate::pipeline::result::Error;
 use crate::pipeline::tier::FrameTier;
@@ -46,7 +46,7 @@ pub(crate) struct ParkedFrame {
 #[derive(Debug)]
 pub(crate) struct FrameToPark<'a> {
     pub(crate) index: usize,
-    pub(crate) image: LinearImage,
+    pub(crate) image: PipelineFrame,
     pub(crate) stars: &'a [Star],
     pub(crate) stats: FrameStats,
 }
@@ -141,8 +141,8 @@ impl<'a> FrameRegistrar<'a> {
         let mut warped = buffers
             .take()
             .unwrap_or_else(|| WarpBuffers::new(image.dimensions()));
-        warped.warp_into(&image, &warp, self.config.registration.warp);
-        let metadata = image.metadata.clone();
+        warped.warp_into(&image.source(), &warp, self.config.registration.warp);
+        let metadata = image.metadata().clone();
         drop(image);
         self.resolved.complete_one();
         let stored = self.tier.store(metadata, warped, stats)?;

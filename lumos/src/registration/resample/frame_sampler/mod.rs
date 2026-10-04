@@ -18,9 +18,7 @@
 //! stars, by up to the ratio of the positive lobes' Kish size to the whole kernel's.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::Reach;
 use crate::math::size2us::Size2us;
 use crate::registration::config::WarpParams;
@@ -29,6 +27,7 @@ use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::ringing_clamp::RingingClamp;
+use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
 use crate::registration::transform::WarpTransform;
@@ -84,7 +83,7 @@ impl SampleMethod {
 pub(crate) struct FrameSampler<'a> {
     method: SampleMethod,
     /// The channels as the windows read them: with nulls at zero for a masked frame.
-    sources: ArrayVec<&'a Buffer2<f32>, 3>,
+    sources: ArrayVec<SourcePlane<'a>, 3>,
     masked: Option<&'a MaskedSources>,
     border: f32,
     size: Size2us,
@@ -116,22 +115,20 @@ impl<'a> FrameSampler<'a> {
     /// `image` sampled by `method`; `masked` holds its sources when it declares nulls.
     pub(crate) fn new(
         method: SampleMethod,
-        image: &'a LinearImage,
+        image: &SourceImage<'a>,
         masked: Option<&'a MaskedSources>,
         border: f32,
     ) -> Self {
         let sources = match masked {
             Some(masked) => masked.planes().collect(),
-            None => (0..image.channels())
-                .map(|channel| image.channel(channel))
-                .collect(),
+            None => image.planes.clone(),
         };
         Self {
             method,
             sources,
             masked,
             border,
-            size: image.dimensions().size(),
+            size: image.size(),
         }
     }
 
@@ -184,12 +181,12 @@ impl<'a> FrameSampler<'a> {
         let index = kernel::nearest_index(self.size, position);
         if self
             .masked
-            .is_some_and(|masked| masked.validity().pixels()[index] == 0.0)
+            .is_some_and(|masked| masked.validity().pixels[index] == 0.0)
         {
             return self.no_data(x, channels);
         }
         for (row, source) in channels.iter_mut().zip(&self.sources) {
-            row[x] = source.pixels()[index];
+            row[x] = source.pixels[index];
         }
         PixelQuality {
             coverage: 1.0,
@@ -224,9 +221,9 @@ impl<'a> FrameSampler<'a> {
             for (row, source) in channels.iter_mut().zip(&self.sources) {
                 row[x] = match clamp {
                     Some(clamp) => {
-                        clamp.sample(window.lobe_sums(isa, source), total, || window.lobes(isa))
+                        clamp.sample(window.lobe_sums(isa, *source), total, || window.lobes(isa))
                     }
-                    None => window.total(isa, source) / total,
+                    None => window.total(isa, *source) / total,
                 };
             }
             return PixelQuality {
@@ -299,10 +296,12 @@ impl<'a> FrameSampler<'a> {
     ) {
         for (row, source) in channels.iter_mut().zip(&self.sources) {
             row[x] = match clamp {
-                Some(clamp) => clamp.sample(window.lobe_sums(isa, source), weights.total(), || {
-                    weights.lobes()
-                }),
-                None => window.total(isa, source) / weights.total(),
+                Some(clamp) => {
+                    clamp.sample(window.lobe_sums(isa, *source), weights.total(), || {
+                        weights.lobes()
+                    })
+                }
+                None => window.total(isa, *source) / weights.total(),
             };
         }
     }

@@ -5,12 +5,15 @@ use std::fmt::Debug;
 use arrayvec::ArrayVec;
 
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::frame_quality::FrameQuality;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
+use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
@@ -45,17 +48,44 @@ impl StoredImage {
         })
     }
 
-    pub(crate) fn load(&self) -> LinearImage {
-        let sample_count = self.dimensions.pixel_count();
-        let planes = self
-            .channels
+    /// Each channel's samples, read in place from the map.
+    pub(crate) fn planes(&self) -> impl Iterator<Item = &[f32]> {
+        let samples = self.dimensions.pixel_count();
+        self.channels
             .iter()
-            .map(|plane| plane.chunk(0, sample_count).to_vec());
-        let mut image = LinearImage::from_planar_channels(self.dimensions, planes);
-        image.metadata = self.metadata.clone();
-        image.flags = self.flags.as_ref().map(|bytes| {
-            PixelFlags::from_bytes(self.dimensions.size(), bytes.chunk(0, sample_count))
-        });
-        image
+            .map(move |plane| plane.chunk(0, samples))
+    }
+
+    /// The image's flags, copied out of the map: a byte a pixel, against the four a channel
+    /// costs.
+    pub(crate) fn flags(&self) -> Option<PixelFlags> {
+        self.flags.as_ref().map(|plane| {
+            PixelFlags::from_bytes(
+                self.dimensions.size(),
+                plane.chunk(0, self.dimensions.pixel_count()),
+            )
+        })
+    }
+
+    /// The image as a frame for the combine, unwarped, its channels the planes already on disk:
+    /// only the quality planes its nulls imply are written, to `store`. Its flags plane stays
+    /// when it holds a flag the quality planes do not.
+    pub(crate) fn into_frame(
+        self,
+        store: &impl PlaneStore,
+        source_stats: FrameStats,
+    ) -> Result<StoredFrame, FrameStoreError> {
+        let flags = self.flags();
+        let quality = FrameQuality::for_flags(flags.as_ref())
+            .try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
+        let kept_flags = flags
+            .as_ref()
+            .is_some_and(|flags| flags.contains_other_than(Flags::NO_DATA));
+        Ok(StoredFrame {
+            channels: self.channels,
+            quality,
+            flags: self.flags.filter(|_| kept_flags),
+            source_stats,
+        })
     }
 }

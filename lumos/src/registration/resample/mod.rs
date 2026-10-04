@@ -16,6 +16,7 @@ use crate::registration::resample::frame_sampler::{
 };
 use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::row_positions::RowPositions;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::transform::WarpTransform;
 
 mod frame_sampler;
@@ -24,6 +25,7 @@ mod kernel;
 mod masked_sources;
 mod ringing_clamp;
 mod row_positions;
+pub(crate) mod source_image;
 mod source_position;
 mod tap_window;
 
@@ -69,7 +71,7 @@ pub struct WarpResult {
 /// ```
 pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpParams) -> WarpResult {
     let mut buffers = WarpBuffers::new(image.dimensions());
-    buffers.warp_into(image, warp_transform, config);
+    buffers.warp_into(&SourceImage::of(image), warp_transform, config);
     WarpResult {
         image: LinearImage {
             metadata: image.metadata.clone(),
@@ -135,7 +137,7 @@ impl WarpBuffers {
     /// and a masked frame's validity sample at them.
     pub(crate) fn warp_into(
         &mut self,
-        image: &LinearImage,
+        image: &SourceImage<'_>,
         warp_transform: &WarpTransform,
         config: WarpParams,
     ) {
@@ -147,7 +149,7 @@ impl WarpBuffers {
             "warp border_value must be finite, got {}",
             config.border_value
         );
-        let dimensions = image.dimensions();
+        let dimensions = image.dimensions;
         assert_eq!(
             self.dimensions(),
             dimensions,
@@ -161,7 +163,7 @@ impl WarpBuffers {
         // from its taps that hold data, and its coverage is the share of the kernel they carry.
         let masked = image
             .flags
-            .as_ref()
+            .as_deref()
             .filter(|flags| flags.contains(Flags::NO_DATA))
             .map(|flags| MaskedSources::new(image, flags, reach));
         let sampler = FrameSampler::new(method, image, masked.as_ref(), config.border_value);
@@ -169,7 +171,7 @@ impl WarpBuffers {
         // rather than one per tap: the cell's flags then cover every source pixel its window reads.
         let source_flags = image
             .flags
-            .as_ref()
+            .as_deref()
             .filter(|flags| flags.contains_other_than(Flags::NO_DATA))
             .and_then(|flags| flags.without(Flags::NO_DATA))
             .map(|mut flags| {

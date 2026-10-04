@@ -313,7 +313,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             &mut buffers[0],
             FrameToPark {
                 index: reference,
-                image,
+                image: PipelineFrame::Resident(image),
                 stars: &[],
                 stats,
             },
@@ -334,7 +334,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
                 buffers,
                 FrameToPark {
                     index,
-                    image,
+                    image: PipelineFrame::Resident(image),
                     stars: &result.stars,
                     stats,
                 },
@@ -345,6 +345,9 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             })
         })?;
         drop(registrar);
+        // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
+        // against the memory without them.
+        drop(buffers);
 
         let mut outcomes = Vec::with_capacity(total);
         let mut detection = Vec::with_capacity(total);

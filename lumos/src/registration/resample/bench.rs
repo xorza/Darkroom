@@ -12,6 +12,7 @@ use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
 };
 use crate::registration::resample::row_positions::RowPositions;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// A mono `side`-square gradient warped by the test transform with `method`, into buffers a
@@ -25,7 +26,13 @@ fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMe
     let transform = WarpTransform::new(create_test_transform());
     let params = config::internals::warp_params(method);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&transform), params));
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&transform),
+            params,
+        );
+    });
 }
 
 /// Create a small rotation transform for realistic warping.
@@ -69,7 +76,8 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let transform = WarpTransform::new(create_test_transform());
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     let method = SampleMethod::for_frame(params, &transform, size);
-    let sampler = FrameSampler::new(method, &image, None, params.border_value);
+    let source = SourceImage::of(&image);
+    let sampler = FrameSampler::new(method, &source, None, params.border_value);
     let mut positions = RowPositions::default();
     let mut axes = WindowAxes::default();
     b.bench(|| {
@@ -146,7 +154,7 @@ fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
     b.bench(|| {
         let mut buffers = resample::WarpBuffers::new(image.dimensions());
         buffers.warp_into(
-            black_box(&image),
+            black_box(&SourceImage::of(&image)),
             &black_box(WarpTransform::new(transform)),
             params,
         );
@@ -165,7 +173,7 @@ fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(
-            black_box(&image),
+            black_box(&SourceImage::of(&image)),
             &black_box(WarpTransform::new(transform)),
             params,
         );
@@ -185,7 +193,13 @@ fn bench_warp_into_rgb_sip_2k(b: quickbench::Bencher) {
     let warp = sip_warp(size);
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&warp),
+            params,
+        );
+    });
 }
 
 /// A 2k RGB frame through `warp_into` with a homography: numerators and denominator are affine in
@@ -203,7 +217,13 @@ fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
     ]));
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&SourceImage::of(&image)),
+            black_box(&warp),
+            params,
+        );
+    });
 }
 
 /// The test transform with an order-3 SIP fitted to a mild radial field over `size`.
