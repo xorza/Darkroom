@@ -4,6 +4,8 @@
 //! → fine structure `F` → flag → grow → in-paint → iterate. Also serves each deinterleaved Bayer
 //! phase, whose dense neighbours are same-colour in the mosaic.
 
+use std::array;
+
 use rayon::prelude::*;
 
 use crate::background_mesh::colour_mesh::LocalBackground;
@@ -188,7 +190,7 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 }
 
 /// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
-/// every output sees a full window. Scalar, row-parallel.
+/// every output sees a full window. Row-parallel.
 ///
 /// Deliberately not star detection's own `median_filter_3x3`, even
 /// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
@@ -198,31 +200,121 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// difference while `median₇` stayed replicated would corrupt the border in a way neither
 /// convention does alone. Replication is also the usual choice for astronomical median filtering.
 ///
-/// The two *could* still share an interior kernel: `median_filter`'s `median_filter_row`
-/// takes three rows and fills the interior, knowing nothing about edges. That is worth doing
-/// behind a cosmic-ray benchmark rather than before one — it couples two subsystems to accelerate
-/// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to
-/// be proven bit-identical to this general one or the detection changes.
+/// Eight pixels whose windows lie inside the row take their medians together by forgetful
+/// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
+/// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
+/// gathers its replicated window and takes `median_mut`.
 fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
+    let side = 2 * r + 1;
     // Every element is written below, so only the length matters.
     out.resize(size.pixel_count(), 0.0);
     out.par_chunks_mut(size.width).enumerate().for_each_init(
-        || Vec::<f32>::with_capacity((2 * r + 1) * (2 * r + 1)),
-        |buf, (y, row)| {
-            for (x, o) in row.iter_mut().enumerate() {
-                buf.clear();
-                // `y + dy − r` for dy in `0..=2r`, replicated into the frame at both edges.
-                for dy in 0..=2 * r {
-                    let yy = (y + dy).saturating_sub(r).min(size.height - 1);
-                    for dx in 0..=2 * r {
-                        let xx = (x + dx).saturating_sub(r).min(size.width - 1);
-                        buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
+        || WindowScratch {
+            values: Vec::with_capacity(side * side),
+            lanes: Vec::with_capacity(side * side),
+        },
+        |scratch, (y, row)| {
+            let width = size.width;
+            let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
+            let mut x = 0;
+            while x < width {
+                if x >= r && x + LANES + r <= width {
+                    scratch.lanes.clear();
+                    for dy in 0..side {
+                        let start = rows(dy) * width + x - r;
+                        for dx in 0..side {
+                            let at = &data[start + dx..start + dx + LANES];
+                            scratch
+                                .lanes
+                                .push(array::from_fn(|lane| total_key(at[lane])));
+                        }
                     }
+                    let medians = median_of_lanes(&mut scratch.lanes);
+                    for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
+                        *o = from_total_key(key);
+                    }
+                    x += LANES;
+                } else {
+                    scratch.values.clear();
+                    for dy in 0..side {
+                        let yy = rows(dy);
+                        for dx in 0..side {
+                            let xx = (x + dx).saturating_sub(r).min(width - 1);
+                            scratch
+                                .values
+                                .push(data[size.index_of(Vec2us::new(xx, yy))]);
+                        }
+                    }
+                    row[x] = median_mut(&mut scratch.values);
+                    x += 1;
                 }
-                *o = median_mut(buf);
             }
         },
     );
+}
+
+/// The pixels one forgetful selection runs over at once: an AVX2 register of `i32`s.
+const LANES: usize = 8;
+
+/// One worker's windows: a pixel's values, and eight pixels' keys, value by value.
+#[derive(Debug)]
+struct WindowScratch {
+    values: Vec<f32>,
+    lanes: Vec<[i32; LANES]>,
+}
+
+/// `total_cmp`'s key for `value`: an `i32` whose order is the total order of the f32s.
+#[inline(always)]
+const fn total_key(value: f32) -> i32 {
+    let bits = value.to_bits().cast_signed();
+    bits ^ ((bits >> 31).cast_unsigned() >> 1).cast_signed()
+}
+
+/// The f32 of a [`total_key`]: the same transform, which undoes itself.
+#[inline(always)]
+const fn from_total_key(key: i32) -> f32 {
+    f32::from_bits((key ^ ((key >> 31).cast_unsigned() >> 1).cast_signed()).cast_unsigned())
+}
+
+/// Each lane's median of `lanes`, an odd count of them, by forgetful selection (Paeth): keep
+/// `k + 2` of the `2k + 1` values, move the least to the front and the greatest to the back and
+/// drop both, take the next value, and repeat until three are left, whose middle is the median.
+///
+/// With `W` the kept values and `U` the unseen ones, `|W| = |U| + 3` throughout. The median of
+/// `W ∪ U` has `|U| + 1` values below it, so not all of `W` lies above it, nor all below: `W`'s
+/// least is at or below it and `W`'s greatest at or above, and dropping one from each side leaves
+/// the median where it was. Taking the next value moves it from `U` to `W`, which changes neither.
+/// Each move is a compare-exchange of every lane at once, so the lanes share one branch-free
+/// sweep. Overwrites `lanes`.
+fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
+    let count = lanes.len();
+    debug_assert!(
+        count % 2 == 1 && count >= 3,
+        "an odd window of three or more"
+    );
+    let exchange = |lanes: &mut [[i32; LANES]], low: usize, high: usize| {
+        let (a, b) = (lanes[low], lanes[high]);
+        lanes[low] = array::from_fn(|lane| a[lane].min(b[lane]));
+        lanes[high] = array::from_fn(|lane| a[lane].max(b[lane]));
+    };
+    let (mut first, mut end, mut next) = (0, count / 2 + 2, count / 2 + 2);
+    loop {
+        for index in first + 1..end {
+            exchange(lanes, first, index);
+        }
+        for index in first + 1..end - 1 {
+            exchange(lanes, index, end - 1);
+        }
+        if end - first == 3 {
+            debug_assert_eq!(next, count);
+            return lanes[first + 1];
+        }
+        first += 1;
+        end -= 1;
+        lanes[end] = lanes[next];
+        end += 1;
+        next += 1;
+    }
 }
 
 /// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5` and each pixel's
@@ -293,10 +385,18 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
     use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
+    use crate::calibration_masters::cosmic_ray::mono::median_window_into;
     use crate::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
     use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
     use crate::io::image::image_metadata::ImageMetadata;
     use crate::math::size2us::Size2us;
+
+    /// The `(2r+1)²` window median of `data`, into a fresh plane.
+    pub(crate) fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
+        let mut out = Vec::new();
+        median_window_into(data, size, r, &mut out);
+        out
+    }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
     /// `mem_budget` weighs against

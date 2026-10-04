@@ -5,6 +5,7 @@
 
 use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
+use crate::calibration_masters::cosmic_ray::mono::internals::median_window;
 use crate::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::calibration_masters::cosmic_ray::*;
 use crate::internals::cfa::XTRANS_PATTERN;
@@ -539,4 +540,61 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
     assert_eq!(flagged, [at(2, 1), at(3, 1), at(4, 1), at(2, 2)]);
     // A second pass finds nothing new: every pixel it would take is held already.
     assert_eq!(masks.detect_and_grow(&significance, &fine, &noise, &cfg), 0);
+}
+
+/// Every window median is the value `median_mut` picks from the pixel's replicated window, to the
+/// bit: at each radius the detector uses, on frames narrower than one group of eight and wider,
+/// with the values `total_cmp` orders apart from the rest — NaN of both signs, both infinities,
+/// both zeros and subnormals — among random ones, so the groups of eight and the edge pixels both
+/// meet them.
+#[test]
+fn window_medians_match_the_sorted_window_to_the_bit() {
+    let mut rng = TestRng::new(31);
+    let special = [
+        f32::NAN,
+        -f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        0.0,
+        -0.0,
+        1e-40,
+        -1e-40,
+    ];
+    for (width, height) in [(5, 4), (13, 7), (21, 13), (40, 9)] {
+        let size = Size2us::new(width, height);
+        let data: Vec<f32> = (0..size.pixel_count())
+            .map(|_| {
+                let pick = rng.next_f32();
+                if pick < 0.1 {
+                    special[(rng.next_f32() * special.len() as f32) as usize % special.len()]
+                } else if pick < 0.2 {
+                    // Repeats, so equal values meet in a window.
+                    0.5
+                } else {
+                    rng.next_f32() - 0.5
+                }
+            })
+            .collect();
+        for r in [1, 2, 3] {
+            let medians = median_window(&data, size, r);
+            for y in 0..height {
+                for x in 0..width {
+                    let mut window = Vec::new();
+                    for dy in 0..=2 * r {
+                        let yy = (y + dy).saturating_sub(r).min(height - 1);
+                        for dx in 0..=2 * r {
+                            let xx = (x + dx).saturating_sub(r).min(width - 1);
+                            window.push(data[yy * width + xx]);
+                        }
+                    }
+                    let expected = median_mut(&mut window);
+                    assert_eq!(
+                        medians[y * width + x].to_bits(),
+                        expected.to_bits(),
+                        "{width}x{height}, r {r}, at ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
 }
