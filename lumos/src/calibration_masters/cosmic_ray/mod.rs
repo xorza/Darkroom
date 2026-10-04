@@ -33,7 +33,7 @@ use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 
 use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;
@@ -53,8 +53,8 @@ const BACKGROUND_TILE_SIZE: usize = 64;
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
-/// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`Flags::COSMIC_RAY`] and
-/// [`Flags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the parametric
+/// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
+/// [`QualityFlags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the parametric
 /// noise model needs an ADC step the frame does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
@@ -93,7 +93,7 @@ pub(crate) fn reject_cosmic_rays(
         PixelFlags::add_where(
             &mut image.flags,
             size,
-            Flags::COSMIC_RAY.union(Flags::REPAIRED),
+            QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
             |index| found.get(index),
         );
     }

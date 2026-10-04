@@ -18,10 +18,11 @@ use crate::internals::assertions::bits;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::cfa_from_plane;
 use crate::internals::cfa::{constant_cfa, make_cfa};
+use crate::internals::fits::rewrite_fits;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -828,10 +829,10 @@ fn calibrate_hot_pixel_correction() {
     assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
     // The repaired pixel says so, and no other does.
     let flags = light.flags.as_ref().unwrap();
-    assert_eq!(flags.count(Flags::REPAIRED), 1);
+    assert_eq!(flags.count(QualityFlags::REPAIRED), 1);
     assert_eq!(
         flags.at_pos(Vec2us::new(2, 2)),
-        Flags::DEFECT.union(Flags::REPAIRED)
+        QualityFlags::DEFECT.union(QualityFlags::REPAIRED)
     );
 }
 
@@ -859,13 +860,14 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type)),
         flat_dark: None,
     });
-    masters
-        .dark
-        .as_mut()
-        .unwrap()
-        .image
-        .metadata
-        .quantization_sigma = Some(0.000_02);
+    let dark = &mut masters.dark.as_mut().unwrap().image;
+    dark.metadata.quantization_sigma = Some(0.000_02);
+    // Pixel 5 is saturated and a defect: 2 + 4 = 6. The dark's flags go in its own `LUMFLAGS`
+    // extension, right after it.
+    let dark_flags = PixelFlags::from_fn(Size2us::new(4, 4), |index| {
+        QualityFlags::from_byte(if index == 5 { 6 } else { 0 })
+    });
+    dark.flags = dark_flags.clone();
     let prepared_bits = bits(masters.flat.as_ref().unwrap().divisor().data.pixels());
 
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
@@ -888,7 +890,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     assert!(refused(PreviewImage::from_file(&path, &context).map(drop)));
     let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
-    assert_eq!(reader.hdus().len(), 5);
+    assert_eq!(reader.hdus().len(), 6);
     assert_eq!(reader.hdus()[0].header.naxis().unwrap(), 0);
     assert_eq!(
         reader.hdus()[0].header.get_text("LUMOSFMT").unwrap(),
@@ -902,9 +904,19 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .collect::<Vec<_>>();
     assert_eq!(
         extension_names,
-        ["MASTER_DARK", "MASTER_FLAT", "MASTER_BIAS", "DEFECT_MAP"]
+        [
+            "MASTER_DARK",
+            "LUMFLAGS",
+            "MASTER_FLAT",
+            "MASTER_BIAS",
+            "DEFECT_MAP"
+        ]
     );
-    for image_index in [1, 2, 3] {
+    assert_eq!(
+        reader.hdus()[2].header.get_text("LUMFOR").unwrap(),
+        Some("MASTER_DARK")
+    );
+    for image_index in [1, 3, 4] {
         assert_eq!(
             reader.hdus()[image_index].header.bitpix().unwrap(),
             Bitpix::F32
@@ -915,7 +927,33 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         assert_eq!(report.datasum, ChecksumStatus::Valid);
         assert_eq!(report.checksum, ChecksumStatus::Valid);
     }
-    let loaded = CalibrationMasters::load(&path).unwrap();
+    let loaded = CalibrationMasters::load(&path, &LoadContext::default()).unwrap();
+    assert_eq!(
+        loaded.dark.as_ref().unwrap().image.flags().unwrap().bytes(),
+        dark_flags.as_ref().unwrap().bytes()
+    );
+    assert!(loaded.bias.as_ref().unwrap().flags().is_none());
+    // Flags whose master is gone would be dropped unseen, so the bundle is refused.
+    let orphan = directory.join("orphan.fits");
+    fs::write(&orphan, &cache_bytes).unwrap();
+    rewrite_fits(&orphan, |index, _, _| index != 1);
+    let error = CalibrationMasters::load(&orphan, &LoadContext::default()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert!(
+        error
+            .to_string()
+            .contains("is for \"MASTER_DARK\", which is no image of the file"),
+        "{error}"
+    );
+    // The caller's context reaches every master's decode: a cancelled one stops the load.
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    assert_eq!(
+        CalibrationMasters::load(&path, &LoadContext::new(cancel, u64::MAX))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Interrupted
+    );
 
     let mut invalid_version = cache_bytes.clone();
     let version_card = invalid_version
@@ -929,7 +967,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     invalid_version[version_card + version_digit] = b'0';
     fs::write(&path, invalid_version).unwrap();
     assert_eq!(
-        CalibrationMasters::load(&path).unwrap_err().kind(),
+        CalibrationMasters::load(&path, &LoadContext::default())
+            .unwrap_err()
+            .kind(),
         ErrorKind::InvalidData
     );
 
@@ -949,7 +989,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     invalid_data[pixel_offset] ^= 0x01;
     fs::write(&path, invalid_data).unwrap();
     assert_eq!(
-        CalibrationMasters::load(&path).unwrap_err().kind(),
+        CalibrationMasters::load(&path, &LoadContext::default())
+            .unwrap_err()
+            .kind(),
         ErrorKind::InvalidData
     );
 
@@ -1001,7 +1043,7 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     assert_eq!(report.datasum, ChecksumStatus::Valid);
     assert_eq!(report.checksum, ChecksumStatus::Valid);
 
-    let loaded = CalibrationMasters::load(&path).unwrap();
+    let loaded = CalibrationMasters::load(&path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.components().collect::<Vec<_>>(), []);
 }
 

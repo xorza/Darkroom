@@ -24,7 +24,7 @@ use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
@@ -177,7 +177,7 @@ pub struct CfaImage {
     pub cfa_type: CfaType,
     pub metadata: ImageMetadata,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
-    /// [`Flags::NO_DATA`] are a finite fill, not data.
+    /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
     pub(crate) flags: Option<PixelFlags>,
 }
 
@@ -265,7 +265,13 @@ impl CfaImage {
         self.data.width() * self.data.height() * size_of::<f32>()
     }
 
-    /// Save this sensor-domain image as a checksummed floating-point FITS file.
+    /// The data-quality flags of the pixels; `None` when no pixel carries one.
+    pub const fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
+    }
+
+    /// Save this sensor-domain image as a checksummed floating-point FITS file, with its flags
+    /// in a `LUMFLAGS` extension when they hold more than the NaN of a sample with no data.
     pub fn save_fits(&self, path: &Path) -> io::Result<()> {
         fits_cfa::save_cfa_fits(path, self)
     }
@@ -286,13 +292,13 @@ impl CfaImage {
         let Some(flags) = self
             .flags
             .as_ref()
-            .filter(|flags| flags.contains(Flags::NO_DATA))
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
         else {
             return;
         };
         let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let mask = flags.mask_of(Flags::NO_DATA);
+        let mask = flags.mask_of(QualityFlags::NO_DATA);
         let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         mask.for_each_set(|pos| {
@@ -343,7 +349,7 @@ impl CfaImage {
         // Every other fact spreads as far as the demosaic reads.
         let mut flags = self.flags;
         if let Some(flags) = &mut flags {
-            flags.dilate(cfa_type.demosaic_support(), Flags::NO_DATA);
+            flags.dilate(cfa_type.demosaic_support(), QualityFlags::NO_DATA);
         }
 
         let unbalance = |planes: &mut [Vec<f32>; 3]| {

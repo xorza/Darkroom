@@ -13,7 +13,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
@@ -80,7 +80,7 @@ impl StoredImage {
             .try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
         let kept_flags = flags
             .as_ref()
-            .is_some_and(|flags| flags.contains_other_than(Flags::NO_DATA));
+            .is_some_and(|flags| flags.contains_other_than(QualityFlags::NO_DATA));
         Ok(StoredFrame {
             channels: self.channels,
             quality,

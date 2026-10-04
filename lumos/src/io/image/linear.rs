@@ -29,7 +29,7 @@ pub struct LinearImage {
     pub metadata: ImageMetadata,
     pub(crate) pixels: LinearPixels,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
-    /// [`Flags::NO_DATA`] are a finite fill, not data.
+    /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
     pub(crate) flags: Option<PixelFlags>,
 }
 
@@ -186,6 +186,11 @@ impl LinearImage {
     /// Get channel as mutable Buffer2 reference.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.pixels.channel_mut(c)
+    }
+
+    /// The data-quality flags of the pixels; `None` when no pixel carries one.
+    pub const fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     /// Iterate the channel planes in channel order: one for grayscale, three for RGB.

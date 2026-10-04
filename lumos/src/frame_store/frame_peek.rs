@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaFrameInfo;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::memory;
 
 /// What one frame is worth to a memory estimate, before the rest of the set is read.
@@ -27,7 +27,7 @@ impl FramePeek {
             dimensions: image.dimensions(),
             may_carry_nulls: image
                 .flags()
-                .is_some_and(|flags| flags.contains(Flags::NO_DATA)),
+                .is_some_and(|flags| flags.contains(QualityFlags::NO_DATA)),
         }
     }
 

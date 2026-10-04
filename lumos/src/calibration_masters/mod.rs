@@ -27,6 +27,7 @@ use crate::combine::stack::combine_cached;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, Pedestal};
 use crate::math::size2us::Size2us;
 use crate::progress::ProgressCallback;
@@ -182,9 +183,11 @@ impl CalibrationMasters {
         fits::save(path, self)
     }
 
-    /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.
-    pub fn load(path: &Path) -> io::Result<Self> {
-        fits::load(path)
+    /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map,
+    /// under `context`: its cancellation, which reads as [`io::ErrorKind::Interrupted`], and its
+    /// memory limit on each master's decode.
+    pub fn load(path: &Path, context: &LoadContext) -> io::Result<Self> {
+        fits::load(path, context)
     }
 
     /// Create `CalibrationMasters` from pre-built CFA images.

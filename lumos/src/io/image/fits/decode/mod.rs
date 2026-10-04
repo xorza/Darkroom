@@ -24,12 +24,14 @@ use fits_well::io::SliceReader;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
+use crate::io::image::fits::cfa::{CFA_FITS_FORMAT, validate_cfa_image_header};
 use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::decode::selected_fits::SelectedFits;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
+use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
-use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::io::image::fits::provenance::FitsChecksumProvenance;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
@@ -141,13 +143,25 @@ pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaIma
         .into_cfa(path)
 }
 
+/// The Lumos CFA image in HDU `index` of a file already open in memory, with its flags extension,
+/// under the caller's `context` — its cancellation, memory limit and float scale — with the
+/// checksum state the caller verified for both. Held to the version check every file entry point
+/// applies; an HDU that is not a Lumos CFA image is refused.
 pub(crate) fn read_cfa_hdu(
     reader: &mut SliceReader<'_>,
     index: usize,
     path: &Path,
+    context: &LoadContext,
+    checksum: FitsChecksumProvenance,
 ) -> Result<CfaImage, ImageError> {
-    let context = LoadContext::default();
+    context.check_cancelled(path)?;
     let hdu = &reader.hdus()[index];
+    if !validate_cfa_image_header(path, &hdu.header)? {
+        return Err(fits_unsupported(
+            path,
+            format!("HDU {index} is not a Lumos {CFA_FITS_FORMAT} image"),
+        ));
+    }
     let plan = plan::preflight_fits_image(
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
@@ -155,25 +169,28 @@ pub(crate) fn read_cfa_hdu(
         context.fits.float_scale,
         context.memory_limit_bytes,
     )?;
+    let size = plan.dimensions.size();
+    let flags_hdu = FlagsExtension::locate(path, reader.hdus(), index, size)?;
+    if flags_hdu.is_some() {
+        plan.admit_flags_extension(path, context.memory_limit_bytes)?;
+    }
     let header = reader.hdus()[index].header.clone();
     let selected = selection::selected_hdu(path, reader.hdus(), index)?;
-    pixels::read_decoded_hdu(
-        &header,
-        plan,
-        selected,
-        FitsChecksumProvenance {
-            datasum: FitsChecksumState::NotChecked,
-            checksum: FitsChecksumState::NotChecked,
-        },
-        path,
-        &context,
-        |ranges| {
+    let mut decoded =
+        pixels::read_decoded_hdu(&header, plan, selected, checksum, path, context, |ranges| {
             reader
                 .read_image_section(index, &ranges)
                 .map(|image| image.physical_f32())
-        },
-    )?
-    .into_cfa(path)
+        })?;
+    if let Some(flags_hdu) = flags_hdu {
+        context.check_cancelled(path)?;
+        let stored = reader
+            .read_image(flags_hdu)
+            .map_err(|source| fits_err(path, source))?
+            .decode();
+        decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
+    }
+    decoded.into_cfa(path)
 }
 
 pub(crate) fn fits_cfa_frame_info(

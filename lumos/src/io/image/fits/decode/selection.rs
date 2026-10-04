@@ -5,6 +5,7 @@ use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu, StreamReader};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
+use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::metadata::read_text;
 use crate::io::image::fits::options::{FitsChecksumPolicy, FitsHduSelector};
 use crate::io::image::fits::provenance::{
@@ -48,12 +49,13 @@ pub(super) fn select_image_hdu(
 ) -> Result<FitsHduProvenance, ImageError> {
     let selected = match selector {
         FitsHduSelector::Auto => {
-            let images: Vec<usize> = hdus
-                .iter()
-                .enumerate()
-                .filter(|(_, hdu)| hdu.is_image())
-                .map(|(index, _)| index)
-                .collect();
+            // A flags extension describes another image, so it is no candidate of its own.
+            let mut images = Vec::new();
+            for (index, hdu) in hdus.iter().enumerate() {
+                if hdu.is_image() && !FlagsExtension::describes_another(path, hdu)? {
+                    images.push(index);
+                }
+            }
             match images.as_slice() {
                 [] => return Err(fits_unsupported(path, "no image HDU found")),
                 [index] => *index,
@@ -158,7 +160,7 @@ pub(super) fn verify_selected_checksum(
                 return Err(fits_unsupported(
                     path,
                     format!(
-                        "selected HDU {index} has an invalid FITS checksum: DATASUM={:?}, CHECKSUM={:?}",
+                        "HDU {index} has an invalid FITS checksum: DATASUM={:?}, CHECKSUM={:?}",
                         report.datasum, report.checksum
                     ),
                 ));
@@ -169,7 +171,7 @@ pub(super) fn verify_selected_checksum(
                 return Err(fits_unsupported(
                     path,
                     format!(
-                        "selected HDU {index} requires valid DATASUM and CHECKSUM: DATASUM={:?}, CHECKSUM={:?}",
+                        "HDU {index} requires valid DATASUM and CHECKSUM: DATASUM={:?}, CHECKSUM={:?}",
                         report.datasum, report.checksum
                     ),
                 ));

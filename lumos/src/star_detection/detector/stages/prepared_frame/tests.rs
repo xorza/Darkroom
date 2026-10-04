@@ -232,9 +232,9 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
     flagged.metadata.saturation_flagged = true;
     flagged.flags = PixelFlags::from_fn(size, |index| {
         if index == 1 {
-            Flags::SATURATED
+            QualityFlags::SATURATED
         } else {
-            Flags::default()
+            QualityFlags::default()
         }
     });
     mark_saturated(&flagged, &mut mask);
@@ -323,9 +323,9 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     let mut image = gray_image(size, pixels);
     image.flags = PixelFlags::from_fn(size, |index| {
         if missing(index) {
-            Flags::NO_DATA
+            QualityFlags::NO_DATA
         } else {
-            Flags::default()
+            QualityFlags::default()
         }
     });
     let config = Config::default();

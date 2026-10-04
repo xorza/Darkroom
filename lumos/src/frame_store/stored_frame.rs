@@ -14,7 +14,7 @@ use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
 /// if a warp produced one or its source declared pixels with no measurement, its flags when it
@@ -30,7 +30,7 @@ pub(crate) struct StoredFrame {
 
 /// The flags a stored frame keeps: those of an image that carries any but `NO_DATA`.
 fn kept_flags(flags: Option<&PixelFlags>) -> Option<&PixelFlags> {
-    flags.filter(|flags| flags.contains_other_than(Flags::NO_DATA))
+    flags.filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
 }
 
 impl StoredFrame {
@@ -41,7 +41,7 @@ impl StoredFrame {
     ) -> Self {
         let ImageParts { planes, flags } = image.into_parts();
         let flags = flags
-            .filter(|flags| flags.contains_other_than(Flags::NO_DATA))
+            .filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
             .map(|flags| StoredPlane::Memory(flags.into_buffer()));
         Self {
             channels: planes.into_iter().map(StoredPlane::Memory).collect(),

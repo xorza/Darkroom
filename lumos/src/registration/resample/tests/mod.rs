@@ -1,5 +1,5 @@
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::registration::config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
@@ -386,9 +386,9 @@ fn a_flag_reaches_every_output_its_kernel_window_reads() {
     let size = Size2us::new(24, 24);
     let mut image = gray_image(size, vec![0.25; size.pixel_count()]);
     image.flags = PixelFlags::from_fn(size, |index| match index {
-        index if index == 10 * 24 + 10 => Flags::SATURATED,
-        index if index == 20 * 24 + 20 => Flags::NO_DATA,
-        _ => Flags::default(),
+        index if index == 10 * 24 + 10 => QualityFlags::SATURATED,
+        index if index == 20 * 24 + 20 => QualityFlags::NO_DATA,
+        _ => QualityFlags::default(),
     });
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
     let warped = resample::warp(
@@ -401,13 +401,13 @@ fn a_flag_reaches_every_output_its_kernel_window_reads() {
         },
     );
     let flags = warped.image.flags.unwrap();
-    assert_eq!(flags.count(Flags::SATURATED), 36);
-    assert_eq!(flags.count(Flags::NO_DATA), 0);
+    assert_eq!(flags.count(QualityFlags::SATURATED), 36);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
     for y in 7..=12 {
         for x in 7..=12 {
             assert_eq!(
                 flags.at_pos(Vec2us::new(x, y)),
-                Flags::SATURATED,
+                QualityFlags::SATURATED,
                 "({x}, {y})"
             );
         }

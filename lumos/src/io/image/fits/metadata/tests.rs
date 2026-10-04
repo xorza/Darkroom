@@ -263,3 +263,94 @@ fn wcs_pointing_follows_the_axis_types() {
     assert_eq!(wcs(["DEC--TAN", "RA---TAN"]), [Some(-5.4), Some(83.8)]);
     assert_eq!(wcs(["GLON-TAN", "GLAT-TAN"]), [None, None]);
 }
+
+/// Every keyword of every field reads into that field, the first spelling winning where two are
+/// given, and the writer writes the first: Siril's aliases (`EXPOSURE`, `TEMPERAT`, `BINX`,
+/// `PIXSIZE1`, `FRAMETYP`, `FILT-1`, `BLKLEVEL`, …) all land where the standard keyword does.
+#[test]
+fn every_alias_reads_into_its_field() {
+    use crate::io::image::fits::metadata::{MetadataField, write_image_metadata};
+
+    let read = |header: &Header, field: MetadataField| -> Option<String> {
+        let metadata = read_metadata(header, vec![4, 4], SampleType::U16);
+        let text = |value: Option<String>| value;
+        let real = |value: Option<f64>| value.map(|value| format!("{value}"));
+        let integer = |value: Option<i64>| value.map(|value| format!("{value}"));
+        match field {
+            MetadataField::Object => text(metadata.object),
+            MetadataField::Instrument => text(metadata.instrument),
+            MetadataField::Telescope => text(metadata.telescope),
+            MetadataField::DateObs => text(metadata.date_obs),
+            MetadataField::Filter => text(metadata.filter),
+            MetadataField::ImageType => text(metadata.image_type),
+            MetadataField::ExposureTime => real(metadata.exposure_time),
+            MetadataField::Gain => real(metadata.gain),
+            MetadataField::Egain => real(metadata.egain),
+            MetadataField::CcdTemp => real(metadata.ccd_temp),
+            MetadataField::SetTemp => real(metadata.set_temp),
+            MetadataField::FocalLength => real(metadata.focal_length),
+            MetadataField::Airmass => real(metadata.airmass),
+            MetadataField::PixelSizeX => real(metadata.pixel_size_x),
+            MetadataField::PixelSizeY => real(metadata.pixel_size_y),
+            MetadataField::DataMax => real(metadata.data_max),
+            MetadataField::Iso => integer(metadata.iso.map(i64::from)),
+            MetadataField::XBinning => integer(metadata.xbinning.map(i64::from)),
+            MetadataField::YBinning => integer(metadata.ybinning.map(i64::from)),
+            MetadataField::Offset => integer(metadata.offset.map(i64::from)),
+        }
+    };
+    let set = |header: &mut Header, field: MetadataField, keyword: &str, value: i32| {
+        if matches!(
+            field,
+            MetadataField::Object
+                | MetadataField::Instrument
+                | MetadataField::Telescope
+                | MetadataField::DateObs
+                | MetadataField::Filter
+                | MetadataField::ImageType
+        ) {
+            header.set(keyword, value.to_string().as_str()).unwrap();
+        } else if matches!(
+            field,
+            MetadataField::Iso
+                | MetadataField::XBinning
+                | MetadataField::YBinning
+                | MetadataField::Offset
+        ) {
+            header.set(keyword, i64::from(value)).unwrap();
+        } else {
+            header.set(keyword, f64::from(value)).unwrap();
+        }
+    };
+    for field in MetadataField::ALL {
+        for (value, &keyword) in (7..).zip(field.keywords()) {
+            let mut header = Header::new();
+            set(&mut header, field, keyword, value);
+            assert_eq!(
+                read(&header, field),
+                Some(value.to_string()),
+                "{field:?} as {keyword}"
+            );
+        }
+        if let [first, second, ..] = field.keywords() {
+            let mut header = Header::new();
+            set(&mut header, field, second, 2);
+            set(&mut header, field, first, 1);
+            assert_eq!(
+                read(&header, field),
+                Some("1".to_owned()),
+                "{field:?}: {first} first"
+            );
+        }
+    }
+
+    let mut header = Header::new();
+    header.set("EXPOSURE", 30.0).unwrap();
+    header.set("TEMPERAT", -10.0).unwrap();
+    let metadata = read_metadata(&header, vec![4, 4], SampleType::U16);
+    let mut written = Header::new();
+    write_image_metadata(&mut written, &metadata, None).unwrap();
+    assert_eq!(written.get_real("EXPTIME").unwrap(), Some(30.0));
+    assert_eq!(written.get_real("CCD-TEMP").unwrap(), Some(-10.0));
+    assert_eq!(written.get_real("EXPOSURE").unwrap(), None);
+}

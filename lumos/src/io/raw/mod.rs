@@ -34,7 +34,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{Flags, PixelFlags, SATURATION_FRACTION};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, SATURATION_FRACTION};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use imaginarium::Buffer2;
 
@@ -200,8 +200,8 @@ impl UnpackedRaw {
         }
     }
 
-    /// The flags the raw values themselves settle for the active area: [`Flags::SATURATED`] at
-    /// each channel's saturation level, and [`Flags::NO_DATA`] on the zeros of a `zero_is_bad`
+    /// The flags the raw values themselves settle for the active area: [`QualityFlags::SATURATED`] at
+    /// each channel's saturation level, and [`QualityFlags::NO_DATA`] on the zeros of a `zero_is_bad`
     /// camera; `None` when no photosite carries either.
     ///
     /// Saturation is decided here, on the raw value before black is subtracted, because after a
@@ -223,11 +223,11 @@ impl UnpackedRaw {
             let (x, y) = (index % active.width, index / active.width);
             let value = raw[(y + margin.y) * raw_size.width + x + margin.x];
             if value == 0 && zero_is_bad {
-                Flags::NO_DATA
+                QualityFlags::NO_DATA
             } else if f64::from(value) >= saturation[channel_at(x, y)] {
-                Flags::SATURATED
+                QualityFlags::SATURATED
             } else {
-                Flags::default()
+                QualityFlags::default()
             }
         }))
     }

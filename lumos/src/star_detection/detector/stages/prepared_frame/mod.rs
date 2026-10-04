@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{Flags, SATURATION_FRACTION};
+use crate::io::image::pixel_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
@@ -50,10 +50,10 @@ impl PreparedFrame {
         let no_data = image
             .flags
             .as_ref()
-            .filter(|flags| flags.contains(Flags::NO_DATA))
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
             .map(|flags| {
                 let mut mask = resources.acquire_bit();
-                mask.fill_from_predicate(|index| flags.at(index).intersects(Flags::NO_DATA));
+                mask.fill_from_predicate(|index| flags.at(index).intersects(QualityFlags::NO_DATA));
                 mask
             });
 
@@ -167,7 +167,8 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
 /// noise stacking weighs by, and not the MAD, which a red nebula inflates in red.
 fn channel_noise(image: &LinearImage) -> [f32; 3] {
     let flags = image.flags.as_ref();
-    let excluded = |index: usize| flags.is_some_and(|flags| flags.at(index) != Flags::default());
+    let excluded =
+        |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
     let size = Size2us::new(image.width(), image.height());
     [0, 1, 2].map(|channel| MrsNoise::estimate(image.channel(channel).pixels(), size, excluded))
 }
@@ -207,7 +208,7 @@ fn saturation_level(image: &LinearImage) -> f32 {
     SATURATION_FRACTION * image.metadata.data_max.map_or(1.0, |max| max as f32)
 }
 
-/// Mark the saturated pixels of `image`: the decoder's [`Flags::SATURATED`] when it flagged
+/// Mark the saturated pixels of `image`: the decoder's [`QualityFlags::SATURATED`] when it flagged
 /// saturation, which a dark subtraction and a flat division leave exact; otherwise every pixel where
 /// any input channel reaches [`saturation_level`]. Per channel, before the channels are combined:
 /// a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
@@ -215,7 +216,9 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
     if image.metadata.saturation_flagged {
         match &image.flags {
             Some(flags) => {
-                mask.fill_from_predicate(|index| flags.at(index).intersects(Flags::SATURATED));
+                mask.fill_from_predicate(|index| {
+                    flags.at(index).intersects(QualityFlags::SATURATED)
+                });
             }
             None => mask.fill(false),
         }

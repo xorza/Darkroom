@@ -75,7 +75,7 @@ mod tests {
     use crate::frame_store::stored_image::StoredImage;
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::linear::LinearImage;
-    use crate::io::image::pixel_flags::{Flags, PixelFlags};
+    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
     use crate::pipeline::frame::PipelineFrame;
 
     /// A parked frame reaches the warp as its map: the source's planes are the map's own memory,
@@ -109,6 +109,6 @@ mod tests {
             assert_eq!(plane.pixels, expected.pixels());
             assert_eq!(plane.width, 3);
         }
-        assert_eq!(source.flags.unwrap().count(Flags::NO_DATA), 1);
+        assert_eq!(source.flags.unwrap().count(QualityFlags::NO_DATA), 1);
     }
 }

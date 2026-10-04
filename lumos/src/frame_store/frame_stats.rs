@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaType;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
@@ -53,7 +53,7 @@ impl FrameStats {
         let facts = FrameFacts::of(image);
         let flags = image.flags();
         let excluded =
-            |index: usize| flags.is_some_and(|flags| flags.at(index) != Flags::default());
+            |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
         let mosaic = image
             .cfa_type()
             .filter(|cfa| matches!(cfa, CfaType::Bayer(_) | CfaType::XTrans(_)));
@@ -70,7 +70,7 @@ impl FrameStats {
                 .into_iter()
                 .collect(),
         };
-        let nulls = flags.filter(|flags| flags.contains(Flags::NO_DATA));
+        let nulls = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA));
         let channels: ArrayVec<MedianMad, 3> = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
@@ -85,7 +85,9 @@ impl FrameStats {
                             row.iter()
                                 .enumerate()
                                 .filter(move |&(x, _)| {
-                                    !nulls.at_pos(Vec2us::new(x, y)).intersects(Flags::NO_DATA)
+                                    !nulls
+                                        .at_pos(Vec2us::new(x, y))
+                                        .intersects(QualityFlags::NO_DATA)
                                 })
                                 .map(|(_, &sample)| sample)
                         })

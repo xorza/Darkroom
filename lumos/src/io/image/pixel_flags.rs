@@ -6,7 +6,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// A sample at or past this fraction of its channel's span above black is flagged
-/// [`Flags::SATURATED`]. Many sensors clip a little below their nominal white level, which LibRaw's
+/// [`QualityFlags::SATURATED`]. Many sensors clip a little below their nominal white level, which LibRaw's
 /// own `adjust_maximum` allows for down to 75% of it; 95% catches those clips and stays above any
 /// unsaturated star core.
 pub(crate) const SATURATION_FRACTION: f32 = 0.95;
@@ -17,24 +17,43 @@ pub(crate) const SATURATION_FRACTION: f32 = 0.95;
 /// mean for it. That is the HST and JWST `DQ` convention: a step records, it does not repair in
 /// secret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct Flags(u8);
+pub struct QualityFlags(u8);
 
-impl Flags {
+impl QualityFlags {
     /// The source holds no measurement: FITS NaN or `BLANK`, or a LibRaw `zero_is_bad` zero. The
     /// sample under it is a finite fill, not data.
-    pub(crate) const NO_DATA: Self = Self(1);
+    pub const NO_DATA: Self = Self(1);
     /// The raw value reached the sensor's linear limit, so the sample is a lower bound, not a
     /// measurement.
-    pub(crate) const SATURATED: Self = Self(1 << 1);
+    pub const SATURATED: Self = Self(1 << 1);
     /// Hot or cold in the defect map.
-    pub(crate) const DEFECT: Self = Self(1 << 2);
+    pub const DEFECT: Self = Self(1 << 2);
     /// Found by L.A.Cosmic.
-    pub(crate) const COSMIC_RAY: Self = Self(1 << 3);
+    pub const COSMIC_RAY: Self = Self(1 << 3);
     /// The value is an interpolation from neighbours, not the photosite's own.
-    pub(crate) const REPAIRED: Self = Self(1 << 4);
+    pub const REPAIRED: Self = Self(1 << 4);
     /// The flat divisor was clamped at its floor, so the value is corrected by less than its
     /// vignetting asks.
-    pub(crate) const FLAT_FLOOR: Self = Self(1 << 5);
+    pub const FLAT_FLOOR: Self = Self(1 << 5);
+    /// Every bit with a meaning; a stored byte holding another was written by something else.
+    pub(crate) const KNOWN: Self = {
+        let mut bits = 0;
+        let mut i = 0;
+        while i < Self::NAMED.len() {
+            bits |= Self::NAMED[i].0.0;
+            i += 1;
+        }
+        Self(bits)
+    };
+    /// Each flag and its name, by bit position, as the FITS extension documents them.
+    pub(crate) const NAMED: [(Self, &'static str); 6] = [
+        (Self::NO_DATA, "NO_DATA"),
+        (Self::SATURATED, "SATURATED"),
+        (Self::DEFECT, "DEFECT"),
+        (Self::COSMIC_RAY, "COSMIC_RAY"),
+        (Self::REPAIRED, "REPAIRED"),
+        (Self::FLAT_FLOOR, "FLAT_FLOOR"),
+    ];
 
     /// The flags a stored byte holds.
     #[inline]
@@ -42,34 +61,41 @@ impl Flags {
         Self(byte)
     }
 
+    /// The flags as a byte: bit `i` is the flag `1 << i`, as the `LUMFLAGS` FITS extension
+    /// stores them.
     #[inline]
-    pub(crate) const fn byte(self) -> u8 {
+    pub const fn byte(self) -> u8 {
         self.0
     }
 
     #[inline]
-    pub(crate) const fn union(self, other: Self) -> Self {
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
+    /// Whether `self` and `other` hold a flag in common.
     #[inline]
-    pub(crate) const fn intersects(self, other: Self) -> bool {
+    pub const fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
 
+    /// # Panics
+    ///
+    /// If `self` is not a single flag.
     const fn index(self) -> usize {
-        debug_assert!(self.0.is_power_of_two(), "a single flag");
+        assert!(self.0.is_power_of_two(), "a single flag");
         self.0.trailing_zeros() as usize
     }
 }
 
-/// Which pixels of an image carry which [`Flags`].
+/// Which pixels of an image carry which [`QualityFlags`].
 ///
 /// One byte per pixel, and one per image rather than one per channel: a pixel is flagged when any
 /// of its channels is, which is the granularity the combine's per-pixel gate acts on. An image with
 /// no flagged pixel carries none of these at all.
 #[derive(Debug, Clone)]
-pub(crate) struct PixelFlags {
+pub struct PixelFlags {
     bits: Buffer2<u8>,
     /// Pixels holding each flag, by bit position. Kept current by every mutation, so whether a flag
     /// is present anywhere is answered without a scan.
@@ -78,7 +104,10 @@ pub(crate) struct PixelFlags {
 
 impl PixelFlags {
     /// The flags `flags_at` gives every pixel, by row-major index; `None` when it gives none.
-    pub(crate) fn from_fn(size: Size2us, flags_at: impl Fn(usize) -> Flags + Sync) -> Option<Self> {
+    pub(crate) fn from_fn(
+        size: Size2us,
+        flags_at: impl Fn(usize) -> QualityFlags + Sync,
+    ) -> Option<Self> {
         let mut bits = Buffer2::new_default(size.width, size.height);
         bits.pixels_mut()
             .par_iter_mut()
@@ -93,7 +122,7 @@ impl PixelFlags {
     pub(crate) fn add_where(
         slot: &mut Option<Self>,
         size: Size2us,
-        flags: Flags,
+        flags: QualityFlags,
         holds: impl Fn(usize) -> bool + Sync,
     ) {
         match slot {
@@ -116,7 +145,7 @@ impl PixelFlags {
                     if holds(index) {
                         flags
                     } else {
-                        Flags::default()
+                        QualityFlags::default()
                     }
                 });
             }
@@ -124,7 +153,7 @@ impl PixelFlags {
     }
 
     /// [`Self::dilate_window`] over the square `radius` either side of each pixel.
-    pub(crate) fn dilate(&mut self, radius: usize, fixed: Flags) {
+    pub(crate) fn dilate(&mut self, radius: usize, fixed: QualityFlags) {
         self.dilate_window(Reach::symmetric(radius), fixed);
     }
 
@@ -134,7 +163,7 @@ impl PixelFlags {
     ///
     /// Separable, and each pass is van Herk–Gil-Werman: an OR over blocks of the window's length
     /// from both ends, so a pixel costs the same at any radius.
-    pub(crate) fn dilate_window(&mut self, reach: Reach, fixed: Flags) {
+    pub(crate) fn dilate_window(&mut self, reach: Reach, fixed: QualityFlags) {
         if reach.before == 0 && reach.after == 0 {
             return;
         }
@@ -191,7 +220,7 @@ impl PixelFlags {
     }
 
     /// Whether any pixel holds a flag other than those in `except`.
-    pub(crate) fn contains_other_than(&self, except: Flags) -> bool {
+    pub(crate) fn contains_other_than(&self, except: QualityFlags) -> bool {
         self.counts
             .iter()
             .enumerate()
@@ -199,7 +228,7 @@ impl PixelFlags {
     }
 
     /// The flags with those in `removed` cleared everywhere; `None` when nothing else remains.
-    pub(crate) fn without(&self, removed: Flags) -> Option<Self> {
+    pub(crate) fn without(&self, removed: QualityFlags) -> Option<Self> {
         let keep = !removed.0;
         Self::from_buffer(Buffer2::new(
             self.bits.width(),
@@ -218,11 +247,12 @@ impl PixelFlags {
         Self { bits, counts }
     }
 
-    pub(crate) const fn size(&self) -> Size2us {
+    pub const fn size(&self) -> Size2us {
         Size2us::new(self.bits.width(), self.bits.height())
     }
 
-    pub(crate) fn bytes(&self) -> &[u8] {
+    /// Each pixel's [`QualityFlags::byte`], row-major.
+    pub fn bytes(&self) -> &[u8] {
         self.bits.pixels()
     }
 
@@ -232,8 +262,8 @@ impl PixelFlags {
 
     /// The flags of the pixel at `index`, row-major.
     #[inline]
-    pub(crate) fn at(&self, index: usize) -> Flags {
-        Flags(self.bits.pixels()[index])
+    pub(crate) fn at(&self, index: usize) -> QualityFlags {
+        QualityFlags(self.bits.pixels()[index])
     }
 
     /// The raw byte of the pixel at `index`, for a copy that keeps every flag.
@@ -242,31 +272,40 @@ impl PixelFlags {
         self.bits.pixels()[index]
     }
 
+    /// The flags of the pixel at `pos`.
     #[inline]
-    pub(crate) fn at_pos(&self, pos: Vec2us) -> Flags {
+    pub fn at_pos(&self, pos: Vec2us) -> QualityFlags {
         self.at(self.size().index_of(pos))
     }
 
-    /// How many pixels hold `flag`, a single flag.
-    pub(crate) const fn count(&self, flag: Flags) -> usize {
+    /// How many pixels hold `flag`.
+    ///
+    /// # Panics
+    ///
+    /// If `flag` is not a single flag.
+    pub const fn count(&self, flag: QualityFlags) -> usize {
         self.counts[flag.index()]
     }
 
-    /// Whether any pixel holds `flag`, a single flag.
-    pub(crate) const fn contains(&self, flag: Flags) -> bool {
+    /// Whether any pixel holds `flag`.
+    ///
+    /// # Panics
+    ///
+    /// If `flag` is not a single flag.
+    pub const fn contains(&self, flag: QualityFlags) -> bool {
         self.count(flag) > 0
     }
 
     /// The pixels holding `flag`, as the bit buffer a neighbour search takes, so a pixel
     /// reconstructed from its neighbours never draws on one that has nothing to give.
-    pub(crate) fn mask_of(&self, flag: Flags) -> BitBuffer2 {
+    pub(crate) fn mask_of(&self, flag: QualityFlags) -> BitBuffer2 {
         let mut mask = BitBuffer2::new_default(self.size());
         let bytes = self.bits.pixels();
-        mask.fill_from_predicate(|index| Flags(bytes[index]).intersects(flag));
+        mask.fill_from_predicate(|index| QualityFlags(bytes[index]).intersects(flag));
         mask
     }
 
-    /// The pixels without [`Flags::NO_DATA`] as a plane: `1.0` where a pixel holds a measurement,
+    /// The pixels without [`QualityFlags::NO_DATA`] as a plane: `1.0` where a pixel holds a measurement,
     /// `0.0` where it does not.
     ///
     /// The form the measurement consumers want it in — the combine gates on a coverage plane, and
@@ -281,7 +320,7 @@ impl PixelFlags {
             bytes
                 .par_iter()
                 .map(|&byte| {
-                    if Flags(byte).intersects(Flags::NO_DATA) {
+                    if QualityFlags(byte).intersects(QualityFlags::NO_DATA) {
                         0.0
                     } else {
                         1.0
@@ -416,11 +455,11 @@ impl WindowParts {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::io::image::pixel_flags::{Flags, PixelFlags};
+    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
     use crate::math::size2us::Size2us;
 
     impl PixelFlags {
-        /// The pixels where any of `planes` holds a non-finite sample, flagged [`Flags::NO_DATA`],
+        /// The pixels where any of `planes` holds a non-finite sample, flagged [`QualityFlags::NO_DATA`],
         /// or `None` when none do: the flags a FITS decode of those samples gives.
         pub(crate) fn of_non_finite(size: Size2us, planes: &[&[f32]]) -> Option<Self> {
             debug_assert!(
@@ -431,9 +470,9 @@ pub(crate) mod internals {
             );
             Self::from_fn(size, |index| {
                 if planes.iter().any(|plane| !plane[index].is_finite()) {
-                    Flags::NO_DATA
+                    QualityFlags::NO_DATA
                 } else {
-                    Flags::default()
+                    QualityFlags::default()
                 }
             })
         }
@@ -443,7 +482,7 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use crate::internals::test_rng::TestRng;
-    use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
+    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, Reach};
     use crate::math::size2us::Size2us;
 
     #[test]
@@ -457,11 +496,15 @@ mod tests {
         let blue = [0.0, 1.0, 2.0, 3.0, f32::INFINITY, 5.0];
         let flags = PixelFlags::of_non_finite(size, &[&red, &green, &blue]).unwrap();
 
-        assert_eq!(flags.count(Flags::NO_DATA), 2);
-        let mask = flags.mask_of(Flags::NO_DATA);
+        assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
+        let mask = flags.mask_of(QualityFlags::NO_DATA);
         for index in 0..6 {
             let expected = index == 1 || index == 4;
-            assert_eq!(flags.at(index) == Flags::NO_DATA, expected, "index {index}");
+            assert_eq!(
+                flags.at(index) == QualityFlags::NO_DATA,
+                expected,
+                "index {index}"
+            );
             assert_eq!(mask.get(index), expected, "index {index}");
         }
         assert_eq!(
@@ -476,7 +519,7 @@ mod tests {
         // The bytes round-trip with their counts, as a spill reads them back.
         let restored = PixelFlags::from_bytes(size, flags.bytes());
         assert_eq!(restored.bytes(), flags.bytes());
-        assert_eq!(restored.count(Flags::NO_DATA), 2);
+        assert_eq!(restored.count(QualityFlags::NO_DATA), 2);
     }
 
     #[test]
@@ -484,8 +527,8 @@ mod tests {
         let size = Size2us::new(3usize, 2usize);
         let plane = [f32::NAN; 6];
         let flags = PixelFlags::of_non_finite(size, &[&plane]).unwrap();
-        assert_eq!(flags.count(Flags::NO_DATA), size.pixel_count());
-        assert!(flags.contains(Flags::NO_DATA));
+        assert_eq!(flags.count(QualityFlags::NO_DATA), size.pixel_count());
+        assert!(flags.contains(QualityFlags::NO_DATA));
     }
 
     /// The separable dilation equals the brute-force window OR, for symmetric reaches from 1 to past
@@ -510,20 +553,20 @@ mod tests {
                     },
                 ])
             {
-                let initial: Vec<Flags> = (0..size.pixel_count())
+                let initial: Vec<QualityFlags> = (0..size.pixel_count())
                     .map(|_| match rng.next_u64() % 9 {
-                        0 => Flags::SATURATED,
-                        1 => Flags::NO_DATA,
-                        _ => Flags::default(),
+                        0 => QualityFlags::SATURATED,
+                        1 => QualityFlags::NO_DATA,
+                        _ => QualityFlags::default(),
                     })
                     .collect();
                 let Some(mut flags) = PixelFlags::from_fn(size, |index| initial[index]) else {
                     continue;
                 };
-                flags.dilate_window(reach, Flags::NO_DATA);
+                flags.dilate_window(reach, QualityFlags::NO_DATA);
                 for y in 0..height {
                     for x in 0..width {
-                        let near = |flag: Flags| {
+                        let near = |flag: QualityFlags| {
                             let rows = reach.window(y, height);
                             let columns = reach.window(x, width);
                             (rows.first..=rows.last).any(|sy| {
@@ -532,16 +575,16 @@ mod tests {
                             })
                         };
                         let index = y * width + x;
-                        let expected = Flags::default()
-                            .union(if near(Flags::SATURATED) {
-                                Flags::SATURATED
+                        let expected = QualityFlags::default()
+                            .union(if near(QualityFlags::SATURATED) {
+                                QualityFlags::SATURATED
                             } else {
-                                Flags::default()
+                                QualityFlags::default()
                             })
-                            .union(if initial[index] == Flags::NO_DATA {
-                                Flags::NO_DATA
+                            .union(if initial[index] == QualityFlags::NO_DATA {
+                                QualityFlags::NO_DATA
                             } else {
-                                Flags::default()
+                                QualityFlags::default()
                             });
                         assert_eq!(
                             flags.at(index),
@@ -551,9 +594,9 @@ mod tests {
                     }
                 }
                 let saturated = (0..size.pixel_count())
-                    .filter(|&index| flags.at(index).intersects(Flags::SATURATED))
+                    .filter(|&index| flags.at(index).intersects(QualityFlags::SATURATED))
                     .count();
-                assert_eq!(flags.count(Flags::SATURATED), saturated);
+                assert_eq!(flags.count(QualityFlags::SATURATED), saturated);
             }
         }
     }

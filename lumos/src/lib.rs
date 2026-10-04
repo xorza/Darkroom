@@ -76,6 +76,7 @@ pub use io::image::image_provenance::{
 };
 pub use io::image::linear::LinearImage;
 pub use io::image::load_context::LoadContext;
+pub use io::image::pixel_flags::{PixelFlags, QualityFlags};
 pub use io::image::preview_image::{PreviewImage, PreviewPixels};
 pub use io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use io::raw::RAW_EXTENSIONS;

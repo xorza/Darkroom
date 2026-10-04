@@ -2,16 +2,16 @@
 
 use crate::combine::cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::run_report::LocalFlagCounts;
 
 /// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says
 /// the value is not the photosite's own measurement.
-const SOFT_EXCLUDED: Flags = Flags::SATURATED
-    .union(Flags::DEFECT)
-    .union(Flags::COSMIC_RAY)
-    .union(Flags::REPAIRED)
-    .union(Flags::FLAT_FLOOR);
+const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
+    .union(QualityFlags::DEFECT)
+    .union(QualityFlags::COSMIC_RAY)
+    .union(QualityFlags::REPAIRED)
+    .union(QualityFlags::FLAT_FLOOR);
 
 /// Everything one combine job needs beyond the pixels themselves: the covering frames' samples
 /// packed to the front, with their weights, flags, frames and noise in the same order, and the
@@ -87,20 +87,20 @@ impl GatheredSamples<'_> {
     ) -> usize {
         let flagged = self.sample_flags[..count]
             .iter()
-            .filter(|&&byte| Flags::from_byte(byte).intersects(SOFT_EXCLUDED))
+            .filter(|&&byte| QualityFlags::from_byte(byte).intersects(SOFT_EXCLUDED))
             .count();
         if flagged == 0 {
             return count;
         }
         if count - flagged < min_survivors {
             for &byte in &self.sample_flags[..count] {
-                kept_flagged.count(Flags::from_byte(byte));
+                kept_flagged.count(QualityFlags::from_byte(byte));
             }
             return count;
         }
         let mut write = 0;
         for read in 0..count {
-            let sample_flags = Flags::from_byte(self.sample_flags[read]);
+            let sample_flags = QualityFlags::from_byte(self.sample_flags[read]);
             if sample_flags.intersects(SOFT_EXCLUDED) {
                 excluded.count(sample_flags);
             } else {

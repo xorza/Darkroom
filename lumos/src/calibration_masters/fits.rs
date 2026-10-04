@@ -1,7 +1,8 @@
 //! The multi-extension FITS bundle a [`CalibrationMasters`] saves to and loads from.
 //!
 //! A dataless primary HDU tagged with the format and version, one image extension per present
-//! master, and a binary table for the defect map. Every extension is named by
+//! master, each followed by a `LUMFLAGS` extension when its flags hold more than `NO_DATA`, and a
+//! binary table for the defect map. Every extension is named by
 //! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
@@ -25,17 +26,20 @@ use crate::calibration_masters::master_dark::{DarkBias, MasterDark};
 use crate::calibration_masters::master_role::MasterRole;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::fits::cfa::{
-    CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHdu, CfaFitsHduMetadata,
-};
+use crate::io::image::error::ImageError;
+use crate::io::image::fits::cfa::{CfaFitsHdu, CfaFitsHduMetadata};
 use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
+use crate::io::image::fits::flags_extension::{FLAGS_EXTNAME, FlagsExtension};
+use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
-/// Version 2 stores the dark with its bias state and holds no flat-dark.
-const BUNDLE_VERSION: i64 = 2;
+/// Version 2 stores the dark with its bias state and holds no flat-dark; version 3 keeps each
+/// master's flags in a `LUMFLAGS` extension.
+const BUNDLE_VERSION: i64 = 3;
 
 /// The keyword that states whether the dark still holds the bias.
 const DARK_BIAS_KEYWORD: &str = "LUMDBIAS";
@@ -54,6 +58,7 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
             .write_raw_hdu(&bundle_primary_header()?, &[])
             .map_err(fits_to_io)?;
 
+        let mut flags_written = 0;
         for (role, image) in masters.masters() {
             // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
             // drift.
@@ -79,6 +84,14 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
             writer
                 .write_image(&encoded.image, Some(&encoded.header))
                 .map_err(fits_to_io)?;
+            if let Some(flags) =
+                FlagsExtension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
+            {
+                writer
+                    .write_image(&flags.image, Some(&flags.header))
+                    .map_err(fits_to_io)?;
+                flags_written += 1;
+            }
         }
 
         if let Some(defect_map) = &masters.defect_map {
@@ -91,12 +104,12 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
     })
 }
 
-pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
+pub(super) fn load(path: &Path, context: &LoadContext) -> io::Result<CalibrationMasters> {
     let bytes = fs::read(path)?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(fits_to_io)?;
     validate_primary(&reader)?;
     verify_checksums(&mut reader)?;
-    let indices = bundle_indices(&reader)?;
+    let indices = bundle_indices(&reader, path)?;
 
     if indices.masters.flat_dark.is_some() {
         return Err(invalid_data(
@@ -118,16 +131,28 @@ pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
                     )));
                 }
             };
-            read_master(&mut reader, Some(index), MasterRole::Dark, path)?
+            read_master(&mut reader, Some(index), MasterRole::Dark, path, context)?
                 .map(|image| MasterDark { image, bias })
         }
         None => None,
     };
     let masters = CalibrationMasters {
-        bias: read_master(&mut reader, indices.masters.bias, MasterRole::Bias, path)?,
+        bias: read_master(
+            &mut reader,
+            indices.masters.bias,
+            MasterRole::Bias,
+            path,
+            context,
+        )?,
         dark,
-        flat: read_master(&mut reader, indices.masters.flat, MasterRole::Flat, path)?
-            .map(PreparedFlat::from_divisor),
+        flat: read_master(
+            &mut reader,
+            indices.masters.flat,
+            MasterRole::Flat,
+            path,
+            context,
+        )?
+        .map(PreparedFlat::from_divisor),
         defect_map: read_defect_map(&mut reader, indices.defects)?,
     };
     // The same coherence check `from_images` runs, so a bundle read back from disk is exactly as
@@ -188,7 +213,10 @@ fn verify_checksums(reader: &mut SliceReader<'_>) -> io::Result<()> {
     Ok(())
 }
 
-fn bundle_indices(reader: &SliceReader<'_>) -> io::Result<BundleIndices> {
+fn bundle_indices(reader: &SliceReader<'_>, path: &Path) -> io::Result<BundleIndices> {
+    // Each master finds its own flags when it is read; this refuses one that names none.
+    FlagsExtension::check_claims(path, reader.hdus())
+        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
     let mut indices = BundleIndices::default();
     for (index, hdu) in reader.hdus().iter().enumerate().skip(1) {
         let extname = hdu
@@ -196,6 +224,9 @@ fn bundle_indices(reader: &SliceReader<'_>) -> io::Result<BundleIndices> {
             .get_text("EXTNAME")
             .map_err(fits_to_io)?
             .ok_or_else(|| invalid_data(format!("HDU {index} is missing EXTNAME")))?;
+        if extname.eq_ignore_ascii_case(FLAGS_EXTNAME) {
+            continue;
+        }
         let component = CalibrationComponent::from_extname(&extname.to_ascii_uppercase())
             .ok_or_else(|| {
                 invalid_data(format!(
@@ -225,6 +256,7 @@ fn read_master(
     index: Option<usize>,
     role: MasterRole,
     path: &Path,
+    context: &LoadContext,
 ) -> io::Result<Option<CfaImage>> {
     let Some(index) = index else {
         return Ok(None);
@@ -236,10 +268,7 @@ fn read_master(
             "{extname} must be an uncompressed BITPIX=-32 image extension"
         )));
     }
-    if hdu.header.get_text("LUMOSFMT").map_err(fits_to_io)? != Some(CFA_FITS_FORMAT)
-        || hdu.header.get_integer("LUMOSVER").map_err(fits_to_io)? != Some(CFA_FITS_VERSION)
-        || hdu.header.get_text("LUMROLE").map_err(fits_to_io)? != Some(extname)
-    {
+    if hdu.header.get_text("LUMROLE").map_err(fits_to_io)? != Some(extname) {
         return Err(invalid_data(format!(
             "{extname} has invalid Lumos CFA metadata"
         )));
@@ -254,9 +283,20 @@ fn read_master(
             "{extname} has an invalid prepared-master state"
         )));
     }
-    read_cfa_hdu(reader, index, path)
+    // Every HDU's checksum was verified before any was read.
+    let checksum = FitsChecksumProvenance {
+        datasum: FitsChecksumState::Valid,
+        checksum: FitsChecksumState::Valid,
+    };
+    read_cfa_hdu(reader, index, path, context, checksum)
         .map(Some)
-        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))
+        .map_err(|source| {
+            let kind = match source {
+                ImageError::Cancelled { .. } => ErrorKind::Interrupted,
+                _ => ErrorKind::InvalidData,
+            };
+            IoError::new(kind, source)
+        })
 }
 
 #[derive(Debug)]

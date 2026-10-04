@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::vec2us::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
@@ -60,7 +60,7 @@ impl PreparedFlat {
         self.floored
     }
 
-    /// Divide `image` by the flat, and flag [`Flags::FLAT_FLOOR`] where the divisor sits at its
+    /// Divide `image` by the flat, and flag [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its
     /// floor.
     pub(crate) fn apply(&self, image: &mut CfaImage) {
         let flat = &self.divisor;
@@ -81,7 +81,7 @@ impl PreparedFlat {
         if self.floored > 0 {
             let divisors = flat.data.pixels();
             let size = image.size();
-            PixelFlags::add_where(&mut image.flags, size, Flags::FLAT_FLOOR, |index| {
+            PixelFlags::add_where(&mut image.flags, size, QualityFlags::FLAT_FLOOR, |index| {
                 divisors[index] <= MIN_NORMALIZED_FLAT
             });
         }

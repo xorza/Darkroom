@@ -367,13 +367,13 @@ fn the_raw_values_settle_no_data_and_saturation() {
 
     let flags = flags_for(2);
     assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
-    assert_eq!(flags.count(Flags::NO_DATA), 1);
-    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), Flags::NO_DATA);
-    assert_eq!(flags.count(Flags::SATURATED), 1);
-    assert_eq!(flags.at_pos(Vec2us::new(9, 9)), Flags::SATURATED);
-    assert_eq!(flags.at_pos(Vec2us::new(11, 11)), Flags::default());
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::NO_DATA);
+    assert_eq!(flags.count(QualityFlags::SATURATED), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(9, 9)), QualityFlags::SATURATED);
+    assert_eq!(flags.at_pos(Vec2us::new(11, 11)), QualityFlags::default());
     // A camera without the convention reads its zero as a value: not missing, not saturated.
     let flags = flags_for(0);
-    assert_eq!(flags.count(Flags::NO_DATA), 0);
-    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), Flags::default());
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::default());
 }
