@@ -3,12 +3,12 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::star_detection::config::fwhm_config::MatchedFilter;
+use crate::star_detection::convolution::internals::{
+    elliptical_gaussian_convolve, gaussian_convolve, gaussian_kernel_1d, matched_filter_fresh,
+};
 use crate::star_detection::convolution::simd::convolve_row;
 use crate::star_detection::convolution::simd::internals::convolve_row_scalar;
-use crate::star_detection::convolution::{
-    convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve,
-    gaussian_kernel_1d, matched_filter,
-};
+use crate::star_detection::convolution::{convolve_cols, convolve_rows_parallel};
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
@@ -226,7 +226,7 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
 
     b.bench_labeled("circular", || {
         output.pixels_mut().copy_from_slice(pixels.pixels());
-        matched_filter(
+        matched_filter_fresh(
             black_box(&mut output),
             black_box(MatchedFilter {
                 fwhm,
@@ -237,18 +237,20 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
         );
     });
 
-    b.bench_labeled("elliptical", || {
-        output.pixels_mut().copy_from_slice(pixels.pixels());
-        matched_filter(
-            black_box(&mut output),
-            black_box(MatchedFilter {
-                fwhm,
-                axis_ratio: 0.7,
-                angle: 0.5,
-            }),
-            black_box(&mut temp),
-        );
-    });
+    for (label, angle) in [("elliptical", 0.5), ("elliptical_on_axis", 0.0)] {
+        b.bench_labeled(label, || {
+            output.pixels_mut().copy_from_slice(pixels.pixels());
+            matched_filter_fresh(
+                black_box(&mut output),
+                black_box(MatchedFilter {
+                    fwhm,
+                    axis_ratio: 0.7,
+                    angle,
+                }),
+                black_box(&mut temp),
+            );
+        });
+    }
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
@@ -263,7 +265,7 @@ fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         output.pixels_mut().copy_from_slice(pixels.pixels());
-        matched_filter(
+        matched_filter_fresh(
             black_box(&mut output),
             black_box(MatchedFilter {
                 fwhm,

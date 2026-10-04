@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use glam::DVec2;
 
-use crate::star_detection::detector::stages::filter::remove_duplicate_stars;
+use crate::star_detection::detector::stages::filter::DuplicateScratch;
 use crate::star_detection::roundness::Roundness;
 use crate::star_detection::star::Star;
 
@@ -35,16 +35,18 @@ fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
         .collect()
 }
 
+/// One scratch for every iteration, as a detector keeps it from frame to frame.
 fn bench_deduplication(b: ::quickbench::Bencher, base_stars: &[Star]) {
+    let mut scratch = DuplicateScratch::default();
     b.bench(|| {
         let mut stars = base_stars.to_vec();
         // Sort by flux — the algorithm's documented precondition.
         stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-        black_box(remove_duplicate_stars(&mut stars, 5.0))
+        black_box(scratch.remove_duplicates(&mut stars, 5.0))
     });
 }
 
-/// Benchmark remove_duplicate_stars with varying star counts.
+/// Benchmark the duplicate removal with varying star counts.
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {

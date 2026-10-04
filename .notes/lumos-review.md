@@ -35,8 +35,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 24. Hot-path performance
 
-- [ ] `24.7` **The elliptical matched filter is a full k² 2-D convolution** — `star_detection/convolution/mod.rs:125-163`
-  - It is 289 taps at FWHM 6. It is separable at 0/π/2. Geusebroek 2003 handles general angles. `[C]`
 - [ ] `24.8` **`Component::scan` walks the whole bbox 3–4 times** — `star_detection/deblend/component.rs:394-410`
   - Store the labeler's runs grouped by label, so the cost is O(area). `[C]`
 - [ ] `24.9` **Each multi-threshold level filters every pixel again** — `star_detection/deblend/multi_threshold/mod.rs:523`
@@ -44,9 +42,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `24.10` **Labeling uses a lock-free shared union-find for strip-local work** — `star_detection/labeling/union_find.rs`, `star_detection/labeling/labeler.rs:122-143`
   - A `SeqCst fetch_add` per run on one cache line. Use disjoint label blocks per strip. `[C]`
 - [ ] `24.14` **Cosmic-ray noise and background are computed again in every iteration, serially** — `calibration_masters/cosmic_ray/mono.rs:114-129`, `calibration_masters/cosmic_ray/xtrans.rs:248-271`, `calibration_masters/cosmic_ray/masks.rs:74-92` `[C]`
-- [ ] `24.16` **Star detection allocates per frame** — `noise_floor_from`, `from_stars`, `filter_fwhm_outliers`, the dedup `HashMap`, the median buffer, and the kernel `Vec`
-  - `labels.fill(0)` writes 96 MB per 24 MP frame. Clear only the previous runs. `[C]`
-- [ ] `24.18` **`GlobalMap` noise is averaged per pixel in the stamp loop** — `star_detection/centroid/mod.rs:490-494` `[P]`
 
 ## 26. One fact in two places, wide signatures, and style deviations
 
@@ -511,6 +506,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 12. Done: the FITS decode reads each chunk as a borrowed view of its stored samples (`HduSections`, fits-well's section view, scratch reused from chunk to chunk), and converts it straight into the output in one parallel pass: `(BZERO + BSCALE·raw) / divisor` in f64, narrowed once. Before, fits-well narrowed the physical value to f32 and the decode divided that, so 2²⁴ + 1 over 65535 came out 256.0039 rather than 256.00394. The stored integers' trailing zeros are read from the integers themselves, at any size and without `BLANK`, in place of integers recovered from the f32 and given up past 2²⁴. The output plane is zeroed a 2 MiB block per worker first: when the conversion's smaller pieces made the first writes, the workers waited on each other's page faults for two thirds of the time. A new bench (`bench_fits_decode_u16`, 24 MP) goes from 38 to 31 ms; the peak estimate drops the chunk's f32 copy. Item 24.11 is closed. Deviation: the same zeroing slowed both demosaics, whose tiles already spread their first writes, so it is the decode's alone.
 
 13. Done: a Moffat fit at a β that is neither an integer nor a half-integer takes `u^(−β)` as `exp(−β·ln u)` on the vector lanes, through a new `Math::ln_f64` (Cephes `log`, its one rational form for every lane, 4e-16 relative on every tier) and a new `F64x4::frexp`; the scalar model takes the same lanes on the portable Isa, so a lane and it agree bit for bit. The power is within 1e-14 of libm's from `u` just above 1 to 10⁶ and β from 1.01 to 9.9, far under the quadrature's 2⁻²⁵. A 17×17 fit at β = 2.3 goes from 1.24 to 0.55 ms (β = 2.5: 0.24 ms). Item 24.12 is closed. The stretch bench now times GHS: 30 ms on a 6 MP RGB master against 27 and 28 ms for the vector arcsinh and the STF curve, 13 ms of each the copy, so a vector `ln_1p`/`exp_m1` could save at most 3 ms; item 24.15 is closed on that measurement. Deviation: the NEON `frexp` compiles only on aarch64, whose LibRaw build needs a cross compiler this machine lacks, so it is reviewed and not built.
+
+14. Done: a label map erases the runs its labeling wrote when it goes back to the pool, so the pool's label planes are zero and no frame clears one; a generation number falls back to a full clear when the labeler labeled again in between, and a debug check holds every acquired plane to zero. The noise floor's tile medians, the FWHM estimate's median and MAD, the filter's FWHM outliers, the duplicate search's cells and flags, the detector's median FWHM and SNR, and the matched filter's kernels all refill buffers the detection resources keep. An elliptical filter whose axes lie along the pixel axes — at the f32 nearest a multiple of π/2 — runs in a row and a column pass of the same kernel, out to 3σ of the major axis both ways: 0.54 ms on 1 MP against 2.87 ms. A dense 4k frame detects in 113 ms, from 118. Items 24.7 and 24.16 are closed; 24.18 no longer applied, as an earlier phase reads the map's noise once at the peak. Deviation: an ellipse at any other angle keeps its 2D kernel, since Geusebroek's skewed pass interpolates between pixels and the kernel would no longer be the PSF's pixel mean.
 
 # Decisions
 

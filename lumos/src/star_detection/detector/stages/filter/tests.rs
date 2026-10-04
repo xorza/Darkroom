@@ -2,6 +2,21 @@ use crate::internals::prelude::*;
 use crate::star_detection::detector::stages::filter::*;
 use crate::star_detection::roundness::Roundness;
 
+/// The cell pass on a fresh scratch, as one call.
+fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    DuplicateScratch::default().remove_duplicates(stars, min_separation)
+}
+
+/// [`FilterOutcome::from_stars`] on fresh scratch.
+fn filter(stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
+    FilterOutcome::from_stars(
+        stars,
+        config,
+        &mut Vec::new(),
+        &mut DuplicateScratch::default(),
+    )
+}
+
 #[test]
 fn filter_returns_the_diagnostics_stored_by_the_detector() {
     let stars = vec![
@@ -34,7 +49,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             }),
     ];
 
-    let outcome = FilterOutcome::from_stars(stars.clone(), &FilterConfig::default());
+    let outcome = filter(stars.clone(), &FilterConfig::default());
 
     assert_eq!(
         outcome
@@ -58,7 +73,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
     );
 
     // With no FWHM deviation bound the 20.0-px star stays, and nothing counts as an outlier.
-    let unbounded = FilterOutcome::from_stars(
+    let unbounded = filter(
         stars,
         &FilterConfig {
             max_fwhm_deviation: None,
@@ -227,7 +242,7 @@ fn filter_fwhm_outliers_over_every_case() {
         } = case;
         let mut subjects = stars(&pairs);
         let before = subjects.len();
-        let removed = filter_fwhm_outliers(&mut subjects, deviation);
+        let removed = filter_fwhm_outliers(&mut subjects, deviation, &mut Vec::new());
 
         let survivors: Vec<f32> = subjects.iter().map(|s| s.flux).collect();
         assert_eq!(survivors, expected, "{name}: surviving fluxes");

@@ -7,7 +7,9 @@ use crate::buffer_pool::BufferPool;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::star_detection::background::workspace::BackgroundWorkspace;
+use crate::star_detection::convolution::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::detector::stages::filter::DuplicateScratch;
 use crate::star_detection::labeling::labeler::Labeler;
 use imaginarium::Buffer2;
 
@@ -23,7 +25,8 @@ use imaginarium::Buffer2;
 /// releases them before the next stage runs.
 ///
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
-/// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
+/// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading. Label
+/// maps are the exception: they come back zeroed, see [`Self::acquire_u32`].
 ///
 /// The three accessor pairs stay written out rather than collapsing into one generic
 /// `acquire::<B>()` over [`BufferPool`]: the pools differ only in element type, so selecting one
@@ -43,6 +46,12 @@ pub(crate) struct DetectionResources {
     pub(crate) background: BackgroundWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
     pub(crate) deblend: JobScratchPool<DeblendBuffers>,
+    /// The per-tile and per-star values a detection's medians sort, refilled for each.
+    pub(crate) values: Vec<f32>,
+    /// Their absolute deviations from the median, for a MAD that keeps the values.
+    pub(crate) deviations: Vec<f32>,
+    pub(crate) duplicates: DuplicateScratch,
+    pub(crate) kernels: FilterKernels,
 }
 
 impl DetectionResources {
@@ -56,6 +65,10 @@ impl DetectionResources {
             labeler: Labeler::default(),
             background: BackgroundWorkspace::default(),
             deblend: JobScratchPool::default(),
+            values: Vec::new(),
+            deviations: Vec::new(),
+            duplicates: DuplicateScratch::default(),
+            kernels: FilterKernels::default(),
         }
     }
 
@@ -79,7 +92,9 @@ impl DetectionResources {
         self.bitmasks.release(buffer, self.dimensions);
     }
 
-    /// Acquire a label map from the pool, or allocate a new one.
+    /// Acquire a label map from the pool, or allocate a new one: all zeros either way, since a
+    /// fresh one is allocated zeroed and [`LabelMap::release_to_pool`] erases what its labeling
+    /// wrote.
     pub(crate) fn acquire_u32(&mut self) -> Buffer2<u32> {
         self.labels.acquire(self.dimensions)
     }

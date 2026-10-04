@@ -172,7 +172,12 @@ impl StarDetector {
         let FilterOutcome {
             stars,
             diagnostics: quality_filter,
-        } = FilterOutcome::from_stars(stars, &self.config.filter);
+        } = FilterOutcome::from_stars(
+            stars,
+            &self.config.filter,
+            &mut resources.values,
+            &mut resources.duplicates,
+        );
         diagnostics.quality_filter = quality_filter;
 
         if diagnostics.quality_filter.fwhm_outliers > 0 {
@@ -189,11 +194,13 @@ impl StarDetector {
         }
 
         if !stars.is_empty() {
-            let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-            diagnostics.median_fwhm = Some(median_mut(&mut buf));
-            buf.clear();
-            buf.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = Some(median_mut(&mut buf));
+            let values = &mut resources.values;
+            values.clear();
+            values.extend(stars.iter().map(|s| s.fwhm));
+            diagnostics.median_fwhm = Some(median_mut(values));
+            values.clear();
+            values.extend(stars.iter().map(|s| s.snr));
+            diagnostics.median_snr = Some(median_mut(values));
         }
 
         DetectionResult { stars, diagnostics }

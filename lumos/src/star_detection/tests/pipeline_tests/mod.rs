@@ -14,7 +14,7 @@ use crate::internals::visual::{ToneMap, save, save_comparison};
 use crate::star_detection::config::Config;
 use crate::star_detection::config::fwhm_config::FwhmMode;
 use crate::star_detection::config::fwhm_config::MatchedFilter;
-use crate::star_detection::convolution::matched_filter;
+use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::detector::stages::prepared_frame::internals::saturation_level_of;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
@@ -119,7 +119,7 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
             let mut output = Buffer2::new_filled(size.width, size.height, 0.0);
             let mut temp = Buffer2::new_filled(size.width, size.height, 0.0);
             output.pixels_mut().copy_from_slice(clean_residual.pixels());
-            matched_filter(
+            matched_filter_fresh(
                 &mut output,
                 MatchedFilter {
                     fwhm,
