@@ -35,8 +35,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 24. Hot-path performance
 
-- [ ] `24.3` **RCD uses a full-frame arena, not tiles** — `io/raw/demosaic/bayer/rcd/mod.rs:146-176,329-332`
-  - RawTherapee's RCD tiles at 194. RCD is fully scalar. `[P]`
 - [ ] `24.7` **The elliptical matched filter is a full k² 2-D convolution** — `star_detection/convolution/mod.rs:125-163`
   - It is 289 taps at FWHM 6. It is separable at 0/π/2. Geusebroek 2003 handles general angles. `[C]`
 - [ ] `24.8` **`Component::scan` walks the whole bbox 3–4 times** — `star_detection/deblend/component.rs:394-410`
@@ -512,6 +510,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 9. Done: a mean combine can write a `dispersion` plane, the variance of each pixel's weighted mean as its survivors' scatter shows it, `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model. It is unbiased where each sample's variance is inversely proportional to its weight, and with equal weights it is the squared standard error of the mean; NaN below two survivors. On frames whose noise is what their model says, its mean over a field matches the variance plane's within the scatter of a scatter, and a model that halves every σ makes the two differ by 4. `QualityPlanes::STANDARD` (coverage, weight, variance) is the default, and `ALL` adds the dispersion; a median and a drizzle produce none. Deviation: the sum is taken about the combined mean, already known, in place of a Welford pass.
 
 10. Done: Markesteijn has a bench (`bench_markesteijn_demosaic`, 26 MP of random samples), at 352 ms for one pass and 926 ms for three on the 6800U's 16 threads. The derivative, homogeneity and 5×5 sum stages walk row slices, the sums as five columns and then five rows, which takes a quarter of the time that went to bounds checks (251 and 866 ms). The tile is 96 px, where its buffers stay in a core's L2: 245 and 703 ms, against 431 and 1152 ms at 144. The border fill walks only its band, row by row in parallel. Now 202 and 655 ms, every digest unchanged. Items 24.1 and 24.2 are closed.
+
+11. Done: RCD runs in tiles of 128, each its own crop run as a frame, writing the part 10 px inside its edges, from where a crop demosaics bit for bit as inside the frame. Tiles start on even rows and columns, so each keeps the frame's phase, and their buffers carry over from tile to tile: a test fills them with ±1000 before a tile and finds the written part unchanged, and the crop test now spans three tiles each way. 24 MP takes 125 ms, from 227 ms (129 at 96, 182 at 256); every digest is unchanged. Its memory is the input, the output and one tile per worker, in place of seven full planes, and its estimate now counts the input it left out. Both demosaics check the cancel token before the border fill, which a frame with no tile reaches at once. The planner's tests take fixed 7- and 22-plane decodes. Item 24.3 is closed. Deviation: RCD's loops stay scalar.
 
 # Decisions
 

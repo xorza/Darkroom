@@ -207,17 +207,18 @@ fn constant_colour_reconstructs_on_every_phase() {
 }
 
 /// From [`INTERPOLATED_BORDER`] in, a frame demosaics bit for bit as the same pixels inside a
-/// larger frame: no stage reads a value it did not compute from the frame's own samples. Random
-/// samples, so no stencil can hide behind equal neighbours.
+/// larger frame: no stage reads a value it did not compute from the frame's own samples, and the
+/// tiles' seams, which lie elsewhere on the pixels in each, change nothing. Both frames span three
+/// tiles each way. Random samples, so no stencil can hide behind equal neighbours.
 #[test]
 fn rcd_beyond_the_border_matches_a_larger_frame() {
-    let large = Size2us::new(96, 96);
+    let large = Size2us::new(300, 280);
     let offset = 16;
     let mut rng = TestRng::new(7);
     let samples: Vec<f32> = (0..large.pixel_count())
         .map(|_| 0.1 + 0.8 * rng.next_f32())
         .collect();
-    let small = Size2us::new(64, 64);
+    let small = Size2us::new(240, 236);
     let crop: Vec<f32> = (0..small.pixel_count())
         .map(|index| {
             let pos = small.point_of(index);
