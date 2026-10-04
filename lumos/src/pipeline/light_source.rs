@@ -8,7 +8,6 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -26,7 +25,7 @@ use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
-use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
+use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark, ParkedFrame};
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::StagePlan;
@@ -70,11 +69,11 @@ struct LightShape {
     run: RunShape,
 }
 
-/// One light through the single pass: its parked frame, `None` when it did not register, and its
-/// detection funnel.
+/// One light through the single pass: its parked frame and how it registered — `None` for the
+/// reference, parked apart, and where the run was cancelled — and its detection funnel.
 #[derive(Debug, Default)]
 struct PassedLight {
-    frame: Option<StoredFrame>,
+    frame: Option<ParkedFrame>,
     diagnostics: Diagnostics,
 }
 

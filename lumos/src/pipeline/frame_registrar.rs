@@ -8,6 +8,7 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::linear::LinearImage;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::frame_registration::FrameRegistration;
 use crate::pipeline::result::Error;
 use crate::pipeline::tier::FrameTier;
 use crate::progress::stage_counter::StageCounter;
@@ -32,6 +33,13 @@ pub(crate) struct FrameRegistrar<'a> {
     /// Counted where the work ends: a dropped frame counts as much as a registered one, since the
     /// bar tracks attempts resolved, not survivors.
     resolved: StageCounter<'a>,
+}
+
+/// One parked light: its stored frame when it registered, and how it registered.
+#[derive(Debug)]
+pub(crate) struct ParkedFrame {
+    pub(crate) stored: Option<StoredFrame>,
+    pub(crate) registration: FrameRegistration,
 }
 
 /// What parking one frame needs: its pixels, its stars and its statistics.
@@ -72,9 +80,8 @@ impl<'a> FrameRegistrar<'a> {
         }
     }
 
-    /// Register `frame`, warp it into `buffers` and park it; `None` when it did not register, or
-    /// when the run was cancelled, which the caller turns into `Cancelled` once every worker
-    /// stops.
+    /// Register `frame`, warp it into `buffers` and park it, with how it registered; `None` when
+    /// the run was cancelled, which the caller turns into `Cancelled` once every worker stops.
     ///
     /// The spill tier hands its buffers back once the frame is on disk, so a worker warps into
     /// pages it already faulted in. The RAM tier keeps them, and the slot refills from a fresh
@@ -83,7 +90,7 @@ impl<'a> FrameRegistrar<'a> {
         &self,
         buffers: &mut Option<WarpBuffers>,
         frame: FrameToPark<'_>,
-    ) -> Result<Option<StoredFrame>, Error> {
+    ) -> Result<Option<ParkedFrame>, Error> {
         if self.cancel.is_cancelled() {
             return Ok(None);
         }
@@ -96,7 +103,15 @@ impl<'a> FrameRegistrar<'a> {
         let name = format!("warped_{index}");
         if index == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
-            return self.tier.store_reference(&name, image, stats).map(Some);
+            return self
+                .tier
+                .store_reference(&name, image, stats)
+                .map(|stored| {
+                    Some(ParkedFrame {
+                        stored: Some(stored),
+                        registration: FrameRegistration::Reference,
+                    })
+                });
         }
 
         let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
@@ -111,7 +126,10 @@ impl<'a> FrameRegistrar<'a> {
             Err(error) => {
                 tracing::info!(frame = n, total = self.others, %error, "registration failed");
                 self.resolved.complete_one();
-                return Ok(None);
+                return Ok(Some(ParkedFrame {
+                    stored: None,
+                    registration: FrameRegistration::Dropped(error),
+                }));
             }
         };
         tracing::info!(
@@ -123,19 +141,23 @@ impl<'a> FrameRegistrar<'a> {
             transform = %registration.transform(),
             "registered"
         );
+        let warp = registration.warp_transform();
         let mut warped = buffers
             .take()
             .unwrap_or_else(|| WarpBuffers::new(image.dimensions()));
-        warped.warp_into(
-            &image,
-            &registration.warp_transform(),
-            self.config.registration.warp,
-        );
+        warped.warp_into(&image, &warp, self.config.registration.warp);
         let metadata = image.metadata.clone();
         drop(image);
         self.resolved.complete_one();
         let stored = self.tier.store(&name, metadata, warped, stats)?;
         *buffers = stored.reusable;
-        Ok(Some(stored.frame))
+        Ok(Some(ParkedFrame {
+            stored: Some(stored.frame),
+            registration: FrameRegistration::Registered {
+                warp: Box::new(warp),
+                inliers: registration.num_inliers(),
+                rms_error: registration.rms_error(),
+            },
+        }))
     }
 }

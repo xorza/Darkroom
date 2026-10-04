@@ -149,6 +149,7 @@ pub use stack_product::quality_planes::QualityPlanes;
 pub use pipeline::align::align_and_stack;
 pub use pipeline::calibrate::calibrate_align_stack;
 pub use pipeline::config::{AlignStackConfig, Reference};
+pub use pipeline::frame_registration::FrameRegistration;
 pub use pipeline::result::{AlignStackResult, AlignmentSummary, Error as AlignStackError};
 
 pub use drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};

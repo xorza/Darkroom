@@ -26,8 +26,8 @@ use crate::run_report::RunReport;
 ///
 /// With [`Reference::Index`] the reference is prepared first, and each other light then goes
 /// through its preparation, its registration and its warp in one pass, written once. With
-/// [`Reference::Auto`] every light is prepared and detected first, since the reference is the one
-/// with the most stars, and parked until it registers.
+/// [`Reference::Auto`] every light is prepared and detected first, since the reference is the
+/// sharpest one, and parked until it registers.
 ///
 /// The sensor geometry is peeked from the first frame's header without a decode, so the memory
 /// tier is chosen before any pixels are read. When the frame set plus its per-frame scratch

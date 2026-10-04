@@ -195,8 +195,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     println!(
         "  [3/3] lights ({:.2}s), {} registered, {} dropped",
         stage_start.elapsed().as_secs_f64(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     black_box(&result);
     let total_secs = start.elapsed().as_secs_f64();
@@ -215,7 +215,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     println!("masters held  {held_mb} MB");
 
     assert_eq!(
-        result.alignment.registered, n,
+        result.alignment.registered(),
+        n,
         "every dithered light should register (probe misconfigured?)"
     );
     // The budget stands for the memory each stage may take. The masters are outside it: the caller
@@ -331,8 +332,8 @@ fn align_stack_memory_probe() {
         result.product.image.width(),
         result.product.image.height(),
         result.product.image.channels(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     println!(
         "time          {total_secs:.2}s  ({:.0} Mpix/s over the stream)",
@@ -360,9 +361,9 @@ fn align_stack_memory_probe() {
     let ceiling_mb = two_x_ceiling_mb(resident, working);
 
     assert!(
-        result.alignment.registered >= 2,
+        result.alignment.registered() >= 2,
         "expected the dithered frames to register; only {} stacked (probe misconfigured?)",
-        result.alignment.registered
+        result.alignment.registered()
     );
     if measured(anon_mb, "ceiling check") {
         assert!(
@@ -426,8 +427,8 @@ fn raw_lights_memory_probe() {
         image.width(),
         image.height(),
         image.channels(),
-        result.alignment.registered,
-        result.alignment.dropped.len()
+        result.alignment.registered(),
+        result.alignment.dropped().len()
     );
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
     println!(
@@ -444,7 +445,7 @@ fn raw_lights_memory_probe() {
     );
     black_box(&result);
 
-    assert_eq!(result.alignment.registered, lights.len());
+    assert_eq!(result.alignment.registered(), lights.len());
     if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, frame_bytes) {
         assert!(
             anon_mb <= budget_mb,

@@ -18,6 +18,7 @@ use crate::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
+use crate::pipeline::frame_registration::FrameRegistration;
 use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::{FrameTier, StagePlan};
 use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
@@ -74,14 +75,41 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 
     assert_eq!(result.alignment.reference, 0);
     assert_eq!(
-        result.alignment.registered, 3,
+        result.alignment.registered(),
+        3,
         "all three frames should stack"
     );
     assert!(
-        result.alignment.dropped.is_empty(),
+        result.alignment.dropped().is_empty(),
         "dropped: {:?}",
-        result.alignment.dropped
+        result.alignment.dropped()
     );
+    // Each light's registration reaches the caller: the reference as itself, and each other light
+    // with the warp it was resampled through, which carries the reference's grid onto the light:
+    // `shifted` resamples the base through `p + shift`, so a star moves by `−shift` in the light.
+    // A fit of ~30 stars centred to a few thousandths of a pixel lands within 0.05 px.
+    assert!(matches!(
+        result.alignment.frames[0],
+        FrameRegistration::Reference
+    ));
+    for (frame, shift) in [(1, DVec2::new(8.0, -5.0)), (2, DVec2::new(-6.0, 7.0))] {
+        let FrameRegistration::Registered {
+            warp,
+            inliers,
+            rms_error,
+        } = &result.alignment.frames[frame]
+        else {
+            panic!("frame {frame}: {:?}", result.alignment.frames[frame]);
+        };
+        assert!(*inliers >= config.registration.matching.min_matches);
+        assert!(*rms_error <= config.registration.max_rms_error);
+        for p in [DVec2::new(20.0, 20.0), DVec2::new(100.0, 140.0)] {
+            assert!(
+                warp.apply(p).distance(p - shift) <= 0.05,
+                "frame {frame} at {p}"
+            );
+        }
+    }
 
     // The detection funnel reaches the caller instead of only the log: one entry per input frame,
     // in input order, each one internally consistent.
@@ -181,12 +209,13 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     .expect("stack");
 
     assert_eq!(
-        result.alignment.dropped,
+        result.alignment.dropped(),
         vec![1, 3],
         "both blank frames should be dropped, in ascending index order"
     );
     assert_eq!(
-        result.alignment.registered, 3,
+        result.alignment.registered(),
+        3,
         "reference + two aligned frames"
     );
 
@@ -213,7 +242,17 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         CancelToken::never(),
     )
     .expect("manual weights follow the survivors");
-    assert_eq!(result.alignment.dropped, vec![1, 3]);
+    assert_eq!(result.alignment.dropped(), vec![1, 3]);
+    for frame in [1, 3] {
+        assert!(
+            matches!(
+                result.alignment.frames[frame],
+                FrameRegistration::Dropped(_)
+            ),
+            "{:?}",
+            result.alignment.frames[frame]
+        );
+    }
 }
 
 #[test]
@@ -465,7 +504,7 @@ fn auto_reference_picks_the_richest_frame() {
         "Auto must not anchor on the near-blank frame"
     );
     assert_eq!(
-        result.alignment.dropped,
+        result.alignment.dropped(),
         vec![0],
         "the near-blank frame can't register"
     );
@@ -818,12 +857,13 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         "RAM tier spilled to disk; both runs took the streaming path"
     );
     assert_eq!(
-        ram.alignment.dropped,
+        ram.alignment.dropped(),
         vec![2, 5],
         "the two starless frames should drop, in ascending index order"
     );
     assert_eq!(
-        ram.alignment.registered, 5,
+        ram.alignment.registered(),
+        5,
         "every dithered frame should register against the reference"
     );
     // The master inherits the reference frame's metadata. Distinct per-frame exposure times make
@@ -882,10 +922,45 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     }
 }
 
+/// Two runs of the default configuration on the same lights give the same stack, bit for bit:
+/// the reference choice, every registration and every plane. RANSAC's seed is fixed, and nothing
+/// downstream depends on the order threads finish in.
+#[test]
+fn two_default_runs_stack_bit_for_bit() {
+    let base = base_field();
+    let frames = || {
+        vec![
+            shifted(&base, 3.0, -2.0),
+            base.clone(),
+            shifted(&base, -5.0, 4.0),
+            shifted(&base, 1.5, 6.5),
+        ]
+    };
+    let run = || {
+        align_and_stack(
+            frames(),
+            &AlignStackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack")
+    };
+    assert_same_stack(&run(), &run(), "second run");
+}
+
 /// Two runs stack the same lights against the same reference, bit for bit: every plane, the
 /// alignment, the detection funnels and the inherited metadata.
 fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, label: &str) {
-    assert_eq!(expected.alignment, actual.alignment, "{label}");
+    assert_eq!(
+        expected.alignment.reference, actual.alignment.reference,
+        "{label}"
+    );
+    // `Debug` prints every float in its shortest round-trip form, so equal text is equal bits.
+    assert_eq!(
+        format!("{:?}", expected.alignment.frames),
+        format!("{:?}", actual.alignment.frames),
+        "{label}"
+    );
     assert_eq!(expected.detection, actual.detection, "{label}");
     let (expected, actual) = (&expected.product, &actual.product);
     assert_eq!(
@@ -899,27 +974,39 @@ fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, lab
             bits(actual.image.channel(channel).pixels()),
             "{label}: image channel {channel}"
         );
+        // A plane the combine emits for one run it emits for the other, bit for bit.
         assert_eq!(
-            bits(expected.weight.as_ref().unwrap().channel(channel)),
-            bits(actual.weight.as_ref().unwrap().channel(channel)),
+            expected
+                .weight
+                .as_ref()
+                .map(|weight| bits(weight.channel(channel))),
+            actual
+                .weight
+                .as_ref()
+                .map(|weight| bits(weight.channel(channel))),
             "{label}: weight channel {channel}"
         );
         assert_eq!(
-            bits(
-                expected
-                    .variance
-                    .as_ref()
-                    .expect("a σ-clipped mean emits a variance plane")
-                    .channel(channel)
-                    .pixels()
-            ),
-            bits(actual.variance.as_ref().unwrap().channel(channel).pixels()),
+            expected
+                .variance
+                .as_ref()
+                .map(|variance| bits(variance.channel(channel).pixels())),
+            actual
+                .variance
+                .as_ref()
+                .map(|variance| bits(variance.channel(channel).pixels())),
             "{label}: variance channel {channel}"
         );
     }
     assert_eq!(
-        bits(expected.coverage.as_ref().unwrap().to_plane().pixels()),
-        bits(actual.coverage.as_ref().unwrap().to_plane().pixels()),
+        expected
+            .coverage
+            .as_ref()
+            .map(|coverage| bits(coverage.to_plane().pixels())),
+        actual
+            .coverage
+            .as_ref()
+            .map(|coverage| bits(coverage.to_plane().pixels())),
         "{label}: coverage"
     );
     assert_eq!(
@@ -950,8 +1037,8 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 
     // Three lights of one field a few minutes apart all register, and the stack has a light's
     // geometry and only finite samples.
-    assert_eq!(result.alignment.dropped, Vec::<usize>::new());
-    assert_eq!(result.alignment.registered, lights.len());
+    assert_eq!(result.alignment.dropped(), Vec::<usize>::new());
+    assert_eq!(result.alignment.registered(), lights.len());
     assert_eq!(result.product.image.dimensions(), frame.dimensions());
     for channel in 0..frame.channels() {
         assert!(

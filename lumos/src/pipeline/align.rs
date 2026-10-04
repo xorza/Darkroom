@@ -1,5 +1,6 @@
 //! Detection, registration, warping, and combination of calibrated images.
 
+use std::cmp::Reverse;
 use std::mem;
 use std::path::Path;
 
@@ -108,8 +109,11 @@ pub(crate) fn register_warp_and_stack(
         .collect();
 
     let star_counts: Vec<usize> = detected.iter().map(|frame| frame.stars.len()).collect();
+    let median_fwhms: Vec<Option<f32>> =
+        detection.iter().map(|funnel| funnel.median_fwhm).collect();
     let reference = select_reference(
         &star_counts,
+        &median_fwhms,
         config.reference,
         config
             .registration
@@ -158,10 +162,15 @@ pub(crate) fn register_warp_and_stack(
     .combine(tier, config, progress, cancel)
 }
 
-/// Choose the reference (alignment anchor) index from per-frame star counts, validating it has
-/// enough stars.
+/// Choose the reference (alignment anchor) index, validating it has enough stars.
+///
+/// `Auto` takes the sharpest frame among those with `required` stars: the lowest median FWHM, as
+/// Siril chooses, ties to the lowest index. Every other frame is warped onto it, so its seeing is
+/// what the stack is resampled to; the star count only has to clear the gate registration needs.
+/// When no frame clears it, the one with the most stars is reported.
 fn select_reference(
     star_counts: &[usize],
+    median_fwhms: &[Option<f32>],
     reference: Reference,
     required: usize,
 ) -> Result<usize, Error> {
@@ -175,10 +184,24 @@ fn select_reference(
             }
             index
         }
-        // Most stars → most anchors for the other frames to match against.
         Reference::Auto => (0..star_counts.len())
-            .max_by_key(|&i| star_counts[i])
-            .expect("star_counts is non-empty"),
+            .filter(|&i| star_counts[i] >= required)
+            .filter_map(|i| median_fwhms[i].map(|fwhm| (i, fwhm)))
+            .reduce(|best, candidate| {
+                if candidate.1 < best.1 {
+                    candidate
+                } else {
+                    best
+                }
+            })
+            .map_or_else(
+                || {
+                    (0..star_counts.len())
+                        .max_by_key(|&i| (star_counts[i], Reverse(i)))
+                        .expect("star_counts is non-empty")
+                },
+                |(i, _)| i,
+            ),
     };
     if star_counts[index] < required {
         return Err(Error::ReferenceInsufficientStars {
@@ -188,4 +211,36 @@ fn select_reference(
         });
     }
     Ok(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Auto` takes the lowest median FWHM among the frames with the stars registration needs:
+    /// frame 2 at 2.5 of 2.5, 3.0 and 3.5; a tie goes to the lowest index; a frame below the gate
+    /// is passed over however sharp, frame 1 at 2.0 with 30 of 40 stars; and when none clears the
+    /// gate, the one with the most stars is the one reported. An index must lie in the input.
+    #[test]
+    fn auto_takes_the_sharpest_frame_with_enough_stars() {
+        let auto = |counts: &[usize], fwhms: &[f32]| {
+            let fwhms: Vec<Option<f32>> = fwhms.iter().map(|&fwhm| Some(fwhm)).collect();
+            select_reference(counts, &fwhms, Reference::Auto, 40)
+        };
+        assert_eq!(auto(&[50, 80, 60], &[3.0, 3.5, 2.5]).unwrap(), 2);
+        assert_eq!(auto(&[50, 80, 60], &[2.5, 3.0, 2.5]).unwrap(), 0);
+        assert_eq!(auto(&[50, 30, 60], &[3.0, 2.0, 3.5]).unwrap(), 0);
+        assert!(matches!(
+            auto(&[10, 20, 15], &[3.0, 2.0, 3.5]),
+            Err(Error::ReferenceInsufficientStars {
+                index: 1,
+                found: 20,
+                required: 40
+            })
+        ));
+        assert!(matches!(
+            select_reference(&[50, 60], &[Some(3.0), Some(3.0)], Reference::Index(5), 40),
+            Err(Error::ReferenceOutOfRange { index: 5, count: 2 })
+        ));
+    }
 }

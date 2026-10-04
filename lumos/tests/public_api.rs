@@ -8,17 +8,17 @@ use lumos::{
     DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
     FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
-    FlagCounts, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata, IngestConfig,
-    InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, MatchIndices, Normalization, Pedestal, QualityMap, QualityPlanes, RansacConfig,
-    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
-    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
-    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
-    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
-    StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
-    TransformModel, TransformType, TriangleConfig, TrimConfig, WarpParams, WarpTransform,
-    Weighting, WinsorizedClipConfig,
+    FlagCounts, FrameRegistration, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
+    IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
+    LoadContext, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap, QualityPlanes,
+    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
+    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
+    WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -320,8 +320,16 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         product,
         alignment: AlignmentSummary {
             reference: 1,
-            registered: 2,
-            dropped: vec![0, 3],
+            frames: vec![
+                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+                FrameRegistration::Reference,
+                FrameRegistration::Registered {
+                    warp: Box::new(WarpTransform::new(Transform::identity())),
+                    inliers: 40,
+                    rms_error: 0.1,
+                },
+                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+            ],
         },
         detection: vec![StarDetectionDiagnostics::default(); 4],
     };

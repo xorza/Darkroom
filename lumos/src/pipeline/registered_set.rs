@@ -3,20 +3,20 @@
 use common::CancelToken;
 
 use crate::combine::stack::stack_stored_frames;
-use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::frame_registrar::ParkedFrame;
 use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::FrameTier;
 use crate::progress::ProgressCallback;
 use crate::star_detection::detector::Diagnostics;
 
-/// Every light's parked frame in input order, `None` for one that did not register, with what the
-/// combine of the survivors and the result need.
+/// Every light's parked frame in input order — `None` only where the run was cancelled — with
+/// what the combine of the survivors and the result need.
 #[derive(Debug)]
 pub(crate) struct RegisteredSet {
-    pub(crate) outcomes: Vec<Option<StoredFrame>>,
+    pub(crate) outcomes: Vec<Option<ParkedFrame>>,
     pub(crate) reference: usize,
     /// The reference's: the master follows the alignment anchor, not whichever frame reaches the
     /// combine first.
@@ -40,14 +40,16 @@ impl RegisteredSet {
         }
         let total = self.outcomes.len();
         let mut frames = Vec::with_capacity(total);
+        let mut registrations = Vec::with_capacity(total);
         let mut dropped = Vec::new();
-        // Ascending without a sort: the outcomes are in input order, the order
-        // `AlignmentSummary::dropped` documents.
+        // Ascending without a sort: the outcomes are in input order.
         for (index, outcome) in self.outcomes.into_iter().enumerate() {
-            match outcome {
+            let parked = outcome.expect("only a cancelled run leaves a light unparked");
+            match parked.stored {
                 Some(frame) => frames.push(frame),
                 None => dropped.push(index),
             }
+            registrations.push(parked.registration);
         }
         tracing::info!(
             aligned = frames.len(),
@@ -77,8 +79,7 @@ impl RegisteredSet {
         Ok(AlignStackResult::from_product(
             stacked,
             self.reference,
-            registered,
-            dropped,
+            registrations,
             self.detection,
         ))
     }

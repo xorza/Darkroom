@@ -8,18 +8,38 @@ use crate::combine::error::Error as StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::FrameStoreError;
 use crate::io::image::error::ImageError;
+use crate::pipeline::frame_registration::FrameRegistration;
 use crate::stack_product::StackProduct;
 use crate::star_detection::detector::Diagnostics;
 
 /// Registration bookkeeping for an aligned stack.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AlignmentSummary {
     /// Index into the input of the alignment reference frame.
     pub reference: usize,
-    /// Number of frames combined into the stack.
-    pub registered: usize,
-    /// Input indices dropped because registration failed, ascending.
-    pub dropped: Vec<usize>,
+    /// How each light registered, in input order: the reference, a warp with its fit, or why it
+    /// was dropped.
+    pub frames: Vec<FrameRegistration>,
+}
+
+impl AlignmentSummary {
+    /// The number of frames combined into the stack, the reference included.
+    pub fn registered(&self) -> usize {
+        self.frames
+            .iter()
+            .filter(|frame| frame.is_stacked())
+            .count()
+    }
+
+    /// The input indices dropped because registration failed, ascending.
+    pub fn dropped(&self) -> Vec<usize> {
+        self.frames
+            .iter()
+            .enumerate()
+            .filter(|(_, frame)| !frame.is_stacked())
+            .map(|(index, _)| index)
+            .collect()
+    }
 }
 
 /// Outcome of a registered stack.
@@ -38,17 +58,12 @@ impl AlignStackResult {
     pub(crate) const fn from_product(
         product: StackProduct,
         reference: usize,
-        registered: usize,
-        dropped: Vec<usize>,
+        frames: Vec<FrameRegistration>,
         detection: Vec<Diagnostics>,
     ) -> Self {
         Self {
             product,
-            alignment: AlignmentSummary {
-                reference,
-                registered,
-                dropped,
-            },
+            alignment: AlignmentSummary { reference, frames },
             detection,
         }
     }
