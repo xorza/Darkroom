@@ -73,7 +73,7 @@ pub(crate) fn fold_scroll_zoom(
         && let Some(pivot) = resp.pointer_local
     {
         let text = &ui.theme().text;
-        let line_px = text.line_height_for(text.font_size_px);
+        let line_px = text.line_height_for(text.font_size);
         zoom_about(
             &mut v.pan,
             &mut v.zoom,

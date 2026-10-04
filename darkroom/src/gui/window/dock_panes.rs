@@ -10,7 +10,8 @@ use std::collections::HashMap;
 
 use glam::Vec2;
 use palantir::{
-    DockDrop, DockOp, DockTabMenu, DockTabs, InternedStr, MenuItem, SplitSide, TabBadge, Ui,
+    DockDrop, DockOperation, DockTabMenu, DockTabs, InternedStr, MenuItem, Size, SplitSide,
+    TabBadge, Ui,
 };
 use scenarium::{NodeId, OutputTypes};
 
@@ -52,7 +53,7 @@ impl DockTabs for DockPanes<'_> {
         })
     }
 
-    fn content(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Vec2>) {
+    fn content(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
         let cx = self.cx;
         let app = cx.app();
         match tab {
@@ -80,7 +81,7 @@ impl DockTabs for DockPanes<'_> {
                     &mut self.prefs.viewer,
                     title,
                     previews,
-                    size,
+                    size.map(Vec2::from),
                 ) {
                     self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                 }
@@ -131,7 +132,7 @@ impl DockTabs for DockPanes<'_> {
             side = Some(SplitSide::Bottom);
         }
         if let Some(side) = side {
-            menu.ops.push(DockOp::MoveTab {
+            menu.operations.push(DockOperation::MoveTab {
                 tab: menu.tab,
                 to: DockDrop::Split {
                     group: menu.group,
@@ -144,7 +145,7 @@ impl DockTabs for DockPanes<'_> {
 
 #[cfg(test)]
 mod tests {
-    use palantir::{DockState, TabStrip};
+    use palantir::{DockView, TabStrip};
 
     use crate::core::document::TabRef;
     use crate::core::document::internals::DocFixture;
@@ -162,9 +163,9 @@ mod tests {
         let mut h = SessionHarness::new(DocFixture::sample().with_tab(TabRef::Preferences));
         let strip = {
             let layout = &h.session.open.document.layout;
-            layout.strip_id(layout.primary().id)
+            DockView::strip_id(layout, layout.primary().id)
         };
-        let chip = |tab: TabRef| TabStrip::chip_id(strip, DockState::<TabRef>::tab_key(tab));
+        let chip = |tab: TabRef| TabStrip::chip_id(strip, DockView::<TabRef>::tab_key(tab));
         let badge = |tab: TabRef| chip(tab).with("badge");
 
         h.session.open.dirty = false;

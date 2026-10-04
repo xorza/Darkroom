@@ -7,7 +7,6 @@
 //! like the rest of `widgets` — a caller supplies the glyph, colour, id, and
 //! tooltip, and maps the returned click onto its own intent.
 
-use palantir::FontWeight;
 use palantir::prelude::*;
 
 use crate::gui::widgets::support::tooltip_after;
@@ -201,12 +200,9 @@ impl Badge {
         let chip = panel.show(ui, |ui| match glyph {
             BadgeGlyph::Char(glyph) => {
                 Text::new(glyph)
-                    .style(&TextStyle {
-                        color,
-                        font_size_px: BADGE_FONT,
-                        weight: FontWeight::BOLD,
-                        ..ui.theme().text
-                    })
+                    .color(color)
+                    .font_size(BADGE_FONT)
+                    .bold()
                     .show(ui);
             }
             BadgeGlyph::Drawn(draw) => draw(ui, color),

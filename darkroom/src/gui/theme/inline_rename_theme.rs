@@ -1,7 +1,7 @@
 //! [`InlineRenameTheme`]: how an in-place rename field is styled.
 
 use palantir::SlotDefaults;
-use palantir::{Background, Spacing, TextEditTheme, TextStyle};
+use palantir::{Background, Spacing, TextEditTheme, TextStyleOverrides};
 
 /// Per-widget theme bundle for the inline-rename label⇄field widget
 /// (node title, boundary-port name, graph tab). The `text_edit`
@@ -50,21 +50,21 @@ impl InlineRenameTheme {
         Self { text_edit: style }
     }
 
-    /// The same bundle with `text` pinned on every state.
+    /// The same bundle with `text` overriding every state's own.
     ///
     /// All four looks, not just `normal`: the idle label reads `normal`
     /// while the open editor resolves per state, so leaving the others
     /// to inherit would change the font when the field is hovered or
     /// focused — mid-rename, on the widget whose whole contract is that
     /// the glyphs don't move when it opens.
-    pub(crate) fn with_text(mut self, text: TextStyle) -> Self {
+    pub(crate) fn with_text(mut self, text: TextStyleOverrides) -> Self {
         for look in [
             &mut self.text_edit.looks.normal,
             &mut self.text_edit.looks.hovered,
             &mut self.text_edit.looks.active,
             &mut self.text_edit.looks.disabled,
         ] {
-            look.text = Some(text);
+            look.text = text;
         }
         self
     }

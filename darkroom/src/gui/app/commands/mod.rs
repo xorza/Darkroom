@@ -33,7 +33,7 @@ use crate::gui::app::PendingTransition;
 /// Everything here needs `&mut App`, a blocking dialog, or both, so none of it
 /// can run during the pass that raises it. A UI action that only rearranges
 /// panes is not one of these — it is a
-/// [`DockOp`](palantir::DockOp) on the frame's queue.
+/// [`DockOperation`](palantir::DockOperation) on the frame's queue.
 #[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle — [`file`](mod@file).

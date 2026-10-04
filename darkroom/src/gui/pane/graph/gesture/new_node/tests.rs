@@ -9,7 +9,7 @@ use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// A much bigger search field and a much roomier popup than the defaults.
 fn enlarge(t: &mut palantir::Theme) {
-    t.text.font_size_px *= 3.0;
+    t.text.font_size *= 3.0;
     t.context_menu.padding = palantir::Spacing::all(24.0);
     t.context_menu.gap = 12.0;
 }
@@ -99,7 +99,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // exactly the gap the popup then paints its rows outside. The chrome
         // around the span is the theme's padding plus the panel's border, which
         // palantir folds into the padding on every side.
-        let chrome = menu.padding.vertical_sum() + 2.0 * menu.panel.border.width;
+        let chrome = menu.padding.sums().h + 2.0 * menu.panel.border.width;
         let used = chrome + (results.max().y - field.min.y);
         assert!(
             used <= cap + 0.5,

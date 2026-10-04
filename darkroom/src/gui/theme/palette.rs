@@ -54,10 +54,10 @@ pub(crate) struct Palette {
     pub(crate) text_muted: RgbaF32,
     /// Disabled ink.
     pub(crate) text_disabled: RgbaF32,
-    /// Control fill one step up from the chrome behind it.
-    pub(crate) elem_mid: RgbaF32,
-    /// Control fill two steps up — the emphasis tier.
-    pub(crate) elem_strong: RgbaF32,
+    /// Control fill one step up from the chrome behind it — the hover tier.
+    pub(crate) elem_hover: RgbaF32,
+    /// Control fill two steps up — the emphasis tier a press reaches for.
+    pub(crate) elem_active: RgbaF32,
     /// Focus ring.
     pub(crate) border_focused: RgbaF32,
     /// Rubber-band sweep and committed selection halo.

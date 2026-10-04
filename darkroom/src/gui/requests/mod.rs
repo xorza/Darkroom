@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use palantir::DockOp;
+use palantir::DockOperation;
 
 use crate::core::document::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
@@ -55,7 +55,7 @@ impl Requests {
     }
 
     /// Queue a mutation of the pane arrangement.
-    pub(crate) fn push_view(&mut self, op: DockOp<TabRef>) {
+    pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.document.push_view(op);
     }
 

@@ -14,7 +14,7 @@ use crate::gui::theme::Theme;
 /// The theme's base text restyled to `px`.
 pub(crate) fn sized_text(ui: &Ui, px: f32) -> TextStyle {
     TextStyle {
-        font_size_px: px,
+        font_size: px,
         ..ui.theme().text
     }
 }
@@ -192,6 +192,6 @@ pub(crate) fn tooltip_after<'a>(
     tip: Option<impl Into<TextInput<'a>>>,
 ) {
     if let Some(tip) = tip {
-        Tooltip::on(snapshot).label(tip).show(ui);
+        Tooltip::on(snapshot, tip).show(ui);
     }
 }

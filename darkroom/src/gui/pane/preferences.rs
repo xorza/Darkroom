@@ -10,7 +10,6 @@
 //! return [`PrefsCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
-use std::mem;
 use std::path::{Path, PathBuf};
 
 use lens::MlModelPaths;
@@ -22,7 +21,6 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::edit_buffer::DraftOutcome;
 use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
 use crate::platform;
 
@@ -58,16 +56,14 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                         if Checkbox::new(&mut prefs.load_last_document)
                             .label("Load last document on startup")
                             .show(ui)
-                            .left
-                            .clicked()
+                            .changed
                         {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                         if Checkbox::new(&mut prefs.confirm_unsaved_changes)
                             .label("Ask to save unsaved changes")
                             .show(ui)
-                            .left
-                            .clicked()
+                            .changed
                         {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
@@ -206,104 +202,102 @@ fn model_row(
     // Refresh the draft from `path` only when `path` changed *externally*
     // (initial load, a Browse pick, or last frame's commit) — never on
     // "unfocused". Focus is resolved before the record pass, so on the blur
-    // frame `focused_id()` already reads unfocused; mirroring there would
-    // stomp the just-typed text before `TextEdit`'s submit/blur commit could
-    // read it (the field would snap back and nothing would save). Keying the
+    // frame `focus()` already reads unfocused; mirroring there would stomp
+    // the just-typed text before `TextEdit`'s submit/blur commit could read
+    // it (the field would snap back and nothing would save). Keying the
     // refresh on the external value sidesteps that race entirely — and gives
     // `status` its no-stat-per-frame revalidation point.
-    //
-    // Scoped so the borrow of `path` ends here: `to_string_lossy` is borrowed
-    // for a UTF-8 path (every path that round-trips through this field), so
-    // the common — unchanged — case compares in place rather than allocating
-    // a fresh `String` each frame only to find nothing moved. The committing
-    // branch below compares against the mirrored `seen` instead.
-    {
-        let canonical = path.to_string_lossy();
-        let field = ui.state_or_default::<PathField>(id);
-        if field.seen != canonical {
-            field.text.replace_range(.., &canonical);
-            field.seen.replace_range(.., &canonical);
-            field.problem = path_problem(&canonical);
-        }
-    }
-    let field = ui.state_or_default::<PathField>(id);
-    let problem = field.problem;
-    let mut draft = mem::take(&mut field.text);
-    Panel::vstack()
-        .id_salt(label)
-        .size((Sizing::FILL, Sizing::HUG))
-        .gap(4.0)
-        .show(ui, |ui| {
-            Panel::hstack()
-                .id_salt("row")
-                .size((Sizing::FILL, Sizing::HUG))
-                .gap(ML_ROW_GAP)
-                .child_align(Align::v(VAlign::Center))
-                .show(ui, |ui| {
-                    Panel::hstack()
-                        .id_salt("label")
-                        .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
-                        .show(ui, |ui| {
-                            Text::new(label)
-                                .style(&sized_text(ui, theme.text.body))
-                                .show(ui);
-                        });
-
-                    let mut edit = TextEdit::new(&mut draft)
-                        .id(id)
-                        .size((Sizing::FILL, Sizing::HUG))
-                        .min_size((ML_PATH_FIELD_MIN, 0.0))
-                        .placeholder("/path/to/model.onnx");
-                    // A broken committed path recolors the field's chrome to
-                    // the error tint (message under the row says what's wrong).
-                    if problem.is_some() {
-                        edit = edit.style(&theme.path_field_error);
-                    }
-                    let outcome = DraftOutcome::of(&edit.show(ui));
-                    if outcome == DraftOutcome::Cancel {
-                        // Escape drops the draft: the field shows the committed path again.
-                        draft.clone_from(&ui.state_or_default::<PathField>(id).seen);
-                    }
-                    let commit = outcome == DraftOutcome::Commit;
-                    // Against the mirror, not a re-read of `path`: `seen` was
-                    // just synced to it, and comparing there keeps `path`
-                    // unborrowed for the write on the next line.
-                    let field = ui.state_or_default::<PathField>(id);
-                    if commit && draft != field.seen {
-                        *path = PathBuf::from(draft.clone());
-                        out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                    }
-                    let field = ui.state_or_default::<PathField>(id);
-                    field.text = draft;
-                    if commit {
-                        // Re-stat on every commit — even an unchanged path:
-                        // the file may have appeared (or vanished) since the
-                        // last check, and Enter is the natural retry. A
-                        // *changed* commit re-checks again next frame via
-                        // the `seen` mirror once it lands in `canonical`.
-                        field.problem = path_problem(&field.text);
-                    }
-
-                    if Button::new()
-                        .id_salt("browse")
-                        .label("Browse…")
-                        .show(ui)
-                        .left
-                        .clicked()
-                    {
-                        out.push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
-                    }
-                });
-
-            if let Some(problem) = problem {
-                indented_line(ui, "problem", |ui| {
-                    Text::new(problem)
-                        .style(&colored_text(ui, theme.status.error, theme.text.body))
-                        .show(ui);
-                });
+    ui.with_state::<PathField, _>(id, |ui, field| {
+        // Scoped so the borrow of `path` ends here: `to_string_lossy` is
+        // borrowed for a UTF-8 path (every path that round-trips through this
+        // field), so the common — unchanged — case compares in place rather
+        // than allocating a fresh `String` each frame only to find nothing
+        // moved. The committing branch below compares against the mirrored
+        // `seen` instead.
+        {
+            let canonical = path.to_string_lossy();
+            if field.seen != canonical {
+                field.text.replace_range(.., &canonical);
+                field.seen.replace_range(.., &canonical);
+                field.problem = path_problem(&canonical);
             }
-            download_hint(ui, theme, download_label, download_url);
-        });
+        }
+        let problem = field.problem;
+        Panel::vstack()
+            .id_salt(label)
+            .size((Sizing::FILL, Sizing::HUG))
+            .gap(4.0)
+            .show(ui, |ui| {
+                Panel::hstack()
+                    .id_salt("row")
+                    .size((Sizing::FILL, Sizing::HUG))
+                    .gap(ML_ROW_GAP)
+                    .child_align(Align::v(VAlign::Center))
+                    .show(ui, |ui| {
+                        Panel::hstack()
+                            .id_salt("label")
+                            .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
+                            .show(ui, |ui| {
+                                Text::new(label)
+                                    .style(&sized_text(ui, theme.text.body))
+                                    .show(ui);
+                            });
+
+                        let mut edit = TextEdit::new(&mut field.text)
+                            .id(id)
+                            .size((Sizing::FILL, Sizing::HUG))
+                            .min_size((ML_PATH_FIELD_MIN, 0.0))
+                            .placeholder("/path/to/model.onnx");
+                        // A broken committed path recolors the field's chrome
+                        // to the error tint (message under the row says
+                        // what's wrong).
+                        if problem.is_some() {
+                            edit = edit.style(&theme.path_field_error);
+                        }
+                        let response = edit.show(ui);
+                        if response.canceled {
+                            // Escape drops the draft: the field shows the
+                            // committed path again.
+                            field.text.clone_from(&field.seen);
+                        }
+                        if response.committed {
+                            // Against the mirror, not a re-read of `path`:
+                            // `seen` was just synced to it, and comparing
+                            // there keeps `path` unborrowed for the write.
+                            if field.text != field.seen {
+                                *path = PathBuf::from(field.text.clone());
+                                out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                            }
+                            // Re-stat on every commit — even an unchanged
+                            // path: the file may have appeared (or vanished)
+                            // since the last check, and Enter is the natural
+                            // retry. A *changed* commit re-checks again next
+                            // frame via the `seen` mirror once it lands in
+                            // `canonical`.
+                            field.problem = path_problem(&field.text);
+                        }
+
+                        if Button::new()
+                            .id_salt("browse")
+                            .label("Browse…")
+                            .show(ui)
+                            .left
+                            .clicked()
+                        {
+                            out.push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
+                        }
+                    });
+
+                if let Some(problem) = problem {
+                    indented_line(ui, "problem", |ui| {
+                        Text::new(problem)
+                            .style(&colored_text(ui, theme.status.error, theme.text.body))
+                            .show(ui);
+                    });
+                }
+                download_hint(ui, theme, download_label, download_url);
+            });
+    });
 }
 
 /// The CLI tools ship as a zip of self-contained binaries plus the model
@@ -354,7 +348,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         }
         // Surface the destination on hover so the user sees where the
         // link goes before clicking — the URL isn't otherwise visible.
-        Tooltip::on(&snapshot).label(url).show(ui);
+        Tooltip::on(&snapshot, url).show(ui);
         Text::new(DOWNLOAD_HINT)
             .style(&muted_text(ui, theme, theme.text.body))
             .show(ui);

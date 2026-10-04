@@ -12,7 +12,7 @@ use scenarium::{
     internals,
 };
 
-use palantir::DockOp;
+use palantir::DockOperation;
 
 use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
 
@@ -150,7 +150,7 @@ impl DocFixture {
     pub(crate) fn with_tab(mut self, tab: TabRef) -> Self {
         let primary = self.doc.layout.primary().id;
         self.doc.layout.find_or_insert(tab, primary);
-        self.doc.layout.apply(DockOp::ActivateTab { tab });
+        self.doc.layout.apply(DockOperation::ActivateTab { tab });
         self
     }
 }

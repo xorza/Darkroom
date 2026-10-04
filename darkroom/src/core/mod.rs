@@ -4,7 +4,7 @@
 //!
 //! It renders nothing, but it stores two palantir data types, because the
 //! document saves them: the pane arrangement is a [`palantir::DockState`],
-//! edited through [`palantir::DockOp`], and the viewer's sampling preference
+//! edited through [`palantir::DockOperation`], and the viewer's sampling preference
 //! is a [`palantir::ImageFilter`]. Nothing else from palantir is used here.
 
 mod background_runtime;

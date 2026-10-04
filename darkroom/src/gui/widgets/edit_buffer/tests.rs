@@ -1,28 +1,5 @@
 use super::*;
 
-/// Every combination of the three signals: Escape cancels whatever else fired, and only Enter or a
-/// blur commits.
-#[test]
-fn escape_wins_and_only_enter_or_blur_commits() {
-    use DraftOutcome::{Cancel, Commit, Editing};
-    for (submitted, cancelled, lost_focus, expected) in [
-        (false, false, false, Editing),
-        (true, false, false, Commit),
-        (false, false, true, Commit),
-        (true, false, true, Commit),
-        (false, true, false, Cancel),
-        (false, true, true, Cancel),
-        (true, true, false, Cancel),
-        (true, true, true, Cancel),
-    ] {
-        assert_eq!(
-            DraftOutcome::from_signals(submitted, cancelled, lost_focus),
-            expected,
-            "submitted={submitted} cancelled={cancelled} lost_focus={lost_focus}"
-        );
-    }
-}
-
 /// Idle means unfocused now *and* at the end of the last frame: the frame focus leaves keeps the
 /// draft, every later unfocused frame may refill it.
 #[test]

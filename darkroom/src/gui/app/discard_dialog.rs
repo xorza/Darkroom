@@ -72,77 +72,120 @@ pub(super) fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardO
         None => ui.fmt(format_args!("Save changes before {tail}?")),
     };
 
-    // Checkbox state lives across the frames the dialog is up; the id isn't
-    // recorded once the dialog closes, so the row is swept and the next
-    // open starts unchecked.
-    let dont_ask_id = WidgetId::from_hash("discard_dialog::dont_ask_again");
-    let mut dont_ask_again = *ui.state_or_default::<bool>(dont_ask_id);
+    // The checkbox's own id keys its state, so the row lives exactly as long
+    // as the dialog is up: once it closes nothing records the checkbox, the
+    // row is swept, and the next open starts unchecked.
+    let dont_ask_id = dont_ask_wid();
+    ui.with_state::<DontAskAgain, _>(dont_ask_id, |ui, DontAskAgain(dont_ask_again)| {
+        let mut choice = DiscardChoice::Stay;
+        let resp = Modal::new()
+            .id_salt(("discard_dialog", "modal"))
+            .show(ui, |ui, _| {
+                Panel::vstack()
+                    .id_salt(("discard_dialog", "body"))
+                    .gap(16.0)
+                    .padding(8.0)
+                    .show(ui, |ui| {
+                        Text::new(title)
+                            .id_salt(("discard_dialog", "title"))
+                            .show(ui);
+                        Checkbox::new(dont_ask_again)
+                            .id(dont_ask_id)
+                            .label("Don't ask again")
+                            .show(ui);
+                        Panel::hstack()
+                            .id_salt(("discard_dialog", "row"))
+                            .gap(8.0)
+                            .show(ui, |ui| {
+                                if Button::new()
+                                    .id_salt(("discard_dialog", "save"))
+                                    .label("Save")
+                                    .show(ui)
+                                    .left
+                                    .clicked()
+                                {
+                                    choice = DiscardChoice::Save;
+                                }
+                                if Button::new()
+                                    .id_salt(("discard_dialog", "discard"))
+                                    .label("Don't Save")
+                                    .show(ui)
+                                    .left
+                                    .clicked()
+                                {
+                                    choice = DiscardChoice::Discard;
+                                }
+                                if Button::new()
+                                    .id_salt(("discard_dialog", "cancel"))
+                                    .label("Cancel")
+                                    .show(ui)
+                                    .left
+                                    .clicked()
+                                {
+                                    choice = DiscardChoice::Cancel;
+                                }
+                            });
+                    });
+            });
+        // Esc / backdrop click dismisses the modal — treat as Cancel.
+        if resp.dismissed {
+            choice = DiscardChoice::Cancel;
+        }
+        DiscardOutcome {
+            choice,
+            dont_ask_again: *dont_ask_again,
+        }
+    })
+}
 
-    let mut choice = DiscardChoice::Stay;
-    let resp = Modal::new()
-        .id_salt(("discard_dialog", "modal"))
-        .show(ui, |ui, _| {
-            Panel::vstack()
-                .id_salt(("discard_dialog", "body"))
-                .gap(16.0)
-                .padding(8.0)
-                .show(ui, |ui| {
-                    Text::new(title)
-                        .id_salt(("discard_dialog", "title"))
-                        .show(ui);
-                    Checkbox::new(&mut dont_ask_again)
-                        .id_salt(("discard_dialog", "dont_ask"))
-                        .label("Don't ask again")
-                        .show(ui);
-                    Panel::hstack()
-                        .id_salt(("discard_dialog", "row"))
-                        .gap(8.0)
-                        .show(ui, |ui| {
-                            if Button::new()
-                                .id_salt(("discard_dialog", "save"))
-                                .label("Save")
-                                .show(ui)
-                                .left
-                                .clicked()
-                            {
-                                choice = DiscardChoice::Save;
-                            }
-                            if Button::new()
-                                .id_salt(("discard_dialog", "discard"))
-                                .label("Don't Save")
-                                .show(ui)
-                                .left
-                                .clicked()
-                            {
-                                choice = DiscardChoice::Discard;
-                            }
-                            if Button::new()
-                                .id_salt(("discard_dialog", "cancel"))
-                                .label("Cancel")
-                                .show(ui)
-                                .left
-                                .clicked()
-                            {
-                                choice = DiscardChoice::Cancel;
-                            }
-                        });
-                });
-        });
-    // Esc / backdrop click dismisses the modal — treat as Cancel.
-    if resp.dismissed {
-        choice = DiscardChoice::Cancel;
-    }
+/// The checkbox's row: a type of its own, so no other row a widget keeps at
+/// the checkbox's id can share it.
+#[derive(Default, Debug)]
+struct DontAskAgain(bool);
 
-    *ui.state_or_default::<bool>(dont_ask_id) = dont_ask_again;
-    DiscardOutcome {
-        choice,
-        dont_ask_again,
-    }
+fn dont_ask_wid() -> WidgetId {
+    WidgetId::from_hash("discard_dialog::dont_ask_again")
 }
 
 #[cfg(test)]
 mod tests {
+    use palantir::internals::harness::UiHarness;
+
     use super::*;
+
+    /// The checkbox keeps its tick while the dialog is up, and the row goes
+    /// with the dialog: once a frame passes without it, the next open starts
+    /// unchecked rather than inheriting the last prompt's answer.
+    #[test]
+    fn the_checkbox_holds_while_the_dialog_is_up_and_resets_once_it_closes() {
+        let mut h = UiHarness::with_text(UVec2::new(800, 600));
+        let open =
+            |h: &mut UiHarness| h.frame_value(|ui| show(ui, None, "quitting").dont_ask_again);
+        h.prime(2, |ui| {
+            show(ui, None, "quitting");
+        });
+        assert!(!open(&mut h), "a fresh dialog starts unchecked");
+
+        h.click_on(dont_ask_wid());
+        assert!(open(&mut h), "the click ticks the box");
+        assert!(open(&mut h), "the tick holds on the next frame");
+
+        h.frame(|ui| {
+            assert_eq!(
+                ui.state::<DontAskAgain>(dont_ask_wid()).map(|row| row.0),
+                Some(true),
+                "still held this frame"
+            );
+        });
+        h.frame(|ui| {
+            assert_eq!(
+                ui.state::<DontAskAgain>(dont_ask_wid()).map(|row| row.0),
+                None,
+                "a frame without the dialog swept its row"
+            );
+        });
+        assert!(!open(&mut h), "the next open starts unchecked");
+    }
 
     fn answer(choice: DiscardChoice, dont_ask_again: bool) -> DiscardOutcome {
         DiscardOutcome {

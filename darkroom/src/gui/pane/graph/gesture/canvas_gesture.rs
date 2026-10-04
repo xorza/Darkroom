@@ -14,7 +14,7 @@ use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 /// that chord is decided: [`PreviewDrag`](super::preview_drag::PreviewDrag) claims an output drag
 /// under it, and `ConnectionUI` drops the output column from its latch candidates under the same
 /// condition — stated once so the two cannot drift into both claiming, or neither.
-pub(crate) fn preview_drag_modifier(ui: &mut Ui) -> bool {
+pub(crate) const fn preview_drag_modifier(ui: &mut Ui) -> bool {
     ui.modifiers().ctrl
 }
 

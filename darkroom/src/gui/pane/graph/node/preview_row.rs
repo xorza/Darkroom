@@ -15,7 +15,7 @@ use std::fmt::Formatter;
 use imaginarium::ColorFormat;
 use palantir::prelude::*;
 use palantir::widget::Shape;
-use palantir::{CursorIcon, DockOp, ImageFit, TextWrap};
+use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;
@@ -98,7 +98,7 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
     // open just activates it.
     if content.left.clicked() {
-        out.push_view(DockOp::OpenTab {
+        out.push_view(DockOperation::OpenTab {
             tab: TabRef::ImageViewer(node.id),
         });
     }

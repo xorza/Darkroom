@@ -297,7 +297,7 @@ impl GraphUI {
         // flight has nothing to cancel, so each applies this to its own
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
-        self.cancelled = ui.escape_pressed();
+        self.cancelled = ui.key_pressed(Shortcut::key(Key::Escape));
         // Esc cancels what is in flight, and deselects only when nothing was.
         let deselect = self.cancelled && !self.in_flight();
         let gesture = classify_canvas_gesture(ui);
@@ -554,7 +554,7 @@ pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests {
-    use palantir::DockOp;
+    use palantir::DockOperation;
     use palantir::internals::harness::UiHarness;
     use scenarium::{Binding, InputPort};
     use std::sync::Arc;
@@ -590,7 +590,7 @@ mod tests {
         assert!(
             matches!(
                 h.view_ops[..],
-                [DockOp::OpenTab {
+                [DockOperation::OpenTab {
                     tab: TabRef::ImageViewer(clicked)
                 }] if clicked == node
             ),

@@ -115,19 +115,17 @@ fn build_tile(theme: &Theme) -> Image {
     let c = theme.canvas.dot.to_srgba_u8();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
-    let mut pixels = Vec::with_capacity((n * n * 4) as usize);
-    for y in 0..n {
-        for x in 0..n {
-            let dx = x as f32 + 0.5 - center;
-            let dy = y as f32 + 0.5 - center;
-            if dx * dx + dy * dy <= r2 {
-                pixels.extend_from_slice(&[c.r, c.g, c.b, c.a]);
-            } else {
-                pixels.extend_from_slice(&[0, 0, 0, 0]);
-            }
+    let mut tile = Image::blank(UVec2::splat(n));
+    tile.fill_with(|x, y| {
+        let dx = x as f32 + 0.5 - center;
+        let dy = y as f32 + 0.5 - center;
+        if dx * dx + dy * dy <= r2 {
+            c
+        } else {
+            SrgbaU8::new(0, 0, 0, 0)
         }
-    }
-    Image::from_srgba8(UVec2::splat(n), pixels)
+    });
+    tile
 }
 
 #[cfg(test)]

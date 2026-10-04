@@ -323,7 +323,7 @@ pub(crate) struct Document {
     pub(crate) main_view: GraphView,
     /// The pane arrangement: open tabs grouped into split panes, plus
     /// the focused group. Persisted like the rest of the view state, and
-    /// mutated only through a `DockOp` — none of which is undoable, so
+    /// mutated only through a `DockOperation` — none of which is undoable, so
     /// Ctrl+Z walks past a tab switch to the last graph edit.
     #[serde(default = "Document::new_layout")]
     pub(crate) layout: DockState<TabRef>,
@@ -468,7 +468,7 @@ impl Document {
         if tab != TabRef::Graph {
             return Err(DocumentValidationError::PinnedTab { tab });
         }
-        if self.layout.dock_id() != Self::new_layout().dock_id() {
+        if self.layout.seed() != Self::new_layout().seed() {
             return Err(DocumentValidationError::ForeignDock);
         }
 
@@ -503,7 +503,7 @@ mod tests {
 
     use super::*;
     use crate::core::document::internals::DocFixture;
-    use palantir::DockOp;
+    use palantir::DockOperation;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two
     /// narrowings of it are strict subsets — so a node that is gone is gone by
@@ -561,7 +561,7 @@ mod tests {
             .find_or_insert(TabRef::ImageViewer(node_id), primary);
         // A split pane too, so the whole tree shape round-trips — not
         // just a flat strip.
-        doc.layout.apply(DockOp::MoveTab {
+        doc.layout.apply(DockOperation::MoveTab {
             tab: TabRef::ImageViewer(node_id),
             to: DockDrop::Split {
                 group: primary,

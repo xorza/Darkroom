@@ -28,7 +28,11 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
                 committed.is_none(),
                 "frame {frame}: an unfocused editor commits nothing"
             );
-            buffered = ui.state_or_default::<EditBuffer>(id).text.clone();
+            buffered = ui
+                .state::<EditBuffer>(id)
+                .expect("the editor keeps its buffer")
+                .text
+                .clone();
         });
         assert_eq!(buffered, "42", "frame {frame}");
     }
@@ -43,7 +47,11 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
                 read_only_label(ui, &theme.const_value_editor, read_only, &value).is_none(),
                 "frame {frame}: a read-only field never commits"
             );
-            buffered = ui.state_or_default::<EditBuffer>(read_only).text.clone();
+            buffered = ui
+                .state::<EditBuffer>(read_only)
+                .expect("the field keeps its buffer")
+                .text
+                .clone();
         });
         assert_eq!(buffered, "42", "frame {frame}");
     }
@@ -51,7 +59,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
 
 /// Escape drops the draft: nothing commits, on the Escape frame or after, and the next idle
 /// frame shows the document value again. Enter and a click elsewhere each commit what was
-/// typed, once.
+/// typed, once — and a blur that follows Enter with no edit between commits nothing more.
 ///
 /// Commits are collected from every record pass, not only the input-observing one: a frame
 /// can run a second pass, and the cancelled draft must not commit there.
@@ -82,7 +90,11 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
                     format_any,
                     80.0,
                 ));
-                text.clone_from(&ui.state_or_default::<EditBuffer>(self.id).text);
+                text.clone_from(
+                    &ui.state::<EditBuffer>(self.id)
+                        .expect("the editor keeps its buffer")
+                        .text,
+                );
             });
             Framed { commits, text }
         }
@@ -124,6 +136,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         );
     }
 
+    let elsewhere = Vec2::new(190.0, 55.0);
     field.focus_and_type(&mut h);
     h.key(Key::Enter);
     assert_eq!(
@@ -131,9 +144,15 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         1,
         "Enter commits the draft once"
     );
+    h.click_at(elsewhere);
+    let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
+    assert!(
+        commits.is_empty(),
+        "a blur with no edit since Enter commits nothing: {commits:?}"
+    );
 
     field.focus_and_type(&mut h);
-    h.click_at(Vec2::new(190.0, 55.0));
+    h.click_at(elsewhere);
     let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).commits).collect();
     assert_eq!(commits.len(), 1, "a click elsewhere commits the draft once");
 }

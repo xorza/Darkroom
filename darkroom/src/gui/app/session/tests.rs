@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{DockOp, Key, Modifiers};
+use palantir::{DockOperation, Key, Modifiers};
 use scenarium::NodeId;
 use std::sync::Arc;
 
@@ -163,7 +163,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
 
     let tab = TabRef::ImageViewer(node_id);
     test.session.open.dirty = false;
-    test.requests.push_view(DockOp::OpenTab { tab });
+    test.requests.push_view(DockOperation::OpenTab { tab });
     test.drain();
     assert!(
         test.session
@@ -241,8 +241,8 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     let mut test = SessionHarness::new(fixture);
     let tab = TabRef::ImageViewer(node_id);
 
-    test.requests.push_view(DockOp::OpenTab { tab });
-    test.requests.push_view(DockOp::OpenTab { tab });
+    test.requests.push_view(DockOperation::OpenTab { tab });
+    test.requests.push_view(DockOperation::OpenTab { tab });
     test.drain();
     assert_eq!(
         test.session
@@ -264,7 +264,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
         .open
         .document
         .layout
-        .apply(DockOp::CloseTab { tab });
+        .apply(DockOperation::CloseTab { tab });
     test.session.reconcile_caches();
     assert!(
         test.session.main_window.image_viewers.is_empty(),

@@ -141,7 +141,7 @@ impl NodePalette<'_> {
             // The field filters the palette rather than editing a value, so Esc
             // closes the whole popup instead of blurring the only thing in it
             // the user can type into.
-            .escape_falls_through()
+            .escape_falls_through(true)
             .placeholder("Search…")
             .style(&self.graph_ctx.theme().inline_rename.text_edit)
             .size((Sizing::fill(1.0), Sizing::HUG))
@@ -247,7 +247,7 @@ fn menu_row(ui: &mut Ui, popup: &CloseHandle, func: &Func) -> bool {
     let resp = MenuItem::new(&func.name).show(ui, popup);
     let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::on(&resp.snapshot()).label(desc).show(ui);
+        Tooltip::on(&resp.snapshot(), desc).show(ui);
     }
     clicked
 }

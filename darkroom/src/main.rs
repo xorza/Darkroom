@@ -56,17 +56,17 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     // ties the window to its launcher entry, so the shell groups the two and
     // takes the taskbar icon from the entry. Wayland windows carry no identity
     // at all without it.
-    let mut window = WindowConfig::new("Darkroom").app_id("com.cssodessa.darkroom");
+    let mut window = WindowConfig::new("Darkroom").with_app_id("com.cssodessa.darkroom");
     if let Some(icon) = load_icon() {
-        window = window.icon(icon);
+        window = window.with_icon(icon);
     }
     if let Ok(Preferences {
         window: Some(w), ..
     }) = &preferences
     {
-        window = window.inner_size(w.size).maximized(w.maximized);
+        window = window.with_inner_size(w.size).with_maximized(w.maximized);
         if let Some(pos) = w.position {
-            window = window.position(pos);
+            window = window.with_position(pos);
         }
     }
     let host = WinitHost::builder(MAIN_WINDOW)
@@ -101,7 +101,9 @@ fn load_icon() -> Option<Image> {
         .ok()?
         .to_rgba8();
     let (w, h) = rgba.dimensions();
-    Some(Image::from_srgba8(UVec2::new(w, h), rgba.into_raw()))
+    Image::from_srgba8(UVec2::new(w, h), rgba.into_raw())
+        .inspect_err(|e| tracing::warn!("window icon rejected: {e}"))
+        .ok()
 }
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to

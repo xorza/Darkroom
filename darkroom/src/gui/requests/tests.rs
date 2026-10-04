@@ -11,8 +11,8 @@ fn remove_node() -> GraphIntent {
     }
 }
 
-fn close_prefs() -> DockOp<TabRef> {
-    DockOp::CloseTab {
+fn close_prefs() -> DockOperation<TabRef> {
+    DockOperation::CloseTab {
         tab: TabRef::Preferences,
     }
 }

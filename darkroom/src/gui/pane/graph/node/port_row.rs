@@ -87,7 +87,7 @@ pub(super) fn ports_row(
     // Every row of every node gets the same track, so the buffer is rebuilt
     // only when a wider node needs more of them or the theme moves the height
     // — not per node. Not a `const`: the height rides the theme's font size.
-    let track = Track::fixed(ui.theme().text.font_size_px * PORT_ROW_HEIGHT_EM);
+    let track = Track::fixed(ui.theme().text.font_size * PORT_ROW_HEIGHT_EM);
     if row_tracks.len() < n_rows || row_tracks.first() != Some(&track) {
         row_tracks.clear();
         row_tracks.resize(n_rows, track);
@@ -97,7 +97,7 @@ pub(super) fn ports_row(
         .size((Sizing::FILL, Sizing::HUG))
         .cols([
             Track::HUG,
-            Track::HUG.max(theme.const_value_editor.max_width),
+            Track::HUG.with_max(theme.const_value_editor.max_width),
             Track::FILL,
             Track::HUG,
         ])
