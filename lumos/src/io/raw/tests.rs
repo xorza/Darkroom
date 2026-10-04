@@ -240,21 +240,6 @@ fn load_raw_valid_file() {
     assert!(mean < 1.0, "Mean is >= 1.0, image may be overexposed");
 }
 
-/// The header dimensions are the sensor's, as the file declares them: the visible area, one
-/// sample per photosite, whatever the demosaic made of it.
-#[cfg(feature = "real-data")]
-#[test]
-fn load_raw_dimensions_match() {
-    use crate::internals::real_data::raw_frames;
-
-    let path = raw_frames("Lights").swap_remove(0);
-    let image = load_raw(&path, &LoadContext::default()).unwrap();
-    assert_eq!(
-        image.metadata.header_dimensions,
-        [image.dimensions().height(), image.dimensions().width(), 1]
-    );
-}
-
 /// LibRaw's own processing hands back the sensor's rows and columns: the visible area's width and
 /// height, not turned by the EXIF orientation nor stretched by the pixel aspect — the settings
 /// the fallback sets. LibRaw turns by the flip it saved at unpack unless `user_flip` overrides it,

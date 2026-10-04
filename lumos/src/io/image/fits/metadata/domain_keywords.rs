@@ -1,5 +1,5 @@
-//! The keywords that carry an image's [`SampleDomain`] and quantization σ through a lumos-written
-//! FITS file.
+//! The keywords that carry an image's [`SampleDomain`], quantization σ and saturation record
+//! through a lumos-written FITS file.
 //!
 //! The samples go out already normalized, so the domain they were normalized in is the one set of
 //! facts a reader cannot recover from the data. Every field is written, the origin of an assumed
@@ -19,6 +19,9 @@ const PEDESTAL: &str = "LUMPED";
 const PEDESTAL_LEVEL: &str = "LUMPEDLV";
 /// In the samples' own (normalized) units, so a reader takes it as it stands.
 const QUANTIZATION_SIGMA: &str = "LUMQSIG";
+/// That every saturated pixel is flagged in the image's flags extension. A calibrated frame has no
+/// level left to mark them by, so a reload learns it here; `DATAMAX` says it for a frame as decoded.
+const SATURATION_FLAGGED: &str = "LUMSATF";
 
 const DECLARED: &str = "DECLARED";
 const ASSUMED: &str = "ASSUMED";
@@ -29,6 +32,7 @@ pub(super) fn write(
     header: &mut Header,
     domain: Option<&SampleDomain>,
     quantization_sigma: Option<f32>,
+    saturation_flagged: bool,
 ) -> fits_well::Result<()> {
     if let Some(domain) = domain {
         header.set(SAMPLE_SCALE, domain.scale)?;
@@ -62,7 +66,15 @@ pub(super) fn write(
         }
         header.set(QUANTIZATION_SIGMA, f64::from(sigma))?;
     }
+    if saturation_flagged {
+        header.set(SATURATION_FLAGGED, true)?;
+    }
     Ok(())
+}
+
+/// Whether the header records that every saturated pixel is flagged.
+pub(crate) fn read_saturation_flagged(header: &Header) -> fits_well::Result<bool> {
+    Ok(header.get_logical(SATURATION_FLAGGED)?.unwrap_or(false))
 }
 
 /// The origin of a recorded [`SAMPLE_SCALE`]. A lumos writer records one with every scale.

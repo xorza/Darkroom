@@ -97,7 +97,7 @@ impl SelectedFits {
             self.selected,
             policy,
             path,
-            self.plan,
+            &self.plan,
             context,
         )?;
         if let Some(flags_hdu) = self.flags_hdu {

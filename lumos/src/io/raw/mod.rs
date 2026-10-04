@@ -283,7 +283,6 @@ impl UnpackedRaw {
             iso: self.iso,
             exposure_time: self.exposure_time,
             ccd_temp: self.ccd_temp,
-            header_dimensions: vec![self.layout.active.height, self.layout.active.width, 1],
             camera_white_balance: self.camera_white_balance,
             provenance: Some(ImageProvenance {
                 container: SourceContainer::CameraRaw,
@@ -341,11 +340,6 @@ impl UnpackedRaw {
             iso: self.iso,
             exposure_time: self.exposure_time,
             ccd_temp: self.ccd_temp,
-            header_dimensions: vec![
-                dimensions.height(),
-                dimensions.width(),
-                dimensions.channels(),
-            ],
             camera_white_balance: self.camera_white_balance,
             provenance: Some(ImageProvenance {
                 container: SourceContainer::CameraRaw,

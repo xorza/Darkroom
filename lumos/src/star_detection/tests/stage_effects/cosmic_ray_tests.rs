@@ -11,7 +11,6 @@ use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
 use crate::star_detection::config::Config;
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::stages::prepared_frame::internals::saturation_level_of;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -42,7 +41,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     let pixels = frame.image.channel(0);
     let size = Size2us::new(pixels.width(), pixels.height());
     let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
-    let saturation = saturation_level_of(&frame.image);
+    let saturation = frame.image.metadata.saturation_level();
     let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;
     assert!(
         lone_stars.len() >= 15,

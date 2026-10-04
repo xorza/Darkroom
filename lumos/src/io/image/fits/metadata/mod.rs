@@ -84,11 +84,7 @@ impl MetadataField {
 /// The observation keywords a FITS header gives, each one `None` when it is absent or given with
 /// a type or value it cannot have: none of them changes a sample, so a writer's odd choice for
 /// one never costs the frame.
-pub(super) fn read_metadata(
-    header: &Header,
-    header_dimensions: Vec<usize>,
-    sample_type: SampleType,
-) -> ImageMetadata {
+pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMetadata {
     let text = |field: MetadataField| field.read(header, read_text);
     let real = |field: MetadataField| field.read(header, Header::get_real);
     ImageMetadata {
@@ -99,7 +95,6 @@ pub(super) fn read_metadata(
         exposure_time: real(MetadataField::ExposureTime),
         iso: MetadataField::Iso.read(header, read_u32),
         sample_type: Some(sample_type),
-        header_dimensions,
         camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
         filter: text(MetadataField::Filter),
         gain: real(MetadataField::Gain),
@@ -116,15 +111,21 @@ pub(super) fn read_metadata(
         dec_deg: read_dec_deg(header),
         pixel_size_x: real(MetadataField::PixelSizeX),
         pixel_size_y: real(MetadataField::PixelSizeY),
-        data_max: real(MetadataField::DataMax),
+        // The decoder fills these: they depend on the decode plan as well as the header.
+        data_max: None,
         provenance: None,
-        // The decoder fills both: they depend on the decode plan as well as the header.
         domain: None,
         quantization_sigma: None,
         mosaic_noise: None,
         saturation_flagged: false,
         calibrated: optional("LUMCAL", header.get_logical("LUMCAL")).unwrap_or(false),
     }
+}
+
+/// The header's `DATAMAX`, in the file's sample units; `None`, with the reason logged, when it is
+/// absent or given in a form it cannot have.
+pub(super) fn read_data_max(header: &Header) -> Option<f64> {
+    MetadataField::DataMax.read(header, Header::get_real)
 }
 
 /// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
@@ -203,6 +204,7 @@ pub(super) fn write_image_metadata(
         header,
         metadata.domain.as_ref(),
         metadata.quantization_sigma,
+        metadata.saturation_flagged,
     )?;
     Ok(())
 }

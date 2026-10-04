@@ -20,8 +20,9 @@ pub(crate) const SATURATION_FRACTION: f32 = 0.95;
 pub struct QualityFlags(u8);
 
 impl QualityFlags {
-    /// The source holds no measurement: FITS NaN or `BLANK`, or a LibRaw `zero_is_bad` zero. The
-    /// sample under it is a finite fill, not data.
+    /// The pixel holds no measurement: FITS NaN or `BLANK`, a LibRaw `zero_is_bad` zero, or a
+    /// calibration master with no measurement there. The sample under it is a finite fill, not
+    /// data.
     pub const NO_DATA: Self = Self(1);
     /// The raw value reached the sensor's linear limit, so the sample is a lower bound, not a
     /// measurement.
@@ -35,6 +36,8 @@ impl QualityFlags {
     /// The flat divisor was clamped at its floor, so the value is corrected by less than its
     /// vignetting asks.
     pub const FLAT_FLOOR: Self = Self(1 << 5);
+    /// The flags under which a sample is no measurement: a fill, or a bound.
+    pub(crate) const UNMEASURED: Self = Self(Self::NO_DATA.0 | Self::SATURATED.0);
     /// Every bit with a meaning; a stored byte holding another was written by something else.
     pub(crate) const KNOWN: Self = {
         let mut bits = 0;

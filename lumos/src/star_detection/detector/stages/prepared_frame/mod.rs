@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{QualityFlags, SATURATION_FRACTION};
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
@@ -201,17 +201,10 @@ fn inverse_variance_weights(sigmas: [f32; 3]) -> [f32; 3] {
     relative.map(|weight| weight / sum)
 }
 
-/// The level a sample of `image` saturates at when its decoder flagged nothing:
-/// [`SATURATION_FRACTION`] of its declared ceiling, `DATAMAX` in the normalized domain, or of that
-/// domain's 1 when it declares none.
-fn saturation_level(image: &LinearImage) -> f32 {
-    SATURATION_FRACTION * image.metadata.data_max.map_or(1.0, |max| max as f32)
-}
-
 /// Mark the saturated pixels of `image`: the decoder's [`QualityFlags::SATURATED`] when it flagged
-/// saturation, which a dark subtraction and a flat division leave exact; otherwise every pixel where
-/// any input channel reaches [`saturation_level`]. Per channel, before the channels are combined:
-/// a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
+/// saturation, which calibration records before it moves the samples; otherwise every pixel where
+/// any input channel reaches its metadata's saturation level. Per channel, before the channels are
+/// combined: a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
 fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
     if image.metadata.saturation_flagged {
         match &image.flags {
@@ -224,22 +217,11 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
         }
         return;
     }
-    let level = saturation_level(image);
+    let level = image.metadata.saturation_level();
     let channels: ArrayVec<&[f32], 3> = (0..image.channels())
         .map(|channel| image.channel(channel).pixels())
         .collect();
     mask.fill_from_predicate(|index| channels.iter().any(|channel| channel[index] >= level));
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::io::image::linear::LinearImage;
-    use crate::star_detection::detector::stages::prepared_frame::saturation_level;
-
-    /// The level the detector marks `image`'s pixels saturated at.
-    pub(crate) fn saturation_level_of(image: &LinearImage) -> f32 {
-        saturation_level(image)
-    }
 }
 
 #[cfg(test)]

@@ -168,8 +168,9 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
     assert_eq!(plan.decoded_bytes, 120_000);
-    // The 120 000 decoded bytes, and two stored chunks of the whole 100 rows at 8 bytes a sample.
-    assert_eq!(plan.peak_bytes, 280_000);
+    // The 120 000 decoded bytes, two stored chunks of the whole 100 rows at 8 bytes a sample, and
+    // the flag plane a float image may need for its NaNs, a byte for each of the 10 000 pixels.
+    assert_eq!(plan.peak_bytes, 290_000);
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,
@@ -189,7 +190,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         )
         .unwrap_err(),
     );
-    assert!(reason.starts_with("estimated peak memory requires 280000 bytes"));
+    assert!(reason.starts_with("estimated peak memory requires 290000 bytes"));
     // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
     // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
     plan.admit_flags_extension(path, 140_000).unwrap();
@@ -198,6 +199,29 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         reason.starts_with("decoded output with its flags requires 140000 bytes"),
         "{reason}"
     );
+
+    // An integer image with no BLANK holds no null, so it has no flag plane until a DATAMAX gives
+    // the decode a level to flag against: 40 000 decoded bytes of f32 and two chunks of 100 rows
+    // at 2 bytes a sample, 80 000, then 10 000 more. Without the DATAMAX a flags extension adds
+    // its own 10 000 bytes to the decoded 40 000 and no decode plane: 50 000.
+    let mono_shape = [100, 100];
+    let mut mono = image_header(16, &mono_shape);
+    let plan_of = |header: &Header| {
+        plan::preflight_fits_image(
+            path,
+            description(header, HduKind::Primary, &mono_shape, Bitpix::I16, 20_160),
+            FitsCubeInterpretation::Reject,
+            FitsFloatScale::Auto,
+            u64::MAX,
+        )
+        .unwrap()
+    };
+    let without = plan_of(&mono);
+    assert_eq!(without.peak_bytes, 80_000);
+    without.admit_flags_extension(path, 50_000).unwrap();
+    assert!(without.admit_flags_extension(path, 49_999).is_err());
+    mono.set("DATAMAX", 30_000.0).unwrap();
+    assert_eq!(plan_of(&mono).peak_bytes, 90_000);
 
     let compressed_shape = [1024, 1024];
     let compressed = compressed_header(-32, &compressed_shape);

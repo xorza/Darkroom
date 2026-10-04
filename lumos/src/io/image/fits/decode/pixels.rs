@@ -48,7 +48,7 @@ pub(super) fn read_stream_hdu(
     selected: FitsHduProvenance,
     policy: FitsChecksumPolicy,
     path: &Path,
-    plan: FitsDecodePlan,
+    plan: &FitsDecodePlan,
     context: &LoadContext,
 ) -> Result<DecodedFitsImage, ImageError> {
     let index = selected.index;
@@ -87,7 +87,7 @@ pub(super) fn read_stream_hdu(
 /// planes are read.
 pub(super) fn read_decoded_hdu<S: SectionRead>(
     header: &Header,
-    plan: FitsDecodePlan,
+    plan: &FitsDecodePlan,
     hdu: FitsHduProvenance,
     path: &Path,
     context: &LoadContext,
@@ -128,7 +128,7 @@ pub(super) fn read_decoded_hdu<S: SectionRead>(
     let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
     let mut planes = ArrayVec::<DecodedPlane, 3>::new();
     for channel in 0..channel_count {
-        planes.push(read_fits_plane(path, &plan, channel, context, sections)?);
+        planes.push(read_fits_plane(path, plan, channel, context, sections)?);
     }
     let checksum = checksum(sections)?;
     let scan = planes
@@ -158,16 +158,17 @@ pub(super) fn read_decoded_hdu<S: SectionRead>(
     let pedestal = domain_keywords::read_pedestal(header)
         .map_err(header_err)?
         .unwrap_or(context.fits.pedestal);
-    let mut metadata = read_metadata(header, plan.shape, plan.sample_type);
+    let mut metadata = read_metadata(header, plan.sample_type);
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
-    if let Some(data_max) = &mut metadata.data_max {
-        *data_max /= f64::from(plan.sample_scale.divisor);
-    }
+    metadata.data_max = plan
+        .data_max
+        .map(|data_max| data_max / f64::from(plan.sample_scale.divisor));
     let saturation = metadata
         .data_max
         .map(|data_max| SATURATION_FRACTION * data_max as f32);
-    metadata.saturation_flagged = saturation.is_some();
+    metadata.saturation_flagged = saturation.is_some()
+        || domain_keywords::read_saturation_flagged(header).map_err(header_err)?;
     let flags = resolve_flags(
         path,
         &mut planes,
