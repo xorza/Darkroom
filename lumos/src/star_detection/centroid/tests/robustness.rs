@@ -16,18 +16,22 @@ fn make_blended_stars(
     pixels
 }
 
-/// One moments step from a star's centre is pulled toward a companion by exactly the weighted share
-/// the window gives it. Under a Gaussian window of `σ_w` around the primary, a Gaussian star of σ
-/// and amplitude A at distance d weighs `A·e^(−d²/2(σ² + σ_w²))` relative to the primary's A₁, and
-/// its weighted light centres at `d·σ_w²/(σ² + σ_w²)`: the step moves by that times `M₂/(M₁ + M₂)`.
-/// Both products lie well inside the stamp, so the sampled sums match to 1e-6.
+/// A companion pulls the converged windowed centre toward itself by exactly what the window gives
+/// it. The centre stops where the windowed mean offset vanishes. Under a Gaussian window of `σ_w`
+/// about `p`, a Gaussian star of σ and amplitude A at `c` weighs `W = A·e^(−(c − p)²/2(σ² + σ_w²))`
+/// and its windowed light centres a share `σ_w²/(σ² + σ_w²)` of the way from `p` to `c`, so the
+/// offset vanishes where `p = W₂·d / (W₁ + W₂)`, a fixed point solved here by bisection. Both
+/// windowed products lie well inside the stamp, so the sampled sums match the integrals, and the
+/// centre lands within twice its tolerance of 1e-5 px.
 ///
 /// The same companion shows in the shape: a round star alone has eccentricity 0 to rounding, and
 /// beside the companion clearly more (measured 0.557 and 0.763).
 #[test]
-fn moments_pull_toward_a_companion_as_derived() {
+fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
     let size = Size2us::new(64, 64);
-    let (sigma2, window2) = (2.5f64 * 2.5, (0.8 * 2.5f64).powi(2));
+    let fwhm = sigma_to_fwhm(2.5);
+    let window = MeasureGrid::new(fwhm).window_sigma;
+    let spread = 2.0 * (2.5f64 * 2.5 + window * window);
     let alone = Measured::flat(
         &SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
             .stamp(size, 0.1),
@@ -49,26 +53,37 @@ fn moments_pull_toward_a_companion_as_derived() {
             amplitude,
         );
         let measured = Measured::flat(&pixels, 0.1, 0.01);
-        let step = refine_centroid(
-            &measured.residual,
-            DVec2::splat(32.0),
-            TEST_STAMP_RADIUS,
-            sigma_to_fwhm(2.5),
-        )
-        .unwrap();
+        let centre = measured
+            .windowed(DVec2::splat(32.0), fwhm)
+            .expect("the centroid converges")
+            .pos;
 
         let d = f64::from(distance);
-        let weight = f64::from(amplitude) / 0.8 * (-d * d / (2.0 * (sigma2 + window2))).exp();
-        let pull = weight / (1.0 + weight) * d * window2 / (sigma2 + window2);
+        let ratio = f64::from(amplitude) / 0.8;
+        let excess = |p: f64| {
+            let primary = (-p * p / spread).exp();
+            let companion = ratio * (-(d - p) * (d - p) / spread).exp();
+            p * (primary + companion) - companion * d
+        };
+        let (mut low, mut high) = (0.0, d / 2.0);
+        for _ in 0..100 {
+            let mid = f64::midpoint(low, high);
+            if excess(mid) < 0.0 {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        let pull = f64::midpoint(low, high);
         assert!(
-            (step.x - 32.0 - pull).abs() <= 1e-6 * pull,
+            (centre.x - 32.0 - pull).abs() <= 2e-5,
             "d {distance}: pulled {} against {pull}",
-            step.x - 32.0
+            centre.x - 32.0
         );
         assert!(
-            step.y == 32.0 || (step.y - 32.0).abs() <= 1e-12,
+            (centre.y - 32.0).abs() <= 1e-12,
             "d {distance}: {}",
-            step.y
+            centre.y
         );
 
         let blended = measured
@@ -102,27 +117,31 @@ fn gaussian_fit_with_contamination() {
     assert!((fit.pos.y - 15.0).abs() <= 1e-9, "{}", fit.pos);
 }
 
-/// Moments where the continuous contraction does not hold: a star of σ 0.7 is undersampled, and
-/// one of σ 8 is cut by the largest stamp at under 2σ. From 0.76 px off, ten steps still reach
-/// 1.3e-2 and 1.9e-2 px (measured), held here to 1.5× that; their FWHMs read 2.171 against a
-/// true 1.648 and 18.02 against 18.84 (measured), pinned to 1e-3 relative.
+/// The windowed centroid where a Gaussian's sampled moments are not exact: a star of σ 0.7 is
+/// undersampled, its windowed light a Gaussian of `σ_e² = σ²σ_w²/(σ² + σ_w²)` = 0.33 at the window
+/// of 1, which pixel-centre samples centre off the truth by a term of order `e^(−2π²σ_e²)`; and one
+/// of σ 8 is cut by the largest stamp at under 2σ, which an off-centre stamp cuts unevenly. From
+/// 0.76 px off both still converge, 0.0126 and 0.0354 px off (measured), held here to 1.5× that. Their FWHMs read 2.171
+/// against a true 1.648 and 18.02 against 18.84 (measured), pinned to 1e-3 relative.
 #[test]
-fn moments_on_undersampled_and_truncated_stars() {
-    for (sigma, side, radius, position_bound, fwhm) in [
-        (0.7f32, 64, 5usize, 0.02, 2.171_242),
-        (8.0, 128, MAX_STAMP_RADIUS, 0.03, 18.024_85),
-    ] {
+fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
+    for (sigma, side, position_bound, fwhm) in
+        [(0.7f32, 64, 0.019, 2.171_242), (8.0, 128, 0.053, 18.024_85)]
+    {
         let start = DVec2::splat((side / 2) as f64);
         let truth = (start + DVec2::new(0.3, 0.7)).as_vec2();
         let pixels = SyntheticStar::new(truth, 0.9, StarProfile::Gaussian { sigma })
             .stamp(Size2us::new(side, side), 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
-        let after =
-            moments_centroid(&measured.residual, start, radius, sigma_to_fwhm(sigma), 10).unwrap();
+        let centre = measured
+            .windowed(start, sigma_to_fwhm(sigma))
+            .expect("the centroid converges")
+            .pos;
         assert!(
-            (after - truth.as_dvec2()).length() <= position_bound,
-            "σ {sigma}: {after}"
+            (centre - truth.as_dvec2()).length() <= position_bound,
+            "σ {sigma}: {centre}"
         );
+        let radius = if sigma < 1.0 { 5 } else { MAX_STAMP_RADIUS };
         let star = measured.compute(start, radius).unwrap();
         assert!(
             (star.fwhm - fwhm).abs() <= 1e-3 * fwhm,
@@ -160,17 +179,15 @@ fn make_rotated_elliptical_star(
 /// Test centroiding on a 45-degree rotated ellipse.
 /// A 4 × 2 ellipse at every angle: its moments are exact, as for an axis-aligned one.
 ///
-/// Centred on a pixel, the light is point-symmetric about the start, so one step stays put (to
-/// 1e-12). The windowed covariance reads eccentricity √(1 − 2²/4²) = 0.866025 and FWHM
-/// 2√(2 ln 2)·√8 = 6.660437 at every angle, to f32 rounding. Started 0.76 px off, the error
-/// contracts per principal axis by `σ²/(σ² + σ_w²)`; the major axis is the slowest, 16/(16 + 4.155)
-/// at the 6 px window, so ten steps leave at most that to the tenth of the start (+1%).
+/// Centred on a pixel, the light is point-symmetric about the start, so the windowed centroid
+/// stays put (to 1e-12). The windowed covariance reads eccentricity √(1 − 2²/4²) = 0.866025 and
+/// FWHM 2√(2 ln 2)·√8 = 6.660437 at every angle, to f32 rounding. Started 0.76 px off, the Newton
+/// gain `σ_w²·(σ_w²·I − C)⁻¹` is a matrix, which turns with the ellipse, so the centroid lands on it
+/// within its tolerance at every angle.
 #[test]
 fn rotated_ellipse_moments_at_every_angle() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
-    let window2 = (0.8 * f64::from(fwhm_to_sigma(6.0))).powi(2);
-    let slowest = 16.0 / (16.0 + window2);
     for degrees in [0.0f32, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0] {
         let angle = degrees.to_radians();
         let centred = Measured::flat(
@@ -178,8 +195,8 @@ fn rotated_ellipse_moments_at_every_angle() {
             0.1,
             0.01,
         );
-        let step = refine_centroid(&centred.residual, centre, 15, 6.0).unwrap();
-        assert!((step - centre).length() <= 1e-12, "{degrees}°: {step}");
+        let still = centred.windowed(centre, 6.0).unwrap().pos;
+        assert!((still - centre).length() <= 1e-12, "{degrees}°: {still}");
         let star = centred.compute(centre, 15).unwrap();
         assert!(
             (star.eccentricity - 0.866_025_4).abs() <= 1e-6,
@@ -198,11 +215,10 @@ fn rotated_ellipse_moments_at_every_angle() {
             0.1,
             0.01,
         );
-        let after = moments_centroid(&offset.residual, centre, 15, 6.0, 10).unwrap();
-        let bound = 1.01 * (centre - truth.as_dvec2()).length() * slowest.powi(10);
+        let after = offset.windowed(centre, 6.0).unwrap().pos;
         assert!(
-            (after - truth.as_dvec2()).length() <= bound,
-            "{degrees}° from off-centre: {after} against {bound}"
+            (after - truth.as_dvec2()).length() <= 1e-4,
+            "{degrees}° from off-centre: {after}"
         );
     }
 }
@@ -287,8 +303,7 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         &unsaturated(&pixels),
         &region,
         &config,
-        expected_fwhm,
-        &StampGrid::new(compute_stamp_radius(expected_fwhm)),
+        &MeasureGrid::new(expected_fwhm),
     )
     .expect("the star measures");
     // FWHM = 2√(2 ln 2)·√(3.5·2) = 6.230268. The covariance is fitted to noiseless samples of its

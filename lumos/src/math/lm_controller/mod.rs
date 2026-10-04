@@ -37,16 +37,14 @@ pub(crate) trait LmProblem<const N: usize> {
 
 /// A converged fit.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the profile fits read only the parameters until position σ reads the rest"
-    )
-)]
 pub(crate) struct LmFit<const N: usize> {
     pub(crate) params: [f64; N],
     pub(crate) chi2: f64,
+    /// The steps the fit took; only the fits' tests read it, to check how fast a fit converges.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "only tests read the step count")
+    )]
     pub(crate) iterations: usize,
     /// The diagonal of `(JᵀWJ)⁻¹` at the solution: each parameter's variance per unit of the
     /// residuals' variance. `None` when the undamped Hessian is singular there.

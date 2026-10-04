@@ -6,12 +6,12 @@
 use super::*;
 use std::f32::consts::PI;
 
-/// One moments step, against what it must return. A star centred on the start stays put: its light
-/// is point-symmetric about the window. A lone pixel `k` columns off moves the centroid onto it
-/// exactly — at k = 5, inside the `stamp_size / 4` = 23/4 limit; at k = 6, beyond it, the step is
-/// refused. No positive light at all, or a stamp off the frame, gives nothing.
+/// The windowed centroid against what it must return. A star centred on the start stays put: its
+/// light is point-symmetric about the window. A lone pixel `k` columns off moves the centre onto it
+/// in one step and stays: at k = 5, within half the stamp radius, 11/2; at k = 6, beyond it, the
+/// centroid is refused. No positive light at all, or a stamp off the frame, gives nothing.
 #[test]
-fn refine_centroid_steps() {
+fn windowed_centroid_limits() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
     let star = Measured::flat(
@@ -20,13 +20,24 @@ fn refine_centroid_steps() {
         0.1,
         0.01,
     );
-    let step = |residual: &Buffer2<f32>, from: DVec2| {
-        refine_centroid(residual, from, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM)
+    let grid = MeasureGrid::new(TEST_EXPECTED_FWHM);
+    let measure = |residual: &Buffer2<f32>, from: DVec2| {
+        WindowedCentroid::measure(
+            residual,
+            from,
+            &grid,
+            WindowedInputs {
+                offset: 0.0,
+                sky_sigma: 0.01,
+                noise_model: None,
+            },
+        )
+        .map(|centre| centre.pos)
     };
-    let centred = step(&star.residual, centre).unwrap();
+    let centred = measure(&star.residual, centre).unwrap();
     assert!((centred - centre).length() <= 1e-12, "{centred}");
     assert_eq!(
-        step(&star.residual, DVec2::new(3.0, 32.0)),
+        measure(&star.residual, DVec2::new(3.0, 32.0)),
         None,
         "off the frame"
     );
@@ -36,27 +47,25 @@ fn refine_centroid_steps() {
         residual[(32 + k, 32)] = 1.0;
         residual
     };
-    assert_eq!(step(&lone(5), centre), Some(DVec2::new(37.0, 32.0)));
-    assert_eq!(step(&lone(6), centre), None, "moved past stamp_size / 4");
+    assert_eq!(measure(&lone(5), centre), Some(DVec2::new(37.0, 32.0)));
+    assert_eq!(
+        measure(&lone(6), centre),
+        None,
+        "moved past half the radius"
+    );
 
     assert_eq!(
-        step(&Buffer2::new_filled(64, 64, 0.0), centre),
+        measure(&Buffer2::new_filled(64, 64, 0.0), centre),
         None,
         "no light"
     );
     assert_eq!(
-        step(&Buffer2::new_filled(64, 64, -0.5), centre),
+        measure(&Buffer2::new_filled(64, 64, -0.5), centre),
         None,
         "only negative light"
     );
 }
 
-/// A clean Gaussian star of amplitude A and σ 2.5, centred on a pixel: its flux is the sampled
-/// Gaussian's sum, 2πσ²·A (the sum over integers equals the integral to e^(−2π²σ²)), less what
-/// falls outside the 23 × 23 stamp — 2·P(|z| > 4.4) ≈ 2.2e-5 of it. Its SNR is that flux over
-/// `σₙ·(2r + 1)`. FWHM and eccentricity do not depend on A; flux and SNR scale with it, to the f32
-/// rounding of the residual (each pixel's `v + 0.1 − 0.1` loses at most 2⁻²⁵·0.2, so the stamp
-/// ≤ 529·6e-9 = 3.2e-6 of a flux near 15).
 #[test]
 fn compute_star_of_a_clean_star() {
     let size = Size2us::new(64, 64);
@@ -150,11 +159,14 @@ fn a_bright_sky_changes_nothing() {
     assert!((bright.fwhm - dark.fwhm).abs() <= 1e-4 * dark.fwhm);
 }
 
-/// One moments step from the true centre under white noise σₙ: the step is a ratio of weighted
-/// sums, so to first order its error is `σₙ·√Σ(w·dx)² / Σ w·I` per axis, with `w` the window and
-/// `I` the noiseless star — computed here from the same stamp. Five of those bound it.
+/// The windowed centroid under white noise σₙ reports the σ the noise gives it. The centre is a
+/// ratio of windowed sums moved by the Newton gain `F = (σ_w² + σ_s²)/σ_w²` of a Gaussian star, so
+/// to first order its error is `F·σₙ·√Σ(w·dx)² / Σ w·I` per axis, with `w` the window and `I` the
+/// noiseless star — computed here from the same stamp. The reported σ reads the noisy stamp, whose
+/// windowed light and spread err by a few percent at this noise, so it agrees within 10%; the
+/// error itself lies within 5 of it.
 #[test]
-fn one_noisy_step_scatters_as_propagated() {
+fn the_windowed_centroid_reports_its_propagated_noise() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
     let clean = SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -163,7 +175,9 @@ fn one_noisy_step_scatters_as_propagated() {
     let mut noisy = clean.clone();
     patterns::add_gaussian_noise(&mut noisy, noise, 21);
 
-    let window2 = (0.8 * f64::from(fwhm_to_sigma(TEST_EXPECTED_FWHM))).powi(2);
+    let grid = MeasureGrid::new(TEST_EXPECTED_FWHM);
+    let window2 = grid.window_sigma * grid.window_sigma;
+    let gain = (window2 + 6.25) / window2;
     let r = TEST_STAMP_RADIUS as isize;
     let (mut spread, mut light) = (0.0f64, 0.0f64);
     for dy in -r..=r {
@@ -174,19 +188,29 @@ fn one_noisy_step_scatters_as_propagated() {
             light += w * value;
         }
     }
-    let bound = 5.0 * f64::from(noise) * spread.sqrt() / light;
+    let expected = gain * f64::from(noise) * spread.sqrt() / light;
 
-    let step = refine_centroid(
+    let measured = WindowedCentroid::measure(
         &Measured::flat(&noisy, 0.1, noise).residual,
         centre,
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
+        &grid,
+        WindowedInputs {
+            offset: 0.0,
+            sky_sigma: noise,
+            noise_model: None,
+        },
     )
     .unwrap();
-    let error = (step - centre).abs();
     assert!(
-        error.x <= bound && error.y <= bound,
-        "{error} against {bound}"
+        (measured.sigma / expected - 1.0).abs() <= 0.1,
+        "{} against {expected}",
+        measured.sigma
+    );
+    let error = (measured.pos - centre).abs();
+    assert!(
+        error.x <= 5.0 * measured.sigma && error.y <= 5.0 * measured.sigma,
+        "{error} against {}",
+        measured.sigma
     );
 }
 
@@ -374,7 +398,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
-    let radius = compute_stamp_radius(4.0);
+    let radius = MeasureGrid::stamp_radius(4.0);
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
         bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
@@ -386,13 +410,9 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
-    let sky_at_fit = compute_annulus_background(
-        &measured.residual,
-        star.pos,
-        radius,
-        annulus_outer_radius(radius),
-    )
-    .expect("annulus has samples");
+    let sky_at_fit =
+        compute_annulus_background(&measured.residual, star.pos, MeasureGrid::new(4.0).annulus)
+            .expect("annulus has samples");
     let expected = compute_star(
         &measured.residual,
         &measured.sky,

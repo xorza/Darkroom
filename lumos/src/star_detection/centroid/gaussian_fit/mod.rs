@@ -16,13 +16,13 @@ mod simd;
 use crate::math::lm_controller::NormalEquations;
 use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
-use crate::star_detection::centroid::fit_is_plausible;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::{fit_is_plausible, position_sigma};
 use glam::DVec2;
 use imaginarium::Buffer2;
 use std::ops::RangeInclusive;
@@ -41,6 +41,8 @@ pub(super) struct GaussianFit {
     pub(super) pos: DVec2,
     /// The profile's covariance, in px².
     pub(super) covariance: Cov2,
+    /// `√((σ_x² + σ_y²)/2)` of `pos`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)`.
+    pub(super) position_sigma: f64,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
     /// `pos`/`covariance` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
@@ -138,13 +140,14 @@ impl GaussianFit {
         noise: Option<FitNoise>,
     ) -> Option<Self> {
         let mut fit = StampFit::prepare::<7>(pixels, pos, grid, background, noise)?;
+        let amplitude_seed = fit.amplitude_seed()?;
 
         // A round seed; the fit finds the elongation and its angle.
         let curvature = 1.0 / (f64::from(fit.sigma_est) * f64::from(fit.sigma_est));
         let initial_params: [f64; 7] = [
             fit.local_pos.x,
             fit.local_pos.y,
-            fit.amplitude_seed(background),
+            amplitude_seed,
             curvature,
             0.0,
             curvature,
@@ -153,7 +156,7 @@ impl GaussianFit {
 
         let model = Gaussian2D {
             max_sigma: grid.radius as f64,
-            min_amplitude: fit.min_amplitude(background),
+            min_amplitude: StampFit::min_amplitude(amplitude_seed),
         };
         let result = fit.fit(&model, grid, initial_params)?;
 
@@ -172,6 +175,7 @@ impl GaussianFit {
         let det = a * c - b * b;
         Some(Self {
             pos: result_pos,
+            position_sigma: position_sigma(&result, fit.stamp.z.len())?,
             covariance: Cov2 {
                 xx: c / det,
                 yy: a / det,

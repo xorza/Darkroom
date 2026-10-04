@@ -1,4 +1,5 @@
 use super::*;
+use crate::star_detection::centroid::measure_grid::AnnulusRadii;
 use crate::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
 
 /// The σ seed is the stamp's second moment about the centre, `σ² = Σw·r² / Σw / 2`: on a centred
@@ -39,82 +40,6 @@ fn sigma_seed_is_the_truncated_second_moment() {
         assert!(
             expected < f64::from(sigma),
             "σ {sigma}: truncation under-reports"
-        );
-    }
-}
-
-/// One moments step contracts the error by `c = σ² / (σ² + σ_w²)`, with the window `σ_w = 0.8 ·
-/// σ(expected FWHM)` held to [1, r / 2]: the window follows the FWHM it is told, at each clamp too.
-/// The truth is 0.76 px from the start, (32, 32) to (32.3, 32.7).
-///
-/// The weighted star is a Gaussian of `σ_p² = σ²σ_w² / (σ² + σ_w²)`, and every stamp here keeps ≥
-/// 4.3 `σ_p` of it on each side: what the stamp cuts moves the ratio by ≤ 1.3e-4 (measured, the r /
-/// 2 case), under the 2e-4 asserted.
-#[test]
-fn refine_centroid_window_follows_the_expected_fwhm() {
-    struct Case {
-        name: &'static str,
-        sigma: f32,
-        expected_fwhm: f32,
-        radius: usize,
-        window_sigma: f64,
-    }
-    let cases = [
-        Case {
-            name: "matched narrow",
-            sigma: 1.5,
-            expected_fwhm: sigma_to_fwhm(1.5),
-            radius: TEST_STAMP_RADIUS,
-            window_sigma: 1.2,
-        },
-        Case {
-            name: "matched wide",
-            sigma: 4.0,
-            expected_fwhm: sigma_to_fwhm(4.0),
-            radius: TEST_STAMP_RADIUS,
-            window_sigma: 3.2,
-        },
-        Case {
-            name: "wide star, narrow window",
-            sigma: 4.0,
-            expected_fwhm: sigma_to_fwhm(1.5),
-            radius: TEST_STAMP_RADIUS,
-            window_sigma: 1.2,
-        },
-        Case {
-            name: "held to 1 px",
-            sigma: 1.5,
-            expected_fwhm: 1.0,
-            radius: TEST_STAMP_RADIUS,
-            window_sigma: 1.0,
-        },
-        Case {
-            name: "held to r / 2",
-            sigma: 1.5,
-            expected_fwhm: sigma_to_fwhm(4.0),
-            radius: 6,
-            window_sigma: 3.0,
-        },
-    ];
-    let truth = Vec2::new(32.3, 32.7).as_dvec2();
-    let start = DVec2::splat(32.0);
-    for case in cases {
-        let pixels = SyntheticStar::new(
-            truth.as_vec2(),
-            0.8,
-            StarProfile::Gaussian { sigma: case.sigma },
-        )
-        .stamp(Size2us::new(64, 64), 0.1);
-        let measured = Measured::flat(&pixels, 0.1, 0.01);
-        let step = refine_centroid(&measured.residual, start, case.radius, case.expected_fwhm)
-            .expect("one step lands");
-        let sigma_sq = f64::from(case.sigma).powi(2);
-        let contraction = sigma_sq / (sigma_sq + case.window_sigma.powi(2));
-        let ratio = (step - truth).length() / (start - truth).length();
-        assert!(
-            (ratio - contraction).abs() <= 2e-4 * contraction,
-            "{}: step ratio {ratio}, expected {contraction}",
-            case.name
         );
     }
 }
@@ -196,21 +121,24 @@ fn stamp_too_small_for_the_parameter_count_is_rejected() {
 }
 
 /// A sky the map left in the residual — a flat pedestal Δ — stays in the flux under `GlobalMap` and
-/// comes out under `LocalAnnulus`, while the moments position, which neither mode touches, is the
-/// same bit for bit.
+/// comes out under `LocalAnnulus`.
 ///
-/// The star is σ = 1.5 on a matched stamp, r = 7, and its annulus runs from 7 to 11 px about the
-/// rounded centre, which the star sits 0.5 px from: there it adds at most A · e^(−6.5² / 2σ²) =
-/// 6.7e-5 to Δ, so the annulus median is Δ to within that and the annulus flux the true flux to
-/// within npix times it. The pedestal adds exactly npix · Δ to the
+/// The star is σ = 1.5 on a matched stamp, r = 7. Its annulus runs from 15 to 22 px, past 99% of a
+/// Moffat's flux and far past the Gaussian's, so its median is Δ to the f32 rounding and the
+/// annulus flux the true flux to within that over npix. The pedestal adds exactly npix · Δ to the
 /// map's flux, to the f32 rounding of each sample (≤ ε of A + Δ) and of the sum.
+///
+/// A flat pedestal barely moves the converged centre: at the fixed point the window is symmetric
+/// about it, so the pedestal's windowed offset vanishes there, to the sampling of the window
+/// (measured 6.4e-7 px, held to 2e-6). With the annulus taking Δ out, the centre is the pedestal
+/// free one to the f32 rounding (measured 2.9e-8 px, held to 1e-7).
 #[test]
 fn local_annulus_removes_a_sky_the_map_left() {
     const AMPLITUDE: f32 = 0.8;
     const PEDESTAL: f32 = 0.02;
     let sigma = 1.5f32;
     let fwhm = sigma_to_fwhm(sigma);
-    let radius = compute_stamp_radius(fwhm);
+    let radius = MeasureGrid::stamp_radius(fwhm);
     assert_eq!(radius, 7);
     let pixels = SyntheticStar::new(
         Vec2::new(64.3, 63.6),
@@ -234,7 +162,12 @@ fn local_annulus_removes_a_sky_the_map_left() {
     let global = measure(&offset, LocalBackgroundMethod::GlobalMap);
     let annulus = measure(&offset, LocalBackgroundMethod::LocalAnnulus);
 
-    assert_eq!(global.pos, annulus.pos);
+    assert!((global.pos - exact.pos).length() <= 2e-6, "{}", global.pos);
+    assert!(
+        (annulus.pos - exact.pos).length() <= 1e-7,
+        "{}",
+        annulus.pos
+    );
     let npix = ((2 * radius + 1) * (2 * radius + 1)) as f64;
     let flux = f64::from(exact.flux);
     let rounding = npix * f64::from(f32::EPSILON) * f64::from(AMPLITUDE + PEDESTAL) * 2.0;
@@ -244,12 +177,10 @@ fn local_annulus_removes_a_sky_the_map_left() {
         "the map keeps {added}, expected {}",
         npix * f64::from(PEDESTAL)
     );
-    let tail = f64::from(AMPLITUDE) * (-6.5f64.powi(2) / (2.0 * f64::from(sigma).powi(2))).exp();
     let removed = f64::from(annulus.flux) - flux;
     assert!(
-        removed.abs() <= npix * tail + rounding,
-        "the annulus leaves {removed} of the pedestal, bound {}",
-        npix * tail + rounding
+        removed.abs() <= rounding,
+        "the annulus leaves {removed} of the pedestal, bound {rounding}"
     );
 }
 
@@ -261,7 +192,11 @@ fn local_annulus_removes_a_sky_the_map_left() {
 fn local_annulus_needs_ten_pixels_in_the_frame() {
     let annulus = |width| {
         let residual = Buffer2::new_filled(width, 5, 0.25f32);
-        compute_annulus_background(&residual, DVec2::splat(1.0), 1, 2)
+        compute_annulus_background(
+            &residual,
+            DVec2::splat(1.0),
+            AnnulusRadii { inner: 1, outer: 2 },
+        )
     };
     assert!(annulus(3).is_none());
     let sky = annulus(4).expect("ten pixels are enough");
@@ -269,23 +204,31 @@ fn local_annulus_needs_ten_pixels_in_the_frame() {
     assert_eq!(sky.noise, 0.0);
 }
 
-/// A stamp inside the frame keeps the whole square ring at distance r in the annulus — every
-/// (±r, dy) and (dx, ±r) with r² ≤ dx² + dy² ≤ 2r² ≤ (1.5r)² — so at least 8r ≥ 32 pixels, far
-/// above the 10 the annulus needs: `measure_star` never falls back to the map for want of them.
+/// The annulus measures the sky around a star and not the star: a 9.0 disk inside the inner
+/// radius, 17 at FWHM 4, leaves a 0.25 sky exactly, with no spread; an annulus wholly outside the
+/// frame has no pixels and falls back to the map. A wide annulus, from 81 at FWHM 20, is
+/// subsampled and still reads the flat sky.
 #[test]
-fn local_annulus_fills_at_the_tightest_stamp() {
-    for radius in MIN_STAMP_RADIUS..=MAX_STAMP_RADIUS {
-        let side = 2 * radius + 1;
-        let residual = Buffer2::new_filled(side, side, 0.25f32);
-        let corner = DVec2::splat(radius as f64);
-        assert_eq!(
-            stamp_centre(corner, Size2us::new(side, side), radius),
-            Some(Vec2us::new(radius, radius))
-        );
-        let sky =
-            compute_annulus_background(&residual, corner, radius, annulus_outer_radius(radius));
-        assert!(sky.is_some(), "radius {radius}");
+fn the_annulus_reads_the_sky_around_the_star() {
+    let size = Size2us::new(240, 240);
+    let centre = DVec2::splat(120.0);
+    let mut residual = Buffer2::new_filled(size.width, size.height, 0.25f32);
+    for y in 104..137 {
+        for x in 104..137 {
+            if (x as f64 - 120.0).hypot(y as f64 - 120.0) < 16.0 {
+                residual[(x, y)] = 9.0;
+            }
+        }
     }
+    for fwhm in [4.0, 20.0] {
+        let grid = MeasureGrid::new(fwhm);
+        let sky = compute_annulus_background(&residual, centre, grid.annulus).unwrap();
+        assert_eq!((sky.offset, sky.noise), (0.25, 0.0), "FWHM {fwhm}");
+    }
+    let outside = DVec2::splat(-200.0);
+    assert!(
+        compute_annulus_background(&residual, outside, MeasureGrid::new(4.0).annulus).is_none()
+    );
 }
 
 /// The seed must respect the ceiling it is handed, because the optimizer clamps to that same

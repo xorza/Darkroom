@@ -13,6 +13,9 @@ use crate::internals::synthetic::patterns;
 use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_to_sigma, sigma_to_fwhm};
 use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::centroid::*;
 use crate::star_detection::config::Config;
 use crate::star_detection::config::background_config::BackgroundConfig;
@@ -25,7 +28,7 @@ use crate::star_detection::detector::stages::detect::internals::detect_stars_tes
 const TEST_EXPECTED_FWHM: f32 = 5.9;
 
 /// The stamp `measure_star` would use at [`TEST_EXPECTED_FWHM`]: ceil(1.75 · 5.9) = 11.
-const TEST_STAMP_RADIUS: usize = compute_stamp_radius(TEST_EXPECTED_FWHM);
+const TEST_STAMP_RADIUS: usize = MeasureGrid::stamp_radius(TEST_EXPECTED_FWHM);
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
@@ -80,8 +83,7 @@ impl Measured {
         }
     }
 
-    /// `measure_star` on `region` with its stamp sized from `expected_fwhm`, as the measure stage
-    /// runs it.
+    /// `measure_star` on `region` with the grid of `expected_fwhm`, as the measure stage runs it.
     fn measure(
         &self,
         region: &Region,
@@ -94,8 +96,22 @@ impl Measured {
             &self.saturation,
             region,
             config,
-            expected_fwhm,
-            &StampGrid::new(compute_stamp_radius(expected_fwhm)),
+            &MeasureGrid::new(expected_fwhm),
+        )
+    }
+
+    /// The windowed centroid from `start` with the grid of `expected_fwhm`, the global sky, the
+    /// test noise of 0.01 and no noise model.
+    fn windowed(&self, start: DVec2, expected_fwhm: f32) -> Option<WindowedCentroid> {
+        WindowedCentroid::measure(
+            &self.residual,
+            start,
+            &MeasureGrid::new(expected_fwhm),
+            WindowedInputs {
+                offset: 0.0,
+                sky_sigma: 0.01,
+                noise_model: None,
+            },
         )
     }
 

@@ -10,6 +10,10 @@ use crate::star_detection::roundness::Roundness;
 pub struct Star {
     /// Position (sub-pixel accurate).
     pub pos: DVec2,
+    /// The position's standard error, `√((σ_x² + σ_y²)/2)` in pixels: from the profile fit's
+    /// covariance `(JᵀWJ)⁻¹·χ²/(n − p)`, or from the windowed centroid's propagated pixel noise when
+    /// no fit ran or it failed.
+    pub position_sigma: f64,
     /// Total flux (sum of background-subtracted pixel values).
     pub flux: f32,
     /// Full Width at Half Maximum in pixels.
@@ -62,6 +66,7 @@ pub(crate) mod internals {
         pub(crate) fn at(pos: DVec2) -> Self {
             Self {
                 pos,
+                position_sigma: 0.01,
                 flux: 100.0,
                 fwhm: 3.0,
                 eccentricity: 0.1,

@@ -3,8 +3,8 @@
 //! Takes detected regions and computes sub-pixel centroids, flux, FWHM,
 //! and quality metrics for each candidate star, on the measurement plane.
 
-use crate::star_detection::centroid::stamp::StampGrid;
-use crate::star_detection::centroid::{compute_stamp_radius, measure_star};
+use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::measurement_config::MeasurementConfig;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
@@ -31,9 +31,9 @@ pub(crate) fn measure(
 
     let expected_fwhm = expected_fwhm.unwrap_or(UNKNOWN_FWHM);
 
-    // One grid for the whole detection: `expected_fwhm` fixes the stamp radius, so every
-    // candidate below fits over the same coordinates.
-    let grid = StampGrid::new(compute_stamp_radius(expected_fwhm));
+    // One grid for the whole detection: `expected_fwhm` fixes the stamp, the window and the
+    // annulus, so every candidate below is measured over the same ones.
+    let grid = MeasureGrid::new(expected_fwhm);
 
     regions
         .par_iter()
@@ -44,7 +44,6 @@ pub(crate) fn measure(
                 &frame.saturation,
                 region,
                 config,
-                expected_fwhm,
                 &grid,
             )
         })
