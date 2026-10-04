@@ -104,15 +104,31 @@ fn position_sigma<const N: usize>(fit: &LmFit<N>, samples: usize) -> Option<f64>
 ///
 /// Returns `None` if the candidate fails quality checks during measurement.
 pub(super) fn measure_star(
-    residual: &Buffer2<f32>,
-    sky: &SkyNoise,
-    saturation: &BitBuffer2,
+    planes: MeasurePlanes<'_>,
     region: &Region,
     config: &MeasurementConfig,
     grid: &MeasureGrid,
 ) -> Option<Star> {
+    let MeasurePlanes {
+        residual,
+        sky,
+        saturation,
+        no_data,
+    } = planes;
     let stamp_radius = grid.stamp.radius;
     let start = DVec2::new(region.peak.x as f64, region.peak.y as f64);
+    // A stamp over a pixel with no measurement reads its fill as one, so such a star is not
+    // measured: at its peak, and again at the centre it moves to.
+    let size = Size2us::new(residual.width(), residual.height());
+    let holds_no_data = |at: DVec2| {
+        no_data.is_some_and(|no_data| {
+            stamp_centre(at, size, stamp_radius)
+                .is_some_and(|centre| no_data.any_in_square(centre, stamp_radius))
+        })
+    };
+    if holds_no_data(start) {
+        return None;
+    }
 
     // None in GlobalMap mode, or when fewer than 10 annulus pixels lie in the frame. A missing
     // annulus leaves the map's noise at the star, held to the frame's floor, for the centroid and
@@ -120,7 +136,9 @@ pub(super) fn measure_star(
     // the stamp only where nothing better was measured.
     let annulus_at = |at: DVec2| match config.local_background {
         LocalBackgroundMethod::GlobalMap => None,
-        LocalBackgroundMethod::LocalAnnulus => LocalBackground::measure(residual, at, grid.annulus),
+        LocalBackgroundMethod::LocalAnnulus => {
+            LocalBackground::measure(residual, no_data, at, grid.annulus)
+        }
     };
     let start_annulus = annulus_at(start);
     let (local_offset, local_noise) = start_annulus
@@ -182,7 +200,10 @@ pub(super) fn measure_star(
         CentroidMethod::WeightedMoments => {}
     }
 
-    // `compute_annulus_background` samples by rounded centre, so the annulus measured at the start
+    if holds_no_data(pos) {
+        return None;
+    }
+    // `LocalBackground::measure` samples by rounded centre, so the annulus measured at the start
     // stands unless the centre moved to another pixel.
     let annulus_background = if pos.round() == start.round() {
         start_annulus
@@ -217,6 +238,16 @@ pub(super) fn measure_star(
     }
 
     Some(star)
+}
+
+/// The frame planes a star is measured on: the residual, its sky noise, and which pixels are
+/// saturated and which hold no measurement.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MeasurePlanes<'a> {
+    pub(super) residual: &'a Buffer2<f32>,
+    pub(super) sky: &'a SkyNoise,
+    pub(super) saturation: &'a BitBuffer2,
+    pub(super) no_data: Option<&'a BitBuffer2>,
 }
 
 /// A profile fit from `start`, fitted again once from its own centre when it moved more than half

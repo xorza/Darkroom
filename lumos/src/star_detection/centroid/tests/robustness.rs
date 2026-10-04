@@ -306,9 +306,12 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
     };
     let expected_fwhm = 6.23;
     let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
+        MeasurePlanes {
+            residual: &bg.residual_of(&pixels),
+            sky: &bg.sky_noise(),
+            saturation: &unsaturated(&pixels),
+            no_data: None,
+        },
         &region,
         &config,
         &MeasureGrid::new(expected_fwhm),

@@ -16,10 +16,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ---
 
-## 8. Missing-data masks are dropped after decode
-
-- [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
-  - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
 ## 15. Spill and memory planning disagree with the machine
 
@@ -516,6 +512,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 4. Done: each of the five files with several major types holds one: `memory/` has `ChunkMemoryLayout` and `MemoryPlan` (with its inputs `RunShape` and `PerFrameBytes`) in their own files; `pipeline/` has `PipelineFrame`, `DetectedFrame` and `FrameTier` (with its satellites `StagePlan` and `StoredWarp`); `progress/` has `StackingProgress` (with `StackingStage`) and `ProgressCallback`; `concurrency/` has `UnsafeSendPtr` and `JobScratchPool` (with its lease). The free fns 26.25 named are methods where a type owns them: the frame footprints are `ImageDimensions::{frame_bytes, quality_plane_bytes, flag_plane_bytes}`, the FITS error constructors `ImageError::{fits, fits_unsupported, scientific_rejection}` (and a cancellation the decode built inline uses `ImageError::cancelled`), `Denoise::denoise_plane`, `MultiThresholdParams::deblend` and the new `LocalMaximaParams::deblend`, `LocalBackground::measure`, `Cov2::windowed` and `BitBuffer2::dilate`. Items 26.25 and 26.26 are closed. Deviation: `stamp_centre`, and the spill's `write_file` and `map_file`, stay module functions: they take a position, a size and a path, which no lumos type owns.
 
 5. Done: the cosmic-ray mask grows as astroscrappy's does — the 3×3 box about each hit kept where `S' > sigclip`, then the box about that kept where `S' > sigclip·sigfrac`, with no contrast test on either — word by word over the bit mask; a test pins both rings and the absent contrast test. The hot-pixel σ takes its tail from the lower side, the median less the 1st percentile over `Φ⁻¹(0.99)`, which hot pixels never reach at any density: a dark with 10% of its pixels 20σ warm now flags all of them, where the absolute 99th percentile sat among them and flagged none. That tail no longer absorbs the tile mesh's error on steep amp glow (−3.5e-4 between centres, +1.5e-3 past the last one), so each pixel the mesh calls hot is confirmed against a robust plane through its colour's photosites 6 to 8 px around it (`RingReference`: median level, clip, plane, clip, plane), which follows the glow, also one-sided at a frame edge, and passes over points and compact clusters. Items 18.1 and 18.2 are closed.
+
+6. Done: a star whose stamp holds a pixel with no data is not measured, checked at its peak and again at the centre it moves to (`BitBuffer2::any_in_square`), and the sky annulus leaves such pixels out — as photutils masks them and SExtractor flags such objects; for a registration catalogue the star is better gone than measured on a fill. `measure_star` takes its frame planes as one `MeasurePlanes`. Item 8.2 is closed.
 
 # Decisions
 

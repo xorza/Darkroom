@@ -14,9 +14,9 @@ use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
-use crate::star_detection::centroid::measure_star;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
+use crate::star_detection::centroid::{MeasurePlanes, measure_star};
 use crate::star_detection::centroid::{StarBackground, compute_star};
 use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::config::detection_config::DetectionConfig;
@@ -58,9 +58,12 @@ fn bench_measure_star(b: ::quickbench::Bencher, star: &SingleStar, config: &Meas
     let grid = MeasureGrid::new(4.0);
     b.bench(|| {
         black_box(measure_star(
-            black_box(&star.residual),
-            black_box(&star.sky),
-            &star.saturation,
+            MeasurePlanes {
+                residual: black_box(&star.residual),
+                sky: black_box(&star.sky),
+                saturation: &star.saturation,
+                no_data: None,
+            },
             black_box(region),
             black_box(config),
             black_box(&grid),
@@ -141,7 +144,19 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     b.bench(|| {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config, &grid))
+            .filter_map(|r| {
+                measure_star(
+                    MeasurePlanes {
+                        residual: &residual,
+                        sky: &sky,
+                        saturation: &saturation,
+                        no_data: None,
+                    },
+                    r,
+                    &config,
+                    &grid,
+                )
+            })
             .collect();
         black_box(stars)
     });
@@ -183,7 +198,19 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("weighted_moments", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_moments, &grid))
+            .filter_map(|r| {
+                measure_star(
+                    MeasurePlanes {
+                        residual: &residual,
+                        sky: &sky,
+                        saturation: &saturation,
+                        no_data: None,
+                    },
+                    r,
+                    &config_moments,
+                    &grid,
+                )
+            })
             .collect();
         black_box(stars)
     });
@@ -191,7 +218,19 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("gaussian_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_gaussian, &grid))
+            .filter_map(|r| {
+                measure_star(
+                    MeasurePlanes {
+                        residual: &residual,
+                        sky: &sky,
+                        saturation: &saturation,
+                        no_data: None,
+                    },
+                    r,
+                    &config_gaussian,
+                    &grid,
+                )
+            })
             .collect();
         black_box(stars)
     });
@@ -199,7 +238,19 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("moffat_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_moffat, &grid))
+            .filter_map(|r| {
+                measure_star(
+                    MeasurePlanes {
+                        residual: &residual,
+                        sky: &sky,
+                        saturation: &saturation,
+                        no_data: None,
+                    },
+                    r,
+                    &config_moffat,
+                    &grid,
+                )
+            })
             .collect();
         black_box(stars)
     });

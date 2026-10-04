@@ -130,9 +130,12 @@ impl Measured {
         expected_fwhm: f32,
     ) -> Option<Star> {
         measure_star(
-            &self.residual,
-            &self.sky,
-            &self.saturation,
+            MeasurePlanes {
+                residual: &self.residual,
+                sky: &self.sky,
+                saturation: &self.saturation,
+                no_data: None,
+            },
             region,
             config,
             &MeasureGrid::new(expected_fwhm),

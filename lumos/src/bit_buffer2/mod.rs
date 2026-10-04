@@ -268,6 +268,39 @@ impl BitBuffer2 {
         }
     }
 
+    /// Whether any pixel of the square `radius` either side of `centre`, clipped to the buffer, is
+    /// set: word by word along each of its rows.
+    pub(crate) fn any_in_square(&self, centre: Vec2us, radius: usize) -> bool {
+        if self.size.width == 0 || self.size.height == 0 {
+            return false;
+        }
+        let (x0, x1) = (
+            centre.x.saturating_sub(radius),
+            (centre.x + radius).min(self.size.width - 1),
+        );
+        let (y0, y1) = (
+            centre.y.saturating_sub(radius),
+            (centre.y + radius).min(self.size.height - 1),
+        );
+        (y0..=y1).any(|y| {
+            let (first, last) = (y * self.stride + x0, y * self.stride + x1);
+            (first / BITS_PER_WORD..=last / BITS_PER_WORD).any(|word| {
+                let low = if word == first / BITS_PER_WORD {
+                    first % BITS_PER_WORD
+                } else {
+                    0
+                };
+                let high = if word == last / BITS_PER_WORD {
+                    last % BITS_PER_WORD
+                } else {
+                    BITS_PER_WORD - 1
+                };
+                let mask = (u64::MAX >> (BITS_PER_WORD - 1 - high)) & (u64::MAX << low);
+                self.words[word] & mask != 0
+            })
+        })
+    }
+
     /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
     /// — a sparse mask costs a pass over its words, not over its pixels. Row padding is masked
     /// off, whatever it holds.

@@ -278,3 +278,29 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
     );
     assert_eq!(tail_only.count_ones(), 0, "and still never reaches a count");
 }
+
+/// A square finds a set bit inside it and only there, across word boundaries and clipped at the
+/// buffer's edges. On 130 × 20 with (64, 5) set — the first bit of a row's second word — the square
+/// of 3 about (61, 5) reaches column 64 and finds it, about (60, 5) stops at 63; about (64, 8) it
+/// reaches row 5, about (64, 9) row 6. With (129, 19) set, a square about (126, 16) reaches the
+/// corner. About (0, 0) the square of 5 is clipped to the first 6 rows and columns: (5, 5) is in
+/// it, (6, 0) is not.
+#[test]
+fn a_square_finds_the_bits_inside_it() {
+    let mut buffer = BitBuffer2::new_default(Size2us::new(130, 20));
+    buffer.set_at(Vec2us::new(64, 5), true);
+    assert!(buffer.any_in_square(Vec2us::new(61, 5), 3));
+    assert!(!buffer.any_in_square(Vec2us::new(60, 5), 3));
+    assert!(buffer.any_in_square(Vec2us::new(64, 8), 3));
+    assert!(!buffer.any_in_square(Vec2us::new(64, 9), 3));
+    buffer.set_at(Vec2us::new(129, 19), true);
+    assert!(buffer.any_in_square(Vec2us::new(126, 16), 3));
+    assert!(!buffer.any_in_square(Vec2us::new(125, 16), 3));
+
+    let mut corner = BitBuffer2::new_default(Size2us::new(130, 20));
+    corner.set_at(Vec2us::new(5, 5), true);
+    assert!(corner.any_in_square(Vec2us::new(0, 0), 5));
+    let mut outside = BitBuffer2::new_default(Size2us::new(130, 20));
+    outside.set_at(Vec2us::new(6, 0), true);
+    assert!(!outside.any_in_square(Vec2us::new(0, 0), 5));
+}

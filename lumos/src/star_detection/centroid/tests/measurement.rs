@@ -414,9 +414,13 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
-    let sky_at_fit =
-        LocalBackground::measure(&measured.residual, star.pos, MeasureGrid::new(4.0).annulus)
-            .expect("annulus has samples");
+    let sky_at_fit = LocalBackground::measure(
+        &measured.residual,
+        None,
+        star.pos,
+        MeasureGrid::new(4.0).annulus,
+    )
+    .expect("annulus has samples");
     let expected = compute_star(
         &measured.residual,
         star.pos,
@@ -524,4 +528,70 @@ fn empty_sky_stamps_measure_no_signal() {
         // The bound faces stamps only where some measured.
         assert_ne!(measured, 0, "r = {radius}");
     }
+}
+
+/// A pixel with no measurement inside a star's stamp drops the star: its fill would read as light
+/// or sky. One beside the stamp leaves the star as it was. Those in the sky annulus are left out
+/// of the sky. The star is a Gaussian of σ 2.5 at (32, 32) on a flat sky; the stamp reaches 11
+/// pixels.
+#[test]
+fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
+    let size = Size2us::new(80, 80);
+    let centre = DVec2::splat(32.0);
+    let pixels = SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(size, 0.1);
+    let star = Measured::flat(&pixels, 0.1, 0.01);
+    let region = star.region_at(centre);
+    let config = MeasurementConfig {
+        local_background: LocalBackgroundMethod::LocalAnnulus,
+        ..MeasurementConfig::default()
+    };
+    let grid = MeasureGrid::new(TEST_EXPECTED_FWHM);
+    assert_eq!(grid.stamp.radius, 11);
+    let measure = |residual: &Buffer2<f32>, no_data: &BitBuffer2| {
+        measure_star(
+            MeasurePlanes {
+                residual,
+                sky: &star.sky,
+                saturation: &star.saturation,
+                no_data: Some(no_data),
+            },
+            &region,
+            &config,
+            &grid,
+        )
+    };
+    let clean = measure(&star.residual, &BitBuffer2::new_default(size)).unwrap();
+
+    let mut inside = BitBuffer2::new_default(size);
+    inside.set_at(Vec2us::new(43, 32), true);
+    assert!(
+        measure(&star.residual, &inside).is_none(),
+        "11 px out: in the stamp"
+    );
+
+    let mut beside = BitBuffer2::new_default(size);
+    beside.set_at(Vec2us::new(44, 32), true);
+    let kept = measure(&star.residual, &beside).unwrap();
+    assert_eq!((kept.pos, kept.flux), (clean.pos, clean.flux));
+
+    // The annulus pixels of row 32 to the right hold no data: the sky is measured without them,
+    // one sample fewer for each, and a fill there changes nothing.
+    let annulus = grid.annulus;
+    let right = (32 + annulus.inner)..=(32 + annulus.outer);
+    let mut masked = BitBuffer2::new_default(size);
+    let mut filled = star.residual.clone();
+    for x in right.clone() {
+        masked.set_at(Vec2us::new(x, 32), true);
+        filled[(x, 32)] = 0.02;
+    }
+    let all = LocalBackground::measure(&star.residual, None, centre, annulus).unwrap();
+    let without = LocalBackground::measure(&filled, Some(&masked), centre, annulus).unwrap();
+    assert_eq!(without.samples, all.samples - right.count());
+    let unfilled =
+        LocalBackground::measure(&star.residual, Some(&masked), centre, annulus).unwrap();
+    assert_eq!(
+        (without.offset, without.noise),
+        (unfilled.offset, unfilled.noise)
+    );
 }
