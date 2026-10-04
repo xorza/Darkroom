@@ -96,15 +96,8 @@ fn gaussian_fit_with_contamination() {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .add_exact(&mut pixels);
-    let fit = GaussianFit::new(
-        &pixels,
-        DVec2::splat(15.0),
-        &StampGrid::new(8),
-        0.1,
-        None,
-        &GaussianFitConfig::default(),
-    )
-    .expect("the fit lands");
+    let fit = GaussianFit::new(&pixels, DVec2::splat(15.0), &StampGrid::new(8), 0.1, None)
+        .expect("the fit lands");
     assert!((fit.pos.x - 15.0 - 0.37246).abs() <= 1e-4, "{}", fit.pos);
     assert!((fit.pos.y - 15.0).abs() <= 1e-9, "{}", fit.pos);
 }
@@ -217,7 +210,7 @@ fn rotated_ellipse_moments_at_every_angle() {
 /// The Gaussian fit recovers a rotated ellipse's full covariance, not only its axis projections.
 #[test]
 fn gaussian_fit_rotated_ellipse() {
-    use crate::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
+    use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 
     let width = 31;
     let height = 31;
@@ -234,15 +227,12 @@ fn gaussian_fit_rotated_ellipse() {
         FRAC_PI_4,
         0.8,
     );
-
-    let config = GaussianFitConfig::default();
     let result = GaussianFit::new(
         &pixels,
         DVec2::new(true_cx, true_cy),
         &StampGrid::new(8),
         background,
         None,
-        &config,
     );
 
     assert!(result.is_some(), "Should fit rotated ellipse");

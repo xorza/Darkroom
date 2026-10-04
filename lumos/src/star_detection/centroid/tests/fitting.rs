@@ -27,16 +27,8 @@ fn every_method_on_a_sub_pixel_grid() {
             let gaussian =
                 SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma: 2.5 })
                     .stamp(size, 0.1);
-            let fit = GaussianFit::new(
-                &gaussian,
-                seed,
-                &StampGrid::new(8),
-                0.1,
-                None,
-                &GaussianFitConfig::default(),
-            )
-            .expect("the Gaussian fit lands");
-            assert!(fit.converged, "Gaussian at {truth}");
+            let fit = GaussianFit::new(&gaussian, seed, &StampGrid::new(8), 0.1, None)
+                .expect("the Gaussian fit lands");
             assert!(
                 (fit.pos - truth).length() <= 1e-6,
                 "Gaussian at {truth}: {}",
@@ -52,13 +44,9 @@ fn every_method_on_a_sub_pixel_grid() {
                 },
             )
             .stamp(size, 0.1);
-            let config = MoffatFitConfig {
-                fixed_beta: 2.5,
-                ..Default::default()
-            };
-            let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, &config)
+            let beta = 2.5;
+            let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, beta)
                 .expect("the Moffat fit lands");
-            assert!(fit.converged, "Moffat at {truth}");
             assert!(
                 (fit.pos - truth).length() <= 1e-6,
                 "Moffat at {truth}: {}",

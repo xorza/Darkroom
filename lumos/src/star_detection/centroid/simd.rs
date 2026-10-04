@@ -10,8 +10,9 @@
 //! `fma(j, j, h)` are one value. The last, partial vector pads its samples with zeros and its
 //! weights with zeros, so the padding lanes add exact zeros wherever the model is finite there.
 
+use crate::math::lm_controller::NormalEquations;
 use crate::simd::{F64_LANES, F64x4, Isa, Kernel};
-use crate::star_detection::centroid::lm_optimizer::{FitData, NormalEquations};
+use crate::star_detection::centroid::lm_optimizer::FitData;
 
 /// One vector of a stamp's samples: positions and values.
 #[derive(Debug, Clone, Copy)]
@@ -218,8 +219,9 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P,
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::math::lm_controller::NormalEquations;
     use crate::simd::tier::Tier;
-    use crate::star_detection::centroid::lm_optimizer::{FitData, NormalEquations};
+    use crate::star_detection::centroid::lm_optimizer::FitData;
     use crate::star_detection::centroid::simd::{BatchModel, Chi2Kernel, NormalEquationsKernel};
 
     /// Every entry's bits, Hessian then gradient then χ².

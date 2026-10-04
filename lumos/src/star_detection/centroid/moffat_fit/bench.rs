@@ -8,7 +8,7 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
+use crate::star_detection::centroid::moffat_fit::MoffatFit;
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
@@ -22,10 +22,7 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
         },
     )
     .stamp(Size2us::new(17, 17), 0.1);
-    let config = MoffatFitConfig {
-        fixed_beta: 2.5,
-        ..Default::default()
-    };
+    let beta = 2.5;
 
     b.bench(|| {
         black_box(MoffatFit::new(
@@ -34,7 +31,7 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
             black_box(&StampGrid::new(8)),
             black_box(0.1),
             None,
-            black_box(&config),
+            black_box(beta),
         ))
     });
 }
@@ -51,10 +48,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
         },
     )
     .stamp(Size2us::new(25, 25), 0.1);
-    let config = MoffatFitConfig {
-        fixed_beta: 2.5,
-        ..Default::default()
-    };
+    let beta = 2.5;
 
     b.bench(|| {
         black_box(MoffatFit::new(
@@ -63,7 +57,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
             black_box(&StampGrid::new(12)),
             black_box(0.1),
             None,
-            black_box(&config),
+            black_box(beta),
         ))
     });
 }

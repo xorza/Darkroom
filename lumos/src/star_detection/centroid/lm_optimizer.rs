@@ -1,65 +1,6 @@
-//! Levenberg-Marquardt optimizer for profile fitting.
-//!
-//! Generic implementation that can be used for both Gaussian and Moffat fitting.
-//! Uses f64 throughout for numerical stability.
+//! The profile models' side of a fit: the samples, and the model as [`LmController`] reads it.
 
-use crate::math::linear_system;
-
-/// Pivot magnitude below which the damped Hessian counts as singular and the step is abandoned.
-///
-/// Three orders tighter than the distortion fits' threshold because the two matrices are not on one
-/// scale: this one is built from pixel fluxes over a stamp, theirs from coordinates normalized to
-/// ~[-1, 1].
-const SINGULAR_PIVOT: f64 = 1e-15;
-
-/// Configuration for Levenberg-Marquardt optimization.
-#[derive(Debug, Clone)]
-pub(super) struct LMConfig {
-    /// Maximum iterations.
-    pub(super) max_iterations: usize,
-    /// Convergence threshold for parameter changes.
-    pub(super) convergence_threshold: f64,
-    /// Initial damping parameter.
-    pub(super) initial_lambda: f64,
-    /// Factor to increase lambda on failed step.
-    pub(super) lambda_up: f64,
-    /// Factor to decrease lambda on successful step.
-    pub(super) lambda_down: f64,
-}
-
-impl Default for LMConfig {
-    fn default() -> Self {
-        Self {
-            max_iterations: 50,
-            convergence_threshold: 1e-8,
-            initial_lambda: 0.001,
-            lambda_up: 10.0,
-            lambda_down: 0.1,
-        }
-    }
-}
-
-/// Result of L-M optimization.
-///
-/// `chi2` and `iterations` are the run's report: the fit models read them only into their
-/// `cfg(test)` diagnostics, so a release build never looks at either. They are kept ungated
-/// anyway — the loop computes both regardless (χ² drives the accept test, the count is the loop
-/// variable), so carrying them costs two moves, while gating them would push `#[cfg]` into the
-/// optimizer's inner loop and save nothing.
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "a release build reads neither `chi2` nor `iterations`"
-    )
-)]
-pub(super) struct LMResult<const N: usize> {
-    pub(super) params: [f64; N],
-    pub(super) chi2: f64,
-    pub(super) converged: bool,
-    pub(super) iterations: usize,
-}
+use crate::math::lm_controller::{LmController, LmFit, LmProblem, NormalEquations};
 
 /// The samples a model is fit against, with optional per-pixel inverse-variance
 /// weights (`None` ≡ all 1). All three coordinate slices are indexed in lockstep.
@@ -89,30 +30,8 @@ impl<'a> FitData<'a> {
     }
 }
 
-/// One L-M step's normal equations: the Hessian `J^T·W·J`, the gradient `J^T·W·r`, and χ².
-///
-/// Accumulation fills the Hessian's upper triangle only; [`Self::mirror_lower_triangle`]
-/// completes it once the last sample has been added.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct NormalEquations<const N: usize> {
-    pub(super) hessian: [[f64; N]; N],
-    pub(super) gradient: [f64; N],
-    pub(super) chi2: f64,
-}
-
-impl<const N: usize> NormalEquations<N> {
-    /// Copy the accumulated upper triangle into the lower one, making the Hessian symmetric.
-    pub(super) fn mirror_lower_triangle(&mut self) {
-        for i in 1..N {
-            for j in 0..i {
-                self.hessian[i][j] = self.hessian[j][i];
-            }
-        }
-    }
-}
-
 /// Trait for models that can be fit with L-M optimization.
-pub(super) trait LMModel<const N: usize> {
+pub(super) trait LMModel<const N: usize>: std::fmt::Debug {
     /// Evaluate the model at a point.
     fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
@@ -133,93 +52,40 @@ pub(super) trait LMModel<const N: usize> {
     /// [`Self::batch_build_normal_equations`] takes.
     fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; N]) -> f64;
 
-    /// Fit this model to `data` by Levenberg-Marquardt, starting from `initial_params`.
-    fn fit(&self, data: FitData<'_>, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
-        let mut params = initial_params;
-        let mut lambda = config.initial_lambda;
-        let mut converged = false;
-        let mut iterations = 0;
+    /// Fit this model to `data` from `initial_params`; `None` when the fit does not converge.
+    fn fit(&self, data: FitData<'_>, initial_params: [f64; N]) -> Option<LmFit<N>>
+    where
+        Self: Sized,
+    {
+        LmController::STANDARD.fit(&ProfileProblem { model: self, data }, initial_params)
+    }
+}
 
-        // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
-        // rejected step changes only `lambda`, so the cached (vectorized) Jacobian pass is
-        // reused across damping retries instead of being recomputed identically every iteration.
-        let mut equations = self.batch_build_normal_equations(data, &params);
-        // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `batch_compute_chi2`
-        // already computed for the new params rather than the rebuild's, so the accept test and the
-        // recorded χ² can never disagree by a rounding difference between those two code paths.
-        let mut prev_chi2 = equations.chi2;
+/// A profile model and the samples it is fit against, as one least-squares problem.
+#[derive(Debug)]
+struct ProfileProblem<'a, M> {
+    model: &'a M,
+    data: FitData<'a>,
+}
 
-        for iter in 0..config.max_iterations {
-            iterations = iter + 1;
+impl<M: LMModel<N>, const N: usize> LmProblem<N> for ProfileProblem<'_, M> {
+    fn normal_equations(&self, params: &[f64; N]) -> NormalEquations<N> {
+        self.model.batch_build_normal_equations(self.data, params)
+    }
 
-            let mut damped_hessian = equations.hessian;
-            for (i, row) in damped_hessian.iter_mut().enumerate() {
-                row[i] *= 1.0 + lambda;
-            }
+    fn chi2(&self, params: &[f64; N]) -> f64 {
+        self.model.batch_compute_chi2(self.data, params)
+    }
 
-            // The solve consumes both operands, so the damped copy above is the only one made —
-            // the gradient is copied into `delta`, which the solution then overwrites.
-            let mut delta = equations.gradient;
-            let solved = linear_system::solve_in_place(
-                damped_hessian.as_flattened_mut(),
-                &mut delta,
-                SINGULAR_PIVOT,
-            );
-            if solved.is_none() {
-                break;
-            }
-
-            let mut new_params = params;
-            for (p, d) in new_params.iter_mut().zip(delta.iter()) {
-                *p += d;
-            }
-            self.constrain(&mut new_params);
-
-            let new_chi2 = self.batch_compute_chi2(data, &new_params);
-
-            if new_chi2.is_finite() && new_chi2 < prev_chi2 {
-                let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
-                params = new_params;
-                lambda *= config.lambda_down;
-                prev_chi2 = new_chi2;
-
-                let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
-                if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
-                    converged = true;
-                    break;
-                }
-
-                equations = self.batch_build_normal_equations(data, &params);
-            } else {
-                // A non-finite χ² from a bad trial point skips the relative-change test, which
-                // would be NaN, and falls straight through to the lambda ramp.
-                if new_chi2.is_finite() {
-                    let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-                    if chi2_rel_diff < 1e-10 {
-                        converged = true;
-                        break;
-                    }
-                }
-
-                lambda *= config.lambda_up;
-                if lambda > 1e10 {
-                    break;
-                }
-            }
-        }
-
-        LMResult {
-            params,
-            chi2: prev_chi2,
-            converged,
-            iterations,
-        }
+    fn constrain(&self, params: &mut [f64; N]) {
+        self.model.constrain(params);
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
+    use crate::math::lm_controller::NormalEquations;
+    use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 
     impl<'a> FitData<'a> {
         pub(crate) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {

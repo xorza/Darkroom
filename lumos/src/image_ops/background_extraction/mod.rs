@@ -12,6 +12,7 @@
 //! pollution is coloured), and runs on the linear master *before* colour calibration and the
 //! stretch.
 
+use crate::math::lstsq::Lstsq;
 use arrayvec::ArrayVec;
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
@@ -251,21 +252,14 @@ fn solve_ls(samples: &[Sample], terms: &[(u8, u8)]) -> Result<DVector<f64>, OpEr
         let (i, j) = terms[c];
         samples[r].x.powi(i32::from(i)) * samples[r].y.powi(i32::from(j))
     });
-    let z = DVector::from_fn(m, |r, _| samples[r].z);
-    let svd = a.svd(true, true);
-    let largest_singular_value = svd.singular_values.iter().copied().fold(0.0, f64::max);
-    let tolerance = f64::EPSILON * m.max(k) as f64 * largest_singular_value;
-    let rank = svd.rank(tolerance);
-    if rank < k {
-        return Err(OpError::RankDeficient {
-            operation: "background surface fit",
-            rank,
-            required_rank: k,
-        });
-    }
-    Ok(svd
-        .solve(&z, tolerance)
-        .expect("SVD was constructed with both singular-vector matrices"))
+    let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
+    let lstsq = Lstsq::new(a);
+    let solution = lstsq.solve(&z).ok_or_else(|| OpError::RankDeficient {
+        operation: "background surface fit",
+        rank: lstsq.rank(),
+        required_rank: k,
+    })?;
+    Ok(DVector::from_column_slice(solution.as_slice()))
 }
 
 /// Fit the surface, then iteratively reject samples whose residual exceeds `kappa·σ` and refit

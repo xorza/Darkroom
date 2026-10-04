@@ -13,9 +13,10 @@
 mod simd;
 
 use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
+use crate::math::lm_controller::NormalEquations;
 use crate::simd::Kernel;
 use crate::star_detection::centroid::fit_is_plausible;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMConfig, LMModel, NormalEquations};
+use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
@@ -24,25 +25,7 @@ use crate::star_detection::centroid::stamp::StampGrid;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-/// Configuration for Moffat profile fitting.
-#[derive(Debug, Clone)]
-pub(super) struct MoffatFitConfig {
-    /// L-M optimization parameters.
-    pub(super) lm: LMConfig,
-    /// Fixed Moffat β (wing-slope) used for the fit.
-    pub(super) fixed_beta: f32,
-}
-
-impl Default for MoffatFitConfig {
-    fn default() -> Self {
-        Self {
-            lm: LMConfig::default(),
-            fixed_beta: 2.5,
-        }
-    }
-}
-
-/// A converged-or-not 2D Moffat profile fitted to one star stamp: where its centre landed and
+/// A converged 2D Moffat profile fitted to one star stamp: where its centre landed and
 /// the FWHM that follows from its alpha and beta. Build one with [`MoffatFit::new`].
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MoffatFit {
@@ -50,10 +33,8 @@ pub(super) struct MoffatFit {
     pub(super) pos: DVec2,
     /// FWHM computed from alpha and beta.
     pub(super) fwhm: f32,
-    /// Whether the fit converged.
-    pub(super) converged: bool,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
-    /// `pos`/`fwhm`/`converged` — but that tests need to verify LM convergence against
+    /// `pos`/`fwhm` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
     /// neither stores them nor runs the arithmetic that fills them.
     #[cfg(test)]
@@ -202,15 +183,15 @@ impl MoffatFit {
         grid: &StampGrid,
         background: f32,
         noise: Option<FitNoise>,
-        config: &MoffatFitConfig,
+        beta: f32,
     ) -> Option<Self> {
         // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
         let mut fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
         let fwhm_est = sigma_to_fwhm(fit.sigma_est);
-        let initial_alpha = fwhm_beta_to_alpha(fwhm_est, config.fixed_beta)
-            .clamp(MIN_ALPHA as f32, grid.radius as f32);
+        let initial_alpha =
+            fwhm_beta_to_alpha(fwhm_est, beta).clamp(MIN_ALPHA as f32, grid.radius as f32);
 
         let initial_params: [f64; 5] = [
             fit.local_pos.x,
@@ -222,10 +203,10 @@ impl MoffatFit {
 
         let model = MoffatFixedBeta::new(
             grid.radius as f64,
-            f64::from(config.fixed_beta),
+            f64::from(beta),
             fit.min_amplitude(background),
         );
-        let result = fit.fit(&model, grid, initial_params, &config.lm);
+        let result = fit.fit(&model, grid, initial_params)?;
 
         let [x0, y0, amplitude, alpha, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
@@ -238,8 +219,7 @@ impl MoffatFit {
 
         Some(Self {
             pos: result_pos,
-            fwhm: alpha_beta_to_fwhm(alpha as f32, config.fixed_beta),
-            converged: result.converged,
+            fwhm: alpha_beta_to_fwhm(alpha as f32, beta),
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result),
         })
@@ -248,7 +228,7 @@ impl MoffatFit {
 
 #[cfg(test)]
 mod internals {
-    use crate::star_detection::centroid::lm_optimizer::LMResult;
+    use crate::math::lm_controller::LmFit;
     use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
     use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, fast_pow_neg};
 
@@ -292,7 +272,7 @@ mod internals {
     impl MoffatFitDebug {
         /// Derive the diagnostics from the optimizer's report. Gated with the struct, so a
         /// release build runs none of this.
-        pub(super) fn of(result: &LMResult<5>) -> Self {
+        pub(super) fn of(result: &LmFit<5>) -> Self {
             let [_, _, amplitude, alpha, background] = result.params;
             Self {
                 amplitude: amplitude as f32,
