@@ -1,7 +1,9 @@
 //! The Moffat as a [`BatchModel`]: each lane evaluates `MoffatFixedBeta`'s own expressions,
 //! `u^(−β)` by its own [`PowStrategy`]. The integer and half-integer powers multiply in `int_pow`'s
-//! order and every division is a division, so a lane is the scalar model bit for bit.
+//! order, the general one is `exp(−β·ln u)` from [`Math`], which the scalar model takes on the
+//! portable Isa, and every division is a division, so a lane is the scalar model bit for bit.
 
+use crate::simd::math::Math;
 use crate::simd::{F64x4, Isa};
 use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
@@ -86,7 +88,7 @@ impl<S: Isa> Profile<S> {
             PowStrategy::HalfInt { int_part } => self.one / (self.int_pow(u, int_part) * u.sqrt()),
             PowStrategy::Int { n } => self.one / self.int_pow(u, n),
             PowStrategy::General { neg_beta } => {
-                isa.load_f64(&u.to_array().map(|u| u.powf(neg_beta)))
+                isa.exp_f64(isa.splat_f64(neg_beta) * isa.ln_f64(u))
             }
         }
     }

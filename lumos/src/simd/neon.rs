@@ -370,6 +370,22 @@ impl F64x4 for NeonF64 {
     }
 
     #[inline(always)]
+    fn frexp(self) -> Frexp<Self> {
+        let mantissa = self.map(|x| unsafe {
+            let bits = vreinterpretq_u64_f64(x);
+            vreinterpretq_f64_u64(vorrq_u64(
+                vandq_u64(bits, vdupq_n_u64(0x800f_ffff_ffff_ffff)),
+                vdupq_n_u64(0x3fe0_0000_0000_0000),
+            ))
+        });
+        let exponent = self.map(|x| unsafe {
+            let field = vcvtq_f64_u64(vshrq_n_u64::<52>(vreinterpretq_u64_f64(x)));
+            vsubq_f64(field, vdupq_n_f64(1022.0))
+        });
+        Frexp { mantissa, exponent }
+    }
+
+    #[inline(always)]
     fn reduce_sum(self) -> f64 {
         unsafe { vpaddd_f64(self.low) + vpaddd_f64(self.high) }
     }

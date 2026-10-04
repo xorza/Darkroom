@@ -275,6 +275,16 @@ impl F64x4 for PortableF64 {
     }
 
     #[inline(always)]
+    fn frexp(self) -> Frexp<Self> {
+        Frexp {
+            mantissa: Self(self.0.map(|x| {
+                f64::from_bits((x.to_bits() & 0x800f_ffff_ffff_ffff) | 0x3fe0_0000_0000_0000)
+            })),
+            exponent: Self(self.0.map(|x| (x.to_bits() >> 52) as f64 - 1022.0)),
+        }
+    }
+
+    #[inline(always)]
     fn reduce_sum(self) -> f64 {
         let l = self.0;
         (l[0] + l[1]) + (l[2] + l[3])

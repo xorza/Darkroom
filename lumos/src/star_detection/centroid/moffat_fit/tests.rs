@@ -310,10 +310,13 @@ fn select_pow_strategy_general() {
     }
 }
 
+/// Each strategy's power against libm's: the half-integer and integer ones within 1e-14 relative,
+/// and the general `exp(−β·ln u)` too, from just above 1 out to `u = 10⁶`, a radius of a thousand
+/// α, at β from barely above 1 to the configured bound of 10.
 #[test]
-fn fast_pow_neg_accuracy_half_integers() {
-    let u_values = [1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0];
-    let betas = [1.5, 2.5, 3.5, 4.5, 5.5];
+fn fast_pow_neg_accuracy_every_strategy() {
+    let u_values = [1.000_001, 1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0, 1e4, 1e6];
+    let betas = [1.5, 2.5, 3.5, 4.5, 5.5, 3.0, 1.01, 2.3, 3.7, 9.9];
 
     for &beta in &betas {
         let strategy = select_pow_strategy(beta);
