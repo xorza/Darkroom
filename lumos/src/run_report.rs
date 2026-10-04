@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 
 /// The decisions a run took on its own and did not fail over, returned with its result.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -46,12 +46,12 @@ pub struct FlagCounts {
 }
 
 /// The flags a [`FlagCounts`] counts, in its field order.
-const COUNTED: [Flags; 5] = [
-    Flags::SATURATED,
-    Flags::DEFECT,
-    Flags::COSMIC_RAY,
-    Flags::REPAIRED,
-    Flags::FLAT_FLOOR,
+const COUNTED: [QualityFlags; 5] = [
+    QualityFlags::SATURATED,
+    QualityFlags::DEFECT,
+    QualityFlags::COSMIC_RAY,
+    QualityFlags::REPAIRED,
+    QualityFlags::FLAT_FLOOR,
 ];
 
 /// One worker's [`FlagCounts`], in [`COUNTED`] order.
@@ -61,7 +61,7 @@ pub(crate) struct LocalFlagCounts([u64; 5]);
 impl LocalFlagCounts {
     /// Count a sample carrying `flags` under each counted flag it holds.
     #[inline]
-    pub(crate) fn count(&mut self, flags: Flags) {
+    pub(crate) fn count(&mut self, flags: QualityFlags) {
         for (count, flag) in self.0.iter_mut().zip(COUNTED) {
             *count += u64::from(flags.intersects(flag));
         }

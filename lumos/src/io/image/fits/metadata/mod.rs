@@ -9,6 +9,78 @@ use crate::io::image::image_provenance::RowOrder;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
+/// A metadata field and every keyword it is read from: the standard or most common spelling first,
+/// which is also the one written, then the aliases other writers use, as Siril reads them
+/// (`fits_keywords.c`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MetadataField {
+    Object,
+    Instrument,
+    Telescope,
+    DateObs,
+    ExposureTime,
+    Iso,
+    Filter,
+    Gain,
+    Egain,
+    CcdTemp,
+    ImageType,
+    XBinning,
+    YBinning,
+    SetTemp,
+    Offset,
+    FocalLength,
+    Airmass,
+    PixelSizeX,
+    PixelSizeY,
+    DataMax,
+}
+
+impl MetadataField {
+    /// The keywords the field is read from, the first present one winning.
+    pub(super) const fn keywords(self) -> &'static [&'static str] {
+        match self {
+            Self::Object => &["OBJECT"],
+            Self::Instrument => &["INSTRUME"],
+            Self::Telescope => &["TELESCOP"],
+            Self::DateObs => &["DATE-OBS"],
+            Self::ExposureTime => &["EXPTIME", "EXPOSURE"],
+            Self::Iso => &["ISOSPEED"],
+            Self::Filter => &["FILTER", "FILT-1"],
+            Self::Gain => &["GAIN"],
+            Self::Egain => &["EGAIN", "CVF"],
+            Self::CcdTemp => &["CCD-TEMP", "CCD_TEMP", "CCDTEMP", "TEMPERAT", "CAMTCCD"],
+            Self::ImageType => &["IMAGETYP", "FRAMETYP", "FRAME"],
+            Self::XBinning => &["XBINNING", "BINX"],
+            Self::YBinning => &["YBINNING", "BINY"],
+            Self::SetTemp => &["SET-TEMP"],
+            Self::Offset => &["OFFSET", "BLKLEVEL"],
+            Self::FocalLength => &["FOCALLEN", "FOCAL", "FLENGTH"],
+            Self::Airmass => &["AIRMASS"],
+            Self::PixelSizeX => &["XPIXSZ", "XPIXELSZ", "PIXSIZE1", "PIXSIZEX", "XPIXSIZE"],
+            Self::PixelSizeY => &["YPIXSZ", "YPIXELSZ", "PIXSIZE2", "PIXSIZEY", "YPIXSIZE"],
+            Self::DataMax => &["DATAMAX"],
+        }
+    }
+
+    /// The keyword the field is written as.
+    const fn keyword(self) -> &'static str {
+        self.keywords()[0]
+    }
+
+    /// The field's value from `header`: the first of its keywords that `read` finds in a form it
+    /// can have. One given in another form is skipped, with the reason logged, for the next.
+    fn read<T>(
+        self,
+        header: &Header,
+        read: impl Fn(&Header, &'static str) -> fits_well::Result<Option<T>>,
+    ) -> Option<T> {
+        self.keywords()
+            .iter()
+            .find_map(|&keyword| optional(keyword, read(header, keyword)))
+    }
+}
+
 /// The observation keywords a FITS header gives, each one `None` when it is absent or given with
 /// a type or value it cannot have: none of them changes a sample, so a writer's odd choice for
 /// one never costs the frame.
@@ -17,34 +89,34 @@ pub(super) fn read_metadata(
     header_dimensions: Vec<usize>,
     sample_type: SampleType,
 ) -> ImageMetadata {
-    let text = |key| optional(key, read_text(header, key));
-    let real = |key| optional(key, header.get_real(key));
+    let text = |field: MetadataField| field.read(header, read_text);
+    let real = |field: MetadataField| field.read(header, Header::get_real);
     ImageMetadata {
-        object: text("OBJECT"),
-        instrument: text("INSTRUME"),
-        telescope: text("TELESCOP"),
-        date_obs: text("DATE-OBS"),
-        exposure_time: real("EXPTIME"),
-        iso: optional("ISOSPEED", read_u32(header, "ISOSPEED")),
+        object: text(MetadataField::Object),
+        instrument: text(MetadataField::Instrument),
+        telescope: text(MetadataField::Telescope),
+        date_obs: text(MetadataField::DateObs),
+        exposure_time: real(MetadataField::ExposureTime),
+        iso: MetadataField::Iso.read(header, read_u32),
         sample_type: Some(sample_type),
         header_dimensions,
         camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
-        filter: text("FILTER"),
-        gain: real("GAIN"),
-        egain: real("EGAIN"),
-        ccd_temp: real("CCD-TEMP").or_else(|| real("CCDTEMP")),
-        image_type: text("IMAGETYP").or_else(|| text("FRAME")),
-        xbinning: optional("XBINNING", read_i32(header, "XBINNING")),
-        ybinning: optional("YBINNING", read_i32(header, "YBINNING")),
-        set_temp: real("SET-TEMP"),
-        offset: optional("OFFSET", read_i32(header, "OFFSET")),
-        focal_length: real("FOCALLEN"),
-        airmass: real("AIRMASS"),
+        filter: text(MetadataField::Filter),
+        gain: real(MetadataField::Gain),
+        egain: real(MetadataField::Egain),
+        ccd_temp: real(MetadataField::CcdTemp),
+        image_type: text(MetadataField::ImageType),
+        xbinning: MetadataField::XBinning.read(header, read_i32),
+        ybinning: MetadataField::YBinning.read(header, read_i32),
+        set_temp: real(MetadataField::SetTemp),
+        offset: MetadataField::Offset.read(header, read_i32),
+        focal_length: real(MetadataField::FocalLength),
+        airmass: real(MetadataField::Airmass),
         ra_deg: read_ra_deg(header),
         dec_deg: read_dec_deg(header),
-        pixel_size_x: real("XPIXSZ"),
-        pixel_size_y: real("YPIXSZ"),
-        data_max: real("DATAMAX"),
+        pixel_size_x: real(MetadataField::PixelSizeX),
+        pixel_size_y: real(MetadataField::PixelSizeY),
+        data_max: real(MetadataField::DataMax),
         provenance: None,
         // The decoder fills both: they depend on the decode plan as well as the header.
         domain: None,
@@ -68,32 +140,61 @@ pub(super) fn write_image_metadata(
     metadata: &ImageMetadata,
     image_type: Option<&str>,
 ) -> fits_well::Result<()> {
-    set_optional_text(header, "OBJECT", metadata.object.as_deref())?;
-    set_optional_text(header, "INSTRUME", metadata.instrument.as_deref())?;
-    set_optional_text(header, "TELESCOP", metadata.telescope.as_deref())?;
-    set_optional_text(header, "DATE-OBS", metadata.date_obs.as_deref())?;
-    set_optional_real(header, "EXPTIME", metadata.exposure_time)?;
-    set_optional_integer(header, "ISOSPEED", metadata.iso.map(i64::from))?;
-    set_optional_text(header, "FILTER", metadata.filter.as_deref())?;
-    set_optional_real(header, "GAIN", metadata.gain)?;
-    set_optional_real(header, "EGAIN", metadata.egain)?;
-    set_optional_real(header, "CCD-TEMP", metadata.ccd_temp)?;
+    use MetadataField as Field;
+    set_optional_text(header, Field::Object.keyword(), metadata.object.as_deref())?;
     set_optional_text(
         header,
-        "IMAGETYP",
+        Field::Instrument.keyword(),
+        metadata.instrument.as_deref(),
+    )?;
+    set_optional_text(
+        header,
+        Field::Telescope.keyword(),
+        metadata.telescope.as_deref(),
+    )?;
+    set_optional_text(
+        header,
+        Field::DateObs.keyword(),
+        metadata.date_obs.as_deref(),
+    )?;
+    set_optional_real(
+        header,
+        Field::ExposureTime.keyword(),
+        metadata.exposure_time,
+    )?;
+    set_optional_integer(header, Field::Iso.keyword(), metadata.iso.map(i64::from))?;
+    set_optional_text(header, Field::Filter.keyword(), metadata.filter.as_deref())?;
+    set_optional_real(header, Field::Gain.keyword(), metadata.gain)?;
+    set_optional_real(header, Field::Egain.keyword(), metadata.egain)?;
+    set_optional_real(header, Field::CcdTemp.keyword(), metadata.ccd_temp)?;
+    set_optional_text(
+        header,
+        Field::ImageType.keyword(),
         image_type.or(metadata.image_type.as_deref()),
     )?;
-    set_optional_integer(header, "XBINNING", metadata.xbinning.map(i64::from))?;
-    set_optional_integer(header, "YBINNING", metadata.ybinning.map(i64::from))?;
-    set_optional_real(header, "SET-TEMP", metadata.set_temp)?;
-    set_optional_integer(header, "OFFSET", metadata.offset.map(i64::from))?;
-    set_optional_real(header, "FOCALLEN", metadata.focal_length)?;
-    set_optional_real(header, "AIRMASS", metadata.airmass)?;
+    set_optional_integer(
+        header,
+        Field::XBinning.keyword(),
+        metadata.xbinning.map(i64::from),
+    )?;
+    set_optional_integer(
+        header,
+        Field::YBinning.keyword(),
+        metadata.ybinning.map(i64::from),
+    )?;
+    set_optional_real(header, Field::SetTemp.keyword(), metadata.set_temp)?;
+    set_optional_integer(
+        header,
+        Field::Offset.keyword(),
+        metadata.offset.map(i64::from),
+    )?;
+    set_optional_real(header, Field::FocalLength.keyword(), metadata.focal_length)?;
+    set_optional_real(header, Field::Airmass.keyword(), metadata.airmass)?;
     set_optional_real(header, "RA", metadata.ra_deg)?;
     set_optional_real(header, "DEC", metadata.dec_deg)?;
-    set_optional_real(header, "XPIXSZ", metadata.pixel_size_x)?;
-    set_optional_real(header, "YPIXSZ", metadata.pixel_size_y)?;
-    set_optional_real(header, "DATAMAX", metadata.data_max)?;
+    set_optional_real(header, Field::PixelSizeX.keyword(), metadata.pixel_size_x)?;
+    set_optional_real(header, Field::PixelSizeY.keyword(), metadata.pixel_size_y)?;
+    set_optional_real(header, Field::DataMax.keyword(), metadata.data_max)?;
     if metadata.calibrated {
         header.set("LUMCAL", true)?;
     }
@@ -447,6 +548,36 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
             i32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::io::image::fits::metadata::MetadataField;
+
+    impl MetadataField {
+        pub(crate) const ALL: [Self; 20] = [
+            Self::Object,
+            Self::Instrument,
+            Self::Telescope,
+            Self::DateObs,
+            Self::ExposureTime,
+            Self::Iso,
+            Self::Filter,
+            Self::Gain,
+            Self::Egain,
+            Self::CcdTemp,
+            Self::ImageType,
+            Self::XBinning,
+            Self::YBinning,
+            Self::SetTemp,
+            Self::Offset,
+            Self::FocalLength,
+            Self::Airmass,
+            Self::PixelSizeX,
+            Self::PixelSizeY,
+            Self::DataMax,
+        ];
+    }
 }
 
 #[cfg(test)]

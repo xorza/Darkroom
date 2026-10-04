@@ -8,7 +8,7 @@ use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -211,9 +211,9 @@ pub(super) struct FrameSource<'a> {
 /// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
 /// neighbours, not a measurement. Another frame's drop measures it. A saturated sample still
 /// deposits: it is a lower bound, and the only value some cores have.
-const EXCLUDED: Flags = Flags::NO_DATA
-    .union(Flags::COSMIC_RAY)
-    .union(Flags::REPAIRED);
+const EXCLUDED: QualityFlags = QualityFlags::NO_DATA
+    .union(QualityFlags::COSMIC_RAY)
+    .union(QualityFlags::REPAIRED);
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid

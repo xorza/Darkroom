@@ -13,7 +13,7 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, Reach};
 use crate::math::vec2us::Vec2us;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
@@ -51,7 +51,10 @@ impl MaskedSources {
                     .enumerate()
                     .for_each(|(y, (row, source_row))| {
                         for (x, (value, &sample)) in row.iter_mut().zip(source_row).enumerate() {
-                            *value = if flags.at_pos(Vec2us::new(x, y)).intersects(Flags::NO_DATA) {
+                            *value = if flags
+                                .at_pos(Vec2us::new(x, y))
+                                .intersects(QualityFlags::NO_DATA)
+                            {
                                 0.0
                             } else {
                                 sample
@@ -62,9 +65,9 @@ impl MaskedSources {
             })
             .collect();
         let mut null_near = flags
-            .without(Flags::from_byte(!Flags::NO_DATA.byte()))
+            .without(QualityFlags::from_byte(!QualityFlags::NO_DATA.byte()))
             .expect("a masked frame holds NO_DATA");
-        null_near.dilate_window(reach, Flags::default());
+        null_near.dilate_window(reach, QualityFlags::default());
         Self {
             validity: flags.validity_plane(),
             zeroed,

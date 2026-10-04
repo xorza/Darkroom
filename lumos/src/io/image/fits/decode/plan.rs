@@ -75,6 +75,31 @@ impl FitsDecodePlan {
     pub(super) const fn may_carry_nulls(&self) -> bool {
         !self.sample_type.is_integer() || self.scaling.blank.is_some()
     }
+
+    /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
+    /// as read, and the flag plane the decode may hold until the two are joined.
+    pub(super) fn admit_flags_extension(
+        &self,
+        path: &Path,
+        memory_limit_bytes: u64,
+    ) -> Result<(), ImageError> {
+        let flag_bytes = checked_size_bytes(
+            path,
+            self.dimensions.pixel_count(),
+            2,
+            "FITS flags extension",
+        )?;
+        let required = self
+            .decoded_bytes
+            .checked_add(flag_bytes)
+            .ok_or_else(|| fits_unsupported(path, "FITS flags memory size overflows u64"))?;
+        enforce_fits_budget(
+            path,
+            "decoded output with its flags",
+            required,
+            memory_limit_bytes,
+        )
+    }
 }
 
 /// What one full-scale span of the stored integer type measures, in physical units.

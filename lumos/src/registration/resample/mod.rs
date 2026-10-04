@@ -9,7 +9,7 @@ use crate::concurrency::{JobScratchPool, UnsafeSendPtr};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::registration::config::WarpParams;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
@@ -164,7 +164,7 @@ impl WarpBuffers {
         let masked = image
             .flags
             .as_deref()
-            .filter(|flags| flags.contains(Flags::NO_DATA))
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
             .map(|flags| MaskedSources::new(image, flags, reach));
         let sampler = FrameSampler::new(method, image, masked.as_ref(), config.border_value);
         // Grown by the kernel's reach once, so each output pixel reads one byte at its source cell
@@ -172,10 +172,10 @@ impl WarpBuffers {
         let source_flags = image
             .flags
             .as_deref()
-            .filter(|flags| flags.contains_other_than(Flags::NO_DATA))
-            .and_then(|flags| flags.without(Flags::NO_DATA))
+            .filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
+            .and_then(|flags| flags.without(QualityFlags::NO_DATA))
             .map(|mut flags| {
-                flags.dilate_window(reach, Flags::default());
+                flags.dilate_window(reach, QualityFlags::default());
                 flags
             });
         let mut flag_plane = source_flags

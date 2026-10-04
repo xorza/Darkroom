@@ -1,10 +1,12 @@
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
+use crate::internals::fits::rewrite_fits;
 use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::*;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::TempDir;
+use fits_well::header::Header;
 use std::fs;
 
 #[test]
@@ -31,44 +33,139 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
             .flags
             .as_ref()
             .unwrap()
-            .mask_of(Flags::NO_DATA)
+            .mask_of(QualityFlags::NO_DATA)
             .get(5)
     );
-    assert_eq!(demosaiced.flags.as_ref().unwrap().count(Flags::NO_DATA), 1);
+    assert_eq!(
+        demosaiced
+            .flags
+            .as_ref()
+            .unwrap()
+            .count(QualityFlags::NO_DATA),
+        1
+    );
 }
 
+/// Every flag survives the trip. `NO_DATA` goes back as NaN, the blank of the float `BITPIX`, so
+/// any reader finds it; without it the repaired sample would reload as a measurement. All of them
+/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`.
+///
+/// The 3×2 plane holds, row-major: nothing, `NO_DATA`, `SATURATED | DEFECT` (2 + 4 = 6), nothing,
+/// `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32).
 #[test]
-fn a_masters_nulls_survive_the_fits_round_trip() {
-    // Written back as NaN — the blank for the float BITPIX this writes — so a reload recovers the
-    // mask. Without it the repaired sample would come back as a measurement, which is exactly the
-    // fabrication the mask exists to prevent.
-    let cfa = CfaImage {
-        data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+fn a_masters_flags_survive_the_fits_round_trip() {
+    let size = Size2us::new(3, 2);
+    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let cfa = |bytes: [u8; 6]| CfaImage {
+        data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
         cfa_type: CfaType::Mono,
         metadata: ImageMetadata::default(),
-        flags: PixelFlags::of_non_finite(
-            Size2us::new(2usize, 2usize),
-            &[&[0.0, f32::NAN, 0.0, 0.0]],
-        ),
+        flags: PixelFlags::from_fn(size, |index| QualityFlags::from_byte(bytes[index])),
     };
-    let dir = TempDir::new("lumos-cfa-nulls");
+    let dir = TempDir::new("lumos-cfa-flags");
     let path = dir.join("master.fits");
-    cfa.save_fits(&path).unwrap();
+    let hdu_count = |path: &Path| {
+        let bytes = fs::read(path).unwrap();
+        fits_well::FitsReader::from_bytes(&bytes)
+            .unwrap()
+            .hdus()
+            .len()
+    };
 
+    cfa(bytes).save_fits(&path).unwrap();
+    assert_eq!(hdu_count(&path), 2);
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    let nulls = loaded.flags.as_ref().expect("the mask must come back");
-    assert_eq!(nulls.count(Flags::NO_DATA), 1);
-    for index in 0..4 {
-        assert_eq!(
-            nulls.mask_of(Flags::NO_DATA).get(index),
-            index == 1,
-            "index {index}"
-        );
-    }
+    assert_eq!(loaded.flags().unwrap().bytes(), &bytes);
+    assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".
     let data = loaded.data.to_vec();
-    assert_eq!([data[0], data[2], data[3]], [0.1f32, 0.3, 0.4]);
+    assert_eq!(
+        [data[0], data[2], data[3], data[4], data[5]],
+        [0.1f32, 0.3, 0.4, 0.5, 0.6]
+    );
+
+    let nulls_only = [0u8, 1, 0, 0, 0, 0];
+    let nulls_path = dir.join("nulls.fits");
+    cfa(nulls_only).save_fits(&nulls_path).unwrap();
+    assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
+    let loaded = CfaImage::from_file(&nulls_path, &LoadContext::default()).unwrap();
+    assert_eq!(loaded.flags().unwrap().bytes(), &nulls_only);
+}
+
+/// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
+/// the check behind it is what fires: a bit no flag has, a `NO_DATA` the NaNs do not state either
+/// way, another geometry, another version, and an extension that names no image of the file.
+#[test]
+fn a_flags_extension_lumos_did_not_write_is_refused() {
+    type Edit = fn(&mut Header, &mut Vec<u8>);
+    let size = Size2us::new(3, 2);
+    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let dir = TempDir::new("lumos-cfa-flags-refused");
+    let path = dir.join("master.fits");
+    let write = || {
+        CfaImage {
+            data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            cfa_type: CfaType::Mono,
+            metadata: ImageMetadata::default(),
+            flags: PixelFlags::from_fn(size, |index| QualityFlags::from_byte(bytes[index])),
+        }
+        .save_fits(&path)
+        .unwrap();
+    };
+    let cases: [(&str, Edit, &str); 6] = [
+        (
+            "unknown bit",
+            |_, data| data[5] |= 0x40,
+            "(2, 1): byte 0x60 holds a bit no flag has",
+        ),
+        (
+            "NO_DATA lost",
+            |_, data| data[1] = 0,
+            "(1, 0): NO_DATA disagrees",
+        ),
+        (
+            "NO_DATA added",
+            |_, data| data[3] = 1,
+            "(0, 1): NO_DATA disagrees",
+        ),
+        (
+            "another geometry",
+            |header, _| {
+                header.set("NAXIS1", 2).unwrap();
+                header.set("NAXIS2", 3).unwrap();
+            },
+            "shape [2, 3] is not the image's 3x2",
+        ),
+        (
+            "another version",
+            |header, _| {
+                header.set("LUMOSVER", 2).unwrap();
+            },
+            "expected PIXFLAGS version 1",
+        ),
+        (
+            "no image named",
+            |header, _| {
+                header.set("LUMFOR", "SCI").unwrap();
+            },
+            "is for \"SCI\", which is no image of the file",
+        ),
+    ];
+    for (name, edit, expected) in cases {
+        write();
+        rewrite_fits(&path, |index, header, data| {
+            if index == 1 {
+                edit(header, data);
+            }
+            true
+        });
+        let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+        assert!(
+            matches!(&error, ImageError::FitsUnsupported { reason, .. } if reason.contains(expected)),
+            "{name}: {error:?}"
+        );
+    }
 }
 
 /// A master records its whole domain and its quantization σ, so a reload gives back exactly what
@@ -435,22 +532,22 @@ fn demosaic_spreads_flags_by_its_support() {
         CfaType::Bayer(CfaPattern::Rggb),
     );
     cfa.flags = PixelFlags::from_fn(size, |index| match index {
-        index if index == 20 * 48 + 20 => Flags::SATURATED,
-        index if index == 40 * 48 + 40 => Flags::NO_DATA,
-        _ => Flags::default(),
+        index if index == 20 * 48 + 20 => QualityFlags::SATURATED,
+        index if index == 40 * 48 + 40 => QualityFlags::NO_DATA,
+        _ => QualityFlags::default(),
     });
     let flags = cfa.demosaic(&CancelToken::never()).unwrap().flags.unwrap();
-    assert_eq!(flags.count(Flags::SATURATED), 21 * 21);
-    assert_eq!(flags.count(Flags::NO_DATA), 1);
+    assert_eq!(flags.count(QualityFlags::SATURATED), 21 * 21);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
     assert!(
         flags
             .at_pos(Vec2us::new(10, 30))
-            .intersects(Flags::SATURATED)
+            .intersects(QualityFlags::SATURATED)
     );
     assert!(
         !flags
             .at_pos(Vec2us::new(31, 20))
-            .intersects(Flags::SATURATED)
+            .intersects(QualityFlags::SATURATED)
     );
 }
 

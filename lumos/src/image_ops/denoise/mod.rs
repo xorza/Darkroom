@@ -23,7 +23,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;
@@ -149,7 +149,7 @@ impl Denoise {
         let excluded = |index: usize| {
             flags
                 .as_ref()
-                .is_some_and(|flags| flags.at(index) != Flags::default())
+                .is_some_and(|flags| flags.at(index) != QualityFlags::default())
         };
         for (channel, plane) in image.planes_mut().enumerate() {
             let noise = match variance {

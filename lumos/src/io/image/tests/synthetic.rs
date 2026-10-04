@@ -7,7 +7,7 @@
 //! building mosaics from known colours and demosaicing them back.
 
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::QualityFlags;
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
@@ -570,10 +570,10 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             .flags
             .as_ref()
             .unwrap_or_else(|| panic!("{name} frame must carry a mask"));
-        assert_eq!(nulls.count(Flags::NO_DATA), 1, "{name}");
+        assert_eq!(nulls.count(QualityFlags::NO_DATA), 1, "{name}");
         for index in 0..6 {
             assert_eq!(
-                nulls.mask_of(Flags::NO_DATA).get(index),
+                nulls.mask_of(QualityFlags::NO_DATA).get(index),
                 index == 2,
                 "{name} index {index}"
             );
@@ -722,8 +722,8 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
     let nulls = loaded.flags.as_ref().unwrap();
-    assert_eq!(nulls.count(Flags::NO_DATA), 4);
-    assert!((0..4).all(|index| nulls.mask_of(Flags::NO_DATA).get(index)));
+    assert_eq!(nulls.count(QualityFlags::NO_DATA), 4);
+    assert!((0..4).all(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index)));
 }
 
 #[test]
@@ -935,10 +935,10 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
 
     let masked = load_linear_fits(&path, &LoadContext::default()).unwrap();
     let nulls = masked.flags.as_ref().unwrap();
-    assert_eq!(nulls.count(Flags::NO_DATA), 3);
+    assert_eq!(nulls.count(QualityFlags::NO_DATA), 3);
     for index in 0..size.pixel_count() {
         assert_eq!(
-            nulls.mask_of(Flags::NO_DATA).get(index),
+            nulls.mask_of(QualityFlags::NO_DATA).get(index),
             matches!(index, 0 | 5 | 10),
             "index {index}"
         );
@@ -1048,7 +1048,7 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     assert!(loaded.metadata.saturation_flagged);
     let flags = loaded.flags.as_ref().unwrap();
     let saturated: Vec<bool> = (0..4)
-        .map(|index| flags.at(index).intersects(Flags::SATURATED))
+        .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
         .collect();
     assert_eq!(saturated, [false, false, true, true]);
 

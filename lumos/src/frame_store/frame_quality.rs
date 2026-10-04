@@ -9,7 +9,7 @@
 use imaginarium::Buffer2;
 
 use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -96,7 +96,7 @@ impl FrameQuality<Buffer2<f32>> {
 
     /// [`Self::for_unwarped`] from the frame's flags alone.
     pub(crate) fn for_flags(flags: Option<&PixelFlags>) -> Self {
-        let Some(flags) = flags.filter(|flags| flags.contains(Flags::NO_DATA)) else {
+        let Some(flags) = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA)) else {
             return Self::None;
         };
         let coverage = flags.validity_plane();

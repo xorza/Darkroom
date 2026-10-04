@@ -20,7 +20,7 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 use crate::registration::config::{self, InterpolationMethod};
@@ -1678,9 +1678,9 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
             image.metadata.saturation_flagged = true;
             image.flags = PixelFlags::from_fn(dims.size(), |index| {
                 if saturated[index] {
-                    Flags::SATURATED
+                    QualityFlags::SATURATED
                 } else {
-                    Flags::default()
+                    QualityFlags::default()
                 }
             });
             image.into()
@@ -1699,7 +1699,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert!(product.image.metadata.saturation_flagged);
     let flags = product.image.flags.as_ref().unwrap();
     let saturated: Vec<bool> = (0..3)
-        .map(|index| flags.at(index).intersects(Flags::SATURATED))
+        .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
         .collect();
     assert_eq!(saturated, [false, true, true]);
     assert_eq!(product.report.excluded_samples.saturated, 3);

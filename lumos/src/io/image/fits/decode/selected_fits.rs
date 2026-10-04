@@ -16,6 +16,7 @@ use crate::io::image::fits::decode::plan::{
 };
 use crate::io::image::fits::decode::selection;
 use crate::io::image::fits::error::fits_err;
+use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::options::FitsChecksumPolicy;
 use crate::io::image::fits::provenance::FitsHduProvenance;
 use crate::io::image::load_context::LoadContext;
@@ -33,6 +34,8 @@ pub(super) struct SelectedFits {
     pub(super) plan: FitsDecodePlan,
     /// Whether the image is one Lumos wrote, whose checksum is then required to be valid.
     lumos_cfa: bool,
+    /// The HDU of the image's flags extension, when it has one.
+    flags_hdu: Option<usize>,
 }
 
 impl SelectedFits {
@@ -55,11 +58,17 @@ impl SelectedFits {
             context.fits.float_scale,
             context.memory_limit_bytes,
         )?;
+        let flags_hdu =
+            FlagsExtension::locate(path, reader.hdus(), selected.index, plan.dimensions.size())?;
+        if flags_hdu.is_some() {
+            plan.admit_flags_extension(path, context.memory_limit_bytes)?;
+        }
         Ok(Self {
             reader,
             selected,
             plan,
             lumos_cfa,
+            flags_hdu,
         })
     }
 
@@ -69,7 +78,7 @@ impl SelectedFits {
     }
 
     /// Verify the checksum the options ask for — or, for an image Lumos wrote, require it — and
-    /// decode the selected image.
+    /// decode the selected image, with its flags extension, whose checksum is always required.
     pub(super) fn read(
         mut self,
         path: &Path,
@@ -87,13 +96,33 @@ impl SelectedFits {
             policy,
             context,
         )?;
-        pixels::read_stream_hdu(
+        if let Some(flags_hdu) = self.flags_hdu {
+            selection::verify_selected_checksum(
+                &mut self.reader,
+                flags_hdu,
+                path,
+                FitsChecksumPolicy::RequireValid,
+                context,
+            )?;
+        }
+        let size = self.plan.dimensions.size();
+        let mut decoded = pixels::read_stream_hdu(
             &mut self.reader,
             self.selected,
             checksum,
             path,
             self.plan,
             context,
-        )
+        )?;
+        if let Some(flags_hdu) = self.flags_hdu {
+            context.check_cancelled(path)?;
+            let stored = self
+                .reader
+                .read_image(flags_hdu)
+                .map_err(|source| fits_err(path, source))?
+                .decode();
+            decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
+        }
+        Ok(decoded)
     }
 }

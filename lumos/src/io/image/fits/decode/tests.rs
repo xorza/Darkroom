@@ -14,6 +14,7 @@ use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
+use crate::io::image::fits::provenance::FitsChecksumState;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use common::TempDir;
 use std::fs;
@@ -188,6 +189,14 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         .unwrap_err(),
     );
     assert!(reason.starts_with("estimated peak memory requires 320000 bytes"));
+    // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
+    // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
+    plan.admit_flags_extension(path, 140_000).unwrap();
+    let reason = unsupported_reason(plan.admit_flags_extension(path, 139_999).unwrap_err());
+    assert!(
+        reason.starts_with("decoded output with its flags requires 140000 bytes"),
+        "{reason}"
+    );
 
     let compressed_shape = [1024, 1024];
     let compressed = compressed_header(-32, &compressed_shape);

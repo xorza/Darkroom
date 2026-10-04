@@ -32,7 +32,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{Flags, PixelFlags, SATURATION_FRACTION};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, SATURATION_FRACTION};
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::median_mut;
 use crate::math::statistics::subsample::Subsample;
@@ -204,8 +204,8 @@ struct DecodedPlane {
 }
 
 /// Apply the caller's null policy to a decoded image's planes — reject the load, or fill the nulls
-/// — and hand back the flags the samples settle: [`Flags::NO_DATA`] where they were null, and
-/// [`Flags::SATURATED`] where a channel reaches `saturation`, a level in the decoded domain.
+/// — and hand back the flags the samples settle: [`QualityFlags::NO_DATA`] where they were null, and
+/// [`QualityFlags::SATURATED`] where a channel reaches `saturation`, a level in the decoded domain.
 ///
 /// A frame with no nulls and no saturation level — most frames without a `DATAMAX` — returns
 /// before any scan, so the feature costs one sum over at most three integers.
@@ -255,13 +255,13 @@ fn resolve_flags(
             .collect::<ArrayVec<&[f32], 3>>();
         PixelFlags::from_fn(dimensions.size(), |index| {
             if samples.iter().any(|plane| !plane[index].is_finite()) {
-                Flags::NO_DATA
+                QualityFlags::NO_DATA
             } else if saturation
                 .is_some_and(|level| samples.iter().any(|plane| plane[index] >= level))
             {
-                Flags::SATURATED
+                QualityFlags::SATURATED
             } else {
-                Flags::default()
+                QualityFlags::default()
             }
         })
     };
@@ -277,7 +277,7 @@ fn resolve_flags(
     // Only for a frame that has them, and the samples the caller is about to read are partly fill
     // with nothing in the frame itself to say so.
     tracing::info!(
-        pixels = flags.count(Flags::NO_DATA),
+        pixels = flags.count(QualityFlags::NO_DATA),
         of = dimensions.pixel_count(),
         "FITS image declares pixels with no measurement"
     );

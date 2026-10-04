@@ -40,7 +40,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::vec2us::Vec2us;
 use crate::memory::ChunkMemoryLayout;
 use crate::progress::ProgressCallback;
@@ -58,8 +58,8 @@ pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
     variance: Option<LinearPixels>,
-    /// The stack's flags, for a frame set where any frame carries flags: [`Flags::NO_DATA`] where
-    /// no frame reached a pixel, [`Flags::SATURATED`] where a kept sample was.
+    /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`] where
+    /// no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
     flags: Option<Buffer2<u8>>,
     report: RunReport,
 }
@@ -533,13 +533,14 @@ impl FrameCache {
                             };
                             if let Some(row_flags) = row.flags.as_deref_mut() {
                                 let pixel_flags = if covered == 0 {
-                                    Flags::NO_DATA
+                                    QualityFlags::NO_DATA
                                 } else if sample_flags[..kept].iter().any(|&byte| {
-                                    Flags::from_byte(byte).intersects(Flags::SATURATED)
+                                    QualityFlags::from_byte(byte)
+                                        .intersects(QualityFlags::SATURATED)
                                 }) {
-                                    Flags::SATURATED
+                                    QualityFlags::SATURATED
                                 } else {
-                                    Flags::default()
+                                    QualityFlags::default()
                                 };
                                 row_flags[pixel_in_row] |= pixel_flags.byte();
                             }

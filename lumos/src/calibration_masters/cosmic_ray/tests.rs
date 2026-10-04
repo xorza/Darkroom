@@ -206,9 +206,9 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     // Every in-painted photosite is flagged at its mosaic position, and nothing else is: the four
     // phase planes map back without crossing.
     let flags = img.flags.as_ref().unwrap();
-    let repaired = Flags::COSMIC_RAY.union(Flags::REPAIRED);
-    assert_eq!(flags.count(Flags::COSMIC_RAY), 7);
-    assert_eq!(flags.count(Flags::REPAIRED), 7);
+    let repaired = QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED);
+    assert_eq!(flags.count(QualityFlags::COSMIC_RAY), 7);
+    assert_eq!(flags.count(QualityFlags::REPAIRED), 7);
     for &p in crs.iter().chain(&[
         Vec2us::new(10, 10),
         Vec2us::new(11, 10),
@@ -494,7 +494,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
             .as_ref()
             .unwrap()
             .at_pos(hit)
-            .intersects(Flags::COSMIC_RAY),
+            .intersects(QualityFlags::COSMIC_RAY),
         "the hit was missed"
     );
 }

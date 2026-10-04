@@ -12,8 +12,8 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::Flags;
 use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::mount_table::MountTable;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
@@ -48,10 +48,10 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
     );
     let masked = StoredImage::spill(&scratch, &image).unwrap();
     let nulls = masked.flags().expect("the mask is spilled with the planes");
-    assert_eq!(nulls.count(Flags::NO_DATA), 2);
+    assert_eq!(nulls.count(QualityFlags::NO_DATA), 2);
     assert_eq!(
         (0..6)
-            .map(|index| nulls.mask_of(Flags::NO_DATA).get(index))
+            .map(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index))
             .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
