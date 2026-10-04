@@ -26,6 +26,7 @@
 //! | 4     | 12            | + higher-order |
 //! | 5     | 18            | Full SIP (HST-level) |
 
+use crate::math::lstsq::Lstsq;
 use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
 
@@ -265,10 +266,8 @@ impl SipPolynomial {
     /// The least-squares polynomial through the masked-in fit targets, or `None` when the design
     /// matrix is rank-deficient.
     ///
-    /// Solved on the rectangular design matrix by SVD rather than through its normal equations,
-    /// whose condition number is the square of the matrix's. The rank test is the usual numerical
-    /// one: a singular value at or below `max(rows, columns)·ε·σ_max` is indistinguishable from
-    /// zero in f64.
+    /// Solved on the rectangular design matrix by [`Lstsq`] rather than through its normal
+    /// equations, whose condition number is the square of the matrix's.
     fn solve(
         points: &[DVec2],
         targets: &[DVec2],
@@ -295,14 +294,7 @@ impl SipPolynomial {
             rhs[(row, 1)] = target.y;
         }
 
-        let svd = design.svd(true, true);
-        let rank_tolerance = rows.max(n_terms) as f64 * f64::EPSILON * svd.singular_values.max();
-        if svd.singular_values.min() <= rank_tolerance {
-            return None;
-        }
-        let solution = svd
-            .solve(&rhs, rank_tolerance)
-            .expect("an SVD computed with both singular-vector sets can solve");
+        let solution = Lstsq::new(design).solve(&rhs)?;
         Some(Self {
             norm,
             terms: terms.clone(),

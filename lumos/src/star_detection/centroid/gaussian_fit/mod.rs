@@ -13,11 +13,12 @@
 
 mod simd;
 
+use crate::math::lm_controller::NormalEquations;
 use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::fit_is_plausible;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMConfig, LMModel, NormalEquations};
+use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
@@ -26,16 +27,13 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 use std::ops::RangeInclusive;
 
-/// Configuration for Gaussian fitting.
-pub(super) type GaussianFitConfig = LMConfig;
-
 /// How close to singular the fitted inverse covariance may come: `b² ≤ (1 − MARGIN)·a·c`. The
 /// principal variances' ratio is then at most `(1 + √(1 − m)) / (1 − √(1 − m))` ≈ 4·10⁴ — far past
 /// any star — while `a·c − b²` stays a positive share of `a·c` that the covariance can be
 /// inverted from.
 const DEFINITENESS_MARGIN: f64 = 1e-4;
 
-/// A converged-or-not 2D Gaussian fitted to one star stamp: where its centre landed and its
+/// A converged 2D Gaussian fitted to one star stamp: where its centre landed and its
 /// shape. Build one with [`GaussianFit::new`].
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GaussianFit {
@@ -43,10 +41,8 @@ pub(super) struct GaussianFit {
     pub(super) pos: DVec2,
     /// The profile's covariance, in px².
     pub(super) covariance: Cov2,
-    /// Whether the fit converged.
-    pub(super) converged: bool,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
-    /// `pos`/`covariance`/`converged` — but that tests need to verify LM convergence against
+    /// `pos`/`covariance` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
     /// neither stores them nor runs the arithmetic that fills them.
     #[cfg(test)]
@@ -140,7 +136,6 @@ impl GaussianFit {
         grid: &StampGrid,
         background: f32,
         noise: Option<FitNoise>,
-        config: &GaussianFitConfig,
     ) -> Option<Self> {
         let mut fit = StampFit::prepare::<7>(pixels, pos, grid, background, noise)?;
 
@@ -160,7 +155,7 @@ impl GaussianFit {
             max_sigma: grid.radius as f64,
             min_amplitude: fit.min_amplitude(background),
         };
-        let result = fit.fit(&model, grid, initial_params, config);
+        let result = fit.fit(&model, grid, initial_params)?;
 
         let [x0, y0, amplitude, a, b, c, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
@@ -182,7 +177,6 @@ impl GaussianFit {
                 yy: a / det,
                 xy: -b / det,
             },
-            converged: result.converged,
             #[cfg(test)]
             debug: internals::GaussianFitDebug::of(&result, fit.stamp.z.len()),
         })
@@ -193,8 +187,8 @@ impl GaussianFit {
 mod internals {
     use glam::Vec2;
 
+    use crate::math::lm_controller::LmFit;
     use crate::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFit};
-    use crate::star_detection::centroid::lm_optimizer::LMResult;
     use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
 
     impl ModelJacobian<7> for Gaussian2D {
@@ -252,7 +246,7 @@ mod internals {
     impl GaussianFitDebug {
         /// Derive the diagnostics from the optimizer's report, where `n` is the sample count the
         /// χ² was summed over. Gated with the struct, so a release build runs none of this.
-        pub(super) fn of(result: &LMResult<7>, n: usize) -> Self {
+        pub(super) fn of(result: &LmFit<7>, n: usize) -> Self {
             let [_, _, amplitude, _, _, _, background] = result.params;
             Self {
                 amplitude: amplitude as f32,

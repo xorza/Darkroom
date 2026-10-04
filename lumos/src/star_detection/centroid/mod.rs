@@ -38,9 +38,9 @@ use crate::star_detection::config::measurement_config::{
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::roundness::Roundness;
 use crate::star_detection::star::Star;
-use gaussian_fit::{GaussianFit, GaussianFitConfig};
+use gaussian_fit::GaussianFit;
 use imaginarium::Buffer2;
-use moffat_fit::{MoffatFit, MoffatFitConfig};
+use moffat_fit::MoffatFit;
 
 /// Stamp radius as a multiple of FWHM.
 ///
@@ -225,27 +225,15 @@ pub(super) fn measure_star(
         // The fits run to full convergence, not just the centre's: their widths are read as the
         // star's FWHM and eccentricity.
         CentroidMethod::GaussianFit => {
-            let fit = GaussianFit::new(
-                residual,
-                pos,
-                grid,
-                local_offset,
-                fit_noise,
-                &GaussianFitConfig::default(),
-            );
-            if let Some(result) = fit.filter(|r| r.converged) {
+            if let Some(result) = GaussianFit::new(residual, pos, grid, local_offset, fit_noise) {
                 pos = result.pos;
                 fit_fwhm = Some(result.covariance.fwhm());
                 fit_eccentricity = Some(result.covariance.eccentricity());
             }
         }
         CentroidMethod::MoffatFit { beta } => {
-            let fit_config = MoffatFitConfig {
-                fixed_beta: beta,
-                lm: lm_optimizer::LMConfig::default(),
-            };
-            let fit = MoffatFit::new(residual, pos, grid, local_offset, fit_noise, &fit_config);
-            if let Some(result) = fit.filter(|r| r.converged) {
+            if let Some(result) = MoffatFit::new(residual, pos, grid, local_offset, fit_noise, beta)
+            {
                 pos = result.pos;
                 fit_fwhm = Some(result.fwhm);
                 // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based

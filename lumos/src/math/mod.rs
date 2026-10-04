@@ -9,6 +9,8 @@
 //! - [`lanczos`]: The windowed-sinc resampling kernel
 //! - [`fwhm`]: FWHM/sigma conversion for Gaussian profiles
 //! - [`linear_system`]: Dense `A·x = b` by Gaussian elimination with partial pivoting
+//! - [`lm_controller`]: Levenberg–Marquardt for small dense least-squares problems
+//! - [`lstsq`]: Linear least squares by the SVD, with one rank rule
 //! - [`dmat3`]: A 3×3 `f64` matrix
 //! - [`size2us`], [`vec2us`], [`urect`]: Integer sizes, positions and rectangles
 
@@ -21,6 +23,8 @@ pub(crate) mod wavelet;
 
 pub(crate) mod lanczos;
 pub(crate) mod linear_system;
+pub(crate) mod lm_controller;
+pub(crate) mod lstsq;
 pub(crate) mod noise;
 pub(crate) mod statistics;
 pub(crate) mod sum;

@@ -391,10 +391,8 @@ fn gaussian_fit_recovers_known_parameters() {
             &StampGrid::new(case.fit_radius),
             case.fit_background.unwrap_or(case.background),
             None,
-            &GaussianFitConfig::default(),
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
-        assert!(result.converged, "{}: did not converge", case.name);
 
         let position_error = (result.pos - case.center).length();
         if matches!(case.perturbation, Perturbation::None) {
@@ -535,14 +533,7 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
             }
             None => Buffer2::new_filled(case.side, case.side, 0.1),
         };
-        let fit = GaussianFit::new(
-            &pixels,
-            case.seed,
-            &StampGrid::new(case.radius),
-            0.1,
-            None,
-            &GaussianFitConfig::default(),
-        );
+        let fit = GaussianFit::new(&pixels, case.seed, &StampGrid::new(case.radius), 0.1, None);
         assert_eq!(fit.is_some(), case.lands, "{}", case.name);
         if let (Some(fit), Some(sigma)) = (fit, case.sigma) {
             assert!(
@@ -572,15 +563,8 @@ fn gaussian_fit_rms_residual() {
             SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::Gaussian { sigma: 2.5 })
                 .stamp(Size2us::new(21, 21), 0.1);
         patterns::add_gaussian_noise(&mut pixels, noise, 11111);
-        let fit = GaussianFit::new(
-            &pixels,
-            DVec2::splat(10.0),
-            &StampGrid::new(8),
-            0.1,
-            None,
-            &GaussianFitConfig::default(),
-        )
-        .unwrap();
+        let fit =
+            GaussianFit::new(&pixels, DVec2::splat(10.0), &StampGrid::new(8), 0.1, None).unwrap();
         let rms = f64::from(fit.debug.rms_residual);
         if noise == 0.0 {
             assert!(rms < 1e-7, "clean stamp: {rms}");
@@ -679,10 +663,8 @@ fn gaussian_fit_converges_as_fast_on_a_round_star() {
             &StampGrid::new(8),
             0.1,
             None,
-            &GaussianFitConfig::default(),
         )
         .expect("the fit lands");
-        assert!(fit.converged);
         fit.debug.iterations
     };
     let round = iterations(2.5, 2.5);

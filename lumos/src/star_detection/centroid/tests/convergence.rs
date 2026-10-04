@@ -53,23 +53,13 @@ fn moments_contract_and_fits_ignore_the_seed() {
         // profile, carries its fixed-β bias, ≤ 2.6e-4 px measured on these stamps.
         let grid = StampGrid::new(radius);
         let gaussian = |seed| {
-            GaussianFit::new(
-                &residual,
-                seed,
-                &grid,
-                0.0,
-                None,
-                &GaussianFitConfig::default(),
-            )
-            .expect("the Gaussian fit lands")
-            .pos
+            GaussianFit::new(&residual, seed, &grid, 0.0, None)
+                .expect("the Gaussian fit lands")
+                .pos
         };
         let moffat = |seed| {
-            let config = MoffatFitConfig {
-                fixed_beta: 2.5,
-                ..Default::default()
-            };
-            MoffatFit::new(&residual, seed, &grid, 0.0, None, &config)
+            let beta = 2.5;
+            MoffatFit::new(&residual, seed, &grid, 0.0, None, beta)
                 .expect("the Moffat fit lands")
                 .pos
         };

@@ -10,8 +10,9 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMConfig, LMModel, LMResult};
+use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::{MAX_STAMP_PIXELS, stamp_centre};
 use crate::star_detection::config::measurement_config::NoiseModel;
 
@@ -200,28 +201,28 @@ impl StampFit {
         FitData::new(&grid.x, &grid.y, &self.stamp.z, self.weights.as_deref())
     }
 
-    /// Fit `model` to the stamp from `initial`.
+    /// Fit `model` to the stamp from `initial`; `None` when the fit does not converge.
     ///
-    /// A weighted fit then runs once more, with each weight taken from the first fit's model value
-    /// instead of the observed pixel, starting where the first ended. Weights from the data give
-    /// a pixel that fluctuated low a smaller variance and so a larger weight — Neyman's χ² — which
-    /// biases amplitude and width low; one pass of iteratively reweighted least squares replaces
-    /// that noise in the weights with the much smaller error of the first fit.
+    /// A weighted fit that converged then runs once more, with each weight taken from the first
+    /// fit's model value instead of the observed pixel, starting where the first ended. Weights
+    /// from the data give a pixel that fluctuated low a smaller variance and so a larger weight —
+    /// Neyman's χ² — which biases amplitude and width low; one pass of iteratively reweighted least
+    /// squares replaces that noise in the weights with the much smaller error of the first fit. A
+    /// failed first fit has no model to reweight from, and a failed second one leaves the first.
     pub(super) fn fit<M: LMModel<N>, const N: usize>(
         &mut self,
         model: &M,
         grid: &StampGrid,
         initial: [f64; N],
-        config: &LMConfig,
-    ) -> LMResult<N> {
-        let first = model.fit(self.data(grid), initial, config);
+    ) -> Option<LmFit<N>> {
+        let first = model.fit(self.data(grid), initial)?;
         let (Some(noise), Some(weights)) = (self.noise, self.weights.as_mut()) else {
-            return first;
+            return Some(first);
         };
         for ((weight, &x), &y) in weights.iter_mut().zip(&grid.x).zip(&grid.y) {
             *weight = noise.weight(model.evaluate(x, y, &first.params), self.sky);
         }
-        model.fit(self.data(grid), first.params, config)
+        Some(model.fit(self.data(grid), first.params).unwrap_or(first))
     }
 
     /// Amplitude seed: the stamp's peak above the sky, floored so the optimizer starts positive.

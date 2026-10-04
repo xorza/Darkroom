@@ -190,20 +190,16 @@ fn moffat_fit_recovers_known_parameters() {
         .stamp(Size2us::new(case.stamp, case.stamp), case.background);
         case.perturbation.apply(&mut pixels);
 
-        let config = MoffatFitConfig {
-            fixed_beta: case.fixed_beta,
-            ..Default::default()
-        };
+        let beta = case.fixed_beta;
         let result = MoffatFit::new(
             &pixels,
             case.guess,
             &StampGrid::new(case.fit_radius),
             case.fit_background.unwrap_or(case.background),
             None,
-            &config,
+            beta,
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
-        assert!(result.converged, "{}: did not converge", case.name);
 
         let offset = (result.pos - case.center).abs();
         if case.fixed_beta != case.beta {
@@ -271,14 +267,7 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
             false,
         ),
     ] {
-        let fit = MoffatFit::new(
-            pixels,
-            seed,
-            &StampGrid::new(8),
-            sky,
-            None,
-            &MoffatFitConfig::default(),
-        );
+        let fit = MoffatFit::new(pixels, seed, &StampGrid::new(8), sky, None, 2.5);
         assert_eq!(fit.is_some(), lands, "{name}");
     }
 }

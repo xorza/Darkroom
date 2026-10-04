@@ -22,14 +22,8 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 **Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
 
-- [ ] `2.3` **Star SNR variance floor** — `star_detection/centroid/mod.rs:570`
-  - The floor `f32::EPSILON` makes σ_total ≥ 3.45e-4. Every star's SNR is 10³–10⁴× too low, so every star fails `min_snr`.
-  - On 16-bit frames, sky σ below ≈2.5 ADU is also understated. `[C]`
 - [ ] `2.4` **Fit weight floor 1e-12** — `star_detection/centroid/stamp.rs:84`
   - On such data every weight is equal, so the "weighted" fit runs unweighted. `[C]`
-- [ ] `2.5` **LM singular pivot 1e-15** — `star_detection/centroid/lm_optimizer.rs:13`, `:163-167`
-  - The Hessian scales as A². A sound fit at A ≈ 1e-6 reads as singular and falls back to the biased seed (group 10).
-  - Solving the Marquardt-scaled system (unit diagonal) makes the threshold scale-free. `[P]`
 - [ ] `2.6` **Amplitude seed floored at 0.01 normalized** — `star_detection/centroid/stamp.rs:228-237`
   - 0.01 is 655 ADU at 16 bit. The fit costs about one extra LM iteration. `[C]`
 
@@ -99,10 +93,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `11.6` **A fit may move up to the full `stamp_radius` and is never re-stamped** — `star_detection/centroid/mod.rs:139-141` vs `:400` `[P]`
 - [ ] `11.7` **The annulus starts at the stamp radius, inside the Moffat wings** — `star_detection/centroid/mod.rs:199-207,292-294`
   - It removes ≈4% of the flux at β 2.5 and FWHM 3. `[P]`
-- [ ] `11.8` **LM convergence uses only absolute step and Δχ² tests** — `star_detection/centroid/lm_optimizer.rs:186-202`
-  - A heavily damped step at large λ meets both tests. A rejected step can set `converged`.
-  - Madsen–Nielsen–Tingleff use ‖g‖∞ ≤ ε₁ and ‖δ‖ ≤ ε₂(‖x‖+ε₂). `[P]`
-- [ ] `11.9` **The IRLS second pass runs after a failed first fit** — `star_detection/centroid/stamp.rs:217-224` `[C]`
 - [ ] `11.10` **A NaN in the residual reaches `Star.flux` and `snr`** — `star_detection/centroid/mod.rs:466-471`
   - A NaN SNR passes `snr < min_snr`, and `validate_catalog` checks only `pos` and `fwhm`. `[P]`
 
@@ -297,8 +287,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `24.11` **FITS decode allocates twice per chunk, converts serially, and rounds three times** — `io/image/fits/decode/pixels.rs:45-49,265-314`
   - Use one fused rayon pass with one f64 `(bzero + bscale·raw)/divisor` narrowed once. `[C]`
 - [ ] `24.12` **Moffat with a non-half-integer β runs scalar `powf` per lane** — `star_detection/centroid/moffat_fit/simd.rs:88-90` `[C]`
-- [ ] `24.13` **LM uses a fixed λ ×10 / ×0.1 schedule** — `star_detection/centroid/lm_optimizer.rs:180-208`
-  - Nielsen's ρ-based update needs fewer iterations. `[P]`
 - [ ] `24.14` **Cosmic-ray noise and background are computed again in every iteration, serially** — `calibration_masters/cosmic_ray/mono.rs:114-129`, `calibration_masters/cosmic_ray/xtrans.rs:248-271`, `calibration_masters/cosmic_ray/masks.rs:74-92` `[C]`
 - [ ] `24.15` **GHS uses scalar `ln_1p`/`exp_m1` per pixel** — `image_ops/stretching/mod.rs:478-496`
   - It is the only curve without a vector or LUT path. `[C]`
@@ -334,9 +322,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
 - [ ] `26.6` **`measure_star` takes `expected_fwhm` and a grid built from it, then asserts that they agree** — `star_detection/centroid/mod.rs:168-173`
   - The grid can carry the window σ and the annulus radius, which removes arguments from `moments_centroid`, `refine_centroid`, `compute_star` and `windowed_covariance`. `[C]`
-- [ ] `26.7` **`LMConfig` never varies** — `star_detection/centroid/lm_optimizer.rs:16-40`
-  - Make it constants. That removes `GaussianFitConfig` and `MoffatFitConfig.lm`. `[C]`
-- [ ] `26.8` **`converged` plus a caller-side filter duplicates `None`** — `star_detection/centroid/gaussian_fit/mod.rs:233`, `star_detection/centroid/moffat_fit/mod.rs:54`, `star_detection/centroid/mod.rs:236,248` `[C]`
 - [ ] `26.9` **`MAX_ANNULUS_OUTER_RADIUS` copies the formula of `annulus_outer_radius`** — `star_detection/centroid/mod.rs:71` vs `:292` `[C]`
 - [ ] `26.10` **`amplitude_seed`/`min_amplitude` take `background` again** — `star_detection/centroid/stamp.rs:228,235`
   - `StampFit.sky` already holds it. `[C]`
@@ -759,7 +744,7 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 ## Phase 8. Numerics kit and measurement (S6, C4)
 
-1. Add `LmController`, `Lstsq` and `Irls`. Move the centroid fits, the SIP fit and the background extraction onto them.
+1. Done: `LmController` (Nielsen's λ update, a Cholesky solve of the Marquardt-scaled system with a relative pivot, and stop tests that hold at any scale — a negligible accepted or Gauss–Newton step in the scaled norm, a Gauss–Newton decrease of χ² under 1e-12 of it, or a gradient orthogonal to the residuals) carries the centroid fits, which now return `None` when they fail and reweight only after a success. `Lstsq` holds the one SVD rank rule the SIP fit and the background extraction share. `Irls` waits for its first robust consumer, the final registration fit (phase 9). Items 2.3, 2.5, 11.8, 11.9, 24.13, 26.7 and 26.8 are closed.
 2. Add `MeasureGrid`, the converged centroid and the integrated models. Add `position_sigma` with both of its sources.
 3. Move the SNR onto `CcdNoise`. Add the DAOFIND shape metrics.
 - **Tests:**
