@@ -63,9 +63,8 @@ impl Display for FramePlane {
 /// one.
 ///
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
-/// `registration::resample::quality::quality_at` establishes that — outside the source footprint
-/// both are zero, and inside it every branch gives a positive confidence wherever there is support
-/// — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
+/// `registration::resample::frame_sampler` establishes that — a pixel the warp has no sample for
+/// takes zero for both, and every sample it takes has positive coverage and confidence — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
 /// on it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it
 /// by, and `source_noise_variance` a non-zero one to divide by.
 ///

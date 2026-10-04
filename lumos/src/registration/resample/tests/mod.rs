@@ -5,9 +5,11 @@ use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::transform::{Transform, WarpTransform};
 
-/// A constant read back through normalized weights: the f32 sum of up to 64 terms of 3.25 rounds
-/// to at most 64·ε·3.25 = 2.5e-5.
-const TOL: f32 = 2.5e-5;
+/// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
+/// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
+/// sum to at most the square of its sum, over at most 64 taps), so the ratio is off by at most
+/// `2·64·ε·8·3.25`.
+const TOL: f32 = 2.0 * 64.0 * f32::EPSILON * 8.0 * 3.25;
 
 /// A `size` image of `channels` signed, unstructured planes, interleaved.
 fn signed_pixels(size: Size2us, channels: usize) -> Vec<f32> {
@@ -45,6 +47,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
                     WarpParams {
                         method,
                         border_value: BORDER,
+                        ..Default::default()
                     },
                 );
                 let y = HEIGHT / 2;
@@ -116,14 +119,14 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
-    // The masked value is the ratio of two warps, each rounding to `(SIZE² + 3)·ε` of its absolute
-    // weight sum — under 2 for any kernel here — times its scale, `CONSTANT` and 1. One null takes
-    // one tap, at most `L(½)² ≈ 0.37` at this shift, so the denominator stays above 0.6.
-    let tolerance = 2.0 * 67.0 * f32::EPSILON * 2.0 * CONSTANT / 0.6;
+    // Without the clamp, which would hide the control's fill under a negative lobe: the
+    // positive lobes' mean it falls back to is the constant.
+    let tolerance = TOL;
     for method in InterpolationMethod::ALL {
         let params = WarpParams {
             method,
             border_value: BORDER,
+            clamping_threshold: None,
         };
         let masked = resample::warp(&fixture.declared, &transform, params);
         let plain = resample::warp(&fixture.undeclared, &transform, params);
@@ -155,24 +158,12 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             .count();
         assert!(smeared > 0, "{method:?}: the control must smear");
 
-        // Coverage falls across that same footprint — exactly across it for a kernel whose taps are
-        // all positive, and across part of it for one with negative lobes: a window that lost only
-        // a negative tap sums its survivors past one and clamps back to full. See
-        // `MaskedWarp::fold_into_quality`; the reconstructed value above is exact either way.
-        assert!(reduced > 0, "{method:?}: coverage must fall somewhere");
-        assert!(
-            reduced <= smeared,
-            "{method:?}: coverage fell at {reduced} pixels, more than the {smeared} the fill reached"
+        // Coverage falls across exactly that footprint: it is the share of the kernel's magnitude
+        // on data, so a lost tap of either sign costs it, and at this shift every tap weighs.
+        assert_eq!(
+            reduced, smeared,
+            "{method:?}: coverage fell at {reduced} pixels, the fill reached {smeared}"
         );
-        if matches!(
-            method,
-            InterpolationMethod::Nearest | InterpolationMethod::Bilinear
-        ) {
-            assert_eq!(
-                reduced, smeared,
-                "{method:?} has no negative lobes, so the two sets must coincide"
-            );
-        }
     }
 }
 
@@ -191,6 +182,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
         let params = WarpParams {
             method,
             border_value: 0.0,
+            ..Default::default()
         };
         let masked = resample::warp(&fixture.declared, &transform, params);
         let plain = resample::warp(&fixture.undeclared, &transform, params);
@@ -204,14 +196,9 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // ...and bilinear's 2x2 window in four: an output at (x, y) samples source (x - ½, y - ½), so
     // source column 8 is a tap for output columns 8 and 9, and likewise for rows.
     assert_eq!(reduced(InterpolationMethod::Bilinear), 4);
-    // Lanczos4 reaches 8 taps per axis, so the same null costs a far wider block. Only the taps it
-    // weights positively show up here, which is why this is an ordering rather than 64.
-    assert!(
-        reduced(InterpolationMethod::Lanczos4) > reduced(InterpolationMethod::Bilinear),
-        "Lanczos4 reduced {}, bilinear {}",
-        reduced(InterpolationMethod::Lanczos4),
-        reduced(InterpolationMethod::Bilinear)
-    );
+    // Lanczos4 reaches 8 taps per axis, every one weighing at this shift, so the same null costs
+    // an 8×8 block.
+    assert_eq!(reduced(InterpolationMethod::Lanczos4), 64);
 }
 
 #[test]
@@ -235,6 +222,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
         WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: BORDER,
+            ..Default::default()
         },
     );
 
@@ -300,6 +288,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     let params = WarpParams {
                         method,
                         border_value: -7.0,
+                        ..Default::default()
                     };
                     let fresh = resample::warp(image, transform, params);
 
@@ -350,6 +339,7 @@ fn an_rgb_warp_is_three_mono_warps() {
         let params = WarpParams {
             method,
             border_value: 0.0,
+            ..Default::default()
         };
         let warped = resample::warp(&rgb, &transform, params);
         for channel in 0..3 {
@@ -406,6 +396,7 @@ fn a_flag_reaches_every_output_its_kernel_window_reads() {
         WarpParams {
             method: InterpolationMethod::Lanczos3,
             border_value: 0.0,
+            ..Default::default()
         },
     );
     let flags = warped.image.flags.unwrap();

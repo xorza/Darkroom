@@ -1,6 +1,6 @@
 //! [`SourcePosition`]: where an output pixel samples its source, split before it is narrowed.
 
-use glam::{DVec2, IVec2};
+use glam::DVec2;
 
 use crate::math::size2us::Size2us;
 
@@ -40,12 +40,6 @@ impl SourcePosition {
         })
     }
 
-    /// The top-left tap of a window that starts `before` taps ahead of this cell.
-    #[inline]
-    pub(super) const fn window_origin(self, before: i32) -> IVec2 {
-        IVec2::new(self.cell_x - before, self.cell_y - before)
-    }
-
     /// This position held to the grid of pixel centres, `[0, w − 1] × [0, h − 1]`: where bilinear
     /// and nearest sample a position in the half-pixel rim of the footprint.
     #[inline]
@@ -68,17 +62,6 @@ impl SourcePosition {
 fn floor_inside(x: f64) -> i32 {
     let truncated = x as i32;
     truncated - i32::from(x < f64::from(truncated))
-}
-
-/// Whether a `taps`×`taps` window whose top-left tap is `origin` lies wholly inside a `size`
-/// source: the one test every kernel's interior path is gated on.
-#[inline]
-pub(super) const fn window_inside(origin: IVec2, taps: usize, size: Size2us) -> bool {
-    let taps = taps as i32;
-    origin.x >= 0
-        && origin.y >= 0
-        && origin.x + taps <= size.width as i32
-        && origin.y + taps <= size.height as i32
 }
 
 /// One axis of [`SourcePosition::clamped_to_centers`].

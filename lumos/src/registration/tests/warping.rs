@@ -16,14 +16,13 @@ fn do_warp(
     transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
+    warp_with(input, transform, config::internals::warp_params(method))
+}
+
+fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpParams) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new_default(input.width(), input.height());
-    internals::warp_plane(
-        input,
-        &mut output,
-        &WarpTransform::new(inverse),
-        config::internals::warp_params(method),
-    );
+    internals::warp_plane(input, &mut output, &WarpTransform::new(inverse), params);
     output
 }
 
@@ -199,7 +198,9 @@ fn warp_homography_roundtrip() {
 
 /// A wider kernel restores a sub-pixel roundtrip better: bilinear below Catmull-Rom, and each
 /// Lanczos order below the next. Catmull-Rom and Lanczos-2 share a 4-tap window and land within a
-/// fraction of a dB of each other, so they are not ordered against each other.
+/// fraction of a dB of each other, so they are not ordered against each other. The kernels are
+/// compared as linear filters, without the ringing clamp: beside a star it cuts the negative
+/// lobes, and the most from the widest kernel, which has the most to cut.
 #[test]
 fn interpolation_quality_ordering() {
     let ref_buf = star_field(Size2us::new(256, 256), 30, 77777)
@@ -210,7 +211,11 @@ fn interpolation_quality_ordering() {
     let forward = Transform::similarity(DVec2::new(3.7, -2.3), 1.0_f64.to_radians(), 1.01);
     let inverse = forward.inverse();
     let psnr = |method| {
-        let restored = do_warp(&do_warp(&ref_buf, &forward, method), &inverse, method);
+        let params = WarpParams {
+            clamping_threshold: None,
+            ..config::internals::warp_params(method)
+        };
+        let restored = warp_with(&warp_with(&ref_buf, &forward, params), &inverse, params);
         let central = extract_central_region(ref_buf.pixels(), restored.pixels(), size, 50);
         compute_psnr(&central.a, &central.b, 1.0)
     };
