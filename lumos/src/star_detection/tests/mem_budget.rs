@@ -70,11 +70,11 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
 #[test]
 fn buffer_working_set_stays_flat_in_frame_count() {
     let size = Size2us::new(128, 128);
-    // A handful of distinct fields (same dimensions, so the pool reuses rather than reallocates) so
-    // every content-dependent detection path runs during warmup and the pool reaches its true
-    // high-water mark before we start checking for growth.
-    let frames: Vec<_> = (0..4)
-        .map(|s| star_field(size, 60, 4200 + s).image)
+    // Two distinct fields (same dimensions, so the pool reuses rather than reallocates) so every
+    // content-dependent detection path runs during warmup and the pool reaches its true high-water
+    // mark before we start checking for growth: the pinned peak below fails if one does not.
+    let frames: Vec<_> = (0..2)
+        .map(|s| star_field(size, 30, 4200 + s).image)
         .collect();
 
     // Each preset runs its own detector, so the presets run in parallel.

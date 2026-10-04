@@ -15,6 +15,7 @@ pub(crate) mod prepared_flat;
 use std::io;
 use std::path::Path;
 
+use arrayvec::ArrayVec;
 use common::CancelToken;
 
 use crate::calibration_masters::defect_map::DefectMap;
@@ -196,8 +197,10 @@ impl CalibrationMasters {
     /// ([`stack_cfa_master`] with a subtractor marks it calibrated): by the flat-dark, else the
     /// bias. A flat that still holds an offset with neither is refused. Cold pixels are detected on
     /// that flat, hot pixels on the dark; with a bias, the dark keeps its thermal signal alone. A
-    /// dark marked calibrated lost its bias when it was stacked and is not subtracted again, and a
-    /// bias or flat-dark marked calibrated has no offset left to remove, so it is refused.
+    /// dark marked calibrated lost its bias when it was stacked and is not subtracted again. A
+    /// flat-dark marked calibrated holds the thermal signal alone: the flat loses the bias and then
+    /// it, and without a bias it is refused. A bias marked calibrated has no offset left to remove,
+    /// and is refused.
     /// `sigma_threshold` controls defect detection sensitivity (see [`DEFAULT_SIGMA_THRESHOLD`]).
     ///
     /// # Errors
@@ -224,36 +227,44 @@ impl CalibrationMasters {
             bias,
             flat_dark,
         } = images;
-        for (role, master) in [
-            (MasterRole::Bias, &bias),
-            (MasterRole::FlatDark, &flat_dark),
-        ] {
-            if master
+        let calibrated = |master: &Option<CfaImage>| {
+            master
                 .as_ref()
                 .is_some_and(|master| master.metadata.calibrated)
-            {
-                return Err(CalibrationError::CalibratedSubtractor { component: role });
-            }
+        };
+        if calibrated(&bias) {
+            return Err(CalibrationError::CalibratedSubtractor {
+                component: MasterRole::Bias,
+            });
+        }
+        if calibrated(&flat_dark) && bias.is_none() {
+            return Err(CalibrationError::CalibratedSubtractor {
+                component: MasterRole::FlatDark,
+            });
         }
         let subtracted_flat = flat
             .map(|mut flat| {
                 if flat.metadata.calibrated {
                     return Ok(flat);
                 }
-                let subtractor = match (&flat_dark, &bias) {
-                    (Some(subtractor), _) => Some((subtractor, MasterRole::FlatDark)),
-                    (None, Some(subtractor)) => Some((subtractor, MasterRole::Bias)),
-                    (None, None) => None,
+                // A flat-dark marked calibrated holds the thermal signal alone, and the bias
+                // beside it removes the offset.
+                let subtractors: ArrayVec<(&CfaImage, MasterRole), 2> = match (&flat_dark, &bias) {
+                    (Some(flat_dark), Some(bias)) if flat_dark.metadata.calibrated => {
+                        [(bias, MasterRole::Bias), (flat_dark, MasterRole::FlatDark)].into()
+                    }
+                    (Some(flat_dark), _) => {
+                        [(flat_dark, MasterRole::FlatDark)].into_iter().collect()
+                    }
+                    (None, Some(bias)) => [(bias, MasterRole::Bias)].into_iter().collect(),
+                    (None, None) => ArrayVec::new(),
                 };
-                match subtractor {
-                    Some((subtractor, role)) => {
-                        let map = master_scale(&flat, subtractor, role)?;
-                        flat.subtract(subtractor, map);
-                    }
-                    None if holds_offset(&flat) => {
-                        return Err(CalibrationError::FlatWithoutSubtractor);
-                    }
-                    None => {}
+                if subtractors.is_empty() && holds_offset(&flat) {
+                    return Err(CalibrationError::FlatWithoutSubtractor);
+                }
+                for (subtractor, role) in subtractors {
+                    let map = master_scale(&flat, subtractor, role)?;
+                    flat.subtract(subtractor, map);
                 }
                 Ok(flat)
             })

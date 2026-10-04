@@ -15,7 +15,8 @@ use crate::io::image::image_dimensions::ImageDimensions;
 
 /// The checks every decoded frame of a run passes before it is parked, in one order — its geometry
 /// against the run's, its facts against frame 0's once they are known, then its samples — and the
-/// statistics measured on it before any interpolation.
+/// statistics measured on it before the warp, with a demosaiced frame's noise taken from its
+/// mosaic.
 ///
 /// Frames decode beside each other, so frame 0 publishes its facts when it is admitted, and a
 /// later frame is compared with them only when they are already known: a mismatched set stops

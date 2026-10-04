@@ -1,3 +1,4 @@
+use crate::frame_store::frame_stats::FrameStats;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
@@ -183,6 +184,49 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             if reason.contains("HDU 1 requires valid DATASUM and CHECKSUM")),
         "{error:?}"
     );
+}
+
+/// The demosaic measures each colour's noise on the mosaic, before the interpolation correlates
+/// neighbours, and the frame's statistics take it from there: the demosaiced frame's noise, sky
+/// and quantization σ are the mosaic's own, bit for bit, though the demosaic cleared the frame's
+/// quantization σ. Measured on the frame's own correlated pixels instead, every channel reads less
+/// than its colour's σ. A 64 × 64 RGGB mosaic: red 0.125 ± 0.02, green 0.25 ± 0.01, blue
+/// 0.375 ± 0.03, with a step of 1/4096.
+#[test]
+fn a_demosaiced_frame_keeps_its_mosaics_noise() {
+    let size = Size2us::new(64, 64);
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
+    let mut rng = TestRng::new(7);
+    let pixels = (0..size.pixel_count())
+        .map(|index| {
+            let colour = usize::from(cfa_type.color_at(Vec2us::new(index % 64, index / 64)));
+            level[colour] + sigma[colour] * rng.next_gaussian_f32()
+        })
+        .collect();
+    let mut cfa = make_cfa(size, pixels, cfa_type);
+    cfa.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0);
+    let mosaic = FrameStats::measure(&cfa);
+
+    let mut demosaiced = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(demosaiced.metadata.quantization_sigma, None);
+    let frame = FrameStats::measure(&demosaiced);
+    assert_eq!(frame.noise, mosaic.noise);
+    assert_eq!(frame.sky, mosaic.sky);
+    assert_eq!(frame.quantization_sigma, mosaic.quantization_sigma);
+
+    demosaiced.metadata.mosaic_noise = None;
+    let correlated = FrameStats::measure(&demosaiced);
+    for colour in 0..3 {
+        assert!(
+            correlated.noise[colour] < mosaic.noise[colour],
+            "colour {colour}: {} against the mosaic's {}",
+            correlated.noise[colour],
+            mosaic.noise[colour]
+        );
+    }
 }
 
 /// A master records its whole domain and its quantization σ, so a reload gives back exactly what

@@ -1,4 +1,4 @@
-//! Per-frame robust statistics, measured before any interpolation touches the pixels.
+//! Per-frame robust statistics, with the white noise measured before any interpolation.
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
@@ -7,25 +7,23 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::ccd_noise::CcdNoise;
-use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
-use crate::math::size2us::Size2us;
-use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
-use crate::math::statistics::{MedianMad, median_mut};
+use crate::math::statistics::MedianMad;
 use crate::math::vec2us::Vec2us;
 
 /// Per-frame statistics: one median/MAD pair per channel, and the white noise.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<MedianMad, 3>,
-    /// The white-noise standard deviation, without the signal MAD includes: per channel by
-    /// [`MrsNoise`], or per colour of a mosaic by [`DifferenceNoise`]. Measured over the pixels no
-    /// flag names.
+    /// The white-noise standard deviation, without the signal MAD includes: per colour of a mosaic
+    /// by [`MosaicNoise`], per colour of the mosaic a demosaiced frame came from, or per channel by
+    /// [`MrsNoise`]. Measured over the pixels no flag names.
     pub(crate) noise: ArrayVec<f32, 3>,
-    /// The level `noise` was measured at, in the same slots: each channel's median, or each
-    /// colour's median of a mosaic.
+    /// The level `noise` was measured at, in the same slots: each colour's median of the mosaic,
+    /// or each channel's median.
     pub(crate) sky: ArrayVec<f32, 3>,
     pub(crate) quantization_sigma: Option<f32>,
     /// From [`CcdNoise::electrons_per_unit`], when the source states its gain.
@@ -35,7 +33,9 @@ pub(crate) struct FrameStats {
 }
 
 impl FrameStats {
-    /// Measure per-channel median and MAD on `image`, before any interpolation touches it.
+    /// Measure per-channel median and MAD on `image`, and its white noise before any interpolation:
+    /// on a mosaic, per colour; on a demosaiced frame, the [`MosaicNoise`] its demosaic measured,
+    /// because the frame's own correlated pixels would understate it; elsewhere, per channel.
     ///
     /// Pixels the source declared no measurement for are left out. They matter most to the MAD: the
     /// decoder fills a null with the frame's own median, so every one of them is a zero-deviation
@@ -49,7 +49,7 @@ impl FrameStats {
     /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
-        let quantization_sigma = image.metadata().quantization_sigma;
+        let metadata = image.metadata();
         let facts = FrameFacts::of(image);
         let flags = image.flags();
         let excluded =
@@ -57,10 +57,24 @@ impl FrameStats {
         let mosaic = image
             .cfa_type()
             .filter(|cfa| matches!(cfa, CfaType::Bayer(_) | CfaType::XTrans(_)));
-        let noise = match mosaic {
-            Some(cfa_type) => {
-                DifferenceNoise::estimate(image.channel(0), dimensions.size(), &cfa_type, excluded)
-            }
+        let mosaic_noise = match mosaic {
+            Some(cfa_type) => Some(MosaicNoise::measure(
+                image.channel(0),
+                dimensions.size(),
+                &cfa_type,
+                excluded,
+                metadata.quantization_sigma,
+            )),
+            None => metadata.mosaic_noise.inspect(|_| {
+                assert_eq!(
+                    dimensions.channels(),
+                    3,
+                    "a frame's mosaic noise names its three channels"
+                );
+            }),
+        };
+        let noise = match &mosaic_noise {
+            Some(mosaic_noise) => ArrayVec::from(mosaic_noise.sigma),
             None => (0..dimensions.channels())
                 .into_par_iter()
                 .map(|channel| {
@@ -108,10 +122,8 @@ impl FrameStats {
             .collect::<Vec<_>>()
             .into_iter()
             .collect();
-        let sky = match mosaic {
-            Some(cfa_type) => {
-                colour_medians(image.channel(0), dimensions.size(), &cfa_type, excluded)
-            }
+        let sky = match &mosaic_noise {
+            Some(mosaic_noise) => ArrayVec::from(mosaic_noise.sky),
             None => channels
                 .iter()
                 .map(|channel: &MedianMad| channel.median)
@@ -121,8 +133,11 @@ impl FrameStats {
             channels,
             noise,
             sky,
-            quantization_sigma,
-            electrons_per_unit: CcdNoise::electrons_per_unit(image.metadata()),
+            quantization_sigma: match mosaic_noise {
+                Some(mosaic_noise) => mosaic_noise.quantization_sigma,
+                None => metadata.quantization_sigma,
+            },
+            electrons_per_unit: CcdNoise::electrons_per_unit(metadata),
             facts,
         }
     }
@@ -155,44 +170,13 @@ impl FrameStats {
     }
 }
 
-/// The median of each colour of a mosaic, over every `row_step`-th row so each colour keeps at
-/// most about [`MAX_STATISTIC_SAMPLES`] samples, skipping the pixels `excluded` names. A colour
-/// with no sample reads 0.
-fn colour_medians(
-    mosaic: &[f32],
-    size: Size2us,
-    cfa_type: &CfaType,
-    excluded: impl Fn(usize) -> bool,
-) -> ArrayVec<f32, 3> {
-    let colours = cfa_type.num_colors();
-    let row_step = (size.pixel_count() / (colours * MAX_STATISTIC_SAMPLES)).max(1);
-    let mut samples: ArrayVec<Vec<f32>, 3> = (0..colours).map(|_| Vec::new()).collect();
-    for y in (0..size.height).step_by(row_step) {
-        for x in 0..size.width {
-            let index = y * size.width + x;
-            if !excluded(index) {
-                samples[usize::from(cfa_type.color_at(Vec2us::new(x, y)))].push(mosaic[index]);
-            }
-        }
-    }
-    samples
-        .into_iter()
-        .map(|mut colour| {
-            if colour.is_empty() {
-                0.0
-            } else {
-                median_mut(&mut colour)
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::internals::cfa::make_cfa;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::math::size2us::Size2us;
 
     /// An RGGB mosaic of constant colours, red 1/8, green 1/4, blue 3/8: each colour's sky is its own
     /// level, where the whole-mosaic median, 1/4, would put red's 1/8 below its sky and blue's 3/8

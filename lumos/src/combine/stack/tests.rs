@@ -20,6 +20,7 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
+use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::{MedianMad, mad_to_sigma};
@@ -1435,6 +1436,53 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
     };
     let dark = combine(uncovered, &mean).unwrap();
     assert_eq!(dark.image.channel(0).pixels(), &[0.05]);
+}
+
+/// Noise weights read a demosaiced frame's mosaic noise, which its own pixels cannot show: one
+/// pixel has no noise to measure, and weighting refuses the frames without it. Frame A reads 1
+/// with σ 1 in every channel; frame B reads 3 with σ 1, 2 and 1/2. The weights are 1/σ²: red
+/// (1 + 3)/2 = 2, green (1 + 3/4)/(1 + 1/4) = 1.4, blue (1 + 12)/(1 + 4) = 2.6. The master was
+/// made by the combine and carries no mosaic noise.
+#[test]
+fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
+    let dims = ImageDimensions::new((1, 1), 3);
+    let frame = |value: f32, sigma: Option<[f32; 3]>| {
+        let mut image = LinearImage::from_pixels(dims, vec![value; 3]);
+        image.metadata.mosaic_noise = sigma.map(|sigma| MosaicNoise {
+            sigma,
+            sky: [value; 3],
+            quantization_sigma: None,
+        });
+        StackFrame::from(image)
+    };
+    let config = StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        weighting: Weighting::Noise,
+        normalization: Normalization::None,
+        small_n: SmallN::none(),
+        ..Default::default()
+    };
+    let product = combine(
+        vec![
+            frame(1.0, Some([1.0; 3])),
+            frame(3.0, Some([1.0, 2.0, 0.5])),
+        ],
+        &config,
+    )
+    .unwrap();
+    for (channel, expected) in [2.0f32, 1.4, 2.6].into_iter().enumerate() {
+        assert_close!(
+            product.image.channel(channel).pixels()[0],
+            expected,
+            f32::EPSILON * expected,
+            "channel {channel}"
+        );
+    }
+    assert_eq!(product.image.metadata.mosaic_noise, None);
+    assert!(matches!(
+        combine(vec![frame(1.0, None), frame(3.0, None)], &config),
+        Err(StackError::NoNoiseToWeigh { index: 0 })
+    ));
 }
 
 #[test]

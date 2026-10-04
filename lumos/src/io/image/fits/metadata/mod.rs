@@ -121,6 +121,7 @@ pub(super) fn read_metadata(
         // The decoder fills both: they depend on the decode plan as well as the header.
         domain: None,
         quantization_sigma: None,
+        mosaic_noise: None,
         saturation_flagged: false,
         calibrated: optional("LUMCAL", header.get_logical("LUMCAL")).unwrap_or(false),
     }
