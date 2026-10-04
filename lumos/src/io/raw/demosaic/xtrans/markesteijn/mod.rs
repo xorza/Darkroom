@@ -11,8 +11,6 @@
 //! 4. Builds homogeneity maps to identify the best direction(s) per pixel
 //! 5. Blends the best directions into the final RGB output
 //!
-//! Performance: targets <500ms for 6032×4028 (vs libraw's 1750ms single-threaded).
-//!
 //! ## Memory layout
 //!
 //! All working memory is preallocated in a single contiguous arena (`DemosaicArena`)

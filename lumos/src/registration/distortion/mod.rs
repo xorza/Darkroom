@@ -1,20 +1,21 @@
 //! Distortion modeling for optical corrections.
 //!
-//! This module provides SIP polynomial distortion correction (FITS WCS standard)
-//! and non-parametric thin-plate spline (TPS) interpolation for correcting
-//! optical distortions in astronomical images.
+//! This module provides a polynomial distortion correction in the form of SIP, and non-parametric
+//! thin-plate spline (TPS) interpolation for correcting optical distortions in astronomical images.
 //!
 //! ## SIP Polynomial (Parametric)
 //!
-//! Simple Imaging Polynomial used in the FITS WCS standard:
+//! The polynomial form of the Simple Imaging Polynomial convention:
 //!
 //! ```text
 //! u' = u + Σ A_pq × u^p × v^q  (for 2 ≤ p+q ≤ order)
 //! v' = v + Σ B_pq × u^p × v^q
 //! ```
 //!
-//! Used in the registration pipeline after RANSAC to refine transformation
-//! accuracy. Compatible with Astrometry.net, Siril, ASTAP.
+//! Used in the registration pipeline after RANSAC to refine transformation accuracy. It maps the
+//! reference frame onto a target frame, not pixels onto the sky, and holds its coefficients in
+//! coordinates normalized about the matched stars' centroid, with no inverse (`AP`/`BP`): it is no
+//! FITS WCS SIP header, and none is written.
 //!
 //! ## Thin-Plate Spline (Non-Parametric)
 //!

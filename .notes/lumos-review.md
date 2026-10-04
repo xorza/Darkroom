@@ -74,29 +74,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `labels.fill(0)` writes 96 MB per 24 MP frame. Clear only the previous runs. `[C]`
 - [ ] `24.18` **`GlobalMap` noise is averaged per pixel in the stamp loop** — `star_detection/centroid/mod.rs:490-494` `[P]`
 
-## 25. Docs that state false facts
-
-- [ ] `25.1` `registration/mod.rs:24`: the doctest does not compile (`&config.warp`, E0308). `registration/mod.rs:98-113` and `registration/config/mod.rs:145-157` use private paths and `TransformType`.
-- [ ] `25.2` `registration/distortion/mod.rs:16-17`, `registration/distortion/sip/mod.rs:1-10`: they claim FITS WCS SIP and Astrometry.net/Siril/ASTAP compatibility.
-  - In fact the coefficients are normalized about a centroid. There is no AP/BP, no export, and the model is relative ref→target.
-- [ ] `25.3` `registration/ransac/mod.rs:3-11`: they call the scorer MAGSAC++ ("marginalizing over noise scales"). It is a truncated Welsch loss.
-- [ ] `25.4` `registration/mod.rs:378-381`: "`unzip` fills both". The code uses `gather_matched`.
-- [ ] `25.5` `drizzle/config.rs:37`: Square says "Sutherland-Hodgman", but it is `sgarea`/`boxer`.
-- [ ] `25.6` `drizzle/config.rs:51-52`: Gaussian says "configurable FWHM", but the FWHM is fixed at pixfrac·scale.
-- [ ] `25.7` `drizzle/config.rs:155`: `with_min_weight_fraction` says "coverage threshold".
-- [ ] `25.8` `image_ops/denoise/mod.rs:217` vs `:229`: the doc says the default is Hard, but the code defaults to Soft.
-- [ ] `25.9` `star_detection/mod.rs:10-14`: it says prepare applies defect correction, and that the background is bilinear (it is a cubic spline).
-- [ ] `25.10` `star_detection/convolution/mod.rs:44-45`: it claims SEP's matched filter, but the formula differs for varying σ.
-- [ ] `25.11` `star_detection/centroid/mod.rs:3-7,45-49,155-157`, `star_detection/centroid/gaussian_fit/mod.rs:11-12`, `star_detection/centroid/moffat_fit/mod.rs:10-11`:
-  - The "~0.05 px" and "~0.01 px" accuracies are stated with no basis.
-  - "99% of flux" is really 99.98% for a Gaussian and ≈91% for a β 2.5 Moffat.
-- [ ] `25.12` `star_detection/centroid/mod.rs:408`: a stray `Cov2` doc line sits on `compute_star`.
-- [ ] `25.13` `io/raw/demosaic/xtrans/markesteijn/mod.rs:14`: "<500 ms". Measured 956 ms.
-- [ ] `25.14` `io/raw/mod.rs:532-533,563`: "fast SIMD demosaic". RCD has no SIMD.
-- [ ] `25.15` `memory/run_memory.rs:15-16`: it promises a "share" for parallel stacks, but no code computes one.
-- [ ] `25.16` `frame_store/mod.rs:1`, `lib.rs:14`: they say frame_store does memory planning. That code is in `memory/`.
-- [ ] `25.18` `background_mesh/mod.rs:87-89`: the doc and `#[inline]` of `find_lower_tile_y` sit on `sigma_range`.
-
 ## 26. One fact in two places, wide signatures, and style deviations
 
 - [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
@@ -580,6 +557,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 ## Phase 14. Results
 
 1. Done: the flat's means are sums added in a fixed order (`sum::par_sum_f32`, fixed chunks; the mosaic's per row), so a flat prepares to the same bits on any thread count. The triangle votes are one flat buffer of packed pairs, sorted and run-length counted, at any star count, in place of the dense matrix and the `HashMap`; its dead bounds check went with it. `try_par_map_bounded` skips only an index above the lowest failure seen, so every index below it runs and the error is the one a sequential map returns; before, a worker could skip an index it had claimed once a higher one failed. Items 22.2 to 22.4 are closed.
+
+2. Done: every doc example compiles: the seven marked `ignore` are `no_run` with their setup hidden, and the two that no longer compiled take the current signatures (`cargo test -p lumos --doc`: 10 pass, none ignored). The SIP docs say what the polynomial is — SIP's form between two frames, normalized about the matched stars' centroid, with no `AP`/`BP` and no header — and not a WCS SIP solution. The RANSAC scorer is named for its loss, a truncated Welsch loss (`ransac/welsch`, `WelschScorer`), and the docs that called it MAGSAC++ or said it integrates over noise scales are corrected. The drizzle Gaussian's FWHM is the drop size; the denoise default is Soft; detection's prepare stage and spline background, the matched filter's relation to SEP, the centroid fits' reported error in place of a fixed accuracy, the stamp's 99.98% (Gaussian) and 91% (Moffat) flux, the memory figure several stacks share, the frame-store module's scope and the misplaced mesh doc are as the code is; the Markesteijn time target is gone. Group 25 is closed.
 
 # Decisions
 

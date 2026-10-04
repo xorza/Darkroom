@@ -1,13 +1,15 @@
-//! SIP (Simple Imaging Polynomial) distortion correction.
+//! Polynomial distortion correction in the form of SIP (Simple Imaging Polynomial).
 //!
-//! The SIP convention is the standard in astronomy for representing non-linear
-//! geometric distortion in FITS image headers. It is used by Spitzer, HST,
-//! Astrometry.net, Siril, and ASTAP.
+//! FITS WCS headers carry SIP's polynomials (Shupe et al. 2005) from pixels to intermediate world
+//! coordinates. This uses their form between two frames instead: it corrects reference pixels
+//! before the linear transform to a target frame, holds the coefficients in coordinates normalized
+//! about the matched stars' centroid, and has no inverse polynomial (`AP`/`BP`). It is not a WCS
+//! SIP solution, and no header is written from it.
 //!
 //! # Model
 //!
 //! Pixel coordinates (u, v) relative to a reference point are corrected by a 2D
-//! polynomial before the linear (CD matrix / homography) transform:
+//! polynomial before the linear (homography) transform:
 //!
 //! ```text
 //! u' = u + Σ A_pq * u^p * v^q    (for 2 ≤ p+q ≤ order)
@@ -15,7 +17,7 @@
 //! ```
 //!
 //! Linear terms (p+q < 2) are excluded because they are already captured by
-//! the homography / CD matrix.
+//! the homography.
 //!
 //! # Coefficient counts by order
 //!

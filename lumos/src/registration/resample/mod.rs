@@ -62,12 +62,16 @@ pub struct WarpResult {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use lumos::{RegistrationConfig, register, warp};
+/// ```no_run
+/// use lumos::{LinearImage, RegistrationConfig, Star, register, warp};
 ///
-/// let result = register(&ref_stars, &target_stars, &RegistrationConfig::default())?;
+/// # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
+/// # -> Result<(), lumos::RegistrationError> {
 /// let config = RegistrationConfig::default();
-/// let aligned = warp(&target_image, &result.warp_transform(), &config.warp).image;
+/// let result = register(ref_stars, target_stars, &config)?;
+/// let aligned = warp(target_image, &result.warp_transform(), config.warp).image;
+/// # Ok(())
+/// # }
 /// ```
 pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpParams) -> WarpResult {
     let mut buffers = WarpBuffers::new(image.dimensions());

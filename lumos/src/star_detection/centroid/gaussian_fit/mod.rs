@@ -9,8 +9,8 @@
 //! space, where `θ` would be degenerate and its derivative zero. The principal widths and the
 //! eccentricity follow from `(a, b, c)` after the fit.
 //!
-//! Uses f64 throughout the fitting pipeline for numerical stability,
-//! achieving ~0.01 pixel centroid accuracy.
+//! Uses f64 throughout the fitting pipeline for numerical stability. Each fit reports its
+//! position's standard error, from `(JᵀWJ)⁻¹·χ²/(n − p)`, rather than a fixed accuracy.
 
 mod simd;
 
@@ -153,8 +153,8 @@ impl LMModel<7> for Gaussian2D {
 }
 
 impl GaussianFit {
-    /// Fit the elliptical Gaussian to a star stamp via Levenberg-Marquardt (f64 throughout,
-    /// ~0.01 px centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the
+    /// Fit the elliptical Gaussian to a star stamp via Levenberg-Marquardt, in f64. When `noise` is
+    /// set, each pixel is weighted by `1/σ²` from the
     /// CCD noise model so the shot-noisy bright core doesn't bias the fit; `None` is a plain
     /// unweighted fit.
     ///

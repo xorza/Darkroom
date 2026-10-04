@@ -44,8 +44,9 @@ struct GaussianKernel2d {
 /// keeps white noise at its σ; the detection plane measures the σ its output has anyway, which
 /// holds for noise of any correlation.
 ///
-/// Follows the SEP matched filter approach (Barbary 2016):
-/// `SNR = conv(D, K) / (sigma * sqrt(sum(K^2)))`
+/// SEP's matched filter (Barbary 2016) where the noise is uniform:
+/// `SNR = conv(D, K) / (sigma * sqrt(sum(K^2)))`. Where σ varies, SEP weighs each pixel by `1/σ²`
+/// inside the sums; this does not, and the threshold reads the local σ of the output instead.
 ///
 /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
 /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.

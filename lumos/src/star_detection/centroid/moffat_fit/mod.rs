@@ -8,8 +8,8 @@
 //! where α is the core width and β controls the wing slope (typically 2.5-4.5), integrated over
 //! each pixel.
 //!
-//! Uses f64 throughout the fitting pipeline for numerical stability,
-//! achieving ~0.01 pixel centroid accuracy.
+//! Uses f64 throughout the fitting pipeline for numerical stability. Each fit reports its
+//! position's standard error, from `(JᵀWJ)⁻¹·χ²/(n − p)`, rather than a fixed accuracy.
 
 mod simd;
 

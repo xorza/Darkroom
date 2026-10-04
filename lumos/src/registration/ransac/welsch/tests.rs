@@ -1,6 +1,6 @@
 use std::f64::consts::E;
 
-use crate::registration::ransac::magsac::*;
+use crate::registration::ransac::welsch::*;
 
 /// Two closed forms that each round once or twice in the last place of values up to 1.
 const TOL: f64 = 4.0 * f64::EPSILON;
@@ -28,7 +28,7 @@ fn gamma_k2_is_one_minus_exp() {
 #[test]
 fn scorer_construction_exact() {
     for (sigma, sigma_sq) in [(2.0, 4.0), (0.5, 0.25), (1.0, 1.0)] {
-        let scorer = MagsacScorer::new(sigma);
+        let scorer = WelschScorer::new(sigma);
         assert_eq!(scorer.threshold_sq, CHI2_99_2DOF * sigma_sq);
         assert_eq!(scorer.outlier_loss, sigma_sq / 2.0);
         assert_eq!(scorer.max_sigma_sq, sigma_sq);
@@ -40,7 +40,7 @@ fn scorer_construction_exact() {
 /// by `0.01·σ²/2` to the outlier loss — the gap a saturating loss leaves.
 #[test]
 fn scorer_loss_hand_values() {
-    let one = MagsacScorer::new(1.0);
+    let one = WelschScorer::new(1.0);
     for (residual_sq, expected) in [
         (0.0, 0.0),
         (1.0, 0.5 * (1.0 - (-0.5f64).exp())),
@@ -61,14 +61,14 @@ fn scorer_loss_hand_values() {
         );
     }
     // σ = 2 at the same r² = 2: `x = 2/8`, so `2·(1 − e^{−¼})` = 0.4424 against σ = 1's 0.3161.
-    let two = MagsacScorer::new(2.0);
+    let two = WelschScorer::new(2.0);
     assert!((two.loss(2.0) - 2.0 * (1.0 - (-0.25f64).exp())).abs() <= TOL);
 }
 
 /// The loss never falls as the residual grows.
 #[test]
 fn scorer_loss_is_monotone() {
-    let scorer = MagsacScorer::new(1.5);
+    let scorer = WelschScorer::new(1.5);
     let mut previous = 0.0;
     for step in 0..=400 {
         let loss = scorer.loss(f64::from(step) * 0.1);
@@ -84,7 +84,7 @@ fn scorer_loss_is_monotone() {
 /// The inlier test is `r² ≤ χ²·σ²`, inclusive.
 #[test]
 fn is_inlier_exact_threshold() {
-    let scorer = MagsacScorer::new(1.0);
+    let scorer = WelschScorer::new(1.0);
     assert!(scorer.is_inlier(0.0));
     assert!(scorer.is_inlier(CHI2_99_2DOF));
     assert!(!scorer.is_inlier(CHI2_99_2DOF.next_up()));
@@ -97,7 +97,7 @@ fn effective_threshold_exact() {
     let sqrt_chi = CHI2_99_2DOF.sqrt();
     assert!((sqrt_chi - 3.034_854_3).abs() < 1e-7, "√χ² = {sqrt_chi}");
     for sigma in [1.0, 3.0] {
-        let threshold = MagsacScorer::new(sigma).threshold_sq.sqrt();
+        let threshold = WelschScorer::new(sigma).threshold_sq.sqrt();
         assert!(
             (threshold - sqrt_chi * sigma).abs() <= TOL * sigma * 4.0,
             "σ = {sigma}"

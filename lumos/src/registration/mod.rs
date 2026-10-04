@@ -21,7 +21,7 @@
 //! );
 //!
 //! // Reproject the target onto the reference's grid, into a new image
-//! let aligned = warp(target_image, &result.warp_transform(), &config.warp);
+//! let aligned = warp(target_image, &result.warp_transform(), config.warp);
 //! # Ok(())
 //! # }
 //! ```
@@ -93,21 +93,24 @@ use triangle::voting::{MatchIndices, PointMatch};
 ///
 /// # Example
 ///
-/// ```ignore
-/// use lumos::registration::{register, Config, TransformType};
+/// ```no_run
+/// use lumos::{RegistrationConfig, Star, TransformModel, TransformType, register};
 ///
-/// // With defaults (max_sigma auto-derived from star FWHM)
-/// let result = register(&ref_stars, &target_stars, &Config::default())?;
+/// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), lumos::RegistrationError> {
+/// // With defaults
+/// let result = register(ref_stars, target_stars, &RegistrationConfig::default())?;
 ///
 /// // With custom config
-/// let config = Config {
+/// let config = RegistrationConfig {
 ///     transform_type: TransformModel::Fixed(TransformType::Similarity),
-///     ..Config::default()
+///     ..RegistrationConfig::default()
 /// };
-/// let result = register(&ref_stars, &target_stars, &config)?;
+/// let result = register(ref_stars, target_stars, &config)?;
 ///
 /// println!("Matched {} stars", result.num_inliers());
 /// println!("RMS error: {:.2} pixels", result.rms_error());
+/// # Ok(())
+/// # }
 /// ```
 pub fn register(
     ref_stars: &[Star],

@@ -83,7 +83,7 @@ pub struct Denoise {
     /// Threshold in units of each scale's noise σ. `k = 3` keeps only coefficients with a <0.27%
     /// chance of being pure noise; higher `k` smooths more aggressively.
     pub k: f32,
-    /// Hard (default) or soft coefficient thresholding.
+    /// Hard or soft (default) coefficient thresholding.
     pub threshold: Threshold,
     /// Blend of the denoised result with the original, in `[0, 1]`: `1` = full denoise, `0` =
     /// no-op. Applied as a fraction of the removed noise, so it's a single global strength dial.

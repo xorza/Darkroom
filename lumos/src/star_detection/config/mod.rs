@@ -23,7 +23,7 @@ use crate::star_detection::config::measurement_config::{
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```
 /// use lumos::StarDetectionConfig;
 ///
 /// // Use a preset

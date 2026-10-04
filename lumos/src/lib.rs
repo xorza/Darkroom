@@ -11,14 +11,16 @@
 //! - [`pipeline`] — end-to-end orchestration (`align_and_stack`, `calibrate_align_stack`).
 //! - [`image_ops`] — non-linear operations on the stacked master, strictly after the linear stages.
 //!
-//! What the stages share: [`frame_store`] (memory planning and RAM/mmap frame storage),
+//! What the stages share: [`frame_store`] (RAM/mmap frame storage), `memory` (what a run may
+//! hold, and the plan that keeps it there),
 //! [`stack_product`] (the combined image and the per-pixel planes beside it), and [`progress`].
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load an astronomical image
 //! let image = LinearImage::from_file("linear_light_001.fits", &LoadContext::default())?;
 //!
@@ -28,6 +30,8 @@
 //! let result = detector.detect(&image);
 //!
 //! println!("Found {} stars", result.stars.len());
+//! # Ok(())
+//! # }
 //! ```
 
 mod background_mesh;

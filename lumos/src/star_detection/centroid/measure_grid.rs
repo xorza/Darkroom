@@ -3,7 +3,8 @@
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::star_detection::centroid::stamp::StampGrid;
 
-/// Stamp radius as a multiple of FWHM: 1.75 × FWHM holds about 99% of a Gaussian's flux.
+/// Stamp radius as a multiple of FWHM. A circle of 1.75 FWHM = 4.12σ holds
+/// `1 − exp(−4.12²/2)` = 99.98% of a Gaussian's flux, and 91% of a β = 2.5 Moffat's.
 const STAMP_RADIUS_FWHM_FACTOR: f32 = 1.75;
 
 /// The smallest stamp radius, in pixels: enough pixels to fit a profile to a narrow star.

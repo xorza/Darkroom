@@ -361,7 +361,7 @@ fn final_refit_does_not_degrade_robust_score() {
         point.x += 3.0;
     }
 
-    let scorer = MagsacScorer::new(1.0);
+    let scorer = WelschScorer::new(1.0);
     let mut inliers = Vec::new();
     let mut score = |transform| {
         score_hypothesis(
