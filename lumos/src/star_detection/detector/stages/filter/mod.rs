@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
-use crate::math::statistics::{MedianMad, mad_floored};
+use crate::math::statistics::{MedianMad, mad_floored, mad_to_sigma};
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::detector::QualityFilterDiagnostics;
 use crate::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
@@ -123,8 +123,13 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
     let reference = MedianMad::of_mut(&mut fwhms);
 
-    let effective_mad = mad_floored(reference.mad, reference.median, FWHM_MAD_FLOOR_FRACTION);
-    let max_fwhm = reference.median + max_deviation * effective_mad;
+    // In σ, as the option states: `1.4826·MAD` is a normal distribution's σ.
+    let sigma = mad_to_sigma(mad_floored(
+        reference.mad,
+        reference.median,
+        FWHM_MAD_FLOOR_FRACTION,
+    ));
+    let max_fwhm = reference.median + max_deviation * sigma;
 
     let before_count = stars.len();
     stars.retain(|s| s.fwhm <= max_fwhm);

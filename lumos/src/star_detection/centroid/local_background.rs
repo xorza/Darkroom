@@ -17,6 +17,8 @@ pub(super) struct LocalBackground {
     /// The sky the residual still carries here, subtracted from every stamp pixel.
     pub(super) offset: f32,
     pub(super) noise: f32,
+    /// The samples the offset and the noise were measured from.
+    pub(super) samples: usize,
 }
 
 /// The most annulus pixels the sky is measured from: the clipped median of 2048 samples errs by
@@ -57,9 +59,11 @@ pub(super) fn compute_annulus_background(
     let mut values: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
     values.extend(pixels().step_by(stride).map(|(x, y)| residual.row(y)[x]));
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
+    let samples = values.len();
     let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
     Some(LocalBackground {
         offset: stats.median,
         noise: stats.sigma,
+        samples,
     })
 }

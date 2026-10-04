@@ -11,9 +11,11 @@ pub struct FilterConfig {
     pub max_eccentricity: f32,
     /// Maximum accepted sharpness.
     pub max_sharpness: f32,
-    /// Maximum accepted absolute roundness.
+    /// Maximum accepted absolute roundness, on both DAOFIND metrics. Each lies in `[−2, 2]`, so 2
+    /// keeps every shape.
     pub max_roundness: f32,
-    /// Maximum robust FWHM deviation in MAD-scaled units, or `None` to keep every FWHM.
+    /// How far above the median FWHM a star may lie, in robust σ, `1.4826·MAD` of the brightest
+    /// half's FWHMs, or `None` to keep every FWHM.
     pub max_fwhm_deviation: Option<f32>,
     /// Minimum retained separation between duplicate stars in pixels.
     pub duplicate_min_separation: f32,
@@ -51,9 +53,9 @@ impl FilterConfig {
         )?;
         InvalidConfigField::finite(
             "max_roundness",
-            "finite and in (0, 1]",
+            "finite and in (0, 2]",
             self.max_roundness,
-            |value| value > 0.0 && value <= 1.0,
+            |value| value > 0.0 && value <= 2.0,
         )?;
         if let Some(deviation) = self.max_fwhm_deviation {
             InvalidConfigField::finite(

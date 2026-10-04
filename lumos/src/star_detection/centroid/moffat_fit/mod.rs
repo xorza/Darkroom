@@ -18,9 +18,9 @@ use crate::simd::Kernel;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::{fit_is_plausible, position_sigma};
 use glam::DVec2;
 use imaginarium::Buffer2;
@@ -184,7 +184,7 @@ impl MoffatFit {
         pos: DVec2,
         grid: &StampGrid,
         background: f32,
-        noise: Option<FitNoise>,
+        noise: Option<StarNoise>,
         beta: f32,
     ) -> Option<Self> {
         // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].

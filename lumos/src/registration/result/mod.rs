@@ -97,12 +97,14 @@ pub enum RegistrationError {
         index: usize,
         position: DVec2,
     },
-    /// A star has a non-finite FWHM.
-    #[error("{catalog} star {index} FWHM must be finite, got {value}")]
-    InvalidStarFwhm {
+    /// A star has a non-finite measurement: its FWHM, flux, SNR, peak, sharpness, eccentricity,
+    /// roundness or position σ.
+    #[error("{catalog} star {index} {field} must be finite, got {value}")]
+    InvalidStarField {
         catalog: RegistrationCatalog,
         index: usize,
-        value: f32,
+        field: &'static str,
+        value: f64,
     },
     /// No matching star patterns found.
     #[error("No matching star patterns found between images")]

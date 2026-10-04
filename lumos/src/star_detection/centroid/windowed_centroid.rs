@@ -6,8 +6,8 @@ use imaginarium::Buffer2;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::{MAX_STAMP_SIZE, stamp_centre};
-use crate::star_detection::config::measurement_config::NoiseModel;
 
 /// The error left in a centre at which the iteration stops, in pixels: a hundredth of what the
 /// brightest stars' noise allows, about 1e-3 px.
@@ -42,12 +42,11 @@ pub(super) struct WindowedCentroid {
 
 /// What a windowed centroid reads of a stamp besides its pixels.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct WindowedInputs<'a> {
+pub(super) struct WindowedInputs {
     /// The local sky the residual still carries.
     pub(super) offset: f32,
-    /// The sky's σ per pixel, held to the frame's floor.
-    pub(super) sky_sigma: f32,
-    pub(super) noise_model: Option<&'a NoiseModel>,
+    /// The noise of the star's pixels, its σ held to the frame's floor.
+    pub(super) noise: StarNoise,
 }
 
 /// The windowed moments about one centre.
@@ -69,7 +68,7 @@ impl WindowedCentroid {
         residual: &Buffer2<f32>,
         start: DVec2,
         grid: &MeasureGrid,
-        inputs: WindowedInputs<'_>,
+        inputs: WindowedInputs,
     ) -> Option<Self> {
         let radius = grid.stamp.radius;
         let window_sq = grid.window_sigma * grid.window_sigma;
@@ -119,7 +118,7 @@ impl WindowedCentroid {
         residual: &Buffer2<f32>,
         pos: DVec2,
         grid: &MeasureGrid,
-        inputs: WindowedInputs<'_>,
+        inputs: WindowedInputs,
         gain: [f64; 3],
     ) -> Option<f64> {
         let radius = grid.stamp.radius;
@@ -129,7 +128,6 @@ impl WindowedCentroid {
             radius,
         )?;
         let inv_two_window = 1.0 / (2.0 * grid.window_sigma * grid.window_sigma);
-        let sky_variance = f64::from(inputs.sky_sigma) * f64::from(inputs.sky_sigma);
         let mut weight = 0.0;
         let mut mean = DVec2::ZERO;
         let mut spread = [0.0f64; 3];
@@ -151,9 +149,7 @@ impl WindowedCentroid {
             let row = residual.row(y);
             for (column, (&column_weight, &dx)) in stamp.columns() {
                 let value = f64::from(row[stamp.x0 + column] - inputs.offset);
-                let variance = inputs.noise_model.map_or(sky_variance, |model| {
-                    model.variance_normalized(value.max(0.0), f64::from(inputs.sky_sigma), 1)
-                });
+                let variance = inputs.noise.variance(value);
                 let w = column_weight * row_weight;
                 let (ex, ey) = (dx - mean.x, dy - mean.y);
                 let scale = w * w * variance;

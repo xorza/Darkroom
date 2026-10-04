@@ -71,25 +71,26 @@ fn every_method_on_a_sub_pixel_grid() {
 ///
 /// The windowed covariance deconvolves its window exactly for a Gaussian, so FWHM and eccentricity
 /// come out to the f32 rounding of the samples: 2e-6 of the FWHM, measured ≤ 1.1e-6. A round star's
-/// eccentricity, √(1 − λ₂/λ₁), turns a rounding δ in the ratio into √δ: ≤ 3e-4. The marginals of an
-/// axis-aligned star peak at `A·σ_y·√(2π)` and `A·σ_x·√(2π)`, so GROUND = (σy − σx)/(σx + σy) — up
-/// to the stamp's truncation, ≤ 4.5e-5 at 3.75σ — and SROUND is zero for any star symmetric in both
-/// axes. Sharpness is the peak over the 3 × 3 core, 1/(1 + 2·e^(−1/2σ²))² for a round star on a
-/// pixel centre.
+/// eccentricity, √(1 − λ₂/λ₁), turns a rounding δ in the ratio into √δ: ≤ 3e-4. A round star reads
+/// 0 on both roundness metrics; an elongated one reads photutils' `roundness2` and `roundness1` of
+/// the same f32 samples' 7 × 7 DAOFIND cutout for the PSF of [`TEST_EXPECTED_FWHM`], from its
+/// marginal fit and its quadrant slices reproduced in numpy, to 1e-6: a ulp of f32 `exp` in a sample and the f32 result.
+/// Sharpness is the peak over the 3 × 3 core, 1/(1 + 2·e^(−1/2σ²))² for a round star on a pixel
+/// centre.
 #[test]
 fn moment_metrics_of_gaussian_stars() {
     let size = Size2us::new(128, 128);
     let at = DVec2::splat(64.0);
-    for (sigma_x, sigma_y) in [
-        (1.5f32, 1.5f32),
-        (2.0, 2.0),
-        (2.5, 2.5),
-        (3.0, 3.0),
-        (3.5, 3.5),
-        (4.0, 4.0),
-        (3.0, 2.0),
-        (4.0, 2.0),
-        (2.0, 4.0),
+    for (sigma_x, sigma_y, ground, sround) in [
+        (1.5f32, 1.5f32, 0.0, 0.0),
+        (2.0, 2.0, 0.0, 0.0),
+        (2.5, 2.5, 0.0, 0.0),
+        (3.0, 3.0, 0.0, 0.0),
+        (3.5, 3.5, 0.0, 0.0),
+        (4.0, 4.0, 0.0, 0.0),
+        (3.0, 2.0, -0.662_517_3, -0.084_948_63),
+        (4.0, 2.0, -1.089_321_7, -0.114_288_59),
+        (2.0, 4.0, 1.089_321_7, 0.114_288_59),
     ] {
         let profile = StarProfile::Elliptical {
             sigma_x,
@@ -116,13 +117,12 @@ fn moment_metrics_of_gaussian_stars() {
             "{label}: eccentricity {}",
             star.eccentricity
         );
-        let ground = (sigma_y - sigma_x) / (sigma_x + sigma_y);
         assert!(
-            (star.roundness.ground - ground).abs() <= 1e-4,
-            "{label}: GROUND {}",
-            star.roundness.ground
+            (star.roundness.ground - ground).abs() <= 1e-6
+                && (star.roundness.sround - sround).abs() <= 1e-6,
+            "{label}: {:?}",
+            star.roundness
         );
-        assert_eq!(star.roundness.sround, 0.0, "{label}: SROUND");
         if sigma_x == sigma_y {
             let core = 1.0 + 2.0 * (-1.0 / (2.0 * sigma_x * sigma_x)).exp();
             let sharpness = 1.0 / (core * core);
@@ -132,37 +132,6 @@ fn moment_metrics_of_gaussian_stars() {
                 star.sharpness
             );
         }
-    }
-}
-
-#[test]
-fn snr_uses_normalized_noise_units() {
-    let model = NoiseModel::from_normalized(1_000.0, 10.0);
-
-    // Model variance = 2/1000 + 4 × (0.02² + (10/1000)²) = 0.004.
-    let modeled = compute_snr(2.0, 0.02, 4, Some(&model));
-    let expected_modeled = 2.0 / 0.004_f32.sqrt();
-    assert!((modeled - expected_modeled).abs() < 1e-5);
-
-    // Background-only variance = 4 × 0.02² = 0.0016.
-    let background_only = compute_snr(2.0, 0.02, 4, None);
-    assert!((background_only - 50.0).abs() < 1e-5);
-    assert_ne!(modeled, background_only);
-}
-
-/// The SNR depends on the flux against the noise, not on the frame's scale: flux 2 against σ 0.02
-/// over 4 pixels is 50, and scaled by 2⁻²⁰ or 2⁻⁶⁰, both together, bit for bit the same, since a
-/// power of two scales every product and the square root exactly.
-#[test]
-fn snr_is_invariant_to_the_frames_scale() {
-    let native = compute_snr(2.0, 0.02, 4, None);
-    assert!((native - 50.0).abs() < 1e-5, "{native}");
-    for scale in [2.0f32.powi(-20), 2.0f32.powi(-60)] {
-        assert_eq!(
-            compute_snr(2.0 * scale, 0.02 * scale, 4, None).to_bits(),
-            native.to_bits(),
-            "scale {scale}"
-        );
     }
 }
 

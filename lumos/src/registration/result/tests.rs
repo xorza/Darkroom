@@ -172,10 +172,11 @@ fn registration_error_messages_include_context() {
             "reference star 3 position must be finite, got (NaN, 4.5)",
         ),
         (
-            RegistrationError::InvalidStarFwhm {
+            RegistrationError::InvalidStarField {
                 catalog: RegistrationCatalog::Target,
                 index: 7,
-                value: f32::INFINITY,
+                field: "FWHM",
+                value: f64::INFINITY,
             },
             "target star 7 FWHM must be finite, got inf",
         ),

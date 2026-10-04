@@ -12,11 +12,12 @@ use std::hint::black_box;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::centroid::compute_star;
 use crate::star_detection::centroid::covariance::windowed_covariance;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::measure_star;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
+use crate::star_detection::centroid::{StarBackground, compute_star};
 use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::config::detection_config::DetectionConfig;
 use crate::star_detection::config::measurement_config::{
@@ -211,8 +212,10 @@ fn bench_windowed_centroid_batch_1000(b: ::quickbench::Bencher) {
     let grid = MeasureGrid::new(4.0);
     let inputs = WindowedInputs {
         offset: 0.0,
-        sky_sigma: 0.01,
-        noise_model: None,
+        noise: StarNoise {
+            background_sigma: 0.01,
+            electrons_per_unit: None,
+        },
     };
     b.bench(|| {
         for _ in 0..1000 {
@@ -232,17 +235,22 @@ fn bench_compute_star_single(b: ::quickbench::Bencher) {
     // `measure_star` does after the centroid is settled.
     let SingleStar { residual, sky, .. } = SingleStar::field();
     let pos = DVec2::new(32.3, 32.7);
-    let peak = residual[(32, 33)];
+    let background = StarBackground {
+        offset: 0.0,
+        noise: StarNoise {
+            background_sigma: f64::from(sky.noise[(32, 33)].max(sky.floor)),
+            electrons_per_unit: None,
+        },
+        sky_samples: None,
+    };
 
     b.bench(|| {
         black_box(compute_star(
             black_box(&residual),
-            black_box(&sky),
             black_box(pos),
-            black_box(peak),
             black_box(7),
-            None,
-            None,
+            2.5,
+            background,
         ))
     });
 }
@@ -251,18 +259,23 @@ fn bench_compute_star_single(b: ::quickbench::Bencher) {
 fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
     let SingleStar { residual, sky, .. } = SingleStar::field();
     let pos = DVec2::new(32.3, 32.7);
-    let peak = residual[(32, 33)];
+    let background = StarBackground {
+        offset: 0.0,
+        noise: StarNoise {
+            background_sigma: f64::from(sky.noise[(32, 33)].max(sky.floor)),
+            electrons_per_unit: None,
+        },
+        sky_samples: None,
+    };
 
     b.bench(|| {
         for _ in 0..1000 {
             black_box(compute_star(
                 black_box(&residual),
-                black_box(&sky),
                 black_box(pos),
-                black_box(peak),
                 black_box(7),
-                None,
-                None,
+                2.5,
+                background,
             ));
         }
     });

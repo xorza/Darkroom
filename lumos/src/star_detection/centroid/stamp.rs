@@ -13,8 +13,8 @@ use imaginarium::Buffer2;
 use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::{MAX_STAMP_PIXELS, stamp_centre};
-use crate::star_detection::config::measurement_config::NoiseModel;
 
 /// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
 ///
@@ -59,32 +59,6 @@ pub(super) struct StampData {
     pub(super) origin: DVec2,
 }
 
-/// Noise inputs for an inverse-variance-weighted fit: the local sky σ plus the
-/// normalized-domain sensor model. `None` (absent) means an unweighted fit.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct FitNoise {
-    pub(super) sky_noise: f32,
-    pub(super) noise_model: NoiseModel,
-}
-
-impl FitNoise {
-    /// Inverse-variance weight for a pixel whose expected value is `z`, using the CCD noise model
-    /// (the same per-pixel decomposition as `compute_snr`):
-    /// `w = 1 / (signal/G + sky_noise² + (read_noise_electrons/G)²)`, where `G` is electrons per
-    /// normalized unit.
-    ///
-    /// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
-    /// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux). The
-    /// caller holds `sky_noise` to the frame's floor, so the variance is positive in any domain.
-    #[inline]
-    pub(super) fn weight(&self, z: f64, background: f64) -> f64 {
-        let signal = (z - background).max(0.0);
-        1.0 / self
-            .noise_model
-            .variance_normalized(signal, f64::from(self.sky_noise), 1)
-    }
-}
-
 /// Gaussian-equivalent width from a stamp's weighted second moments: for a Gaussian
 /// `E[r²] = 2σ²`, so `σ = sqrt(E[r²]/2)`. A better seed for L-M than a fixed value.
 ///
@@ -114,7 +88,7 @@ pub(super) struct StampFit {
     /// Gaussian-equivalent width from the stamp's second moments, seeding the optimizer.
     pub(super) sigma_est: f32,
     /// The noise behind `weights`, kept to reweight from the fitted model.
-    noise: Option<FitNoise>,
+    noise: Option<StarNoise>,
     /// The sky level the signal is measured from.
     sky: f64,
 }
@@ -132,7 +106,7 @@ impl StampFit {
         pos: DVec2,
         grid: &StampGrid,
         background: f32,
-        noise: Option<FitNoise>,
+        noise: Option<StarNoise>,
     ) -> Option<Self> {
         let radius = grid.radius;
         let centre = stamp_centre(pos, Size2us::new(pixels.width(), pixels.height()), radius)?;
@@ -175,7 +149,7 @@ impl StampFit {
                 sum_w += signal;
 
                 if let Some(n) = noise {
-                    weights.push(n.weight(value64, sky));
+                    weights.push(1.0 / n.variance(value64 - sky));
                 }
             }
         }
@@ -219,7 +193,7 @@ impl StampFit {
             return Some(first);
         };
         for ((weight, &x), &y) in weights.iter_mut().zip(&grid.x).zip(&grid.y) {
-            *weight = noise.weight(model.evaluate(x, y, &first.params), self.sky);
+            *weight = 1.0 / noise.variance(model.evaluate(x, y, &first.params) - self.sky);
         }
         Some(model.fit(self.data(grid), first.params).unwrap_or(first))
     }

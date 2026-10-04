@@ -271,7 +271,7 @@ mod tests {
         // A star this narrow, off the pixel grid, reads lopsided marginals; its shape is not what
         // this measures.
         let mut config = Config::default();
-        config.filter.max_roundness = 1.0;
+        config.filter.max_roundness = 2.0;
         let brightest = |image: &LinearImage| {
             StarDetector::from_config(config.clone())
                 .unwrap()
@@ -468,7 +468,7 @@ mod tests {
             auto_config.filter.min_snr = 1.0;
             auto_config.filter.max_eccentricity = 1.0;
             auto_config.filter.max_sharpness = 1.0;
-            auto_config.filter.max_roundness = 1.0;
+            auto_config.filter.max_roundness = 2.0;
             auto_config.filter.max_fwhm_deviation = None;
             auto_config.filter.duplicate_min_separation = 0.0;
 

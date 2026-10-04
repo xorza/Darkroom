@@ -137,7 +137,8 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 4),
         },
         // Exactly five is the smallest set that filters. Reference is all five: median 3.1,
-        // mad 0.1, floor 0.31, so max_fwhm = 3.1 + 3·0.31 = 4.03 and only the 20.0 goes.
+        // mad 0.1, floor 0.31, σ = 1.4826·0.31 = 0.4596, so max_fwhm = 3.1 + 3·0.4596 = 4.48 and
+        // only the 20.0 goes.
         Case {
             name: "exactly five stars",
             stars: vec![
@@ -150,7 +151,7 @@ fn filter_fwhm_outliers_over_every_case() {
             deviation: 3.0,
             survivors: vec![100.0, 90.0, 80.0, 70.0],
         },
-        // Reference 3.0..3.4: median 3.2, mad 0.1, floor 0.32 → max_fwhm 4.16.
+        // Reference 3.0..3.4: median 3.2, mad 0.1, floor 0.32, σ 0.4744 → max_fwhm 4.62.
         Case {
             name: "one gross outlier",
             stars: {
@@ -171,8 +172,8 @@ fn filter_fwhm_outliers_over_every_case() {
             deviation: 3.0,
             survivors: fluxes(100.0, 7),
         },
-        // Nothing stands out: reference median 3.1, floor 0.31 → max_fwhm 4.03, and the widest
-        // star is 3.45.
+        // Nothing stands out: reference median 3.1, floor 0.31, σ 0.4596 → max_fwhm 4.48, and the
+        // widest star is 3.45.
         Case {
             name: "uniform",
             stars: ramp(10, 3.0, 0.05),
@@ -180,7 +181,7 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 10),
         },
         // An identical reference gives mad = 0, so only the floor keeps the threshold finite:
-        // median 3.0, floor 0.3 → max_fwhm 3.9, which the 5.0 exceeds.
+        // median 3.0, floor 0.3, σ 0.4448 → max_fwhm 4.33, which the 5.0 exceeds.
         Case {
             name: "mad floor carries a zero-spread reference",
             stars: {
@@ -192,20 +193,22 @@ fn filter_fwhm_outliers_over_every_case() {
             survivors: fluxes(100.0, 9),
         },
         // The reference is the bright half only, so the faint half is judged against it: median
-        // 3.0, mad 0.1, floor 0.3 → max_fwhm 3.9. The 4.0 goes with the 8.0 and the 15.0.
+        // 3.0, mad 0.1, floor 0.3, σ 0.4448 → max_fwhm 4.33. The 4.0 stays, the 8.0 and the 15.0
+        // go.
         Case {
             name: "reference is the bright half",
             stars: mixed_flux_order.to_vec(),
             deviation: 3.0,
-            survivors: vec![100.0, 95.0, 90.0, 85.0, 80.0, 50.0, 20.0],
+            survivors: vec![100.0, 95.0, 90.0, 85.0, 80.0, 50.0, 40.0, 20.0],
         },
-        // One fixture, two deviations. Reference 3.0..3.8: median 3.4, mad 0.2, floor 0.34.
-        // Strict 1.5 → max_fwhm 3.91, keeping five; loose 5.0 → 5.10, keeping all but 6.0 and 7.0.
+        // One fixture, two deviations. Reference 3.0..3.8: median 3.4, mad 0.2, floor 0.34,
+        // σ 0.5041. Strict 1.5 → max_fwhm 4.16, keeping six of the ramp to 4.4; loose 5.0 → 5.92,
+        // keeping all but 6.0 and 7.0.
         Case {
             name: "strict deviation",
             stars: with_two_outliers.clone(),
             deviation: 1.5,
-            survivors: fluxes(100.0, 5),
+            survivors: fluxes(100.0, 6),
         },
         Case {
             name: "loose deviation",

@@ -26,17 +26,17 @@ pub struct Star {
     pub peak: f32,
     /// Whether the peak pixel reached the saturation level: its centroid and flux are unreliable.
     pub saturated: bool,
-    /// Sharpness metric (peak / `flux_in_core`). Cosmic rays have high sharpness (>0.8),
-    /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
+    /// Sharpness: the star's own peak, at its centre pixel, over the 3 × 3 core's flux about it.
+    /// A cosmic ray, a single pixel, reads near 1; a star spreads its light, 0.14 for a centred
+    /// Gaussian of FWHM 4.
     pub sharpness: f32,
     /// The DAOFIND roundness metrics.
     pub roundness: Roundness,
 }
 
 impl Star {
-    /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
-    ///
-    /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
+    /// Check if star is likely a cosmic ray: sharper than `max_sharpness`, the filter's 0.7 by
+    /// default.
     pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
         self.sharpness > max_sharpness
     }

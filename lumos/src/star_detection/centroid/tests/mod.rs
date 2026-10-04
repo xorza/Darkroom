@@ -15,6 +15,7 @@ use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::centroid::*;
 use crate::star_detection::config::Config;
@@ -38,6 +39,20 @@ use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 /// rounding moves the covariance by at most 1.6e-7 px² over the fixtures here (measured), so 1e-6
 /// holds it with room while staying far below any width error worth reporting.
 const EXACT_FIT_PX2: f64 = 1e-6;
+
+/// The background `measure_star` measures against where no annulus measured the sky: no offset,
+/// the map's noise at the nearest pixel held to the floor, and no gain.
+fn global_background(sky: &SkyNoise, pos: DVec2) -> StarBackground {
+    let pixel = (pos.x.round() as usize, pos.y.round() as usize);
+    StarBackground {
+        offset: 0.0,
+        noise: StarNoise {
+            background_sigma: f64::from(sky.noise[pixel].max(sky.floor)),
+            electrons_per_unit: None,
+        },
+        sky_samples: None,
+    }
+}
 
 /// A saturation mask with no pixel set, the size of `pixels`.
 fn unsaturated(pixels: &Buffer2<f32>) -> BitBuffer2 {
@@ -109,15 +124,24 @@ impl Measured {
             &MeasureGrid::new(expected_fwhm),
             WindowedInputs {
                 offset: 0.0,
-                sky_sigma: 0.01,
-                noise_model: None,
+                noise: StarNoise {
+                    background_sigma: 0.01,
+                    electrons_per_unit: None,
+                },
             },
         )
     }
 
-    /// `compute_star` at `pos` over a stamp of `radius`, with the global sky and no noise model.
+    /// `compute_star` at `pos` over a stamp of `radius`, with the global sky, no gain and the PSF
+    /// of [`TEST_EXPECTED_FWHM`].
     fn compute(&self, pos: DVec2, radius: usize) -> Option<Star> {
-        compute_star(&self.residual, &self.sky, pos, 0.0, radius, None, None)
+        compute_star(
+            &self.residual,
+            pos,
+            radius,
+            MeasureGrid::new(TEST_EXPECTED_FWHM).window_sigma,
+            global_background(&self.sky, pos),
+        )
     }
 }
 

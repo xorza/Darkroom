@@ -97,8 +97,10 @@ fn the_position_sigma_matches_the_scatter() {
             &grid,
             WindowedInputs {
                 offset: 0.0,
-                sky_sigma: NOISE,
-                noise_model: None,
+                noise: StarNoise {
+                    background_sigma: f64::from(NOISE),
+                    electrons_per_unit: None,
+                },
             },
         )
         .unwrap();
