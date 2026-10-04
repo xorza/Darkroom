@@ -233,7 +233,7 @@ fn register_snapshot() {
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "26c6eae05885e36f");
+    assert_snapshot("registration", &snapshot, "f39788a68fefa1a4");
 }
 
 #[test]

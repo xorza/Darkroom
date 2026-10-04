@@ -161,11 +161,14 @@ fn warp_transform_with_sip() {
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(field.centre),
-        ..Default::default()
     };
-    let sip = SipPolynomial::fit_from_transform(&reference, &target, &transform, &sip_config)
-        .unwrap()
-        .polynomial;
+    let sip = SipPolynomial::fitted_under(
+        &transform,
+        &reference,
+        &target,
+        sip_config.order,
+        sip_config.reference_point.unwrap(),
+    );
 
     let wt = WarpTransform::with_sip(transform, sip.clone());
     assert!(wt.has_sip());
@@ -203,9 +206,9 @@ fn warp_transform_apply_no_sip_matches_transform() {
 }
 
 #[test]
-fn auto_sizes_its_gates_against_the_model_it_can_climb_to() {
-    // The ladder ends at Homography, so every count `Auto` is measured by has to be Homography's
-    // — anything smaller would let a pair through that the last rung cannot fit.
+fn auto_sizes_its_gates_against_the_most_general_model_it_fits() {
+    // `Auto` fits up to Homography, so every count it is measured by has to be Homography's —
+    // anything smaller would let a pair through that the most general model cannot fit.
     assert_eq!(
         TransformModel::Auto.most_general(),
         TransformType::Homography

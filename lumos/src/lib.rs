@@ -118,7 +118,7 @@ pub use registration::ransac::config::RansacConfig;
 pub use registration::register;
 pub use registration::resample::{WarpResult, warp};
 pub use registration::result::{
-    FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
+    FailedModel, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
     StarMatch,
 };
 pub use registration::transform::inverse_warp::{InverseMapped, InverseWarp};

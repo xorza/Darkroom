@@ -35,7 +35,7 @@
 //! | Similarity | 4 | Translation + rotation + uniform scale |
 //! | Affine | 6 | Handles shear and differential scaling |
 //! | Homography | 8 | Full perspective transformation |
-//! | Auto | - | Ladder Euclidean → Similarity → Affine → Homography; first within 0.5px RMS wins |
+//! | Auto | - | Every model from Euclidean to Homography fitted, the lowest GRIC (Torr 1998) wins |
 //!
 //! # Configuration Presets
 //!
@@ -47,10 +47,10 @@
 
 pub(crate) mod config;
 pub(crate) mod distortion;
+mod final_fit;
 mod point_normalization;
 mod point_pairs;
 pub(crate) mod ransac;
-pub(crate) mod recovery;
 pub(crate) mod resample;
 pub(crate) mod result;
 mod spatial;
@@ -58,13 +58,11 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
 
-use crate::registration::point_pairs::PointPairs;
-use crate::registration::recovery::{RecoveredMatches, recover_matches};
+use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitCatalogs, FitModel, SipModel};
 use crate::registration::spatial::KdTree;
 use config::Config;
-use distortion::sip::SipPolynomial;
-use result::{FailedRung, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch};
-use transform::{TransformModel, TransformType, WarpTransform};
+use result::{FailedModel, RegistrationCatalog, RegistrationError, RegistrationResult};
+use transform::{TransformModel, TransformType};
 
 use std::time::Instant;
 
@@ -74,7 +72,7 @@ use crate::math::statistics::median_mut;
 use crate::star_detection::star::Star;
 use ransac::RansacEstimator;
 use triangle::matching::match_triangles;
-use triangle::voting::PointMatch;
+use triangle::voting::{MatchIndices, PointMatch};
 
 /// Register two sets of star positions.
 ///
@@ -138,9 +136,20 @@ pub fn register(
 
     // Derive max_sigma from median FWHM for optimal noise tolerance
     let max_sigma = tuning::max_sigma_from_fwhm(median_fwhm(ref_stars, target_stars));
+    let catalogs =
+        FitCatalogs::new(ref_stars, target_stars).ok_or(RegistrationError::InsufficientStars {
+            found: 0,
+            required: required_stars,
+        })?;
+    let sip = config.sip.as_ref().map(|sip| SipModel {
+        order: sip.order,
+        origin: sip
+            .reference_point
+            .unwrap_or_else(|| bounding_box_centre(ref_stars)),
+    });
 
     // The brightest `max_stars` of each set, as trees: triangle matching forms its triangles over
-    // both, and match recovery queries the target tree again on every rung.
+    // both, and RANSAC samples their matches for every model.
     let brightest = |stars: &[Star]| {
         KdTree::build(
             stars
@@ -174,21 +183,32 @@ pub fn register(
     }
 
     // RANSAC estimation
-    let result = match config.transform_type {
-        TransformModel::Auto => {
-            auto_ladder(ref_tree.points(), &target_tree, &matches, max_sigma, config)
-        }
+    let fit = match config.transform_type {
+        TransformModel::Auto => select_by_gric(
+            ref_tree.points(),
+            &target_tree,
+            &matches,
+            &catalogs,
+            sip,
+            max_sigma,
+            config,
+        ),
         TransformModel::Fixed(transform_type) => estimate_and_refine(
             ref_tree.points(),
             &target_tree,
             &matches,
-            transform_type,
+            &catalogs,
+            FitModel {
+                transform: transform_type,
+                sip,
+            },
             max_sigma,
             config,
         ),
     }?;
 
-    let result = result.with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+    let result = RegistrationResult::new(fit.warp.transform, fit.warp.sip, fit.matches)
+        .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
     let rms_error = result.rms_error();
 
     if rms_error > config.max_rms_error {
@@ -233,6 +253,16 @@ fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), 
     Ok(())
 }
 
+/// The centre of the stars' bounding box: the SIP origin when none is configured, shared by every
+/// frame registered to the same reference.
+fn bounding_box_centre(stars: &[Star]) -> DVec2 {
+    let (low, high) = stars.iter().fold(
+        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+        |(low, high), star| (low.min(star.pos), high.max(star.pos)),
+    );
+    (low + high) / 2.0
+}
+
 /// Compute the median FWHM from two sets of stars.
 fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
     let mut fwhms: Vec<f32> = ref_stars
@@ -244,117 +274,140 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
     f64::from(median_mut(&mut fwhms))
 }
 
-/// `Auto` model selection: estimate transforms from fewest to most degrees of freedom and accept
-/// the first whose RMS clears [`tuning::AUTO_UPGRADE_THRESHOLD`] — the *simplest model that fits*,
-/// so the alignment isn't overfit to star-centroid noise (every extra DOF soaks up noise and
-/// generalizes worse). Falls through to the most general model (Homography) when no simpler rung
-/// clears the bar; the caller's `max_rms_error` gate then has the final say on that result.
+/// The models `Auto` chooses among, from the fewest degrees of freedom to the most.
+const AUTO_MODELS: [TransformType; 4] = [
+    TransformType::Euclidean,
+    TransformType::Similarity,
+    TransformType::Affine,
+    TransformType::Homography,
+];
+
+/// `Auto` model selection by the geometric robust information criterion (Torr 1998): every model
+/// of [`AUTO_MODELS`] is fitted — up to an affine map with a SIP correction — and the one of lowest
 ///
-/// The bar is the *stricter* of the ladder's own threshold and the caller's `max_rms_error`. Taking
-/// only the ladder's would let a tight `max_rms_error` fail the whole registration on a rung this
-/// function accepted, while a later rung would have satisfied it.
+/// `GRIC = Σ min(zᵢ²/ŝ², λ₃·(r − d)) + λ₂·k`
 ///
-/// The ladder is Euclidean → Similarity → Affine → Homography (rigid → +scale → +shear →
-/// projective) — every rung, rather than a couple of representative ones, because each omission
-/// costs accuracy in both directions: without Euclidean a same-scale rigid set is fit with a
-/// needless scale DOF, and without Affine mild differential distortion escalates all the way to the
-/// full projective model.
+/// wins, ties to the simpler, among the models whose RMS meets the caller's `max_rms_error` — a
+/// model the caller will refuse cannot be the answer while another passes — or among all when none
+/// does, for `register` to refuse. The sum runs over the union of every fitted model's pairs, each
+/// model's residual on each in units of the pair's σ, so a pair a model cannot follow costs it the
+/// cap rather than leaving its RMS unmeasured; `ŝ` is the most general fitted model's robust
+/// scale, the noise estimate all are judged by. A pair of 2-D points is `r = 4` numbers and every
+/// candidate a 2-D map, `d = 2`, so the cap is `λ₃·(r − d)` = 4 at Torr's `λ₃ = 2`, Torr's
+/// `λ₁·d·n` is the same for every candidate and drops out, and each parameter costs
+/// `λ₂ = ln(r·n)`, with `k` the transform's parameters and the SIP correction's.
 ///
-/// A rung that fits without clearing the bar is kept as the fallback, so a later rung's failure
-/// cannot cost the run a usable fit: the ladder's bar is at most the caller's `max_rms_error`, so a
-/// fit between the two is one `register` would accept. The fallback is the *most general* rung that
-/// fit, matching what the fall-through would have returned had it succeeded — and not the
-/// lowest-RMS rung, because each rung's RMS is measured over its own inlier set, so the numbers do
-/// not compare directly.
-///
-/// Every rung's failure reaches the caller, as
-/// [`AutoLadderExhausted`](RegistrationError::AutoLadderExhausted), when none of them fit at all.
-/// The rungs fail independently — RANSAC estimates the model it was given, and SIP is fit on that
-/// model's inlier set — so no single rung's error stands in for the others.
-fn auto_ladder(
+/// Every model's failure reaches the caller, as
+/// [`EveryModelFailed`](RegistrationError::EveryModelFailed), when none of them fit at all.
+/// The models fail independently — RANSAC estimates the model it was given — so no single error
+/// stands in for the others.
+fn select_by_gric(
     ref_positions: &[DVec2],
     target_tree: &KdTree,
     matches: &[PointMatch],
+    catalogs: &FitCatalogs,
+    sip: Option<SipModel>,
     max_sigma: f64,
     config: &Config,
-) -> Result<RegistrationResult, RegistrationError> {
-    let bar = tuning::AUTO_UPGRADE_THRESHOLD.min(config.max_rms_error);
-    let mut fallback: Option<RegistrationResult> = None;
-    let mut failures: Vec<FailedRung> = Vec::new();
-    for model in [
-        TransformType::Euclidean,
-        TransformType::Similarity,
-        TransformType::Affine,
-        TransformType::Homography,
-    ] {
+) -> Result<FinalFit, RegistrationError> {
+    let mut fitted: Vec<(FitModel, FinalFit)> = Vec::new();
+    let mut failures: Vec<FailedModel> = Vec::new();
+    // A homography has no SIP fit: its perspective terms are the correction's quadratic ones.
+    let candidates = AUTO_MODELS
+        .into_iter()
+        .filter(|&transform| sip.is_none() || transform != TransformType::Homography);
+    for transform in candidates {
+        let model = FitModel { transform, sip };
         match estimate_and_refine(
             ref_positions,
             target_tree,
             matches,
+            catalogs,
             model,
             max_sigma,
             config,
         ) {
-            // The most general rung reached is the fall-through result, accepted whatever its RMS —
-            // the caller's gate has the final say on it.
-            Ok(result) if result.rms_error() <= bar || model == TransformType::Homography => {
-                return Ok(result);
-            }
-            Ok(result) => {
-                tracing::debug!(
-                    ?model,
-                    rms_error = result.rms_error(),
-                    bar,
-                    "Auto rung fit but missed the bar"
-                );
-                fallback = Some(result);
-            }
-            // An invalid config fails identically on every rung and is the run's own fault rather
+            Ok(fit) => fitted.push((model, fit)),
+            // An invalid config fails identically on every model and is the run's own fault rather
             // than the pair's — `align_and_stack` keys a whole-run abort on that distinction, so it
-            // must not be buried in a ladder report. `register` validates before the ladder, so
-            // this guards the ordering rather than a reachable path.
+            // must not be buried in a per-model report. `register` validates first, so this
+            // guards the ordering rather than a reachable path.
             Err(error @ RegistrationError::InvalidConfig(_)) => return Err(error),
             Err(error) => {
-                tracing::debug!(?model, %error, "Auto rung failed");
-                failures.push(FailedRung {
-                    model,
+                tracing::debug!(model = ?transform, %error, "Auto candidate failed");
+                failures.push(FailedModel {
+                    model: transform,
                     error: Box::new(error),
                 });
             }
         }
     }
-
-    match fallback {
-        Some(result) => {
-            tracing::debug!(
-                model = ?result.transform().transform_type(),
-                rms_error = result.rms_error(),
-                failed_rungs = failures.len(),
-                "Auto fell back to the most general rung that fit"
-            );
-            Ok(result)
-        }
-        None => Err(RegistrationError::AutoLadderExhausted { failures }),
-    }
+    let Some(scale) = fitted.last().map(|(_, fit)| fit.scale) else {
+        return Err(RegistrationError::EveryModelFailed { failures });
+    };
+    let mut union: Vec<MatchIndices> = fitted
+        .iter()
+        .flat_map(|(_, fit)| fit.matches.iter().map(|star_match| star_match.indices))
+        .collect();
+    union.sort_unstable_by_key(|pair| (pair.reference, pair.target));
+    union.dedup();
+    let per_parameter = (4.0 * union.len() as f64).ln();
+    let gric = |(model, fit): &(FitModel, FinalFit)| {
+        union
+            .iter()
+            .map(|&pair| {
+                (catalogs.normalized_residual(&fit.warp, pair) / scale)
+                    .powi(2)
+                    .min(4.0)
+            })
+            .sum::<f64>()
+            + per_parameter * model.parameter_count() as f64
+    };
+    let rms = |fit: &FinalFit| {
+        (fit.matches
+            .iter()
+            .map(|star_match| star_match.residual * star_match.residual)
+            .sum::<f64>()
+            / fit.matches.len() as f64)
+            .sqrt()
+    };
+    let any_accurate = fitted
+        .iter()
+        .any(|(_, fit)| rms(fit) <= config.max_rms_error);
+    let scores: Vec<f64> = fitted
+        .iter()
+        .map(|candidate| {
+            if any_accurate && rms(&candidate.1) > config.max_rms_error {
+                f64::INFINITY
+            } else {
+                gric(candidate)
+            }
+        })
+        .collect();
+    let best = scores.iter().enumerate().fold(
+        0,
+        |best, (i, &score)| if score < scores[best] { i } else { best },
+    );
+    tracing::debug!(?scores, chosen = ?fitted[best].0.transform, "Auto chose by GRIC");
+    Ok(fitted.swap_remove(best).1)
 }
 
-/// Run RANSAC estimation followed by match recovery and optional SIP fitting.
-///
-/// `transform_type` is passed separately from `config.transform_type` because
-/// the Auto resolution logic resolves to a concrete type before calling this.
+/// Run RANSAC estimation for `model`'s transform, then the final fit of `model` over the full
+/// catalogs.
 fn estimate_and_refine(
     ref_stars: &[DVec2],
     target_tree: &KdTree,
     matches: &[PointMatch],
-    transform_type: TransformType,
+    catalogs: &FitCatalogs,
+    model: FitModel,
     max_sigma: f64,
     config: &Config,
-) -> Result<RegistrationResult, RegistrationError> {
+) -> Result<FinalFit, RegistrationError> {
     let target_stars = target_tree.points();
     let t0 = Instant::now();
     let ransac = RansacEstimator::new(config.ransac.clone(), max_sigma);
     let ransac_result = ransac
-        .estimate(matches, ref_stars, target_stars, transform_type)
+        .estimate(matches, ref_stars, target_stars, model.transform)
         .map_err(|failure| RegistrationError::RansacFailed {
             reason: failure.reason,
             iterations: failure.iterations,
@@ -362,87 +415,41 @@ fn estimate_and_refine(
         })?;
     let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-    let inlier_matches: Vec<_> = ransac_result
-        .inliers
-        .iter()
-        .map(|&i| matches[i].indices)
-        .collect();
-
     let t0 = Instant::now();
-    let RecoveredMatches {
-        transform,
-        matches: inlier_matches,
-    } = recover_matches(
-        ref_stars,
-        target_tree,
-        &ransac_result.transform,
-        &inlier_matches,
+    let fit = FinalFit::run(
+        catalogs,
+        ransac_result.transform,
+        model,
         tuning::recovery_radius(max_sigma),
-        transform_type,
-    );
-    let recovery_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    )
+    .map_err(|failure| match failure {
+        FinalFitFailure::TooFewPairs { found, required } => {
+            RegistrationError::TooFewInliers { found, required }
+        }
+        FinalFitFailure::TooFewSipPairs { found, required } => {
+            RegistrationError::InsufficientSipPoints { found, required }
+        }
+        FinalFitFailure::Degenerate => RegistrationError::DegenerateFit {
+            model: model.transform,
+        },
+    })?;
+    let fit_ms = t0.elapsed().as_secs_f64() * 1000.0;
     // The floor the matcher was held to holds for the fit too: a transform supported by a minimal
     // sample has a near-zero RMS by construction, so the accuracy gate alone would pass it.
-    if inlier_matches.len() < config.matching.min_matches {
+    if fit.matches.len() < config.matching.min_matches {
         return Err(RegistrationError::TooFewInliers {
-            found: inlier_matches.len(),
+            found: fit.matches.len(),
             required: config.matching.min_matches,
         });
     }
-
-    let t0 = Instant::now();
-    let sip = if let Some(sip_config) = &config.sip {
-        // Materialized rather than indexed through `inlier_matches`: the fitter takes paired
-        // position slices and knows nothing about match indices, which is the layering that keeps
-        // `distortion` independent of how the matches were found. Only the SIP path pays for it,
-        // and it pays once — `unzip` fills both from a single walk.
-        let mut inliers = PointPairs::default();
-        inliers.gather_matched(
-            inlier_matches
-                .iter()
-                .map(|star_match| (star_match.reference, star_match.target)),
-            ref_stars,
-            target_stars,
-        );
-
-        Some(
-            SipPolynomial::fit_from_transform(
-                &inliers.reference,
-                &inliers.target,
-                &transform,
-                sip_config,
-            )?
-            .polynomial,
-        )
-    } else {
-        None
-    };
-
-    // Each pair's residual is measured where the warp will put its reference star, through the
-    // same `WarpTransform::apply` the warp evaluates.
-    let warp = WarpTransform {
-        transform,
-        sip: sip.clone(),
-    };
-    let matched_stars: Vec<StarMatch> = inlier_matches
-        .iter()
-        .map(|indices| StarMatch {
-            indices: *indices,
-            residual: (warp.apply(ref_stars[indices.reference]) - target_stars[indices.target])
-                .length(),
-        })
-        .collect();
-
-    let sip_ms = t0.elapsed().as_secs_f64() * 1000.0;
     tracing::debug!(
         ransac_ms,
-        recovery_ms,
-        sip_ms,
+        fit_ms,
         ransac_inliers = ransac_result.inliers.len(),
+        fit_scale = fit.scale,
         "Registration sub-step timing"
     );
-
-    Ok(RegistrationResult::new(transform, sip, matched_stars))
+    Ok(fit)
 }
 
 #[cfg(all(test, feature = "bench"))]

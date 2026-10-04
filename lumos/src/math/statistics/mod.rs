@@ -167,28 +167,10 @@ fn fill_abs_deviations<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) 
     scratch.extend(values.iter().map(|&value| (value - median).abs()));
 }
 
-/// MAD of `values` about `median`, through [`median_fast`].
-///
-/// For rejection hot paths whose data is guaranteed NaN-free — see [`median_fast`] for what a NaN
-/// would cost and why the check is debug-only. Checked here as well as there so a violation names
-/// the caller's data rather than the derived deviations.
-#[inline]
-pub(crate) fn mad_fast<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
-    debug_assert!(
-        !median.is_nan() && !values.iter().any(|value| value.is_nan()),
-        "mad_fast requires a NaN-free median and values; use mad_with_scratch otherwise"
-    );
-    if values.is_empty() {
-        return F::ZERO;
-    }
-    fill_abs_deviations(values, median, scratch);
-    median_fast(scratch)
-}
-
 /// MAD of `values` about `median`, through [`median_mut`].
 ///
-/// `MAD = median(|x_i - median(x)|)`. The NaN-tolerant twin of [`mad_fast`]: same shape, but the
-/// deviations are ranked under a total order, so data that may hold NaN still measures.
+/// `MAD = median(|x_i - median(x)|)`, the deviations ranked under a total order, so data that may
+/// hold NaN still measures.
 #[inline]
 pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
     if values.is_empty() {

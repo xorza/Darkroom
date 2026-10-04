@@ -66,10 +66,15 @@ fn sip_warp(size: Size2us, transform: Transform) -> WarpTransform {
     let config = SipConfig {
         order: 3,
         reference_point: Some(center),
-        ..SipConfig::default()
     };
-    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
-    WarpTransform::with_sip(transform, fit.polynomial)
+    let sip = SipPolynomial::fitted_under(
+        &transform,
+        &reference,
+        &target,
+        config.order,
+        config.reference_point.unwrap(),
+    );
+    WarpTransform::with_sip(transform, sip)
 }
 
 /// Every method on a row equals the single-point oracle at that pixel's position, across a

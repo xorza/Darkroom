@@ -19,29 +19,14 @@ fn rms(residuals: &[f64]) -> f64 {
     (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt()
 }
 
-fn fit_sip(
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
-    transform: &Transform,
-    config: &SipConfig,
-) -> SipFitResult {
-    SipPolynomial::fit_from_transform(ref_points, target_points, transform, config).unwrap()
-}
-
-/// An order-`order` fit of `field` about its own centre.
-fn fit_field(field: &RadialField, order: usize, clip_iterations: usize) -> SipFitResult {
+/// An order-`order` fit of `field` under its own transform, about its own centre, every pair
+/// weighed alike.
+fn fit_field(field: &RadialField, order: usize) -> SipPolynomial {
     let RadialPairs { reference, target } = field.pairs();
-    let config = SipConfig {
-        order,
-        reference_point: Some(field.centre),
-        clip_iterations,
-        ..Default::default()
-    };
-    fit_sip(&reference, &target, &field.transform, &config)
+    SipPolynomial::fitted_under(&field.transform, &reference, &target, order, field.centre)
 }
 
 mod basis;
 mod correction;
 mod fitting;
 mod reference;
-mod results;

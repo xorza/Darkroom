@@ -61,26 +61,30 @@ fn config_precise_preset() {
     config.validate().unwrap();
 }
 
+/// The wide-field preset corrects distortion by SIP under the model GRIC chooses; a fixed
+/// homography under SIP is refused, its perspective terms being the correction's quadratic ones.
 #[test]
 fn config_wide_field_preset() {
     let config = Config::wide_field();
-    assert_eq!(
-        config.transform_type,
-        TransformModel::Fixed(TransformType::Homography)
-    );
+    assert_eq!(config.transform_type, TransformModel::Auto);
     assert!(config.sip.is_some());
     assert!(config.ransac.max_rotation.is_none());
     assert!(config.ransac.scale_range.is_none());
     config.validate().unwrap();
+    let homography = Config {
+        transform_type: TransformModel::Fixed(TransformType::Homography),
+        ..config
+    };
+    assert_eq!(
+        homography.validate().unwrap_err().field,
+        "transform_type with SIP"
+    );
 }
 
 #[test]
 fn config_precise_wide_field_preset() {
     let config = Config::precise_wide_field();
-    assert_eq!(
-        config.transform_type,
-        TransformModel::Fixed(TransformType::Homography)
-    );
+    assert_eq!(config.transform_type, TransformModel::Auto);
     assert_eq!(config.matching.max_stars, 500);
     assert_eq!(config.matching.min_matches, 20);
     assert_eq!(config.matching.triangle.ratio_tolerance, 0.02);

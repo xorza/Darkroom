@@ -9,7 +9,7 @@ use std::ptr;
 use common::TempDir;
 
 use super::*;
-use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+use crate::registration::distortion::sip::SipPolynomial;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -209,14 +209,8 @@ fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2)
         .iter()
         .map(|&r| transform.apply(r + field(r - center)))
         .collect();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..SipConfig::default()
-    };
-    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
-    WarpTransform::with_sip(transform, fit.polynomial)
+    let sip = SipPolynomial::fitted_under(&transform, &reference, &target, 3, center);
+    WarpTransform::with_sip(transform, sip)
 }
 
 /// A frame registered with SIP drizzles through the warp's inverse: `drizzle_images` and the

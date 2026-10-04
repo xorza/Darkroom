@@ -6,6 +6,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, generate_random_stars,
 };
+use crate::registration::final_fit::{FitCatalogs, FitModel};
 use crate::registration::ransac::config::RansacConfig;
 use crate::registration::register;
 use crate::registration::spatial::KdTree;
@@ -607,9 +608,10 @@ fn the_smallest_catalogs_register_and_three_stars_do_not() {
     );
 }
 
-/// A fit is held to `min_matches` after recovery, not only the matcher. Twelve matches of which
-/// three agree on a translation: RANSAC fits the three exactly, the RMS is zero, and recovery has
-/// no star within reach of the others — so the fit rests on 3 pairs where 8 are asked for.
+/// A fit is held to `min_matches` after the final fit, not only the matcher. Twelve matches of
+/// which three agree on a translation: RANSAC fits the three exactly, the RMS is zero, and the
+/// final fit has no star within reach of the others — so the fit rests on 3 pairs where 8 are
+/// asked for.
 #[test]
 fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
     let shift = DVec2::new(4.0, -2.0);
@@ -644,11 +646,17 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
         ..Config::default()
     };
     config.ransac.seed = 1;
+    let as_stars = |points: &[DVec2]| points.iter().map(|&p| Star::at(p)).collect::<Vec<_>>();
+    let catalogs = FitCatalogs::new(&as_stars(&reference), &as_stars(&target)).unwrap();
     let error = estimate_and_refine(
         &reference,
         &KdTree::build(target).unwrap(),
         &matches,
-        TransformType::Translation,
+        &catalogs,
+        FitModel {
+            transform: TransformType::Translation,
+            sip: None,
+        },
         1.0,
         &config,
     )

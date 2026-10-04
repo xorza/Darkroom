@@ -168,8 +168,8 @@ impl RegistrationMatchingConfig {
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Which model to fit, or `Auto` to ladder Euclidean → Similarity → Affine → Homography and
-    /// take the first that fits. Default: `Auto`.
+    /// Which model to fit, or `Auto` to fit every model from Euclidean to Homography and take the
+    /// one of lowest GRIC. Default: `Auto`.
     pub transform_type: TransformModel,
 
     /// Star selection, acceptance gates, and triangle matching.
@@ -241,10 +241,11 @@ impl Config {
         }
     }
 
-    /// Wide-field configuration: handles lens distortion.
+    /// Wide-field configuration: handles lens distortion, by a SIP correction under the model GRIC
+    /// chooses up to an affine map.
     pub fn wide_field() -> Self {
         Self {
-            transform_type: TransformModel::Fixed(TransformType::Homography),
+            transform_type: TransformModel::Auto,
             sip: Some(SipConfig::default()),
             ransac: RansacConfig {
                 max_rotation: None,
@@ -328,6 +329,15 @@ impl Config {
         )?;
         if let Some(sip) = &self.sip {
             sip.validate()?;
+            // A homography's perspective terms act to first order as the correction's quadratic
+            // ones: the two are not determined together.
+            InvalidConfigField::check(
+                self.transform_type != TransformModel::Fixed(TransformType::Homography),
+                "transform_type with SIP",
+                "at most affine, as a homography's perspective terms are the SIP correction's \
+                 quadratic ones",
+                TransformType::Homography.parameter_count() as f64,
+            )?;
         }
         self.warp.validate()?;
 

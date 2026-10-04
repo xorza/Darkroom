@@ -103,11 +103,14 @@ mod tests {
         let config = SipConfig {
             order: 3,
             reference_point: Some(center),
-            ..SipConfig::default()
         };
-        let sip = SipPolynomial::fit_from_transform(&reference, &target, &affine, &config)
-            .unwrap()
-            .polynomial;
+        let sip = SipPolynomial::fitted_under(
+            &affine,
+            &reference,
+            &target,
+            config.order,
+            config.reference_point.unwrap(),
+        );
         let transforms = [
             WarpTransform::new(affine),
             WarpTransform::new(Transform::homography([
