@@ -131,8 +131,8 @@ impl InputMap {
             Self::Transform { to_output, .. } => Some(to_output.apply(p)),
             Self::Sip(sip) => sip
                 .inverse
-                .apply(p)
-                .map(|mapped| sip.grid.apply(mapped.position)),
+                .position(p)
+                .map(|position| sip.grid.apply(position)),
         }
     }
 

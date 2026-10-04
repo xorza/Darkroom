@@ -409,16 +409,24 @@ impl SipPolynomial {
     }
 
     /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
+    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+        self.local(p).jacobian
+    }
+
+    /// [`Self::correct`] and [`Self::jacobian`] at `p` from one set of powers, as a Newton step
+    /// takes both.
     ///
     /// The correction is `s·P((p − p₀)/s)` in the normalized coordinates the polynomial is held in,
     /// so the scale cancels and its derivative is `P`'s: `∂(uᵖvᵠ)/∂u = p·uᵖ⁻¹vᵠ`, from the same
     /// [`MonomialPowers`] [`evaluate_basis`] reads. Columns are the images of the x and y steps.
-    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+    pub(crate) fn local(&self, p: DVec2) -> SipLocal {
         let powers = MonomialPowers::at(self.norm.normalize(p));
+        let mut value = DVec2::ZERO;
         let mut d_du = DVec2::ZERO;
         let mut d_dv = DVec2::ZERO;
         for (i, &(pu, pv)) in self.terms.iter().enumerate() {
             let coefficients = DVec2::new(self.coeffs_u[i], self.coeffs_v[i]);
+            value += coefficients * (powers.u[pu] * powers.v[pv]);
             if pu > 0 {
                 d_du += coefficients * (pu as f64 * powers.u[pu - 1] * powers.v[pv]);
             }
@@ -426,7 +434,41 @@ impl SipPolynomial {
                 d_dv += coefficients * (pv as f64 * powers.u[pu] * powers.v[pv - 1]);
             }
         }
-        DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv)
+        SipLocal {
+            corrected: p + self.norm.denormalize_delta(value),
+            jacobian: DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv),
+        }
+    }
+
+    /// The correction along pixel row `y`, as two polynomials in `u` alone.
+    ///
+    /// With `v` fixed, `Σ cₚᵩ·uᵖ·vᵠ` is `Σₚ (Σᵩ cₚᵩ·vᵠ)·uᵖ`: the inner sums are taken once per row,
+    /// and each pixel costs one Horner pass of `order` steps per axis instead of every monomial.
+    /// Exact as algebra; the reordered sums round differently from [`Self::correct`] in the last
+    /// bits.
+    pub(crate) fn row(&self, y: f64) -> SipRow {
+        let v = self.norm.normalize(DVec2::new(0.0, y)).y;
+        let order = self
+            .terms
+            .iter()
+            .map(|&(p, q)| p + q)
+            .max()
+            .expect("a SIP polynomial has terms");
+        let mut v_powers = [1.0; MAX_ORDER + 1];
+        for k in 1..=MAX_ORDER {
+            v_powers[k] = v_powers[k - 1] * v;
+        }
+        let mut coefficients = [DVec2::ZERO; MAX_ORDER + 1];
+        for (i, &(p, q)) in self.terms.iter().enumerate() {
+            coefficients[p] += DVec2::new(self.coeffs_u[i], self.coeffs_v[i]) * v_powers[q];
+        }
+        SipRow {
+            y,
+            center_x: self.norm.center().x,
+            scale: self.norm.scale(),
+            order,
+            coefficients,
+        }
     }
 
     /// Compute the correction vector at a point (without applying it).
@@ -446,6 +488,37 @@ impl SipPolynomial {
         }
 
         self.norm.denormalize_delta(DVec2::new(du, dv))
+    }
+}
+
+/// [`SipPolynomial::local`]: the corrected point and the correction's Jacobian there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SipLocal {
+    pub(crate) corrected: DVec2,
+    pub(crate) jacobian: DMat2,
+}
+
+/// [`SipPolynomial::row`]: the correction along one pixel row, its coefficients collapsed to `u`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SipRow {
+    y: f64,
+    center_x: f64,
+    scale: f64,
+    order: usize,
+    /// `Σᵩ cₚᵩ·vᵠ` for each power `p` of `u`, both axes.
+    coefficients: [DVec2; MAX_ORDER + 1],
+}
+
+impl SipRow {
+    /// The corrected point of pixel column `x` on this row.
+    #[inline]
+    pub(crate) fn correct(&self, x: f64) -> DVec2 {
+        let u = (x - self.center_x) / self.scale;
+        let correction = self.coefficients[..=self.order]
+            .iter()
+            .rev()
+            .fold(DVec2::ZERO, |sum, &coefficient| sum * u + coefficient);
+        DVec2::new(x, self.y) + correction * self.scale
     }
 }
 
