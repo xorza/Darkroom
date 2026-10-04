@@ -50,7 +50,12 @@ fn each_picker_offers_its_variants_under_their_labels() {
     assert_eq!(names(offered::<BackgroundMode>()), ["subtract", "divide"]);
     assert_eq!(
         names(offered::<ScnrMethodChoice>()),
-        ["average_neutral", "additive_mask"]
+        [
+            "average_neutral",
+            "additive_mask",
+            "maximum_neutral",
+            "maximum_mask"
+        ]
     );
     assert_eq!(
         names(offered::<DetectionPreset>()),
@@ -93,11 +98,19 @@ fn each_pick_builds_the_preset_it_names() {
     same(&StretchMethodChoice::AutoStf.config(), &Stretch::auto_stf());
     same(
         &ScnrMethodChoice::AverageNeutral.config(),
-        &Scnr::average_neutral(),
+        &Scnr::average_neutral(1.0),
+    );
+    same(
+        &ScnrMethodChoice::MaximumNeutral.config(),
+        &Scnr::maximum_neutral(1.0),
+    );
+    same(
+        &ScnrMethodChoice::MaximumMask.config(),
+        &Scnr::maximum_mask(1.0),
     );
     same(
         &ScnrMethodChoice::AdditiveMask.config(),
-        &Scnr::additive_mask(0.5),
+        &Scnr::additive_mask(1.0),
     );
     assert_eq!(BackgroundMode::Divide.config().mode, BackgroundMode::Divide);
     same(

@@ -33,14 +33,15 @@ impl Preset for BackgroundMode {
     }
 }
 
-/// Which green-removal protection [`ScnrKnobs`] builds. The lumos enum carries
-/// the additive mask's blend amount in its variant, so the editor picks the
-/// method here and supplies the amount as its own field.
+/// Which green-removal protection [`ScnrKnobs`] builds; the amount is its own
+/// field, which every protection reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
 pub(crate) enum ScnrMethodChoice {
     AverageNeutral,
     AdditiveMask,
+    MaximumNeutral,
+    MaximumMask,
 }
 
 impl Preset for ScnrMethodChoice {
@@ -56,9 +57,8 @@ impl Preset for ScnrMethodChoice {
     }
 }
 
-/// The editable knobs behind a [`Scnr`]. `amount` is read only by
-/// [`ScnrMethodChoice::AdditiveMask`]; average-neutral is a full-strength clamp
-/// with nothing to tune.
+/// The editable knobs behind a [`Scnr`]: the protection, and the blend toward
+/// its full strength.
 #[derive(Debug, Clone, Introspect)]
 #[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056", name = "ScnrConfig")]
 pub(crate) struct ScnrKnobs {
@@ -67,11 +67,11 @@ pub(crate) struct ScnrKnobs {
 }
 
 impl Default for ScnrKnobs {
-    /// Average-neutral; the additive mask, when picked, at half strength.
+    /// Average-neutral at full strength, as [`Scnr::default`].
     fn default() -> Self {
         Self {
             method: ScnrMethodChoice::AverageNeutral,
-            amount: 0.5,
+            amount: 1.0,
         }
     }
 }
@@ -79,8 +79,10 @@ impl Default for ScnrKnobs {
 impl From<ScnrKnobs> for Scnr {
     fn from(knobs: ScnrKnobs) -> Self {
         match knobs.method {
-            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(),
+            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(knobs.amount),
             ScnrMethodChoice::AdditiveMask => Scnr::additive_mask(knobs.amount),
+            ScnrMethodChoice::MaximumNeutral => Scnr::maximum_neutral(knobs.amount),
+            ScnrMethodChoice::MaximumMask => Scnr::maximum_mask(knobs.amount),
         }
     }
 }

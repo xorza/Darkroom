@@ -57,7 +57,7 @@ fn neutralize_then_stretch_removes_green() {
     visual::save_linear(&img, "color/stacked_light_neutralized_stf");
 
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
-    Scnr::average_neutral().apply(&mut img).unwrap();
+    Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_scnr");
 
     NeutralizeBackground.apply(&mut img).unwrap();

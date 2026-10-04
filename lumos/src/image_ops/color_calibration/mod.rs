@@ -66,41 +66,68 @@ fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
     ClippedStats::sigma_clipped(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 
-/// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the
-/// stretched, already-color-balanced image. No-op on grayscale.
+/// Remove the residual green cast (Subtractive Chromatic Noise Reduction), as PixInsight's SCNR
+/// does. Intended for the stretched, already-color-balanced image. No-op on grayscale.
+///
+/// Each protection method gives a full-strength green, and `amount` blends toward it from the
+/// original: `G′ = (1 − amount)·G + amount·G_full`, exactly `G` at 0 and `G_full` at 1. For the
+/// mask methods that is PixInsight's own `G·(1 − amount)·(1 − m) + m·G`, with `G_full = m·G`.
 #[derive(Debug, Clone, Copy)]
 pub struct Scnr {
-    method: ScnrMethod,
+    protection: ScnrProtection,
+    amount: f32,
 }
 
 /// Which green-removal protection [`Scnr`] applies.
 #[derive(Debug, Clone, Copy)]
-enum ScnrMethod {
+enum ScnrProtection {
     AverageNeutral,
-    AdditiveMask { amount: f32 },
+    MaximumNeutral,
+    AdditiveMask,
+    MaximumMask,
 }
 
 impl Default for Scnr {
+    /// Average Neutral at full strength.
     fn default() -> Self {
-        Self::average_neutral()
+        Self::average_neutral(1.0)
     }
 }
 
 impl Scnr {
-    /// Average Neutral: `G' = min(G, (R+B)/2)` — a full-strength clamp of green to the red/blue
-    /// average. The default.
-    pub const fn average_neutral() -> Self {
+    /// Average Neutral: green clamped to the red/blue mean, `G_full = min(G, (R + B)/2)`.
+    pub const fn average_neutral(amount: f32) -> Self {
         Self {
-            method: ScnrMethod::AverageNeutral,
+            protection: ScnrProtection::AverageNeutral,
+            amount,
         }
     }
 
-    /// Additive Mask with blend `amount` ∈ `[0,1]` (0 = no change, 1 = full strength): attenuates
-    /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
-    /// `G' = G·(1−amount)·(1−m) + m·G`.
+    /// Maximum Neutral: green clamped to the larger of red and blue, `G_full = min(G, max(R, B))`
+    /// — gentler than Average Neutral where one of the two is faint.
+    pub const fn maximum_neutral(amount: f32) -> Self {
+        Self {
+            protection: ScnrProtection::MaximumNeutral,
+            amount,
+        }
+    }
+
+    /// Additive Mask: green attenuated where red and blue are faint, `G_full = m·G` with
+    /// `m = min(1, R + B)`: attenuates rather than clamps, so genuine teal (OIII planetary nebulae)
+    /// survives.
     pub const fn additive_mask(amount: f32) -> Self {
         Self {
-            method: ScnrMethod::AdditiveMask { amount },
+            protection: ScnrProtection::AdditiveMask,
+            amount,
+        }
+    }
+
+    /// Maximum Mask: as Additive Mask with `m = max(R, B)`, which protects less where both are
+    /// moderate.
+    pub const fn maximum_mask(amount: f32) -> Self {
+        Self {
+            protection: ScnrProtection::MaximumMask,
+            amount,
         }
     }
 
@@ -109,44 +136,38 @@ impl Scnr {
     /// A no-op on grayscale, which has no green channel to subtract.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] if the additive-mask amount is outside `[0, 1]`.
+    /// [`OpError::InvalidConfig`] if the amount is outside `[0, 1]`.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
-        match self.method {
-            ScnrMethod::AverageNeutral => image.map_rgb(scnr_average_neutral),
-            ScnrMethod::AdditiveMask { amount } => {
-                image.map_rgb(move |px| scnr_additive_mask(px, amount));
-            }
-        }
+        let Self { protection, amount } = *self;
+        image.map_rgb(move |px| Rgb {
+            g: (1.0 - amount) * px.g + amount * protection.full_strength(px),
+            ..px
+        });
         Ok(())
     }
 
     fn validate(self) -> Result<(), InvalidConfigField> {
-        if let ScnrMethod::AdditiveMask { amount } = self.method {
-            InvalidConfigField::finite("SCNR amount", "finite and in [0, 1]", amount, |value| {
-                (0.0..=1.0).contains(&value)
-            })?;
+        InvalidConfigField::finite(
+            "SCNR amount",
+            "finite and in [0, 1]",
+            self.amount,
+            |value| (0.0..=1.0).contains(&value),
+        )
+    }
+}
+
+impl ScnrProtection {
+    /// The green of `px` at full strength.
+    fn full_strength(self, px: Rgb) -> f32 {
+        // A mask is a share of green to keep, so it lies in [0, 1] whatever the channels hold.
+        let mask = |m: f32| m.clamp(0.0, 1.0) * px.g;
+        match self {
+            Self::AverageNeutral => px.g.min(f32::midpoint(px.r, px.b)),
+            Self::MaximumNeutral => px.g.min(px.r.max(px.b)),
+            Self::AdditiveMask => mask(px.r + px.b),
+            Self::MaximumMask => mask(px.r.max(px.b)),
         }
-        Ok(())
-    }
-}
-
-/// Average Neutral: clamp green to the red/blue average.
-const fn scnr_average_neutral(px: Rgb) -> Rgb {
-    Rgb {
-        r: px.r,
-        g: px.g.min(f32::midpoint(px.r, px.b)),
-        b: px.b,
-    }
-}
-
-/// Additive Mask: attenuate green by `amount`, protected where R+B is large.
-fn scnr_additive_mask(px: Rgb, amount: f32) -> Rgb {
-    let m = (px.r + px.b).min(1.0);
-    Rgb {
-        r: px.r,
-        g: px.g * (1.0 - amount) * (1.0 - m) + m * px.g,
-        b: px.b,
     }
 }
 

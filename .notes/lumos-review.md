@@ -28,9 +28,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - The LibRaw default and RawTherapee "best" are 3-pass. It costs ≈2–3× the time. `[P]`
 
 
-## 19. Display-domain operations: colour and tone errors
-
-- [ ] `19.8` **SCNR has no `amount` for Average Neutral, and no Maximum Neutral or Maximum Mask** — `image_ops/color_calibration/mod.rs:92-98` `[C]` gap.
 
 ## 20. Drizzle defaults and geometry
 
@@ -514,6 +511,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 5. Done: the cosmic-ray mask grows as astroscrappy's does — the 3×3 box about each hit kept where `S' > sigclip`, then the box about that kept where `S' > sigclip·sigfrac`, with no contrast test on either — word by word over the bit mask; a test pins both rings and the absent contrast test. The hot-pixel σ takes its tail from the lower side, the median less the 1st percentile over `Φ⁻¹(0.99)`, which hot pixels never reach at any density: a dark with 10% of its pixels 20σ warm now flags all of them, where the absolute 99th percentile sat among them and flagged none. That tail no longer absorbs the tile mesh's error on steep amp glow (−3.5e-4 between centres, +1.5e-3 past the last one), so each pixel the mesh calls hot is confirmed against a robust plane through its colour's photosites 6 to 8 px around it (`RingReference`: median level, clip, plane, clip, plane), which follows the glow, also one-sided at a frame edge, and passes over points and compact clusters. Items 18.1 and 18.2 are closed.
 
 6. Done: a star whose stamp holds a pixel with no data is not measured, checked at its peak and again at the centre it moves to (`BitBuffer2::any_in_square`), and the sky annulus leaves such pixels out — as photutils masks them and SExtractor flags such objects; for a registration catalogue the star is better gone than measured on a fill. `measure_star` takes its frame planes as one `MeasurePlanes`. Item 8.2 is closed.
+
+7. Done: SCNR has PixInsight's four protections — Average Neutral, Maximum Neutral, Additive Mask and Maximum Mask — and one `amount` for each, the blend `(1 − amount)·G + amount·G_full` toward the protection's full-strength green; for the masks that is PixInsight's own formula. Every constructor takes the amount, the default is Average Neutral at 1, and `lens` offers all four with the amount as its own knob. Item 19.8 is closed.
 
 # Decisions
 
