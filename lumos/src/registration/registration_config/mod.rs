@@ -161,7 +161,8 @@ impl RegistrationMatchingConfig {
 /// # Example
 ///
 /// ```no_run
-/// use lumos::{RegistrationConfig, Star, register};
+/// use lumos::detection::Star;
+/// use lumos::{RegistrationConfig, register};
 ///
 /// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), lumos::RegistrationError> {
 /// // Use defaults
@@ -173,7 +174,7 @@ impl RegistrationMatchingConfig {
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct RegistrationConfig {
     /// Which model to fit, or `Auto` to fit every model from Euclidean to Homography and take the
     /// one of lowest GRIC. Default: `Auto`.
     pub transform_type: TransformModel,
@@ -194,7 +195,7 @@ pub struct Config {
     pub warp: WarpParams,
 }
 
-impl Default for Config {
+impl Default for RegistrationConfig {
     fn default() -> Self {
         Self {
             transform_type: TransformModel::Auto,
@@ -212,7 +213,7 @@ impl Default for Config {
     }
 }
 
-impl Config {
+impl RegistrationConfig {
     /// Fast configuration: fewer iterations, lower quality, faster.
     pub fn fast() -> Self {
         Self {
@@ -353,7 +354,7 @@ impl Config {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::registration::config::{InterpolationMethod, WarpParams};
+    use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 
     pub(crate) fn warp_params(method: InterpolationMethod) -> WarpParams {
         WarpParams {

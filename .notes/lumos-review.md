@@ -28,12 +28,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - OSC data pays the demosaic interpolation before it drizzles. Siril offers CFA drizzle. Gap.
 
 
-## 26. One fact in two places, wide signatures, and style deviations
-
-- [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
-  - Rename the types, so rustc and docs show the public names. `[C]`
-
-
 ---
 
 ## Checked and fine
@@ -456,7 +450,7 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 ## Phase 14. Remaining items
 
-Phase 14 is complete except 26.16, which waits on Pending item 4. 20.3 stays open until CFA drizzle enters the scope.
+Phase 14 is complete. 20.3 stays open until CFA drizzle enters the scope.
 
 ## Phase 14. Results
 
@@ -492,6 +486,8 @@ Phase 14 is complete except 26.16, which waits on Pending item 4. 20.3 stays ope
 
 16. Done: the cosmic-ray window medians (3×3, 7×7 and twice 5×5 each iteration, 94% of the pass) take eight pixels at a time by forgetful selection on `total_cmp`'s integer keys, so each is the value `median_mut` picks, NaN and signed zeros included, which a test holds them to at every pixel; a window across a side edge keeps the gather. 1 MP of mono or Bayer goes from 165 to 70 ms. The steps already ran in parallel, and recomputing the noise from the cleaned frame each iteration is astroscrappy's own design. Per-strip label blocks, tried for 24.10, measured no gain (441 against 443 µs at 4k, 7.1 against 6.9 ms on a globular mask): only runs that start a component touch the counter. They were dropped; the counter is now `Relaxed`, whose comment had claimed uniqueness needs `SeqCst`. Items 24.10 and 24.14 are closed. Deviation: the X-Trans pass, 89 ms, gathers its same-colour lattice and is unchanged.
 
+17. Done: the star-detection types are published under `lumos::detection` with their own names — `Config`, `BackgroundConfig`, `DetectionConfig`, `FilterConfig`, `FwhmConfig`, `MeasurementConfig`, `DetectionResult`, `Diagnostics`, `QualityFilterDiagnostics`, and beside them `StarDetector`, `Star`, `Roundness`, `FwhmSource` and the enums the configs hold — in place of ten renamed root re-exports. The registration config is `RegistrationConfig` in `registration/registration_config/`, published under that name. `lens`, the examples and the doc examples follow. On the macOS laptop (arm64) the frame-store tests pass, the run scratch among them. Item 26.16 is closed.
+
 # Decisions
 
 Confirmed on 2026-10-03.
@@ -503,11 +499,15 @@ Confirmed on 2026-10-03.
 5. **Dark scaling (phase 6):** exposure-ratio scaling only, for a bias-removed dark.
 6. **Scope:** Markesteijn 3-pass as an option (16.12), and SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8) are in scope. CFA drizzle (20.3) waits.
 
+Confirmed on 2026-10-04.
+
+7. **FWHM convention (phase 8):** the PSF's width before the pixel integrates it, as DAOPHOT and PSFEx report it, in the results and in a `Fixed` FWHM alike.
+8. **Run scratch on other systems (phase 11):** tested on macOS now; Windows waits for a host.
+9. **The streamed checksum, 15.9:** the fits-well patch is applied to the submodule's working tree and not committed there.
+10. **Published names, 26.16:** the star-detection types go under `lumos::detection` with their own names; `registration::config::Config` is renamed `RegistrationConfig`, its directory with it, and stays at the crate root.
+
 ## Pending
 
-1. **The FWHM convention (phase 8).** Every width is now the PSF's before the pixel integrates it, as DAOPHOT and PSFEx report it. PixInsight and Siril fit point-sampled models, so their FWHM includes the pixel: about `√(σ² + 1/12)` in σ, 3% wider at FWHM 2.5. A `Fixed` FWHM in the config is read the same way. The alternative is to report the width with the pixel included and keep the integrated models inside.
-2. **Run scratch on macOS and Windows (phase 11).** The plan asks for the scratch deletion to be tested on the macOS laptop and on Windows. Unix unlink-after-create is POSIX and runs the same code on macOS, but it is untested there; the Windows path (`FILE_FLAG_DELETE_ON_CLOSE`, the handle held with the map) compiles only under `cfg(windows)` and is untested. I need the laptop's tmux session for the first, and a Windows host for the second.
-3. **The streamed checksum, 15.9 (phase 12).** The fix is in fits-well: `FitsReader::begin_data_checksum` and `finish_data_checksum`, and `read_image_section_summed`, which sums each chunk as the decode reads it. fits-well's chain passes (384 tests). The patch is `.notes/fits-well-streamed-checksum.patch`. I have no right to commit and push to xorza/fits-well, so the submodule is unchanged. Give me that right, or apply the patch, and I will connect lumos to it.
-4. **The renamed public re-exports, 26.16 (phase 14).** Ten config, result and diagnostics types are published under other names than they have (`star_detection::config::Config` as `StarDetectionConfig`, `BackgroundConfig` as `StarDetectionBackgroundConfig`, `registration::config::Config` as `RegistrationConfig`, …), so a compiler message names `Config` where the caller wrote `StarDetectionConfig`. Renaming the types meets the one-struct-one-file rule: the file must take the type's name, which gives paths like `star_detection::star_detection_config::star_detection_background_config`. The choices: (a) rename types and files and accept the long paths; (b) publish the detection and registration types under public modules (`lumos::detection::Config`), so the published name is the real one, and change `lens` and `darkroom` to match; (c) keep the renamed re-exports. I recommend (b).
+1. **Run scratch on Windows (phase 11).** The Windows path (`FILE_FLAG_DELETE_ON_CLOSE`, the handle held with the map) compiles only under `cfg(windows)` and is untested; it needs a Windows host.
 
 No phase needs a new dependency. `statrs` gives `Φ⁻¹` and `erf`. The cgroup limits are read from `/sys/fs/cgroup` directly (phase 11). `std` gives the Windows delete-on-close flags. `/proc/self/mountinfo` gives the file system type.

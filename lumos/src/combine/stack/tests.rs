@@ -23,7 +23,7 @@ use crate::io::image::image_provenance::{
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::{MedianMad, mad_to_sigma};
-use crate::registration::config::{self, InterpolationMethod};
+use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::quality_map::QualityMap;
@@ -1167,7 +1167,11 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     };
 
     for method in InterpolationMethod::ALL {
-        let warped = resample::warp(&source, &transform, config::internals::warp_params(method));
+        let warped = resample::warp(
+            &source,
+            &transform,
+            registration_config::internals::warp_params(method),
+        );
         let frames = vec![
             StackFrame::from(source.clone()),
             StackFrame::registered(&source, warped),
@@ -1222,7 +1226,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     };
     let a = field(0.0, 1.0, 0.002, 1);
     let b = field(1.0, 0.8, 0.006, 2);
-    let params = config::internals::warp_params(InterpolationMethod::Bilinear);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
     let warped_b = resample::warp(
         &b,
         &WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0))),
@@ -1269,7 +1273,7 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
         .map(|_| rng.next_f32() - 0.5)
         .collect();
     let source = LinearImage::from_pixels(dims, pixels);
-    let params = config::internals::warp_params(InterpolationMethod::Bilinear);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
     let frames = vec![
         StackFrame::registered(
             &source,

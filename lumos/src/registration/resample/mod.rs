@@ -11,7 +11,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::registration::config::WarpParams;
+use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
 };
@@ -64,7 +64,8 @@ pub struct WarpResult {
 /// # Example
 ///
 /// ```no_run
-/// use lumos::{LinearImage, RegistrationConfig, Star, register, warp};
+/// use lumos::detection::Star;
+/// use lumos::{LinearImage, RegistrationConfig, register, warp};
 ///
 /// # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
 /// # -> Result<(), lumos::RegistrationError> {
@@ -275,7 +276,7 @@ pub(super) mod internals {
 
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::linear::LinearImage;
-    use crate::registration::config::WarpParams;
+    use crate::registration::registration_config::WarpParams;
     use crate::registration::resample;
     use crate::registration::transform::WarpTransform;
 

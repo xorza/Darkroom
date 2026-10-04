@@ -11,7 +11,10 @@ use std::hint::black_box;
 
 use crate::internals::synthetic::fixtures::star_field;
 use crate::registration::transform::Transform;
-use crate::{RegistrationConfig, Star, StarDetectionConfig, StarDetector, register};
+use crate::star_detection::config::Config as StarDetectionConfig;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star::Star;
+use crate::{RegistrationConfig, register};
 
 /// A reference catalog and a transformed copy of it.
 #[derive(Debug)]
@@ -74,8 +77,8 @@ mod real_data {
 
     use crate::internals::real_data::{LightPair, first_and_last_lights, raw_frames, raw_light};
     use crate::io::image::linear::LinearImage;
-    use crate::registration::config::Config as RegistrationConfig;
     use crate::registration::register;
+    use crate::registration::registration_config::RegistrationConfig;
     use crate::registration::resample::warp;
     use crate::star_detection::config::Config;
     use crate::star_detection::detector::StarDetector;

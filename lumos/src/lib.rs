@@ -18,14 +18,15 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
+//! use lumos::detection::{self, StarDetector};
+//! use lumos::{LinearImage, LoadContext};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load an astronomical image
 //! let image = LinearImage::from_file("linear_light_001.fits", &LoadContext::default())?;
 //!
 //! // Detect stars
-//! let config = StarDetectionConfig::default();
+//! let config = detection::Config::default();
 //! let mut detector = StarDetector::from_config(config)?;
 //! let result = detector.detect(&image);
 //!
@@ -98,31 +99,34 @@ pub use calibration_masters::{
     CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
-pub use star_detection::config::Config as StarDetectionConfig;
-pub use star_detection::config::background_config::{
-    BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement,
-};
-pub use star_detection::config::detection_config::{
-    Connectivity, Deblend, DetectionConfig as StarDetectionCandidateConfig,
-};
-pub use star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
-pub use star_detection::config::fwhm_config::{FwhmConfig as StarDetectionFwhmConfig, FwhmMode};
-pub use star_detection::config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
-};
-pub use star_detection::detector::{
-    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, FwhmSource,
-    QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
-};
-pub use star_detection::roundness::Roundness;
-pub use star_detection::star::Star;
+/// Star detection: the detector, its configuration, and the stars and diagnostics it returns, each
+/// under its own name.
+pub mod detection {
+    pub use crate::star_detection::config::Config;
+    pub use crate::star_detection::config::background_config::{
+        BackgroundConfig, BackgroundRefinement,
+    };
+    pub use crate::star_detection::config::detection_config::{
+        Connectivity, Deblend, DetectionConfig,
+    };
+    pub use crate::star_detection::config::filter_config::FilterConfig;
+    pub use crate::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
+    pub use crate::star_detection::config::measurement_config::{
+        CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+    };
+    pub use crate::star_detection::detector::{
+        DetectionResult, Diagnostics, FwhmSource, QualityFilterDiagnostics, StarDetector,
+    };
+    pub use crate::star_detection::roundness::Roundness;
+    pub use crate::star_detection::star::Star;
+}
 
-pub use registration::config::{
-    Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig, WarpParams,
-};
 pub use registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use registration::ransac::config::RansacConfig;
 pub use registration::register;
+pub use registration::registration_config::{
+    InterpolationMethod, RegistrationConfig, RegistrationMatchingConfig, WarpParams,
+};
 pub use registration::resample::{WarpResult, warp};
 pub use registration::result::{
     FailedModel, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,

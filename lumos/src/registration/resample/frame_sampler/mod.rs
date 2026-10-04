@@ -21,7 +21,7 @@ use arrayvec::ArrayVec;
 
 use crate::io::image::pixel_flags::Reach;
 use crate::math::size2us::Size2us;
-use crate::registration::config::WarpParams;
+use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};

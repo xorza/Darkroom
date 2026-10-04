@@ -13,7 +13,8 @@ use std::hint;
 use std::thread;
 use std::time::Duration;
 
-use lumos::{ImageDimensions, LinearImage, StarDetector};
+use lumos::detection::StarDetector;
+use lumos::{ImageDimensions, LinearImage};
 
 #[expect(
     clippy::cast_sign_loss,

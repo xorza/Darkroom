@@ -2,6 +2,7 @@ use std::io::{Error, ErrorKind};
 
 use common::CancelToken;
 use imaginarium::Buffer2;
+use lumos::detection;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CalibrationComponent, CalibrationError,
     CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage, DefectSummary,
@@ -13,10 +14,7 @@ use lumos::{
     LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap,
     QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
     RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct, StarMatch,
     TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
     WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
@@ -149,12 +147,12 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         10
     );
 
-    let detection = StarDetectionConfig {
-        background: StarDetectionBackgroundConfig::default(),
-        detection: StarDetectionCandidateConfig::default(),
-        fwhm: StarDetectionFwhmConfig::default(),
-        measurement: StarDetectionMeasurementConfig::default(),
-        filter: StarDetectionFilterConfig::default(),
+    let detection = detection::Config {
+        background: detection::BackgroundConfig::default(),
+        detection: detection::DetectionConfig::default(),
+        fwhm: detection::FwhmConfig::default(),
+        measurement: detection::MeasurementConfig::default(),
+        filter: detection::FilterConfig::default(),
     };
     detection.validate().unwrap();
 
@@ -229,12 +227,12 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "scale must be finite and positive, got 0"
     );
 
-    let detection_error = StarDetector::from_config(StarDetectionConfig {
-        detection: StarDetectionCandidateConfig {
+    let detection_error = detection::StarDetector::from_config(detection::Config {
+        detection: detection::DetectionConfig {
             sigma_threshold: 0.0,
             ..Default::default()
         },
-        ..StarDetectionConfig::default()
+        ..detection::Config::default()
     })
     .unwrap_err();
     assert_eq!(
@@ -273,7 +271,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
 #[test]
 fn star_detection_filter_diagnostics_are_one_nested_component() {
-    let quality_filter = StarDetectionQualityFilterDiagnostics {
+    let quality_filter = detection::QualityFilterDiagnostics {
         saturated: 1,
         low_snr: 2,
         high_eccentricity: 3,
@@ -282,7 +280,7 @@ fn star_detection_filter_diagnostics_are_one_nested_component() {
         fwhm_outliers: 6,
         duplicates: 7,
     };
-    let _: StarDetectionDiagnostics = StarDetectionDiagnostics {
+    let _: detection::Diagnostics = detection::Diagnostics {
         quality_filter,
         ..Default::default()
     };
@@ -341,7 +339,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
                 FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
             ],
         },
-        detection: vec![StarDetectionDiagnostics::default(); 4],
+        detection: vec![detection::Diagnostics::default(); 4],
     };
 
     // A uniform coverage is one number until a plane is asked for.

@@ -6,7 +6,7 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use crate::registration::config::{self, InterpolationMethod};
+use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
@@ -24,7 +24,7 @@ fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMe
         patterns::diagonal_gradient(size).pixels().to_vec(),
     );
     let transform = WarpTransform::new(create_test_transform());
-    let params = config::internals::warp_params(method);
+    let params = registration_config::internals::warp_params(method);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(
@@ -74,7 +74,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let mut coverage = vec![0.0; size.width];
     let mut confidence = vec![0.0; size.width];
     let transform = WarpTransform::new(create_test_transform());
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let method = SampleMethod::for_frame(params, &transform, size);
     let source = SourceImage::of(&image);
     let sampler = FrameSampler::new(method, &source, None, params.border_value);
@@ -125,7 +125,7 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
 
     b.bench(|| {
         resample::warp(
@@ -150,7 +150,7 @@ fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     b.bench(|| {
         let mut buffers = resample::WarpBuffers::new(image.dimensions());
         buffers.warp_into(
@@ -169,7 +169,7 @@ fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
     let image =
         LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
     let transform = create_test_transform();
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(
@@ -191,7 +191,7 @@ fn bench_warp_into_rgb_sip_2k(b: quickbench::Bencher) {
         [plane.clone(), plane.clone(), plane],
     );
     let warp = sip_warp(size);
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(
@@ -215,7 +215,7 @@ fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
     let warp = WarpTransform::new(Transform::homography([
         1.0, 0.003, 4.0, -0.002, 1.0, 2.5, 1e-7, -2e-7,
     ]));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
     b.bench(|| {
         buffers.warp_into(

@@ -33,14 +33,15 @@
 //! # Example
 //!
 //! ```no_run
-//! use lumos::{InvalidConfigField, LinearImage, StarDetectionConfig, StarDetector};
+//! use lumos::detection::{self, StarDetector};
+//! use lumos::{InvalidConfigField, LinearImage};
 //!
 //! # fn example(image: &LinearImage) -> Result<(), InvalidConfigField> {
 //! // Use a preset configuration
-//! let config = StarDetectionConfig::wide_field();
+//! let config = detection::Config::wide_field();
 //!
 //! // Or customize from defaults
-//! let mut config = StarDetectionConfig::default();
+//! let mut config = detection::Config::default();
 //! config.filter.min_snr = 15.0;
 //! config.detection.sigma_threshold = 3.0;
 //!

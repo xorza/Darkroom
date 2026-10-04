@@ -4,7 +4,7 @@
 )]
 
 use crate::internals::prelude::*;
-use crate::registration::config::{self, InterpolationMethod, WarpParams};
+use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::internals::warp_plane;
 use crate::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
@@ -39,7 +39,7 @@ fn integer_shifts_copy_the_source() {
             f64::from(shift.1),
         )));
         for method in InterpolationMethod::ALL {
-            let params = config::internals::warp_params(method);
+            let params = registration_config::internals::warp_params(method);
             let tolerance = match Filter::of(method) {
                 Some(Filter::Lanczos(order)) => {
                     let lut = order.lut();
@@ -165,7 +165,7 @@ fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
             &input,
             &mut output,
             &wt,
-            config::internals::warp_params(method),
+            registration_config::internals::warp_params(method),
         );
         assert!(
             output

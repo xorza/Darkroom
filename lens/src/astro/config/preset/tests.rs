@@ -1,8 +1,9 @@
 use std::fmt;
 
+use lumos::detection;
 use lumos::{
-    BackgroundMode, ColorMode, ExtractBackground, RegistrationConfig, Scnr, StackConfig,
-    StarDetectionConfig, Stretch, StretchMethod,
+    BackgroundMode, ColorMode, ExtractBackground, RegistrationConfig, Scnr, StackConfig, Stretch,
+    StretchMethod,
 };
 use scenarium::{ConstValue, DataType, DynamicValue, TypeId};
 
@@ -121,21 +122,18 @@ fn each_pick_builds_the_preset_it_names() {
         },
     );
     for (pick, preset) in [
-        (
-            DetectionPreset::WideField,
-            StarDetectionConfig::wide_field(),
-        ),
+        (DetectionPreset::WideField, detection::Config::wide_field()),
         (
             DetectionPreset::HighResolution,
-            StarDetectionConfig::high_resolution(),
+            detection::Config::high_resolution(),
         ),
         (
             DetectionPreset::CrowdedField,
-            StarDetectionConfig::crowded_field(),
+            detection::Config::crowded_field(),
         ),
         (
             DetectionPreset::PreciseGround,
-            StarDetectionConfig::precise_ground(),
+            detection::Config::precise_ground(),
         ),
     ] {
         same(&pick.config(), &preset);

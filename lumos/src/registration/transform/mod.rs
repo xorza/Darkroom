@@ -299,7 +299,8 @@ impl Transform {
     ///
     /// ```no_run
     /// use glam::DVec2;
-    /// use lumos::{RegistrationConfig, Star, register};
+    /// use lumos::detection::Star;
+    /// use lumos::{RegistrationConfig, register};
     ///
     /// # fn example(ref_stars: &[Star], target_stars: &[Star], ref_pos: DVec2)
     /// # -> Result<(), lumos::RegistrationError> {

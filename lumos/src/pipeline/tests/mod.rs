@@ -25,7 +25,7 @@ use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::{StackingProgress, StackingStage};
-use crate::registration::config::Config as RegistrationConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::{Transform, TransformModel, TransformType, WarpTransform};
 use crate::star_detection::config::Config as StarDetectionConfig;

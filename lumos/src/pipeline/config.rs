@@ -4,7 +4,7 @@ use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::combine::config::{StackConfig, Weighting};
 use crate::combine::error::StackConfigError;
 use crate::pipeline::error::AlignStackError;
-use crate::registration::config::Config as RegistrationConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::star_detection::config::Config as StarDetectionConfig;
 
 /// How the reference frame (the alignment anchor) is chosen.

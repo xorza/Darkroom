@@ -85,7 +85,8 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
         };
         stars[3].pos = DVec2::new(f64::NAN, 4.0);
 
-        let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
         match error {
             RegistrationError::InvalidStarPosition {
                 catalog: actual,
@@ -115,7 +116,8 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
         stars[5].fwhm = f32::INFINITY;
         stars[6].snr = f32::NAN;
 
-        let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
         match error {
             RegistrationError::InvalidStarField {
                 catalog: actual,
@@ -134,7 +136,8 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = 2.0;
-        let error = register(&ref_stars, &target_stars, &Config::default()).unwrap_err();
+        let error =
+            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
         assert!(
             matches!(
                 error,

@@ -6,7 +6,8 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::{LinearImage, RegistrationConfig, Star, register, warp};
+//! use lumos::detection::Star;
+//! use lumos::{LinearImage, RegistrationConfig, register, warp};
 //!
 //! # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
 //! # -> Result<(), lumos::RegistrationError> {
@@ -39,18 +40,18 @@
 //!
 //! # Configuration Presets
 //!
-//! - [`Config::default()`] — Balanced settings for most astrophotography
-//! - [`Config::fast()`] — Fewer iterations, bilinear interpolation
-//! - [`Config::precise()`] — More iterations, SIP distortion correction
-//! - [`Config::wide_field()`] — Homography + SIP for wide-field lenses
-//! - [`Config::mosaic()`] — Allows larger rotations and scale differences
+//! - [`RegistrationConfig::default()`] — Balanced settings for most astrophotography
+//! - [`RegistrationConfig::fast()`] — Fewer iterations, bilinear interpolation
+//! - [`RegistrationConfig::precise()`] — More iterations, SIP distortion correction
+//! - [`RegistrationConfig::wide_field()`] — Homography + SIP for wide-field lenses
+//! - [`RegistrationConfig::mosaic()`] — Allows larger rotations and scale differences
 
-pub(crate) mod config;
 pub(crate) mod distortion;
 mod final_fit;
 mod point_normalization;
 mod point_pairs;
 pub(crate) mod ransac;
+pub(crate) mod registration_config;
 pub(crate) mod resample;
 pub(crate) mod result;
 mod spatial;
@@ -59,8 +60,8 @@ pub(crate) mod triangle;
 mod tuning;
 
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitCatalogs, FitModel, SipModel};
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::spatial::KdTree;
-use config::Config;
 use result::{FailedModel, RegistrationCatalog, RegistrationError, RegistrationResult};
 use transform::{TransformModel, TransformType};
 
@@ -86,7 +87,7 @@ use triangle::voting::{MatchIndices, PointMatch};
 ///
 /// # Errors
 ///
-/// [`RegistrationError::InvalidConfig`] if `config` fails validation (see [`Config::validate`]),
+/// [`RegistrationError::InvalidConfig`] if `config` fails validation (see [`RegistrationConfig::validate`]),
 /// and the matching/accuracy failures below. A caller that runs this per frame pair must treat
 /// `InvalidConfig` apart from the rest: every other variant describes one pair, and is a frame to
 /// drop, but an invalid config fails every pair identically and is the run's own fault.
@@ -94,7 +95,8 @@ use triangle::voting::{MatchIndices, PointMatch};
 /// # Example
 ///
 /// ```no_run
-/// use lumos::{RegistrationConfig, Star, TransformModel, TransformType, register};
+/// use lumos::detection::Star;
+/// use lumos::{RegistrationConfig, TransformModel, TransformType, register};
 ///
 /// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), lumos::RegistrationError> {
 /// // With defaults
@@ -115,7 +117,7 @@ use triangle::voting::{MatchIndices, PointMatch};
 pub fn register(
     ref_stars: &[Star],
     target_stars: &[Star],
-    config: &Config,
+    config: &RegistrationConfig,
 ) -> Result<RegistrationResult, RegistrationError> {
     config.validate()?;
     validate_catalog(ref_stars, RegistrationCatalog::Reference)?;
@@ -311,7 +313,7 @@ fn select_by_gric(
     catalogs: &FitCatalogs,
     sip: Option<SipModel>,
     max_sigma: f64,
-    config: &Config,
+    config: &RegistrationConfig,
 ) -> Result<FinalFit, RegistrationError> {
     let mut fitted: Vec<(FitModel, FinalFit)> = Vec::new();
     let mut failures: Vec<FailedModel> = Vec::new();
@@ -404,7 +406,7 @@ fn estimate_and_refine(
     catalogs: &FitCatalogs,
     model: FitModel,
     max_sigma: f64,
-    config: &Config,
+    config: &RegistrationConfig,
 ) -> Result<FinalFit, RegistrationError> {
     let target_stars = target_tree.points();
     let t0 = Instant::now();

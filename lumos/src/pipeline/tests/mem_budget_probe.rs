@@ -67,7 +67,7 @@ use crate::pipeline::align::align_and_stack;
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::config::Config as RegistrationConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::quality_planes::QualityPlanes;

@@ -7,10 +7,10 @@ use std::time::Instant;
 
 use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::math::size2us::Size2us;
-use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::point_normalization::centroid;
 use crate::registration::register;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::TransformModel;
 use crate::star_detection::config::Config;
