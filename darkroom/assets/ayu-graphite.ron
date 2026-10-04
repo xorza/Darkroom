@@ -19,52 +19,52 @@
     tab_inactive:        "#2b2b2b",    // panel              gray_2
     node_fill:           "#383838",    // elem               gray_3
     node_border:         "#00000000",  // (no outline)       the shadow carries the edge
-    header_fill:         "#525252",    // elem_strong        gray_5
+    header_fill:         "#525252",    // elem_active        gray_5
     node_ambient_shadow: "#00000080",  // overlay_black      black
     text:                "#ebebeb",    // text               gray_7
     text_muted:          "#a4a4a4",    // text_muted         gray_6
     text_disabled:       "#a4a4a4",    // text_disabled      gray_6
-    elem_mid:            "#454545",    // elem_mid           gray_4
-    elem_strong:         "#525252",    // elem_strong        gray_5
-    border_focused:      "#0072ad",    // border_focused     blue_normal
+    elem_hover:          "#454545",    // elem_hover         gray_4
+    elem_active:         "#525252",    // elem_active        gray_5
+    border_focused:      "#0078b5",    // border_focused     blue_normal
 
     // Graph — the wires, and the marks drawn over them.
-    selection_rect:      "#59bafe",    // accent             blue_bright
-    connection_broken:   "#ff9f8f",    // error              red_bright
-    breaker_stroke:      "#ff9f8f",    // error              red_bright
+    selection_rect:      "#44b5ff",    // accent             blue_bright
+    connection_broken:   "#ff8b8c",    // error              red_bright
+    breaker_stroke:      "#ff8b8c",    // error              red_bright
 
     // Ports — an untyped port's circle, and the ink beside it. A typed port
     // takes its hue from the type table instead.
-    input_port:          "#83c774",    // success            green_bright
-    output_port:         "#f8a45c",    // syn_keyword        orange_bright
-    event_port:          "#ff9f8f",    // error              red_bright
+    input_port:          "#8bdd79",    // success            green_bright
+    output_port:         "#fa993b",    // syn_keyword        orange_bright
+    event_port:          "#ff8b8c",    // error              red_bright
     port_label:          "#a4a4a4",    // text_muted         gray_6
 
     // Badges — what a node's head says about itself.
-    badge_graph:         "#59bafe",    // accent             blue_bright
-    badge_sink:          "#ff9f8f",    // error              red_bright
-    badge_cache:         "#d5b848",    // warning            yellow_bright
+    badge_graph:         "#44b5ff",    // accent             blue_bright
+    badge_sink:          "#ff8b8c",    // error              red_bright
+    badge_cache:         "#f6e055",    // warning            yellow_bright
     badge_impure:        "#ebebeb",    // text               gray_7
 
     // Status — what a node's head says about its last run.
-    status_success:      "#83c774",    // success            green_bright
-    status_info:         "#59bafe",    // accent             blue_bright
+    status_success:      "#8bdd79",    // success            green_bright
+    status_info:         "#44b5ff",    // accent             blue_bright
     status_busy:         "#a4a4a4",    // text_muted         gray_6
-    status_warning:      "#f8a45c",    // syn_keyword        orange_bright
-    status_error:        "#ff9f8f",    // error              red_bright
+    status_warning:      "#fa993b",    // syn_keyword        orange_bright
+    status_error:        "#ff8b8c",    // error              red_bright
 
     // A wire's hue is the type flowing along it. `ramp` backs the
     // open-ended custom and enum families, keyed by type id.
     type_colors: (
-        boolean: "#ff9f8f",    // error              red_bright
-        int:     "#d5b848",    // ansi_bright_yellow yellow_bright
-        float:   "#8f7600",    // ansi_yellow        yellow_normal
-        string:  "#83c774",    // syn_string         green_bright
-        path:    "#59bafe",    // hint               blue_bright
-        image:   "#f8a45c",    // syn_keyword        orange_bright
+        boolean: "#ff8b8c",    // error              red_bright
+        int:     "#f6e055",    // ansi_bright_yellow yellow_bright
+        float:   "#8e7d00",    // warning_border     yellow_normal
+        string:  "#8bdd79",    // syn_string         green_bright
+        path:    "#44b5ff",    // hint               blue_bright
+        image:   "#fa993b",    // syn_keyword        orange_bright
         ramp: (
-            "#b65345",    // ansi_red           red_normal
-            "#0072ad",    // ansi_blue          blue_normal
+            "#bf5459",    // error_border       red_normal
+            "#0078b5",    // info_border        blue_normal
             "#ebebeb",    // syn_punctuation    gray_7
             "#a4a4a4",    // text_muted         gray_6
         ),

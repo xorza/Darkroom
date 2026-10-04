@@ -1,6 +1,6 @@
 //! The document's share of a frame's requests.
 
-use palantir::DockOp;
+use palantir::DockOperation;
 
 use crate::core::document::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
@@ -37,7 +37,7 @@ impl DocumentQueue {
             .extend(iter.into_iter().map(DocumentRequest::Graph));
     }
 
-    pub(crate) fn push_view(&mut self, op: DockOp<TabRef>) {
+    pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.requests.push(DocumentRequest::View(op));
     }
 

@@ -55,7 +55,7 @@ impl AnchoredMenu {
         // `None` for a menu that isn't open.
         let anchor = *self.anchor.get()?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
-        // `resp.dismissed`) — no separate `escape_pressed` here.
+        // `resp.dismissed`) — no separate Escape poll here.
         //
         // Chrome, padding, and the width floor all come off the same theme
         // slot `ContextMenu::show` reads, so a canvas menu and a menu-bar

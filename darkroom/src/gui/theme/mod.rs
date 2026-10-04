@@ -19,7 +19,7 @@ pub(crate) mod status_colors;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
 
-use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyle};
+use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyleOverrides};
 
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
@@ -184,10 +184,6 @@ impl Theme {
         // it is a projection of the same roles, and a second copy of them
         // could drift from the one the darkroom rosters read.
         let pal = palantir_palette_for(p);
-        // Built before the struct literal because the title variant
-        // derives from the palantir theme's ambient text style — the
-        // same style an unstyled rename would have inherited anyway,
-        // so bolding it is the only difference between the two slots.
         let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
         let palantir = palantir_for(
@@ -201,13 +197,12 @@ impl Theme {
                 text: &text,
             },
         );
-        let menu_button = menu_button_for(&pal, palantir.text, &text);
+        let menu_button = menu_button_for(&pal, &text);
         let path_field_error = error_bordered(&palantir.text_edit, status.error);
         let inline_rename = InlineRenameTheme::from_palette(&pal);
-        let inline_rename_title = inline_rename.clone().with_text(TextStyle {
-            weight: FontWeight::BOLD,
-            ..palantir.text
-        });
+        let inline_rename_title = inline_rename
+            .clone()
+            .with_text(TextStyleOverrides::NONE.with_weight(FontWeight::BOLD));
         Self {
             // The three measurements that belong to no widget group; the
             // rest are authored beside their colours in the groups below.

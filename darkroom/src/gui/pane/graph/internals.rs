@@ -7,7 +7,7 @@
 //! through it differs. A test that skipped a phase would be exercising a
 //! frame the app never performs.
 
-use palantir::DockOp;
+use palantir::DockOperation;
 use palantir::internals::harness::UiHarness;
 use palantir::prelude::*;
 use scenarium::NodeId;
@@ -58,7 +58,7 @@ pub(crate) struct CanvasHarness {
     /// The view ops the last [`Self::frame`] raised. Rare — the canvas asks
     /// for one thing the dock owns, a viewer tab for a clicked preview card —
     /// but real, so they are collected rather than treated as impossible.
-    pub(crate) view_ops: Vec<DockOp<TabRef>>,
+    pub(crate) view_ops: Vec<DockOperation<TabRef>>,
 }
 
 impl CanvasHarness {

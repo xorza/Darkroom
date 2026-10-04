@@ -2,15 +2,11 @@
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
 //! (`gui::pane::graph::node::header`), which maps the returned
-//! [`RenameEvent`] onto a `RenameNode` intent. Mirrors the per-widget split of
-//! `gui::pane::graph::node::value_editor`; both share the buffered-text core
-//! and the commit/cancel rule in [`crate::gui::widgets::edit_buffer`].
+//! [`RenameEvent`] onto a `RenameNode` intent.
 
 use palantir::prelude::*;
 
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
-use crate::gui::widgets::edit_buffer::{DraftOutcome, EditBuffer};
-use std::mem;
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.
@@ -18,10 +14,10 @@ use std::mem;
 struct RenameState {
     active: bool,
     /// The in-progress draft. Commit and cancel come from the editor's own
-    /// focus edges ([`DraftOutcome::of`]), which only report a blur once
-    /// focus has landed, so the `set_focus` → focus-landing gap this widget
-    /// opens never reads as one.
-    edit: EditBuffer,
+    /// `committed` and `canceled` edges, which only report a blur once focus
+    /// has landed, so the `set_focus` → focus-landing gap this widget opens
+    /// never reads as one.
+    draft: String,
 }
 
 /// What one frame of [`InlineRename`] surfaced. `clicked` (idle label
@@ -63,8 +59,8 @@ impl<'a> InlineRename<'a> {
     ///
     /// Font, colour and leading ride along inside the bundle's per-state
     /// `text` slots, as they do for every palantir widget — to bold a title,
-    /// hand over a bundle built with [`InlineRenameTheme::with_text`]. A slot
-    /// left `None` inherits ambient `palantir::Theme::text`.
+    /// hand over a bundle built with [`InlineRenameTheme::with_text`]. An
+    /// axis a slot leaves unset inherits ambient `palantir::Theme::text`.
     ///
     /// Unlike a palantir widget's auto id, this one is *not* scoped to
     /// the enclosing node and *cannot* be disambiguated by occurrence:
@@ -76,7 +72,7 @@ impl<'a> InlineRename<'a> {
     #[track_caller]
     pub(crate) fn new(name: &'a str, style: &'a InlineRenameTheme) -> Self {
         Self {
-            id: WidgetId::auto_stable(),
+            id: WidgetId::auto(),
             name,
             style,
             max_chars: DEFAULT_MAX_CHARS,
@@ -111,16 +107,15 @@ impl<'a> InlineRename<'a> {
         // is sticky in edit mode, but idle needs vertical centering too so
         // the swap doesn't snap glyphs vertically.
         let text_align = Align::new(HAlign::Left, VAlign::Center);
-        // The label's text style: the bundle's resting slot, or ambient
-        // when it declines to pin one — `TextEdit` resolves its own the
-        // same way, so the two agree across the swap by construction.
-        let text = theme.text_edit.looks.normal.text.as_ref();
+        // The label's text style: the bundle's resting slot over ambient —
+        // `TextEdit` resolves its own the same way, so the two agree across
+        // the swap by construction.
+        let text = theme.text_edit.looks.normal.text.apply(&ui.theme().text);
         // Floor the height at one text line so an empty label still has
         // a clickable box (a `Hug` panel with no text would collapse to
         // zero height). Derived from the resolved text style so a bundle
         // that pins a font size also tightens the click target.
-        let style_for_metrics = text.unwrap_or(&ui.theme().text);
-        let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
+        let line_h = text.line_height_for(text.font_size);
         // Resolve the editor theme up front so the idle path can
         // mirror the active TextEdit's trailing caret-room — without
         // this, the panel grows by `caret_width` (and right-aligned
@@ -134,61 +129,55 @@ impl<'a> InlineRename<'a> {
         // reserves the same, on the same side, so the row keeps its width and
         // the glyphs stay put across the swap.
         let idle_padding = Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0);
-        if !ui.state_or_default::<RenameState>(id).active {
-            // `DRAG` as well as `CLICK`: the label captures the press
-            // (so it can register clicks / double-click-to-edit), but
-            // a press that turns into a drag must still be available
-            // to an ancestor that uses the label as a move handle —
-            // e.g. the node header dragging its node. Without `DRAG`
-            // the press latches as a click-only capture and the drag
-            // is swallowed. The active editor is a `TextEdit` (no
-            // `DRAG`), so this only applies while idle.
-            let resp = Panel::hstack()
-                .id(id)
-                .size((Sizing::HUG, Sizing::HUG))
-                .min_size((MIN_EDIT_WIDTH, line_h))
-                .padding(idle_padding)
-                // Match TextEdit's single-line vertical centering so
-                // the swap to edit mode doesn't shift the glyph row.
-                .child_align(Align::v(VAlign::Center))
-                .sense(Sense::CLICK | Sense::DRAG)
-                .show(ui, |ui| {
-                    // Derived from the widget's own id rather than left
-                    // to a call-site auto id: the node header draws every
-                    // node's title from one call site, so an auto id
-                    // would separate two titles only by record order.
-                    let mut t = Text::new(name).id(label_wid(id));
-                    if let Some(s) = text {
-                        t = t.style(s);
-                    }
-                    t.show(ui);
-                })
-                .response;
-            let clicked = resp.left.clicked();
-            let double_clicked = resp.left.double_clicked();
-            if double_clicked {
-                let st = ui.state_or_default::<RenameState>(id);
-                st.active = true;
-                // Refilled, not replaced — the row's buffer keeps whatever
-                // capacity the last rename grew it to.
-                st.edit.text.clear();
-                st.edit.text.push_str(name);
-                ui.set_focus(id);
+        ui.with_state::<RenameState, _>(id, |ui, st| {
+            if !st.active {
+                // `DRAG` as well as `CLICK`: the label captures the press
+                // (so it can register clicks / double-click-to-edit), but
+                // a press that turns into a drag must still be available
+                // to an ancestor that uses the label as a move handle —
+                // e.g. the node header dragging its node. Without `DRAG`
+                // the press latches as a click-only capture and the drag
+                // is swallowed. The active editor is a `TextEdit` (no
+                // `DRAG`), so this only applies while idle.
+                let resp = Panel::hstack()
+                    .id(id)
+                    .size((Sizing::HUG, Sizing::HUG))
+                    .min_size((MIN_EDIT_WIDTH, line_h))
+                    .padding(idle_padding)
+                    // Match TextEdit's single-line vertical centering so
+                    // the swap to edit mode doesn't shift the glyph row.
+                    .child_align(Align::v(VAlign::Center))
+                    .sense(Sense::CLICK | Sense::DRAG)
+                    .show(ui, |ui| {
+                        // Derived from the widget's own id rather than left
+                        // to a call-site auto id: the node header draws every
+                        // node's title from one call site, so an auto id
+                        // would separate two titles only by record order.
+                        Text::new(name).id(label_wid(id)).style(&text).show(ui);
+                    })
+                    .response;
+                let clicked = resp.left.clicked();
+                let double_clicked = resp.left.double_clicked();
+                if double_clicked {
+                    st.active = true;
+                    // Refilled, not replaced — the row's buffer keeps whatever
+                    // capacity the last rename grew it to.
+                    st.draft.clear();
+                    st.draft.push_str(name);
+                    ui.set_focus(id);
+                }
+                return RenameEvent {
+                    clicked,
+                    committed: None,
+                };
             }
-            return RenameEvent {
-                clicked,
-                committed: None,
-            };
-        }
 
-        let mut draft = mem::take(&mut ui.state_or_default::<RenameState>(id).edit.text);
-        // Both signals come off the editor, not off `ui`. A focused
-        // `TextEdit` declares a `TEXT_FIELD` scope, which takes Enter
-        // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
-        // them here would see nothing, and the widget that consumed them
-        // is the one that can report them anyway.
-        let outcome = {
-            let edit = TextEdit::new(&mut draft)
+            // Both signals come off the editor, not off `ui`. A focused
+            // `TextEdit` declares a `TEXT_FIELD` scope, which takes Enter
+            // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
+            // them here would see nothing, and the widget that consumed them
+            // is the one that can report them anyway.
+            let edit = TextEdit::new(&mut st.draft)
                 .id(id)
                 .style(&theme.text_edit)
                 .max_chars(max_chars)
@@ -200,32 +189,28 @@ impl<'a> InlineRename<'a> {
                 // frame the editor first records — and the select-all is
                 // gated on no press being held, which is what keeps a
                 // click *into* an open editor placing the caret instead.
-                .select_all_on_focus()
+                .select_all_on_focus(true)
                 .size((Sizing::HUG, Sizing::HUG))
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .text_align(text_align)
                 .show(ui);
-            DraftOutcome::of(&edit)
-        };
-        let commit = outcome == DraftOutcome::Commit;
-        // Only a committing frame needs the draft as a value of its own;
-        // every other one hands the buffer straight back, so an open rename
-        // copies its text once per commit rather than once per frame.
-        let committed = (commit && draft.as_str() != name).then(|| draft.clone());
-        ui.state_or_default::<RenameState>(id).edit.text = draft;
-        if outcome == DraftOutcome::Editing {
-            return RenameEvent {
+            if !edit.committed && !edit.canceled {
+                return RenameEvent {
+                    clicked: false,
+                    committed: None,
+                };
+            }
+            // Only a committing frame needs the draft as a value of its own;
+            // every other one leaves it in the row, so an open rename copies its
+            // text once per commit rather than once per frame.
+            let committed = (edit.committed && st.draft != name).then(|| st.draft.clone());
+            st.active = false;
+            ui.clear_focus();
+            RenameEvent {
                 clicked: false,
-                committed: None,
-            };
-        }
-        let st = ui.state_or_default::<RenameState>(id);
-        st.active = false;
-        ui.clear_focus();
-        RenameEvent {
-            clicked: false,
-            committed,
-        }
+                committed,
+            }
+        })
     }
 }
 

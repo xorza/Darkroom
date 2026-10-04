@@ -1,6 +1,6 @@
 //! One request a frontend raises against the open document.
 
-use palantir::DockOp;
+use palantir::DockOperation;
 
 use crate::core::document::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -16,5 +16,5 @@ use crate::core::edit::graph_intent::GraphIntent;
 #[derive(Debug)]
 pub(crate) enum DocumentRequest {
     Graph(GraphIntent),
-    View(DockOp<TabRef>),
+    View(DockOperation<TabRef>),
 }

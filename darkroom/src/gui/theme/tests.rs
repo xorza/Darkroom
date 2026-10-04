@@ -37,13 +37,8 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.palantir.window_clear, p.canvas_bg);
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());
     // The menu-bar font was shrunk from palantir's default to ours.
-    let menu_text = theme
-        .menu_button
-        .looks
-        .normal
-        .text
-        .expect("menu button carries an explicit text style");
-    assert_eq!(menu_text.font_size_px, theme.text.body);
+    let menu_text = theme.menu_button.looks.normal.text;
+    assert_eq!(menu_text.font_size, Some(theme.text.body));
 }
 
 /// Every badge is legible against every other, because a node's head
@@ -88,7 +83,7 @@ fn chrome_surfaces_stack_darkest_first() {
         ("chrome_fill", p.chrome_fill),
         ("tab_inactive", p.tab_inactive),
         ("node_fill", p.node_fill),
-        ("elem_mid", p.elem_mid),
+        ("elem_hover", p.elem_hover),
         ("header_fill", p.header_fill),
     ];
     for pair in ladder.windows(2) {

@@ -6,7 +6,7 @@ pub(crate) mod node_palette;
 pub(crate) mod palette_rows;
 
 use glam::Vec2;
-use palantir::widget::approx;
+use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
 use crate::core::document::PortRef;
@@ -217,7 +217,7 @@ pub(crate) fn results_wid() -> WidgetId {
 ///
 /// Palantir folds a chrome's border into its padding on every side, unless the
 /// width paints nothing. That fold (`Background::border_inset`) is not public,
-/// so its gate is repeated here over the same public `approx` predicate.
+/// so its gate is repeated here over the same public `domain` predicate.
 ///
 /// The span between the rows is measured rather than re-summed from the
 /// field's height, [`SEARCH_ROW_GAP`] and the stack's gutter. A sum has to be
@@ -233,17 +233,17 @@ fn chrome_above_results(ui: &Ui) -> f32 {
     let rows = field.zip(results).map_or_else(
         || {
             let text = &ui.theme().text;
-            text.line_height_for(text.font_size_px) + SEARCH_ROW_GAP + menu.gap
+            text.line_height_for(text.font_size) + SEARCH_ROW_GAP + menu.gap
         },
         |(field, results)| results.min.y - field.min.y,
     );
     let border = menu.panel.border.width;
-    let border = if approx::paints_nothing(border) {
+    let border = if domain::is_invisible(border) {
         0.0
     } else {
         border
     };
-    menu.padding.vertical_sum() + 2.0 * border + rows
+    menu.padding.sums().h + 2.0 * border + rows
 }
 
 #[cfg(test)]

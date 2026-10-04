@@ -38,13 +38,12 @@ const CHECKER_DARK_U8: u8 = 51; // #333333
 pub(super) fn checker_image() -> palantir::Image {
     const L: u8 = CHECKER_LIGHT_U8;
     const D: u8 = CHECKER_DARK_U8;
-    let px = [
-        [L, L, L, 255],
-        [D, D, D, 255],
-        [D, D, D, 255],
-        [L, L, L, 255],
-    ];
-    palantir::Image::from_srgba8(UVec2::splat(2), px.into_iter().flatten().collect())
+    let mut tile = palantir::Image::blank(UVec2::splat(2));
+    tile.fill_with(|x, y| {
+        let gray = if (x + y) % 2 == 0 { L } else { D };
+        SrgbaU8::rgb(gray, gray, gray)
+    });
+    tile
 }
 
 /// Four inward corner brackets — "fit the image to the view".
@@ -191,6 +190,7 @@ mod tests {
         assert_eq!(
             img,
             palantir::Image::from_srgba8(UVec2::splat(2), expected.to_vec())
+                .expect("2×2 RGBA8 is 16 bytes")
         );
     }
 }

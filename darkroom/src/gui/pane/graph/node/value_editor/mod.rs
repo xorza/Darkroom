@@ -25,8 +25,7 @@
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
 //! to "3" on the next frame). The buffer lives in palantir's `StateMap`
-//! keyed by the editor id ([`crate::gui::widgets::edit_buffer::EditBuffer`],
-//! shared with [`crate::gui::widgets::inline_rename`]'s renaming editor);
+//! keyed by the editor id ([`crate::gui::widgets::edit_buffer::EditBuffer`]);
 //! we mirror canonical → buffer only while unfocused — skipping the blur
 //! frame, whose buffer still holds the user's text to commit — and parse
 //! only when the edit commits.
@@ -42,7 +41,7 @@ use palantir::{TextEditTheme, TextWrap};
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
-use crate::gui::widgets::edit_buffer::{DraftOutcome, EditBuffer};
+use crate::gui::widgets::edit_buffer::EditBuffer;
 
 /// Render the editor for `value`. Returns the new value when the user
 /// committed an edit this frame (scrub released, Enter, blur, or a
@@ -250,7 +249,8 @@ fn read_only_label(
     // The same retained buffer the editable fields keep under this id,
     // refilled from the literal every frame — which is also what makes the
     // field read-only: anything typed into it is gone by the next record.
-    EditBuffer::with_text(ui, id, |ui, text| {
+    ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
+        let text = &mut buffer.text;
         text.clear();
         write!(text, "{}", value.value_text()).expect("writing to a String cannot fail");
         TextEdit::new(text)
@@ -337,9 +337,9 @@ fn buffered_text_edit<T: ?Sized>(
     mirror: fn(&T, &mut String),
     width: f32,
 ) -> Option<String> {
-    let focused = ui.focused_id() == Some(id);
-    let idle = ui.state_or_default::<EditBuffer>(id).is_idle(focused);
-    let committed = EditBuffer::with_text(ui, id, |ui, text| {
+    ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
+        let idle = buffer.is_idle(ui.focus() == Some(id));
+        let text = &mut buffer.text;
         if idle {
             text.clear();
             mirror(canonical, text);
@@ -353,11 +353,10 @@ fn buffered_text_edit<T: ?Sized>(
         // the mirror re-seeds from the committed document value — so a
         // commit is the one frame that copies, at gesture rate rather than
         // frame rate.
-        (DraftOutcome::of(&response) == DraftOutcome::Commit).then(|| text.clone())
-    });
-    let focused = ui.focused_id() == Some(id);
-    ui.state_or_default::<EditBuffer>(id).settle(focused);
-    committed
+        let committed = response.committed.then(|| text.clone());
+        buffer.settle(ui.focus() == Some(id));
+        committed
+    })
 }
 
 /// The `String` port's mirror: its literal *is* the field's text, verbatim.

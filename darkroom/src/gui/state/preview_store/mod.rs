@@ -272,7 +272,7 @@ fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
     assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
     assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
-    Raster::from_srgba8(target, pixels)
+    Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
 }
 
 /// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,

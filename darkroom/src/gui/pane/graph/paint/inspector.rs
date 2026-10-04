@@ -292,7 +292,7 @@ fn outside_action(ui: &Ui, body_acted: bool) -> bool {
     let oc = ui.response_for(outer_canvas_widget_id());
     // Any-button drag: left rubber-bands, middle pans, right scribbles
     // the breaker — all of them count as "acted on the canvas".
-    let dragged = oc.left.drag.dragging() || oc.middle.drag.dragging() || oc.right.drag.dragging();
+    let dragged = oc.left.drag.is_live() || oc.middle.drag.is_live() || oc.right.drag.is_live();
     let canvas_acted = oc.left.clicked()
         || dragged
         || oc.scroll.lines != Vec2::ZERO

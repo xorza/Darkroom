@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use palantir::{MenuItem, Ui};
+use palantir::{MenuItem, MenuSeparator, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
@@ -88,7 +88,7 @@ impl NodeMenuUi {
                 {
                     chosen = Some(MenuChoice::Run);
                 }
-                MenuItem::separator().show(ui);
+                MenuSeparator::new().show(ui);
             }
             if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Duplicate { incoming: false });
@@ -100,7 +100,7 @@ impl NodeMenuUi {
             {
                 chosen = Some(MenuChoice::Duplicate { incoming: true });
             }
-            MenuItem::separator().show(ui);
+            MenuSeparator::new().show(ui);
             if MenuItem::new("Remove").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Remove);
             }

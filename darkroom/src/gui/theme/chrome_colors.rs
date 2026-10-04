@@ -2,6 +2,7 @@
 //! surround, the shared inks, and the badge roster.
 
 use palantir::RgbaF32;
+use palantir::widget::Animatable;
 
 use crate::gui::theme::palette::Palette;
 
@@ -58,7 +59,7 @@ impl ChromeColors {
             tab_inactive: p.tab_inactive,
             badge_graph: p.badge_graph,
             link: p.badge_graph,
-            link_hovered: p.badge_graph.lerp(RgbaF32::WHITE, 0.5),
+            link_hovered: Animatable::lerp(p.badge_graph, RgbaF32::WHITE, 0.5),
             badge_sink: p.badge_sink,
             badge_cache: p.badge_cache,
             badge_impure: p.badge_impure,

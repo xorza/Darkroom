@@ -6,7 +6,7 @@ pub(crate) mod window_ctx;
 use std::collections::HashMap;
 
 use palantir::prelude::*;
-use palantir::{DockOp, DockView, KeyFilter, TabOverflow};
+use palantir::{DockOperation, DockView, KeyFilter, TabOverflow};
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;
@@ -64,7 +64,7 @@ pub(crate) struct MainWindow {
     /// The dock's op sink for one frame. A field so the two phases that
     /// fill it — the navigation scan and the record — reuse one buffer's
     /// capacity rather than building a `Vec` per frame.
-    dock_ops: Vec<DockOp<TabRef>>,
+    dock_ops: Vec<DockOperation<TabRef>>,
     /// The open document's resolved output types, kept across frames and
     /// resolved again only after an edit that can retype an output.
     output_types: OutputTypeCache,
@@ -90,7 +90,7 @@ impl MainWindow {
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        cx.document().layout.scan(ui, ops);
+        DockView::scan(ui, &cx.document().layout, ops);
         for op in ops.drain(..) {
             out.push_view(op);
         }
@@ -166,7 +166,7 @@ impl MainWindow {
             // Escape all stop here rather than doubling as graph edits,
             // while `ACCEL` (Ctrl+S, Ctrl+R, …) still lands on the app
             // mid-edit.
-            .input_scope(KeyFilter::all().difference(KeyFilter::TEXT))
+            .input_scope(KeyFilter::ALL.difference(KeyFilter::TEXT))
             .show(ui, |ui| {
                 Panel::hstack()
                     .id_salt("chrome_row")

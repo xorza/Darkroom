@@ -1,5 +1,5 @@
 use palantir::prelude::*;
-use palantir::{CloseHandle, DockOp};
+use palantir::{CloseHandle, DockOperation, MenuSeparator};
 
 use crate::core::document::TabRef;
 use crate::gui::app::commands::AppCommand;
@@ -12,7 +12,7 @@ use crate::gui::theme::Theme;
 ///
 /// A pick goes onto `out` in whichever tier it belongs to: the file lifecycle
 /// and `Quit` as [`AppCommand`]s for `App` to run after the pass, Preferences
-/// as the [`DockOp`] that opens its tab.
+/// as the [`DockOperation`] that opens its tab.
 pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
     Panel::hstack()
         .auto_id()
@@ -63,13 +63,13 @@ fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
         if MenuItem::new("Save As…").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::SaveAs));
         }
-        MenuItem::separator().show(ui);
+        MenuSeparator::new().show(ui);
         if MenuItem::new("Preferences").show(ui, popup).left.clicked() {
-            out.push_view(DockOp::OpenTab {
+            out.push_view(DockOperation::OpenTab {
                 tab: TabRef::Preferences,
             });
         }
-        MenuItem::separator().show(ui);
+        MenuSeparator::new().show(ui);
         if MenuItem::new("Quit").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::Quit);
         }

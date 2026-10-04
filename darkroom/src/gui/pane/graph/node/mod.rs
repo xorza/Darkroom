@@ -33,7 +33,7 @@ pub(super) struct NodeUI {
     drag: GroupDrag,
     /// The node kept recorded by the focus cull-exemption last frame.
     /// Focus clears during input, *before* the record, so on the blur
-    /// frame `focus_within` is already false — but that frame is exactly
+    /// frame `is_focus_within` is already false — but that frame is exactly
     /// when an in-progress const edit commits (the editor's pending draft
     /// resolves on its first post-blur record). One frame of hysteresis
     /// keeps the node recorded through it; otherwise the cull would let
@@ -112,7 +112,7 @@ impl NodeUI {
         // parent-scoped under them), so culling a sibling can't re-key
         // anything that stays on screen. Palantir *does* drop widget state
         // for ids not recorded this frame, so a node whose subtree holds the
-        // keyboard focus (`focus_within` — an in-progress title/const/port
+        // keyboard focus (`is_focus_within` — an in-progress title/const/port
         // edit) stays recorded even off-screen; otherwise panning away
         // mid-edit would discard the draft. The exemption carries one frame
         // past the blur (`focus_kept_last`): focus clears before the record,
@@ -132,7 +132,7 @@ impl NodeUI {
             let Some(n) = graph_ctx.node(item.id) else {
                 continue;
             };
-            let keeps_focus = ui.focus_within(wid::body(n.id));
+            let keeps_focus = ui.is_focus_within(wid::body(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
             }

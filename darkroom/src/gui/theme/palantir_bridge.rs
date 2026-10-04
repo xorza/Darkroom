@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Background, ButtonTheme, Corners, RgbaF32, Stroke, TextStyle, WidgetLook};
+use palantir::{Background, ButtonTheme, Corners, RgbaF32, Stroke, WidgetLook};
 
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::type_scale::TypeScale;
@@ -10,19 +10,19 @@ use crate::gui::theme::type_scale::TypeScale;
 /// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
 /// reads the same palette as darkroom-owned chrome. Two notes on the
 /// mapping:
-/// - `window_bg` is the window clear and the selected tab chip — the graph
-///   canvas, so a chip dissolves into the pane below it.
-/// - `elem` and `node_fill` are one colour by design: nodes and palantir's
-///   own surfaces sit on the same tier.
+/// - `window_background` is the window clear and the selected tab chip —
+///   the graph canvas, so a chip dissolves into the pane below it.
+/// - `element` and `node_fill` are one colour by design: nodes and
+///   palantir's own surfaces sit on the same tier.
 pub(super) const fn palantir_palette_for(p: &Palette) -> palantir::Palette {
     palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,
         text_disabled: p.text_disabled,
-        window_bg: p.canvas_bg,
-        elem: p.node_fill,
-        elem_mid: p.elem_mid,
-        elem_strong: p.elem_strong,
+        window_background: p.canvas_bg,
+        element: p.node_fill,
+        element_mid: p.elem_hover,
+        element_strong: p.elem_active,
         border_focused: p.border_focused,
         accent: p.selection_rect,
     }
@@ -75,10 +75,8 @@ pub(super) fn palantir_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palanti
 
     // Context-menu rows at the smaller menu scale, each keeping the colour
     // its own state resolved to.
-    let base = theme.text;
     let shrink = |look: &mut WidgetLook| {
-        let style = look.text.take().unwrap_or(base);
-        look.text = Some(style.with_font_size(text.body));
+        look.text = look.text.with_font_size(text.body);
     };
     let item = &mut theme.context_menu.item;
     shrink(&mut item.looks.normal);
@@ -95,7 +93,7 @@ const CLOSE_LIFT_RADIUS: f32 = 3.0;
 /// Darkroom's own tab chips over palantir's recipe.
 ///
 /// Palantir derives its strip from the palette alone, which lands the
-/// band on `elem` and the idle cap on `elem_strong`. Darkroom wants the
+/// band on `element` and the idle cap on `element_strong`. Darkroom wants the
 /// strip to continue the chrome band the menu bar rides, an unselected
 /// chip on its own `tab_inactive` rung, and the card radius every other
 /// elevated surface uses — so those five roles are set here and the rest
@@ -103,27 +101,25 @@ const CLOSE_LIFT_RADIUS: f32 = 3.0;
 fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<'_>) {
     let tabs = &mut theme.tabs;
     tabs.strip = Background::fill(r.chrome_fill);
-    tabs.corner = r.corner_radius;
+    tabs.radius = r.corner_radius;
     tabs.accent_idle = r.header_fill;
     tabs.badge = r.warning;
-    // The selected chip keeps palantir's `window_bg` fill, which is
+    // The selected chip keeps palantir's `window_background` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
     let chip = |fill: RgbaF32| Background::rounded(fill, top);
     tabs.inactive.normal.background = chip(r.tab_inactive);
-    tabs.inactive.hovered.background = chip(p.elem_mid);
-    tabs.inactive.active.background = chip(p.elem_strong);
-    tabs.inactive.disabled.background = chip(p.elem);
+    tabs.inactive.hovered.background = chip(p.element_mid);
+    tabs.inactive.active.background = chip(p.element_strong);
+    tabs.inactive.disabled.background = chip(p.element);
     // The chrome lift behind a hovered close button is the same header
     // band a node's title wears.
     let lift = Background::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
     tabs.close.hovered.background = lift.clone();
     tabs.close.active.background = lift;
     // Chips at the menu scale, like every other chrome label.
-    let base = theme.text;
     let scale = |look: &mut WidgetLook| {
-        let style = look.text.unwrap_or(base);
-        look.text = Some(style.with_font_size(r.text.body));
+        look.text = look.text.with_font_size(r.text.body);
     };
     scale(&mut theme.tabs.active.normal);
     scale(&mut theme.tabs.active.hovered);
@@ -141,7 +137,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
-/// (transparent at rest, `elem_mid` / `elem_strong` fills, no chip
+/// (transparent at rest, `element_mid` / `element_strong` fills, no chip
 /// overlay) with the label muted until hovered and every state at the
 /// menu scale — so a trigger reads as a menu, not as a button.
 ///
@@ -149,18 +145,12 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 /// palantir widget resolves against a menu-bar style: the bar hands this
 /// to [`palantir::Button::style`] at the call site.
 ///
-/// `fallback_text` is the assembled palantir theme's ambient style — the
-/// one an unstyled label would have inherited — so the only axes this
-/// pins are the two it sets.
-pub(super) fn menu_button_for(
-    p: &palantir::Palette,
-    fallback_text: TextStyle,
-    text: &TypeScale,
-) -> ButtonTheme {
+/// Pins colour and size only; every other axis inherits the ambient style
+/// an unstyled label would have.
+pub(super) fn menu_button_for(p: &palantir::Palette, text: &TypeScale) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
-        let style = look.text.take().unwrap_or(fallback_text);
-        look.text = Some(style.with_color(color).with_font_size(text.body));
+        look.text = look.text.with_color(color).with_font_size(text.body);
     };
     restyle(&mut mb.looks.normal, p.text_muted);
     restyle(&mut mb.looks.hovered, p.text);
