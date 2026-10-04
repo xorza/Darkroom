@@ -59,6 +59,7 @@ fn stretch_stacked_light() {
             "ghs",
             Stretch {
                 method: StretchMethod::Ghs {
+                    black_point: 0.0,
                     d: 5000.0,
                     b: -1.0,
                     sp: 0.0,
@@ -103,6 +104,7 @@ fn stretch_stacked_light() {
     Stretch::auto_asinh().apply(&mut staged).unwrap();
     Stretch {
         method: StretchMethod::Ghs {
+            black_point: 0.0,
             d: 3.0,
             b: 0.0,
             sp: 0.3,

@@ -63,7 +63,10 @@ fn bench_stretch_asinh_explicit(b: ::quickbench::Bencher) {
     let master = real_data::linear_master();
     bench_op(b, &master, |img| {
         Stretch {
-            method: StretchMethod::Asinh { beta: 0.05 },
+            method: StretchMethod::Asinh {
+                black_point: 0.0,
+                beta: 0.05,
+            },
             color: ColorMode::ColorPreserving,
         }
         .apply(img)

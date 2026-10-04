@@ -296,6 +296,7 @@ fn stretch_snapshot() {
         Stretch::auto_stf(),
         Stretch {
             method: StretchMethod::Ghs {
+                black_point: 0.0,
                 d: 5.0,
                 b: 0.0,
                 sp: 0.1,
@@ -309,7 +310,7 @@ fn stretch_snapshot() {
         stretch.apply(&mut image).unwrap();
         image_snapshot(&mut snapshot, &image);
     }
-    assert_snapshot("stretch", &snapshot, "e838367b3e598a7d");
+    assert_snapshot("stretch", &snapshot, "262d78318d67a2d8");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane.

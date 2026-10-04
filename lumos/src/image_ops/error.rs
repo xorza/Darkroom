@@ -116,7 +116,10 @@ mod tests {
         });
         rejects("asinh beta", |image| {
             Stretch {
-                method: StretchMethod::Asinh { beta: 0.0 },
+                method: StretchMethod::Asinh {
+                    black_point: 0.0,
+                    beta: 0.0,
+                },
                 color: ColorMode::ColorPreserving,
             }
             .apply(image)
@@ -124,6 +127,7 @@ mod tests {
         rejects("ghs d", |image| {
             Stretch {
                 method: StretchMethod::Ghs {
+                    black_point: 0.0,
                     d: -1.0,
                     b: 0.0,
                     sp: 0.5,

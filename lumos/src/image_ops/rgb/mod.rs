@@ -35,11 +35,12 @@ impl Rgb {
     /// This pixel moved to the intensity `target` with its hue kept, in display range: every
     /// channel scaled by `target / intensity`; if one would pass white, all three divided by the
     /// largest instead of that one clipped, which would shift the hue; a channel below black
-    /// clamped to 0. A pixel with no positive intensity has no hue to keep and goes black.
+    /// clamped to 0. A pixel with no positive intensity, or a NaN one, has no hue to keep and goes
+    /// black.
     #[inline]
     pub(crate) fn with_intensity(self, target: f32) -> Rgb {
         let intensity = self.intensity();
-        if intensity <= 0.0 {
+        if intensity.is_nan() || intensity <= 0.0 {
             return Rgb::ZERO;
         }
         let scaled = self.scale(target / intensity);

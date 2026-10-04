@@ -9,7 +9,7 @@ use std::array;
 use std::hint::black_box;
 
 use crate::Stretch;
-use crate::image_ops::stretching::{self, AsinhCurve};
+use crate::image_ops::stretching::{self, AsinhCurve, BlackPoint};
 
 const W: usize = 3000;
 const H: usize = 2000;
@@ -42,6 +42,7 @@ fn bench_stretch_rgb(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let curve = AsinhCurve::new(0.05);
+    let black = BlackPoint::new(0.02);
     let n_px = W * H;
     // One hashed level per pixel, scaled per channel.
     let planes: [Vec<f32>; 3] = array::from_fn(|channel| {
@@ -59,7 +60,7 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         let [r, g, bch] = &mut planes;
         // The same entry point `apply_color_preserving_asinh` calls, so the bench times whichever
         // kernel production picks on this machine.
-        stretching::simd::asinh_color_preserve(r, g, bch, curve);
+        stretching::simd::asinh_color_preserve(r, g, bch, black, curve);
         black_box(&planes);
     });
 }
