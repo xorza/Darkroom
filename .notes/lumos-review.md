@@ -28,25 +28,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
   - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
-## 13. The final registration fit discards precision
-
-- [ ] `13.1` **Match recovery searches only the brightest `max_stars` (200)** — `registration/mod.rs:144-155,355-365`
-  - The final fit never sees the rest of the catalog. With 2000 stars this costs ≈3× in precision. Triangle matching needs the cap, but the final fit does not. `[C]`
-- [ ] `13.2` **The recovery and inlier gates are ≈1.5 FWHM wide, and the fit inside them is plain least squares** — `registration/tuning/mod.rs:33,44`, `registration/recovery.rs:80,93,132`, `registration/ransac/mod.rs:320-327`
-  - The gate is 30–100× the centroid noise. Nothing tightens it or clips residuals, so one blend 4 px off pulls the fit by r/N.
-  - Use MAGSAC++ σ-consensus IRLS, or shrinking LO thresholds. `[C]`
-- [ ] `13.3` **One mismatch can push the Auto ladder to an overfit model** — `registration/mod.rs:283,410-417`, `registration/result/mod.rs:215-226`
-  - The RMS is non-robust: one 4 px mismatch among 50 true matches gives 0.57 px > 0.5, so the ladder escalates to Affine or Homography.
-  - Points that the SIP fit clipped also stay in the RMS. `[C]`
-- [ ] `13.4` **There is no weighting by centroid σ, and saturated stars are used** — `registration/mod.rs:144-153`, `registration/ransac/transforms.rs`
-  - Brightest-first selection prefers saturated stars, which have flat tops. The weight should be 1/σ² with σ ≈ FWHM/(2.355·SNR).
-  - PixInsight excludes stars above its upper limit. `[P]`
-- [ ] `13.5` **The homography is refined only by algebraic DLT** — `registration/ransac/transforms.rs:257-310`
-  - OpenCV and Hartley–Zisserman refine with LM on reprojection error. `[C]`
-- [ ] `13.6` **SIP is fitted after the linear transform is frozen** — `registration/distortion/sip/mod.rs:153-263`, `registration/mod.rs:377-402`
-  - The monomials are not orthogonal to the affine terms, so this is one Gauss–Seidel step, not the joint optimum.
-  - The result also depends on the per-frame default reference point (`sip/mod.rs:180-183`).
-  - astrometry.net `fit_sip_wcs` fits both together. `[C]`
 ## 14. Resampling: ringing, aliasing, unstable normalization
 
 - [ ] `14.1` **Lanczos has no ringing clamp** — `registration/resample/row/simd/mod.rs:66-89`
@@ -234,8 +215,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
   - Rename the types, so rustc and docs show the public names. `[C]`
-- [ ] `26.17` **`SipFitResult` is public but not exported, and its diagnostics are computed and discarded** — `registration/distortion/sip/mod.rs:122`, `registration/mod.rs:398` `[C]`
-- [ ] `26.18` **`SipPolynomial.terms` is a pure function of the order** — `registration/distortion/sip/mod.rs:115` `[C]`
 - [ ] `26.19` **TPS defects** — `registration/distortion/tps/mod.rs`
   - The default regularization 0 interpolates centroid noise exactly.
   - `DistortionMap::interpolate` returns 0 past the grid.
@@ -675,7 +654,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 1. Done: no rotation limit by default, and a fixed default seed (`RansacConfig::seed: u64`, 0). LO-RANSAC takes a refit on its score alone. A minimal sample is degenerate when any pair is closer than the scorer's noise scale, or any triplet stands lower than it over its longest side. Near-isosceles triangles vote in every vertex order their tied sides admit, with the orientation test reversed for an odd permutation. Items 3.1, 13.7 to 13.10 and 22.1 are closed.
    Deviation (13.9): a triangle is kept while it stands at least the noise scale high over its longest side, not by a share of that side. The invariants `s₀/L` and `s₁/L` move by about σ/L whatever the shape, so Groth's side-ratio limit, which protects invariants built on the shortest side, does not apply; a relative height limit cut real matches in a dense field. A flat triangle loses its orientation, and that is what the noise-scale test guards.
-2. Add `final_fit` and the homography LM. Add GRIC. Return each frame's registration.
+2. Done except each frame's registration in the result (part 3): `registration/final_fit/` matches every unsaturated star of both full catalogs through the hypothesis, weights each pair by `1/(|det J|·σ_ref² + σ_target²)` times a Cauchy weight (Holland and Welsch's 2.3849) on its normalized residual, and gates at the recovery radius first, then at `√χ²₀.₉₉(2)` of the robust scale (median over the Rayleigh median, at least 1). It reaches the Cramér–Rao bound of 2000 stars, times the Cauchy weights' variance ratio of 1.062. The homography refines its weighted DLT by LM on the reprojection error. Each linear part is fitted with its SIP correction at the joint optimum in every pass: translation, similarity and affine map in one linear solve with the linear part factored out (astrometry.net's `fit_sip_wcs`), the rotation by a secant iteration on the envelope derivative. `Auto` fits every model and takes the lowest GRIC (Torr 1998) over the union of their pairs, among those the caller's `max_rms_error` accepts. Items 13.1 to 13.6, 26.17 and 26.18 are closed.
+   Deviations: (a) A homography takes no SIP correction: its perspective terms act to first order as the correction's quadratic ones, so the two are not determined together (the joint solve is rank-deficient), which is why the SIP convention puts an affine map under the polynomial. Validation refuses the pairing, `Auto` with SIP stops at the affine map, and the wide-field presets use `Auto`. (b) The SIP origin defaults to the reference catalog's bounding-box centre, not the image centre: `register` does not see the image, and the reference catalog is the same for every frame of a run. (c) Sigma clipping in the SIP fit is gone; the final fit's robust weights and gate carry outliers for the transform and the correction alike.
 - **Tests:**
   - A 180° rotated catalog registers.
   - 50 true matches and one 4 px blend: Auto stays at Euclidean. Today the RMS is 0.57 px, and Auto goes to Affine.

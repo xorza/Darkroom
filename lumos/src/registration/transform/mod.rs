@@ -53,6 +53,18 @@ pub enum TransformType {
 }
 
 impl TransformType {
+    /// The transform's free parameters: 2 for a translation, 3 with a rotation, 4 with a scale, 6
+    /// for an affine map and 8 for a homography.
+    pub(crate) const fn parameter_count(self) -> usize {
+        match self {
+            TransformType::Translation => 2,
+            TransformType::Euclidean => 3,
+            TransformType::Similarity => 4,
+            TransformType::Affine => 6,
+            TransformType::Homography => 8,
+        }
+    }
+
     /// Minimum number of point correspondences required to estimate this transform.
     pub const fn min_points(&self) -> usize {
         match self {
@@ -73,10 +85,9 @@ impl TransformType {
 pub enum TransformModel {
     /// Fit exactly this model.
     Fixed(TransformType),
-    /// Ladder Euclidean → Similarity → Affine → Homography, accepting the first rung whose RMS
-    /// residual clears the ladder's own bar — or
-    /// [`max_rms_error`](crate::RegistrationConfig::max_rms_error), whenever the caller sets a
-    /// tighter one.
+    /// Fit every model from Euclidean to Homography and take the one of lowest geometric robust
+    /// information criterion (Torr 1998): the one whose residuals, over every pair any model
+    /// matched, best repay its degrees of freedom.
     #[default]
     Auto,
 }
@@ -430,6 +441,15 @@ impl WarpTransform {
     /// When the transform has no usable inverse ([`Transform::try_inverse`]).
     pub fn inverse(&self) -> InverseWarp {
         InverseWarp::new(self.transform.inverse(), self.sip.clone())
+    }
+
+    /// The Jacobian of [`Self::apply`] at `p`: the transform's at the corrected point, times the
+    /// correction's.
+    pub(crate) fn jacobian(&self, p: DVec2) -> DMat2 {
+        match &self.sip {
+            Some(sip) => self.transform.jacobian(sip.correct(p)) * sip.jacobian(p),
+            None => self.transform.jacobian(p),
+        }
     }
 
     /// Whether this transform has a nonlinear SIP component.

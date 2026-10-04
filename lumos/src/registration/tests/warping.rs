@@ -313,12 +313,14 @@ fn the_public_warp_samples_through_the_sip_correction() {
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(field.centre),
-        ..Default::default()
     };
-    let sip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .unwrap()
-            .polynomial;
+    let sip = SipPolynomial::fitted_under(
+        &transform,
+        &ref_points,
+        &target_points,
+        sip_config.order,
+        sip_config.reference_point.unwrap(),
+    );
     assert!(sip.max_grid_correction(size, 10.0) > 0.1);
     let warp_transform = WarpTransform::with_sip(transform, sip);
 

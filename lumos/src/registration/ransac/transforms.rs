@@ -309,8 +309,9 @@ fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
     Transform::from_homography_matrix(denormalized).filter(Transform::is_valid)
 }
 
+/// The two rows of the DLT system `A·h = 0` one correspondence gives, in normalized coordinates.
 #[inline]
-fn dlt_rows(reference: DVec2, target: DVec2) -> [[f64; 9]; 2] {
+pub(crate) fn dlt_rows(reference: DVec2, target: DVec2) -> [[f64; 9]; 2] {
     [
         [
             -reference.x,
@@ -354,7 +355,7 @@ fn solve_homogeneous_svd_fixed(a: SMatrix<f64, 9, 9>) -> Option<DMat3> {
 }
 
 /// Solve an overdetermined homogeneous system directly so conditioning remains κ rather than κ².
-fn solve_homogeneous_svd_dynamic(a: DMatrix<f64>) -> Option<DMat3> {
+pub(crate) fn solve_homogeneous_svd_dynamic(a: DMatrix<f64>) -> Option<DMat3> {
     debug_assert!(a.nrows() >= a.ncols());
     let svd = SVD::new(a, false, true);
     let v_t = svd.v_t?;

@@ -110,12 +110,14 @@ mod tests {
         let config = SipConfig {
             order: 3,
             reference_point: Some(DVec2::ZERO),
-            clip_iterations: 0,
-            ..SipConfig::default()
         };
-        let sip = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config)
-            .unwrap()
-            .polynomial;
+        let sip = SipPolynomial::fitted_under(
+            &transform,
+            &reference,
+            &target,
+            config.order,
+            config.reference_point.unwrap(),
+        );
         WarpTransform::with_sip(transform, sip)
     }
 

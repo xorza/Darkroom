@@ -247,7 +247,7 @@ fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
 
 /// The test transform with an order-3 SIP fitted to a mild radial field over `size`.
 fn sip_warp(size: Size2us) -> WarpTransform {
-    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::registration::distortion::sip::SipPolynomial;
     let transform = create_test_transform();
     let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
     let mut reference = Vec::new();
@@ -263,11 +263,6 @@ fn sip_warp(size: Size2us) -> WarpTransform {
             transform.apply(r + d * 2e-9 * d.length_squared())
         })
         .collect();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..SipConfig::default()
-    };
-    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
-    WarpTransform::with_sip(transform, fit.polynomial)
+    let sip = SipPolynomial::fitted_under(&transform, &reference, &target, 3, center);
+    WarpTransform::with_sip(transform, sip)
 }

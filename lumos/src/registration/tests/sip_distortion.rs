@@ -11,36 +11,30 @@ use crate::registration::Config;
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::register;
 use crate::registration::tests::helpers;
-use crate::registration::transform::Transform;
+use crate::registration::transform::{Transform, TransformType};
 
+/// A shift with a cubic barrel field before it, `d·1e-8·|d|²` about (512, 512) — 3 to 4 px at the
+/// corners — on 120 stars. With SIP of order 3 about the field's centre the warp is the field: GRIC
+/// takes the fewest parameters that fit it, a rotation and the correction, every pair is matched and
+/// the warp lands on every star and every point of the frame to rounding. Without SIP no transform
+/// follows the field: the robust fit keeps the pairs it can follow, 108 of the 120 (measured), and
+/// still leaves 0.22 px on them.
 #[test]
 fn register_with_sip_recovers_barrel_distortion() {
     let ref_pos = generate_random_positions(120, 1024.0, 1024.0, 42);
-
-    // Target = a small linear shift composed with a cubic barrel distortion (~3–4 px at corners).
     let field = RadialField {
         transform: Transform::translation(DVec2::new(7.0, -4.0)),
         ..RadialField::new(DVec2::new(512.0, 512.0), 1e-8)
     };
     let target_pos: Vec<DVec2> = ref_pos.iter().map(|&p| field.image(p)).collect();
-
     let ref_stars = positions_to_stars(&ref_pos, 3.0);
     let target_stars = positions_to_stars(&target_pos, 3.0);
 
     let base_config = Config {
         matching: helpers::matching_config(20, 10),
-        max_rms_error: 10.0, // high gate so both registrations return (we compare their RMS)
+        max_rms_error: 10.0,
         ..Config::default()
     };
-    let no_sip = register(
-        &ref_stars,
-        &target_stars,
-        &Config {
-            sip: None,
-            ..base_config.clone()
-        },
-    )
-    .expect("linear registration should succeed");
     let with_sip = register(
         &ref_stars,
         &target_stars,
@@ -48,33 +42,34 @@ fn register_with_sip_recovers_barrel_distortion() {
             sip: Some(SipConfig {
                 order: 3,
                 reference_point: Some(field.centre),
-                ..Default::default()
             }),
-            ..base_config
+            ..base_config.clone()
         },
     )
     .expect("SIP registration should succeed");
+    assert_eq!(
+        with_sip.transform().transform_type(),
+        TransformType::Euclidean
+    );
+    assert_eq!(with_sip.num_inliers(), 120);
+    let warp = with_sip.warp_transform();
+    for y in (0..=1024).step_by(128) {
+        for x in (0..=1024).step_by(128) {
+            let p = DVec2::new(f64::from(x), f64::from(y));
+            let miss = warp.apply(p).distance(field.image(p));
+            assert!(miss <= 1e-9, "at {p:?}: {miss:e}");
+        }
+    }
 
-    assert!(
-        with_sip.sip().is_some(),
-        "a SIP polynomial should have been fitted"
-    );
-    // A linear transform cannot absorb the radial barrel → a visible residual remains.
-    assert!(
-        no_sip.rms_error() > 0.3,
-        "linear-only should leave a barrel residual, got RMS {:.3}",
-        no_sip.rms_error()
-    );
-    // The order-3 SIP captures the cubic distortion → residuals collapse.
-    assert!(
-        with_sip.rms_error() < no_sip.rms_error() * 0.5,
-        "SIP should at least halve the residual: {:.3} vs {:.3}",
-        with_sip.rms_error(),
-        no_sip.rms_error()
-    );
-    assert!(
-        with_sip.rms_error() < 0.2,
-        "SIP-corrected RMS {:.3} should be small",
-        with_sip.rms_error()
-    );
+    let no_sip = register(
+        &ref_stars,
+        &target_stars,
+        &Config {
+            sip: None,
+            ..base_config
+        },
+    )
+    .expect("linear registration should succeed");
+    assert!(no_sip.num_inliers() < 120, "{}", no_sip.num_inliers());
+    assert!(no_sip.rms_error() > 0.1, "{}", no_sip.rms_error());
 }
