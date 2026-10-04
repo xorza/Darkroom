@@ -37,11 +37,9 @@ rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
 statrs = { workspace = true }
 arrayvec = { workspace = true }
-smallvec = { workspace = true }
-parking_lot = { workspace = true }
-blake3 = { workspace = true }
 
 [dev-dependencies]
+blake3 = { workspace = true }
 common = { workspace = true, features = ["internals"] }
 quickbench = { workspace = true }
 image = { workspace = true }

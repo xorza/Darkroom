@@ -7,9 +7,9 @@ use common::CancelToken;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame::PipelineFrame;
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::result::Error;
 use crate::pipeline::tier::FrameTier;
 use crate::progress::stage_counter::StageCounter;
 use crate::progress::{ProgressCallback, StackingStage};
@@ -90,7 +90,7 @@ impl<'a> FrameRegistrar<'a> {
         &self,
         buffers: &mut Option<WarpBuffers>,
         frame: FrameToPark<'_>,
-    ) -> Result<Option<ParkedFrame>, Error> {
+    ) -> Result<Option<ParkedFrame>, AlignStackError> {
         if self.cancel.is_cancelled() {
             return Ok(None);
         }
@@ -117,7 +117,7 @@ impl<'a> FrameRegistrar<'a> {
             // identically for every pair, so dropping it would spend the whole run to report
             // `AllFramesDropped` and blame the data.
             Err(RegistrationError::InvalidConfig(invalid)) => {
-                return Err(Error::RegistrationConfig(invalid));
+                return Err(AlignStackError::RegistrationConfig(invalid));
             }
             Err(error) => {
                 tracing::info!(frame = n, total = self.others, %error, "registration failed");

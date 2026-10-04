@@ -59,20 +59,27 @@ pub(crate) const DECODE_VERSION: u64 = pins_fingerprint(&[
     DECODE_PINS.raw_cfa,
 ]);
 
+/// FNV-1a 64's starting state.
+pub(crate) const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a 64 continued from `hash` over `bytes`.
+pub(crate) const fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut byte = 0;
+    while byte < bytes.len() {
+        hash = (hash ^ bytes[byte] as u64).wrapping_mul(PRIME);
+        byte += 1;
+    }
+    hash
+}
+
 /// FNV-1a over `pins`, each followed by a `0xff` no pin holds, so no two lists hash as one
 /// concatenation. A version derived from pinned digests rather than a number bumped by hand.
 pub(crate) const fn pins_fingerprint(pins: &[&str]) -> u64 {
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    let mut hash = FNV1A_OFFSET;
     let mut pin = 0;
     while pin < pins.len() {
-        let bytes = pins[pin].as_bytes();
-        let mut byte = 0;
-        while byte < bytes.len() {
-            hash = (hash ^ bytes[byte] as u64).wrapping_mul(PRIME);
-            byte += 1;
-        }
-        hash = (hash ^ 0xff).wrapping_mul(PRIME);
+        hash = fnv1a(fnv1a(hash, pins[pin].as_bytes()), &[0xff]);
         pin += 1;
     }
     hash

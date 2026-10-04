@@ -29,7 +29,7 @@ impl RowPositions {
         source: Size2us,
     ) {
         self.positions.clear();
-        self.positions.reserve(width);
+        self.positions.reserve_exact(width);
         let y = y as f64;
         if let Some(sip) = &transform.sip {
             let row = sip.row(y);

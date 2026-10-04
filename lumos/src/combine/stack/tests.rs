@@ -31,7 +31,7 @@ use common::TempDir;
 use std::path::PathBuf;
 
 /// The combine, with no progress reported and no cancel.
-fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, Error> {
+fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
     stack_images(
         frames,
         config,
@@ -269,13 +269,13 @@ fn stack_empty_paths() {
         ProgressCallback::default(),
         CancelToken::never(),
     );
-    assert!(matches!(result.unwrap_err(), Error::NoFrames));
+    assert!(matches!(result.unwrap_err(), StackError::NoFrames));
 }
 
 #[test]
 fn stack_images_empty() {
     let result = combine(Vec::new(), &StackConfig::default());
-    assert!(matches!(result.unwrap_err(), Error::NoFrames));
+    assert!(matches!(result.unwrap_err(), StackError::NoFrames));
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn stack_nonexistent_file() {
         ProgressCallback::default(),
         CancelToken::never(),
     );
-    assert!(matches!(result.unwrap_err(), Error::ImageLoad(_)));
+    assert!(matches!(result.unwrap_err(), StackError::ImageLoad(_)));
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn stack_rejects_invalid_config_before_loading() {
     .unwrap_err();
     assert!(matches!(
         error,
-        Error::Config(StackConfigError::ManualWeightCountMismatch {
+        StackError::Config(StackConfigError::ManualWeightCountMismatch {
             expected: 3,
             actual: 2,
         })
@@ -321,7 +321,7 @@ fn stack_rejects_invalid_config_before_loading() {
     .unwrap_err();
     assert!(matches!(
         error,
-        Error::Config(StackConfigError::Field(invalid))
+        StackError::Config(StackConfigError::Field(invalid))
             if invalid.field == "sigma_low" && invalid.value == -1.0
     ));
 }
@@ -453,7 +453,7 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
             &config
         )
         .unwrap_err(),
-        Error::NoCommonCoverage
+        StackError::NoCommonCoverage
     ));
 }
 
@@ -487,7 +487,7 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     assert!(
         matches!(
             stack([Some(RowOrder::TopDown), Some(RowOrder::BottomUp)]).unwrap_err(),
-            Error::RowOrderMismatch {
+            StackError::RowOrderMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
@@ -545,7 +545,7 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 Some((1.0, ScaleOrigin::Assumed, None)),
             ])
             .unwrap_err(),
-            Error::SampleDomainMismatch {
+            StackError::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
@@ -593,7 +593,7 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 Some((1.0, ScaleOrigin::Declared, Some("count/s"))),
             ])
             .unwrap_err(),
-            Error::SampleDomainMismatch {
+            StackError::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
@@ -619,7 +619,7 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 &StackConfig::default()
             )
             .unwrap_err(),
-            Error::SampleDomainMismatch {
+            StackError::SampleDomainMismatch {
                 index: 2,
                 reference_index: 1,
                 ..
@@ -660,7 +660,7 @@ fn stack_images_dimension_errors() {
     let result = combine(vec![a.into(), b.into()], &StackConfig::default());
     assert!(matches!(
         result.unwrap_err(),
-        Error::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
+        StackError::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
     ));
 
     // Either plane of the pair is named for itself; the wrong-shaped one is the one reported.
@@ -687,7 +687,7 @@ fn stack_images_dimension_errors() {
         assert!(
             matches!(
                 error,
-                Error::WarpPlaneDimensionMismatch {
+                StackError::WarpPlaneDimensionMismatch {
                     index: 0,
                     plane,
                     expected_width: 4,
@@ -734,7 +734,7 @@ fn stack_images_rejects_invalid_warp_quality_values() {
         assert!(
             matches!(
                 error,
-                Error::InvalidWarpPlaneValue {
+                StackError::InvalidWarpPlaneValue {
                     index: 0,
                     plane,
                     pixel: 1,
@@ -772,7 +772,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
         assert!(
             matches!(
                 error,
-                Error::FrameQualityPairMismatch {
+                StackError::FrameQualityPairMismatch {
                     index: 0,
                     pixel: 1,
                     coverage,
@@ -823,7 +823,7 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         )
         .unwrap_err();
 
-        let Error::NonFiniteImageSample {
+        let StackError::NonFiniteImageSample {
             index,
             channel,
             pixel,
@@ -879,7 +879,7 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
         cache.core.cancel = cancel;
         assert!(matches!(
             run_stacking(&cache, &config).unwrap_err(),
-            Error::Cancelled
+            StackError::Cancelled
         ));
     }
 }
@@ -898,7 +898,7 @@ fn cancelled_stack_returns_cancelled_error() {
         ProgressCallback::default(),
         cancel,
     );
-    assert!(matches!(result.unwrap_err(), Error::Cancelled));
+    assert!(matches!(result.unwrap_err(), StackError::Cancelled));
 }
 
 /// Coverage decides which frames reach each pixel, and the product's planes count them. Frame A
@@ -1084,7 +1084,7 @@ fn only_normalization_requires_common_coverage() {
         },
     )
     .unwrap_err();
-    assert!(matches!(error, Error::NoCommonCoverage));
+    assert!(matches!(error, StackError::NoCommonCoverage));
 
     let product = combine(
         frames(),
@@ -1611,7 +1611,7 @@ fn noise_weighting_refuses_a_frame_with_no_noise() {
     };
     assert!(matches!(
         run_stacking(&cache, &config),
-        Err(Error::NoNoiseToWeigh { index: 0 })
+        Err(StackError::NoNoiseToWeigh { index: 0 })
     ));
 }
 

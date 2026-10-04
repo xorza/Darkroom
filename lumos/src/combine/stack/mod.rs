@@ -20,7 +20,7 @@ use crate::combine::cache::sample_noise::SampleNoise;
 use crate::combine::cache::slots::Slots;
 use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
-use crate::combine::error::{Error, StackConfigError};
+use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
@@ -118,7 +118,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     combine_cached(config, paths.len(), "paths", || {
@@ -150,7 +150,7 @@ pub fn stack_images(
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let frame_count = frames.len();
     combine_cached(config, frame_count, "memory", || {
         FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
@@ -166,7 +166,7 @@ pub(crate) fn stack_stored_frames(
     config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let frame_count = frames.len();
     combine_cached(config, frame_count, "frame store", || {
         FrameCache::from_stored_frames(
@@ -198,10 +198,10 @@ pub(crate) fn combine_cached(
     config: &StackConfig,
     frame_count: usize,
     source: &'static str,
-    build: impl FnOnce() -> Result<FrameCache, Error>,
-) -> Result<StackProduct, Error> {
+    build: impl FnOnce() -> Result<FrameCache, StackError>,
+) -> Result<StackProduct, StackError> {
     if frame_count == 0 {
-        return Err(Error::NoFrames);
+        return Err(StackError::NoFrames);
     }
     config.validate()?;
     validate_manual_weights(config, frame_count)?;
@@ -265,7 +265,7 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
 ///
 /// # Errors
 ///
-/// [`Error::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
+/// [`StackError::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
 /// chunks rather than unwinding, so a cancelled run still produces a `StackProduct` — one holding
 /// zeros wherever it stopped. Returning that as an error is what keeps the partial image from
 /// being mistaken for a stack; the alternative, handing it back and trusting each caller to
@@ -273,7 +273,7 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
 pub(crate) fn run_stacking(
     cache: &FrameCache,
     config: &StackConfig,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
     let method = config.small_n.resolve(config.method, frame_count);
@@ -399,9 +399,9 @@ fn finish_unless_cancelled(
     combined: CombineOutput,
     planes: QualityPlanes,
     quantization_sigma: Option<f32>,
-) -> Result<StackProduct, Error> {
+) -> Result<StackProduct, StackError> {
     if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(StackError::Cancelled);
     }
     Ok(cache.finish_product(combined, planes, quantization_sigma))
 }

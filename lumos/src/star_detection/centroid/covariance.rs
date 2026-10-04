@@ -19,11 +19,11 @@ pub(super) struct Cov2 {
 }
 
 impl Cov2 {
-    pub(super) fn trace(self) -> f64 {
+    pub(super) const fn trace(self) -> f64 {
         self.xx + self.yy
     }
 
-    pub(super) fn det(self) -> f64 {
+    pub(super) const fn det(self) -> f64 {
         self.xx * self.yy - self.xy * self.xy
     }
 
@@ -61,7 +61,7 @@ impl Cov2 {
     }
 
     /// Inverse of the symmetric matrix, or `None` if (near-)singular.
-    pub(super) fn inverse(self) -> Option<Cov2> {
+    pub(super) const fn inverse(self) -> Option<Cov2> {
         let det = self.det();
         if det.abs() < 1e-12 {
             return None;

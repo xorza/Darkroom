@@ -4,7 +4,6 @@
 //! enabling efficient nearest-neighbor queries for triangle formation.
 
 use glam::DVec2;
-use smallvec::SmallVec;
 
 /// Extract the coordinate for the given split dimension (0 = x, 1 = y).
 #[inline(always)]
@@ -143,10 +142,11 @@ impl KdTree {
             return;
         }
 
-        let mut heap = BoundedMaxHeap::new(k);
+        let mut heap = BoundedMaxHeap {
+            capacity: k,
+            items: out,
+        };
         self.descend(Subtree::root(self.indices.len()), query, &mut heap);
-
-        heap.write_into(out);
         out.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
     }
 
@@ -249,7 +249,7 @@ trait Descent {
     fn prune_radius_sq(&self) -> f64;
 }
 
-impl Descent for BoundedMaxHeap {
+impl Descent for BoundedMaxHeap<'_> {
     fn visit(&mut self, index: usize, dist_sq: f64) {
         self.push(Neighbor { index, dist_sq });
     }
@@ -301,42 +301,31 @@ impl Descent for WithinRadius<'_> {
     }
 }
 
-/// Neighbours a k-nearest query holds inline before it spills to the heap. `k` is the caller's,
-/// and the tree is queried per star, so the common small-k case must not allocate.
-const SMALL_HEAP_CAPACITY: usize = 32;
-
 /// A bounded max-heap for k-nearest neighbor search: the `k` smallest distances seen so far, with
 /// the largest of them at the root, so the one to evict is always in hand.
 ///
-/// [`SmallVec`] rather than a `Vec`, so `k <= SMALL_HEAP_CAPACITY` stays on the stack and a larger
-/// one spills — the storage split without a second copy of the heap operations to go with it.
+/// Held in the caller's output buffer, empty at the start: the tree is queried per star, and a
+/// buffer the caller reuses allocates once, not per query.
 #[derive(Debug)]
-struct BoundedMaxHeap {
-    /// The caller's `k`. Not `items.capacity()`, which is the inline size until the heap spills.
+struct BoundedMaxHeap<'a> {
+    /// The caller's `k`. Not `items.capacity()`, which is whatever the reused buffer grew to.
     capacity: usize,
-    items: SmallVec<[Neighbor; SMALL_HEAP_CAPACITY]>,
+    items: &'a mut Vec<Neighbor>,
 }
 
-impl BoundedMaxHeap {
-    fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            items: SmallVec::with_capacity(capacity),
-        }
-    }
-
+impl BoundedMaxHeap<'_> {
     fn push(&mut self, neighbor: Neighbor) {
         if self.items.len() < self.capacity {
             self.items.push(neighbor);
             let last = self.items.len() - 1;
-            Self::sift_up_slice(&mut self.items, last);
+            Self::sift_up_slice(self.items, last);
         } else if neighbor.dist_sq < self.items[0].dist_sq {
             self.items[0] = neighbor;
-            Self::sift_down_slice(&mut self.items, 0);
+            Self::sift_down_slice(self.items, 0);
         }
     }
 
-    fn is_full(&self) -> bool {
+    const fn is_full(&self) -> bool {
         self.items.len() >= self.capacity
     }
 
@@ -344,11 +333,6 @@ impl BoundedMaxHeap {
         self.items
             .first()
             .map_or(f64::INFINITY, |neighbor| neighbor.dist_sq)
-    }
-
-    /// Append the heap's contents to `out` (unsorted) without consuming the heap.
-    fn write_into(&self, out: &mut Vec<Neighbor>) {
-        out.extend_from_slice(&self.items);
     }
 
     fn sift_up_slice(items: &mut [Neighbor], mut idx: usize) {

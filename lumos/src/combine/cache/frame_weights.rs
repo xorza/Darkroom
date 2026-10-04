@@ -4,7 +4,7 @@ use std::iter;
 
 use crate::combine::cache::slots::Slots;
 use crate::combine::config::Weighting;
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::combine::normalization::FrameNorm;
 use crate::frame_store::frame_stats::FrameStats;
 
@@ -26,14 +26,14 @@ impl FrameWeights {
     /// The weights `weighting` asks for, or `None` for equal ones.
     ///
     /// # Errors
-    /// [`Error::NoNoiseToWeigh`] when noise weighting meets a frame with no measured noise in a
+    /// [`StackError::NoNoiseToWeigh`] when noise weighting meets a frame with no measured noise in a
     /// slot.
     pub(crate) fn resolve<'a>(
         weighting: &Weighting,
         stats: impl IntoIterator<Item = &'a FrameStats>,
         frame_norms: Option<&[FrameNorm]>,
         slots: Slots,
-    ) -> Result<Option<Self>, Error> {
+    ) -> Result<Option<Self>, StackError> {
         let values = match weighting {
             Weighting::Equal => return Ok(None),
             Weighting::Manual(weights) => weights
@@ -49,7 +49,7 @@ impl FrameWeights {
                         let variance = stats.ccd_noise(slot).background_variance * gain * gain;
                         let weight = 1.0 / variance;
                         if !weight.is_finite() {
-                            return Err(Error::NoNoiseToWeigh { index });
+                            return Err(StackError::NoNoiseToWeigh { index });
                         }
                         values.push(weight);
                     }
@@ -161,6 +161,9 @@ mod tests {
             None,
             Slots::new(None, 1),
         );
-        assert!(matches!(noiseless, Err(Error::NoNoiseToWeigh { index: 1 })));
+        assert!(matches!(
+            noiseless,
+            Err(StackError::NoNoiseToWeigh { index: 1 })
+        ));
     }
 }

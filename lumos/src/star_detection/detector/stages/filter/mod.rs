@@ -2,20 +2,11 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
-use std::collections::HashMap;
-
-use smallvec::SmallVec;
-
 use crate::math::statistics::{MedianMad, mad_floored, mad_to_sigma};
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::detector::QualityFilterDiagnostics;
 use crate::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::star_detection::star::Star;
-
-/// Below this star count, dedup with the O(n²) brute force instead of the sparse spatial hash.
-/// For a handful of stars the brute force is trivial and skips the hash's per-call allocation; the
-/// crossover is conservative — the spatial hash is O(stars) and competitive well below this.
-const SPATIAL_HASH_CROSSOVER: usize = 100;
 
 /// Result of the filter stage: the surviving stars plus rejection statistics.
 #[derive(Debug)]
@@ -139,120 +130,65 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// Remove duplicate star detections that are too close together.
 ///
 /// For each cluster of stars within `min_separation`, keeps the *first* star
-/// encountered in `stars` and drops the rest — neither this function nor its
-/// `_simple`/spatial-hash helpers ever compare `.flux`. Callers therefore MUST
-/// pass `stars` already sorted by flux descending (as `FilterOutcome::from_stars` does via
-/// `sort_by_flux` before calling this) for "first kept" to mean "brightest
-/// kept"; otherwise an arbitrary, non-brightest star in each cluster survives.
+/// encountered in `stars` and drops the rest: a star is a duplicate of an earlier *kept* star
+/// strictly closer than `min_separation`, so a dropped star never suppresses a later one. Nothing
+/// here compares `.flux`, so callers MUST pass `stars` already sorted by flux descending (as
+/// `FilterOutcome::from_stars` does via `sort_by_flux`) for "first kept" to mean "brightest kept".
 ///
-/// Deliberately not `registration::spatial::KdTree`, which is the crate's other spatial index.
-/// That one is built once over a fixed point set; this queries a set that *grows as it decides* —
-/// only stars already kept are in the grid, which is what makes "first kept wins" hold. The same
-/// answer can be had from a static tree over every star plus a `neighbour < i && kept[neighbour]`
-/// filter, at the cost of an O(n log n) build and n radius queries whose results are mostly
-/// discarded, in place of a structure built as the single pass goes.
+/// One pass in input order over the stars sorted by their cell of side `min_separation`, each
+/// cell's run in input order: a star reads the earlier stars of its own and the eight neighbouring
+/// cells, found by binary search, so the cost is O(n log n) at any count and the memory one entry
+/// per star, where a dense grid would cost the field's area.
+///
+/// Deliberately not `registration::spatial::KdTree`, which is the crate's other spatial index:
+/// its radius queries return the stars after a star as well as before it, and the pass needs only
+/// those before.
 fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    // Both paths count a pair as duplicate only when strictly closer than `min_separation`, so a
-    // separation of zero removes nothing. Said here rather than reached: the spatial hash would
-    // divide by it.
+    // A pair is a duplicate only when strictly closer than `min_separation`, so a separation of
+    // zero removes nothing. Said here rather than reached: the cells would divide by it.
     if stars.len() < 2 || min_separation == 0.0 {
         return 0;
     }
-
-    if stars.len() < SPATIAL_HASH_CROSSOVER {
-        remove_duplicate_stars_simple(stars, min_separation)
-    } else {
-        remove_duplicate_stars_hashed(stars, min_separation)
-    }
-}
-
-/// The spatial-hash path of [`remove_duplicate_stars`]: the same answer in O(stars).
-fn remove_duplicate_stars_hashed(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    debug_assert!(min_separation > 0.0, "the cell size is the separation");
     let min_sep_sq = f64::from(min_separation * min_separation);
     let cell_size = f64::from(min_separation);
+    let cell_of = |star: &Star| {
+        (
+            (star.pos.y / cell_size).floor() as i64,
+            (star.pos.x / cell_size).floor() as i64,
+        )
+    };
+    let mut members: Vec<((i64, i64), usize)> = stars
+        .iter()
+        .enumerate()
+        .map(|(index, star)| (cell_of(star), index))
+        .collect();
+    members.sort_unstable();
 
-    // Sparse spatial hash keyed by integer cell coordinate: only cells that actually hold a star
-    // are allocated, so memory and time are O(stars). A dense grid is O(field_area / min_sep²) —
-    // a 6k×6k field with a few thousand stars otherwise allocates (and zeroes) millions of empty
-    // cells, which dominated the cost. A star is a duplicate of an earlier *kept* star within
-    // `min_separation`, and the grid only ever holds kept stars, so a rejected star can never
-    // suppress a later one.
-    let mut grid: HashMap<(i64, i64), SmallVec<[usize; 4]>> = HashMap::new();
     let mut kept = vec![true; stars.len()];
-
     for i in 0..stars.len() {
-        let star = &stars[i];
-        let cell_x = (star.pos.x / cell_size).floor() as i64;
-        let cell_y = (star.pos.y / cell_size).floor() as i64;
-
-        let mut is_duplicate = false;
-        'outer: for dy in -1..=1 {
-            for dx in -1..=1 {
-                if let Some(cell) = grid.get(&(cell_x + dx, cell_y + dy)) {
-                    for &other_idx in cell {
-                        let other = &stars[other_idx];
-                        let ddx = star.pos.x - other.pos.x;
-                        let ddy = star.pos.y - other.pos.y;
-                        if ddx * ddx + ddy * ddy < min_sep_sq {
-                            is_duplicate = true;
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        }
-
-        if is_duplicate {
-            kept[i] = false;
-        } else {
-            grid.entry((cell_x, cell_y)).or_default().push(i);
-        }
+        let star = stars[i].pos;
+        let (cell_y, cell_x) = cell_of(&stars[i]);
+        let duplicate = (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                let cell = (cell_y + dy, cell_x + dx);
+                let start = members.partition_point(|&(member, _)| member < cell);
+                members[start..]
+                    .iter()
+                    .take_while(|&&(member, j)| member == cell && j < i)
+                    .any(|&(_, j)| kept[j] && star.distance_squared(stars[j].pos) < min_sep_sq)
+            })
+        });
+        kept[i] = !duplicate;
     }
 
-    compact_by_mask(stars, &kept)
-}
-
-/// Simple O(n²) duplicate removal for small star counts.
-fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = f64::from(min_separation * min_separation);
-    let mut kept = vec![true; stars.len()];
-
-    for i in 0..stars.len() {
-        if !kept[i] {
-            continue;
-        }
-        for j in (i + 1)..stars.len() {
-            if !kept[j] {
-                continue;
-            }
-            let dx = stars[i].pos.x - stars[j].pos.x;
-            let dy = stars[i].pos.y - stars[j].pos.y;
-            if dx * dx + dy * dy < min_sep_sq {
-                kept[j] = false;
-            }
-        }
-    }
-
-    compact_by_mask(stars, &kept)
-}
-
-/// In-place compaction: remove stars where `kept[i]` is false. Returns removed count.
-fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
-    let removed_count = kept.iter().filter(|&&k| !k).count();
-
-    let mut write_idx = 0;
-    for read_idx in 0..stars.len() {
-        if kept[read_idx] {
-            if write_idx != read_idx {
-                stars[write_idx] = stars[read_idx];
-            }
-            write_idx += 1;
-        }
-    }
-    stars.truncate(write_idx);
-
-    removed_count
+    let removed = kept.iter().filter(|&&keep| !keep).count();
+    let mut index = 0;
+    stars.retain(|_| {
+        let keep = kept[index];
+        index += 1;
+        keep
+    });
+    removed
 }
 
 #[cfg(all(test, feature = "bench"))]

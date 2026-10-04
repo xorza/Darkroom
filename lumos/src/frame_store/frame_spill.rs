@@ -40,20 +40,21 @@ pub(crate) struct FrameSpill<'a> {
 }
 
 impl<'a> FrameSpill<'a> {
-    /// The files a kept cache holds for `canonical_source` decoded by `decoder`: a hash of both, so
-    /// distinct sources or decoders never share a file and the same pair always finds its own.
+    /// The files a kept cache holds for `canonical_source` decoded by `decoder`: named by an FNV-1a
+    /// hash of both, so the same pair always finds its own. Two pairs that share a name are told
+    /// apart by the commit, which records the [`CacheKey`] and is checked before a byte is reused:
+    /// a clash rebuilds the frame, it never reads another's.
     pub(crate) fn cached(
         directory: &'a Path,
         canonical_source: &Path,
         decoder: DecoderKind,
     ) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"lumos-frame-cache\0");
-        hasher.update(&[decoder.tag()]);
-        hasher.update(canonical_source.as_os_str().as_encoded_bytes());
+        let hash = cache_key::fnv1a(cache_key::FNV1A_OFFSET, b"lumos-frame-cache\0");
+        let hash = cache_key::fnv1a(hash, &[decoder.tag()]);
+        let hash = cache_key::fnv1a(hash, canonical_source.as_os_str().as_encoded_bytes());
         Self {
             directory,
-            stem: hasher.finalize().to_hex().to_string(),
+            stem: format!("{hash:016x}"),
         }
     }
 

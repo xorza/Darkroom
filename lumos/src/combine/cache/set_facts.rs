@@ -1,6 +1,6 @@
 //! [`SetFacts`]: what every frame of a stack has to state alike.
 
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::RowOrder;
@@ -43,16 +43,16 @@ impl SetFacts {
 
     /// Check frame `index` against the facts stated before it, then record the ones it states
     /// first. Frames are admitted in index order, which is what makes the reference the first.
-    pub(crate) fn admit(&mut self, index: usize, facts: &FrameFacts) -> Result<(), Error> {
+    pub(crate) fn admit(&mut self, index: usize, facts: &FrameFacts) -> Result<(), StackError> {
         self.check(index, facts)?;
         self.record(index, facts);
         Ok(())
     }
 
     /// Check frame `index` against the facts recorded so far, without recording its own.
-    pub(crate) fn check(&self, index: usize, facts: &FrameFacts) -> Result<(), Error> {
+    pub(crate) fn check(&self, index: usize, facts: &FrameFacts) -> Result<(), StackError> {
         if let Some(domain) = &facts.domain {
-            let mismatch = |reference: &Stated<SampleDomain>| Error::SampleDomainMismatch {
+            let mismatch = |reference: &Stated<SampleDomain>| StackError::SampleDomainMismatch {
                 index,
                 actual: Box::new(domain.clone()),
                 reference_index: reference.index,
@@ -73,7 +73,7 @@ impl SetFacts {
         if let (Some(actual), Some(reference)) = (facts.row_order, &self.row_order)
             && actual != reference.value
         {
-            return Err(Error::RowOrderMismatch {
+            return Err(StackError::RowOrderMismatch {
                 index,
                 actual,
                 reference_index: reference.index,
@@ -83,7 +83,7 @@ impl SetFacts {
         if let Some(reference) = &self.cfa_type
             && facts.cfa_type != reference.value
         {
-            return Err(Error::CfaPatternMismatch {
+            return Err(StackError::CfaPatternMismatch {
                 index,
                 actual: facts.cfa_type,
                 reference_index: reference.index,

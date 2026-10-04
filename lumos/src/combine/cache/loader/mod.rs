@@ -7,7 +7,7 @@ use common::FileIdentity;
 use imaginarium::Buffer2;
 
 use crate::combine::config::StackConfig;
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::concurrency;
 use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::decode_cache::DecodeCache;
@@ -61,7 +61,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     run: IngestRun,
     step: Option<&dyn FrameStep<I>>,
     progress: ProgressCallback,
-) -> Result<LoadedCache, Error> {
+) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0].as_ref();
     let IngestRun { memory, context } = run;
@@ -136,13 +136,13 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, Error> {
+fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, StackError> {
     match I::load(path, context) {
         Ok(image) => Ok(image),
         // Cancellation is the run stopping, not this file failing, so it leaves the load error
         // behind and reports as the stack's own.
-        Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
-        Err(source) => Err(Error::ImageLoad(source)),
+        Err(ImageError::Cancelled { .. }) => Err(StackError::Cancelled),
+        Err(source) => Err(StackError::ImageLoad(source)),
     }
 }
 
@@ -193,7 +193,7 @@ struct CheckedImage<I> {
 }
 
 impl<I: StackableImage> CheckedImage<I> {
-    fn admit(image: I, index: usize, admission: &FrameAdmission<'_>) -> Result<Self, Error> {
+    fn admit(image: I, index: usize, admission: &FrameAdmission<'_>) -> Result<Self, StackError> {
         Ok(Self {
             stats: admission.admit(index, &image)?,
             quality: FrameQuality::for_unwarped(&image),
@@ -227,7 +227,7 @@ struct TierLoad<'a, I, P> {
 
 impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
     /// Load all images into memory and compute per-frame channel statistics.
-    fn in_memory(&self, first: Option<I>) -> Result<LoadedTier, Error> {
+    fn in_memory(&self, first: Option<I>) -> Result<LoadedTier, StackError> {
         let Self {
             paths,
             progress,
@@ -255,7 +255,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
                 let index = offset + start;
                 // Cancelled: stop decoding further frames (the slow phase).
                 if cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
+                    return Err(StackError::Cancelled);
                 }
                 let mut image = load_image::<I>(path.as_ref(), context)?;
                 if let Some(step) = step {
@@ -287,7 +287,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
         &self,
         config: &IngestConfig,
         early: Option<EarlyDecode<I>>,
-    ) -> Result<LoadedTier, Error> {
+    ) -> Result<LoadedTier, StackError> {
         let Self {
             paths,
             progress,
@@ -335,7 +335,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             concurrency::try_par_map_limited(&paths[1..], concurrency, |offset, path| {
                 // Cancelled: stop decoding further frames (the slow phase).
                 if context.cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
+                    return Err(StackError::Cancelled);
                 }
                 let frame = frame_cache.frame(path.as_ref(), offset + 1, None)?;
                 cached_count.complete_one();
@@ -389,7 +389,7 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
         path: &Path,
         index: usize,
         decoded: Option<Decoded<I>>,
-    ) -> Result<StoredFrame, Error> {
+    ) -> Result<StoredFrame, StackError> {
         let dimensions = self.admission.dimensions();
         if let Some(step) = self.step {
             let image = if let Some(Decoded { image, .. }) = decoded {
@@ -406,7 +406,7 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
                 &checked.quality,
                 checked.stats,
             )
-            .map_err(Error::from);
+            .map_err(StackError::from);
         }
         let Some(kept) = self.kept else {
             let image = match decoded {
@@ -420,7 +420,7 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
                 &checked.quality,
                 checked.stats,
             )
-            .map_err(Error::from);
+            .map_err(StackError::from);
         };
         let (source, decoded_image) = match decoded {
             Some(Decoded { image, source }) => (source, Some(image)),
@@ -457,7 +457,7 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
             .into());
         }
         StoredFrame::cache(&spill, key, &checked.image, &checked.quality, checked.stats)
-            .map_err(Error::from)
+            .map_err(StackError::from)
     }
 }
 

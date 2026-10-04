@@ -22,7 +22,7 @@ use crate::calibration_masters::error::CalibrationError;
 use crate::calibration_masters::master_subtraction::MasterSubtraction;
 use crate::combine::cache::FrameCache;
 use crate::combine::config::StackConfig;
-use crate::combine::error::Error;
+use crate::combine::error::StackError;
 use crate::combine::stack::combine_cached;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
@@ -100,8 +100,8 @@ pub fn stack_cfa_master(
     subtract: Option<&CfaImage>,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<Option<CfaImage>, Error> {
-    // `None` rather than `Error::NoFrames`: an absent calibration role is normal, and this is
+) -> Result<Option<CfaImage>, StackError> {
+    // `None` rather than `StackError::NoFrames`: an absent calibration role is normal, and this is
     // the one thing `combine_cached` cannot decide for us.
     if paths.is_empty() {
         return Ok(None);

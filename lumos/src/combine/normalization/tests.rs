@@ -214,7 +214,7 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
     );
     assert!(matches!(
         result,
-        Err(Error::NonPositiveMedian {
+        Err(StackError::NonPositiveMedian {
             index: 1,
             channel: 0,
             median: 0.0
@@ -501,7 +501,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     cancel.cancel();
     let error =
         FrameNorm::measure(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
-    assert!(matches!(error, Error::Cancelled));
+    assert!(matches!(error, StackError::Cancelled));
 }
 
 /// A star field seen through three frames of known gain, offset and noise: `x_k = (truth −

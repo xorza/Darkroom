@@ -14,8 +14,8 @@ use crate::memory::MemoryPlan;
 use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::stored_image::StoredImage;
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame::PipelineFrame;
-use crate::pipeline::result::Error;
 use crate::registration::resample::WarpBuffers;
 
 /// The memory decisions the register-warp stage reads, both taken from one [`MemoryPlan`]: where a
@@ -31,7 +31,7 @@ impl StagePlan {
         plan: &MemoryPlan,
         ingest: &IngestConfig,
         memory: RunMemory,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AlignStackError> {
         Ok(Self {
             tier: FrameTier::for_plan(plan, ingest, memory)?,
             warp_concurrency: plan.warp_concurrency,
@@ -68,7 +68,7 @@ impl FrameTier {
         plan: &MemoryPlan,
         ingest: &IngestConfig,
         memory: RunMemory,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AlignStackError> {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }
@@ -78,7 +78,7 @@ impl FrameTier {
                 chunk_memory: memory.planning(),
                 parked: AtomicU64::new(0),
             })
-            .map_err(Error::from)
+            .map_err(AlignStackError::from)
     }
 
     pub(crate) const fn spills(&self) -> bool {
@@ -86,7 +86,7 @@ impl FrameTier {
     }
 
     /// Park a calibrated frame between detection and registration.
-    pub(crate) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, Error> {
+    pub(crate) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
         match self {
             Self::Ram => Ok(PipelineFrame::Resident(image)),
             Self::Spill {
@@ -119,7 +119,7 @@ impl FrameTier {
         metadata: ImageMetadata,
         buffers: WarpBuffers,
         source_stats: FrameStats,
-    ) -> Result<StoredWarp, Error> {
+    ) -> Result<StoredWarp, AlignStackError> {
         let WarpBuffers {
             pixels,
             coverage,
@@ -173,7 +173,7 @@ impl FrameTier {
         &self,
         frame: PipelineFrame,
         source_stats: FrameStats,
-    ) -> Result<StoredFrame, Error> {
+    ) -> Result<StoredFrame, AlignStackError> {
         match (self, frame) {
             (Self::Ram, PipelineFrame::Resident(image)) => {
                 let quality = FrameQuality::for_unwarped(&image);
@@ -181,11 +181,12 @@ impl FrameTier {
             }
             (Self::Spill { scratch, .. }, PipelineFrame::Resident(image)) => {
                 let quality = FrameQuality::for_unwarped(&image);
-                StoredFrame::spill(scratch, &image, &quality, source_stats).map_err(Error::from)
+                StoredFrame::spill(scratch, &image, &quality, source_stats)
+                    .map_err(AlignStackError::from)
             }
             (Self::Spill { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
                 .into_frame(scratch, source_stats)
-                .map_err(Error::from),
+                .map_err(AlignStackError::from),
             (Self::Ram, PipelineFrame::Spilled(_)) => {
                 unreachable!("the RAM tier parks no frame on disk")
             }

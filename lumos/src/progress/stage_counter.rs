@@ -1,6 +1,6 @@
 //! [`StageCounter`]: one stage's completed units, counted by parallel workers.
 
-use parking_lot::Mutex;
+use std::sync::Mutex;
 
 use crate::progress::{ProgressCallback, StackingStage};
 
@@ -33,7 +33,7 @@ impl<'a> StageCounter<'a> {
 
     /// Count one more unit done and report it; the count after this one.
     pub(crate) fn complete_one(&self) -> usize {
-        let mut done = self.done.lock();
+        let mut done = self.done.lock().expect("no holder of this lock panicked");
         *done += 1;
         debug_assert!(
             *done <= self.total,

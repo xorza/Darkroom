@@ -11,7 +11,7 @@ use crate::calibration_masters::master_dark::{DarkBias, MasterDark};
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
 use crate::combine::config::{CombineMethod, SmallN, StackConfig, Weighting};
-use crate::combine::error::{Error, StackConfigError};
+use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::assertions::bits;
@@ -500,10 +500,10 @@ fn empty_roles_yield_no_masters() {
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
 
     for (role, preset) in [
-        (MasterRole::Dark, StackConfig::dark()),
-        (MasterRole::FlatDark, StackConfig::dark()),
+        (MasterRole::Dark, StackConfig::bias_or_dark()),
+        (MasterRole::FlatDark, StackConfig::bias_or_dark()),
         (MasterRole::Flat, StackConfig::flat()),
-        (MasterRole::Bias, StackConfig::bias()),
+        (MasterRole::Bias, StackConfig::bias_or_dark()),
     ] {
         assert_eq!(
             format!("{:?}", role.stack_config()),
@@ -1105,7 +1105,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
     for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
         let config = StackConfig {
             method: CombineMethod::Mean(rejection),
-            ..StackConfig::dark()
+            ..StackConfig::bias_or_dark()
         };
         let error = stack_cfa_master(
             &missing,
@@ -1118,7 +1118,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
         assert!(
             matches!(
                 error,
-                Error::Config(StackConfigError::Field(invalid)) if invalid.field == "sigma_low"
+                StackError::Config(StackConfigError::Field(invalid)) if invalid.field == "sigma_low"
             ),
             "expected the config to be rejected, got {error:?}"
         );
@@ -1130,7 +1130,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
         &missing,
         StackConfig {
             weighting: Weighting::Manual(vec![1.0, 1.0]),
-            ..StackConfig::dark()
+            ..StackConfig::bias_or_dark()
         },
         None,
         ProgressCallback::default(),
@@ -1140,7 +1140,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
     assert!(
         matches!(
             error,
-            Error::Config(StackConfigError::ManualWeightCountMismatch {
+            StackError::Config(StackConfigError::ManualWeightCountMismatch {
                 expected: 1,
                 actual: 2
             })
@@ -1152,14 +1152,14 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
     // missing files fails differently.
     let error = stack_cfa_master(
         &missing,
-        StackConfig::dark(),
+        StackConfig::bias_or_dark(),
         None,
         ProgressCallback::default(),
         CancelToken::never(),
     )
     .unwrap_err();
     assert!(
-        !matches!(error, Error::Config(_)),
+        !matches!(error, StackError::Config(_)),
         "a valid config must get past validation and fail on the missing file, got {error:?}"
     );
 }

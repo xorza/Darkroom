@@ -83,7 +83,7 @@ mod tests {
     use std::ptr;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use parking_lot::Mutex;
+    use std::sync::Mutex;
 
     use crate::pipeline::detector_pool::DetectorPool;
     use crate::star_detection::config::Config;
@@ -133,7 +133,10 @@ mod tests {
         let failed = AtomicBool::new(false);
         let error = pool
             .try_map(1000, |_, item| {
-                attempted.lock().push(item);
+                attempted
+                    .lock()
+                    .expect("no holder of this lock panicked")
+                    .push(item);
                 if item == 0 {
                     failed.store(true, Ordering::SeqCst);
                     return Err(item);
@@ -149,7 +152,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, 0);
-        let ran = attempted.into_inner().len();
+        let ran = attempted
+            .into_inner()
+            .expect("no holder of this lock panicked")
+            .len();
         assert!(
             ran <= SLOTS,
             "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"

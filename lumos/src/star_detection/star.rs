@@ -40,14 +40,14 @@ pub struct Star {
 impl Star {
     /// Check if star is likely a cosmic ray: sharper than `max_sharpness`, the filter's 0.7 by
     /// default.
-    pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
+    pub const fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
         self.sharpness > max_sharpness
     }
 
     /// Check if star passes roundness filters.
     ///
     /// Both roundness metrics should be close to zero for circular sources.
-    pub fn is_round(&self, max_roundness: f32) -> bool {
+    pub const fn is_round(&self, max_roundness: f32) -> bool {
         self.roundness.ground.abs() <= max_roundness && self.roundness.sround.abs() <= max_roundness
     }
 }

@@ -78,9 +78,9 @@ fn bench_full_pipeline() {
         Some(result.into_cfa_master())
     };
 
-    let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
+    let dark = stack_cfa("Dark", &dark_paths, StackConfig::bias_or_dark());
     let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());
-    let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias());
+    let bias = stack_cfa("Bias", &bias_paths, StackConfig::bias_or_dark());
 
     let t_defect = Instant::now();
     let masters = CalibrationMasters::from_images(

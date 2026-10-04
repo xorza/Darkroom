@@ -13,7 +13,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::combine::config::StackConfig;
-use crate::combine::error::Error as StackError;
+use crate::combine::error::StackError;
 use crate::combine::stack;
 use crate::drizzle::accumulator::DrizzleFrame;
 use crate::drizzle::config::DrizzleConfig;
@@ -376,7 +376,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::combine::cache::FrameCache;
     use crate::combine::config::Normalization;
-    use crate::combine::error::Error;
+    use crate::combine::error::StackError;
     use crate::ingest::ingest_config::IngestConfig;
     use crate::progress::ProgressCallback;
 
@@ -433,7 +433,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         assert!(
             matches!(
                 linear_set(&other_span),
-                Err(Error::SampleDomainMismatch {
+                Err(StackError::SampleDomainMismatch {
                     index: 1,
                     reference_index: 0,
                     ..
@@ -444,7 +444,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         assert!(
             matches!(
                 linear_set(&mirrored),
-                Err(Error::RowOrderMismatch {
+                Err(StackError::RowOrderMismatch {
                     index: 1,
                     reference_index: 0,
                     ..
@@ -464,7 +464,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         assert!(
             matches!(
                 cfa_set,
-                Err(Error::CfaPatternMismatch {
+                Err(StackError::CfaPatternMismatch {
                     index: 1,
                     reference_index: 0,
                     actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
@@ -477,7 +477,10 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         // tier reads the file's identity before decoding it, the memory tier decodes it.
         let reached = linear_set(&reference);
         assert!(
-            matches!(reached, Err(Error::ImageLoad(_) | Error::FrameStore(_))),
+            matches!(
+                reached,
+                Err(StackError::ImageLoad(_) | StackError::FrameStore(_))
+            ),
             "{tier}: {reached:?}"
         );
     }

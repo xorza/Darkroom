@@ -1,6 +1,7 @@
 //! Pixel distribution and accumulation for drizzle reconstruction.
 
 pub(crate) mod frame_source;
+mod kernel_plan;
 mod output_band;
 
 use arrayvec::ArrayVec;
@@ -11,7 +12,8 @@ use std::ops::Range;
 
 use crate::concurrency::JobScratchPool;
 use crate::drizzle::accumulator::frame_source::FrameSource;
-use crate::drizzle::accumulator::output_band::{KernelPlan, OutputBand, RadialScratch};
+use crate::drizzle::accumulator::kernel_plan::KernelPlan;
+use crate::drizzle::accumulator::output_band::{OutputBand, RadialScratch};
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::DrizzleError;
@@ -99,6 +101,8 @@ pub struct DrizzleAccumulator {
     frame_counts: Option<Buffer2<f32>>,
     /// Configuration.
     config: DrizzleConfig,
+    /// The kernel's constants, resolved from `config` once for the run.
+    plan: KernelPlan,
     /// Input pixels whose position the warp's SIP correction could not invert, over every frame.
     unconverged_points: usize,
     /// The coverage bitsets of every band, one bit per output pixel, cut per frame into each band's
@@ -152,6 +156,7 @@ impl DrizzleAccumulator {
                 .quality
                 .coverage
                 .then(|| Buffer2::new_default(output.width, output.height)),
+            plan: KernelPlan::new(&config),
             config,
             unconverged_points: 0,
             touched: Vec::new(),
@@ -195,7 +200,7 @@ impl DrizzleAccumulator {
             frame.pixel_weight_map.as_ref(),
             noise,
         );
-        let plan = KernelPlan::new(&self.config);
+        let plan = self.plan;
         let reach = plan.reach();
 
         let Size2us { width, height } = self.output;
