@@ -1355,6 +1355,14 @@ fn requested_planes_decide_what_the_combine_allocates() {
     assert!(all.coverage.is_some());
     assert!(all.weight.is_some());
     assert!(all.variance.is_some());
+    assert!(all.dispersion.is_some());
+
+    // The default asks for the standard planes, which leave out the dispersion.
+    let standard = stack(StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        ..Default::default()
+    });
+    assert!(standard.variance.is_some() && standard.dispersion.is_none());
 
     // A median is not a linear combination, so its variance plane is absent even though the
     // request asked for it — and is never allocated, not allocated and cleared.
@@ -1367,8 +1375,8 @@ fn requested_planes_decide_what_the_combine_allocates() {
     assert!(median.coverage.is_some());
     assert!(median.weight.is_some(), "a median still reports weight");
     assert!(
-        median.variance.is_none(),
-        "a median has no linear-combine variance factor"
+        median.variance.is_none() && median.dispersion.is_none(),
+        "a median has no linear-combine variance factor and no dispersion"
     );
 
     // Image only: no ancillary plane survives, whatever the method would support.
@@ -1379,7 +1387,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
     });
     assert!(bare.coverage.is_none());
     assert!(bare.weight.is_none());
-    assert!(bare.variance.is_none());
+    assert!(bare.variance.is_none() && bare.dispersion.is_none());
     // The combined pixels are unaffected by which planes were asked for.
     assert_eq!(
         bare.image.channel(0).pixels(),
@@ -1430,7 +1438,9 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
     // Trimming removes each channel's high value, hence a different source frame: R keeps f0/f1,
     // G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] stay as given, and every frame has unit
     // noise, so the variance is Σw²/(Σw)². Three frames leave two survivors, so the minimum comes
-    // down to 2.
+    // down to 2. The dispersion is Σw(x − x̄)² / ((n − 1)·Σw): R's 1 and 2 lie −2/3 and 1/3 about
+    // 5/3, so (4/9 + 2/9) / 3 = 2/9; G's 2 and 3 lie −0.6 and 0.4 about 2.6, so (0.72 + 0.48) / 5
+    // = 6/25; B's 1 and 3 lie −1.5 and 0.5 about 2.5, so (2.25 + 0.75) / 4 = 3/4.
     let dims = ImageDimensions::new((1, 1), 3);
     let frame = |pixels: Vec<f32>| with_noise(LinearImage::from_pixels(dims, pixels).into(), 1.0);
     let frames = vec![
@@ -1444,6 +1454,7 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
         normalization: Normalization::None,
         small_n: SmallN::none(),
         min_survivors: 2,
+        quality: QualityPlanes::ALL,
         ..Default::default()
     };
 
@@ -1451,6 +1462,7 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
 
     assert_eq!(result.coverage.as_ref().unwrap()[0], 1.0);
     let expected_values: [f64; 3] = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
+    let expected_dispersions: [f64; 3] = [2.0 / 9.0, 6.0 / 25.0, 3.0 / 4.0];
     let expected_weights: [f64; 3] = [3.0, 5.0, 4.0];
     let expected_linear_variances: [f64; 3] = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
     let linear_variance = result.variance.as_ref().unwrap();
@@ -1481,12 +1493,85 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
             expected_linear_variances[channel],
             "variance",
         );
+        // Five roundings, each within half an ulp: two products, a sum, a product and the
+        // quotient. The mean's own rounding moves the sum only to second order, since a weighted
+        // sum of squares is least at the weighted mean.
+        assert_close!(
+            result.dispersion.as_ref().unwrap().channel(channel)[0],
+            expected_dispersions[channel],
+            4.0 * f64::from(f32::EPSILON) * expected_dispersions[channel],
+            "channel {channel} dispersion"
+        );
     }
     assert_ne!(
         result.weight.as_ref().unwrap().channel(0)[0],
         result.weight.as_ref().unwrap().channel(1)[0]
     );
     assert_ne!(linear_variance.channel(1)[0], linear_variance.channel(2)[0]);
+}
+
+/// On frames whose noise is what their model says, the dispersion and the variance estimate the same
+/// figure, `1 / Σwᵢ` for inverse-variance weights. Eight frames of a flat 0.5 with Gaussian noise of
+/// σ from 0.01 to 0.03, weighted by `1/σ²`: each pixel's dispersion is that figure times a χ² of 7
+/// degrees of freedom over 7, so the mean of 4096 independent pixels is within `√(2 / (7·4096))`
+/// = 0.84% of it at one σ, and 4.2% at five. A model that halves every σ quarters the variance and
+/// leaves the dispersion alone, so the two then differ by 4.
+#[test]
+fn dispersion_agrees_with_the_variance_where_the_model_holds() {
+    const SIDE: usize = 64;
+    const SIGMAS: [f32; 8] = [0.01, 0.02, 0.01, 0.03, 0.015, 0.02, 0.025, 0.01];
+    let dims = ImageDimensions::new((SIDE, SIDE), 1);
+    let mut rng = TestRng::new(17);
+    let pixels: Vec<Vec<f32>> = SIGMAS
+        .iter()
+        .map(|&sigma| {
+            (0..SIDE * SIDE)
+                .map(|_| 0.5 + sigma * rng.next_gaussian_f32())
+                .collect()
+        })
+        .collect();
+    let config = StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        weighting: Weighting::Manual(SIGMAS.iter().map(|sigma| 1.0 / (sigma * sigma)).collect()),
+        normalization: Normalization::None,
+        quality: QualityPlanes::ALL,
+        ..Default::default()
+    };
+    let inverse_variance: f64 = SIGMAS
+        .iter()
+        .map(|&sigma| 1.0 / f64::from(sigma * sigma))
+        .sum();
+    for (model_scale, expected_ratio) in [(1.0f32, 1.0f64), (0.5, 4.0)] {
+        let frames: Vec<StackFrame> = pixels
+            .iter()
+            .zip(SIGMAS)
+            .map(|(pixels, sigma)| {
+                with_noise(
+                    LinearImage::from_pixels(dims, pixels.clone()).into(),
+                    sigma * model_scale,
+                )
+            })
+            .collect();
+        let product = combine(frames, &config).unwrap();
+        let mean = |plane: &QualityMap| {
+            plane
+                .channel(0)
+                .pixels()
+                .iter()
+                .map(|&value| f64::from(value))
+                .sum::<f64>()
+                / (SIDE * SIDE) as f64
+        };
+        let dispersion = mean(product.dispersion.as_ref().unwrap());
+        let variance = mean(product.variance.as_ref().unwrap());
+        assert_close!(dispersion * inverse_variance, 1.0, 0.042, "dispersion");
+        assert_close!(
+            dispersion / variance,
+            expected_ratio,
+            0.042 * expected_ratio,
+            "model σ × {model_scale}"
+        );
+    }
 }
 
 #[test]

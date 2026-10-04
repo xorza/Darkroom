@@ -971,7 +971,8 @@ fn combine_mean_weighs_each_survivor_by_its_own_weight() {
 ///
 /// The variance is `Σw²·v/(Σw)²` with each sample's model taken at the combined value 17.5/7 =
 /// 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 7·(3/4)/49 = 3/28, exact up
-/// to its one rounding.
+/// to its one rounding. The survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to 7, so
+/// the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding.
 #[test]
 fn the_survivors_are_named_after_the_combine() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
@@ -1003,6 +1004,7 @@ fn the_survivors_are_named_after_the_combine() {
     assert_eq!(sample.value, 2.5);
     assert_eq!(sample.weight, 7.0);
     assert_eq!(sample.variance, 3.0 / 28.0);
+    assert_eq!(sample.dispersion, 1.0 / 6.0);
 
     Rejection::None.combine_mean(
         PixelSamples {

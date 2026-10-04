@@ -154,9 +154,9 @@ pub struct StackConfig {
     pub small_n: SmallN,
     /// Cache/memory behavior.
     pub ingest: IngestConfig,
-    /// Which ancillary per-pixel planes the combine should produce. Defaults to all of them —
-    /// they are what makes the stacked master measurable — but each is a full image-sized
-    /// allocation, so a caller that discards them should say so.
+    /// Which ancillary per-pixel planes the combine should produce. Defaults to coverage, weight
+    /// and variance — they are what makes the stacked master measurable — but each is a full
+    /// image-sized allocation, so a caller that discards them should say so.
     pub quality: QualityPlanes,
     /// The fewest samples a pixel keeps when the combine leaves samples out: flagged ones today
     /// (saturated, repaired, cosmic ray, defect, flat floor). A flagged sample is left out only
@@ -177,7 +177,7 @@ impl Default for StackConfig {
             // Default method is σ-clip, so the default fallback is the library σ-floor.
             small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
             ingest: IngestConfig::default(),
-            quality: QualityPlanes::ALL,
+            quality: QualityPlanes::STANDARD,
             min_survivors: DEFAULT_MIN_SURVIVORS,
         }
     }

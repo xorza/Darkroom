@@ -103,7 +103,14 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         quality: QualityPlanes::IMAGE_ONLY,
         min_survivors: 4,
     };
-    assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
+    assert_eq!(QualityPlanes::default(), QualityPlanes::STANDARD);
+    assert_eq!(
+        QualityPlanes::ALL,
+        QualityPlanes {
+            dispersion: true,
+            ..QualityPlanes::STANDARD
+        }
+    );
 
     let registration = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Similarity),
@@ -307,6 +314,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
+        dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,
         report: RunReport {
             excluded_samples: FlagCounts {

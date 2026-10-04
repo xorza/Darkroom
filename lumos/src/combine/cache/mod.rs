@@ -58,6 +58,7 @@ pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
     variance: Option<LinearPixels>,
+    dispersion: Option<LinearPixels>,
     /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`] where
     /// no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
     flags: Option<Buffer2<u8>>,
@@ -71,6 +72,7 @@ struct QualityRows<'a> {
     value: &'a mut [f32],
     weight: Option<&'a mut [f32]>,
     variance: Option<&'a mut [f32]>,
+    dispersion: Option<&'a mut [f32]>,
     flags: Option<&'a mut [u8]>,
 }
 
@@ -201,6 +203,7 @@ impl FrameCache {
             pixels,
             weight: weight_pixels,
             variance: variance_pixels,
+            dispersion: dispersion_pixels,
             flags,
             report,
         } = combined;
@@ -225,6 +228,7 @@ impl FrameCache {
         };
         let weight = weight_pixels.map(QualityMap::from_pixels);
         let variance = variance_pixels.map(QualityMap::from_pixels);
+        let dispersion = dispersion_pixels.map(QualityMap::from_pixels);
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
@@ -240,6 +244,7 @@ impl FrameCache {
                 }),
                 weight,
                 variance,
+                dispersion,
                 cfa_type,
                 report,
             };
@@ -299,6 +304,7 @@ impl FrameCache {
             coverage: Some(Coverage::PerPixel(coverage)),
             weight,
             variance,
+            dispersion,
             cfa_type,
             report,
         }
@@ -338,6 +344,9 @@ impl FrameCache {
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
         let mut output_variance = planes
             .variance
+            .then(|| LinearPixels::new_zeroed(dimensions));
+        let mut output_dispersion = planes
+            .dispersion
             .then(|| LinearPixels::new_zeroed(dimensions));
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags =
@@ -389,6 +398,7 @@ impl FrameCache {
                         value,
                         weight: None,
                         variance: None,
+                        dispersion: None,
                         flags: None,
                     })
                     .collect();
@@ -404,6 +414,13 @@ impl FrameCache {
                         [pixel_offset..pixel_offset + chunk_pixels];
                     for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
                         row.variance = Some(chunk);
+                    }
+                }
+                if let Some(plane) = output_dispersion.as_mut() {
+                    let slice = &mut plane.channel_mut(channel).pixels_mut()
+                        [pixel_offset..pixel_offset + chunk_pixels];
+                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
+                        row.dispersion = Some(chunk);
                     }
                 }
                 // One plane for every channel, each pass ORing into it: a pixel is flagged when any
@@ -510,7 +527,7 @@ impl FrameCache {
                                 covered
                             };
                             let sample = if kept == 0 {
-                                CombinedSample::default()
+                                CombinedSample::uncovered()
                             } else {
                                 debug_assert!(
                                     values[..kept].iter().all(|v| v.is_finite()),
@@ -551,6 +568,9 @@ impl FrameCache {
                             if let Some(variance) = row.variance.as_deref_mut() {
                                 variance[pixel_in_row] = sample.variance;
                             }
+                            if let Some(dispersion) = row.dispersion.as_deref_mut() {
+                                dispersion[pixel_in_row] = sample.dispersion;
+                            }
                         }
                         excluded.add(&row_excluded);
                         kept_flagged.add(&row_kept);
@@ -562,6 +582,7 @@ impl FrameCache {
             pixels,
             weight: output_weight,
             variance: output_variance,
+            dispersion: output_dispersion,
             flags: output_flags,
             report: RunReport {
                 excluded_samples: excluded.totals(),

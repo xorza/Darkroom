@@ -227,7 +227,7 @@ impl Rejection {
             scratch.survivors = None;
             let value = sum::weighted_mean_f32(values, weights);
             return if measure_quality {
-                CombinedSample::from_survivors(value, weights, 0..values.len(), noise)
+                CombinedSample::from_survivors(value, values, weights, 0..values.len(), noise)
             } else {
                 CombinedSample::value_only(value, values.len())
             };
@@ -246,6 +246,7 @@ impl Rejection {
         let sample = if measure_quality {
             CombinedSample::from_survivors(
                 value,
+                values,
                 weights,
                 positions.iter().map(|&position| position as usize),
                 noise,

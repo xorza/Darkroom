@@ -293,7 +293,7 @@ pub(crate) fn run_stacking(
     // A median is not a linear combination, so it has no variance to report whatever the caller
     // asked for. Resolving here means the reducer never allocates a plane it would drop.
     let planes = config.quality.resolve(weighted_combine);
-    let measure_quality = planes.weight || planes.variance;
+    let measure_quality = planes.weight || planes.variance || planes.dispersion;
 
     let sigmas = SourceSigmas::measure(stats());
     let min_survivors = config.min_survivors;
@@ -312,7 +312,13 @@ pub(crate) fn run_stacking(
                 let count = samples.values.len();
                 let value = math::statistics::median_mut(samples.values);
                 if measure_quality {
-                    CombinedSample::from_survivors(value, samples.weights, 0..count, None)
+                    CombinedSample::from_survivors(
+                        value,
+                        samples.values,
+                        samples.weights,
+                        0..count,
+                        None,
+                    )
                 } else {
                     CombinedSample::value_only(value, count)
                 }

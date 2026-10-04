@@ -131,12 +131,12 @@ fn a_decoded_stack_charges_its_frames_scratch_and_output() {
 }
 
 /// The combine's output planes are charged beside the warped frames, not only the decode and
-/// warp peaks: at `QualityPlanes::ALL` an RGB output is 3 × (image, weight, variance) + coverage
+/// warp peaks: at `QualityPlanes::STANDARD` an RGB output is 3 × (image, weight, variance) + coverage
 /// = 10 planes, which flips a set the warp stage alone would keep in RAM.
 #[test]
 fn a_warped_run_charges_the_combine_output() {
     let plane_bytes = plane(10);
-    let output = QualityPlanes::ALL.resident_bytes(ImageDimensions::new(
+    let output = QualityPlanes::STANDARD.resident_bytes(ImageDimensions::new(
         ((10 * MIB) as usize / size_of::<f32>(), 1),
         3,
     ));

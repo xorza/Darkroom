@@ -88,7 +88,7 @@ impl Default for DrizzleConfig {
             kernel: DrizzleKernel::Square,
             fill_value: 0.0,
             min_weight_fraction: 0.1,
-            quality: QualityPlanes::ALL,
+            quality: QualityPlanes::STANDARD,
             ingest: IngestConfig::default(),
         }
     }

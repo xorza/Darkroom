@@ -90,7 +90,7 @@ fn kernel_config(kernel: DrizzleKernel) -> DrizzleConfig {
         scale,
         pixfrac,
         kernel,
-        quality: QualityPlanes::ALL,
+        quality: QualityPlanes::STANDARD,
         ..DrizzleConfig::default()
     }
 }
@@ -144,12 +144,12 @@ fn bench_drizzle_kernels(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_drizzle_quality_planes(b: ::quickbench::Bencher) {
     let frames = dithered_set(&star_field(FIELD, 250, 5).image, 0.0);
-    for quality in [QualityPlanes::ALL, QualityPlanes::IMAGE_ONLY] {
+    for quality in [QualityPlanes::STANDARD, QualityPlanes::IMAGE_ONLY] {
         let config = DrizzleConfig {
             quality,
             ..kernel_config(DrizzleKernel::Turbo)
         };
-        let label = if quality == QualityPlanes::ALL {
+        let label = if quality == QualityPlanes::STANDARD {
             "all-planes"
         } else {
             "image-only"

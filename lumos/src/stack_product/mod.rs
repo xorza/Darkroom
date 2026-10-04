@@ -56,6 +56,17 @@ pub struct StackProduct {
     ///
     /// Absent for median output, which has no exact variance.
     pub variance: Option<QualityMap>,
+    /// The variance of each pixel's value as its surviving samples' scatter shows it, in the
+    /// image's units squared: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model.
+    ///
+    /// Unbiased where each sample's variance is inversely proportional to its weight — as `Noise`
+    /// weighting makes it at the sky — and with equal weights the squared standard error of the
+    /// mean. It checks [`Self::variance`]: where the two disagree beyond the scatter of a
+    /// scatter, the noise model or the frames are off. Rejection trims the tails, so a clipped
+    /// pixel reads below the frames' full scatter. NaN where fewer than two samples survive.
+    ///
+    /// Absent for median output and for drizzle, and unless asked for.
+    pub dispersion: Option<QualityMap>,
     /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
@@ -112,6 +123,7 @@ mod tests {
             coverage: None,
             weight: None,
             variance: None,
+            dispersion: None,
             cfa_type,
             report: RunReport::default(),
         }

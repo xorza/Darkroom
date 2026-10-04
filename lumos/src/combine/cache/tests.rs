@@ -54,6 +54,7 @@ fn unrequested_quality_planes_are_never_allocated() {
         let count = values.len();
         CombinedSample::from_survivors(
             values.iter().sum::<f32>() / count as f32,
+            values,
             weights,
             0..count,
             None,
@@ -63,22 +64,33 @@ fn unrequested_quality_planes_are_never_allocated() {
     let weight_only = cache.process_chunked(
         request(QualityPlanes {
             variance: false,
+            dispersion: false,
             ..QualityPlanes::ALL
         }),
         reduce,
     );
     assert!(weight_only.weight.is_some());
     assert!(
-        weight_only.variance.is_none(),
-        "a variance plane was allocated for a combine that did not ask for one"
+        weight_only.variance.is_none() && weight_only.dispersion.is_none(),
+        "a variance or dispersion plane was allocated for a combine that did not ask for one"
     );
 
     let bare = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), reduce);
     assert!(bare.weight.is_none());
-    assert!(bare.variance.is_none());
+    assert!(bare.variance.is_none() && bare.dispersion.is_none());
 
-    // Skipping the planes must not disturb the combined pixels.
+    // Skipping the planes must not disturb the combined pixels. Two equal-weight samples, 1 and 3,
+    // about their mean 2: (1 + 1) / ((2 − 1)·2) = 1.
     let all = cache.process_chunked(request(QualityPlanes::ALL), reduce);
+    assert!(
+        all.dispersion
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels()
+            .iter()
+            .all(|&dispersion| dispersion == 1.0)
+    );
     assert_eq!(
         bare.pixels.channel(0).pixels(),
         all.pixels.channel(0).pixels()
@@ -89,11 +101,16 @@ fn unrequested_quality_planes_are_never_allocated() {
 fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     assert_eq!(
         QualityPlanes::ALL.resolve(false),
+        QualityPlanes::STANDARD.resolve(false),
+        "a reducer that is not a weighted mean reports no variance factor and no dispersion"
+    );
+    assert_eq!(
+        QualityPlanes::ALL.resolve(false),
         QualityPlanes {
             variance: false,
+            dispersion: false,
             ..QualityPlanes::ALL
         },
-        "a reducer that is not a linear combination reports no variance factor"
     );
     assert_eq!(QualityPlanes::ALL.resolve(true), QualityPlanes::ALL);
     assert_eq!(
@@ -348,12 +365,19 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     .expect("frames are valid");
 
     // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
-    // Residents: 3 channels × (pixels + weight + variance).
+    // Residents: 3 channels × (pixels + weight + variance), and the dispersion when asked for.
+    assert_eq!(
+        cache.weighted_layout(QualityPlanes::STANDARD),
+        ChunkMemoryLayout {
+            input_bytes: 7 * 4,
+            resident_planes: 9,
+        }
+    );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_bytes: 7 * 4,
-            resident_planes: 9,
+            resident_planes: 12,
         }
     );
 
@@ -369,7 +393,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
     // accumulating to the combine's residents.
     assert_eq!(
-        cache.coverage_layout(QualityPlanes::ALL),
+        cache.coverage_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
             input_bytes: 2 * 4,
             resident_planes: 10,
