@@ -2,7 +2,7 @@
 //! compute the same bits on every Isa.
 
 use std::f32::consts::LN_2;
-use std::f64::consts::LOG2_E;
+use std::f64::consts::{LOG2_E, SQRT_2};
 
 use crate::simd::{F32x8, F64x4, Isa, Mask8};
 
@@ -42,6 +42,41 @@ const LOG_SQRT_HALF: f32 = 0.707_106_77;
 /// ln 2 in two parts, which reassemble the log from the mantissa's and the exponent's.
 const LOG_LN2_LO: f32 = -2.121_944_4e-4;
 const LOG_LN2_HI: f32 = 0.693_359_4;
+
+/// Cephes double `log` (`cephes/cmath/log.c`): `log(1 + x) = x − x²/2 + x³·P(x)/Q(x)` for the
+/// mantissa less one in `[√½ − 1, √2 − 1)`, to 1.44e-16 relative.
+#[expect(
+    clippy::excessive_precision,
+    reason = "the coefficients as Cephes publishes them"
+)]
+const LOG1P_P: [f64; 6] = [
+    1.018_756_638_045_809_317_96e-4,
+    4.974_949_949_767_470_014_25e-1,
+    4.705_791_198_788_817_258_54,
+    1.449_892_253_416_109_308_46e1,
+    1.793_686_785_078_198_163_13e1,
+    7.708_387_337_558_853_916_66,
+];
+/// `Q`'s coefficients after its leading 1.
+#[expect(
+    clippy::excessive_precision,
+    reason = "the coefficients as Cephes publishes them"
+)]
+const LOG1P_Q: [f64; 5] = [
+    1.128_735_871_891_674_505_9e1,
+    4.522_791_458_375_322_211_05e1,
+    8.298_752_669_127_766_032_11e1,
+    7.115_447_506_185_638_944_66e1,
+    2.312_516_201_267_653_405_83e1,
+];
+
+/// ln 2 in two parts, as Cephes `log` reassembles it.
+#[expect(
+    clippy::excessive_precision,
+    reason = "the coefficients as Cephes publishes them"
+)]
+const LOG_F64_LN2_LO: f64 = 2.121_944_400_546_905_827_679e-4;
+const LOG_F64_LN2_HI: f64 = 0.693_359_375;
 
 /// Where [`Math::asinh_f32`] switches to `asinh(x) = ln(x) + ln 2`: past 2¹², the dropped
 /// `1/(4x²)` is under 1.5e-8, below the f32 resolution of a value that large.
@@ -100,6 +135,36 @@ pub(crate) trait Math: Isa {
         y = exponent.mul_add(self.splat_f32(LOG_LN2_LO), y);
         y = self.splat_f32(-0.5).mul_add(z, y);
         exponent.mul_add(self.splat_f32(LOG_LN2_HI), m + y)
+    }
+
+    /// `ln(x)` for a positive normal `x` (Cephes `log`), to a few 1e-16 relative. Cephes takes a
+    /// shorter rational form when the exponent passes ±2, for speed alone; this keeps the one
+    /// form for every lane. Other lanes give a value the caller discards, the same on every Isa.
+    #[inline(always)]
+    fn ln_f64(self, x: Self::F64) -> Self::F64 {
+        let one = self.splat_f64(1.0);
+        let split = x.frexp();
+
+        // Bring the mantissa into [√½ − 1, √2 − 1): below √½ — where `m·√2` floors to 0 — use
+        // 2m − 1 and drop the exponent by one, else m − 1. Both products are exact; a mantissa an
+        // ulp from √½ may take either side, which moves the reduced value an ulp past the range.
+        let upper = (split.mantissa * self.splat_f64(SQRT_2)).floor();
+        let exponent = split.exponent - (one - upper);
+        let m = split.mantissa * (self.splat_f64(2.0) - upper) - one;
+
+        let z = m * m;
+        let mut p = self.splat_f64(LOG1P_P[0]);
+        for &coefficient in &LOG1P_P[1..] {
+            p = p.mul_add(m, self.splat_f64(coefficient));
+        }
+        let mut q = m + self.splat_f64(LOG1P_Q[0]);
+        for &coefficient in &LOG1P_Q[1..] {
+            q = q.mul_add(m, self.splat_f64(coefficient));
+        }
+        let mut y = m * (z * p / q);
+        y = exponent.mul_add(self.splat_f64(-LOG_F64_LN2_LO), y);
+        y = self.splat_f64(-0.5).mul_add(z, y);
+        exponent.mul_add(self.splat_f64(LOG_F64_LN2_HI), m + y)
     }
 
     /// `asinh(x)` for `x ≥ 0`, to a few ULP relative at every magnitude: `log1p(u)` with
