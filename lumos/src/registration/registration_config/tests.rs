@@ -1,9 +1,9 @@
 use crate::internals::prelude::*;
-use crate::registration::config::*;
+use crate::registration::registration_config::*;
 
 #[test]
 fn config_default_values() {
-    let config = Config::default();
+    let config = RegistrationConfig::default();
     assert_eq!(config.transform_type, TransformModel::Auto);
     assert_eq!(config.matching.max_stars, 200);
     assert_eq!(config.matching.min_stars, None);
@@ -43,7 +43,7 @@ fn config_default_values() {
 
 #[test]
 fn config_fast_preset() {
-    let config = Config::fast();
+    let config = RegistrationConfig::fast();
     assert_eq!(config.ransac.max_iterations, 500);
     assert_eq!(config.matching.max_stars, 100);
     assert!(!config.ransac.local_optimization);
@@ -53,7 +53,7 @@ fn config_fast_preset() {
 
 #[test]
 fn config_precise_preset() {
-    let config = Config::precise();
+    let config = RegistrationConfig::precise();
     assert_eq!(config.ransac.max_iterations, 5000);
     assert_eq!(config.ransac.confidence, 0.999);
     assert!(config.sip.is_some());
@@ -65,13 +65,13 @@ fn config_precise_preset() {
 /// homography under SIP is refused, its perspective terms being the correction's quadratic ones.
 #[test]
 fn config_wide_field_preset() {
-    let config = Config::wide_field();
+    let config = RegistrationConfig::wide_field();
     assert_eq!(config.transform_type, TransformModel::Auto);
     assert!(config.sip.is_some());
     assert!(config.ransac.max_rotation.is_none());
     assert!(config.ransac.scale_range.is_none());
     config.validate().unwrap();
-    let homography = Config {
+    let homography = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Homography),
         ..config
     };
@@ -83,7 +83,7 @@ fn config_wide_field_preset() {
 
 #[test]
 fn config_precise_wide_field_preset() {
-    let config = Config::precise_wide_field();
+    let config = RegistrationConfig::precise_wide_field();
     assert_eq!(config.transform_type, TransformModel::Auto);
     assert_eq!(config.matching.max_stars, 500);
     assert_eq!(config.matching.min_matches, 20);
@@ -100,7 +100,7 @@ fn config_precise_wide_field_preset() {
 
 #[test]
 fn config_mosaic_preset() {
-    let config = Config::mosaic();
+    let config = RegistrationConfig::mosaic();
     assert!(config.ransac.max_rotation.is_none());
     assert_eq!(config.ransac.scale_range, Some((0.5, 2.0)));
     config.validate().unwrap();
@@ -114,12 +114,12 @@ fn warp_params_defaults() {
     assert_eq!(default.clamping_threshold, Some(0.3));
     // Both ends of the range are thresholds PixInsight accepts, and `None` is the clamp off.
     for clamping_threshold in [Some(0.0), Some(1.0), None] {
-        Config {
+        RegistrationConfig {
             warp: WarpParams {
                 clamping_threshold,
                 ..Default::default()
             },
-            ..Config::default()
+            ..RegistrationConfig::default()
         }
         .validate()
         .unwrap();
@@ -129,50 +129,50 @@ fn warp_params_defaults() {
 #[test]
 fn config_validation_rejects_invalid() {
     // Each case: a single out-of-range field and the field name its error must name.
-    let cases: &[(Config, &str)] = &[
+    let cases: &[(RegistrationConfig, &str)] = &[
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     max_iterations: 0,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac max_iterations",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     max_stars: 2,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "max_stars",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     min_stars: Some(2),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "min_stars",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     max_stars: 5,
                     min_stars: Some(10),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "max_stars",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     triangle: TriangleConfig {
                         ratio_tolerance: 0.0,
@@ -180,12 +180,12 @@ fn config_validation_rejects_invalid() {
                     },
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ratio_tolerance",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     triangle: TriangleConfig {
                         ratio_tolerance: 1.0,
@@ -193,12 +193,12 @@ fn config_validation_rejects_invalid() {
                     },
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ratio_tolerance",
         ),
         (
-            Config {
+            RegistrationConfig {
                 matching: RegistrationMatchingConfig {
                     triangle: TriangleConfig {
                         min_votes: 0,
@@ -206,164 +206,164 @@ fn config_validation_rejects_invalid() {
                     },
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "min_votes",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     confidence: 1.5,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac confidence",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     min_inlier_ratio: 0.0,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac min_inlier_ratio",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     local_optimization: true,
                     lo_iterations: 0,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac lo_iterations",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     max_rotation: Some(-0.1),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac max_rotation",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     max_rotation: Some(f64::NAN),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac max_rotation",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     scale_range: Some((1.5, 0.5)),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac scale_range maximum",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     scale_range: Some((0.8, f64::INFINITY)),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac scale_range maximum",
         ),
         (
-            Config {
+            RegistrationConfig {
                 ransac: RansacConfig {
                     scale_range: Some((f64::INFINITY, 1.2)),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "ransac scale_range minimum",
         ),
         (
-            Config {
+            RegistrationConfig {
                 max_rms_error: 0.0,
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "max_rms_error",
         ),
         (
-            Config {
+            RegistrationConfig {
                 max_rms_error: f64::INFINITY,
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "max_rms_error",
         ),
         (
-            Config {
+            RegistrationConfig {
                 sip: Some(SipConfig {
                     order: 6,
                     ..Default::default()
                 }),
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "SIP order",
         ),
         (
-            Config {
+            RegistrationConfig {
                 sip: Some(SipConfig {
                     reference_point: Some(DVec2::new(0.0, f64::NEG_INFINITY)),
                     ..Default::default()
                 }),
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "SIP reference_point y",
         ),
         (
             // Homography needs 4 points, so min_matches = 3 is too few.
-            Config {
+            RegistrationConfig {
                 transform_type: TransformModel::Fixed(TransformType::Homography),
                 matching: RegistrationMatchingConfig {
                     min_matches: 3,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "min_matches",
         ),
         (
-            Config {
+            RegistrationConfig {
                 warp: WarpParams {
                     border_value: f32::NAN,
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "warp border_value",
         ),
         (
-            Config {
+            RegistrationConfig {
                 warp: WarpParams {
                     clamping_threshold: Some(1.5),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "warp clamping_threshold",
         ),
         (
-            Config {
+            RegistrationConfig {
                 warp: WarpParams {
                     clamping_threshold: Some(f32::NAN),
                     ..Default::default()
                 },
-                ..Config::default()
+                ..RegistrationConfig::default()
             },
             "warp clamping_threshold",
         ),
@@ -377,13 +377,13 @@ fn config_validation_rejects_invalid() {
 #[test]
 fn config_lo_iterations_zero_ok_when_lo_disabled() {
     // lo_iterations is only validated when local_optimization is enabled.
-    let config = Config {
+    let config = RegistrationConfig {
         ransac: RansacConfig {
             local_optimization: false,
             lo_iterations: 0,
             ..Default::default()
         },
-        ..Config::default()
+        ..RegistrationConfig::default()
     };
     assert!(config.validate().is_ok());
 }

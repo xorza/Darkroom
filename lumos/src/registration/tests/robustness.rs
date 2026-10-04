@@ -13,7 +13,9 @@ use crate::registration::spatial::KdTree;
 use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::triangle::voting::{MatchIndices, PointMatch};
-use crate::registration::{Config, RegistrationError, TransformType, estimate_and_refine};
+use crate::registration::{
+    RegistrationConfig, RegistrationError, TransformType, estimate_and_refine,
+};
 use crate::star_detection::star::Star;
 
 /// How far an exact fit may stray, in pixels, anywhere on the field.
@@ -113,8 +115,8 @@ impl Scenario {
         }
     }
 
-    fn config(&self) -> Config {
-        let mut config = Config {
+    fn config(&self) -> RegistrationConfig {
+        let mut config = RegistrationConfig {
             transform_type: TransformModel::Fixed(self.model),
             matching: helpers::matching_config(self.min_stars, self.min_matches),
             ..Default::default()
@@ -641,9 +643,9 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
             confidence: 1.0,
         })
         .collect();
-    let mut config = Config {
+    let mut config = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Translation),
-        ..Config::default()
+        ..RegistrationConfig::default()
     };
     config.ransac.seed = 1;
     let as_stars = |points: &[DVec2]| points.iter().map(|&p| Star::at(p)).collect::<Vec<_>>();

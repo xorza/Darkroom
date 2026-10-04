@@ -7,7 +7,6 @@ use crate::internals::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::StarDetector;
 use crate::internals::init_tracing;
 use crate::internals::synthetic::fixtures::{cluster_field, star_field};
 use crate::star_detection::config::Config;
@@ -18,6 +17,7 @@ use crate::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
+use crate::star_detection::detector::StarDetector;
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {

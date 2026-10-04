@@ -17,10 +17,12 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
+use crate::star_detection::config::Config as StarDetectionConfig;
+use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star::Star;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
-    Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
-    StarDetector, register, stack, warp,
+    Normalization, ProgressCallback, RegistrationConfig, StackConfig, register, stack, warp,
 };
 
 #[test]

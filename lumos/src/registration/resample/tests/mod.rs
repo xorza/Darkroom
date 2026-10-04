@@ -1,6 +1,6 @@
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::registration::config::{InterpolationMethod, WarpParams};
+use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;

@@ -10,7 +10,7 @@ use crate::registration::register;
 use crate::registration::result::RegistrationError;
 use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars};
 use crate::registration::transform::{Transform, TransformModel};
-use crate::registration::{Config, TransformType};
+use crate::registration::{RegistrationConfig, TransformType};
 use crate::star_detection::star::Star;
 
 /// `s·R(θ)` about (1000, 1000), then `offset`.
@@ -30,7 +30,7 @@ fn about_centre(offset: DVec2, angle_deg: f64, scale: f64) -> Transform {
 #[test]
 fn auto_selects_the_simplest_adequate_model() {
     let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101_010, FWHM_TIGHT);
-    let config = Config {
+    let config = RegistrationConfig {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         ..Default::default()
@@ -96,7 +96,7 @@ fn a_blend_buys_no_model() {
     let truth = about_centre(DVec2::new(12.0, -5.0), 0.4, 1.0);
     let mut target = map_stars(&ref_stars, &truth);
     target[50].pos += DVec2::new(4.0, 0.0);
-    let config = Config {
+    let config = RegistrationConfig {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         ..Default::default()
@@ -136,7 +136,7 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
         &ref_stars,
         &Transform::affine([1.000_25, 0.0, 20.0, 0.0, 0.999_75, -15.0]),
     );
-    let config = Config {
+    let config = RegistrationConfig {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         ..Default::default()
@@ -156,7 +156,7 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
     let strict = register(
         &ref_stars,
         &target,
-        &Config {
+        &RegistrationConfig {
             max_rms_error: 0.15,
             ..config.clone()
         },
@@ -178,7 +178,7 @@ fn a_model_that_fit_survives_another_failing() {
         1.4,
         32,
     );
-    let config = Config {
+    let config = RegistrationConfig {
         matching: helpers::matching_config(8, 6),
         sip: Some(SipConfig::default()),
         // The fixture is deliberately marginal — 1.4 px of noise against a scorer scale of 0.67 px —
@@ -194,7 +194,7 @@ fn a_model_that_fit_survives_another_failing() {
     let fixed = register(
         &ref_stars,
         &target,
-        &Config {
+        &RegistrationConfig {
             transform_type: TransformModel::Fixed(TransformType::Affine),
             ..config.clone()
         },
@@ -209,7 +209,7 @@ fn a_model_that_fit_survives_another_failing() {
     let auto = register(
         &ref_stars,
         &target,
-        &Config {
+        &RegistrationConfig {
             transform_type: TransformModel::Auto,
             ..config
         },
@@ -239,7 +239,7 @@ fn every_model_failing_reports_every_reason() {
         1.2,
         12,
     );
-    let config = Config {
+    let config = RegistrationConfig {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         sip: Some(SipConfig {

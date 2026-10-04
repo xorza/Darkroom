@@ -5,7 +5,7 @@ use glam::{DMat2, DVec2};
 
 use crate::io::image::pixel_flags::Reach;
 use crate::math::size2us::Size2us;
-use crate::registration::config::InterpolationMethod;
+use crate::registration::registration_config::InterpolationMethod;
 use crate::registration::resample::kernel::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::transform::{TransformType, WarpTransform};

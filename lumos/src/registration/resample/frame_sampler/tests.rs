@@ -1,6 +1,6 @@
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::PixelFlags;
-use crate::registration::config::{self, InterpolationMethod};
+use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
@@ -650,7 +650,7 @@ fn coverage_and_confidence_vanish_together() {
     let positions = positions(size);
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            config::internals::warp_params(method),
+            registration_config::internals::warp_params(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );
@@ -689,7 +689,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
     let warped = resample::warp(
         &image,
         &halving,
-        config::internals::warp_params(InterpolationMethod::Lanczos3),
+        registration_config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
 
     let lut = LanczosOrder::Three.lut();
@@ -813,7 +813,7 @@ fn filters_reproduce_their_polynomials() {
     let bound = 2.0 * 64.0 * epsilon * 8.0 * 2.5;
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            config::internals::warp_params(method),
+            registration_config::internals::warp_params(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );

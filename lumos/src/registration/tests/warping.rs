@@ -4,7 +4,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
-use crate::registration::config::{self, InterpolationMethod, WarpParams};
+use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
 use crate::registration::resample::{self, internals};
 use crate::registration::transform::{Transform, TransformType, WarpTransform};
 
@@ -16,7 +16,11 @@ fn do_warp(
     transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
-    warp_with(input, transform, config::internals::warp_params(method))
+    warp_with(
+        input,
+        transform,
+        registration_config::internals::warp_params(method),
+    )
 }
 
 fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpParams) -> Buffer2<f32> {
@@ -213,7 +217,7 @@ fn interpolation_quality_ordering() {
     let psnr = |method| {
         let params = WarpParams {
             clamping_threshold: None,
-            ..config::internals::warp_params(method)
+            ..registration_config::internals::warp_params(method)
         };
         let restored = warp_with(&warp_with(&ref_buf, &forward, params), &inverse, params);
         let central = extract_central_region(ref_buf.pixels(), restored.pixels(), size, 50);
@@ -335,7 +339,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
         pixels.pixels().to_vec(),
     );
     for method in InterpolationMethod::ALL {
-        let params = config::internals::warp_params(method);
+        let params = registration_config::internals::warp_params(method);
         let warped = resample::warp(&image, &warp_transform, params).image;
         let mut plane = Buffer2::new_default(size.width, size.height);
         internals::warp_plane(&pixels, &mut plane, &warp_transform, params);

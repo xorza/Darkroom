@@ -24,13 +24,13 @@ use crate::star_detection::config::measurement_config::{
 /// # Example
 ///
 /// ```
-/// use lumos::StarDetectionConfig;
+/// use lumos::detection::Config;
 ///
 /// // Use a preset
-/// let config = StarDetectionConfig::wide_field();
+/// let config = Config::wide_field();
 ///
 /// // Customize from a preset
-/// let mut config = StarDetectionConfig::crowded_field();
+/// let mut config = Config::crowded_field();
 /// config.filter.min_snr = 20.0;
 /// ```
 #[derive(Debug, Clone, Default)]

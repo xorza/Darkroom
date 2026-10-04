@@ -7,7 +7,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
-use crate::registration::Config;
+use crate::registration::RegistrationConfig;
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::register;
 use crate::registration::tests::helpers;
@@ -30,15 +30,15 @@ fn register_with_sip_recovers_barrel_distortion() {
     let ref_stars = positions_to_stars(&ref_pos, 3.0);
     let target_stars = positions_to_stars(&target_pos, 3.0);
 
-    let base_config = Config {
+    let base_config = RegistrationConfig {
         matching: helpers::matching_config(20, 10),
         max_rms_error: 10.0,
-        ..Config::default()
+        ..RegistrationConfig::default()
     };
     let with_sip = register(
         &ref_stars,
         &target_stars,
-        &Config {
+        &RegistrationConfig {
             sip: Some(SipConfig {
                 order: 3,
                 reference_point: Some(field.centre),
@@ -64,7 +64,7 @@ fn register_with_sip_recovers_barrel_distortion() {
     let no_sip = register(
         &ref_stars,
         &target_stars,
-        &Config {
+        &RegistrationConfig {
             sip: None,
             ..base_config
         },
