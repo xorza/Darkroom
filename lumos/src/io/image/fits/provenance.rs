@@ -19,6 +19,16 @@ pub struct FitsChecksumProvenance {
     pub checksum: FitsChecksumState,
 }
 
+impl FitsChecksumProvenance {
+    /// Neither keyword checked: what a load under [`FitsChecksumPolicy::Ignore`] records.
+    ///
+    /// [`FitsChecksumPolicy::Ignore`]: crate::FitsChecksumPolicy::Ignore
+    pub(crate) const NOT_CHECKED: Self = Self {
+        datasum: FitsChecksumState::NotChecked,
+        checksum: FitsChecksumState::NotChecked,
+    };
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitsTransferProvenance {
     pub bscale: f64,
