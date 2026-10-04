@@ -55,7 +55,7 @@ impl DetectionPlane {
         }
         if let Some(filter) = filters.matched {
             let mut temp = resources.acquire_f32();
-            matched_filter(&mut residual, filter, &mut temp);
+            matched_filter(&mut residual, filter, &mut temp, &mut resources.kernels);
             resources.release_f32(temp);
         }
         let noise = BackgroundEstimate::noise_of(&residual, filters.mask, background, resources);

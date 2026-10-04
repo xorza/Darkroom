@@ -13,6 +13,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm::sigma_to_fwhm;
+use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
 
 /// `pixels` less `background`: the residual the matched filter takes.
@@ -251,7 +252,7 @@ fn matched_filter_of_a_zero_residual_is_zero() {
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     result.pixels_mut().copy_from_slice(residual.pixels());
-    matched_filter(
+    matched_filter_fresh(
         &mut result,
         MatchedFilter {
             fwhm: 3.0,
@@ -281,7 +282,7 @@ fn matched_filter_detects_star() {
     result
         .pixels_mut()
         .copy_from_slice(less(&pixels, &background).pixels());
-    matched_filter(
+    matched_filter_fresh(
         &mut result,
         MatchedFilter {
             fwhm: 3.0,
@@ -319,7 +320,7 @@ fn matched_filter_peaks_at_the_star() {
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     result.pixels_mut().copy_from_slice(residual.pixels());
-    matched_filter(
+    matched_filter_fresh(
         &mut result,
         MatchedFilter {
             fwhm: sigma_to_fwhm(sigma),
@@ -346,7 +347,7 @@ fn matched_filter_preserves_negative_residuals() {
     result
         .pixels_mut()
         .copy_from_slice(less(&pixels, &background).pixels());
-    matched_filter(
+    matched_filter_fresh(
         &mut result,
         MatchedFilter {
             fwhm: 2.0,
@@ -388,7 +389,7 @@ fn matched_filter_noise_normalization() {
         result
             .pixels_mut()
             .copy_from_slice(less(&pixels, &background).pixels());
-        matched_filter(
+        matched_filter_fresh(
             &mut result,
             MatchedFilter {
                 fwhm: 4.0,
@@ -450,11 +451,11 @@ fn separable_matches_outer_product_2d() {
         };
         let kernel = gaussian_kernel_1d(sigma);
         let size = kernel.len();
-        let weights = kernel
+        let weights: Vec<f32> = kernel
             .iter()
             .flat_map(|&ky| kernel.iter().map(move |&kx| ky * kx))
             .collect();
-        convolve_2d(&pixels, &GaussianKernel2d { weights, size }, &mut result_2d);
+        convolve_2d(&pixels, &weights, size, &mut result_2d);
 
         let tolerance = (size * size) as f32 * f32::EPSILON;
         for (i, (&a, &b)) in result_sep.iter().zip(result_2d.iter()).enumerate() {
@@ -463,6 +464,91 @@ fn separable_matches_outer_product_2d() {
                 "{side}x{side}, σ = {sigma}: separable and 2D differ at {i}: {a} vs {b}"
             );
         }
+    }
+}
+
+/// An ellipse along the pixel axes filters in two passes as its 2D kernel does, and with the same
+/// `sqrt(ΣK²)`: at no turn, a half turn, and a quarter turn each way, which sets the major axis on
+/// the columns. The 2D weights are the quadrature's pixel means of the rotated profile, the 1D ones
+/// exact, both to well under f32's rounding, and the f32 nearest π/2 turns the 2D kernel 4e-8 off
+/// the axis, which moves a weight by under 1e-6 of itself; a 2D tap sum adds n² products of values
+/// ≤ 1, so the two agree to n²·ε. A quarter turn that took the major axis on the rows would differ
+/// by far more.
+#[test]
+fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
+    let (side, sigma, axis_ratio) = (24, 1.5f32, 0.6f32);
+    let mut pixels = Buffer2::new_filled(side, side, 0.0f32);
+    for (i, p) in pixels.iter_mut().enumerate() {
+        *p = ((i * 7 + 3) % 100) as f32 / 100.0;
+    }
+    let radius = kernel_radius(sigma);
+    let size = 2 * radius + 1;
+    let tolerance = (size * size) as f32 * f32::EPSILON;
+    for (angle, sigmas) in [
+        (0.0f32, [sigma, sigma * axis_ratio]),
+        (std::f32::consts::PI, [sigma, sigma * axis_ratio]),
+        (FRAC_PI_2, [sigma * axis_ratio, sigma]),
+        (-FRAC_PI_2, [sigma * axis_ratio, sigma]),
+    ] {
+        let mut separable = pixels.clone();
+        let mut temp = Buffer2::new_default(side, side);
+        let separable_norm = separable_convolve(
+            &mut separable,
+            sigmas,
+            radius,
+            &mut temp,
+            &mut FilterKernels::default(),
+        );
+        let mut full = Buffer2::new_default(side, side);
+        let full_norm = elliptical_gaussian_convolve(&pixels, sigma, axis_ratio, angle, &mut full);
+        assert!(
+            (separable_norm - full_norm).abs() <= tolerance * full_norm,
+            "angle {angle}: sqrt(ΣK²) {separable_norm} vs {full_norm}"
+        );
+        for (i, (&a, &b)) in separable.iter().zip(full.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < tolerance,
+                "angle {angle} at {i}: {a} vs {b}"
+            );
+        }
+        if angle == FRAC_PI_2 {
+            let mut swapped = pixels.clone();
+            separable_convolve(
+                &mut swapped,
+                [sigma, sigma * axis_ratio],
+                radius,
+                &mut temp,
+                &mut FilterKernels::default(),
+            );
+            let largest = swapped
+                .iter()
+                .zip(full.iter())
+                .map(|(&a, &b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                largest > 100.0 * tolerance,
+                "the axes would not matter: {largest}"
+            );
+        }
+    }
+}
+
+/// The quarter turns of an angle stored as the f32 nearest a multiple of π/2, and none for an
+/// angle an ulp away from one, or between.
+#[test]
+fn quarter_turns_are_the_angles_nearest_the_axes() {
+    use std::f32::consts::PI;
+    for (angle, turns) in [
+        (0.0f32, Some(0)),
+        (FRAC_PI_2, Some(1)),
+        (-FRAC_PI_2, Some(-1)),
+        (PI, Some(2)),
+        (3.0 * FRAC_PI_2, Some(3)),
+        (FRAC_PI_2.next_up(), None),
+        (0.0f32.next_up(), None),
+        (0.3, None),
+    ] {
+        assert_eq!(quarter_turns(angle), turns, "{angle}");
     }
 }
 

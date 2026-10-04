@@ -26,6 +26,9 @@ pub(crate) struct LabelMap {
     labels: Buffer2<u32>,
     /// Component `i` carries label `i + 1`.
     components: Vec<ComponentData>,
+    /// Which of its labeler's labelings wrote it, so it can erase its runs while the labeler
+    /// still holds them.
+    generation: u64,
 }
 
 impl LabelMap {
@@ -36,13 +39,15 @@ impl LabelMap {
         resources: &mut DetectionResources,
     ) -> Self {
         debug_assert_eq!(mask.size, resources.dimensions);
-        let mut labels = resources.acquire_u32();
-        labels.pixels_mut().fill(0);
+        let labels = resources.acquire_u32();
+        debug_assert!(labels.pixels().iter().all(|&label| label == 0));
         resources.labeler.label(mask, connectivity, labels)
     }
 
-    /// Release this `LabelMap`'s buffers back to the pool.
-    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
+    /// Release this `LabelMap`'s buffers back to the pool, its labels zero again: the runs its
+    /// labeling wrote erased, rather than the whole plane cleared before the next.
+    pub(crate) fn release_to_pool(mut self, pool: &mut DetectionResources) {
+        pool.labeler.erase(&mut self.labels, self.generation);
         pool.release_u32(self.labels);
         pool.labeler.recycle(self.components);
     }
@@ -107,7 +112,11 @@ pub(crate) mod internals {
                     component.area += 1;
                 }
             }
-            Self { labels, components }
+            Self {
+                labels,
+                components,
+                generation: u64::MAX,
+            }
         }
 
         /// The raw labels, row-major.

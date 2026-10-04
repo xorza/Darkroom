@@ -78,27 +78,27 @@ pub(crate) fn noise_floor_for(scale: f32) -> f32 {
 /// does not reproduce a constant sky exactly, and without a margin above that jitter every pixel
 /// clears `bg` and the whole frame labels as one component. The sky carries the frame's magnitude,
 /// so a fraction of it stays above the jitter in any domain.
-fn noise_floor_from(grid: &TileGrid) -> f32 {
+fn noise_floor_from(grid: &TileGrid, values: &mut Vec<f32>) -> f32 {
     let stats = grid.stats.pixels();
-    let mut sigmas: Vec<f32> = stats
-        .iter()
-        .map(|tile| tile.sigma)
-        .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
-        .collect();
-    let scale = if sigmas.is_empty() {
-        let mut skies: Vec<f32> = stats
+    values.clear();
+    values.extend(
+        stats
             .iter()
-            .map(|tile| tile.sky.abs())
-            .filter(|sky| sky.is_finite() && *sky > 0.0)
-            .collect();
-        if skies.is_empty() {
+            .map(|tile| tile.sigma)
+            .filter(|sigma| sigma.is_finite() && *sigma > 0.0),
+    );
+    if values.is_empty() {
+        values.extend(
+            stats
+                .iter()
+                .map(|tile| tile.sky.abs())
+                .filter(|sky| sky.is_finite() && *sky > 0.0),
+        );
+        if values.is_empty() {
             return f32::MIN_POSITIVE;
         }
-        median_mut(&mut skies)
-    } else {
-        median_mut(&mut sigmas)
-    };
-    noise_floor_for(scale)
+    }
+    noise_floor_for(median_mut(values))
 }
 
 impl BackgroundEstimate {
@@ -122,7 +122,7 @@ impl BackgroundEstimate {
             config.sigma_clip_iterations,
             true,
         );
-        let noise_floor = noise_floor_from(tile_grid);
+        let noise_floor = noise_floor_from(tile_grid, &mut resources.values);
         interpolate_from_grid(
             tile_grid,
             Some(&mut background),
@@ -154,7 +154,7 @@ impl BackgroundEstimate {
             config.sigma_clip_iterations,
             true,
         );
-        let floor = noise_floor_from(tile_grid);
+        let floor = noise_floor_from(tile_grid, &mut resources.values);
         interpolate_from_grid(tile_grid, None, &mut noise, &workspace.interpolation);
         SkyNoise { noise, floor }
     }

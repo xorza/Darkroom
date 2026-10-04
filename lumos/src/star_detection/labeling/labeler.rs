@@ -37,6 +37,8 @@ pub(crate) struct Labeler {
     mapping: Vec<u32>,
     /// The component list the last label map gave back, refilled by the next.
     components: Vec<ComponentData>,
+    /// How many labelings this labeler has made; the strips hold the last one's runs.
+    generation: u64,
 }
 
 /// One horizontal band of the mask and the runs found in it.
@@ -86,8 +88,17 @@ impl Labeler {
 
         let mut components = mem::take(&mut self.components);
         components.clear();
+        self.generation += 1;
+        let generation = self.generation;
+        for strip in &mut self.strips {
+            strip.runs.clear();
+        }
         if width == 0 || height == 0 {
-            return LabelMap { labels, components };
+            return LabelMap {
+                labels,
+                components,
+                generation,
+            };
         }
 
         let Self {
@@ -149,7 +160,11 @@ impl Labeler {
             mapping,
         );
         if count == 0 {
-            return LabelMap { labels, components };
+            return LabelMap {
+                labels,
+                components,
+                generation,
+            };
         }
 
         let labels_ptr = UnsafeSendPtr::new(labels.pixels_mut().as_mut_ptr());
@@ -185,7 +200,28 @@ impl Labeler {
             }
         }
 
-        LabelMap { labels, components }
+        LabelMap {
+            labels,
+            components,
+            generation,
+        }
+    }
+
+    /// Zero `labels` again: the runs of the labeling `generation` wrote, while this labeler still
+    /// holds them, else every pixel.
+    pub(crate) fn erase(&self, labels: &mut Buffer2<u32>, generation: u64) {
+        if generation != self.generation {
+            labels.pixels_mut().fill(0);
+            return;
+        }
+        let width = labels.width();
+        let pixels = labels.pixels_mut();
+        for strip in &self.strips {
+            for &(y, run) in &strip.runs {
+                let row_start = y as usize * width;
+                pixels[row_start + run.start as usize..row_start + run.end as usize].fill(0);
+            }
+        }
     }
 
     /// Take back a label map's component list for the next frame to refill.
