@@ -16,11 +16,9 @@ mod simd;
 use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
-use crate::simd::math::Math;
-use crate::simd::portable::Portable;
-use crate::simd::{F64x4, Isa, Kernel};
+use crate::simd::Kernel;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
-use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
+use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
@@ -72,12 +70,9 @@ fn fast_pow_neg(u: f64, strategy: PowStrategy) -> f64 {
             1.0 / (u_n * u.sqrt())
         }
         PowStrategy::Int { n } => 1.0 / int_pow(u, n),
-        // The vector kernel's power, on the portable Isa, so a lane and this agree bit for bit.
-        PowStrategy::General { neg_beta } => {
-            let isa = Portable::new();
-            isa.exp_f64(isa.splat_f64(neg_beta) * isa.ln_f64(isa.splat_f64(u)))
-                .to_array()[0]
-        }
+        // The vector kernel's power, which every Isa computes to the same bits, so a lane and
+        // this agree bit for bit.
+        PowStrategy::General { neg_beta } => GeneralPower { u, neg_beta }.dispatch(),
     }
 }
 
