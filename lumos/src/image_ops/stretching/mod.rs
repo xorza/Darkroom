@@ -11,13 +11,18 @@
 //!
 //! Excursions outside the domain are still expected and handled — calibration leaves sub-background
 //! pixels negative, and a stack's bright stars exceed 1 — so every curve clamps its output, and the
-//! result is always a valid display image in `[0, 1]`.
+//! result is always a valid display image in `[0, 1]`. A NaN sample shows as black, in the vector
+//! paths and the scalar ones alike.
+//!
+//! Every curve first moves its black point to 0 and keeps white at 1, `(x − black) / (1 − black)`.
+//! The automatic methods put it `shadow_sigmas` normalized MADs below the median, PixInsight
+//! AutoSTF's black point; an explicit curve takes it as a parameter.
 //!
 //! Three curve families:
-//! - **STF / MTF auto-stretch** (PixInsight/Siril): a linear black-point clip-rescale followed by
-//!   the Midtones Transfer Function `MTF(m,x) = (m−1)x / ((2m−1)x − m)` — a rational (Möbius)
-//!   curve, *not* a gamma curve. The black point (`median − k·σ`) and midtones `m` are derived
-//!   from the image median and MAD. Fully automatic; the standard "screen stretch".
+//! - **STF / MTF auto-stretch** (PixInsight/Siril): after the black point, the Midtones Transfer
+//!   Function `MTF(m,x) = (m−1)x / ((2m−1)x − m)` — a rational (Möbius) curve, *not* a gamma curve.
+//!   The midtones `m` puts the median on the target. Fully automatic; the standard "screen
+//!   stretch".
 //! - **Normalized arcsinh** (Lupton et al. 2004): `f(x) = asinh(x/β) / asinh(1/β)`, linear near
 //!   black (faint detail, low noise gain) and logarithmic in the highlights (compressed cores),
 //!   with `β` chosen automatically from the background level.
@@ -27,8 +32,11 @@
 //!
 //! All default to **color-preserving** application: the curve runs on the combined intensity
 //! `I = (r+g+b)/3` and every channel is scaled by `f(I)/I`, so hue/saturation and star color are
-//! preserved and only intensity is remapped. A per-channel stretch instead ties an object's color
-//! to its brightness and burns bright star cores toward white.
+//! preserved and only intensity is remapped. The ratio is formed after the black point, as Lupton
+//! et al. and PixInsight's ArcsinhStretch form it: on data that still holds the sky, a faint
+//! nebula's colour is a small excess over a grey pedestal and comes out nearly grey. A per-channel
+//! stretch instead ties an object's color to its brightness and burns bright star cores toward
+//! white.
 
 use crate::image_ops::rgb::Rgb;
 use arrayvec::ArrayVec;
@@ -39,8 +47,8 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
+use crate::math::statistics::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
-use crate::math::statistics::{MedianMad, median_mut};
 
 mod simd;
 
@@ -53,22 +61,27 @@ const MIDTONES_MAX: f32 = 1.0 - 1e-4;
 #[derive(Debug, Clone, Copy)]
 pub enum StretchMethod {
     /// Screen-Transfer-Function (MTF) auto-stretch. Black point `= median − shadow_sigmas·σ`
-    /// (σ from MAD), and the midtones balance is chosen so the rescaled median lands on
+    /// (σ the normalized MAD), and the midtones balance is chosen so the rescaled median lands on
     /// `target_background`.
     AutoStf {
         shadow_sigmas: f32,
         target_background: f32,
     },
-    /// Normalized arcsinh with softening `β` chosen so the background median maps to
-    /// `target_background`.
-    AutoAsinh { target_background: f32 },
-    /// Normalized arcsinh with an explicit softening `β` (smaller = stronger stretch).
-    Asinh { beta: f32 },
-    /// Generalized Hyperbolic Stretch — an explicit *designer* curve. `d` is the
-    /// stretch strength (0 = identity); `b` selects the curve family (`0` exponential, `b < 0`
+    /// Normalized arcsinh after the same black point as [`Self::AutoStf`], with softening `β`
+    /// chosen so the rescaled median maps to `target_background`.
+    AutoAsinh {
+        shadow_sigmas: f32,
+        target_background: f32,
+    },
+    /// Normalized arcsinh after `black_point`, with an explicit softening `β` (smaller = stronger
+    /// stretch).
+    Asinh { black_point: f32, beta: f32 },
+    /// Generalized Hyperbolic Stretch after `black_point` — an explicit *designer* curve. `d` is
+    /// the stretch strength (0 = identity); `b` selects the curve family (`0` exponential, `b < 0`
     /// logarithmic-like with `b ≈ −1.4` ≈ asinh, `b > 0` hyperbolic); `sp` is the symmetry point
     /// (most contrast); `lp`/`hp` are the shadow/highlight protection points (linear outside them).
     Ghs {
+        black_point: f32,
         d: f32,
         b: f32,
         sp: f32,
@@ -96,10 +109,11 @@ pub enum ColorMode {
 }
 
 impl StretchMethod {
-    /// The background level the automatic presets place the median on.
-    pub const AUTO_TARGET_BACKGROUND: f32 = 0.2;
-    /// How many σ below the median the STF preset puts the black point.
-    pub const STF_SHADOW_SIGMAS: f32 = 1.5;
+    /// The background level the automatic presets place the median on: PixInsight AutoSTF's.
+    pub const AUTO_TARGET_BACKGROUND: f32 = 0.25;
+    /// How many normalized MADs below the median the automatic presets put the black point:
+    /// PixInsight AutoSTF's shadows clipping, −2.8.
+    pub const AUTO_SHADOW_SIGMAS: f32 = 2.8;
 }
 
 /// A stretch to apply to a stacked image. Output is always clamped to `[0, 1]`.
@@ -114,6 +128,7 @@ impl Stretch {
     pub const fn auto_asinh() -> Self {
         Self {
             method: StretchMethod::AutoAsinh {
+                shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
                 target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
@@ -124,7 +139,7 @@ impl Stretch {
     pub const fn auto_stf() -> Self {
         Self {
             method: StretchMethod::AutoStf {
-                shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+                shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
                 target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
@@ -159,6 +174,10 @@ impl Stretch {
             StretchMethod::AutoStf {
                 shadow_sigmas,
                 target_background,
+            }
+            | StretchMethod::AutoAsinh {
+                shadow_sigmas,
+                target_background,
             } => {
                 InvalidConfigField::finite(
                     "shadow_sigmas",
@@ -168,15 +187,21 @@ impl Stretch {
                 )?;
                 ensure_target_background(target_background)
             }
-            StretchMethod::AutoAsinh { target_background } => {
-                ensure_target_background(target_background)
-            }
-            StretchMethod::Asinh { beta } => {
+            StretchMethod::Asinh { black_point, beta } => {
+                ensure_black_point(black_point)?;
                 InvalidConfigField::finite("asinh beta", "finite and positive", beta, |value| {
                     value > 0.0
                 })
             }
-            StretchMethod::Ghs { d, b, sp, lp, hp } => {
+            StretchMethod::Ghs {
+                black_point,
+                d,
+                b,
+                sp,
+                lp,
+                hp,
+            } => {
+                ensure_black_point(black_point)?;
                 InvalidConfigField::finite("ghs d", "finite and non-negative", d, |value| {
                     value >= 0.0
                 })?;
@@ -216,6 +241,13 @@ fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
     })
 }
 
+/// `Ok(())` if `black` is a valid black point in `[0, 1)`: one at white leaves no range to map.
+fn ensure_black_point(black: f32) -> Result<(), InvalidConfigField> {
+    InvalidConfigField::finite("black_point", "finite and in [0, 1)", black, |value| {
+        (0.0..1.0).contains(&value)
+    })
+}
+
 /// Per-channel stretch: each channel gets its own auto curve from its own statistics (explicit
 /// methods share one curve across channels), applied to its own plane. Channels are independent, so
 /// nothing here reads a value another channel already changed.
@@ -227,7 +259,7 @@ fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Re
     for plane in image.planes_mut() {
         curves.push(match explicit_curve(method) {
             Some(curve) => curve,
-            None => build_curve(&mut subsample(plane.pixels()), method)?,
+            None => build_curve(&mut Subsample::statistic_values(plane.pixels()), method)?,
         });
     }
     for (plane, curve) in image.planes_mut().zip(curves) {
@@ -236,21 +268,25 @@ fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Re
     Ok(())
 }
 
-/// A [`Subsample`] of a plane for the curve's median/MAD.
-fn subsample(plane: &[f32]) -> Vec<f32> {
-    Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES)
-        .of(plane)
-        .collect()
-}
-
 /// Curves that need no image statistics — built straight from their parameters. Returns `None` for
 /// the auto methods, which [`build_curve`] derives from a sample set instead.
 fn explicit_curve(method: StretchMethod) -> Option<Curve> {
     match method {
-        StretchMethod::Asinh { beta } => Some(Curve::Asinh(AsinhCurve::new(beta))),
-        StretchMethod::Ghs { d, b, sp, lp, hp } => {
-            Some(Curve::Ghs(GhsCurve::new(d, b, sp, lp, hp)))
-        }
+        StretchMethod::Asinh { black_point, beta } => Some(Curve {
+            black: BlackPoint::new(black_point),
+            tone: Tone::Asinh(AsinhCurve::new(beta)),
+        }),
+        StretchMethod::Ghs {
+            black_point,
+            d,
+            b,
+            sp,
+            lp,
+            hp,
+        } => Some(Curve {
+            black: BlackPoint::new(black_point),
+            tone: Tone::Ghs(GhsCurve::new(d, b, sp, lp, hp)),
+        }),
         StretchMethod::AutoStf { .. } | StretchMethod::AutoAsinh { .. } => None,
     }
 }
@@ -261,10 +297,10 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
 /// [`LinearImage::intensity_plane`](crate::io::image::linear::LinearImage::intensity_plane).
 fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     let plane = image.channel(0).pixels();
-    let sample = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES);
     if !image.is_rgb() {
-        return sample.of(plane).collect();
+        return Subsample::statistic_values(plane);
     }
+    let sample = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES);
     let (g, b) = (image.channel(1).pixels(), image.channel(2).pixels());
     // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
     // pixel; running it in parallel hides that latency — the work is a pure map over indices.
@@ -282,68 +318,103 @@ fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
         .collect()
 }
 
-/// A prepared tone curve, selected once from the [`StretchMethod`]. Implementors clamp their
-/// output to `[0, 1]`, so any input (including a raw stack's above-unity highlights) yields a
-/// valid display value.
-trait ToneCurve: Copy + Sync {
-    fn eval(&self, x: f32) -> f32;
+/// The black point a curve moves to 0 first, keeping white at 1: `(x − black) / (1 − black)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BlackPoint {
+    black: f32,
+    inv_range: f32,
+}
 
-    /// [`Self::eval`] over a block of samples, in place — where a curve with a vector kernel takes
-    /// it over.
-    fn eval_block(&self, block: &mut [f32]) {
-        for value in block {
-            *value = self.eval(*value);
+impl BlackPoint {
+    /// `black` in `[0, 1)`; 0 maps every value to itself.
+    fn new(black: f32) -> Self {
+        debug_assert!((0.0..1.0).contains(&black), "black point {black}");
+        Self {
+            black,
+            inv_range: 1.0 / (1.0 - black),
         }
+    }
+
+    #[inline]
+    fn rescale(self, x: f32) -> f32 {
+        (x - self.black) * self.inv_range
     }
 }
 
-/// STF: a linear clip-rescale `[black, 1] → [0, 1]`, then `MTF(midtones, ·)`.
+/// An automatic method's black point, and the background median after it.
 #[derive(Debug, Clone, Copy)]
-struct StfCurve {
-    black: f32,
-    inv_range: f32,
-    midtones: f32,
+struct AutoBackground {
+    black: BlackPoint,
+    rescaled: f32,
 }
 
-impl StfCurve {
-    /// The curve that puts `median` on `target_bkg`, or an error when no midtones balance in
-    /// `[MIDTONES_MIN, MIDTONES_MAX]` does: a median at or below the black point (nothing above
-    /// black to lift) or at white.
-    fn new(median: f32, sigma: f32, shadow_sigmas: f32, target_bkg: f32) -> Result<Self, OpError> {
-        let unreachable = || OpError::UnreachableBackground {
-            method: "auto STF",
-            median,
-            target: target_bkg,
-        };
-        let black = (median - shadow_sigmas * sigma).clamp(0.0, 1.0);
+impl AutoBackground {
+    /// The black point `shadow_sigmas` times `sigma` below `median`, held at 0 from below;
+    /// `unreachable` when it reaches white or leaves the median at or below it, or at white —
+    /// nothing for a curve to place.
+    fn new(
+        median: f32,
+        sigma: f32,
+        shadow_sigmas: f32,
+        unreachable: impl FnOnce() -> OpError,
+    ) -> Result<Self, OpError> {
+        let black = (median - shadow_sigmas * sigma).max(0.0);
         if black >= 1.0 {
             return Err(unreachable());
         }
-        let inv_range = 1.0 / (1.0 - black);
-        let rescaled_median = (median - black) * inv_range;
-        if !(rescaled_median > 0.0 && rescaled_median < 1.0) {
+        let black = BlackPoint::new(black);
+        let rescaled = black.rescale(median);
+        if !(rescaled > 0.0 && rescaled < 1.0) {
             return Err(unreachable());
         }
-        // MTF's Möbius self-inverse identity: MTF(MTF(t, x0), x0) = t, so the midtones balance
-        // that maps the rescaled median onto the target background is just MTF(target, median).
-        let midtones = mtf(target_bkg, rescaled_median);
-        if !(MIDTONES_MIN..=MIDTONES_MAX).contains(&midtones) {
-            return Err(unreachable());
-        }
-        Ok(Self {
-            black,
-            inv_range,
-            midtones,
-        })
+        Ok(Self { black, rescaled })
     }
 }
 
-impl ToneCurve for StfCurve {
+/// A prepared tone curve, selected once from the [`StretchMethod`], on values after the black
+/// point. Implementors clamp their output to `[0, 1]`, so any input (including a raw stack's
+/// above-unity highlights) yields a valid display value, and map NaN to 0.
+trait ToneCurve: Copy + Sync {
+    fn eval(&self, x: f32) -> f32;
+
+    /// [`Self::eval`] after `black` over a block of samples, in place — where a curve with a vector
+    /// kernel takes it over.
+    fn eval_block(&self, black: BlackPoint, block: &mut [f32]) {
+        for value in block {
+            *value = self.eval(black.rescale(*value));
+        }
+    }
+}
+
+/// `x` held to `[0, 1]`, NaN to 0: `f32::max` takes the operand that is not NaN.
+#[inline]
+const fn unit(x: f32) -> f32 {
+    x.max(0.0).min(1.0)
+}
+
+/// `MTF(midtones, ·)`, the STF's curve after its black point.
+#[derive(Debug, Clone, Copy)]
+struct MtfCurve {
+    midtones: f32,
+}
+
+impl MtfCurve {
+    /// The curve that puts the rescaled `median` on `target`; `None` when no midtones balance in
+    /// `[MIDTONES_MIN, MIDTONES_MAX]` does.
+    fn new(median: f32, target: f32) -> Option<Self> {
+        // MTF's Möbius self-inverse identity: MTF(MTF(t, x0), x0) = t, so the midtones balance
+        // that maps the rescaled median onto the target background is just MTF(target, median).
+        let midtones = mtf(target, median);
+        (MIDTONES_MIN..=MIDTONES_MAX)
+            .contains(&midtones)
+            .then_some(Self { midtones })
+    }
+}
+
+impl ToneCurve for MtfCurve {
     #[inline]
     fn eval(&self, x: f32) -> f32 {
-        // The clip-rescale clamps to [0,1] and the MTF maps [0,1] → [0,1], so this is bounded.
-        let v = ((x - self.black) * self.inv_range).clamp(0.0, 1.0);
-        mtf(self.midtones, v)
+        mtf(self.midtones, unit(x))
     }
 }
 
@@ -373,11 +444,11 @@ impl ToneCurve for AsinhCurve {
     fn eval(&self, x: f32) -> f32 {
         // asinh maps [0,1] → [0,1] but is unbounded outside it; clamp so a raw stack's above-unity
         // highlights (or negative post-subtraction pixels) still land in display range.
-        ((x * self.inv_beta).asinh() * self.inv_norm).clamp(0.0, 1.0)
+        unit((x * self.inv_beta).asinh() * self.inv_norm)
     }
 
-    fn eval_block(&self, block: &mut [f32]) {
-        simd::asinh_plane(block, *self);
+    fn eval_block(&self, black: BlackPoint, block: &mut [f32]) {
+        simd::asinh_plane(block, black, *self);
     }
 }
 
@@ -479,7 +550,7 @@ impl ToneCurve for GhsCurve {
     #[inline]
     fn eval(&self, x: f32) -> f32 {
         if self.identity {
-            return x.clamp(0.0, 1.0);
+            return unit(x);
         }
         let raw = if x < self.lp {
             // T1: linear, tangent to the mirrored base at lp.
@@ -492,16 +563,22 @@ impl ToneCurve for GhsCurve {
             // T4: linear, tangent to the base at hp.
             self.tp_hp_sp * (x - self.hp) + self.t_hp_sp
         };
-        ((raw - self.t0) * self.inv_range).clamp(0.0, 1.0)
+        unit((raw - self.t0) * self.inv_range)
     }
 }
 
-/// The curve chosen for a stretch. [`apply_color_preserving_image`] / [`apply_curve_plane`] match
-/// this exactly once and then run a monomorphized loop, so the `Stf`/`Asinh` choice is never
-/// re-decided per pixel.
+/// The curve chosen for a stretch: its black point, then its tone curve.
+/// [`apply_color_preserving_image`] / [`apply_curve_plane`] match the tone exactly once and then
+/// run a monomorphized loop, so the choice is never re-decided per pixel.
 #[derive(Debug, Clone, Copy)]
-enum Curve {
-    Stf(StfCurve),
+struct Curve {
+    black: BlackPoint,
+    tone: Tone,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Tone {
+    Mtf(MtfCurve),
     Asinh(AsinhCurve),
     Ghs(GhsCurve),
 }
@@ -519,21 +596,17 @@ fn mtf(m: f32, x: f32) -> f32 {
     }
 }
 
-/// Choose the arcsinh softening `β` so a background of `median` maps to `target_background`.
+/// Choose the arcsinh softening `β` so a background of `median` maps to `target_background`;
+/// `None` when no `β` does.
 ///
 /// `g(β) = asinh(median/β) / asinh(1/β)` is monotonically decreasing in `β`, ranging from ~1 as
 /// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear), so a reachable target lies in
 /// `(median, 1)`. Bisect `log₁₀ β` over `[−30, 5]` — wide enough for medians down to ~1e-20 — and
 /// then check the result, because a target past the range's end converges onto the bound rather
 /// than onto the target.
-fn solve_asinh_beta(median: f32, target_background: f32) -> Result<f32, OpError> {
-    let unreachable = || OpError::UnreachableBackground {
-        method: "auto asinh",
-        median,
-        target: target_background,
-    };
+fn solve_asinh_beta(median: f32, target_background: f32) -> Option<f32> {
     if !(median > 0.0 && median < target_background) {
-        return Err(unreachable());
+        return None;
     }
     let g = |beta: f32| (median / beta).asinh() / (1.0 / beta).asinh();
     let (mut lo, mut hi) = (-30.0f32, 5.0f32);
@@ -548,60 +621,100 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> Result<f32, OpError>
     let beta = 10.0f32.powf(f32::midpoint(lo, hi));
     // A reachable target is met to the f32 accuracy of the two `asinh` evaluations (a few ulp,
     // ~1e-6); a target past the range's end misses by far more than this.
-    if (g(beta) - target_background).abs() > 1e-4 {
-        return Err(unreachable());
-    }
-    Ok(beta)
+    ((g(beta) - target_background).abs() <= 1e-4).then_some(beta)
 }
 
 /// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The
 /// explicit methods are resolved by [`explicit_curve`] before any samples are materialized, so they
 /// never reach here.
 fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
-    Ok(match method {
+    let background = MedianMad::of_mut(samples);
+    match method {
         StretchMethod::AutoStf {
             shadow_sigmas,
             target_background,
-        } => {
-            let background = MedianMad::of_mut(samples);
-            Curve::Stf(StfCurve::new(
-                background.median,
-                background.sigma(),
-                shadow_sigmas,
-                target_background,
-            )?)
-        }
-        StretchMethod::AutoAsinh { target_background } => {
-            let median = median_mut(samples);
-            Curve::Asinh(AsinhCurve::new(solve_asinh_beta(
-                median,
-                target_background,
-            )?))
-        }
+        } => stf_curve(
+            background.median,
+            background.sigma(),
+            shadow_sigmas,
+            target_background,
+        ),
+        StretchMethod::AutoAsinh {
+            shadow_sigmas,
+            target_background,
+        } => auto_asinh_curve(
+            background.median,
+            background.sigma(),
+            shadow_sigmas,
+            target_background,
+        ),
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
             unreachable!("explicit methods are built by explicit_curve, not build_curve")
         }
+    }
+}
+
+/// The STF curve for a background of `median` and spread `sigma`: the black point
+/// `shadow_sigmas·sigma` below the median, and the midtones that put the median on `target`.
+fn stf_curve(median: f32, sigma: f32, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
+    let unreachable = || OpError::UnreachableBackground {
+        method: "auto STF",
+        median,
+        target,
+    };
+    let background = AutoBackground::new(median, sigma, shadow_sigmas, unreachable)?;
+    let tone = MtfCurve::new(background.rescaled, target).ok_or_else(unreachable)?;
+    Ok(Curve {
+        black: background.black,
+        tone: Tone::Mtf(tone),
+    })
+}
+
+/// The auto-asinh curve for a background of `median` and spread `sigma`: the black point
+/// [`stf_curve`] takes, and the softening that puts the median on `target`.
+fn auto_asinh_curve(
+    median: f32,
+    sigma: f32,
+    shadow_sigmas: f32,
+    target: f32,
+) -> Result<Curve, OpError> {
+    let unreachable = || OpError::UnreachableBackground {
+        method: "auto asinh",
+        median,
+        target,
+    };
+    let background = AutoBackground::new(median, sigma, shadow_sigmas, unreachable)?;
+    let beta = solve_asinh_beta(background.rescaled, target).ok_or_else(unreachable)?;
+    Ok(Curve {
+        black: background.black,
+        tone: Tone::Asinh(AsinhCurve::new(beta)),
     })
 }
 
 /// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
 fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
-    match curve {
-        Curve::Stf(c) => map_plane(plane, c),
-        Curve::Asinh(c) => map_plane(plane, c),
-        Curve::Ghs(c) => map_plane(plane, c),
+    match curve.tone {
+        Tone::Mtf(c) => map_plane(plane, curve.black, c),
+        Tone::Asinh(c) => map_plane(plane, curve.black, c),
+        Tone::Ghs(c) => map_plane(plane, curve.black, c),
     }
 }
 
-fn map_plane<C: ToneCurve>(plane: &mut [f32], curve: C) {
+fn map_plane<C: ToneCurve>(plane: &mut [f32], black: BlackPoint, curve: C) {
     plane
         .par_chunks_mut(SAMPLES_PER_BLOCK)
-        .for_each(|block| curve.eval_block(block));
+        .for_each(|block| curve.eval_block(black, block));
 }
 
-/// Map one pixel under color-preserving stretch: `curve` on the combined intensity, the pixel moved
-/// to that intensity with its hue kept ([`Rgb::with_intensity`]).
-fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
+/// Map one pixel under color-preserving stretch: every channel after the black point, `curve` on
+/// their combined intensity, and the pixel moved to that intensity with its hue kept
+/// ([`Rgb::with_intensity`]).
+fn color_preserve_pixel<C: ToneCurve>(px: Rgb, black: BlackPoint, curve: &C) -> Rgb {
+    let px = Rgb {
+        r: black.rescale(px.r),
+        g: black.rescale(px.g),
+        b: black.rescale(px.b),
+    };
     px.with_intensity(curve.eval(px.intensity()))
 }
 
@@ -616,23 +729,41 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
         }
         return;
     }
-    match curve {
-        Curve::Stf(c) => image.map_rgb(|px| color_preserve_pixel(px, &c)),
-        Curve::Asinh(c) => apply_color_preserving_asinh(image, c),
-        Curve::Ghs(c) => image.map_rgb(|px| color_preserve_pixel(px, &c)),
+    let black = curve.black;
+    match curve.tone {
+        Tone::Mtf(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
+        Tone::Asinh(c) => apply_color_preserving_asinh(image, black, c),
+        Tone::Ghs(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
     }
 }
 
 /// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
 /// itself, and the kernel that evaluates it, live in [`simd`].
-fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
+fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: AsinhCurve) {
     debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
     let [r, g, b] = image.rgb_planes_mut();
     // The three planes split in lockstep so each task sees one band's worth of every channel.
     r.par_chunks_mut(SAMPLES_PER_BLOCK)
         .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
         .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
-        .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, c));
+        .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, black, c));
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::image_ops::stretching::{Curve, Tone, ToneCurve};
+
+    impl Curve {
+        /// The curve at `x`, its black point first.
+        pub(super) fn eval(&self, x: f32) -> f32 {
+            let x = self.black.rescale(x);
+            match self.tone {
+                Tone::Mtf(c) => c.eval(x),
+                Tone::Asinh(c) => c.eval(x),
+                Tone::Ghs(c) => c.eval(x),
+            }
+        }
+    }
 }
 
 #[cfg(all(test, feature = "bench"))]

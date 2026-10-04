@@ -4,6 +4,7 @@ mod real_data;
 use crate::image_ops::stretching::*;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
+use crate::math::statistics::median_mut;
 use std::f32::consts::LN_10;
 use std::iter;
 
@@ -160,31 +161,44 @@ fn solve_beta_hits_target_background() {
 fn auto_stretches_report_an_unreachable_background() {
     for median in [0.0f32, -0.001, 0.25, 0.9] {
         assert!(
-            matches!(
-                solve_asinh_beta(median, 0.2),
-                Err(OpError::UnreachableBackground { .. })
-            ),
+            solve_asinh_beta(median, 0.2).is_none(),
             "asinh: median {median}"
         );
     }
-    // STF fails at each of its three checks: the black point at white (1.5 − 1.5σ clamps to 1); the
-    // median at or below black, or at white; and a midtones balance past its limits — 1e-5 over a
-    // black of 0 needs `MTF(0.2, 1e-5) ≈ 4e-5 < MIDTONES_MIN`, and 0.99999 one near 1.
-    for (median, sigma) in [
-        (1.5f32, 0.001f32),
-        (0.0, 0.001),
-        (-0.001, 0.001),
-        (1.0, 0.001),
-        (1e-5, 1.0),
-        (0.999_99, 1.0),
+    // Both auto curves fail at each check of their black point: at white (1.5 − 1.5σ is past 1),
+    // and the median at or below it, or at white. STF fails too on a midtones balance past its
+    // limits — 1e-5 over a black of 0 needs `MTF(0.2, 1e-5) ≈ 4e-5 < MIDTONES_MIN`, and 0.99999
+    // one near 1 — where auto asinh fails on a median at or past its target, 0.99999, and reaches
+    // 1e-5 with a small `β`.
+    for (median, sigma, asinh_fails) in [
+        (1.5f32, 0.001f32, true),
+        (0.0, 0.001, true),
+        (-0.001, 0.001, true),
+        (1.0, 0.001, true),
+        (1e-5, 1.0, false),
+        (0.999_99, 1.0, true),
     ] {
-        assert!(
-            matches!(
-                StfCurve::new(median, sigma, 1.5, 0.2),
-                Err(OpError::UnreachableBackground { .. })
-            ),
-            "STF: median {median}, sigma {sigma}"
+        let asinh = auto_asinh_curve(median, sigma, 1.5, 0.2);
+        assert_eq!(
+            asinh.is_err(),
+            asinh_fails,
+            "asinh: median {median}, sigma {sigma}"
         );
+        for (name, curve) in [
+            ("STF", stf_curve(median, sigma, 1.5, 0.2)),
+            ("asinh", asinh),
+        ]
+        .into_iter()
+        .filter(|(name, _)| *name == "STF" || asinh_fails)
+        {
+            assert!(
+                matches!(
+                    curve,
+                    Err(OpError::UnreachableBackground { median: reported, .. }) if reported == median
+                ),
+                "{name}: median {median}, sigma {sigma}"
+            );
+        }
     }
 
     // Through `apply`: the image is left as it was.
@@ -206,11 +220,14 @@ fn stf_params_hand_computed() {
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
     //
     // Each value takes a few f32 roundings along the way; 16ε of it holds them.
-    let c = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap();
+    let c = stf_curve(0.1, 0.02, 1.0, 0.25).unwrap();
     let near = |got: f32, expected: f32| (got - expected).abs() <= 16.0 * f32::EPSILON * expected;
-    assert_eq!(c.black, 0.1 - 0.02, "black");
-    assert_eq!(c.inv_range, 1.0 / (1.0 - c.black), "inv_range");
-    assert!(near(c.midtones, 0.0625), "midtones = {}", c.midtones);
+    assert_eq!(c.black.black, 0.1 - 0.02, "black");
+    assert_eq!(c.black.inv_range, 1.0 / (1.0 - c.black.black), "inv_range");
+    let Tone::Mtf(tone) = c.tone else {
+        panic!("an STF curve is an MTF");
+    };
+    assert!(near(tone.midtones, 0.0625), "midtones = {}", tone.midtones);
     assert!(
         near(c.eval(0.1), 0.25),
         "the median maps to the target: {}",
@@ -218,13 +235,32 @@ fn stf_params_hand_computed() {
     );
 }
 
+/// The automatic presets are PixInsight AutoSTF's: the black point 2.8 normalized MADs below the
+/// median, and the median on 0.25. A median of 0.1 and a σ of 0.02 put it at 0.1 − 0.056 = 0.044.
+/// More shadow sigmas lower the black point, the same way for both auto methods.
 #[test]
-fn stf_shadow_sigmas_lower_the_black_point() {
-    let b1 = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap().black;
-    let b3 = StfCurve::new(0.1, 0.02, 3.0, 0.25).unwrap().black;
-    assert_eq!(b1, 0.1 - 0.02);
-    assert_eq!(b3, 0.1 - 3.0 * 0.02);
-    assert!(b3 < b1, "more shadow sigmas => lower black point");
+fn the_auto_black_point_is_autostfs() {
+    assert_eq!(StretchMethod::AUTO_SHADOW_SIGMAS, 2.8);
+    assert_eq!(StretchMethod::AUTO_TARGET_BACKGROUND, 0.25);
+    let preset = |curve: fn(f32, f32, f32, f32) -> Result<Curve, OpError>, shadow_sigmas: f32| {
+        curve(
+            0.1,
+            0.02,
+            shadow_sigmas,
+            StretchMethod::AUTO_TARGET_BACKGROUND,
+        )
+        .unwrap()
+        .black
+        .black
+    };
+    for curve in [stf_curve, auto_asinh_curve] {
+        assert_eq!(
+            preset(curve, StretchMethod::AUTO_SHADOW_SIGMAS),
+            0.1 - 2.8 * 0.02
+        );
+        assert_eq!(preset(curve, 1.0), 0.1 - 0.02);
+        assert_eq!(preset(curve, 3.0), 0.1 - 3.0 * 0.02);
+    }
 }
 
 #[test]
@@ -478,6 +514,7 @@ fn ghs_end_to_end_lifts_the_background() {
     let mut img = gray(Size2us::new(10, 10), px.clone());
     Stretch {
         method: StretchMethod::Ghs {
+            black_point: 0.0,
             d: 5.0,
             b: 0.0,
             sp: 0.1,
@@ -503,7 +540,10 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
         vec![0.15, 0.45],
     );
     let cfg = Stretch {
-        method: StretchMethod::Asinh { beta: 0.05 },
+        method: StretchMethod::Asinh {
+            black_point: 0.0,
+            beta: 0.05,
+        },
         color: ColorMode::ColorPreserving,
     };
     cfg.apply(&mut img).unwrap();
@@ -615,4 +655,94 @@ fn default_config_is_color_preserving_auto_asinh() {
     let cfg = Stretch::default();
     assert_eq!(cfg.color, ColorMode::ColorPreserving);
     assert!(matches!(cfg.method, StretchMethod::AutoAsinh { .. }));
+}
+
+/// Faint Hα, (0.055, 0.05, 0.05) on a sky of 0.05, keeps its hue: the ratio is formed after the
+/// black point, so with the black point on the sky what is left is pure red — green and blue come
+/// out 0 exactly. Formed on the data with the sky in it, the same pixel comes out at the ratio
+/// 0.055 : 0.05, near grey.
+#[test]
+fn faint_h_alpha_keeps_its_hue() {
+    let stretch = |black_point: f32| {
+        let mut image = rgb(Size2us::new(1, 1), vec![0.055], vec![0.05], vec![0.05]);
+        Stretch {
+            method: StretchMethod::Asinh {
+                black_point,
+                beta: 0.01,
+            },
+            color: ColorMode::ColorPreserving,
+        }
+        .apply(&mut image)
+        .unwrap();
+        [0, 1, 2].map(|channel| image.channel(channel).pixels()[0])
+    };
+    let [r, g, b] = stretch(0.05);
+    assert!(r > 0.0, "{r}");
+    assert_eq!([g, b], [0.0, 0.0]);
+    let [r, g, _] = stretch(0.0);
+    assert!((r / g - 1.1).abs() < 1e-5, "the control: {}", r / g);
+}
+
+/// The automatic black point sits below the sky, so a faint red pixel keeps its excess over it:
+/// the output channels stand as `c − black`. The sky runs 0.049, 0.05, 0.051 under a pixel of
+/// (0.055, 0.05, 0.05), which gives a median of 0.05 and a MAD of 0.001; the black point is the
+/// production statistics' median less 2.8 normalized MADs of the intensities, and the output ratio
+/// meets `(0.055 − black) / (0.05 − black)` to the roundings of the rescale (2ε per channel) and
+/// the one gain (ε each): 6ε.
+#[test]
+fn the_auto_black_point_keeps_a_faint_colour() {
+    let size = Size2us::new(16, 16);
+    let sky: Vec<f32> = (0..size.pixel_count())
+        .map(|index| [0.049, 0.05, 0.051][index % 3])
+        .collect();
+    let (mut r, g, b) = (sky.clone(), sky.clone(), sky);
+    r[1] = 0.055;
+    let (g0, b0) = (g[1], b[1]);
+    let mut intensities: Vec<f32> = (0..size.pixel_count())
+        .map(|index| (r[index] + g[index] + b[index]) * (1.0 / 3.0))
+        .collect();
+    let background = MedianMad::of_mut(&mut intensities);
+    let black = background.median - StretchMethod::AUTO_SHADOW_SIGMAS * background.sigma();
+    let mut image = rgb(size, r, g, b);
+    Stretch::auto_asinh().apply(&mut image).unwrap();
+    let (out_r, out_g, out_b) = (
+        image.channel(0).pixels()[1],
+        image.channel(1).pixels()[1],
+        image.channel(2).pixels()[1],
+    );
+    assert_eq!(g0, b0);
+    assert_eq!(out_g, out_b);
+    let expected = (0.055 - black) / (g0 - black);
+    assert!(
+        (out_r / out_g - expected).abs() <= 6.0 * f32::EPSILON * expected,
+        "{} vs {expected}",
+        out_r / out_g
+    );
+    assert!(expected > 1.5, "the excess is a real colour: {expected}");
+}
+
+/// A NaN sample is black on every scalar curve, as on the vector paths.
+#[test]
+fn a_nan_sample_is_black_on_every_curve() {
+    assert_eq!(MtfCurve { midtones: 0.2 }.eval(f32::NAN), 0.0);
+    assert_eq!(AsinhCurve::new(0.05).eval(f32::NAN), 0.0);
+    assert_eq!(GhsCurve::new(3.0, 1.0, 0.5, 0.2, 0.8).eval(f32::NAN), 0.0);
+    assert_eq!(GhsCurve::new(0.0, 1.0, 0.5, 0.2, 0.8).eval(f32::NAN), 0.0);
+    let mut image = rgb(Size2us::new(1, 1), vec![f32::NAN], vec![0.2], vec![0.2]);
+    Stretch {
+        method: StretchMethod::Ghs {
+            black_point: 0.0,
+            d: 3.0,
+            b: 1.0,
+            sp: 0.5,
+            lp: 0.2,
+            hp: 0.8,
+        },
+        color: ColorMode::ColorPreserving,
+    }
+    .apply(&mut image)
+    .unwrap();
+    for channel in 0..3 {
+        assert_eq!(image.channel(channel).pixels(), &[0.0], "channel {channel}");
+    }
 }

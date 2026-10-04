@@ -2,7 +2,7 @@
 mod real_data;
 
 use crate::image_ops::background_extraction::*;
-use crate::image_ops::stretching::Stretch;
+use crate::image_ops::stretching::{Stretch, StretchMethod};
 use crate::internals::images::rgb_image as rgb;
 use crate::internals::prelude::*;
 use crate::math::statistics::median_mut;
@@ -364,7 +364,7 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
 }
 
 /// The standard chain: remove the gradient, then auto-stretch. Each auto stretch must put the
-/// background median on its 0.2 target, from a sky subtracted to ≈0 — the input that sends a
+/// background median on its target, from a sky subtracted to ≈0 — the input that sends a
 /// stretch whose target depends on the median onto a degenerate branch.
 ///
 /// 129×129 is an odd count, so the median is one pixel and a monotone curve maps it exactly;
@@ -390,9 +390,10 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
         stretch.apply(&mut img).unwrap();
         let mut px = img.channel(0).pixels().to_vec();
         let median = median_mut(&mut px);
+        let target = StretchMethod::AUTO_TARGET_BACKGROUND;
         assert!(
-            (median - 0.2).abs() < 1e-4,
-            "{stretch:?}: background median {median}, want 0.2"
+            (median - target).abs() < 1e-4,
+            "{stretch:?}: background median {median}, want {target}"
         );
     }
 }

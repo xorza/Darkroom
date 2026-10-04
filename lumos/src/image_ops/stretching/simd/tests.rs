@@ -1,17 +1,17 @@
 //! Every tier against the scalar curve.
 
-use crate::image_ops::stretching::AsinhCurve;
 use crate::image_ops::stretching::simd::internals::{
     asinh_color_preserve_scalar, asinh_plane_scalar,
 };
 use crate::image_ops::stretching::simd::{AsinhColorPreserve, AsinhPlane};
+use crate::image_ops::stretching::{AsinhCurve, BlackPoint};
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 use crate::simd::math::ASINH_LOG_FROM;
 use crate::simd::tier::Tier;
 use std::f32::consts::LN_2;
 
-/// Every tier over three planes drawn from each shape: the shapes put intensities below zero
-/// (black on both paths), inside the curve, and above the highlight cap.
+/// Every tier over three planes drawn from each shape, after a black point of 0.02: the shapes put
+/// intensities below it (black on both paths), inside the curve, and above the highlight cap.
 ///
 /// The kernel evaluates `asinh` through a Cephes `logf` (about 2 ULP) where the scalar path calls
 /// libm's `asinhf` (at most 1 ULP), so the curve values differ by up to 3 ULP, which is 3ε
@@ -20,6 +20,7 @@ use std::f32::consts::LN_2;
 #[test]
 fn asinh_color_preserve_matches_scalar() {
     let curve = AsinhCurve::new(0.05);
+    let black = BlackPoint::new(0.02);
     assert_simd_matches_scalar(SWEEP_WIDTHS, 4.0 * f32::EPSILON, |tier, shape, width| {
         let mut scalar = [
             shape.row(width, 0),
@@ -28,12 +29,13 @@ fn asinh_color_preserve_matches_scalar() {
         ];
         let mut simd = scalar.clone();
         let [r, g, b] = &mut scalar;
-        asinh_color_preserve_scalar(r, g, b, curve);
+        asinh_color_preserve_scalar(r, g, b, black, curve);
         let [red, green, blue] = &mut simd;
         tier.run(AsinhColorPreserve {
             red,
             green,
             blue,
+            black,
             curve,
         });
         ScalarSimd::relative(scalar.concat(), simd.concat())
@@ -99,6 +101,7 @@ fn asinh_is_accurate_at_every_magnitude() {
         let mut plane = values.clone();
         tier.run(AsinhPlane {
             plane: &mut plane,
+            black: BlackPoint::new(0.0),
             curve,
         });
         for (&x, &got) in values.iter().zip(&plane) {
@@ -117,20 +120,58 @@ fn asinh_is_accurate_at_every_magnitude() {
     }
 }
 
-/// Every tier's plane curve against the scalar curve (libm's `asinhf`), at a curve whose `1/β` puts
-/// the shapes' samples across the whole `asinh` range: both within the 8ε the vector steps keep,
-/// plus the scale's and the clamp's one rounding each.
+/// Every tier's plane curve against the scalar curve (libm's `asinhf`), after a black point of
+/// 0.02, at a curve whose `1/β` puts the shapes' samples across the whole `asinh` range: both
+/// within the 8ε the vector steps keep, plus the scale's and the clamp's one rounding each. The
+/// black point rounds the same two operations on both paths.
 #[test]
 fn asinh_plane_matches_scalar() {
     let curve = AsinhCurve::new(0.05);
+    let black = BlackPoint::new(0.02);
     assert_simd_matches_scalar(SWEEP_WIDTHS, 10.0 * f32::EPSILON, |tier, shape, width| {
         let mut scalar = shape.row(width, 0);
         let mut simd = scalar.clone();
-        asinh_plane_scalar(&mut scalar, curve);
+        asinh_plane_scalar(&mut scalar, black, curve);
         tier.run(AsinhPlane {
             plane: &mut simd,
+            black,
             curve,
         });
         ScalarSimd::relative(scalar, simd)
     });
+}
+
+/// A NaN sample shows as black on every tier and on the scalar path: on the plane, and in any
+/// channel of a colour pixel, whose other channels go black with it because their intensity is
+/// NaN.
+#[test]
+fn a_nan_sample_is_black_on_every_path() {
+    let curve = AsinhCurve::new(0.05);
+    let black = BlackPoint::new(0.02);
+    let mut scalar = [f32::NAN, 0.5];
+    asinh_plane_scalar(&mut scalar, black, curve);
+    assert_eq!(scalar[0], 0.0);
+    let mut red = [f32::NAN, 0.3];
+    let mut green = [0.2, f32::NAN];
+    let mut blue = [0.2, 0.2];
+    asinh_color_preserve_scalar(&mut red, &mut green, &mut blue, black, curve);
+    assert_eq!([red, green, blue], [[0.0; 2]; 3]);
+    for tier in Tier::supported() {
+        let mut plane = [f32::NAN, 0.5];
+        tier.run(AsinhPlane {
+            plane: &mut plane,
+            black,
+            curve,
+        });
+        assert_eq!(plane[0], 0.0, "{tier}");
+        let (mut red, mut green, mut blue) = ([f32::NAN, 0.3], [0.2, f32::NAN], [0.2, 0.2]);
+        tier.run(AsinhColorPreserve {
+            red: &mut red,
+            green: &mut green,
+            blue: &mut blue,
+            black,
+            curve,
+        });
+        assert_eq!([red, green, blue], [[0.0; 2]; 3], "{tier}");
+    }
 }

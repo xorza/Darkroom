@@ -48,6 +48,13 @@ impl Subsample {
         debug_assert!(self.count == 0 || self.index(self.count - 1) < plane.len());
         self.indices().map(move |index| plane[index])
     }
+
+    /// The values of `plane` an image statistic is taken from: at most [`MAX_STATISTIC_SAMPLES`].
+    pub(crate) fn statistic_values(plane: &[f32]) -> Vec<f32> {
+        Self::new(plane.len(), MAX_STATISTIC_SAMPLES)
+            .of(plane)
+            .collect()
+    }
 }
 
 #[cfg(test)]

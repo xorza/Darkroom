@@ -111,8 +111,7 @@ impl Preset for StretchMethodChoice {
 }
 
 /// The editable knobs behind a [`Stretch`]. Both methods take a
-/// `target_background`; `shadow_sigmas` is read only by
-/// [`StretchMethodChoice::AutoStf`].
+/// `target_background` and a `shadow_sigmas`, which sets their black point.
 #[derive(Debug, Clone, Introspect)]
 #[config(type_id = "b08bb9a1-db12-43d4-aa57-fe3e3732e917", name = "Stretch")]
 pub(crate) struct StretchKnobs {
@@ -123,13 +122,13 @@ pub(crate) struct StretchKnobs {
 }
 
 impl Default for StretchKnobs {
-    /// Lumos's automatic presets: [`Stretch::default`]'s auto-asinh, and the
-    /// STF preset's black point should STF be picked.
+    /// Lumos's automatic presets: [`Stretch::default`]'s auto-asinh, with the
+    /// black point and target both automatic methods share.
     fn default() -> Self {
         Self {
             method: StretchMethodChoice::AutoAsinh,
             target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
-            shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+            shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
             color: Stretch::default().color,
         }
     }
@@ -139,6 +138,7 @@ impl From<StretchKnobs> for Stretch {
     fn from(knobs: StretchKnobs) -> Self {
         let method = match knobs.method {
             StretchMethodChoice::AutoAsinh => StretchMethod::AutoAsinh {
+                shadow_sigmas: knobs.shadow_sigmas,
                 target_background: knobs.target_background,
             },
             StretchMethodChoice::AutoStf => StretchMethod::AutoStf {
@@ -234,5 +234,21 @@ mod tests {
         assert_eq!(shadow_sigmas, 2.0);
         assert_eq!(target_background, 0.25);
         assert_eq!(stretch.color, ColorMode::PerChannel);
+
+        let stretch: Stretch = StretchKnobs {
+            method: StretchMethodChoice::AutoAsinh,
+            target_background: 0.3,
+            shadow_sigmas: 1.5,
+            color: ColorMode::ColorPreserving,
+        }
+        .into();
+        let StretchMethod::AutoAsinh {
+            shadow_sigmas,
+            target_background,
+        } = stretch.method
+        else {
+            panic!("expected auto-asinh");
+        };
+        assert_eq!((shadow_sigmas, target_background), (1.5, 0.3));
     }
 }

@@ -24,8 +24,13 @@ use crate::math::vec2us::Vec2us;
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 const WINDOW: usize = 512;
 /// Feather ramp (px): tiles fade in over this border width so overlaps blend without seams.
-const FEATHER_RAMP: f32 = 64.0;
+const FEATHER_RAMP: usize = 64;
 const FEATHER_MIN: f32 = 0.02;
+/// The widest stride at which every pixel lies at full feather weight in some tile: a tile's
+/// full-weight core spans `WINDOW − 2·FEATHER_RAMP` pixels, and the next one must start before it
+/// ends. Wider, a band between cores takes its value only from two tiles' ramps, within
+/// `FEATHER_RAMP` of their window edges, where the model sees least context.
+const MAX_STRIDE: usize = WINDOW - 2 * FEATHER_RAMP;
 
 /// Where the ONNX model is and how finely to tile. lumos ships **no model** — the caller supplies a
 /// legally-obtained `.onnx`.
@@ -33,8 +38,8 @@ const FEATHER_MIN: f32 = 0.02;
 pub struct TiledOnnxConfig {
     /// Path to the caller-supplied ONNX model.
     pub weights: PathBuf,
-    /// Tile stride in px (overlap = `WINDOW − stride`), in `1..=512`: a wider stride would leave
-    /// bands no tile covers. Default 256 (50% overlap).
+    /// Tile stride in px (overlap = `WINDOW − stride`), in `1..=384`: a wider stride would leave
+    /// bands that only the feathered edges of tiles cover. Default 256 (50% overlap).
     pub stride: usize,
 }
 
@@ -46,13 +51,13 @@ impl TiledOnnxConfig {
         }
     }
 
-    /// A stride that covers the frame: at least one pixel, and no wider than the window, past
-    /// which the bands between tiles would hold no model output at all.
+    /// A stride that covers the frame at full weight: at least one pixel, and at most
+    /// [`MAX_STRIDE`].
     fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::check(
-            (1..=WINDOW).contains(&self.stride),
+            (1..=MAX_STRIDE).contains(&self.stride),
             "ML tile stride",
-            "between 1 and 512",
+            "between 1 and 384",
             self.stride as f64,
         )
     }
@@ -187,7 +192,7 @@ const FEATHER_LUT: [f32; WINDOW] = {
         } else {
             WINDOW - 1 - i
         } as f32;
-        lut[i] = (d / FEATHER_RAMP).clamp(FEATHER_MIN, 1.0);
+        lut[i] = (d / FEATHER_RAMP as f32).clamp(FEATHER_MIN, 1.0);
         i += 1;
     }
     lut

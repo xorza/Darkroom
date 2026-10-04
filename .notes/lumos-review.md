@@ -35,51 +35,8 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 16. RAW: the preview is a second decoder, and LibRaw facts are lost
 
-- [ ] `16.1` **The preview RCD reads masked optical-black margins** — `io/raw/mod.rs:541-556`, `io/raw/demosaic/bayer/rcd/mod.rs:123-167,646-733`
-  - Canon frames preview with a dark, colour-fringed left and top band. Preview and science disagree in that band.
-  - LibRaw and RawTherapee demosaic only the visible area. `[C]`
-- [ ] `16.2` **Replace the preview path with `load_raw_cfa` → `CfaImage::demosaic` → clamp** — `io/raw/mod.rs:534-620`
-  - This fixes the item above.
-  - It removes `BlackRepeat::at_raw`, `raw_filter_color`, `apply_bayer_black_corrections`, the `CLAMP=true` normalize instance, `CfaPattern::at_raw_origin` (always the identity), `raw_xtrans_pattern`, `XTransNormalization`, `PixelSource::{U16, U16WithRepeat}`, `XTransImage::with_margins` and `process_xtrans`.
-  - All margin arithmetic in RCD and Markesteijn collapses to active coordinates. The per-read `match` in Markesteijn's inner loop becomes a slice index. `[C]`
-- [ ] `16.3` **RCD always copies into three new output planes** — `io/raw/demosaic/bayer/rcd/mod.rs:424-439`
-  - This costs 288 MB of peak memory and 3 copies per 24 MP frame. `[C]`
-- [ ] `16.4` **The LibRaw fallback uses `adjust_maximum`, so its scale is wrong** — `io/raw/mod.rs:629-646`
-  - The default threshold 0.75 divides by the frame's own maximum when that maximum is within 75–100% of white, but `physical_scale = span` is recorded. Set `adjust_maximum_thr = 0`. `[C]`
-- [ ] `16.5` **The LibRaw fallback rotates by EXIF orientation and stretches by pixel aspect** — `io/raw/mod.rs:629-646,1073-1074`
-  - Portrait frames decode as H×W in this path only, and the `row_order: TopDown` provenance is false. Set `user_flip = 0` and `use_fuji_rotate = 0`.
-  - The 8-bit branch at `:730-745` is dead (`output_bps = 16`). `[C]`
-- [ ] `16.6` **SuperCCD `fuji_width` is ignored** — `io/raw/mod.rs:777-873`
-  - RCD demosaics a 45°-rotated layout. Route it to the fallback, or refuse it. `[P]`
-- [ ] `16.7` **`raw_pitch` is assumed to be `2·raw_width`** — `io/raw/mod.rs:471-483`
-  - Any other pitch shears the image silently. Check the pitch and return an error. `[P]`
-- [ ] `16.8` **The black level is applied in two roundings** — `io/raw/mod.rs:414-449,493-530`, `io/raw/normalize/mod.rs:5-8`
-  - This breaks the module's "correctly rounded" promise. Every black term is an integer ADU, exact in f32.
-  - Do one pass `(v − black_row[x]) / span` with a black row per row phase. Keep integer ADU in `BlackLevel` as the one source, and derive `per_channel`, `common`, `channel_delta_norm` and `delta_norm` from it.
-  - The `delta.abs() > f32::EPSILON` test (`:337`, `:502-504`) becomes `cblack != 0`. `[C]`
-- [ ] `16.9` **Untrusted black metadata can overflow or pass validation** — `io/raw/mod.rs:204,222,240,249,252-260`
-  - `u32 +=` on file data. `BlackExceedsMaximum` checks only `common`. `[C]`
-- [ ] `16.10` **The black level is truncated to whole ADU before lumos sees it** — LibRaw `utils_dcraw.cpp:247-251`, `tiff.cpp:1058-1092`
-  - The OB mean in f64 and `dng_levels.dng_fblack` give the exact value. `[P]`, low.
-- [ ] `16.11` **Both demosaics run on CFA data that is not white-balanced** — `io/raw/demosaic/bayer/rcd/mod.rs`, `io/raw/demosaic/xtrans/markesteijn_steps/mod.rs:792-817`
-  - The direction decisions assume balanced channels. dcraw, RawTherapee, darktable and ART white-balance before they demosaic.
-  - Multiply by the camera WB (green = 1) before the kernel and divide after. `[P]`
 - [ ] `16.12` **X-Trans uses Markesteijn 1-pass** — `io/raw/demosaic/xtrans/markesteijn/mod.rs:1-14,44`
   - The LibRaw default and RawTherapee "best" are 3-pass. It costs ≈2–3× the time. `[P]`
-- [ ] `16.13` **RCD has no golden cross-check against librtprocess** — `io/raw/demosaic/bayer/rcd/tests.rs`
-  - Markesteijn has one. `[C]` absent.
-
-## 17. Format coverage and FITS header facts
-
-- [ ] `17.4` **`RAW_EXTENSIONS` refuses formats that LibRaw decodes** — `io/raw/mod.rs:47`
-  - ORF, RW2, PEF, NRW, SRW, IIQ, 3FR, ERF, MRW and RWL are refused. Siril accepts LibRaw's full list. RW2 needs `zero_is_bad` (group 8) first. `[C]`
-- [ ] `17.5` **Sony YCC pseudo-RAW (LibRaw 0.22) is already white-balanced, and lumos does not read `color.as_shot_wb_applied`** — `io/raw/mod.rs:297-321`
-  - The camera WB recorded in the metadata then describes a balance the samples already carry. `[P]`
-- [ ] `17.6` **Common header aliases are not read** — `io/image/fits/metadata/mod.rs:26-45`
-  - `EXPOSURE`, `CCD_TEMP`, `TEMPERAT`, `BINX`/`BINY`, `PIXSIZE1`, `XPIXELSZ`, `FRAMETYP`, `FILT-1`, `BLKLEVEL` (Siril `fits_keywords.c`). `[C]`
-- [ ] `17.7` **`read_cfa_hdu` is a second FITS entry point with its own validation** — `io/image/fits/decode/mod.rs:163-198`
-  - It skips `validate_cfa_image_header`. `read_master` checks `LUMOSFMT` again by hand.
-  - It uses `LoadContext::default()`, so it ignores the caller's cancel token and FITS options. `[C]`
 
 ## 18. Defect and cosmic-ray correction depart from the references
 
@@ -90,18 +47,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 19. Display-domain operations: colour and tone errors
 
-- [ ] `19.1` **The colour-preserving stretch computes ratios on data that still holds the sky pedestal** — `image_ops/stretching/mod.rs:604-606`, `image_ops/rgb/mod.rs:237-254`, `image_ops/stretching/simd/mod.rs:140-157`
-  - Faint Hα (0.055, 0.05, 0.05) comes out nearly grey.
-  - Lupton 2004 and PixInsight ArcsinhStretch subtract the black point before they form the ratio. Auto-asinh needs a black point. `[C]`
-- [ ] `19.2` **HDR compresses by subtraction, which gives black halos** — `image_ops/hdr/mod.rs:103-107`
-  - An M31 halo pixel goes to 0. Durand & Dorsey compress the base in the log domain: r' = mean·(r/mean)^(1−amount). `[C]`
-- [ ] `19.3` **HDR turns near-black RGB pixels into saturated colour speckle** — `image_ops/hdr/mod.rs:103-107`, `image_ops/rgb/mod.rs:239-242`
-  - (I+δ)/I has no bound. Grey and RGB also disagree at I ≤ 0. `[C]`
-- [ ] `19.4` **The STF preset uses 1.5σ / 0.2, not −2.8·MADN / 0.25** — `image_ops/stretching/mod.rs:99-103`
-  - The module calls it "standard". `[C]`
-- [ ] `19.6` **NaN becomes 0 in the SIMD paths but propagates in the scalar paths** — `image_ops/stretching/simd/mod.rs:135,144` vs `image_ops/stretching/mod.rs:345,376,482,495` `[C]`
-- [ ] `19.7` **ML tile stride validation allows overlaps too small for the feather** — `image_ops/ml/backend/mod.rs:242-249`
-  - Bound the stride at `WINDOW − 2·FEATHER_RAMP`. `[P]`
 - [ ] `19.8` **SCNR has no `amount` for Average Neutral, and no Maximum Neutral or Maximum Mask** — `image_ops/color_calibration/mod.rs:92-98` `[C]` gap.
 
 ## 20. Drizzle defaults and geometry
@@ -187,7 +132,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - the 8-bit LibRaw branch (group 16)
   - `let planar = image;` (`image_ops/ml/backend/mod.rs:282`)
 - [ ] `26.22` **`check_cancel` is a free fn in `combine/error.rs:175`** (rule: error.rs is for errors only). `[C]`
-- [ ] `26.23` **The "subsample a plane into a Vec" code occurs three times** — `image_ops/stretching/mod.rs:240-244`, `image_ops/color_calibration/mod.rs:64-69`, `image_ops/denoise/mod.rs:351-357` `[C]`
 - [ ] `26.24` **`compact_by_mask` reimplements `Vec::retain`, and the dedup has two paths (`_simple`, `_hashed`)** — `star_detection/detector/stages/filter/mod.rs:229-244`
   - One sorted-cell pass replaces both paths. `[C]`
 - [ ] `26.25` **Exposed free fns that belong as methods**
@@ -624,15 +568,7 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 2. Done: the warp reads a parked frame through `SourceImage`, its planes in place from the map rather than copied back, and a parked reference becomes its stored frame without a second write of its channels. Both register-and-warp paths drop their warp buffers before the combine. Items 15.4 and 15.5 are closed; phase 11 is complete but for the host tests under Pending.
    Note: the memory plan still charges a warp worker its source frame on the spill tier. A parked source is now mapped page cache, which the kernel reclaims, so the charge is conservative rather than wrong.
 
-## Phase 12. RAW and FITS paths (C7)
-
-1. Replace the preview path, and remove the list in 16.2.
-2. Add the integer `BlackLevel`, the one-pass normalize and checked file arithmetic.
-3. Add the white-balanced demosaic and the LibRaw fallback settings. Refuse SuperCCD and odd pitch. Widen the extension list.
-4. Merge the FITS entry points. Add the alias table and the streamed checksum. Write and read the `LUMFLAGS` extension, and give the stack product's flags a public view (`PixelFlags` and `LinearImage::flags` are crate-internal today).
-5. Add the RCD golden cross-check (16.13).
-- **Tests:** preview and science agree pixel for pixel in the former margin band. A Canon black level with `cblack` is exact against a hand sum in integers. A portrait frame through the fallback keeps W×H.
-- **Closes:** group 16 except 16.12, 15.9, 17.4 to 17.7.
+## Phase 12. Results
 
 1. Done: `load_raw` is `load_raw_cfa`'s frame demosaicked and clamped, so the preview and the science path cannot disagree, the masked margins included; the reader crops as it normalizes, and both demosaics take cropped frames alone, which removes `BlackRepeat::at_raw`, `raw_filter_color`, `apply_bayer_black_corrections`, the clamped normalize, `CfaPattern::at_raw_origin`, `raw_xtrans_pattern`, `XTransNormalization`, `PixelSource`, `XTransImage::with_margins`, `process_xtrans` and the SIMD normalize. RCD hands back its working planes instead of copying them. `BlackLevel` holds ADU as LibRaw's `adjust_bl` folds them, in f64, and normalizes in one pass, `(v − black(x, y)) / span` rounded once; it uses the unrounded optical-black mean (`black_stat`) and a DNG's float levels where LibRaw's integers are their roundings, refuses a black that reaches `maximum` in any channel or cell, and has no `u32` sums of file data left. The LibRaw fallback sets `adjust_maximum_thr = 0`, `user_flip = 0` and `use_fuji_rotate = 0`, and accepts only 16-bit output. A SuperCCD (`fuji_width`, read through the shim) and a `raw_pitch` other than two bytes per sample are refused. Items 16.1 to 16.10 are closed.
    Deviation (16.10): the DNG float levels are used only when each lies within one ADU of LibRaw's integer for it. LibRaw folds `BlackLevelDeltaH/V` into one rounded mean, and a float that strays further was not where LibRaw's black came from.
@@ -642,11 +578,9 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 4. Done: `rcd_matches_librtprocess_bit_for_bit` holds the interior of four scenes (a colour edge, an impulse, a Moffat star and a triangle grating, made from correctly rounded operations only) in all four Bayer phases to librtprocess's RCD, bit for bit, by an FNV-1a digest per case; `internals/reference/rcd_librtprocess.py` builds librtprocess at a pinned commit and prints the digests. Two sums now group in pairs as librtprocess groups them, which moves the demosaic snapshot (`0951c9f7b35a4fde`) by rounding only. Item 16.13 is closed; phase 12 is complete but for 15.9. Deviations: the cross-check showed that librtprocess, RawTherapee and darktable keep the diagonal high-pass filter on odd columns only, so their step 4.1 reads one or two of its three sites beside the diagonal, and which ones depends on the Bayer phase (0.04 on the star). Lumos keeps RCD 2.3's definition, the three sites along the diagonal (its closed forms expand to that sum, checked to 1e-14), which a phase-invariance test already pins; the script makes this one change to librtprocess. The commit that claimed "as librtprocess does" for this step was wrong. librtprocess's tiles also overlap by 9 pixels where RCD reaches 10, so the two columns at each seam differ from an untiled run (2e-5 on the grating); the test frame fits in one tile.
 
-## Phase 13. Display operations
+## Phase 13. Results
 
-- Subtract the black point before the colour ratio (19.1). Use the log-domain base for HDR (19.2), with a bounded ratio (19.3). Use the standard STF constants (19.4). Use one NaN policy in SIMD and scalar (19.6). Bound the ML tile stride (19.7). Use one `subsample_plane` helper (26.23).
-- **Tests:** faint Hα (0.055, 0.05, 0.05) above a sky of 0.05 keeps its hue after the stretch. The HDR halo pixel stays above 0.
-- **Closes:** 19.1 to 19.4, 19.6, 19.7, 26.23.
+1. Done: every stretch curve first moves its black point to 0 and keeps white at 1, and the colour-preserving ratio is formed after it, as Lupton et al. and PixInsight's ArcsinhStretch form it: faint Hα (0.055, 0.05, 0.05) with the black point on the sky comes out pure red, where the old ratio gave 1.1 : 1. Both automatic methods put the black point at PixInsight AutoSTF's −2.8 normalized MADs and the median on its 0.25 (`AUTO_SHADOW_SIGMAS`, `AUTO_TARGET_BACKGROUND`); `AutoAsinh` takes `shadow_sigmas`, and the explicit `Asinh` and `Ghs` take a `black_point`. A NaN sample is black on every scalar curve and every vector tier. HDR compresses the starlet base of the log intensity, after Durand & Dorsey, so each pixel takes the smooth factor `(G/B)^amount` of its neighbourhood: a halo pixel stays above 0, near-black neighbours keep their ratio, and grey and colour agree at intensities at or below 0; the log reads intensities from one 16-bit step up. The ML tile stride is bounded at 384, where the tiles' full-weight cores meet. `Subsample::statistic_values` is the one plane subsample. The stretch snapshot moves (`262d78318d67a2d8`). Items 19.1 to 19.4, 19.6, 19.7 and 26.23 are closed; phase 13 is complete.
 
 ## Phase 14. Remaining items
 
