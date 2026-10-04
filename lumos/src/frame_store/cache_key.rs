@@ -44,8 +44,8 @@ pub(crate) struct DecodePins {
 
 pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     fits_linear: "eef15741e2043c92",
-    float_tiff: "77b7dfc2f9d95a73",
-    fits_cfa: "e12487046be536c0",
+    float_tiff: "029c2cc11944e24e",
+    fits_cfa: "ab330c08a5153ba9",
     raw_cfa: "b6144af28244502b",
 };
 

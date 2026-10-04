@@ -14,6 +14,8 @@
 //! [`StarDetector`]: crate::star_detection::detector::StarDetector
 //! [`DetectionResources`]: crate::star_detection::resources::DetectionResources
 
+use rayon::prelude::*;
+
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
 use crate::memory::DETECTION_WORKING_PLANES;
@@ -76,49 +78,57 @@ fn buffer_working_set_stays_flat_in_frame_count() {
         .map(|s| star_field(size, 60, 4200 + s).image)
         .collect();
 
-    let mut peak = BufferCounts {
-        floats: 0,
-        bitmasks: 0,
-        labels: 0,
-    };
-    for (name, config) in [
+    // Each preset runs its own detector, so the presets run in parallel.
+    let presets = [
         ("default", Config::default()),
         ("wide_field", Config::wide_field()),
         ("high_resolution", Config::high_resolution()),
         ("crowded_field", Config::crowded_field()),
         ("precise_ground", Config::precise_ground()),
-    ] {
-        let mut detector = StarDetector::from_config(config).unwrap();
+    ];
+    let baselines: Vec<BufferCounts> = presets
+        .into_par_iter()
+        .map(|(name, config)| {
+            let mut detector = StarDetector::from_config(config).unwrap();
 
-        // Warm up across every distinct field: after this the pool holds its full steady-state
-        // scratch.
-        for frame in &frames {
-            detector.detect(frame);
-        }
-        let baseline =
-            buffer_counts_for(&detector).expect("resources are populated after the first detect");
-        peak = BufferCounts {
+            // Warm up across every distinct field: after this the pool holds its full steady-state
+            // scratch.
+            for frame in &frames {
+                detector.detect(frame);
+            }
+            let baseline = buffer_counts_for(&detector)
+                .expect("resources are populated after the first detect");
+
+            // No matter how many more same-size frames we detect, the pool never grows past the
+            // warmed working set. Acquire/release is balanced per stage, so a leak grows the count
+            // on the next detection: one more pass over every field shows it.
+            for (i, frame) in frames.iter().enumerate() {
+                detector.detect(frame);
+                let c = buffer_counts_for(&detector).unwrap();
+                assert!(
+                    c.floats <= baseline.floats
+                        && c.bitmasks <= baseline.bitmasks
+                        && c.labels <= baseline.labels,
+                    "{name}: pool grew on detection {i}: {c:?} exceeds the warmed baseline \
+                     {baseline:?} — a scratch buffer leaked per frame, so star detection's memory \
+                     would scale with the frame count"
+                );
+            }
+            baseline
+        })
+        .collect();
+    let peak = baselines.iter().fold(
+        BufferCounts {
+            floats: 0,
+            bitmasks: 0,
+            labels: 0,
+        },
+        |peak, baseline| BufferCounts {
             floats: peak.floats.max(baseline.floats),
             bitmasks: peak.bitmasks.max(baseline.bitmasks),
             labels: peak.labels.max(baseline.labels),
-        };
-
-        // No matter how many more same-size frames we detect, the pool never grows past the
-        // warmed working set. Acquire/release is balanced per stage, so a growing count means a
-        // leak.
-        for i in 0..16 {
-            detector.detect(&frames[i % frames.len()]);
-            let c = buffer_counts_for(&detector).unwrap();
-            assert!(
-                c.floats <= baseline.floats
-                    && c.bitmasks <= baseline.bitmasks
-                    && c.labels <= baseline.labels,
-                "{name}: pool grew on detection {i}: {c:?} exceeds the warmed baseline \
-                 {baseline:?} — a scratch buffer leaked per frame, so star detection's memory \
-                 would scale with the frame count"
-            );
-        }
-    }
+        },
+    );
     assert_eq!(
         peak, WORKING_SET,
         "warmed pool footprint changed from the pinned working set — if this is an intentional \

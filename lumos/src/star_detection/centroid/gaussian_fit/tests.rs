@@ -230,6 +230,20 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         fit_background: None,
     },
     RecoveryCase {
+        // Near the narrowest σ the fit admits: the seed's moments read it wider, so the fit starts
+        // at a lower order and runs again until it reaches the 7 its own width needs.
+        name: "narrowest_sigma",
+        stamp: 15,
+        center: DVec2::new(7.2, 6.9),
+        amplitude: 1.0,
+        sigma: Vec2::splat(0.55),
+        background: 0.1,
+        guess: DVec2::splat(7.0),
+        fit_radius: 5,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
         name: "zero_background",
         stamp: 21,
         center: DVec2::new(10.0, 10.0),
@@ -417,6 +431,17 @@ fn gaussian_fit_recovers_known_parameters() {
             ] {
                 assert!(error <= bound, "{}: {what} off by {error:e}", case.name);
             }
+            let truth = [
+                case.center.x,
+                case.center.y,
+                f64::from(case.amplitude),
+                1.0 / f64::from(case.sigma.x).powi(2),
+                0.0,
+                1.0 / f64::from(case.sigma.y).powi(2),
+                f64::from(case.background),
+            ];
+            let order = Gaussian2D::new(case.fit_radius as f64, 1e-6).sufficient_order(&truth);
+            assert_eq!(result.debug.order, order, "{}: quadrature order", case.name);
         } else {
             assert!(
                 position_error <= case.position_bound(),
@@ -583,10 +608,8 @@ fn gaussian_fit_rms_residual() {
 /// on and off the vector width — with a cross term in play.
 #[test]
 fn batch_normal_equations_match_reference() {
-    let model = Gaussian2D {
-        max_sigma: 10.0,
-        min_amplitude: 1e-6,
-    };
+    let mut model = Gaussian2D::new(10.0, 1e-6);
+    model.integrate_at(3);
     let truth = [5.0, 5.0, 500.0, 0.25, -0.04, 0.16, 50.0];
     // Away from the truth, so the residuals are not zero.
     let params = [5.2, 4.8, 490.0, 0.23, -0.03, 0.17, 51.0];
@@ -600,10 +623,8 @@ fn batch_normal_equations_match_reference() {
 fn gaussian_evaluate_and_jacobian_consistency() {
     use crate::star_detection::centroid::lm_optimizer::LMModel;
 
-    let model = Gaussian2D {
-        max_sigma: 15.0,
-        min_amplitude: 1e-6,
-    };
+    let mut model = Gaussian2D::new(15.0, 1e-6);
+    model.integrate_at(3);
     let params_list: &[[f64; 7]] = &[
         [10.0, 10.0, 1000.0, 0.25, 0.0, 0.25, 100.0],
         [5.5, 7.3, 500.0, 0.44, 0.1, 0.111, 50.0],
@@ -614,12 +635,20 @@ fn gaussian_evaluate_and_jacobian_consistency() {
 
     for params in params_list {
         for &(x, y) in &points {
-            let eval = model.evaluate(x, y, params);
+            let eval = model.point(x, y, params);
             let jac = Gaussian2D::jacobian_row(x, y, params);
             let ModelSample {
                 value: fused_eval,
                 jacobian: fused_jac,
-            } = model.evaluate_and_jacobian(x, y, params);
+            } = model.point_and_jacobian(x, y, params);
+            // Over the pixel, the same terms weighted alike: within the same bound of the sum.
+            let integrated = model.evaluate(x, y, params);
+            let fused_integrated = model.evaluate_and_jacobian(x, y, params).value;
+            assert!(
+                (integrated - fused_integrated).abs()
+                    <= 64.0 * f64::EPSILON * integrated.abs().max(1.0),
+                "integrated mismatch: {integrated} vs {fused_integrated}"
+            );
 
             assert!(
                 (eval - fused_eval).abs() <= 64.0 * f64::EPSILON * eval.abs().max(1.0),

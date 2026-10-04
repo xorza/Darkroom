@@ -1,7 +1,8 @@
 //! 2D Gaussian fitting for high-precision centroid computation.
 //!
 //! Levenberg-Marquardt fit of an elliptical, rotated Gaussian held by its inverse covariance:
-//! `f(x, y) = A·exp(−½(a·dx² + 2b·dx·dy + c·dy²)) + B`, with `a·c − b² > 0`.
+//! `f(x, y) = A·exp(−½(a·dx² + 2b·dx·dy + c·dy²)) + B`, with `a·c − b² > 0`, integrated over each
+//! pixel.
 //!
 //! The inverse covariance rather than `(σx, σy, θ)`: it has no angle to wrap, and no angle at all
 //! to be undefined when the star is round — `b = 0, a = c` is an ordinary point of the parameter
@@ -14,6 +15,7 @@
 mod simd;
 
 use crate::math::lm_controller::NormalEquations;
+use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
@@ -22,16 +24,12 @@ use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::star_noise::StarNoise;
-use crate::star_detection::centroid::{fit_is_plausible, position_sigma};
+use crate::star_detection::centroid::{
+    MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE, fit_is_plausible, position_sigma,
+};
 use glam::DVec2;
 use imaginarium::Buffer2;
 use std::ops::RangeInclusive;
-
-/// How close to singular the fitted inverse covariance may come: `b² ≤ (1 − MARGIN)·a·c`. The
-/// principal variances' ratio is then at most `(1 + √(1 − m)) / (1 − √(1 − m))` ≈ 4·10⁴ — far past
-/// any star — while `a·c − b²` stays a positive share of `a·c` that the covariance can be
-/// inverted from.
-const DEFINITENESS_MARGIN: f64 = 1e-4;
 
 /// A converged 2D Gaussian fitted to one star stamp: where its centre landed and its
 /// shape. Build one with [`GaussianFit::new`].
@@ -59,28 +57,41 @@ struct Gaussian2D {
     max_sigma: f64,
     /// The smallest amplitude the fit may take; see [`StampFit::min_amplitude`].
     min_amplitude: f64,
-}
-
-/// The narrowest σ the fit may take, in px.
-const MIN_SIGMA: f64 = 0.5;
-
-/// The largest `|b|` [`DEFINITENESS_MARGIN`] allows beside `a` and `c`: where
-/// [`Gaussian2D::constrain`] holds the fit, and so where a fit pinned at that bound is told apart
-/// from a free one.
-fn max_cross_term(a: f64, c: f64) -> f64 {
-    ((1.0 - DEFINITENESS_MARGIN) * a * c).sqrt()
+    /// The midpoint until [`StampFit::fit`] sets the order the profile needs.
+    quadrature: PixelQuadrature,
 }
 
 impl Gaussian2D {
-    /// The range `a` and `c` are held to: `1/σ²` for σ between [`MIN_SIGMA`] and the stamp radius.
+    fn new(max_sigma: f64, min_amplitude: f64) -> Self {
+        Self {
+            max_sigma,
+            min_amplitude,
+            quadrature: PixelQuadrature::gauss_legendre(1),
+        }
+    }
+
+    /// The range the inverse covariance's eigenvalues are held to: `1/σ²` for a principal σ
+    /// between [`MIN_PROFILE_SIGMA`] and the stamp radius. Its diagonal lies between the eigenvalues, so
+    /// `a` and `c` are held to it too.
     fn curvature_range(&self) -> RangeInclusive<f64> {
-        1.0 / (self.max_sigma * self.max_sigma)..=1.0 / (MIN_SIGMA * MIN_SIGMA)
+        1.0 / (self.max_sigma * self.max_sigma)..=1.0 / (MIN_PROFILE_SIGMA * MIN_PROFILE_SIGMA)
+    }
+
+    /// The largest `|b|` beside `a` and `c` within [`Self::curvature_range`] that keeps both
+    /// eigenvalues `½(a + c) ± √(¼(a − c)² + b²)` in it: `b² ≤ (K − a)(K − c)` bounds the larger
+    /// by `K`, and `b² ≤ (a − k)(c − k)` the smaller by `k > 0`, which keeps the matrix definite.
+    /// [`LMModel::constrain`] holds the fit there, so a fit pinned at it is told apart from a free
+    /// one.
+    fn max_cross_term(&self, a: f64, c: f64) -> f64 {
+        let curvature = self.curvature_range();
+        let (k, big_k) = (*curvature.start(), *curvature.end());
+        ((big_k - a) * (big_k - c)).min((a - k) * (c - k)).sqrt()
     }
 }
 
 impl LMModel<7> for Gaussian2D {
     #[inline]
-    fn evaluate(&self, x: f64, y: f64, params: &[f64; 7]) -> f64 {
+    fn point(&self, x: f64, y: f64, params: &[f64; 7]) -> f64 {
         let [x0, y0, amp, a, b, c, bg] = *params;
         let dx = x - x0;
         let dy = y - y0;
@@ -88,16 +99,33 @@ impl LMModel<7> for Gaussian2D {
         amp * (-0.5 * q).exp() + bg
     }
 
-    /// Amplitude at least `min_amplitude`, `a` and `c` within [`Gaussian2D::curvature_range`],
-    /// and `b` held to [`DEFINITENESS_MARGIN`] of singular, so every step leaves a profile that is
-    /// a Gaussian.
+    fn quadrature(&self) -> &PixelQuadrature {
+        &self.quadrature
+    }
+
+    fn integrate_at(&mut self, order: usize) {
+        self.quadrature = PixelQuadrature::gauss_legendre(order);
+    }
+
+    /// From the narrower of the σ along each pixel axis at a fixed offset along the other,
+    /// `1/√a` and `1/√c`; within the curvature range it is at least [`MIN_PROFILE_SIGMA`], where
+    /// the order is 7.
+    fn sufficient_order(&self, params: &[f64; 7]) -> usize {
+        let sigma = 1.0 / params[3].max(params[5]).sqrt();
+        PixelQuadrature::sufficient_order(AnalyticProfile::Gaussian { sigma }, PIXEL_MEAN_TOLERANCE)
+            .expect("a Gaussian of σ 0.5 or wider needs order 7")
+    }
+
+    /// Amplitude at least `min_amplitude`, and the principal widths within
+    /// [`Gaussian2D::curvature_range`]: `a` and `c` within it, then `b` within
+    /// [`Gaussian2D::max_cross_term`], so every step leaves a profile that is a Gaussian.
     #[inline]
     fn constrain(&self, params: &mut [f64; 7]) {
         let curvature = self.curvature_range();
         params[2] = params[2].max(self.min_amplitude);
         params[3] = params[3].clamp(*curvature.start(), *curvature.end());
         params[5] = params[5].clamp(*curvature.start(), *curvature.end());
-        let b_max = max_cross_term(params[3], params[5]);
+        let b_max = self.max_cross_term(params[3], params[5]);
         params[4] = params[4].clamp(-b_max, b_max);
     }
 
@@ -109,6 +137,7 @@ impl LMModel<7> for Gaussian2D {
         NormalEquationsKernel {
             model: GaussianBatch::new(*params),
             data,
+            quadrature: &self.quadrature,
         }
         .dispatch()
     }
@@ -117,6 +146,7 @@ impl LMModel<7> for Gaussian2D {
         Chi2Kernel {
             model: GaussianBatch::new(*params),
             data,
+            quadrature: &self.quadrature,
         }
         .dispatch()
     }
@@ -154,16 +184,14 @@ impl GaussianFit {
             f64::from(background),
         ];
 
-        let model = Gaussian2D {
-            max_sigma: grid.radius as f64,
-            min_amplitude: StampFit::min_amplitude(amplitude_seed),
-        };
-        let result = fit.fit(&model, grid, initial_params)?;
+        let mut model =
+            Gaussian2D::new(grid.radius as f64, StampFit::min_amplitude(amplitude_seed));
+        let result = fit.fit(&mut model, grid, initial_params)?;
 
         let [x0, y0, amplitude, a, b, c, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
         let curvature = model.curvature_range();
-        let b_max = max_cross_term(a, c);
+        let b_max = model.max_cross_term(a, c);
         let shape_free = amplitude > model.min_amplitude
             && [a, c]
                 .iter()
@@ -182,7 +210,11 @@ impl GaussianFit {
                 xy: -b / det,
             },
             #[cfg(test)]
-            debug: internals::GaussianFitDebug::of(&result, fit.stamp.z.len()),
+            debug: internals::GaussianFitDebug::of(
+                &result,
+                fit.stamp.z.len(),
+                model.quadrature.nodes().len(),
+            ),
         })
     }
 }
@@ -199,7 +231,7 @@ mod internals {
         /// `∂f/∂x0 = A·E·(a·dx + b·dy)`, `∂f/∂y0 = A·E·(b·dx + c·dy)`, `∂f/∂A = E`,
         /// `∂f/∂a = −½A·E·dx²`, `∂f/∂b = −A·E·dx·dy`, `∂f/∂c = −½A·E·dy²`, `∂f/∂B = 1`,
         /// with `E = exp(−½(a·dx² + 2b·dx·dy + c·dy²))`.
-        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 7]) -> ModelSample<7> {
+        fn point_and_jacobian(&self, x: f64, y: f64, params: &[f64; 7]) -> ModelSample<7> {
             let [x0, y0, amp, a, b, c, bg] = *params;
             let dx = x - x0;
             let dy = y - y0;
@@ -234,6 +266,8 @@ mod internals {
         pub(super) rms_residual: f32,
         /// Number of iterations used.
         pub(super) iterations: usize,
+        /// The quadrature order the fit ended at.
+        pub(super) order: usize,
     }
 
     impl GaussianFit {
@@ -250,20 +284,21 @@ mod internals {
     impl GaussianFitDebug {
         /// Derive the diagnostics from the optimizer's report, where `n` is the sample count the
         /// χ² was summed over. Gated with the struct, so a release build runs none of this.
-        pub(super) fn of(result: &LmFit<7>, n: usize) -> Self {
+        pub(super) fn of(result: &LmFit<7>, n: usize, order: usize) -> Self {
             let [_, _, amplitude, _, _, _, background] = result.params;
             Self {
                 amplitude: amplitude as f32,
                 background: background as f32,
                 rms_residual: (result.chi2 / n as f64).sqrt() as f32,
                 iterations: result.iterations,
+                order,
             }
         }
     }
 
     impl Gaussian2D {
-        /// The Jacobian row alone, derived independently of
-        /// [`Gaussian2D::evaluate_and_jacobian`]'s fused form.
+        /// The Jacobian row alone at one point, derived independently of
+        /// [`Gaussian2D::point_and_jacobian`]'s fused form.
         ///
         /// The vector kernel mirrors the fused path; this exists so the consistency test has a second
         /// derivation of the same algebra to check it against. Keep the two written out

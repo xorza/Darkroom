@@ -117,7 +117,9 @@ fn fits_report_their_own_widths() {
 
 /// The windowed covariance deconvolves its Gaussian window, `C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹`, which is
 /// exact for a Gaussian source: it returns the source's own covariance, axes kept apart, from any
-/// seed window — one pass already lands, and the rest re-weight by the same answer.
+/// seed window — one pass already lands, and the rest re-weight by the same answer. The samples
+/// here are the Gaussian at the pixel centres, so the source is a Gaussian; a pixel's box is the
+/// moment metrics' to remove.
 ///
 /// The stamps keep ≥ 4.67σ of each source along every axis: what they cut and the sampling leave
 /// ≤ 3.1e-8 of each variance (measured), under the 1e-7 asserted.
@@ -126,16 +128,22 @@ fn windowed_covariance_deconvolves_to_the_source() {
     let size = Size2us::new(64, 64);
     let pos = DVec2::splat(32.0);
     for (sigma_x, sigma_y, radius) in [(2.5f32, 2.5f32, 12), (3.0, 2.0, 14), (2.0, 3.0, 14)] {
-        let pixels = SyntheticStar::new(
-            pos.as_vec2(),
-            1.0,
-            StarProfile::Elliptical {
-                sigma_x,
-                sigma_y,
-                angle: 0.0,
-            },
-        )
-        .stamp(size, 0.0);
+        let profile = StarProfile::Elliptical {
+            sigma_x,
+            sigma_y,
+            angle: 0.0,
+        };
+        let pixels = Buffer2::new(
+            size.width,
+            size.height,
+            (0..size.pixel_count())
+                .map(|index| {
+                    let dx = (index % size.width) as f64 - pos.x;
+                    let dy = (index / size.width) as f64 - pos.y;
+                    profile.shape_at(dx, dy) as f32
+                })
+                .collect(),
+        );
         let measured = Measured::flat(&pixels, 0.0, 1.0);
         let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
         for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {

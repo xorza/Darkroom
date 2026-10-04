@@ -70,7 +70,7 @@ fn pipeline_wider_psf() {
     }
     .frame();
 
-    run_test("wider_psf", "pipeline", &frame, &synthetic_config(), 13);
+    run_test("wider_psf", "pipeline", &frame, &synthetic_config(), 12);
 }
 
 /// Test: Wide dynamic range (bright to faint stars).

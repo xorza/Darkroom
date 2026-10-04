@@ -94,8 +94,10 @@ mod tests {
             &[(Vec2::new(8.0, 20.0), 0.5)],
             1,
         );
-        // Peak is exactly the sky plus the star's amplitude, and it is where we put it.
-        assert_eq!(field.pixels[(8, 20)], 0.6);
+        // The peak pixel is the sky plus the amplitude times the profile's mean over it, at σ 1.5:
+        // m(0) = 3·√(π/2)·erf(1/(3√2)) = 0.981786 per axis, so 0.1 + 0.5·m(0)² = 0.581952, to the
+        // f32 rounding of the sum. It sits where we put it.
+        assert!((field.pixels[(8, 20)] - 0.581_952).abs() <= 1e-7);
         assert_eq!(field.centers, vec![Vec2us::new(8, 20)]);
         // Far from the star, only sky.
         assert_eq!(field.pixels[(31, 0)], 0.1);

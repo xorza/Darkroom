@@ -3,7 +3,7 @@
 
 use crate::simd::Isa;
 use crate::simd::math::Math;
-use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Lanes, Sample};
+use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
 
 /// The Gaussian at `[x0, y0, amplitude, a, b, c, background]`.
 #[derive(Debug, Clone, Copy)]
@@ -56,16 +56,16 @@ impl<S: Isa> LaneProfile<S, 7> for Profile<S> {
     /// `∂f/∂a = −½A·E·dx²`, `∂f/∂b = −A·E·dx·dy`, `∂f/∂c = −½A·E·dy²`, `∂f/∂B = 1`,
     /// with `E = exp(−½(a·dx² + 2b·dx·dy + c·dy²))`.
     #[inline(always)]
-    fn sample(self, isa: S, lanes: Lanes<S::F64>) -> Sample<S::F64, 7> {
-        let dx = lanes.x - self.x0;
-        let dy = lanes.y - self.y0;
+    fn sample(self, isa: S, x: S::F64, y: S::F64) -> Sample<S::F64, 7> {
+        let dx = x - self.x0;
+        let dy = y - self.y0;
         let t = self.a * dx + self.b * dy;
         let u = self.b * dx + self.c * dy;
         let exp_val = isa.exp_f64(self.neg_half * (dx * t + dy * u));
         let amp_exp = self.amp * exp_val;
         let half_amp_exp = self.neg_half * amp_exp;
         Sample {
-            residual: lanes.z - (amp_exp + self.bg),
+            value: amp_exp + self.bg,
             jacobian: [
                 amp_exp * t,
                 amp_exp * u,
@@ -83,19 +83,19 @@ impl<S: Isa> LaneProfile<S, 7> for Profile<S> {
 mod tests {
     use crate::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
     use crate::star_detection::centroid::lm_optimizer::internals::ModelStamp;
     use crate::star_detection::centroid::simd::internals::assert_every_tier_matches_portable;
 
     #[test]
     fn every_tier_matches_portable_bit_for_bit() {
-        let model = Gaussian2D {
-            max_sigma: 15.0,
-            min_amplitude: 1e-6,
-        };
+        let mut model = Gaussian2D::new(15.0, 1e-6);
+        model.integrate_at(3);
         let stamp = ModelStamp::of(&model, 4, &[1.6, 1.4, 500.0, 0.25, -0.02, 0.18, 50.0]);
         assert_every_tier_matches_portable(
             GaussianBatch::new([1.7, 1.3, 490.0, 0.23, -0.03, 0.17, 51.0]),
             stamp.data(),
+            &model.quadrature,
         );
     }
 }

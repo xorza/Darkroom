@@ -174,7 +174,32 @@ impl StampFit {
         FitData::new(&grid.x, &grid.y, &self.stamp.z, self.weights.as_deref())
     }
 
-    /// Fit `model` to the stamp from `initial`; `None` when the fit does not converge.
+    /// Fit `model`, integrated over each pixel, to the stamp from `initial`; `None` when the fit
+    /// does not converge.
+    ///
+    /// The quadrature starts at the order the profile at `initial` needs. A fit that converges to
+    /// a profile needing more runs again from its result at that order, until the order suffices
+    /// for the profile it lands on; the order only rises, so this ends by the order the narrowest
+    /// admitted profile needs.
+    pub(super) fn fit<M: LMModel<N>, const N: usize>(
+        &mut self,
+        model: &mut M,
+        grid: &StampGrid,
+        initial: [f64; N],
+    ) -> Option<LmFit<N>> {
+        model.integrate_at(model.sufficient_order(&initial));
+        let mut result = self.fit_at_order(model, grid, initial)?;
+        loop {
+            let needed = model.sufficient_order(&result.params);
+            if needed <= model.quadrature().nodes().len() {
+                return Some(result);
+            }
+            model.integrate_at(needed);
+            result = self.fit_at_order(model, grid, result.params)?;
+        }
+    }
+
+    /// One fit at the model's quadrature.
     ///
     /// A weighted fit that converged then runs once more, with each weight taken from the first
     /// fit's model value instead of the observed pixel, starting where the first ended. Weights
@@ -182,7 +207,7 @@ impl StampFit {
     /// Neyman's χ² — which biases amplitude and width low; one pass of iteratively reweighted least
     /// squares replaces that noise in the weights with the much smaller error of the first fit. A
     /// failed first fit has no model to reweight from, and a failed second one leaves the first.
-    pub(super) fn fit<M: LMModel<N>, const N: usize>(
+    fn fit_at_order<M: LMModel<N>, const N: usize>(
         &mut self,
         model: &M,
         grid: &StampGrid,

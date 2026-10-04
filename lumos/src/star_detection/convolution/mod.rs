@@ -14,6 +14,8 @@ use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::pixel_gaussian::PixelGaussian;
+use crate::math::pixel_quadrature::PixelQuadrature;
 use crate::math::size2us::Size2us;
 use crate::star_detection::config::fwhm_config::MatchedFilter;
 use imaginarium::Buffer2;
@@ -21,6 +23,11 @@ use imaginarium::Buffer2;
 /// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.
 const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
+
+/// The Gauss–Legendre order of an elliptical kernel's pixel means. The error falls geometrically
+/// with the order: order 8 errs by 2e-12 of the peak at σ 0.5, and 16 is under f64 rounding. The
+/// kernel is built once per frame, so the order costs nothing that matters.
+const ELLIPTICAL_KERNEL_ORDER: usize = 16;
 
 #[derive(Debug)]
 struct GaussianKernel2d {
@@ -32,7 +39,8 @@ struct GaussianKernel2d {
 /// contents and `values`' size — for the intermediate pass.
 ///
 /// Convolves the residual — the image less its sky, so the convolution carries no pedestal — with a
-/// Gaussian kernel matching the expected PSF. The output is normalized by `sqrt(sum(K^2))`, which
+/// Gaussian kernel matching the expected PSF as the pixels record it: each weight is the PSF's
+/// mean over its pixel. The output is normalized by `sqrt(sum(K^2))`, which
 /// keeps white noise at its σ; the detection plane measures the σ its output has anyway, which
 /// holds for noise of any correlation.
 ///
@@ -142,7 +150,8 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
         });
 }
 
-/// Compute 1D Gaussian kernel (normalized to sum to 1.0).
+/// The 1D Gaussian kernel of `sigma` out to `3σ`, each weight the profile's mean over its pixel,
+/// normalized to sum to 1.
 #[expect(
     clippy::cast_sign_loss,
     reason = "σ derives from a validated, positive FWHM"
@@ -151,24 +160,14 @@ fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
     let radius = (3.0 * sigma).ceil() as usize;
-    let size = 2 * radius + 1;
-    let mut kernel = vec![0.0f32; size];
-
-    let two_sigma_sq = 2.0 * sigma * sigma;
-    let mut sum = 0.0f32;
-
-    for (i, k) in kernel.iter_mut().enumerate() {
-        let x = i as f32 - radius as f32;
-        let value = (-x * x / two_sigma_sq).exp();
-        *k = value;
-        sum += value;
-    }
-
-    for v in &mut kernel {
-        *v /= sum;
-    }
-
-    kernel
+    let gaussian = PixelGaussian {
+        sigma: f64::from(sigma),
+    };
+    let means: Vec<f64> = (0..=2 * radius)
+        .map(|i| gaussian.mean_at(i as f64 - radius as f64))
+        .collect();
+    let sum: f64 = means.iter().sum();
+    means.iter().map(|&mean| (mean / sum) as f32).collect()
 }
 
 /// Convolve all rows in parallel, vectors within each row.
@@ -189,7 +188,8 @@ fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]
     simd::convolve_cols_direct(input.pixels(), output.pixels_mut(), size, kernel);
 }
 
-/// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
+/// The 2D elliptical Gaussian kernel out to `3σ` of the major axis, each weight the profile's mean
+/// over its pixel, normalized to sum to 1.
 #[expect(
     clippy::cast_sign_loss,
     reason = "σ derives from a validated, positive FWHM"
@@ -204,40 +204,28 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
     let radius = (3.0 * sigma).ceil() as usize;
     let size = 2 * radius + 1;
 
-    let sigma_major = sigma;
-    let sigma_minor = sigma * axis_ratio;
-
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
+    let sigma_major = f64::from(sigma);
+    let sigma_minor = sigma_major * f64::from(axis_ratio);
+    let (sin_a, cos_a) = f64::from(angle).sin_cos();
     let two_sigma_major_sq = 2.0 * sigma_major * sigma_major;
     let two_sigma_minor_sq = 2.0 * sigma_minor * sigma_minor;
+    let profile = |x: f64, y: f64| {
+        let x_rot = x * cos_a + y * sin_a;
+        let y_rot = -x * sin_a + y * cos_a;
+        (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp()
+    };
 
-    let mut kernel = vec![0.0f32; size * size];
-    let mut sum = 0.0f32;
-
-    for ky in 0..size {
-        for kx in 0..size {
-            let x = kx as f32 - radius as f32;
-            let y = ky as f32 - radius as f32;
-
-            let x_rot = x * cos_a + y * sin_a;
-            let y_rot = -x * sin_a + y * cos_a;
-
-            let value =
-                (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp();
-
-            kernel[ky * size + kx] = value;
-            sum += value;
-        }
-    }
-
-    for v in &mut kernel {
-        *v /= sum;
-    }
-
+    let rule = PixelQuadrature::gauss_legendre(ELLIPTICAL_KERNEL_ORDER);
+    let means: Vec<f64> = (0..size * size)
+        .map(|index| {
+            let x = (index % size) as f64 - radius as f64;
+            let y = (index / size) as f64 - radius as f64;
+            rule.integrate(x, y, profile)
+        })
+        .collect();
+    let sum: f64 = means.iter().sum();
     GaussianKernel2d {
-        weights: kernel,
+        weights: means.iter().map(|&mean| (mean / sum) as f32).collect(),
         size,
     }
 }

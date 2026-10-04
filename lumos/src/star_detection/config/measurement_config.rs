@@ -34,8 +34,9 @@ impl CentroidMethod {
     /// Validate the centroid method configuration.
     pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         if let CentroidMethod::MoffatFit { beta } = self {
-            InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", beta, |value| {
-                value > 0.0 && value <= 10.0
+            // At β ≤ 1 the profile's flux diverges: no PSF has it.
+            InvalidConfigField::finite("Moffat beta", "finite and in (1, 10]", beta, |value| {
+                value > 1.0 && value <= 10.0
             })?;
         }
         Ok(())

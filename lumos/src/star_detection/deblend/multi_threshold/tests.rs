@@ -606,11 +606,12 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
         };
         // 6σ, not the profile's own 4σ: this component is padded well past the falloff on purpose.
         let radius = (sigma * 6.0).ceil() as i32;
+        let star_pixels = star.pixels();
         for dy in -radius..=radius {
             for dx in -radius..=radius {
                 let x = (star.center.x as i32 + dx) as usize;
                 let y = (star.center.y as i32 + dy) as usize;
-                pixels[(x, y)] += star.value_at(x as f32, y as f32);
+                pixels[(x, y)] += star_pixels.value(x, y);
             }
         }
     }

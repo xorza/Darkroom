@@ -57,7 +57,7 @@ fn uniform_tracking_error() {
         "challenging",
         &frame,
         &Config::default(),
-        12,
+        11,
     );
 }
 

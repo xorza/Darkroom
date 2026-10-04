@@ -702,22 +702,19 @@ fn elliptical_convolve_various_axis_ratios() {
     }
 }
 
+/// Each weight is the Gaussian's mean over its pixel. At σ 1 the centre pixel holds
+/// `erf(1/(2√2))` of the light, 0.382925, and the next one `(erf(3/(2√2)) − erf(1/(2√2)))/2`,
+/// 0.241730: a ratio of 0.631273. Both weights carry one f32 rounding of the division by the shared
+/// sum and the ratio one more: 2ε.
 #[test]
 fn gaussian_kernel_known_values() {
-    // For sigma=1.0, the 1D Gaussian at x=0 is 1/(sqrt(2*pi)*sigma) ≈ 0.3989
-    // After normalization, center should be the largest
     let kernel = gaussian_kernel_1d(1.0);
     let center = kernel.len() / 2;
-
-    // The kernel is normalized, so we check relative values
-    // At x=1, G(1)/G(0) = exp(-0.5) ≈ 0.6065
     let ratio = kernel[center + 1] / kernel[center];
-    let expected_ratio = (-0.5f32).exp();
-
-    // Both weights carry one rounding from the shared division and the ratio one more: 2ε.
+    let expected_ratio = 0.631_273_4f32;
     assert!(
         (ratio - expected_ratio).abs() <= 2.0 * f32::EPSILON,
-        "Gaussian ratio at x=1 should be exp(-0.5): {ratio} vs {expected_ratio}"
+        "ratio of the pixels at 1 and 0: {ratio} vs {expected_ratio}"
     );
 }
 

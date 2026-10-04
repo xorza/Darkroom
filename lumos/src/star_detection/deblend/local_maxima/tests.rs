@@ -81,7 +81,7 @@ fn single_star_is_one_whole_region() {
 
     let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(50, 50)]);
-    assert_eq!(peaks[0].value, 1.0);
+    assert_eq!(peaks[0].value, fixture.pixels[(50, 50)]);
 
     let regions = deblended(&component, default_separation(), default_prominence());
     assert_eq!(regions.len(), 1);
@@ -103,7 +103,10 @@ fn two_separated_stars() {
 
     let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
-    assert_eq!((peaks[0].value, peaks[1].value), (1.0, 0.8));
+    assert_eq!(
+        (peaks[0].value, peaks[1].value),
+        (fixture.pixels[(30, 50)], fixture.pixels[(70, 50)])
+    );
 
     let regions = deblended(&component, default_separation(), default_prominence());
     let blob_area = |left: bool| {
