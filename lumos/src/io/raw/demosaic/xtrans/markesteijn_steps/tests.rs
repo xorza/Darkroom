@@ -1,24 +1,14 @@
 use crate::internals::assertions::assert_close;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
+use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern};
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
 
 #[test]
 fn green_minmax_uniform() {
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; w * h];
     let mut gmax = vec![0.0f32; w * h];
@@ -33,23 +23,12 @@ fn green_minmax_uniform() {
 
 #[test]
 fn green_minmax_bounds() {
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
     // Create gradient data
-    let data: Vec<u16> = (0..raw_w * raw_h)
-        .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
-        .collect();
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data: Vec<f32> = (0..w * h).map(|i| (i as f32) / (w * h) as f32).collect();
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; w * h];
     let mut gmax = vec![0.0f32; w * h];
@@ -69,20 +48,11 @@ fn green_minmax_bounds() {
 
 #[test]
 fn interpolate_green_uniform() {
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; w * h];
     let mut gmax = vec![0.0f32; w * h];
@@ -92,7 +62,7 @@ fn interpolate_green_uniform() {
     interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
     // Every direction's green is the uniform input, to a few f32 roundings of its weighted average.
-    let expected = f32::from(to_u16(0.5)) / 65535.0;
+    let expected = 0.5;
     for d in 0..NDIR {
         for i in 0..w * h {
             let g = green_dir[d * w * h + i];
@@ -200,9 +170,9 @@ fn derivatives_of_uniform_input_vanish_inside_the_border() {
     let size = Size2us::new(24, 24);
     let (w, h) = (size.width, size.height);
     let pixels = size.pixel_count();
-    let data = vec![to_u16(0.5); pixels];
-    let xtrans = make_xtrans(&data, SensorLayout::cropped(size));
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; pixels];
+    let xtrans = make_xtrans(&data, size);
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
@@ -230,31 +200,18 @@ fn derivatives_of_uniform_input_vanish_inside_the_border() {
 #[test]
 fn derivatives_checkerboard_nonzero() {
     // Checkerboard input has sharp edges → non-zero Laplacian (derivatives).
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
     let pixels = w * h;
-    let data: Vec<u16> = (0..raw_w * raw_h)
+    let data: Vec<f32> = (0..w * h)
         .map(|i| {
-            let y = i / raw_w;
-            let x = i % raw_w;
-            if (x + y) % 2 == 0 {
-                to_u16(0.8)
-            } else {
-                to_u16(0.2)
-            }
+            let y = i / w;
+            let x = i % w;
+            if (x + y) % 2 == 0 { 0.8 } else { 0.2 }
         })
         .collect();
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
@@ -490,21 +447,12 @@ fn geometry_stages_cover_each_xtrans_site() {
 
 #[test]
 fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
-    let raw_w = 30;
-    let raw_h = 30;
     let w = 18;
     let h = 18;
     let pixels = w * h;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
     let mut gmin = vec![0.0; pixels];
     let mut gmax = vec![0.0; pixels];
     let mut green_dir = vec![0.0; NDIR * pixels];
@@ -516,13 +464,13 @@ fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
     for direction in 0..NDIR {
         for y in 3..h - 3 {
             for x in 3..w - 3 {
-                let raw_y = y + xtrans.layout.margin.y;
-                let raw_x = x + xtrans.layout.margin.x;
-                let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
+                let raw_y = y;
+                let raw_x = x;
+                let native = xtrans.pattern.color_at(Vec2us::new(raw_x, raw_y));
                 let [red, blue] = colors[direction * pixels + y * w + x];
                 match native {
-                    0 => assert_eq!(red, active_raw(&xtrans, y, x)),
-                    2 => assert_eq!(blue, active_raw(&xtrans, y, x)),
+                    0 => assert_eq!(red, xtrans.read(y, x)),
+                    2 => assert_eq!(blue, xtrans.read(y, x)),
                     1 if !is_solitary_green(&hex, raw_y, raw_x) && direction >= 2 => {
                         assert_eq!([red, blue], [0.0, 0.0]);
                         continue;
@@ -565,21 +513,12 @@ fn reconstruction_geometry_dependencies_are_completed_by_earlier_stages() {
 #[test]
 fn blend_uniform_homo_produces_uniform_output() {
     // With uniform input and uniform homogeneity, output should be uniform
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
     let pixels = w * h;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
@@ -630,21 +569,12 @@ fn blend_uniform_homo_produces_uniform_output() {
 #[test]
 fn blend_one_dominant_direction() {
     // With one dominant direction, output should match that direction's RGB
-    let raw_w = 42;
-    let raw_h = 42;
     let w = 30;
     let h = 30;
     let pixels = w * h;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let data = vec![0.5; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
+    let hex = HexLookup::new(&xtrans.pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
@@ -733,7 +663,7 @@ fn a_border_pixel_takes_a_missing_colour_from_that_colour() {
     let data: Vec<f32> = (0..size.pixel_count())
         .map(|index| (10 * (index / size.width) + index % size.width + 1) as f32)
         .collect();
-    let xtrans = XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
+    let xtrans = XTransImage::new(&data, size, test_pattern());
     let mut r = vec![0.0; size.pixel_count()];
     let mut g = vec![0.0; size.pixel_count()];
     let mut b = vec![0.0; size.pixel_count()];

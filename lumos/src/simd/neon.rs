@@ -80,17 +80,6 @@ impl Isa for Neon {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> NeonF32 {
-        unsafe {
-            let samples = vld1q_u16(lanes.as_ptr());
-            NeonF32 {
-                low: vcvtq_f32_u32(vmovl_u16(vget_low_u16(samples))),
-                high: vcvtq_f32_u32(vmovl_high_u16(samples)),
-            }
-        }
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: NeonF32) -> NeonF32 {
         let last = lookup_last(table);
         self.load_f32(

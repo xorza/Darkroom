@@ -67,14 +67,6 @@ impl Isa for Avx2Fma {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> Avx2F32 {
-        Avx2F32(unsafe {
-            let samples = _mm_loadu_si128(lanes.as_ptr().cast());
-            _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(samples))
-        })
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: Avx2F32) -> Avx2F32 {
         let clamped = index
             .min(self.splat_f32(lookup_last(table)))

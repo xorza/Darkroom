@@ -19,7 +19,7 @@ pub(super) enum BlackLevelError {
         capacity: usize,
     },
 
-    /// Black is at or above maximum, leaving no range to normalize into.
-    #[error("invalid black level: common black {black} >= maximum {maximum}")]
-    BlackExceedsMaximum { black: u32, maximum: u32 },
+    /// Black is at or above maximum somewhere, leaving no range to normalize into.
+    #[error("invalid black level: black {black} ADU reaches the maximum {maximum}")]
+    BlackExceedsMaximum { black: f64, maximum: u32 },
 }

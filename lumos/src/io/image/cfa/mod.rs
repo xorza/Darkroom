@@ -29,9 +29,9 @@ use crate::io::image::sample_domain::DomainMap;
 use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
+use crate::io::raw::demosaic::xtrans;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
@@ -100,7 +100,7 @@ impl CfaType {
     }
 
     /// The memory a demosaic of a `dimensions` frame of this pattern holds at once.
-    pub(crate) fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
+    pub(crate) const fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
         match self {
             Self::Mono => {
                 let bytes = dimensions.pixel_count().saturating_mul(size_of::<f32>());
@@ -109,9 +109,7 @@ impl CfaType {
                     peak_bytes: bytes,
                 }
             }
-            // Raw and active extents coincide here: the caller has already cropped to the
-            // visible area, so the margins the RCD arena would need are gone.
-            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size(), dimensions.size()),
+            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size()),
             Self::XTrans(_) => markesteijn::demosaic_memory(dimensions.size()),
         }
     }
@@ -339,10 +337,7 @@ impl CfaImage {
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
-                use crate::io::raw::demosaic::bayer::BayerImage;
-
-                let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let bayer = BayerImage::with_margins(&pixels, layout, cfa_pattern);
+                let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern);
                 let planes = rcd::demosaic(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
@@ -351,10 +346,8 @@ impl CfaImage {
                 image
             }
             CfaType::XTrans(pattern) => {
-                use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
-
-                let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let planes = process_xtrans_f32(&pixels, layout, pattern, cancel)?;
+                let planes =
+                    xtrans::demosaic(&pixels, Size2us::new(width, height), pattern, cancel)?;
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);

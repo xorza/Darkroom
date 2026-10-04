@@ -76,9 +76,6 @@ pub(crate) trait Isa: Copy + Debug {
 
     fn load_f64(self, lanes: &[f64; F64_LANES]) -> Self::F64;
 
-    /// Each sample converted to f32, which holds every u16 exactly.
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> Self::F32;
-
     /// `table[⌊index⌋]` per lane, with `index` first clamped to `[0, table.len() − 1]` (a NaN to
     /// 0), so no lane reads outside the table.
     ///

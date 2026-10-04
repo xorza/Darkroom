@@ -5,7 +5,6 @@
 //! - X-Trans 6x6 patterns (Fujifilm sensors)
 
 pub(crate) mod bayer;
-pub(crate) mod sensor_layout;
 pub(crate) mod xtrans;
 
 /// What one decode costs: the bytes it leaves, and its peak on the way there, the output included.

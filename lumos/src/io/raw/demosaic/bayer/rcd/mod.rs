@@ -32,23 +32,17 @@ const BORDER: usize = 4;
 /// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
 pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
-pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
-    let raw_pixels = raw.width.saturating_mul(raw.height);
-    let active_pixels = active.width.saturating_mul(active.height);
-    let half_pixels = raw.width.div_ceil(2).saturating_mul(raw.height);
-
-    let directional_peak = raw_pixels
-        .saturating_mul(6)
-        .saturating_add(half_pixels.saturating_mul(2));
-    let output_peak = raw_pixels
-        .saturating_mul(4)
-        .saturating_add(active_pixels.saturating_mul(3));
+/// The output's three planes, and the peak beside the caller's input: six full planes and the two
+/// half-width diagonal maps at the directional step. The colour planes become the output, so
+/// nothing is copied out of them at the end.
+pub(crate) const fn demosaic_memory(size: Size2us) -> DemosaicMemory {
+    let pixels = size.width.saturating_mul(size.height);
+    let half_pixels = size.width.div_ceil(2).saturating_mul(size.height);
     DemosaicMemory {
-        output_bytes: active_pixels
-            .saturating_mul(3)
-            .saturating_mul(size_of::<f32>()),
-        peak_bytes: directional_peak
-            .max(output_peak)
+        output_bytes: pixels.saturating_mul(3).saturating_mul(size_of::<f32>()),
+        peak_bytes: pixels
+            .saturating_mul(6)
+            .saturating_add(half_pixels.saturating_mul(2))
             .saturating_mul(size_of::<f32>()),
     }
 }
@@ -114,21 +108,17 @@ fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
 
 /// RCD demosaic implementation.
 ///
-/// Input: Bayer data and margin info. Calibrated samples may be outside `[0, 1]`.
-/// Output: planar RGB f32 channels for the active area (width × height).
+/// Input: a Bayer frame, whose calibrated samples may be outside `[0, 1]`.
+/// Output: planar RGB f32 channels of its size.
 pub(crate) fn demosaic(
     bayer: &BayerImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let width = bayer.layout.active.width;
-    let height = bayer.layout.active.height;
-    let rw = bayer.layout.raw.width;
-    let rh = bayer.layout.raw.height;
-    let tm = bayer.layout.margin.y;
-    let lm = bayer.layout.margin.x;
+    let rw = bayer.size.width;
+    let rh = bayer.size.height;
     let cfa = bayer.data;
-    let pattern = bayer.raw_cfa_pattern;
-    let npix = bayer.layout.raw.pixel_count();
+    let pattern = bayer.pattern;
+    let npix = bayer.size.pixel_count();
 
     // Cooperative cancel: each stage below is a full-image parallel pass. A
     // check between stages lets a cancelled run bail within one stage (~tens of
@@ -418,27 +408,7 @@ pub(crate) fn demosaic(
     }
     border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, pattern, s);
 
-    // Per-row contiguous copy (margins cropped); cheaper than the interleaved
-    // scatter and lets the caller take the buffers zero-copy.
-
-    let active = width * height;
-    let mut out_r = vec![0.0f32; active];
-    let mut out_g = vec![0.0f32; active];
-    let mut out_b = vec![0.0f32; active];
-
-    out_r
-        .par_chunks_mut(width)
-        .zip(out_g.par_chunks_mut(width))
-        .zip(out_b.par_chunks_mut(width))
-        .enumerate()
-        .for_each(|(y, ((r_row, g_row), b_row))| {
-            let base = (tm + y) * rw + lm;
-            r_row.copy_from_slice(&rgb_r[base..base + width]);
-            g_row.copy_from_slice(&rgb_g[base..base + width]);
-            b_row.copy_from_slice(&rgb_b[base..base + width]);
-        });
-
-    Ok([out_r, out_g, out_b])
+    Ok([rgb_r, rgb_g, rgb_b])
 }
 
 /// Step 4.2: Interpolate the missing color at R/B CFA positions.

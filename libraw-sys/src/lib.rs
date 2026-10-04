@@ -17,4 +17,9 @@ unsafe extern "C" {
     /// `internal_output_params.zero_is_bad`, set for Panasonic and some cameras its size table
     /// identifies. Valid after `libraw_open_*`. Defined in `shim/internal.cpp`.
     pub fn libraw_lumos_zero_is_bad(lr: *mut libraw_data_t) -> core::ffi::c_uint;
+
+    /// A Fuji SuperCCD's rotated width — its `internal_output_params.fuji_width` — or 0 for any
+    /// other sensor, whose photosites lie on the rows. Valid after `libraw_open_*`. Defined in
+    /// `shim/internal.cpp`.
+    pub fn libraw_lumos_fuji_width(lr: *mut libraw_data_t) -> core::ffi::c_uint;
 }

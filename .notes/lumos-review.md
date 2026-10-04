@@ -28,39 +28,8 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
   - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
-## 14. Resampling: ringing, aliasing, unstable normalization
-
-- [ ] `14.1` **Lanczos has no ringing clamp** — `registration/resample/row/simd/mod.rs:66-89`
-  - Undershoot is up to ≈13% of peak around bright or undersampled stars.
-  - PixInsight StarAlignment clamps at 0.3 by default. Siril clamps by default. `[C]`
-- [ ] `14.2` **No prefilter when the warp downsamples** — `registration/resample/kernel/mod.rs`, `registration/resample/row/simd/mod.rs`
-  - The `mosaic` preset allows scale 0.5–2. Stretch the kernel by the scale factor, or switch the kernel. `[C]`
-- [ ] `14.3` **Masked frames divide by a signed kernel sum** — `registration/resample/masked_warp.rs:94-125`
-  - Two adjacent nulls at half-pixel phase leave a sum of 0.25, which amplifies noise. Normalized convolution needs a non-negative applicability.
-  - The border path already falls back to bilinear. Do the same here. `[P]`
-- [ ] `14.4` **A bilinear band within `a` px of the source edge gives a visible sharpness step** — `registration/resample/row/simd/mod.rs:72-74` `[C]`
-
 ## 15. Spill and memory planning disagree with the machine
 
-- [ ] `15.1` **The default spill directory is on tmpfs** — `combine/cache_config.rs:27` (`env::temp_dir()`)
-  - On this host `/tmp` is a 13.6 GB tmpfs. Debian 13 and Arch use tmpfs by default.
-  - Spill files then use RAM, fill the tmpfs (ENOSPC), and evict the memory the plan counted on.
-  - Default to a disk-backed directory (`$XDG_CACHE_HOME`, `/var/tmp`), or refuse tmpfs after a `statfs` check. `[C]`
-- [ ] `15.2` **The memory reading ignores cgroup limits** — `memory/mod.rs:20-43`
-  - sysinfo `available_memory()` is the host `MemAvailable`. The GitHub runner containers (14g/8g, no swap) get OOM-killed instead of spilling.
-  - Take min(available, `cgroup_limits().free_memory`). `[C]`
-- [ ] `15.4` **On the spill tier, warp buffers stay allocated through the whole combine** — `pipeline/align.rs:228,317`
-  - ≈3.8 GB for 8 workers on RGB 24 MP. The combine chunk sizing does not know about it. Drop them before the combine. `[C]`
-- [ ] `15.5` **Spilled calibrated frames are never deleted after read-back** — `pipeline/tier.rs:81-92`, `pipeline/frame.rs:27-32`
-  - The peak disk use is ≈2×.
-  - `StoredImage::load` copies the whole map into a new `Vec` (`frame_store/stored_image.rs:50-63`), where the warp could read the map directly. `[C]`
-- [ ] `15.6` **With `keep_cache`, per-run spill files go into the shared cache, leak, and can collide** — `pipeline/tier.rs:64-74`, `frame_store/spill_directory.rs:37-48`
-  - `calib_{i}` and `warped_{i}` are never committed or reused. Two concurrent runs can map each other's `warped_3_c0.bin` and stack the wrong frame.
-  - Per-run spills must always use a per-run directory. `[C]` leak, `[P]` collision.
-- [ ] `15.7` **Per-run spills could be unlinked temp files** — `frame_store/spill_directory.rs:114-140`
-  - `O_TMPFILE` or unlink-after-map lets the OS clean up after a crash. That removes the marker file and the pid scan.
-  - It also blocks replacement of a file under a live map (the hazard in the SAFETY comment at `frame_store/frame_spill.rs:223`).
-  - The pid check deletes another host's live run on a NAS share. `[P]`
 - [ ] `15.9` **FITS checksum verification buffers the whole data unit, outside the budget, and reads it twice** — `io/image/fits/decode/selection.rs:134-150`, `io/image/fits/selected_fits.rs:78-89`
   - ≈124 MB extra for a 62 MP frame, on every Lumos-written CFA file. Accumulate the checksum per chunk during the decode. `[C]`
 
@@ -158,11 +127,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - It takes 273 ms. Use row-parallel loops. `[P]`
 - [ ] `24.3` **The demosaics use full-frame arenas, not tiles** — `io/raw/demosaic/xtrans/markesteijn/mod.rs:82-96`, `io/raw/demosaic/bayer/rcd/mod.rs:146-176,329-332`
   - Markesteijn uses 1668 MB for 24 MP. dcraw tiles at 512 and RawTherapee RCD at 194. RCD is fully scalar. `[P]`
-- [ ] `24.4` **Warp tap weights are computed again per channel and per map** — `registration/resample/mod.rs:163-174`, `registration/resample/row/simd/mod.rs:78-79`
-  - Loop over the channels inside the pixel loop. `[C]`
-- [ ] `24.5` **SIP is evaluated generically per pixel** — `registration/resample/row_positions.rs:33-39`, `registration/distortion/sip/mod.rs:347-408`
-  - Per row it collapses to two polynomials in u (Horner, exact). `[C]`
-- [ ] `24.6` **`InverseWarp::apply` builds the monomials twice per Newton step, plus a final Jacobian that drizzle discards** — `registration/transform/inverse_warp.rs:66-85` `[C]`
 - [ ] `24.7` **The elliptical matched filter is a full k² 2-D convolution** — `star_detection/convolution/mod.rs:125-163`
   - It is 289 taps at FWHM 6. It is separable at 0/π/2. Geusebroek 2003 handles general angles. `[C]`
 - [ ] `24.8` **`Component::scan` walks the whole bbox 3–4 times** — `star_detection/deblend/component.rs:394-410`
@@ -631,53 +595,29 @@ Phase 7 is done. Two open points remain from it:
 
 Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an absolute value that lost every star of a frame scaled by 2⁻¹⁶; it now holds σ to the frame's own floor and computes in f64. The bounded parallel map now returns the failure at the lowest index, so a set with two bad frames always reports the first.
 
-## Phase 8. Numerics kit and measurement (S6, C4)
+## Phase 8. Results
 
 1. Done: `LmController` (Nielsen's λ update, a Cholesky solve of the Marquardt-scaled system with a relative pivot, and stop tests that hold at any scale — a negligible accepted or Gauss–Newton step in the scaled norm, a Gauss–Newton decrease of χ² under 1e-12 of it, or a gradient orthogonal to the residuals) carries the centroid fits, which now return `None` when they fail and reweight only after a success. `Lstsq` holds the one SVD rank rule the SIP fit and the background extraction share. `Irls` waits for its first robust consumer, the final registration fit (phase 9). Items 2.3, 2.5, 11.8, 11.9, 24.13, 26.7 and 26.8 are closed.
 2. Done: `MeasureGrid` holds the stamp, the window σ and the annulus (from where a β = 2.5 Moffat holds 99% of its flux). `WindowedCentroid` subtracts the local sky, weights the signed signal, takes the adaptive-moments Newton step and stops on the bound `c/(1 − c)·‖Δ‖`; a failed fit falls back to it, and a fit that moves more than half the stamp radius is stamped again once. Every star carries `position_sigma`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)` or the windowed centroid's propagated noise; both match the scatter of 1000 noise draws. The fits' weight and amplitude seed floors are relative. Items 2.4, 2.6, 11.1 to 11.4, 11.6, 11.7, 12.4, 26.6, 26.9 and 26.10 are closed.
    The integrated models (11.5) are built as C4 records. The characterization snapshots moved with the fixtures, which now render pixel means; detection on the characterization field finds 34 stars, and registration 32 inliers with a worst corner error of 3.5e-3 px.
 3. Done: the SNR is the CCD equation with the sky-estimate term, on the background σ held to the frame's floor, and the fits weigh by the same equation when the gain is known. GROUND and SROUND are photutils' `roundness2` and `roundness1` on DAOFIND's cutout, and the tests pin them to photutils' formulas reproduced in numpy. Sharpness reads the star's own centre pixel. `validate_catalog` checks every float field of a star. Items 10.1 to 10.4, 11.10 and 12.1 to 12.3 are closed. 24.12 needs a SIMD `ln`, so it moves to phase 14 with the rest of group 24.
    Effect on the characterization field: 34 stars pass, against 30. The 30 keep their positions, fluxes, FWHMs and eccentricities exactly. The 4 new ones are blended neighbours that the whole-stamp roundness rejected. Registration finds 32 inliers, against 27, and its worst corner error falls from 4.6e-3 px to 3.4e-3 px.
-- **Tests:**
-  - Review table 11.1 on noise-free stars: the bias at a 0.4 px start for FWHM 3, 4.5 and 6 is below 1e-4 px.
-  - An integrated fit of a star with FWHM 1.2 recovers 1.2 within the fit's σ. Today the bias is +16%.
-  - Round stars of FWHM 2 at uniform sub-pixel phase: the `NotRound` rate is at the noise rate, not 57%.
-  - Both sources of `position_sigma` agree with the scatter of 1000 fixed-seed noise draws, within the standard error of a variance from 1000 samples.
-  - `Lstsq` gives the same SIP and background solutions as today's code on the existing fixtures.
-- **Closes:** groups 10, 11 and 12, 2.3 to 2.6, 26.6 to 26.10, 24.13.
 
-## Phase 9. Registration final fit (C5)
+## Phase 9. Results
 
 1. Done: no rotation limit by default, and a fixed default seed (`RansacConfig::seed: u64`, 0). LO-RANSAC takes a refit on its score alone. A minimal sample is degenerate when any pair is closer than the scorer's noise scale, or any triplet stands lower than it over its longest side. Near-isosceles triangles vote in every vertex order their tied sides admit, with the orientation test reversed for an odd permutation. Items 3.1, 13.7 to 13.10 and 22.1 are closed.
    Deviation (13.9): a triangle is kept while it stands at least the noise scale high over its longest side, not by a share of that side. The invariants `s₀/L` and `s₁/L` move by about σ/L whatever the shape, so Groth's side-ratio limit, which protects invariants built on the shortest side, does not apply; a relative height limit cut real matches in a dense field. A flat triangle loses its orientation, and that is what the noise-scale test guards.
 2. Done: `registration/final_fit/` matches every unsaturated star of both full catalogs through the hypothesis, weights each pair by `1/(|det J|·σ_ref² + σ_target²)` times a Cauchy weight (Holland and Welsch's 2.3849) on its normalized residual, and gates at the recovery radius first, then at `√χ²₀.₉₉(2)` of the robust scale (median over the Rayleigh median, at least 1). It reaches the Cramér–Rao bound of 2000 stars, times the Cauchy weights' variance ratio of 1.062. The homography refines its weighted DLT by LM on the reprojection error. Each linear part is fitted with its SIP correction at the joint optimum in every pass: translation, similarity and affine map in one linear solve with the linear part factored out (astrometry.net's `fit_sip_wcs`), the rotation by a secant iteration on the envelope derivative. `Auto` fits every model and takes the lowest GRIC (Torr 1998) over the union of their pairs, among those the caller's `max_rms_error` accepts. Items 13.1 to 13.6, 26.17 and 26.18 are closed.
 3. Done: `AlignmentSummary::frames` holds each light's registration in input order — the reference, the warp it was resampled through with its pair count and RMS, or the error that dropped it — and `registered()` and `dropped()` derive from it. `Reference::Auto` takes the lowest median FWHM among the frames with the stars registration needs, ties to the lowest index. Two default runs stack bit for bit. Items 21.1 and 21.4 are closed; phase 9 is complete.
    Deviations: (a) A homography takes no SIP correction: its perspective terms act to first order as the correction's quadratic ones, so the two are not determined together (the joint solve is rank-deficient), which is why the SIP convention puts an affine map under the polynomial. Validation refuses the pairing, `Auto` with SIP stops at the affine map, and the wide-field presets use `Auto`. (b) The SIP origin defaults to the reference catalog's bounding-box centre, not the image centre: `register` does not see the image, and the reference catalog is the same for every frame of a run. (c) Sigma clipping in the SIP fit is gone; the final fit's robust weights and gate carry outliers for the transform and the correction alike.
-- **Tests:**
-  - A 180° rotated catalog registers.
-  - 50 true matches and one 4 px blend: Auto stays at Euclidean. Today the RMS is 0.57 px, and Auto goes to Affine.
-  - 2000 stars with a known transform: the scatter of the fitted parameters over fixed-seed draws matches the Cramér–Rao bound from the weighted Fisher information, within the Monte Carlo standard error.
-  - Two runs with the default config give bit-identical stacks.
-- **Closes:** groups 3 and 13, 21.1, 21.4, 22.1, 26.17, 26.18.
 
-## Phase 10. Resampling (group 14)
-
-- Add the Lanczos ringing clamp (PixInsight default 0.3). Stretch the kernel by `1/scale` when the warp's smallest singular value is below 1. For the masked path and the edge band, use the normalized valid-tap Lanczos, with a bilinear fallback below a stated tap sum.
-- Compute the tap weights once per pixel for all channels (24.4). Collapse SIP per row with Horner (24.5). Build the monomials once per Newton step (24.6).
+## Phase 10. Results
 
 1. Done: a SIP row collapses to two polynomials in `u` (`SipPolynomial::row`, Horner per pixel), and the 2k RGB SIP warp bench goes from 49.6 ms to 44.5 ms. A Newton step takes the correction and its Jacobian from one set of powers (`SipPolynomial::local`), and `InverseWarp::position` skips the final Jacobian that drizzle's placement discarded. Items 24.5 and 24.6 are closed.
 2. Done: `resample/frame_sampler` builds each output pixel's window once — taps, weights, weight sums — and every channel and both quality values come from it, so the old `row` and `quality` passes are gone. Bicubic and the Lanczos family take PixInsight's ringing clamp (`WarpParams::clamping_threshold`, default `Some(0.3)`). Every filter but Nearest is stretched by the largest singular value of the output-to-source Jacobian, held to at least 1 (DeForest 2004, astropy `reproject`'s adaptive mode). Where the source edge or a null cuts the window, its taps with data are normalized while `(Σ L)² ≥ Σ L²` and `Σ L > 0`, that is while the normalized sample is no noisier than one pixel; otherwise Bilinear at the same stretch averages its own taps with data. Coverage is now the share of the kernel's magnitude `Σ|L|` on data, so a lost negative tap costs it too, and confidence is the Kish size of the coefficients the sample used. Windows wholly inside the source with no null near and at most 8 taps per axis run in registers (`InteriorWindow`); every Isa gives `Portable`'s bits. Items 14.1 to 14.4 and 24.4 are closed; phase 10 is complete.
    Deviations: (a) The clamp splits the taps by the sign of the weight `L`, not of `L·f`, and reads the light `max(f, 0)`, with the part below zero through the plain kernel. For data at or above zero this is PCL's rule exactly. PCL's split, on calibrated data that dips below zero, can put a negative weight in the positive lobe's sum and divide by nearly nothing. (b) The stretch is one per frame, the largest local scale on a 32 px grid (one Jacobian for an affine map), not per pixel: the flag propagation reads one window reach per frame. It is isotropic, so a warp that shrinks one axis also blurs the other. (c) Where the clamp acts, confidence describes the unclamped coefficients, which understates it beside bright stars. (d) Cost: the 4k mono Lanczos3 warp goes from 71.3 ms to 91.7 ms, 2k RGB homography from 39.8 to 47.9 ms, 2k RGB SIP from 44.2 to 51.3 ms. Without the clamp the new kernel matches the old one; the clamp is the 23%. The 2k Bilinear plane goes from 3.35 ms to 10.8 ms, its quality maps now included.
-- **Tests:** a bright single pixel keeps its undershoot within the clamp. A 0.5× warp of a Nyquist grating gives no alias above the noise. SIMD and scalar stay bit-identical.
-- **Closes:** group 14, 24.4 to 24.6.
 
-## Phase 11. Run resources (C6)
-
-1. Read the cgroup limit.
-2. Split `DecodeCache` and `RunScratch`. Add delete-while-open, the disk-backed default and the tmpfs check.
-3. Let the warp read stored planes in place. Drop the warp buffers before the combine.
-- **Tests:** two concurrent `keep_cache` runs never open each other's scratch files. The scratch directory is empty while a run is in progress, on Linux, on the macOS laptop and on Windows. A `tmpfs` root from a fixture `mountinfo` is refused.
-- **Closes:** 15.1, 15.2, 15.4 to 15.7.
+## Phase 11. Results
 
 1. Done: the memory reading is the least of the host's `MemAvailable` and what every level of the process's own cgroup chain leaves (`memory/cgroup_memory.rs`), v2 and v1, with the mount's root taken off the group path so a container's view resolves. One run's spills go to `RunScratch`: each file is unlinked on Unix as soon as it is created, before any data goes in, and opened delete-on-close on Windows, so a crash leaves nothing, no run sees another's files, and a frame's disk space returns when its planes drop; the marker file, the run directories and the pid scan are gone. `keep_cache` writes only content-keyed frames, to `DecodeCache` (`<root>/decode-cache`); a prepared frame and every pipeline frame stay in the run's scratch. The default root is the user cache directory (`$XDG_CACHE_HOME/lumos`, `~/.cache/lumos`, `~/Library/Caches/lumos`, `%LOCALAPPDATA%\lumos`, else `/var/tmp/lumos`), and a root on tmpfs or ramfs per `/proc/self/mountinfo` is refused with an error that names it. `RunReport` gains `spilled_frames` and `parked_lights`, which the pipeline test now reads instead of file names. Test temp directories moved from `/tmp` to the workspace's `.tmp/tests`. Items 15.1, 15.2, 15.6 and 15.7 are closed.
    Deviations: (a) The cgroup figure is `limit − (use − inactive_file)` per level, Kubernetes' working set, not sysinfo's `limit − use`: a group's use counts its page cache, which on this host's session was 10.8 of 11.8 GB, and the kernel reclaims the inactive part before the limit; v2's `memory.high` caps as `memory.max` does. sysinfo reads only the root cgroup, which misses a systemd unit's limit. (b) The Unix scratch file is created and unlinked, not opened `O_TMPFILE`: that needs `libc` or a per-architecture constant, and the window between the two calls can leave only an empty file. (c) On Windows a delete-on-close file keeps its name until its last handle closes, so the scratch directory is not empty while a run is in progress there.
@@ -693,6 +633,9 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 5. Add the RCD golden cross-check (16.13).
 - **Tests:** preview and science agree pixel for pixel in the former margin band. A Canon black level with `cblack` is exact against a hand sum in integers. A portrait frame through the fallback keeps W×H.
 - **Closes:** group 16 except 16.12, 15.9, 17.4 to 17.7.
+
+1. Done: `load_raw` is `load_raw_cfa`'s frame demosaicked and clamped, so the preview and the science path cannot disagree, the masked margins included; the reader crops as it normalizes, and both demosaics take cropped frames alone, which removes `BlackRepeat::at_raw`, `raw_filter_color`, `apply_bayer_black_corrections`, the clamped normalize, `CfaPattern::at_raw_origin`, `raw_xtrans_pattern`, `XTransNormalization`, `PixelSource`, `XTransImage::with_margins`, `process_xtrans` and the SIMD normalize. RCD hands back its working planes instead of copying them. `BlackLevel` holds ADU as LibRaw's `adjust_bl` folds them, in f64, and normalizes in one pass, `(v − black(x, y)) / span` rounded once; it uses the unrounded optical-black mean (`black_stat`) and a DNG's float levels where LibRaw's integers are their roundings, refuses a black that reaches `maximum` in any channel or cell, and has no `u32` sums of file data left. The LibRaw fallback sets `adjust_maximum_thr = 0`, `user_flip = 0` and `use_fuji_rotate = 0`, and accepts only 16-bit output. A SuperCCD (`fuji_width`, read through the shim) and a `raw_pitch` other than two bytes per sample are refused. Items 16.1 to 16.10 are closed.
+   Deviation (16.10): the DNG float levels are used only when each lies within one ADU of LibRaw's integer for it. LibRaw folds `BlackLevelDeltaH/V` into one rounded mean, and a float that strays further was not where LibRaw's black came from.
 
 ## Phase 13. Display operations
 

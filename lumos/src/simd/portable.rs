@@ -50,11 +50,6 @@ impl Isa for Portable {
     }
 
     #[inline(always)]
-    fn load_u16(self, lanes: &[u16; F32_LANES]) -> PortableF32 {
-        PortableF32(lanes.map(f32::from))
-    }
-
-    #[inline(always)]
     fn lookup_f32(self, table: &[f32], index: PortableF32) -> PortableF32 {
         let last = lookup_last(table);
         PortableF32(index.0.map(|index| lookup_lane(table, last, index)))

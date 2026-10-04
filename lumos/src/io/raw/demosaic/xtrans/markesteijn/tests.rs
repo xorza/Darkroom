@@ -1,8 +1,5 @@
 use crate::internals::prelude::*;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::internals::{
-    make_xtrans, test_pattern, test_pattern_array, to_u16,
-};
+use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::MARK_INFO_BORDER;
 
@@ -200,8 +197,7 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
             }
         }
         let size = Size2us::new(WIDTH, HEIGHT);
-        let xtrans =
-            XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
+        let xtrans = XTransImage::new(&data, size, test_pattern());
         let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
         for sample in case.samples {
             let index = size.index_of(sample.pos);
@@ -222,39 +218,30 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
 }
 
 /// A constant colour per channel — uniform grey and two distinct (R, G, B) — comes back as itself
-/// at every pixel, border included, with and without masked margins. Every stage averages or
-/// blends equal values, so each output is the input to a few f32 roundings: under 2e-7, where one
-/// rounding of a value below 1 is up to 6e-8.
+/// at every pixel, border included. Every stage averages or blends equal values, so each output is
+/// the input to a few f32 roundings: under 2e-7, where one rounding of a value below 1 is up to
+/// 6e-8.
 #[test]
 fn constant_colour_reconstructs_to_rounding() {
-    let active = Size2us::new(36, 36);
+    let size = Size2us::new(36, 36);
     let pattern = test_pattern();
     for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
-        // Margins of 6 keep the 6×6 layout's phase at the raw origin.
-        for margin in [0, 6] {
-            let raw = Size2us::new(active.width + 2 * margin, active.height + 2 * margin);
-            let data: Vec<f32> = (0..raw.pixel_count())
-                .map(|index| colour[pattern.color_at(raw.point_of(index)) as usize])
-                .collect();
-            let layout = SensorLayout {
-                raw,
-                active,
-                margin: Vec2us::new(margin, margin),
-            };
-            let planes = demosaic(
-                &XTransImage::with_margins_f32(&data, layout, pattern),
-                &CancelToken::never(),
-            )
-            .unwrap();
-            for (channel, plane) in planes.iter().enumerate() {
-                for (index, &value) in plane.iter().enumerate() {
-                    assert_close!(
-                        value,
-                        colour[channel],
-                        2e-7,
-                        "{colour:?} margin {margin} channel {channel} at {index}: {value}"
-                    );
-                }
+        let data: Vec<f32> = (0..size.pixel_count())
+            .map(|index| colour[pattern.color_at(size.point_of(index)) as usize])
+            .collect();
+        let planes = demosaic(
+            &XTransImage::new(&data, size, pattern),
+            &CancelToken::never(),
+        )
+        .unwrap();
+        for (channel, plane) in planes.iter().enumerate() {
+            for (index, &value) in plane.iter().enumerate() {
+                assert_close!(
+                    value,
+                    colour[channel],
+                    2e-7,
+                    "{colour:?} channel {channel} at {index}: {value}"
+                );
             }
         }
     }
@@ -262,21 +249,10 @@ fn constant_colour_reconstructs_to_rounding() {
 
 #[test]
 fn markesteijn_no_nan() {
-    let raw_w = 30;
-    let raw_h = 30;
     let w = 18;
     let h = 18;
-    let data: Vec<u16> = (0..raw_w * raw_h)
-        .map(|i| to_u16(i as f32 / (raw_w * raw_h) as f32))
-        .collect();
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
+    let data: Vec<f32> = (0..w * h).map(|i| i as f32 / (w * h) as f32).collect();
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
 
     let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
 
@@ -287,19 +263,10 @@ fn markesteijn_no_nan() {
 
 #[test]
 fn markesteijn_all_zeros() {
-    let raw_w = 24;
-    let raw_h = 24;
     let w = 12;
     let h = 12;
-    let data = vec![0u16; raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
+    let data = vec![0.0f32; w * h];
+    let xtrans = make_xtrans(&data, Size2us::new(w, h));
 
     let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
     for &v in planes.iter().flatten() {
@@ -326,8 +293,7 @@ fn markesteijn_beyond_the_border_matches_a_larger_frame() {
         })
         .collect();
     let run = |data: &[f32], size| {
-        let xtrans =
-            XTransImage::with_margins_f32(data, SensorLayout::cropped(size), test_pattern());
+        let xtrans = XTransImage::new(data, size, test_pattern());
         demosaic(&xtrans, &CancelToken::never()).unwrap()
     };
     let whole = run(&samples, large);
