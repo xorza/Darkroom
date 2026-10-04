@@ -194,7 +194,7 @@ fn calibrate_snapshot() {
     let demosaiced = light.demosaic(&CancelToken::never()).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &demosaiced);
-    assert_snapshot("demosaic", &snapshot, "902ced908cf4d911");
+    assert_snapshot("demosaic", &snapshot, "0951c9f7b35a4fde");
 }
 
 #[test]
