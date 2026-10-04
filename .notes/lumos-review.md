@@ -22,18 +22,10 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `15.9` **FITS checksum verification buffers the whole data unit, outside the budget, and reads it twice** — `io/image/fits/decode/selection.rs:134-150`, `io/image/fits/selected_fits.rs:78-89`
   - ≈124 MB extra for a 62 MP frame, on every Lumos-written CFA file. Accumulate the checksum per chunk during the decode. `[C]`
 
-## 16. RAW: the preview is a second decoder, and LibRaw facts are lost
-
-
-
-
 ## 20. Drizzle defaults and geometry
 
 - [ ] `20.3` **No CFA drizzle** — `drizzle/accumulator/mod.rs:340-341`
   - OSC data pays the demosaic interpolation before it drizzles. Siril offers CFA drizzle. Gap.
-
-
-## 24. Hot-path performance
 
 
 ## 26. One fact in two places, wide signatures, and style deviations
@@ -309,7 +301,7 @@ Built in phase 6. As built:
   - `calibrate` returns a `CalibrationOutcome`. The pipeline adds the outcomes into `RunReport`: unverified exposures and temperatures, scaled darks, and floored flat pixels.
 - `stack_cfa_master` takes the subtractor and removes it from each frame before the normalization. The prepared frames spill to the run's cache and are never cached between runs.
 
-Still open, after S1 and S2: each master carries its noise, so the subtraction adds its variance. Defect repair sets `DEFECT | REPAIRED`, and the flat floor sets `FLAT_FLOOR`.
+Still open: each master carries its noise, so the subtraction adds its variance.
 
 ## C3. Detection: one plane to threshold, one plane to measure
 
@@ -464,13 +456,7 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 ## Phase 14. Remaining items
 
-- Determinism: fixed-chunk parallel sums (22.2), a sorted flat vote `Vec` (22.3), the error of the lowest slot index (22.4).
-- Cosmic rays and defects: 18.1 and 18.2.
-- Performance: the rest of group 24, each with a bench before and after.
-- Docs: the rest of group 25. A doc that a phase above rewrites is fixed in that phase.
-- Style: the rest of group 26. Dependencies: group 27.
-- Markesteijn 3-pass as an option (16.12). SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8).
-- **Closes:** 16.12, 18.1, 18.2, 19.8, 22.2 to 22.4, the rest of groups 24 to 27. 20.3 stays open until CFA drizzle enters the scope.
+Phase 14 is complete except 26.16, which waits on Pending item 4. 20.3 stays open until CFA drizzle enters the scope.
 
 ## Phase 14. Results
 
