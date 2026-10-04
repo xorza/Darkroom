@@ -93,3 +93,29 @@ fn preparation_rejects_mismatched_subtractor_dimensions() {
     let subtractor = make_cfa(Size2us::new(3, 2), vec![0.1; 6], CfaType::Mono);
     prepare(flat, Some(&subtractor));
 }
+
+/// A flat prepares to the same bits on one thread as on seven, mono and mosaic: each mean is a
+/// sum added in a fixed order.
+#[test]
+fn preparation_does_not_depend_on_the_thread_count() {
+    let size = Size2us::new(300, 260);
+    let mut rng = TestRng::new(5);
+    let pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|_| 0.4 + 0.2 * rng.next_f32())
+        .collect();
+    for cfa_type in [
+        CfaType::Mono,
+        CfaType::Bayer(CfaPattern::Rggb),
+        standard_xtrans(),
+    ] {
+        let run = |threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let flat = make_cfa(size, pixels.clone(), cfa_type);
+            bits(pool.install(|| prepare(flat, None)).divisor().data.pixels())
+        };
+        assert_eq!(run(1), run(7), "{cfa_type:?}");
+    }
+}

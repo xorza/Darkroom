@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::math::sum;
 use crate::math::vec2us::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
@@ -89,8 +90,7 @@ impl PreparedFlat {
 }
 
 fn normalize_mono(flat: &mut Buffer2<f32>) -> Result<(), CalibrationError> {
-    let sum: f64 = flat.par_iter().map(|&value| f64::from(value)).sum();
-    let mean = (sum / flat.len() as f64) as f32;
+    let mean = (sum::par_sum_f32(flat.pixels()) / flat.len() as f64) as f32;
     if mean.is_nan() || mean <= 0.0 {
         return Err(CalibrationError::NonPositiveFlat { channel: None });
     }
@@ -101,31 +101,38 @@ fn normalize_mono(flat: &mut Buffer2<f32>) -> Result<(), CalibrationError> {
     Ok(())
 }
 
+/// One row's sum and count of each colour.
+#[derive(Debug, Default)]
+struct ColorSums {
+    sums: [f64; 3],
+    counts: [u64; 3],
+}
+
 fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) -> Result<(), CalibrationError> {
     let width = flat.width();
-    let (sums, counts) = flat
-        .par_chunks_mut(width)
+    // Each row's sums, added in row order: a rayon `reduce` would add them in whatever tree its
+    // work stealing built, and the means would move with the thread count.
+    let rows: Vec<ColorSums> = flat
+        .par_chunks(width)
         .enumerate()
         .map(|(y, row)| {
-            let mut sums = [0.0f64; 3];
-            let mut counts = [0u64; 3];
-            for (x, value) in row.iter_mut().enumerate() {
+            let mut sums = ColorSums::default();
+            for (x, &value) in row.iter().enumerate() {
                 let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
-                sums[color] += f64::from(*value);
-                counts[color] += 1;
+                sums.sums[color] += f64::from(value);
+                sums.counts[color] += 1;
             }
-            (sums, counts)
+            sums
         })
-        .reduce(
-            || ([0.0f64; 3], [0u64; 3]),
-            |(mut sums_a, mut counts_a), (sums_b, counts_b)| {
-                for color in 0..3 {
-                    sums_a[color] += sums_b[color];
-                    counts_a[color] += counts_b[color];
-                }
-                (sums_a, counts_a)
-            },
-        );
+        .collect();
+    let mut sums = [0.0f64; 3];
+    let mut counts = [0u64; 3];
+    for row in &rows {
+        for color in 0..3 {
+            sums[color] += row.sums[color];
+            counts[color] += row.counts[color];
+        }
+    }
 
     let mut inv_means = [0.0f32; 3];
     for color in 0..3 {

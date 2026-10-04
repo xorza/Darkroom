@@ -3,7 +3,7 @@
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 
@@ -129,13 +129,12 @@ struct Failure<E> {
 /// window is the point: batching the indices instead would make every window wait on its slowest
 /// member, and these jobs are RAW decodes and warps whose costs differ by a lot.
 ///
-/// The first failure stops workers from *taking* further indices. Ones already running still
-/// finish, and a worker that read the index counter just before the failure landed may run one
-/// more — so the bound on wasted work is a slot's worth, not zero.
+/// A failure stops workers from running indices past it. Ones already running still finish, so
+/// the bound on wasted work is a slot's worth, not zero.
 ///
-/// Of several failures the one at the lowest index is returned, which makes it the same failure a
-/// sequential map would return: indices are claimed in order, so every index below a failing one
-/// was claimed before it and runs to its end.
+/// Of several failures the one at the lowest index is returned, the failure a sequential map
+/// would return: a worker skips only an index above the lowest failure seen, so every index below
+/// the lowest runs to its end.
 pub(crate) fn try_par_map_bounded<S, R, E>(
     len: usize,
     slots: &mut [S],
@@ -149,7 +148,7 @@ where
     assert!(!slots.is_empty(), "a bounded map needs at least one slot");
 
     let next = AtomicUsize::new(0);
-    let failed = AtomicBool::new(false);
+    let lowest_failure = AtomicUsize::new(usize::MAX);
     let mut outcomes: Vec<SlotOutcome<R, E>> = slots
         .iter()
         .map(|_| SlotOutcome {
@@ -163,17 +162,17 @@ where
     // single task, whose worker loop would then drain the whole index range by itself.
     rayon::scope(|scope| {
         for (slot, outcome) in slots.iter_mut().zip(outcomes.iter_mut()) {
-            let (next, failed, job) = (&next, &failed, &job);
+            let (next, lowest_failure, job) = (&next, &lowest_failure, &job);
             scope.spawn(move |_| {
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= len || failed.load(Ordering::Acquire) {
+                    if index >= len || index > lowest_failure.load(Ordering::Acquire) {
                         break;
                     }
                     match job(slot, index) {
                         Ok(value) => outcome.values.push((index, value)),
                         Err(error) => {
-                            failed.store(true, Ordering::Release);
+                            lowest_failure.fetch_min(index, Ordering::AcqRel);
                             outcome.failure = Some(Failure { index, error });
                             return;
                         }

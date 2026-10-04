@@ -16,13 +16,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ---
 
-## 2. Absolute `EPSILON` floors on quantities that scale with the data
-
-`Spread::resolution` and `Spread::floored` (`math/statistics/spread.rs`) are the scale-free form. The rejection and `sigma_clip_iteration` use them; the items below do not yet.
-
-**Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
-
-
 ## 8. Missing-data masks are dropped after decode
 
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
@@ -54,15 +47,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `20.3` **No CFA drizzle** — `drizzle/accumulator/mod.rs:340-341`
   - OSC data pays the demosaic interpolation before it drizzles. Siril offers CFA drizzle. Gap.
 
-## 21. Reference choice and stage order
-
-## 22. Run-to-run determinism
-
-- [ ] `22.2` **Parallel float reductions are order-nondeterministic** — `calibration_masters/prepared_flat/mod.rs:61,79-97`
-  - rayon `sum`/`reduce`. Use fixed chunking. `[P]`
-- [ ] `22.3` **The triangle vote matrix switches to a SipHash `HashMap` from 500×500** — `registration/triangle/voting.rs:28,52-57`
-  - A sorted flat `Vec` of pairs is deterministic and needs one representation. `[C]`
-- [ ] `22.4` **`try_par_map_bounded` returns the error of whichever slot fails first in slot order** — `concurrency/mod.rs:153-158` `[C]`, low.
 
 ## 24. Hot-path performance
 
@@ -592,6 +576,10 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 - The optional `dispersion` plane of C1: the weighted scatter of the survivors.
 - Markesteijn 3-pass as an option (16.12). SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8).
 - **Closes:** 16.12, 18.1, 18.2, 19.8, 22.2 to 22.4, the rest of groups 24 to 27. 20.3 stays open until CFA drizzle enters the scope.
+
+## Phase 14. Results
+
+1. Done: the flat's means are sums added in a fixed order (`sum::par_sum_f32`, fixed chunks; the mosaic's per row), so a flat prepares to the same bits on any thread count. The triangle votes are one flat buffer of packed pairs, sorted and run-length counted, at any star count, in place of the dense matrix and the `HashMap`; its dead bounds check went with it. `try_par_map_bounded` skips only an index above the lowest failure seen, so every index below it runs and the error is the one a sequential map returns; before, a worker could skip an index it had claimed once a higher one failed. Items 22.2 to 22.4 are closed.
 
 # Decisions
 

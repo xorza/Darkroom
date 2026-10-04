@@ -16,6 +16,8 @@ mod weighted_sums;
 #[cfg(all(test, feature = "bench"))]
 mod bench;
 
+use rayon::prelude::*;
+
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::weighted_sums::WeightedSums;
 use crate::simd::{F32_LANES, Kernel};
@@ -44,6 +46,21 @@ pub(crate) fn sum_f32(values: &[f32]) -> f64 {
     } else {
         scalar::sum_f32(values)
     }
+}
+
+/// Samples one task of [`par_sum_f32`] sums.
+const PAR_SUM_CHUNK: usize = 1 << 16;
+
+/// [`sum_f32`] across threads, the same bits on any thread count: fixed chunks of
+/// [`PAR_SUM_CHUNK`] samples, each summed by [`sum_f32`], and their partial sums added in order.
+/// rayon's own `sum` splits where its work stealing splits, so its total moves with the scheduling.
+pub(crate) fn par_sum_f32(values: &[f32]) -> f64 {
+    values
+        .par_chunks(PAR_SUM_CHUNK)
+        .map(sum_f32)
+        .collect::<Vec<f64>>()
+        .iter()
+        .sum()
 }
 
 /// Mean of f32 values, rounded to f32 exactly once.
