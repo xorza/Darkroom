@@ -32,6 +32,11 @@ pub enum FrameStoreError {
     },
     #[error("frame-store source changed while it was being read: '{path}'")]
     SourceChanged { path: PathBuf },
+    #[error(
+        "frame-store directory '{path}' is on {filesystem}, which keeps its files in memory: a \
+         spill there spends the RAM it was meant to free; set `cache_dir` to a directory on disk"
+    )]
+    MemoryBackedDirectory { path: PathBuf, filesystem: String },
     #[error("failed to memory-map frame-store file '{path}': {source}")]
     MemoryMap {
         path: PathBuf,

@@ -44,6 +44,7 @@ mod ingest;
 mod io;
 mod math;
 mod memory;
+mod mount_table;
 mod pipeline;
 mod progress;
 mod registration;

@@ -189,8 +189,8 @@ pub(crate) fn stack_stored_frames(
 /// entry point has to remember.
 ///
 /// `build` is deferred rather than taken as a built cache so that validation runs before a
-/// potentially long load, and so the cache — which owns the spill directory — drops at the end of
-/// this scope on every path.
+/// potentially long load, and so the cache — whose spilled planes hold their disk space — drops at
+/// the end of this scope on every path.
 pub(crate) fn combine_cached(
     config: &StackConfig,
     frame_count: usize,

@@ -3,14 +3,13 @@ use crate::internals::prelude::*;
 use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::frame_quality::FramePlane;
-use crate::frame_store::frame_spill::FrameSpill;
 
 use crate::combine::config::{Normalization, SmallN};
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack::*;
 use crate::error::FrameDimensionMismatch;
-use crate::frame_store::spill_directory::SpillDirectory;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
 use crate::internals::assertions::bits;
@@ -213,24 +212,15 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
 
     let scratch = TempDir::new("lumos_tier_test");
-    let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
+    let run_scratch = RunScratch::create(&scratch.join("cache")).unwrap();
     let metadata = frames[0].image.metadata.clone();
     let stored = frames
         .into_iter()
-        .enumerate()
-        .map(|(i, f)| {
-            StoredFrame::spill(
-                &FrameSpill::new(spill_directory.path(), &format!("f{i}")),
-                &f.image,
-                &f.quality,
-                f.source_stats,
-            )
-            .unwrap()
-        })
+        .map(|f| StoredFrame::spill(&run_scratch, &f.image, &f.quality, f.source_stats).unwrap())
         .collect();
     let disk = stack_stored_frames(
         stored,
-        CacheTier::of(Some(spill_directory), RunMemory::new(1 << 30, None)),
+        CacheTier::of(true, RunMemory::new(1 << 30, None)),
         dims,
         metadata,
         &config,

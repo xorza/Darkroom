@@ -3,10 +3,9 @@
 use std::fmt::Debug;
 
 use arrayvec::ArrayVec;
-use memmap2::Mmap;
 
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_spill::{self, FrameSpill, write_file};
+use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -21,28 +20,27 @@ pub(crate) struct StoredImage {
     channels: ArrayVec<StoredPlane, 3>,
     /// The image's [`PixelFlags`] bytes, for an image that carries any. Spilled with the channels:
     /// without them the fill under every null reads back as a measurement.
-    flags: Option<Mmap>,
+    flags: Option<StoredPlane<u8>>,
 }
 
 impl StoredImage {
-    /// Write `image`'s channels and flags to `spill`'s files and memory-map them back.
+    /// Write `image`'s channels and flags to `store` and memory-map them back.
     pub(crate) fn spill(
-        spill: &FrameSpill<'_>,
+        store: &impl PlaneStore,
         image: &LinearImage,
     ) -> Result<Self, FrameStoreError> {
         let flags = image
             .flags
             .as_ref()
-            .map(|flags| {
-                let path = spill.flags_path();
-                write_file(&path, flags.bytes())?;
-                frame_spill::map_file(&path)
-            })
+            .map(|flags| store.store_flags(flags.bytes()))
             .transpose()?;
+        let channels = (0..image.channels())
+            .map(|channel| store.store_channel(channel, image.channel(channel).pixels()))
+            .collect::<Result<_, _>>()?;
         Ok(Self {
             metadata: image.metadata.clone(),
             dimensions: image.dimensions(),
-            channels: spill.spill_channels(image)?,
+            channels,
             flags,
         })
     }
@@ -55,10 +53,9 @@ impl StoredImage {
             .map(|plane| plane.chunk(0, sample_count).to_vec());
         let mut image = LinearImage::from_planar_channels(self.dimensions, planes);
         image.metadata = self.metadata.clone();
-        image.flags = self
-            .flags
-            .as_ref()
-            .map(|bytes| PixelFlags::from_bytes(self.dimensions.size(), bytes));
+        image.flags = self.flags.as_ref().map(|bytes| {
+            PixelFlags::from_bytes(self.dimensions.size(), bytes.chunk(0, sample_count))
+        });
         image
     }
 }

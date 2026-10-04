@@ -100,18 +100,14 @@ impl<'a> FrameRegistrar<'a> {
             stars,
             stats,
         } = frame;
-        let name = format!("warped_{index}");
         if index == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
-            return self
-                .tier
-                .store_reference(&name, image, stats)
-                .map(|stored| {
-                    Some(ParkedFrame {
-                        stored: Some(stored),
-                        registration: FrameRegistration::Reference,
-                    })
-                });
+            return self.tier.store_reference(image, stats).map(|stored| {
+                Some(ParkedFrame {
+                    stored: Some(stored),
+                    registration: FrameRegistration::Reference,
+                })
+            });
         }
 
         let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
@@ -149,7 +145,7 @@ impl<'a> FrameRegistrar<'a> {
         let metadata = image.metadata.clone();
         drop(image);
         self.resolved.complete_one();
-        let stored = self.tier.store(&name, metadata, warped, stats)?;
+        let stored = self.tier.store(metadata, warped, stats)?;
         *buffers = stored.reusable;
         Ok(Some(ParkedFrame {
             stored: Some(stored.frame),

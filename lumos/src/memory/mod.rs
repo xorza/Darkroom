@@ -6,20 +6,31 @@
 //! against `available_memory` directly, through the one [`RunMemory`](run_memory::RunMemory) its
 //! run read at the entry.
 
+pub(crate) mod cgroup_memory;
 pub(crate) mod run_memory;
+
+use std::sync::LazyLock;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::size2us::Size2us;
+use crate::memory::cgroup_memory::CgroupMemory;
+use crate::mount_table::MountTable;
 use std::sync::PoisonError;
 
 /// Share of available RAM the pipeline will commit, leaving the rest as headroom for allocator
 /// slack, the OS page cache, and whatever else the machine is doing.
 const MEMORY_PERCENT: u64 = 75;
 
+/// What the process can allocate: the host's available memory, or less where its control groups
+/// leave less ([`CgroupMemory`]).
 pub(crate) fn available_memory() -> u64 {
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::Mutex;
     use sysinfo::System;
+
+    // Where the groups are is read once; what they hold, on every call.
+    static GROUPS: LazyLock<Option<CgroupMemory>> =
+        LazyLock::new(|| CgroupMemory::of_process(&MountTable::read()));
 
     // Reused rather than built per call. Constructing a `System` costs ~20 µs against ~5 µs to
     // refresh one that already exists, and asking for memory alone
@@ -35,11 +46,15 @@ pub(crate) fn available_memory() -> u64 {
     let available = system.available_memory();
 
     // macOS can report zero when compressed pages exceed free, inactive, and purgeable pages.
-    if available == 0 {
+    let host = if available == 0 {
         system.total_memory().saturating_sub(system.used_memory())
     } else {
         available
-    }
+    };
+    GROUPS
+        .as_ref()
+        .and_then(CgroupMemory::available)
+        .map_or(host, |groups| host.min(groups))
 }
 
 pub(crate) fn memory_budget(available_memory: u64) -> u64 {

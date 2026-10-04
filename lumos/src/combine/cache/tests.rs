@@ -3,9 +3,8 @@ use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::config::Weighting;
 use crate::combine::rejection::Rejection;
 use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
-use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::spill_directory::SpillDirectory;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
@@ -564,7 +563,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
 #[test]
 fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
-    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
+    let scratch = RunScratch::create(temp_dir.path()).unwrap();
     let dims = ImageDimensions::new((4, 3), 1);
     let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, ramp.clone());
@@ -573,7 +572,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let spilled = FrameCache::from_stored_frames(
         vec![
             StoredFrame::spill(
-                &FrameSpill::new(spill_directory.path(), "test_chunk"),
+                &scratch,
                 &image,
                 &FrameQuality::None,
                 FrameStats::measure(&image),
@@ -581,10 +580,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             .unwrap(),
         ],
         CacheCore::plain(
-            CacheTier::of(
-                Some(spill_directory),
-                RunMemory::new(1 << 30, Some(123_456)),
-            ),
+            CacheTier::of(true, RunMemory::new(1 << 30, Some(123_456))),
             dims,
         ),
         Normalization::None,

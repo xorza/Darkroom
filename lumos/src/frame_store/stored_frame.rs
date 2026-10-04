@@ -10,6 +10,7 @@ use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill};
 use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -50,30 +51,24 @@ impl StoredFrame {
         }
     }
 
-    /// Write the frame's channels, quality planes and flags to `spill`'s files and memory-map them
-    /// back.
+    /// Write the frame's channels, quality planes and flags to `store` and memory-map them back.
     ///
     /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
     /// stage hand the same ones to the next frame rather than allocating a set that has to be
     /// faulted in from scratch.
     pub(crate) fn spill(
-        spill: &FrameSpill<'_>,
+        store: &impl PlaneStore,
         image: &impl StackableImage,
         quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        let channels = spill.spill_channels(image)?;
-        let quality = quality.try_map(|plane, buffer| {
-            let path = spill.quality_path(plane);
-            StoredPlane::write(&path, buffer.pixels())?;
-            StoredPlane::map(&path)
-        })?;
+        let channels = (0..image.dimensions().channels())
+            .map(|channel| store.store_channel(channel, image.channel(channel)))
+            .collect::<Result<_, _>>()?;
+        let quality =
+            quality.try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
         let flags = kept_flags(image.flags())
-            .map(|flags| {
-                let path = spill.flags_path();
-                StoredPlane::write(&path, flags.bytes())?;
-                StoredPlane::map(&path)
-            })
+            .map(|flags| store.store_flags(flags.bytes()))
             .transpose()?;
         Ok(Self {
             channels,

@@ -1,16 +1,13 @@
 //! [`FrameSpill`]: where a spilled frame's planes and sidecars live on disk, and what they are called.
 //!
-//! Every name the frame store writes comes from [`FrameSpill`], so the writer that produced a file
-//! and a later run looking for it cannot disagree about where it is. The files themselves are not
-//! tracked individually: they all sit inside a
-//! [`SpillDirectory`](crate::frame_store::spill_directory::SpillDirectory), which decides
-//! whether they outlive the run.
+//! Every name the decode cache writes comes from [`FrameSpill`], so the writer that produced a file
+//! and a later run looking for it cannot disagree about where it is. What one run alone needs has
+//! no name at all: it goes to [`RunScratch`](crate::frame_store::run_scratch::RunScratch).
 
 use std::fmt::Display;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
-use arrayvec::ArrayVec;
 use common::SerdeFormat;
 use common::file_utils;
 use memmap2::Mmap;
@@ -21,10 +18,9 @@ use crate::frame_store::cache_key::{self, CacheKey, DecoderKind};
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::image_dimensions::ImageDimensions;
-
+use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::io::image::image_dimensions::ImageDimensions;
 
 /// The sidecar layout pin: the digest of a fixed [`Commit`] and [`FrameStats`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
@@ -35,9 +31,8 @@ pub(crate) const SIDECAR_PIN: &str = "a73b65315738117a";
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
 
-/// The files one frame occupies inside a spill directory: one plane per channel, the optional
-/// frame-quality planes, the optional null mask, and for a kept frame its statistics and
-/// [`Commit`].
+/// The files one kept frame occupies in the decode cache: one plane per channel, the optional
+/// frame-quality planes, the optional null mask, its statistics and its [`Commit`].
 #[derive(Debug, Clone)]
 pub(crate) struct FrameSpill<'a> {
     directory: &'a Path,
@@ -45,14 +40,6 @@ pub(crate) struct FrameSpill<'a> {
 }
 
 impl<'a> FrameSpill<'a> {
-    /// The files of a frame spilled for this run only, under `stem`.
-    pub(crate) fn new(directory: &'a Path, stem: &str) -> Self {
-        Self {
-            directory,
-            stem: stem.to_owned(),
-        }
-    }
-
     /// The files a kept cache holds for `canonical_source` decoded by `decoder`: a hash of both, so
     /// distinct sources or decoders never share a file and the same pair always finds its own.
     pub(crate) fn cached(
@@ -121,26 +108,6 @@ impl<'a> FrameSpill<'a> {
             .all(|plane| plane_on_disk(&self.quality_path(plane), dimensions))
     }
 
-    /// Write the channels of `image` and memory-map them back.
-    ///
-    /// The files are not tracked for removal here. Everything the frame store spills lives inside
-    /// a [`SpillDirectory`](crate::frame_store::spill_directory::SpillDirectory), which
-    /// removes the directory on drop unless `keep_cache` asked for it to survive — so a per-file
-    /// drop guard would either duplicate that or, if it ignored the flag, delete what the user
-    /// asked to keep.
-    pub(crate) fn spill_channels(
-        &self,
-        image: &impl StackableImage,
-    ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
-        let mut planes = ArrayVec::new();
-        for channel in 0..image.dimensions().channels() {
-            let path = self.channel_path(channel);
-            StoredPlane::write(&path, image.channel(channel))?;
-            planes.push(StoredPlane::map(&path)?);
-        }
-        Ok(planes)
-    }
-
     /// Record a kept frame whose planes are all written, decoded under `key`. The commit record
     /// goes last, so a run killed before it leaves a cache the next run rebuilds.
     pub(crate) fn commit(
@@ -173,6 +140,34 @@ impl<'a> FrameSpill<'a> {
             stats,
             carries: commit.carries,
         })
+    }
+}
+
+impl PlaneStore for FrameSpill<'_> {
+    fn store_channel(
+        &self,
+        channel: usize,
+        pixels: &[f32],
+    ) -> Result<StoredPlane, FrameStoreError> {
+        let path = self.channel_path(channel);
+        StoredPlane::write(&path, pixels)?;
+        StoredPlane::map(&path)
+    }
+
+    fn store_quality(
+        &self,
+        plane: FramePlane,
+        pixels: &[f32],
+    ) -> Result<StoredPlane, FrameStoreError> {
+        let path = self.quality_path(plane);
+        StoredPlane::write(&path, pixels)?;
+        StoredPlane::map(&path)
+    }
+
+    fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError> {
+        let path = self.flags_path();
+        StoredPlane::write(&path, bytes)?;
+        StoredPlane::map(&path)
     }
 }
 
@@ -262,6 +257,24 @@ fn read_sidecar<T: DeserializeOwned>(path: &Path) -> Option<T> {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use std::path::Path;
+
+    use crate::frame_store::frame_spill::FrameSpill;
+
+    impl<'a> FrameSpill<'a> {
+        /// A kept frame's files under `stem` in `directory`: [`Self::cached`]'s naming with a stem
+        /// a test can read.
+        pub(crate) fn named(directory: &'a Path, stem: &str) -> Self {
+            Self {
+                directory,
+                stem: stem.to_owned(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::fs;
 
@@ -346,7 +359,7 @@ mod tests {
     #[test]
     fn committed_reads_back_only_a_valid_record_under_its_key() {
         let directory = TempDir::new("frame_spill_commit");
-        let spill = FrameSpill::new(directory.path(), "frame");
+        let spill = FrameSpill::named(directory.path(), "frame");
         let key = key(7);
         let carries = |quality, flags| Carries { quality, flags };
         for (stats, carries) in [
@@ -398,7 +411,7 @@ mod tests {
 
         let blocker = directory.join("not_a_directory");
         fs::write(&blocker, b"file").unwrap();
-        let error = FrameSpill::new(&blocker, "frame")
+        let error = FrameSpill::named(&blocker, "frame")
             .commit(key, carries(false, false), &valid)
             .unwrap_err();
         let expected = blocker.join("frame.stats");

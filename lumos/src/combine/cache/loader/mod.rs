@@ -10,12 +10,13 @@ use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::concurrency;
 use crate::frame_store::cache_key::CacheKey;
+use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::spill_directory::SpillDirectory;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_config::IngestConfig;
@@ -38,7 +39,7 @@ use crate::combine::cache::frame_check::FrameCheck;
 #[derive(Debug)]
 struct LoadedTier {
     frames: Vec<StoredFrame>,
-    spill_directory: Option<SpillDirectory>,
+    spilled: bool,
     metadata: ImageMetadata,
 }
 
@@ -115,7 +116,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     };
     let LoadedTier {
         frames,
-        spill_directory,
+        spilled,
         metadata,
     } = if plan.fits_in_ram {
         load.in_memory(early.map(|early| early.image))?
@@ -126,7 +127,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedCache {
         frames,
         core: CacheCore {
-            tier: CacheTier::of(spill_directory, memory),
+            tier: CacheTier::of(spilled, memory),
             dimensions,
             metadata,
             progress,
@@ -275,7 +276,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
         tracing::info!("Loaded {} frames into memory", frames.len());
         Ok(LoadedTier {
             frames,
-            spill_directory: None,
+            spilled: false,
             metadata: metadata.expect("frame 0 provides metadata"),
         })
     }
@@ -295,9 +296,14 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             context,
             step,
         } = *self;
-        let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
+        let scratch = RunScratch::create(&config.cache_dir)?;
+        let kept = config
+            .keep_cache
+            .then(|| DecodeCache::open(&config.cache_dir))
+            .transpose()?;
         let frame_cache = FrameDiskCache {
-            directory: spill_directory.path(),
+            scratch: &scratch,
+            kept: kept.as_ref(),
             admission,
             context,
             step,
@@ -341,40 +347,43 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
         frames.extend(remaining);
 
         tracing::info!(
-            "Cached {} frames ({} channels each) to disk at {:?}",
+            "Spilled {} frames ({} channels each) to disk under {:?}",
             frames.len(),
             admission.dimensions().channels(),
-            spill_directory.path()
+            config.cache_dir
         );
 
         Ok(LoadedTier {
             frames,
-            spill_directory: Some(spill_directory),
+            spilled: true,
             metadata,
         })
     }
 }
 
-/// The disk tier's frame store: the run's spill directory, and how a frame gets there.
+/// The disk tier's frame store: the run's scratch, the decode cache when `keep_cache` asked for
+/// one, and how a frame gets to either.
 #[derive(Debug)]
 struct FrameDiskCache<'a, I: StackableImage> {
-    directory: &'a Path,
+    scratch: &'a RunScratch,
+    kept: Option<&'a DecodeCache>,
     admission: &'a FrameAdmission<'a>,
     context: &'a LoadContext,
     step: Option<&'a dyn FrameStep<I>>,
 }
 
 impl<I: StackableImage> FrameDiskCache<'_, I> {
-    /// Frame `index` through the cache: the planes a committed cache holds for this source and
-    /// decoder, or a decode written there and committed.
+    /// Frame `index` on disk: with a decode cache, the planes it holds committed for this source
+    /// and decoder, or a decode written there and committed; without one, a decode in the run's
+    /// scratch.
     ///
     /// `decoded` is a frame already decoded, which is written rather than looked up: the decode a
     /// lookup would save is already spent. The source's identity is read before the decode and
     /// again after it, and a frame whose source changed in between is refused rather than cached
     /// under the identity it had before.
     ///
-    /// A frame through `step` is not what its source decodes to, so it is spilled for this run
-    /// alone, under its index.
+    /// A frame through `step` is not what its source decodes to, so it goes to the run's scratch
+    /// whatever the cache.
     fn frame(
         &self,
         path: &Path,
@@ -391,15 +400,33 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
                 image
             };
             let checked = CheckedImage::admit(image, index, self.admission)?;
-            let spill = FrameSpill::new(self.directory, &format!("prepared_{index}"));
-            return StoredFrame::spill(&spill, &checked.image, &checked.quality, checked.stats)
-                .map_err(Error::from);
+            return StoredFrame::spill(
+                self.scratch,
+                &checked.image,
+                &checked.quality,
+                checked.stats,
+            )
+            .map_err(Error::from);
         }
+        let Some(kept) = self.kept else {
+            let image = match decoded {
+                Some(Decoded { image, .. }) => image,
+                None => load_image::<I>(path, self.context)?,
+            };
+            let checked = CheckedImage::admit(image, index, self.admission)?;
+            return StoredFrame::spill(
+                self.scratch,
+                &checked.image,
+                &checked.quality,
+                checked.stats,
+            )
+            .map_err(Error::from);
+        };
         let (source, decoded_image) = match decoded {
             Some(Decoded { image, source }) => (source, Some(image)),
             None => (CachedSource::of(path)?, None),
         };
-        let spill = FrameSpill::cached(self.directory, &source.canonical, I::DECODER);
+        let spill = FrameSpill::cached(kept.path(), &source.canonical, I::DECODER);
         let key = CacheKey::new(source.identity, I::DECODER);
 
         if decoded_image.is_none()
