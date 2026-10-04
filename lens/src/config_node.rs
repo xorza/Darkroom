@@ -12,7 +12,7 @@
 //! `DynamicValue`s. A config type carries its own wire identity, the
 //! `Introspect` `TYPE_ID` and `DISPLAY_NAME` its derive declares — `lumos`
 //! derives them on its own types — and where a config's shape does not fit the
-//! field model, [`crate::astro::config`] declares a flat projection instead.
+//! field model, the astro module's `config` declares a flat projection instead.
 
 use std::any::Any;
 use std::fmt;

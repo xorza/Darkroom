@@ -18,3 +18,15 @@ fn toward_blends_the_hue_and_leaves_alpha_alone() {
     let mid = toward(a, b, 0.5);
     assert_eq!((mid.r, mid.g, mid.b, mid.a), (0.5, 0.5, 0.5, 0.8));
 }
+
+/// The lift moves each channel 28% of its way to white and keeps alpha: a zero channel lands on
+/// 0 + (1 − 0)·0.28 = 0.28 exactly, and a full one stays at 1.
+#[test]
+fn hover_lift_moves_each_channel_toward_white_and_keeps_alpha() {
+    let lifted = hover_lift(RgbaF32::new(0.0, 1.0, 0.0, 0.5));
+    assert_eq!(
+        (lifted.r, lifted.g, lifted.b, lifted.a),
+        (0.28, 1.0, 0.28, 0.5)
+    );
+    assert_eq!(hover_lift(RgbaF32::WHITE), RgbaF32::WHITE);
+}

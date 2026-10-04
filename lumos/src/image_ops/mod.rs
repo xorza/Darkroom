@@ -12,8 +12,8 @@
 //! quantization σ and mosaic noise: neither describes the samples an op leaves.
 //!
 //! The submodules below are the image operations themselves (each an op-named config struct with an
-//! in-place `apply`), plus their shared support: [`error`] (the `OpError` contract) and [`wavelet`]
-//! (the multiscale primitive `denoise`/`hdr` build on).
+//! in-place `apply`), plus their shared support, [`error`] (the `OpError` contract). The
+//! multiscale primitive `denoise` and `hdr` build on is [`crate::math::wavelet`].
 //!
 //! A convention rather than a trait, deliberately. A trait would turn nine inherent `apply`
 //! methods into trait methods, so every downstream call site would need it in scope, to save the
@@ -22,7 +22,7 @@
 //! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
 //!
 //! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) take the same `apply(&mut LinearImage)`
-//! shape but report [`crate::MlError`]: their failures are a missing model or an image smaller
+//! shape but report `MlError`: their failures are a missing model or an image smaller
 //! than one tile, neither of which is a config range that `InvalidConfigField` describes.
 
 pub(crate) mod background_extraction;

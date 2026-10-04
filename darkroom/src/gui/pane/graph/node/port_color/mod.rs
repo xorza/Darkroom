@@ -11,20 +11,20 @@
 //!
 //! The hue rosters themselves live on the theme
 //! ([`TypeColors`], serialized like every
-//! other colour); this module owns only the type → slot mapping and the
-//! hover emphasis.
+//! other colour), and so does the hover lift; this module owns only the
+//! type → slot mapping.
 
 use palantir::RgbaF32;
 use scenarium::DataType;
 
 use crate::core::document::PortKind;
 use crate::gui::theme::Theme;
-use crate::gui::theme::color::toward;
+use crate::gui::theme::color::hover_lift;
 use crate::gui::theme::type_colors::TypeColors;
 
 /// `RgbaF32` for a port of type `ty` on the given side. Untyped (`Any`) ports
 /// defer to the theme's positional port colors; `hovered` lifts either one
-/// through [`emphasize`].
+/// through [`hover_lift`].
 pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> RgbaF32 {
     let base = if matches!(ty, DataType::Any) {
         fallback(theme, kind)
@@ -49,7 +49,7 @@ const fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
 }
 
 fn lit(c: RgbaF32, hovered: bool) -> RgbaF32 {
-    if hovered { emphasize(c) } else { c }
+    if hovered { hover_lift(c) } else { c }
 }
 
 /// The base hue for a non-`Any` type under the theme's roster.
@@ -73,17 +73,6 @@ fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
 /// lands on the same color.
 const fn ramp_pick(ramp: &[RgbaF32], key: u128) -> RgbaF32 {
     ramp[(key % ramp.len() as u128) as usize]
-}
-
-/// Hover emphasis: blend toward white, so the port lifts off the canvas.
-///
-/// Every port lifts this way, typed or not. The palette cannot carry a
-/// lifted colour beside each resting one — most port colours already sit on
-/// its brightest tint, which has nothing above it — so the lift is computed
-/// here instead.
-fn emphasize(c: RgbaF32) -> RgbaF32 {
-    const T: f32 = 0.28;
-    toward(c, RgbaF32::WHITE, T)
 }
 
 #[cfg(test)]

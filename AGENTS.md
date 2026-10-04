@@ -45,8 +45,15 @@ macOS, "C++ Clang tools" or `winget install LLVM.LLVM` on Windows,
 Per touched member crate:
 
 ```
-cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && cargo test -p <crate> --tests --all-features
+cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && RUSTDOCFLAGS="-D warnings" cargo doc -p <crate> --no-deps --document-private-items --all-features && cargo test -p <crate> --tests --all-features
 ```
+
+The doc step fails on a broken intra-doc link. It documents private items
+because most of the workspace's docs sit on crate-private items, whose links
+rustdoc otherwise never resolves, and takes `--all-features`, as clippy does,
+so the docs of feature-gated code are checked too. Rustdoc never builds
+`cfg(test)` code, so a doc outside it names a test-only item in a code span,
+not a link.
 
 A crate's AGENTS.md may name its own test feature set, which replaces
 `--all-features` in `cargo test` (`lumos` does). A submodule runs its chain

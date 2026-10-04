@@ -322,8 +322,8 @@ const FILL_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Replace a plane's non-finite samples with the median of its finite ones.
 ///
-/// What sits under a null is not data and [`NullMask`] says so, but the stages that measure a whole
-/// plane mostly do not consult the mask, so this value is what they see. The median is the frame's
+/// What sits under a null is not data and [`QualityFlags::NO_DATA`] says so, but the stages that
+/// measure a whole plane mostly do not consult the flags, so this value is what they see. The median is the frame's
 /// own background level, which leaves a masked region a flat patch instead of the hard-edged hole a
 /// zero fill would cut — and a hard edge is what manufactures star detections and drags a
 /// background estimate. A deliberate stand-in, not a correction.
@@ -342,7 +342,7 @@ fn fill_nulls(samples: &mut [f32], null_count: usize) {
             .step_by(sample.stride()),
     );
     // A wholly-null plane has no level of its own to borrow, and no guess is better than any
-    // other. The mask says every pixel of it is missing, which is the part that has to survive.
+    // other. The flags say every pixel of it is missing, which is the part that has to survive.
     let fill = if finite.is_empty() {
         0.0
     } else {

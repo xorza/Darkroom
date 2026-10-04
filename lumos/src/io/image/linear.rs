@@ -29,7 +29,8 @@ pub struct LinearImage {
     pub metadata: ImageMetadata,
     pub(crate) pixels: LinearPixels,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
-    /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
+    /// [`QualityFlags::NO_DATA`](crate::io::image::pixel_flags::QualityFlags::NO_DATA) are a finite
+    /// fill, not data.
     pub(crate) flags: Option<PixelFlags>,
 }
 

@@ -2,7 +2,7 @@
 //! stacking builder nodes.
 //!
 //! Unlike the per-frame configs — which derive
-//! [`Introspect`](common::Introspect) on the lumos type itself and need nothing
+//! [`Introspect`] on the lumos type itself and need nothing
 //! here but an identity — each of these fronts a *nested* config whose full
 //! field set is far wider than a node's worth of ports. So each is a flat
 //! projection: the handful of knobs the editor offers, expanded back over

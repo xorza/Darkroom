@@ -64,7 +64,7 @@ pub(super) struct StampData {
 ///
 /// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the range
 /// its own `constrain` enforces — starting outside it just spends the first iteration being clamped
-/// back. Always at least [`MIN_STAMP_RADIUS`](super::MIN_STAMP_RADIUS), so the 0.5 floor cannot
+/// back. Always at least [`MIN_STAMP_RADIUS`](super::measure_grid::MIN_STAMP_RADIUS), so the 0.5 floor cannot
 /// cross it.
 pub(super) fn sigma_from_moments(sum_r2: f64, sum_w: f64, max_sigma: f64) -> f32 {
     if sum_w > f64::EPSILON {

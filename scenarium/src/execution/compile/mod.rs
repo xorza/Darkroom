@@ -93,7 +93,7 @@ struct PortTotals {
 /// The [`CompiledGraph`] is the one thing here that cannot be reused, since the
 /// engine, its runtime cache, and the GUI all hold handles to the previous one
 /// while the next compile runs — so it is always fresh and can be shared with
-/// the worker in an [`Arc`](std::sync::Arc).
+/// the worker in an [`Arc`].
 #[derive(Debug, Default)]
 pub struct Compiler {
     /// Every node, sorted into the dense index space — *the* placement, which

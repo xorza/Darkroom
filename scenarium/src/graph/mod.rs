@@ -72,8 +72,9 @@ pub struct Graph {
     /// Data wiring, keyed by consumer input port. Sparse: only bound ports
     /// appear; absence means unbound. A `BTreeMap` keeps
     /// serialization deterministic and lets a node's ports range contiguously.
-    /// Serialized as a sequence of `(port, binding)` pairs
-    /// (see [`serde`](crate::graph::serde) for why it stays one).
+    /// Serialized as a sequence of `(port, binding)` pairs and decoded entry
+    /// by entry, so a document that repeats a port is refused rather than
+    /// loaded as a map that kept only the last binding.
     #[serde(
         default,
         serialize_with = "crate::graph::serde::serialize_bindings",

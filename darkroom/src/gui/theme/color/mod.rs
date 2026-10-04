@@ -17,5 +17,14 @@ pub(crate) fn toward(c: RgbaF32, to: RgbaF32, t: f32) -> RgbaF32 {
     Animatable::lerp(c, to, t).with_alpha(c.a)
 }
 
+/// The hover emphasis every port shares: blend toward white, so the port lifts off the canvas.
+///
+/// The palette cannot carry a lifted colour beside each resting one — most port colours already
+/// sit on its brightest tint, which has nothing above it — so the lift is computed here instead.
+pub(crate) fn hover_lift(c: RgbaF32) -> RgbaF32 {
+    const T: f32 = 0.28;
+    toward(c, RgbaF32::WHITE, T)
+}
+
 #[cfg(test)]
 mod tests;

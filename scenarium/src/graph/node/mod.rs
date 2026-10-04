@@ -138,7 +138,7 @@ impl Node {
     /// **A node takes what its declaration says, wherever one is reachable.** A
     /// `Special` node's is hardcoded, so both its name and its cache mode come
     /// straight off [`SpecialNode::func`]. A `Func` node names only an id, and
-    /// resolving one takes a [`Library`](crate::library::Library) this does not
+    /// resolving one takes a [`Library`] this does not
     /// have — so it starts unnamed and on `CacheMode::None`, and `From<&Func>`
     /// is the constructor for when the declaration *is* in hand.
     ///
