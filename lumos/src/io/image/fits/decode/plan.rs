@@ -278,16 +278,11 @@ pub(super) fn preflight_fits_image(
         stored_bitpix.elem_size(),
         "FITS native decode chunk",
     )?;
-    let physical_chunk_bytes = checked_size_bytes(
-        path,
-        chunk_samples,
-        size_of::<f32>(),
-        "FITS physical decode chunk",
-    )?;
+    // The reader's copy of a chunk as stored, and the scratch it byte-swaps or decodes it into,
+    // which the conversion writes straight into the output.
     let peak_bytes = decoded_bytes
         .checked_add(native_chunk_bytes)
         .and_then(|bytes| bytes.checked_add(native_chunk_bytes))
-        .and_then(|bytes| bytes.checked_add(physical_chunk_bytes))
         .and_then(|bytes| {
             if hdu.kind == HduKind::CompressedImage {
                 bytes.checked_add(hdu.source_bytes.checked_mul(2)?)

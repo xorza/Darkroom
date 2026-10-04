@@ -4,17 +4,19 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::Scaling;
+use fits_well::image::{ImageView, Scaling};
 use fits_well::io::StreamReader;
 use rayon::prelude::*;
 
 use common::CancelToken;
 
+use crate::concurrency;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
+use crate::io::image::fits::decode::hdu_sections::{HduSections, SectionRead};
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
 
 use crate::io::image::fits::metadata::domain_keywords;
@@ -47,11 +49,15 @@ pub(super) fn read_stream_hdu(
 ) -> Result<DecodedFitsImage, ImageError> {
     let index = selected.index;
     let header = reader.hdus()[index].header.clone();
-    read_decoded_hdu(&header, plan, selected, checksum, path, context, |ranges| {
-        reader
-            .read_image_section(index, &ranges)
-            .map(|image| image.physical_f32())
-    })
+    read_decoded_hdu(
+        &header,
+        plan,
+        selected,
+        checksum,
+        path,
+        context,
+        &mut HduSections::new(reader, index),
+    )
 }
 
 pub(super) fn read_decoded_hdu(
@@ -61,7 +67,7 @@ pub(super) fn read_decoded_hdu(
     checksum: FitsChecksumProvenance,
     path: &Path,
     context: &LoadContext,
-    mut read_pixels: impl FnMut(Vec<Range<usize>>) -> fits_well::Result<Vec<f32>>,
+    sections: &mut impl SectionRead,
 ) -> Result<DecodedFitsImage, ImageError> {
     tracing::debug!(
         source_bytes = plan.source_bytes,
@@ -97,13 +103,7 @@ pub(super) fn read_decoded_hdu(
     let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
     let mut planes = ArrayVec::<DecodedPlane, 3>::new();
     for channel in 0..channel_count {
-        planes.push(read_fits_plane(
-            path,
-            &plan,
-            channel,
-            context,
-            &mut read_pixels,
-        )?);
+        planes.push(read_fits_plane(path, &plan, channel, context, sections)?);
     }
     let scan = planes
         .iter()
@@ -339,38 +339,41 @@ fn read_fits_plane(
     plan: &FitsDecodePlan,
     channel: usize,
     context: &LoadContext,
-    read_pixels: &mut impl FnMut(Vec<Range<usize>>) -> fits_well::Result<Vec<f32>>,
+    sections: &mut impl SectionRead,
 ) -> Result<DecodedPlane, ImageError> {
     let width = plan.dimensions.width();
     let height = plan.dimensions.height();
     let expected_pixels = plan.dimensions.pixel_count();
-    let mut output = vec![0.0; expected_pixels];
+    let mut output = concurrency::zeroed_in_parallel(expected_pixels);
     let mut nulls: Option<NullSummary> = None;
     let mut scan = SampleScan::EMPTY;
-    let integer = plan.sample_type.is_integer().then_some(plan.scaling);
     for row_start in (0..height).step_by(plan.rows_per_chunk) {
         context.check_cancelled(path)?;
         let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
         let expected_chunk = (row_end - row_start) * width;
-        let mut pixels = read_pixels(channel_ranges(plan, channel, row_start..row_end))
+        let section = sections
+            .read_section(&channel_ranges(plan, channel, row_start..row_end))
             .map_err(|source| ImageError::fits(path, source))?;
         context.check_cancelled(path)?;
-        if pixels.len() != expected_chunk {
+        let samples = section.samples();
+        if samples.len() != expected_chunk {
             return Err(ImageError::fits_unsupported(
                 path,
                 format!(
                     "channel {channel} rows {row_start}..{row_end} contain {} pixels; expected {expected_chunk}",
-                    pixels.len()
+                    samples.len()
                 ),
             ));
         }
+        let start = row_start * width;
         let ChunkScan {
             nulls: chunk_nulls,
             scan: chunk_scan,
-        } = normalize_and_scan(
-            &mut pixels,
+        } = convert_and_scan(
+            samples,
+            section.scaling(),
             plan.sample_scale.divisor,
-            integer,
+            &mut output[start..start + expected_chunk],
             &context.cancel,
         )
         .map_err(|Cancelled| ImageError::cancelled(path))?;
@@ -378,14 +381,12 @@ fn read_fits_plane(
         // Each chunk locates its nulls in its own index space; the plane's is what a caller can act
         // on, so the offset is applied here rather than threaded into the pass.
         if let Some(chunk_nulls) = chunk_nulls {
-            let chunk_nulls = chunk_nulls.offset_by(row_start * width);
+            let chunk_nulls = chunk_nulls.offset_by(start);
             nulls = Some(match nulls {
                 None => chunk_nulls,
                 Some(nulls) => nulls.merge(chunk_nulls),
             });
         }
-        let start = row_start * width;
-        output[start..start + expected_chunk].copy_from_slice(&pixels);
     }
     Ok(DecodedPlane {
         samples: output,
@@ -426,12 +427,9 @@ impl NullSummary {
 /// What the normalize pass learns about the samples beside their nulls.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SampleScan {
-    /// The OR of every stored integer, for an integer `BITPIX`: its trailing zeros are the ones
-    /// every sample shares.
+    /// The OR of every stored integer but `BLANK`, for an integer `BITPIX`: its trailing zeros are
+    /// the ones every sample shares.
     raw_bits: u64,
-    /// Whether every stored integer was below `2²⁴`, where the `f32` the reader hands back holds
-    /// it exactly. Past that the bits above describe the conversion, not the data.
-    raw_exact: bool,
     /// The largest finite sample after the division.
     maximum: f32,
 }
@@ -443,20 +441,15 @@ struct ChunkScan {
     scan: SampleScan,
 }
 
-/// Integers an `f32` holds exactly: every magnitude below `2²⁴`.
-const EXACT_F32_INTEGER: f64 = 16_777_216.0;
-
 impl SampleScan {
     const EMPTY: Self = Self {
         raw_bits: 0,
-        raw_exact: true,
         maximum: f32::NEG_INFINITY,
     };
 
     const fn merge(self, other: Self) -> Self {
         Self {
             raw_bits: self.raw_bits | other.raw_bits,
-            raw_exact: self.raw_exact && other.raw_exact,
             maximum: self.maximum.max(other.maximum),
         }
     }
@@ -464,110 +457,159 @@ impl SampleScan {
     /// One quantization step in physical units: `|BSCALE|·2^z`, where `z` is the trailing zeros
     /// every stored integer shares. 12- or 14-bit data written left-justified into a 16-bit
     /// container steps by 16 or 4 stored units, not by one. The container's own step stands when
-    /// nothing can be read off the samples: all of them zero, or some too large to have reached
-    /// this pass exactly.
+    /// every stored integer is zero, and nothing can be read off them.
     fn integer_step(&self, bscale: f64) -> f64 {
-        let shared_zeros = if self.raw_exact && self.raw_bits != 0 {
-            self.raw_bits.trailing_zeros()
-        } else {
+        let shared_zeros = if self.raw_bits == 0 {
             0
+        } else {
+            self.raw_bits.trailing_zeros()
         };
         bscale.abs() * 2.0f64.powi(shared_zeros as i32)
     }
 }
 
-/// Divide a decode chunk into the pipeline's `[0, 1]` domain, locate the FITS nulls it carries, and
-/// scan it for its [`SampleScan`], in one pass over the samples.
+/// Convert a section of stored samples into the pipeline's domain in `out`, locate the FITS nulls
+/// it carries, and scan it for its [`SampleScan`], in one parallel pass.
 ///
-/// The divide loop is deliberately branch-free: the divide is unconditional, and the finite test
-/// and the maximum fold into a boolean `|=` and a select, so the loop vectorizes to `vdivps` plus
-/// compare-and-reduce. A `if !finite { continue }` between the load and the divide costs far more
-/// than the second pass it saves — it makes the divide scalar, and a scalar `f32` divide is several
-/// times the throughput of the vector one. The stored-integer OR is its own loop over the chunk,
-/// still in cache, and only an integer `BITPIX` pays for it.
+/// Each sample is `(BZERO + BSCALE·raw) / divisor` in `f64`, narrowed to `f32` once: an
+/// intermediate `f32` would round the physical value and then the quotient. The quotient divides
+/// rather than multiplying by a reciprocal, which `f64` does not hold exactly for a span like
+/// 65535. A NaN or ±inf survives the division, and a finite sample the division pushes past
+/// `f32::MAX` narrows to an infinity, so the finite test after it catches nulls and overflows both.
 ///
-/// Scaling before testing is both safe and slightly stronger: NaN and ±inf survive a division, so a
-/// null is still a null afterwards, and a span that overflows a finite sample is caught here rather
-/// than reaching the image.
-///
-/// Divides rather than multiplying by a precomputed reciprocal: the reciprocal of a span like 65535
-/// is inexact in `f32`, and precision outranks throughput here. The `divisor == 1.0` test is
-/// hoisted out of the loop rather than left in it — dividing by one is exact but not free, and it
-/// is the common case for a floating-point HDU.
-///
-/// Locating the offending samples is a second scan that only a chunk holding one pays for, so a
-/// frame with no nulls — every frame from a sensor — never runs it at all.
-fn normalize_and_scan(
-    pixels: &mut [f32],
+/// Each work item runs three plain loops over its samples, which vectorize, rather than one loop
+/// whose branches keep it scalar: the stored integers' OR, the conversion, and the finite scan of
+/// what it wrote, still in cache.
+fn convert_and_scan(
+    samples: ImageView<'_>,
+    scaling: Scaling,
     divisor: f32,
-    integer: Option<Scaling>,
+    out: &mut [f32],
     cancel: &CancelToken,
 ) -> Result<ChunkScan, Cancelled> {
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
+    let convert = Conversion {
+        scaling,
+        divisor: f64::from(divisor),
+    };
+    match samples {
+        ImageView::U8(stored) => convert.integers(stored, out, cancel),
+        ImageView::I16(stored) => convert.integers(stored, out, cancel),
+        ImageView::I32(stored) => convert.integers(stored, out, cancel),
+        ImageView::I64(stored) => convert.integers(stored, out, cancel),
+        ImageView::F32(stored) => convert.floats(stored, out, cancel),
+        ImageView::F64(stored) => convert.floats(stored, out, cancel),
     }
-    let scale = divisor != 1.0;
-    pixels
-        .par_chunks_mut(CHUNK_SAMPLES)
-        .enumerate()
-        .map(|(chunk_index, chunk)| {
-            if cancel.is_cancelled() {
-                return Err(Cancelled);
+}
+
+/// The scaling and the divisor one section converts by.
+#[derive(Debug, Clone, Copy)]
+struct Conversion {
+    scaling: Scaling,
+    divisor: f64,
+}
+
+impl Conversion {
+    /// Integer samples, the `BLANK` sentinel a NaN and no part of the stored integers' OR.
+    fn integers<T: Copy + Sync + Into<i64>>(
+        self,
+        stored: &[T],
+        out: &mut [f32],
+        cancel: &CancelToken,
+    ) -> Result<ChunkScan, Cancelled> {
+        let Scaling {
+            bscale,
+            bzero,
+            blank,
+        } = self.scaling;
+        // A sentinel no stored value matches when the HDU declares none.
+        let blank = blank.unwrap_or(i64::MIN);
+        let divisor = self.divisor;
+        self.each_chunk(stored, out, cancel, |stored, out| {
+            let mut raw_bits = 0u64;
+            for &raw in stored {
+                let raw: i64 = raw.into();
+                // Two's complement keeps a negative value's trailing zeros.
+                raw_bits |= if raw == blank { 0 } else { raw.cast_unsigned() };
             }
-            let chunk_start = chunk_index * CHUNK_SAMPLES;
-            let mut scan = SampleScan::EMPTY;
-            if let Some(integer) = integer {
-                for &pixel in chunk.iter().filter(|pixel| pixel.is_finite()) {
-                    let stored = ((f64::from(pixel) - integer.bzero) / integer.bscale).round();
-                    scan.raw_exact &= stored.abs() < EXACT_F32_INTEGER;
-                    // Two's complement keeps a negative value's trailing zeros.
-                    scan.raw_bits |= (stored as i64).cast_unsigned();
-                }
+            for (pixel, &raw) in out.iter_mut().zip(stored) {
+                let raw: i64 = raw.into();
+                let physical = bzero + bscale * raw as f64;
+                let value = (physical / divisor) as f32;
+                *pixel = if raw == blank { f32::NAN } else { value };
             }
-            let mut nonfinite = false;
-            let mut maximum = f32::NEG_INFINITY;
-            if scale {
-                for pixel in chunk.iter_mut() {
-                    *pixel /= divisor;
-                    let finite = pixel.is_finite();
-                    nonfinite |= !finite;
-                    maximum = maximum.max(if finite { *pixel } else { f32::NEG_INFINITY });
-                }
-            } else {
-                for &pixel in chunk.iter() {
+            raw_bits
+        })
+    }
+
+    /// Floating-point samples, which carry their own nulls.
+    fn floats<T: Copy + Sync + Into<f64>>(
+        self,
+        stored: &[T],
+        out: &mut [f32],
+        cancel: &CancelToken,
+    ) -> Result<ChunkScan, Cancelled> {
+        let Scaling { bscale, bzero, .. } = self.scaling;
+        let divisor = self.divisor;
+        self.each_chunk(stored, out, cancel, |stored, out| {
+            for (pixel, &raw) in out.iter_mut().zip(stored) {
+                *pixel = ((bzero + bscale * raw.into()) / divisor) as f32;
+            }
+            0
+        })
+    }
+
+    /// `convert` over each work item, returning its stored integers' OR, then the finite scan of
+    /// what it wrote, reduced over the section.
+    fn each_chunk<T: Copy + Sync>(
+        self,
+        stored: &[T],
+        out: &mut [f32],
+        cancel: &CancelToken,
+        convert: impl Fn(&[T], &mut [f32]) -> u64 + Sync,
+    ) -> Result<ChunkScan, Cancelled> {
+        Cancelled::check(cancel)?;
+        debug_assert_eq!(stored.len(), out.len());
+        out.par_chunks_mut(CHUNK_SAMPLES)
+            .zip(stored.par_chunks(CHUNK_SAMPLES))
+            .enumerate()
+            .map(|(chunk_index, (out, stored))| {
+                Cancelled::check(cancel)?;
+                let raw_bits = convert(stored, out);
+                let mut nonfinite = false;
+                let mut maximum = f32::NEG_INFINITY;
+                for &pixel in out.iter() {
                     let finite = pixel.is_finite();
                     nonfinite |= !finite;
                     maximum = maximum.max(if finite { pixel } else { f32::NEG_INFINITY });
                 }
-            }
-            scan.maximum = maximum;
-            Ok(ChunkScan {
-                nulls: nonfinite.then(|| summarize_nulls(chunk, chunk_start)),
-                scan,
-            })
-        })
-        .try_reduce(
-            || ChunkScan {
-                nulls: None,
-                scan: SampleScan::EMPTY,
-            },
-            |left, right| {
                 Ok(ChunkScan {
-                    nulls: match (left.nulls, right.nulls) {
-                        (None, value) | (value, None) => value,
-                        (Some(left), Some(right)) => Some(left.merge(right)),
-                    },
-                    scan: left.scan.merge(right.scan),
+                    nulls: nonfinite.then(|| summarize_nulls(out, chunk_index * CHUNK_SAMPLES)),
+                    scan: SampleScan { raw_bits, maximum },
                 })
-            },
-        )
+            })
+            .try_reduce(
+                || ChunkScan {
+                    nulls: None,
+                    scan: SampleScan::EMPTY,
+                },
+                |left, right| {
+                    Ok(ChunkScan {
+                        nulls: match (left.nulls, right.nulls) {
+                            (None, value) | (value, None) => value,
+                            (Some(left), Some(right)) => Some(left.merge(right)),
+                        },
+                        scan: left.scan.merge(right.scan),
+                    })
+                },
+            )
+    }
 }
 
 /// Count a chunk's nulls and locate the first, in the whole-span index space `chunk_start` anchors
 /// it to.
 ///
-/// Off the hot path by construction: [`normalize_and_scan`] only reaches this once a chunk
-/// is known to hold at least one null.
+/// Off the hot path by construction: [`Conversion::each_chunk`] only reaches this once a chunk is
+/// known to hold at least one null.
 fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
     let mut count = 0;
     let mut first_index = None;
@@ -589,16 +631,37 @@ mod tests {
 
     use crate::io::cancelled::Cancelled;
     use crate::io::image::fits::decode::pixels::{
-        FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, fill_nulls, normalize_and_scan,
+        ChunkScan, FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, convert_and_scan, fill_nulls,
     };
-    use fits_well::image::Scaling;
+    use fits_well::image::{ImageView, Scaling};
+
+    const IDENTITY: Scaling = Scaling {
+        bscale: 1.0,
+        bzero: 0.0,
+        blank: None,
+    };
+
+    /// `samples` through [`convert_and_scan`], with the converted samples beside the scan.
+    fn convert(samples: ImageView<'_>, scaling: Scaling, divisor: f32) -> (Vec<f32>, ChunkScan) {
+        let mut out = vec![0.0; samples.len()];
+        let scan =
+            convert_and_scan(samples, scaling, divisor, &mut out, &CancelToken::never()).unwrap();
+        (out, scan)
+    }
 
     #[test]
     fn cancellation_stops_chunk_validation() {
         let cancel = CancelToken::new();
         cancel.cancel();
         assert_eq!(
-            normalize_and_scan(&mut [1.0, 2.0], 1.0, None, &cancel).unwrap_err(),
+            convert_and_scan(
+                ImageView::F32(&[1.0, 2.0]),
+                IDENTITY,
+                1.0,
+                &mut [0.0; 2],
+                &cancel
+            )
+            .unwrap_err(),
             Cancelled
         );
     }
@@ -607,62 +670,107 @@ mod tests {
     fn a_unit_divisor_accepts_every_finite_value_and_changes_none() {
         // The float-FITS path. Nothing is out of range to this pass — a negative calibration
         // residual and an undivided ADU value are both legitimate.
-        let mut pixels = [-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
-        let expected = pixels;
-        let scan = normalize_and_scan(&mut pixels, 1.0, None, &CancelToken::never()).unwrap();
+        let pixels = [-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
+        let (out, scan) = convert(ImageView::F32(&pixels), IDENTITY, 1.0);
         assert_eq!(scan.nulls, None);
         assert_eq!(scan.scan.maximum, 65_535.0);
-        assert_eq!(pixels, expected);
+        assert_eq!(
+            scan.scan.raw_bits, 0,
+            "a float sample has no stored integer"
+        );
+        assert_eq!(out, pixels);
     }
 
     #[test]
     fn normalizing_maps_the_declared_span_onto_the_unit_interval() {
         // BITPIX = 16 with BZERO = 2¹⁵, BSCALE = 1: divisor |1| × (2¹⁶ − 1) = 65535, so the
         // unsigned span 0..=65535 lands exactly on [0, 1].
-        let mut unsigned = [0.0f32, 16_384.0, 32_768.0, 65_535.0];
         let unsigned_convention = Scaling {
-            bscale: 1.0,
             bzero: 32_768.0,
-            blank: None,
+            ..IDENTITY
         };
-        let scan = normalize_and_scan(
-            &mut unsigned,
+        let (unsigned, scan) = convert(
+            ImageView::I16(&[-32_768, -16_384, 0, 32_767]),
+            unsigned_convention,
             65_535.0,
-            Some(unsigned_convention),
-            &CancelToken::never(),
-        )
-        .unwrap()
-        .scan;
-        // The stored integers are v − 32768: −32768, −16384, 0 and 32767. The last is odd, so they
-        // share no trailing zero and the step is one stored unit.
-        assert_eq!(scan.raw_bits.trailing_zeros(), 0);
-        assert!(scan.raw_exact);
-        assert_eq!(scan.integer_step(1.0), 1.0);
-        assert_eq!(scan.maximum, 1.0);
-        // The endpoints are exact; 16384/65535 = 0.2500038147, 32768/65535 = 0.5000076294.
-        assert_eq!(unsigned[0], 0.0);
-        assert!((unsigned[1] - 0.250_003_8).abs() < 1e-7, "{unsigned:?}");
-        assert!((unsigned[2] - 0.500_007_6).abs() < 1e-7, "{unsigned:?}");
-        assert_eq!(unsigned[3], 1.0);
+        );
+        // The stored integers −32768, −16384, 0 and 32767: the last is odd, so they share no
+        // trailing zero and the step is one stored unit.
+        assert_eq!(scan.scan.raw_bits.trailing_zeros(), 0);
+        assert_eq!(scan.scan.integer_step(1.0), 1.0);
+        assert_eq!(scan.scan.maximum, 1.0);
+        // Each is the quotient rounded once: the endpoints exactly, 16384/65535 and 32768/65535
+        // to the nearest f32.
+        assert_eq!(
+            unsigned,
+            [
+                0.0,
+                (16_384.0f64 / 65_535.0) as f32,
+                (32_768.0f64 / 65_535.0) as f32,
+                1.0
+            ]
+        );
 
         // The same divisor puts a signed frame on [-0.5, 0.5] around its own zero: the scale is
         // applied without an offset, so a negative sample stays negative.
-        let mut signed = [-32_768.0f32, 0.0, 32_767.0];
-        normalize_and_scan(&mut signed, 65_535.0, None, &CancelToken::never()).unwrap();
-        assert!((signed[0] - -0.500_007_6).abs() < 1e-7, "{signed:?}");
-        assert_eq!(signed[1], 0.0);
-        assert!((signed[2] - 0.499_992_37).abs() < 1e-7, "{signed:?}");
+        let (signed, _) = convert(ImageView::I16(&[-32_768, 0, 32_767]), IDENTITY, 65_535.0);
+        assert_eq!(
+            signed,
+            [
+                (-32_768.0f64 / 65_535.0) as f32,
+                0.0,
+                (32_767.0f64 / 65_535.0) as f32
+            ]
+        );
+    }
+
+    /// A stored integer past `2²⁴` reaches the quotient whole: 2²⁴ + 1 over 65535 is
+    /// 256.00392156…, whose nearest f32 is 256.00394. Narrowed to f32 first it would be 2²⁴, and
+    /// the quotient 256.0039. Its bits are read whole too, so integers that are all multiples of
+    /// 16 past 2²⁴ step by 16.
+    #[test]
+    fn a_stored_integer_past_the_f32_mantissa_rounds_once() {
+        let raw = (1i32 << 24) + 1;
+        let (out, _) = convert(ImageView::I32(&[raw]), IDENTITY, 65_535.0);
+        assert_eq!(out[0], (f64::from(raw) / 65_535.0) as f32);
+        assert_ne!(out[0], (raw as f32) / 65_535.0);
+
+        let (_, scan) = convert(
+            ImageView::I32(&[(1 << 24) + 16, (1 << 24) + 48]),
+            IDENTITY,
+            1.0,
+        );
+        assert_eq!(scan.scan.integer_step(1.0), 16.0);
+    }
+
+    /// `BLANK` is a null and no stored integer: the samples 4 and 8 share two trailing zeros, which
+    /// the sentinel −1, all ones, would otherwise erase.
+    #[test]
+    fn the_blank_sentinel_is_a_null_and_stays_out_of_the_integer_scan() {
+        let scaling = Scaling {
+            blank: Some(-1),
+            ..IDENTITY
+        };
+        let (out, scan) = convert(ImageView::I16(&[4, -1, 8]), scaling, 1.0);
+        assert!(out[1].is_nan());
+        assert_eq!([out[0], out[2]], [4.0, 8.0]);
+        assert_eq!(
+            scan.nulls,
+            Some(NullSummary {
+                count: 1,
+                first_index: 1,
+            })
+        );
+        assert_eq!(scan.scan.integer_step(1.0), 4.0);
     }
 
     #[test]
     fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
-        // Scaling runs before the finite test, so a divisor small enough to push a finite sample
-        // past f32::MAX is caught by the same pass instead of reaching the image.
-        let mut pixels = [1.0e30f32, 0.0];
+        // The divide runs before the finite test, so a divisor small enough to push a finite
+        // sample past f32::MAX is caught by the same pass instead of reaching the image.
+        let (_, scan) = convert(ImageView::F32(&[1.0e30, 0.0]), IDENTITY, 1.0e-30);
         assert_eq!(
-            normalize_and_scan(&mut pixels, 1.0e-30, None, &CancelToken::never())
-                .unwrap()
-                .nulls,
+            scan.nulls,
             Some(NullSummary {
                 count: 1,
                 first_index: 0,
@@ -674,9 +782,8 @@ mod tests {
     fn nan_and_both_infinities_are_counted_after_the_divide() {
         // Nulls survive the divide, which is what lets the test run after it rather than before:
         // a NaN or ±inf divided by any span is still one, and is still counted here.
-        let mut pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
-
-        let scan = normalize_and_scan(&mut pixels, 65_535.0, None, &CancelToken::never()).unwrap();
+        let pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
+        let (_, scan) = convert(ImageView::F32(&pixels), IDENTITY, 65_535.0);
         assert_eq!(
             scan.nulls,
             Some(NullSummary {
@@ -685,28 +792,18 @@ mod tests {
             })
         );
         // The maximum is over the finite samples only: 5/65535, not infinity.
-        assert_eq!(scan.scan.maximum, 5.0 / 65_535.0);
+        assert_eq!(scan.scan.maximum, (5.0f64 / 65_535.0) as f32);
     }
 
     /// The shared trailing zeros of the stored integers give the step: stored values that are all
-    /// multiples of 16 step by 16 × |BSCALE|. A value past 2²⁴ is not exact in the f32 the reader
-    /// hands back, and then nothing is read off the bits.
+    /// multiples of 16 step by 16 × |BSCALE|; with every stored integer zero, the container's.
     #[test]
     fn the_integer_step_is_the_shared_trailing_zeros() {
         let shifted = SampleScan {
             raw_bits: 0b1_0000 | 0b11_0000 | 0b1111_1111_0000,
-            raw_exact: true,
             maximum: 1.0,
         };
         assert_eq!(shifted.integer_step(0.5), 8.0);
-        assert_eq!(
-            SampleScan {
-                raw_exact: false,
-                ..shifted
-            }
-            .integer_step(0.5),
-            0.5
-        );
         assert_eq!(SampleScan::EMPTY.integer_step(2.0), 2.0);
     }
 

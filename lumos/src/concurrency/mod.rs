@@ -3,8 +3,29 @@
 pub(crate) mod job_scratch_pool;
 pub(crate) mod unsafe_send_ptr;
 
+use std::mem::MaybeUninit;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use rayon::prelude::*;
+
+/// The `f32` samples of a 2 MiB transparent huge page.
+const HUGE_PAGE_SAMPLES: usize = 2 * 1024 * 1024 / size_of::<f32>();
+
+/// `len` zeros, written by the workers a 2 MiB block each, for a plane workers then fill in
+/// contiguous pieces smaller than a page. A fresh plane's pages are zeroed by the kernel at the
+/// first write to each; when such pieces make those first writes, several workers fault on one
+/// huge page and wait on each other, which took two thirds of a 24 MP FITS decode. Where the first
+/// writes already spread over the pages, as a demosaic's tiles do, this pass only adds work.
+pub(crate) fn zeroed_in_parallel(len: usize) -> Vec<f32> {
+    let mut plane = Vec::with_capacity(len);
+    plane.spare_capacity_mut()[..len]
+        .par_chunks_mut(HUGE_PAGE_SAMPLES)
+        .for_each(|block| block.fill(MaybeUninit::new(0.0)));
+    // SAFETY: every one of the `len` samples was written above.
+    unsafe { plane.set_len(len) };
+    plane
+}
 
 /// What one slot of a bounded map finished with: the values of the indices it took, and the
 /// failure that stopped it, if one did.

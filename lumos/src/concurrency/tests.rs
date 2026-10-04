@@ -5,6 +5,7 @@ use std::sync::{Arc, Barrier};
 
 use rayon::ThreadPoolBuilder;
 
+use crate::concurrency;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::concurrency::{try_par_map_bounded_owned, try_par_map_limited};
 
@@ -179,4 +180,15 @@ fn owned_map_propagates_error_and_stops_taking_work() {
         ran <= SLOTS,
         "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"
     );
+}
+
+/// Zeros at every length: none, fewer than one block, and a block and a half, whose last piece is
+/// short.
+#[test]
+fn zeroed_in_parallel_is_all_zeros_at_its_length() {
+    for len in [0, 3, 3 * 1024 * 1024 / 4] {
+        let plane = concurrency::zeroed_in_parallel(len);
+        assert_eq!(plane.len(), len);
+        assert!(plane.iter().all(|&value| value.to_bits() == 0));
+    }
 }
