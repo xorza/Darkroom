@@ -356,7 +356,8 @@ fn align_stack_memory_probe() {
     let output_bytes = dimensions.frame_bytes();
     let per_frame = PerFrameBytes::new(frame_bytes as usize, output_bytes);
     let detection = DETECTION_WORKING_PLANES * frame_bytes as usize + output_bytes;
-    let resident = (n * per_frame.warped + QualityPlanes::ALL.resident_bytes(dimensions)) as u64;
+    let resident =
+        (n * per_frame.warped + QualityPlanes::STANDARD.resident_bytes(dimensions)) as u64;
     let working = (threads * per_frame.working.max(detection)) as u64;
     let ceiling_mb = two_x_ceiling_mb(resident, working);
 

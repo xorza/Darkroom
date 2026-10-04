@@ -411,8 +411,10 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         drizzle_one(size, config, image.clone(), &transform, None)
     };
 
+    // Drizzle has no survivors to scatter, so even a request for every plane gets no dispersion.
     let all = product(QualityPlanes::ALL);
     assert!(all.coverage.is_some() && all.weight.is_some() && all.variance.is_some());
+    assert!(all.dispersion.is_none());
 
     let bare = product(QualityPlanes::IMAGE_ONLY);
     assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.variance.is_none());
@@ -422,6 +424,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         coverage: true,
         weight: false,
         variance: false,
+        dispersion: false,
     });
     assert!(coverage_only.coverage.is_some());
     assert!(coverage_only.weight.is_none() && coverage_only.variance.is_none());

@@ -363,6 +363,7 @@ impl DrizzleAccumulator {
                 .weight
                 .then_some(QualityMap::Shared(self.weight)),
             variance: (!self.variance.is_empty()).then(|| QualityMap::from_planes(self.variance)),
+            dispersion: None,
             // Drizzle takes demosaiced frames, which carry no mosaic.
             cfa_type: None,
             // Drizzle leaves out every flagged pixel it cannot use, with no survivor floor to keep

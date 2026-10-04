@@ -135,7 +135,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
                 n,
                 frame,
                 frame,
-                QualityPlanes::ALL.resident_bytes(dimensions),
+                QualityPlanes::STANDARD.resident_bytes(dimensions),
             ),
             rayon::current_num_threads(),
             avail,
