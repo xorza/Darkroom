@@ -25,7 +25,7 @@ pub(crate) enum StoredPlane<T = f32> {
         /// held for the map's life, and dropped after it. Unix needs no handle, as the map keeps
         /// an unlinked file alive by itself.
         #[cfg(windows)]
-        file: Option<File>,
+        _file: Option<File>,
         _type: PhantomData<T>,
     },
 }
@@ -61,7 +61,7 @@ impl<T: Pod> StoredPlane<T> {
         Self::Mapped {
             map,
             #[cfg(windows)]
-            file,
+            _file: file,
             _type: PhantomData,
         }
     }
