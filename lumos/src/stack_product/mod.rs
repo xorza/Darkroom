@@ -87,44 +87,55 @@ pub struct StackProduct {
 }
 
 impl StackProduct {
-    /// Hold every pixel `empty` names at `fill_value`, a value no frame measured: it carries no
-    /// weight, inverse variance, dispersion or coverage, so no plane claims a measurement there.
-    pub(crate) fn fill_where(&mut self, empty: impl Fn(usize) -> bool + Sync, fill_value: f32) {
-        for channel in 0..self.image.channels() {
-            self.image
-                .channel_mut(channel)
-                .pixels_mut()
+    /// Hold every pixel of each channel that `empty(channel, index)` names at `fill_value`, a value
+    /// no frame measured: it carries no weight, inverse variance, dispersion or coverage, so no
+    /// plane claims a measurement there. A plane every channel shares holds none only where no
+    /// channel does.
+    pub(crate) fn fill_where(
+        &mut self,
+        empty: impl Fn(usize, usize) -> bool + Sync,
+        fill_value: f32,
+    ) {
+        let channels = self.image.channels();
+        let fill = |plane: &mut [f32], channel: Option<usize>, value: f32| {
+            plane
                 .par_iter_mut()
                 .enumerate()
-                .for_each(|(index, value)| {
-                    if empty(index) {
-                        *value = fill_value;
+                .for_each(|(index, sample)| {
+                    let filled = match channel {
+                        Some(channel) => empty(channel, index),
+                        None => (0..channels).all(|channel| empty(channel, index)),
+                    };
+                    if filled {
+                        *sample = value;
                     }
                 });
+        };
+        for channel in 0..channels {
+            fill(
+                self.image.channel_mut(channel).pixels_mut(),
+                Some(channel),
+                fill_value,
+            );
         }
+        let coverage = match &mut self.coverage {
+            Some(Coverage::PerPixel(map)) => Some(map),
+            Some(Coverage::Uniform { .. }) | None => None,
+        };
         let maps = [
             &mut self.weight,
             &mut self.inverse_variance,
             &mut self.dispersion,
         ];
-        let planes = maps
-            .into_iter()
-            .flatten()
-            .flat_map(QualityMap::planes_mut)
-            .chain(match &mut self.coverage {
-                Some(Coverage::PerPixel(plane)) => Some(plane),
-                Some(Coverage::Uniform { .. }) | None => None,
-            });
-        for plane in planes {
-            plane
-                .pixels_mut()
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(index, value)| {
-                    if empty(index) {
-                        *value = 0.0;
+        for map in maps.into_iter().flatten().chain(coverage) {
+            match map {
+                QualityMap::Shared(plane) => fill(plane.pixels_mut(), None, 0.0),
+                QualityMap::PerChannel(planes) => {
+                    for (channel, plane) in planes.iter_mut().enumerate() {
+                        fill(plane.pixels_mut(), Some(channel), 0.0);
                     }
-                });
+                }
+            }
         }
     }
 

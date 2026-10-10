@@ -3,7 +3,7 @@ use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::config::Weighting;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::Rejection;
-use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
+use crate::frame_store::frame_quality::{DropPlanes, FramePlane, FrameQuality};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::cfa::make_cfa;
@@ -284,8 +284,12 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
         };
     let drizzled: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Drizzled {
-            weight: Buffer2::new(4, 1, support),
-            confidence: Buffer2::new(4, 1, confidence),
+            drops: [DropPlanes {
+                weight: Buffer2::new(4, 1, support),
+                confidence: Buffer2::new(4, 1, confidence),
+            }]
+            .into_iter()
+            .collect(),
         };
     let frame = |quality: FrameQuality<Buffer2<f32>>| {
         let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
@@ -514,7 +518,7 @@ fn finish_product_uniform_equal_weights() {
         "fully-covered stack should not materialize a plane: {coverage:?}"
     );
     // It still materializes like the plane it stands for.
-    assert_eq!(coverage.to_plane().pixels(), &[1.0; 6]);
+    assert_eq!(coverage.to_plane(0).pixels(), &[1.0; 6]);
     let Some(QualityMap::Shared(weight)) = product.weight.as_ref() else {
         panic!("a mono stack has one weight plane");
     };

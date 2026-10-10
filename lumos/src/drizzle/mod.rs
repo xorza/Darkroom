@@ -2,6 +2,7 @@
 
 pub(crate) mod accumulator;
 pub(crate) mod config;
+pub(crate) mod deposit;
 pub(crate) mod drizzle_result;
 pub(crate) mod drizzle_tier;
 pub(crate) mod error;

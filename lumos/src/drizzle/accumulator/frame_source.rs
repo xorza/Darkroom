@@ -7,7 +7,9 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
-use crate::io::image::linear::LinearImage;
+use crate::drizzle::deposit::Deposit;
+use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -30,6 +32,9 @@ const SIP_BOUNDARY_STRIDE: usize = 8;
 #[derive(Debug)]
 pub(super) struct Fluxes {
     pub(super) values: ArrayVec<f32, MAX_CHANNELS>,
+    /// The output channel a mosaic photosite's one sample reaches alone, its colour; `None` for a
+    /// pixel whose every channel reaches its own.
+    pub(super) colour: Option<usize>,
     /// The pixel's [`QualityFlags::RESAMPLE_CARRIED`] flags, as a byte.
     pub(super) carried: u8,
 }
@@ -198,6 +203,8 @@ pub(super) struct FrameSource<'a> {
     /// The channel planes, borrowed once for the frame. `LinearImage::channel` is an enum match and
     /// a release assert, which a per-deposit read would pay for every output pixel a drop touches.
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
+    /// The mosaic whose photosites each reach the channel of their colour alone.
+    mosaic: Option<CfaType>,
     size: Size2us,
     map: InputMap,
     pixel_weights: Option<&'a [f32]>,
@@ -209,21 +216,24 @@ pub(super) struct FrameSource<'a> {
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
-    /// `scale` times finer.
+    /// `scale` times finer, its samples reaching the output as `deposit` says.
     pub(super) fn new(
-        image: &'a LinearImage,
+        image: &'a impl StackableImage,
+        deposit: Deposit,
         warp: &WarpTransform,
         scale: f64,
         pixel_weights: Option<&'a Buffer2<f32>>,
     ) -> Self {
+        let dimensions = image.dimensions();
         Self {
-            planes: (0..image.channels())
-                .map(|channel| image.channel(channel).pixels())
+            planes: (0..dimensions.channels())
+                .map(|channel| image.channel(channel))
                 .collect(),
-            size: Size2us::new(image.width(), image.height()),
+            mosaic: deposit.mosaic(),
+            size: dimensions.size(),
             map: InputMap::new(warp, output_grid(scale)),
             pixel_weights: pixel_weights.map(Buffer2::pixels),
-            flags: image.flags.as_ref(),
+            flags: image.flags(),
         }
     }
 
@@ -235,6 +245,9 @@ impl<'a> FrameSource<'a> {
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
         Fluxes {
             values: self.planes.iter().map(|plane| plane[pixel.index]).collect(),
+            colour: self
+                .mosaic
+                .map(|cfa_type| usize::from(cfa_type.color_at(pixel.position))),
             carried: self.flags.map_or(0, |flags| {
                 flags.at(pixel.index).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
             }),
@@ -430,6 +443,7 @@ pub(crate) mod internals {
     use std::ops::Range;
 
     use crate::drizzle::accumulator::frame_source::FrameSource;
+    use crate::drizzle::deposit::Deposit;
     use crate::io::image::linear::LinearImage;
     use crate::registration::transform::WarpTransform;
 
@@ -443,7 +457,7 @@ pub(crate) mod internals {
         output_margin: f64,
         input_margin: f64,
     ) -> Range<usize> {
-        FrameSource::new(image, warp, scale, None).input_rows(
+        FrameSource::new(image, Deposit::of(image), warp, scale, None).input_rows(
             &rows,
             output_width,
             output_margin,

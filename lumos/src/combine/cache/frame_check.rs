@@ -68,11 +68,13 @@ impl FrameCheck<'_> {
                 coverage.chunk(0, pixel_count),
                 confidence.chunk(0, pixel_count),
             ),
-            FrameQuality::Drizzled { weight, confidence } => self.quality_pair(
-                FramePlane::DropWeight,
-                weight.chunk(0, pixel_count),
-                confidence.chunk(0, pixel_count),
-            ),
+            FrameQuality::Drizzled { drops } => drops.iter().try_for_each(|drops| {
+                self.quality_pair(
+                    FramePlane::DropWeight,
+                    drops.weight.chunk(0, pixel_count),
+                    drops.confidence.chunk(0, pixel_count),
+                )
+            }),
             FrameQuality::None | FrameQuality::Mask { .. } => Ok(()),
         }
     }
@@ -153,6 +155,14 @@ impl FrameCheck<'_> {
                 expected: dimensions.channels(),
                 actual: frame.channels.len(),
             });
+        }
+        if let FrameQuality::Drizzled { drops } = &frame.quality {
+            assert!(
+                drops.len() == 1 || drops.len() == dimensions.channels(),
+                "a drizzled frame's drops are shared or one per channel, not {} for {}",
+                drops.len(),
+                dimensions.channels()
+            );
         }
         let expected = dimensions.pixel_count();
         let planes = frame

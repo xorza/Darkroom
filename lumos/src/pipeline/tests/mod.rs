@@ -1000,11 +1000,11 @@ fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, lab
         expected
             .coverage
             .as_ref()
-            .map(|coverage| bits(coverage.to_plane().pixels())),
+            .map(|coverage| bits(coverage.to_plane(0).pixels())),
         actual
             .coverage
             .as_ref()
-            .map(|coverage| bits(coverage.to_plane().pixels())),
+            .map(|coverage| bits(coverage.to_plane(0).pixels())),
         "{label}: coverage"
     );
     assert_eq!(

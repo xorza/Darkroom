@@ -66,8 +66,15 @@ pub enum ColorProvenance {
 pub enum DemosaicProvenance {
     None,
     LumosRcd,
-    LumosMarkesteijn { passes: MarkesteijnPasses },
+    LumosMarkesteijn {
+        passes: MarkesteijnPasses,
+    },
     LibRaw,
+    /// No demosaic: a CFA drizzle put each photosite into the channel of its colour alone.
+    CfaDrizzle,
+    /// No demosaic: the green photosites as they are, the others filled from their green
+    /// neighbours — a plane to register on, not a colour image.
+    GreenProxy,
 }
 
 /// Which end of the image the first stored row belongs to.

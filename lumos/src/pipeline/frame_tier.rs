@@ -249,7 +249,7 @@ mod tests {
                 let stored = tier
                     .store_reference(frame, FrameStats::measure(&image))
                     .unwrap();
-                let gate = FrameGate::of(&stored, 0, 4);
+                let gate = FrameGate::of(&stored, 0, 0, 4);
                 assert_eq!(
                     (0..4)
                         .map(|index| gate.sample(index).map(|sample| sample.confidence))

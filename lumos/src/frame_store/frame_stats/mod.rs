@@ -154,6 +154,14 @@ impl FrameStats {
         }
     }
 
+    /// The statistics of a frame as those of the image its drizzle makes of it, which is no
+    /// sensor frame: a mosaic's colour slots become the channels of their colours, as for the
+    /// frame its demosaic makes, and nothing is a mosaic any more.
+    pub(crate) const fn into_drizzled(mut self) -> Self {
+        self.facts.cfa_type = None;
+        self
+    }
+
     /// The white noise of a slot, raised to the quantization σ.
     pub(crate) fn slot_noise(&self, slot: usize) -> f32 {
         self.noise[slot].max(self.quantization_sigma.unwrap_or(0.0))

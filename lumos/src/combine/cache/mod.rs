@@ -40,6 +40,7 @@ use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::flat_gain;
 use crate::io::image::flat_gain::{GainGrid, GainRows};
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
@@ -61,8 +62,9 @@ use std::path::Path;
 pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     /// The share of frames gathered at each pixel, when coverage was asked for and some frame
-    /// carries frame quality; every pixel is wholly covered otherwise.
-    coverage: Option<Buffer2<f32>>,
+    /// carries frame quality; every pixel is wholly covered otherwise. One plane, or one per
+    /// channel when a frame is gathered by each channel's own rule.
+    coverage: Option<LinearPixels>,
     weight: Option<LinearPixels>,
     inverse_variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
@@ -261,7 +263,7 @@ impl FrameCache {
         StackProduct {
             image,
             coverage: planes.coverage.then(|| match coverage {
-                Some(coverage) => Coverage::PerPixel(coverage),
+                Some(coverage) => Coverage::PerPixel(QualityMap::from_pixels(coverage)),
                 None => Coverage::Uniform {
                     value: 1.0,
                     size: dimensions.size(),
@@ -312,9 +314,10 @@ impl FrameCache {
         let mut output_dispersion = planes
             .dispersion
             .then(|| LinearPixels::new_zeroed(dimensions));
-        let mut output_coverage = self
-            .gathers_coverage(planes)
-            .then(|| Buffer2::<f32>::new_default(dimensions.width(), dimensions.height()));
+        let coverage_channels = self.coverage_channels(planes);
+        let mut output_coverage = (coverage_channels > 0).then(|| {
+            LinearPixels::new_zeroed(ImageDimensions::new(dimensions.size(), coverage_channels))
+        });
         let inverse_frame_count = 1.0 / self.frames.len() as f32;
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags =
@@ -340,7 +343,7 @@ impl FrameCache {
                 let gates: Vec<FrameGate<'_>> = self
                     .frames
                     .iter()
-                    .map(|frame| FrameGate::of(frame, pixel_offset, chunk_end))
+                    .map(|frame| FrameGate::of(frame, channel, pixel_offset, chunk_end))
                     .collect();
                 let flags: Vec<Option<&[u8]>> = self
                     .frames
@@ -383,9 +386,15 @@ impl FrameCache {
                         flags: None,
                     })
                     .collect();
-                // Coverage is the channels' one gate, so the first channel's gather writes it.
-                if let Some(plane) = output_coverage.as_mut().filter(|_| channel == 0) {
-                    let slice = &mut plane.pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
+                // A coverage plane shared by the channels is their one gate, so the first channel's
+                // gather writes it; one per channel is written by its own.
+                if let Some(pixels) = output_coverage
+                    .as_mut()
+                    .filter(|_| coverage_channels > 1 || channel == 0)
+                {
+                    let slice = &mut pixels
+                        .channel_mut(channel.min(coverage_channels - 1))
+                        .pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
                     for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
                         row.coverage = Some(chunk);
                     }
@@ -586,17 +595,24 @@ impl FrameCache {
         }
     }
 
-    /// Whether the combine writes a coverage plane: one was asked for, and some frame carries
-    /// quality planes, without which every pixel is wholly covered — and saying so costs one
-    /// number rather than an image-sized plane of `1.0`.
-    fn gathers_coverage(&self, planes: QualityPlanes) -> bool {
-        planes.coverage && self.frames.iter().any(|frame| !frame.quality.is_none())
+    /// The coverage planes the combine writes: none unless one was asked for and some frame
+    /// carries quality planes, without which every pixel is wholly covered — and saying so costs
+    /// one number rather than an image-sized plane of `1.0`; one per channel when a frame is
+    /// gathered by each channel's own rule; one otherwise.
+    fn coverage_channels(&self, planes: QualityPlanes) -> usize {
+        if !planes.coverage || self.frames.iter().all(|frame| frame.quality.is_none()) {
+            0
+        } else if self.frames.iter().any(|frame| frame.quality.per_channel()) {
+            self.core.dimensions.channels()
+        } else {
+            1
+        }
     }
 
     /// What the combine pass holds: a chunk of every channel of every frame, as the chunk-outer walk
-    /// reads them, plus one more plane for each of that frame's coverage and confidence planes and
-    /// a byte for its flags, against the resident output planes: the coverage plane when one is
-    /// gathered, and the flag plane when any frame carries flags.
+    /// reads them, plus one more plane for each of that frame's quality planes and a byte for its
+    /// flags, against the resident output planes: the coverage planes when any are gathered, and
+    /// the flag plane when any frame carries flags.
     fn weighted_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
         ChunkMemoryLayout {
             input_bytes: self
@@ -620,7 +636,7 @@ impl FrameCache {
             resident_bytes: self.core.dimensions.channels()
                 * planes.resident_planes_per_channel()
                 * size_of::<f32>()
-                + usize::from(self.gathers_coverage(planes)) * size_of::<f32>()
+                + self.coverage_channels(planes) * size_of::<f32>()
                 + usize::from(self.frames.iter().any(|frame| frame.flags.is_some())),
         }
     }

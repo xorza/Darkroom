@@ -42,8 +42,8 @@ pub(crate) struct GateSample {
 }
 
 impl<'a> FrameGate<'a> {
-    /// `frame`'s gate over the pixels `start..end`.
-    pub(crate) fn of(frame: &'a StoredFrame, start: usize, end: usize) -> Self {
+    /// `frame`'s gate over the pixels `start..end` of `channel`.
+    pub(crate) fn of(frame: &'a StoredFrame, channel: usize, start: usize, end: usize) -> Self {
         match &frame.quality {
             FrameQuality::None => Self::Everywhere,
             FrameQuality::Planes {
@@ -61,10 +61,16 @@ impl<'a> FrameGate<'a> {
                     .chunk(start, end),
                 excluded: *excluded,
             },
-            FrameQuality::Drizzled { weight, confidence } => Self::Drizzled {
-                weight: weight.chunk(start, end),
-                confidence: confidence.chunk(start, end),
-            },
+            FrameQuality::Drizzled { .. } => {
+                let drops = frame
+                    .quality
+                    .drops(channel)
+                    .expect("a drizzled frame holds its drops");
+                Self::Drizzled {
+                    weight: drops.weight.chunk(start, end),
+                    confidence: drops.confidence.chunk(start, end),
+                }
+            }
         }
     }
 

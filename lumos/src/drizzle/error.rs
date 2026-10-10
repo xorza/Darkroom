@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::combine::error::StackError;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
@@ -50,6 +51,15 @@ pub enum DrizzleError {
         channel: usize,
         pixel: usize,
         value: f32,
+    },
+
+    /// A frame whose mosaic pattern is not the first frame's: its photosites would reach other
+    /// channels at the same positions. `None` is a frame that is no mosaic.
+    #[error("drizzle frame {index} has mosaic pattern {actual:?}, expected {expected:?}")]
+    PatternMismatch {
+        index: usize,
+        expected: Option<CfaType>,
+        actual: Option<CfaType>,
     },
 
     /// The combine of the drizzled frames failed: its configuration, or storing a frame.

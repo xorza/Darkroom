@@ -6,6 +6,7 @@
 //! no planes: a mask of its own flags says the same. Both are absent when neither applies, which
 //! is what lets one combine engine serve every case.
 
+use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::frame_store::stackable_image::StackableImage;
@@ -85,11 +86,38 @@ pub(crate) enum FrameQuality<P> {
     /// elsewhere: the pair of a frame nothing interpolated, read from the flags it stores beside
     /// its channels instead of two planes of the same bit.
     Mask { excluded: QualityFlags },
-    /// A frame drizzled on its own: where its drops landed, `weight` is their summed weight `Σw`,
-    /// which the combine multiplies the frame's weight by, and `confidence` their Kish size
-    /// `(Σw)²/Σw²`, the factor the frame's noise is divided by. Zero for both where none landed,
-    /// which is where the frame is not gathered.
-    Drizzled { weight: P, confidence: P },
+    /// A frame drizzled on its own: one [`DropPlanes`] every channel shares, or one per channel
+    /// for a mosaic whose photosites each reached the channel of their colour alone.
+    Drizzled { drops: ArrayVec<DropPlanes<P>, 3> },
+}
+
+/// Where a drizzled frame's drops landed in a channel: `weight` is their summed weight `Σw`, which
+/// the combine multiplies the frame's weight by, and `confidence` their Kish size `(Σw)²/Σw²`, the
+/// factor the frame's noise is divided by. Zero for both where none landed, which is where the
+/// frame is not gathered: the pair agrees as a warp's coverage and confidence do.
+#[derive(Debug, Clone)]
+pub(crate) struct DropPlanes<P> {
+    pub(crate) weight: P,
+    pub(crate) confidence: P,
+}
+
+impl<P> DropPlanes<P> {
+    fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> DropPlanes<Q> {
+        DropPlanes {
+            weight: convert(self.weight),
+            confidence: convert(self.confidence),
+        }
+    }
+
+    fn try_map<Q, E>(
+        &self,
+        mut convert: impl FnMut(FramePlane, &P) -> Result<Q, E>,
+    ) -> Result<DropPlanes<Q>, E> {
+        Ok(DropPlanes {
+            weight: convert(FramePlane::DropWeight, &self.weight)?,
+            confidence: convert(FramePlane::Confidence, &self.confidence)?,
+        })
+    }
 }
 
 impl FrameQuality<Buffer2<f32>> {
@@ -136,13 +164,33 @@ impl<P> FrameQuality<P> {
         }
     }
 
-    /// The factor the frame's noise is divided by at each pixel — a warp's interpolation
-    /// confidence, a drizzle's Kish size — or `None` for a frame that carries no such plane.
-    pub(crate) const fn confidence(&self) -> Option<&P> {
+    /// The factor the frame's noise is divided by at each pixel of `channel` — a warp's
+    /// interpolation confidence, a drizzle's Kish size — or `None` for a frame that carries no such
+    /// plane.
+    pub(crate) fn confidence(&self, channel: usize) -> Option<&P> {
         match self {
             Self::None | Self::Mask { .. } => None,
-            Self::Planes { confidence, .. } | Self::Drizzled { confidence, .. } => Some(confidence),
+            Self::Planes { confidence, .. } => Some(confidence),
+            Self::Drizzled { .. } => self.drops(channel).map(|drops| &drops.confidence),
         }
+    }
+
+    /// A drizzled frame's drops in `channel`; `None` for another form.
+    ///
+    /// # Panics
+    /// When the frame's drops are per channel and `channel` is not one of them.
+    pub(crate) fn drops(&self, channel: usize) -> Option<&DropPlanes<P>> {
+        match self {
+            Self::Drizzled { drops } if drops.len() == 1 => Some(&drops[0]),
+            Self::Drizzled { drops } => Some(&drops[channel]),
+            Self::None | Self::Mask { .. } | Self::Planes { .. } => None,
+        }
+    }
+
+    /// Whether the frame is gathered by a different rule in each channel: a mosaic drizzled
+    /// into the channels of its colours.
+    pub(crate) const fn per_channel(&self) -> bool {
+        matches!(self, Self::Drizzled { drops } if drops.len() > 1)
     }
 
     /// The flags a [`Mask`](Self::Mask) leaves the frame out where; `None` for another form.
@@ -157,9 +205,11 @@ impl<P> FrameQuality<P> {
         match self {
             Self::None => FrameQuality::None,
             Self::Mask { excluded } => FrameQuality::Mask { excluded },
-            Self::Drizzled { weight, confidence } => FrameQuality::Drizzled {
-                weight: convert(weight),
-                confidence: convert(confidence),
+            Self::Drizzled { drops } => FrameQuality::Drizzled {
+                drops: drops
+                    .into_iter()
+                    .map(|drops| drops.map(&mut convert))
+                    .collect(),
             },
             Self::Planes {
                 coverage,
@@ -171,28 +221,38 @@ impl<P> FrameQuality<P> {
         }
     }
 
-    /// Every plane the frame carries, each with the kind that names it — both or neither. The one
-    /// place that decides what "all the quality planes" means, so a caller cannot enumerate a
-    /// subset.
+    /// Every plane the frame carries, each with the kind that names it: a pair, a pair per channel
+    /// of drops, or none. The one place that decides what "all the quality planes" means, so a
+    /// caller cannot enumerate a subset.
     ///
     /// Reads the variant rather than going through [`FramePlane`], which also names the image
     /// channels and so has a variant this type could only ever answer `None` for.
     pub(crate) fn present(&self) -> impl Iterator<Item = (FramePlane, &P)> {
-        let weight = match self {
-            Self::Drizzled { weight, .. } => Some((FramePlane::DropWeight, weight)),
-            Self::None | Self::Mask { .. } | Self::Planes { .. } => None,
+        let warp = match self {
+            Self::Planes {
+                coverage,
+                confidence,
+            } => Some([
+                (FramePlane::Coverage, coverage),
+                (FramePlane::Confidence, confidence),
+            ]),
+            Self::None | Self::Mask { .. } | Self::Drizzled { .. } => None,
         };
-        [
-            self.coverage().map(|plane| (FramePlane::Coverage, plane)),
-            weight,
-            self.confidence()
-                .map(|plane| (FramePlane::Confidence, plane)),
-        ]
-        .into_iter()
-        .flatten()
+        let drops: &[DropPlanes<P>] = match self {
+            Self::Drizzled { drops } => drops,
+            Self::None | Self::Mask { .. } | Self::Planes { .. } => &[],
+        };
+        warp.into_iter()
+            .flatten()
+            .chain(drops.iter().flat_map(|drops| {
+                [
+                    (FramePlane::DropWeight, &drops.weight),
+                    (FramePlane::Confidence, &drops.confidence),
+                ]
+            }))
     }
 
-    /// How many planes are present: 0 or 2.
+    /// How many planes are present: none, a pair, or a pair per channel.
     pub(crate) fn count(&self) -> usize {
         self.present().count()
     }
@@ -217,9 +277,11 @@ impl<P> FrameQuality<P> {
             Self::Mask { excluded } => Ok(FrameQuality::Mask {
                 excluded: *excluded,
             }),
-            Self::Drizzled { weight, confidence } => Ok(FrameQuality::Drizzled {
-                weight: convert(FramePlane::DropWeight, weight)?,
-                confidence: convert(FramePlane::Confidence, confidence)?,
+            Self::Drizzled { drops } => Ok(FrameQuality::Drizzled {
+                drops: drops
+                    .iter()
+                    .map(|drops| drops.try_map(&mut convert))
+                    .collect::<Result<_, _>>()?,
             }),
             Self::Planes {
                 coverage,

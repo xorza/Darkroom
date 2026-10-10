@@ -1,4 +1,5 @@
 mod accumulation;
+mod cfa;
 mod combine;
 mod config;
 mod geometry;
@@ -14,6 +15,7 @@ use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::frame_source::internals::input_rows;
 use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::drizzle::geometry::{boxer, sgarea};
@@ -24,6 +26,7 @@ use crate::io::image::pixel_flags::PixelFlags;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::StackProduct;
+use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -36,7 +39,13 @@ const MAX_DEPOSITS: f32 = 49.0;
 const LOBE_EXCESS: f32 = 1.7;
 
 fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
-    DrizzleAccumulator::new(input_dims, config, 0).expect("test drizzle config must be valid")
+    DrizzleAccumulator::new(
+        input_dims,
+        Deposit::Channels(input_dims.channels()),
+        config,
+        0,
+    )
+    .expect("test drizzle config must be valid")
 }
 
 /// The combine that makes the drizzled frames the single-pass drizzle: a mean of every sample,

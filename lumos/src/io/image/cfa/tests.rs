@@ -838,3 +838,56 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
         }
     }
 }
+
+/// The green proxy keeps every green photosite and fills the others from the greens of their 3×3
+/// neighbourhood, weighed 1 beside and 1/√2 on a diagonal, over the mosaic `v = x + 10y`.
+///
+/// RGGB: red (0, 0) has greens (1, 0) and (0, 1) beside it, 1 and 10, so 5.5; blue (1, 1) has
+/// greens 10, 12, 1 and 21 beside it, so 11 — a Bayer site's diagonals are never green. X-Trans:
+/// red (2, 0) has greens (1, 0) and (3, 0) beside it, 1 and 3, and (1, 1) and (3, 1) on its
+/// diagonals, 11 and 13, so `(4 + 24r) / (2 + 2r)` with `r = 1/√2`. A filled photosite carries
+/// the flags of the greens it was filled from, a green its own: green (1, 0) is saturated, and
+/// so are the red (0, 0) and blue (1, 1) it fills, while blue (3, 3), whose greens are (2, 3),
+/// (4, 3), (3, 2) and (3, 4), carries nothing.
+#[test]
+fn the_green_proxy_fills_each_photosite_from_its_greens() {
+    let size = Size2us::new(6, 6);
+    let pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| (index % 6 + 10 * (index / 6)) as f32)
+        .collect();
+    let mut bayer = make_cfa(size, pixels.clone(), CfaType::Bayer(CfaPattern::Rggb));
+    PixelFlags::add_where(&mut bayer.flags, size, QualityFlags::SATURATED, |index| {
+        index == 1
+    });
+    let proxy = bayer.green_proxy();
+    let plane = proxy.channel(0);
+    assert_eq!(plane[(0, 0)], 5.5);
+    assert_eq!(plane[(1, 1)], 11.0);
+    assert_eq!(plane[(1, 0)], 1.0, "a green photosite is kept");
+    let flags = proxy.flags.as_ref().unwrap();
+    for (pixel, expected) in [
+        (1, QualityFlags::SATURATED),
+        (0, QualityFlags::SATURATED),
+        (7, QualityFlags::SATURATED),
+        (21, QualityFlags::default()),
+    ] {
+        assert_eq!(flags.at(pixel), expected, "pixel {pixel}");
+    }
+    assert_eq!(
+        proxy.metadata.provenance.as_ref().map(|p| p.demosaic),
+        bayer
+            .metadata
+            .provenance
+            .as_ref()
+            .map(|_| DemosaicProvenance::GreenProxy)
+    );
+
+    let xtrans = make_cfa(size, pixels, CfaType::XTrans(XTRANS_PATTERN)).green_proxy();
+    let r = FRAC_1_SQRT_2;
+    let expected = ((4.0 + 24.0 * r) / (2.0 + 2.0 * r)) as f32;
+    let actual = xtrans.channel(0)[(2, 0)];
+    assert!(
+        (actual - expected).abs() <= f32::EPSILON * expected,
+        "{actual}, expected {expected}"
+    );
+}

@@ -29,14 +29,6 @@ impl QualityMap {
             Self::PerChannel(planes) => &planes[channel],
         }
     }
-
-    /// Every plane the map holds, one or three.
-    pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
-        match self {
-            Self::Shared(plane) => std::slice::from_mut(plane).iter_mut(),
-            Self::PerChannel(planes) => planes.iter_mut(),
-        }
-    }
 }
 
 impl From<QualityMap> for LinearImage {
