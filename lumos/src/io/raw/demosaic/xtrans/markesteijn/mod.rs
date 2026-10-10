@@ -15,13 +15,13 @@
 //! matrix, which a calibrated frame does not carry; the derivatives only choose a direction, and
 //! librtprocess calls the two nearly indistinguishable.
 //!
-//! Each stage reads only what the stage before computed, which lies further from a tile's edge
-//! than its own input, so a tile computes its pixels in full only a margin inside its edges.
-//! librtprocess's tiles write all but 8 pixels at each side, nearer than that, so its pixels
-//! beside a seam depend on where the tiles lie. Here each tile writes only the part its
-//! passes compute in full, and the tiles overlap by twice the margin. The pixels nearest the
-//! frame's edge, which no tile computes in full, come from their neighbours. The interior is librtprocess's to the bit, run as one tile over the frame, which a test holds
-//! it to.
+//! Each stage reads only what the stage before computed, which lies further from a tile's edge than
+//! its own input, so a tile computes its pixels in full only a margin inside its edges.
+//! librtprocess's tiles write all but 8 pixels at each side, nearer than that, so its pixels beside
+//! a seam depend on where the tiles lie. Here each tile writes only the part its passes compute in
+//! full, and the tiles overlap by twice the margin. The pixels nearest the frame's edge, which no
+//! tile computes in full, come from their neighbours. The interior is librtprocess's to the bit,
+//! run as one tile over the frame, which a test holds it to.
 
 mod hex_table;
 mod tile;

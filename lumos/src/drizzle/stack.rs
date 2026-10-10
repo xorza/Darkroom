@@ -336,9 +336,11 @@ fn accumulate<I: StackableImage>(
             (drizzle.min_weight_fraction * deepest).max(f32::MIN_POSITIVE)
         })
         .collect();
-    let plane = |channel: usize| channel.min(depth.len() - 1);
     product.fill_where(
-        |channel, index| depth[plane(channel)].pixels()[index] < thresholds[plane(channel)],
+        |channel, index| {
+            let plane = deposit.weight_plane(channel);
+            depth[plane].pixels()[index] < thresholds[plane]
+        },
         drizzle.fill_value,
     );
     Ok(DrizzleResult {

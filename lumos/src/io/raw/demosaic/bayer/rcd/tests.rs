@@ -134,14 +134,15 @@ fn the_green_estimate_is_continuous_across_the_switch() {
 ///
 /// `internals/reference/rcd_librtprocess.py` builds librtprocess's `rcd.cc` at a pinned commit and
 /// prints each case's FNV-1a 64 digest of the output inside [`INTERPOLATED_BORDER`]: the planes in
-/// order, then rows, then columns, each f32's little-endian bytes. The script changes two steps. One
-/// is RCD 2.3's definition: the diagonal statistics of a red or blue site sum the squared high-pass
-/// filter over the site and its two diagonal neighbours, which librtprocess reads partly from the
-/// pixels beside them. The other drops the `eps` from the green ratio's denominator, which lumos
-/// takes level-free; the scenes are positive, so the denominator never cancels. The 160×120 frame fits in one of librtprocess's 194-pixel tiles: its tiles
-/// overlap by 9 pixels where RCD reaches 10, so the two columns at a seam differ from an untiled
-/// run (by up to 2e-5 on the grating). The scenes use only correctly rounded operations, so their
-/// samples are the same bits on every platform.
+/// order, then rows, then columns, each f32's little-endian bytes. The script changes two steps.
+/// One is RCD 2.3's definition: the diagonal statistics of a red or blue site sum the squared
+/// high-pass filter over the site and its two diagonal neighbours, which librtprocess reads partly
+/// from the pixels beside them. The other drops the `eps` from the green ratio's denominator, which
+/// lumos takes level-free; the scenes are positive, so the denominator never cancels. The 160×120
+/// frame fits in one of librtprocess's 194-pixel tiles: its tiles overlap by 9 pixels where RCD
+/// reaches 10, so the two columns at a seam differ from an untiled run (by up to 2e-5 on the
+/// grating). The scenes use only correctly rounded operations, so their samples are the same bits
+/// on every platform.
 #[test]
 fn rcd_matches_librtprocess_bit_for_bit() {
     /// A scene's sample of `channel` at `(x, y)`.

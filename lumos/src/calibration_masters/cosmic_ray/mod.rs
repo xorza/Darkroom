@@ -58,8 +58,9 @@ const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
 /// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
 /// [`QualityFlags::REPAIRED`]. Saturated star cores and pixels with no measurement are kept out of
-/// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number of CR pixels corrected, or an error when the
-/// parametric noise model needs an ADC step the frame does not record.
+/// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number
+/// of CR pixels corrected, or an error when the parametric noise model needs an ADC step the frame
+/// does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
     config: &CosmicRayConfig,

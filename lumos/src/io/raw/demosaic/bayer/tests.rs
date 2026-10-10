@@ -505,8 +505,8 @@ fn rcd_reproduces_a_linear_ramp_inside_the_border() {
 }
 
 /// A flat field comes back as its level at every level, the faint and the signed among them: the
-/// ratio carries no `eps`, which at 1e-5 would have put green 11% low at red and blue sites, `8v/(eps + 8v)`. Each sample is the level to
-/// one unit in its last place.
+/// ratio carries no `eps`, which at 1e-5 would have put green 11% low at red and blue sites,
+/// `8v/(eps + 8v)`. Each sample is the level to one unit in its last place.
 #[test]
 fn rcd_returns_a_flat_field_at_any_level() {
     let size = Size2us::new(32, 24);

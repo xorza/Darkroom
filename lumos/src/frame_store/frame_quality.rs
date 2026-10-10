@@ -3,8 +3,9 @@
 //! Two planes that always travel together: how much of an output pixel had real source support,
 //! and how confident the interpolation was there. A warp is the usual producer. A frame nothing
 //! interpolated has whole support and unit confidence wherever it has a measurement, so it needs
-//! no planes: a mask of its own flags says the same. Both are absent when neither applies, which
-//! is what lets one combine engine serve every case.
+//! no planes: a mask of its own flags says the same. A frame drizzled on its own carries its drops'
+//! weight and Kish size instead. All are absent when none applies, which is what lets one combine
+//! engine serve every case.
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
@@ -61,11 +62,12 @@ impl Display for FramePlane {
 /// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
 /// interpolation that produced it was.
 ///
-/// Both planes, a mask, or neither. A warp produces the pair; a frame nothing interpolated whose
-/// flags name pixels it has no measurement for, a mask (see [`Self::for_unwarped`]). Every
-/// consumer's rule for "does this frame contribute at this pixel?" is about the pair, and a frame
-/// with neither carries nothing at all. So a lone plane is not a shape any producer means, and
-/// this type cannot hold one.
+/// Both planes, a mask, a drizzle's drops, or nothing. A warp produces the pair; a frame nothing
+/// interpolated whose flags name pixels it has no measurement for, a mask (see
+/// [`Self::for_unwarped`]); a drizzle, a pair of drop planes, shared or per channel. Every
+/// consumer's rule for "does this frame contribute at this pixel?" is about a pair, and a frame
+/// with none carries nothing at all. So a lone plane is not a shape any producer means, and this
+/// type cannot hold one.
 ///
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::frame_sampler` establishes that — a pixel the warp has no sample for
