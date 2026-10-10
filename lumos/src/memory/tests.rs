@@ -5,7 +5,7 @@ use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::math::size2us::Size2us;
-use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, MIN_CHUNK_ROWS};
+use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows, MIN_CHUNK_ROWS};
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::*;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -132,7 +132,8 @@ fn a_decoded_stack_charges_its_frames_scratch_and_output() {
 
 /// The combine's output planes are charged beside the warped frames, not only the decode and
 /// warp peaks: at `QualityPlanes::STANDARD` an RGB output is 3 × (image, weight, variance) + coverage
-/// = 10 planes, which flips a set the warp stage alone would keep in RAM.
+/// = 10 planes and a flag byte a pixel, ¼ plane, which flips a set the warp stage alone would keep
+/// in RAM.
 #[test]
 fn a_warped_run_charges_the_combine_output() {
     let plane_bytes = plane(10);
@@ -140,14 +141,14 @@ fn a_warped_run_charges_the_combine_output() {
         ((10 * MIB) as usize / size_of::<f32>(), 1),
         3,
     ));
-    assert_eq!(output, 10 * plane_bytes);
+    assert_eq!(output, 10 * plane_bytes + plane_bytes / 4);
     let shape = |output_bytes| pipeline_shape(plane_bytes, mono(plane_bytes), 5, output_bytes);
     // Mono, five frames, one worker: the decode peaks at 5 frames + its 1P statistics copy and the
     // 7P detector = 13P; the warp at 5 × 3¼P warped + the one worker's 1P source = 17¼P; and the
-    // combine at 16¼P + the output's 10P = 26¼P, which decides. In quarter planes: 105 and 69.
+    // combine at 16¼P + the output's 10¼P = 26½P, which decides. In quarter planes: 106 and 69.
     let quarters = |count: u64| available_for_usable(count * 10 * MIB / 4);
-    assert!(MemoryPlan::plan(shape(output), 1, quarters(105)).fits_in_ram);
-    assert!(!MemoryPlan::plan(shape(output), 1, quarters(105) - 2).fits_in_ram);
+    assert!(MemoryPlan::plan(shape(output), 1, quarters(106)).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(output), 1, quarters(106) - 2).fits_in_ram);
     assert!(MemoryPlan::plan(shape(0), 1, quarters(69)).fits_in_ram);
     assert!(!MemoryPlan::plan(shape(0), 1, quarters(69) - 2).fits_in_ram);
 }
@@ -213,31 +214,73 @@ fn a_single_pass_holds_the_warped_set_beside_its_workers() {
 }
 
 /// Rows per chunk by hand: the usable budget over the bytes a row of every input plane costs,
-/// after the resident planes, floored at `MIN_CHUNK_ROWS`.
+/// after the resident planes, floored at `MIN_CHUNK_ROWS`, and what the floor holds past the
+/// budget.
 /// - 6000 px × 60 planes (3 channels × 20 frames) × 4 B = 1 440 000 B a row: 6 GiB usable of 8 is
 ///   4473.9 rows, 768 MiB of 1 GiB is 559.2, 192 MiB of 256 MiB is 139.8.
 /// - 6000 px × 20 mono planes = 480 000 B a row: 6 GiB is 13 421.8 rows.
 /// - Nothing available: the floor.
 /// - 1 MiB available is 786 432 B usable; six resident 100×200 planes take 480 000, and nine input
-///   planes cost 3600 B a row, so 85 whole rows fit. Ten resident planes leave nothing: the floor.
+///   planes cost 3600 B a row, so 85 whole rows fit. A resident flag plane adds 20 000 B, which
+///   leaves 79.
+/// - Ten resident planes take 800 000 B, past the budget: the floor, holding 64 rows of 3600 B
+///   beside them, 800 000 + 230 400 − 786 432 = 243 968 B over. Nothing available holds 64 rows of
+///   800 B over.
+/// - A 30-row image whose 60 resident planes take 720 000 B fits 18 rows; under the floor it holds
+///   its 30 rows, 720 000 + 108 000 − 786 432 = 41 568 B over.
 #[test]
-fn optimal_chunk_rows_matches_budget_arithmetic() {
-    let layout = |input_planes: usize, resident_planes| ChunkMemoryLayout {
+fn chunk_rows_match_budget_arithmetic() {
+    let layout = |input_planes: usize, resident_planes: usize, flags: usize| ChunkMemoryLayout {
         input_bytes: input_planes * size_of::<f32>(),
-        resident_planes,
+        resident_bytes: resident_planes * size_of::<f32>() + flags,
+    };
+    let fits = |rows| ChunkRows {
+        rows,
+        overcommit_bytes: 0,
+    };
+    let floor = |overcommit_bytes| ChunkRows {
+        rows: MIN_CHUNK_ROWS,
+        overcommit_bytes,
     };
     for (layout, size, available, expected) in [
-        (layout(60, 0), Size2us::new(6000, 100), 8 * GB, 4473),
-        (layout(60, 0), Size2us::new(6000, 100), GB, 559),
-        (layout(60, 0), Size2us::new(6000, 100), 256 * MIB, 139),
-        (layout(20, 0), Size2us::new(6000, 100), 8 * GB, 13_421),
-        (layout(2, 0), Size2us::new(100, 100), 0, MIN_CHUNK_ROWS),
-        (layout(9, 6), Size2us::new(100, 200), MIB, 85),
-        (layout(9, 10), Size2us::new(100, 200), MIB, MIN_CHUNK_ROWS),
-        (layout(60, 3), Size2us::new(0, 100), 8 * GB, MIN_CHUNK_ROWS),
+        (
+            layout(60, 0, 0),
+            Size2us::new(6000, 100),
+            8 * GB,
+            fits(4473),
+        ),
+        (layout(60, 0, 0), Size2us::new(6000, 100), GB, fits(559)),
+        (
+            layout(60, 0, 0),
+            Size2us::new(6000, 100),
+            256 * MIB,
+            fits(139),
+        ),
+        (
+            layout(20, 0, 0),
+            Size2us::new(6000, 100),
+            8 * GB,
+            fits(13_421),
+        ),
+        (layout(2, 0, 0), Size2us::new(100, 100), 0, floor(64 * 800)),
+        (layout(9, 6, 0), Size2us::new(100, 200), MIB, fits(85)),
+        (layout(9, 6, 1), Size2us::new(100, 200), MIB, fits(79)),
+        (
+            layout(9, 10, 0),
+            Size2us::new(100, 200),
+            MIB,
+            floor(243_968),
+        ),
+        (layout(9, 60, 0), Size2us::new(100, 30), MIB, floor(41_568)),
+        (
+            layout(60, 3, 0),
+            Size2us::new(0, 100),
+            8 * GB,
+            fits(MIN_CHUNK_ROWS),
+        ),
     ] {
         assert_eq!(
-            layout.optimal_chunk_rows(size, available),
+            layout.chunk_rows(size, available),
             expected,
             "{layout:?} over {size:?} at {available} B"
         );

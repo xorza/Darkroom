@@ -12,7 +12,7 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::memory::chunk_memory_layout::ChunkMemoryLayout;
+use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows};
 use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
@@ -84,16 +84,36 @@ pub(super) struct ChunkContext<'a> {
 }
 
 impl CacheCore {
-    /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
-    /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the chunk
-    /// via [`StoredPlane::chunk`](crate::frame_store::stored_plane::StoredPlane::chunk), and hand
-    /// `(output_slice, ChunkContext)` to `process`. The frames
-    /// live in the owning cache, so they're passed in. Returns the combined `LinearPixels`.
+    /// The rows a pass holding `memory` reads at once: the whole image for a resident stack, and
+    /// the rows the chunk budget leaves room for on the disk tier. A pass the floor puts past the
+    /// budget says so in the log.
+    pub(super) fn chunk_rows(&self, memory: ChunkMemoryLayout) -> ChunkRows {
+        let Some(chunk_memory) = self.tier.chunk_memory() else {
+            return ChunkRows {
+                rows: self.dimensions.height(),
+                overcommit_bytes: 0,
+            };
+        };
+        let chunking = memory.chunk_rows(self.dimensions.size(), chunk_memory);
+        if chunking.overcommit_bytes > 0 {
+            tracing::warn!(
+                rows = chunking.rows,
+                overcommit_bytes = chunking.overcommit_bytes,
+                "the smallest combine chunk does not fit the memory budget"
+            );
+        }
+        chunking
+    }
+
+    /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),
+    /// gather each frame's channel slice for the chunk via
+    /// [`StoredPlane::chunk`](crate::frame_store::stored_plane::StoredPlane::chunk), and hand
+    /// `(output_slice, ChunkContext)` to `process`. The frames live in the owning cache, so they're
+    /// passed in. Returns the combined `LinearPixels`.
     pub(super) fn process_chunks<Process>(
         &self,
         frames: &[StoredFrame],
-        memory: ChunkMemoryLayout,
-        chunk_memory: Option<u64>,
+        chunk_rows: usize,
         mut process: Process,
     ) -> LinearPixels
     where
@@ -103,10 +123,6 @@ impl CacheCore {
         let frame_count = frames.len();
         let width = dims.width();
         let height = dims.height();
-
-        let chunk_rows = chunk_memory.map_or(height, |chunk_memory| {
-            memory.optimal_chunk_rows(dims.size(), chunk_memory)
-        });
 
         let mut output = LinearPixels::new_zeroed(dims);
         let channel_count = output.channel_count();

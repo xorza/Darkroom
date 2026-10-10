@@ -207,7 +207,7 @@ impl FrameCache {
             variance: variance_pixels,
             dispersion: dispersion_pixels,
             flags,
-            report,
+            mut report,
         } = combined;
         let dimensions = self.core.dimensions;
         // Every frame carries the first one's pattern: `SetFacts` held them to it.
@@ -272,14 +272,12 @@ impl FrameCache {
 
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
         // same row-aligned chunks the combine uses, against the figure the combine sized against.
-        let chunk_rows = self
+        let chunking = self
             .core
-            .tier
-            .chunk_memory()
-            .map_or(height, |chunk_memory| {
-                self.coverage_layout(planes)
-                    .optimal_chunk_rows(dimensions.size(), chunk_memory)
-            });
+            .chunk_rows(self.coverage_layout(planes, image.flags.is_some()));
+        report.chunk_overcommit_bytes =
+            report.chunk_overcommit_bytes.max(chunking.overcommit_bytes);
+        let chunk_rows = chunking.rows;
 
         let mut start_row = 0;
         while start_row < height {
@@ -356,8 +354,7 @@ impl FrameCache {
         let cancel = self.core.cancel.clone();
         let frame_norms = self.frame_norms.as_deref();
         let dimensions = self.core.dimensions;
-        let memory = self.weighted_layout(planes);
-        // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
+        let chunking = self.core.chunk_rows(self.weighted_layout(planes));
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
         let mut output_variance = planes
             .variance
@@ -373,11 +370,9 @@ impl FrameCache {
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
         // chunk per channel, so the leases have to outlive any single `for_each_init`.
         let scratch_pool = JobScratchPool::<CombineScratch>::default();
-        let pixels = self.core.process_chunks(
-            &self.frames,
-            memory,
-            self.core.tier.chunk_memory(),
-            |output_slice, ctx| {
+        let pixels = self
+            .core
+            .process_chunks(&self.frames, chunking.rows, |output_slice, ctx| {
                 let ChunkContext {
                     frames,
                     width,
@@ -593,8 +588,7 @@ impl FrameCache {
                         kept_flagged.add(&row_kept);
                     },
                 );
-            },
-        );
+            });
         CombineOutput {
             pixels,
             weight: output_weight,
@@ -606,6 +600,7 @@ impl FrameCache {
                 kept_flagged_samples: kept_flagged.totals(),
                 variance_background_only: planes.variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
+                chunk_overcommit_bytes: chunking.overcommit_bytes,
                 spilled_frames: if self.core.tier.spills() {
                     self.frames.len() as u64
                 } else {
@@ -635,7 +630,7 @@ impl FrameCache {
 
     /// What the combine pass holds: one input plane per frame channel, plus one more for each of
     /// that frame's coverage and confidence planes and a byte for its flags, against the resident
-    /// output planes.
+    /// output planes and, when any frame carries flags, the output flag plane.
     fn weighted_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
         ChunkMemoryLayout {
             input_bytes: self
@@ -646,14 +641,17 @@ impl FrameCache {
                         + usize::from(frame.flags.is_some())
                 })
                 .sum(),
-            resident_planes: self.core.dimensions.channels() * planes.resident_planes_per_channel(),
+            resident_bytes: self.output_bytes(
+                planes,
+                self.frames.iter().any(|frame| frame.flags.is_some()),
+            ),
         }
     }
 
     /// What the coverage pass holds: one input plane per frame that carries frame quality, against
-    /// the combine's residents — which are all still alive at that point — plus the single
-    /// coverage plane being accumulated.
-    fn coverage_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
+    /// the combine's residents — which are all still alive at that point, the flag plane among
+    /// them when `flagged` — plus the single coverage plane being accumulated.
+    fn coverage_layout(&self, planes: QualityPlanes, flagged: bool) -> ChunkMemoryLayout {
         ChunkMemoryLayout {
             input_bytes: self
                 .frames
@@ -661,9 +659,15 @@ impl FrameCache {
                 .filter(|frame| !frame.quality.is_none())
                 .count()
                 * size_of::<f32>(),
-            resident_planes: self.core.dimensions.channels() * planes.resident_planes_per_channel()
-                + 1,
+            resident_bytes: self.output_bytes(planes, flagged) + size_of::<f32>(),
         }
+    }
+
+    /// Bytes per pixel of the combine's output planes: the f32 planes of every channel, and the
+    /// one flag byte when `flagged`.
+    fn output_bytes(&self, planes: QualityPlanes, flagged: bool) -> usize {
+        self.core.dimensions.channels() * planes.resident_planes_per_channel() * size_of::<f32>()
+            + usize::from(flagged)
     }
 
     /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.

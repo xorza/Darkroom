@@ -74,3 +74,43 @@ fn bench_sigma_clipped_tile_4096(b: ::quickbench::Bencher) {
         ))
     });
 }
+
+/// A 24 MP plane of sky at 0.1 with ±0.01 of hashed noise: what normalization ranks per plane.
+fn make_plane() -> Vec<f32> {
+    (0..24_000_000u32)
+        .map(|index| {
+            let hash = index.wrapping_mul(0x9E37_79B9).rotate_left(13) ^ index;
+            0.1 + (hash % 2001) as f32 * 1e-5 - 0.01
+        })
+        .collect()
+}
+
+/// A plane's median by copying it and selecting, as normalization did.
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 2000)]
+fn bench_plane_median_by_selection(b: ::quickbench::Bencher) {
+    let plane = make_plane();
+    let mut copy = Vec::with_capacity(plane.len());
+    b.bench(|| {
+        copy.clear();
+        copy.extend_from_slice(black_box(&plane));
+        black_box(median_mut(&mut copy))
+    });
+}
+
+/// The same median by two radix passes over the plane, with no copy.
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 2000)]
+fn bench_plane_median_by_radix(b: ::quickbench::Bencher) {
+    let plane = make_plane();
+    let mut median = radix_median::RadixMedian::default();
+    b.bench(|| {
+        let mut high = median.high_pass();
+        for &value in black_box(&plane) {
+            high.add(value);
+        }
+        let mut low = high.finish();
+        for &value in &plane {
+            low.add(value);
+        }
+        black_box(low.median())
+    });
+}

@@ -348,21 +348,32 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     let dimensions = ImageDimensions::new((2, 1), 3);
     let image = || LinearImage::from_pixels(dimensions, vec![1.0; 6]);
     let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
-    let mut frames = vec![
-        StackFrame::from(image()),
-        StackFrame::from(image()),
-        StackFrame::from(image()),
-    ];
-    frames[1].quality = FrameQuality::from_coverage(plane());
-    frames[2].quality = FrameQuality::from_coverage(plane());
-
-    let cache = FrameCache::from_stack_frames(
-        frames,
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("frames are valid");
+    let frames = |flagged: bool| {
+        let mut frames = vec![
+            StackFrame::from(image()),
+            StackFrame::from(image()),
+            StackFrame::from(image()),
+        ];
+        frames[1].quality = FrameQuality::from_coverage(plane());
+        frames[2].quality = FrameQuality::from_coverage(plane());
+        if flagged {
+            frames[0].image.flags = PixelFlags::from_fn(Size2us::new(2, 1), |index| {
+                if index == 0 {
+                    QualityFlags::SATURATED
+                } else {
+                    QualityFlags::default()
+                }
+            });
+        }
+        FrameCache::from_stack_frames(
+            frames,
+            Normalization::None,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("frames are valid")
+    };
+    let cache = frames(false);
 
     // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
     // Residents: 3 channels × (pixels + weight + variance), and the dispersion when asked for.
@@ -370,14 +381,14 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         cache.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
             input_bytes: 7 * 4,
-            resident_planes: 9,
+            resident_bytes: 9 * 4,
         }
     );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_bytes: 7 * 4,
-            resident_planes: 12,
+            resident_bytes: 12 * 4,
         }
     );
 
@@ -386,17 +397,35 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
             input_bytes: 7 * 4,
-            resident_planes: 3,
+            resident_bytes: 3 * 4,
         }
     );
 
     // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
     // accumulating to the combine's residents.
     assert_eq!(
-        cache.coverage_layout(QualityPlanes::STANDARD),
+        cache.coverage_layout(QualityPlanes::STANDARD, false),
         ChunkMemoryLayout {
             input_bytes: 2 * 4,
-            resident_planes: 10,
+            resident_bytes: 10 * 4,
+        }
+    );
+
+    // A frame with flags is read a byte a pixel, and the output flag plane it gives the stack is
+    // held a byte a pixel through both passes.
+    let flagged = frames(true);
+    assert_eq!(
+        flagged.weighted_layout(QualityPlanes::STANDARD),
+        ChunkMemoryLayout {
+            input_bytes: 7 * 4 + 1,
+            resident_bytes: 9 * 4 + 1,
+        }
+    );
+    assert_eq!(
+        flagged.coverage_layout(QualityPlanes::STANDARD, true),
+        ChunkMemoryLayout {
+            input_bytes: 2 * 4,
+            resident_bytes: 10 * 4 + 1,
         }
     );
 }
