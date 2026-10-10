@@ -423,9 +423,9 @@ fn weight_and_inverse_variance_maps() {
 /// A declined plane is not produced, and declining it changes nothing about the image.
 ///
 /// The fill gate reads the drops' depth, not the weight plane, so the risk this pins is that
-/// declining the *outputs* disturbs the combine or the gate. Run with a non-zero `min_weight_fraction` and a transform that
-/// leaves the frame's edge thinly covered, so the fill gate is actually exercised while coverage is
-/// declined.
+/// declining the *outputs* disturbs the combine or the gate. Run with a non-zero
+/// `min_weight_fraction` and a transform that leaves the frame's edge thinly covered, so the fill
+/// gate is actually exercised while coverage is declined.
 #[test]
 fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
     let size = Size2us::new(24, 24);

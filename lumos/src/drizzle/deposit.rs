@@ -47,4 +47,12 @@ impl Deposit {
             Self::Mosaic(cfa_type) => cfa_type.num_colors(),
         }
     }
+
+    /// The weight plane of output channel `channel`: the shared one, or its colour's.
+    pub(crate) const fn weight_plane(self, channel: usize) -> usize {
+        match self {
+            Self::Channels(_) => 0,
+            Self::Mosaic(_) => channel,
+        }
+    }
 }

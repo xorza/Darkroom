@@ -263,6 +263,7 @@ impl DrizzleAccumulator {
     /// The frames added, as one drizzled frame: see [`DrizzledPlanes`].
     pub(crate) fn into_planes(self) -> DrizzledPlanes {
         let Self {
+            deposit,
             mut data,
             weight,
             weight_sq,
@@ -295,7 +296,7 @@ impl DrizzleAccumulator {
             })
             .collect();
         for (channel, plane) in data.iter_mut().enumerate() {
-            let weight = &drops[channel.min(drops.len() - 1)].weight;
+            let weight = &drops[deposit.weight_plane(channel)].weight;
             plane
                 .pixels_mut()
                 .par_iter_mut()

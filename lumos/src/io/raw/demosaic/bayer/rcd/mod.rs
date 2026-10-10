@@ -30,11 +30,12 @@ const EPSSQ: f32 = 1e-10;
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
-/// The band the border fill takes from neighbours (see [`tiled`]). RCD's stages chain stencils — the direction maps and
-/// low-pass filter reach 4 pixels, and the colour steps read values earlier steps computed up to 3
-/// pixels further out — so a pixel nearer an edge than this reads values no stage computed. A
-/// test pins the reach: from this distance in, a frame demosaics bit for bit as it does inside a
-/// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
+/// The band the border fill takes from neighbours (see [`tiled`]). RCD's stages chain stencils —
+/// the direction maps and low-pass filter reach 4 pixels, and the colour steps read values earlier
+/// steps computed up to 3 pixels further out — so a pixel nearer an edge than this reads values no
+/// stage computed. A test pins the reach: from this distance in, a frame demosaics bit for bit as
+/// it does inside a larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same
+/// reason.
 pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
 /// The side of a tile, where its phase planes stay in a core's cache, and even, so that every
