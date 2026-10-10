@@ -25,42 +25,16 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
-   nominal rate at small N (Batch 5).
-2. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
+1. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
    the samples. The confidence weighting gives the reference frame less weight (Batch 6).
-3. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
+2. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
    too little variance (Batch 7).
-4. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
+3. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
 
 Reading guide: batches are sorted by impact. Each batch is one change that should land in one
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 5: Rejection scale precision — **medium-high**
-
-These items share the `Spread`/`Pass` machinery, and the tests must land with the fix.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| CMB-1 | Iterated sigma clip and winsorized measure the MAD (or the winsorized SD) of the window that the last pass already trimmed. They then scale it with constants for a complete Gaussian sample, so σ shrinks with each pass. Clean-data rejection at 2.5σ (nominal 1.24 %): 5.5 % at N = 10, 3.9 % at N = 20, 2.4 % at N = 50. Winsorized at k = 3, N = 10 rejects 2.3 % against a nominal 0.27 %. Linear fit avoids this with full-count normal scores. Siril has the same bias. | `combine/rejection/pass.rs:58`, `math/statistics/spread.rs:28-39`, `winsorized_clip_config.rs:137-171` | confirmed (rates from simulation) |
-| CMB-2 | The σ floor is the background RMS only. On the sky it hides CMB-1 (0.8–0.9 %). On stars, nebulae and flats the true σ is higher than the floor, so the CMB-1 rates come back exactly where photometry is done. | `combine/rejection/mod.rs:161-164`, `spread.rs:82-86` | confirmed |
-| CMB-16 | After a ±kσ clip, the dispersion plane reads 3–9 % low (truncated-normal factor 0.911 at k = 2.5). | `combine/cache/sample.rs:142-147,179-183` | confirmed (analytic) |
-| CMB-14 | The clean-frames test allows a 5 % RMS error and lets CMB-1 through. No clean-data rate test exists for sigma clip or winsorized. The bench has no large-N or linear-fit row. | `combine/tests/mod.rs:255-286`, `combine/bench.rs` | confirmed |
-| CMB-15 | The `min_survivors` doc and the claim that winsorized is stable at small N are stale or wrong. | `combine/config/mod.rs:23-27,161-165` | confirmed |
-
-**Direction:** After pass 0, measure the scale with censoring awareness: a rank-based spread on
-the full-count Blom scores, as `NormalScores` already provides. For `RejectionScale::Robust`,
-use the noise-model σ at the pass centre as the floor (the value `clip_by_model` already
-computes). Correct the dispersion by the truncated-normal factor where the band is known. Add
-exact clean-data rate tests, with and without the floor.
-
-**Also decided (CMB-13):** for the `CcdModel` rejection scale only, test each sample against its
-own band `|x−c|/σᵢ`. The robust scales keep the sorted window. Today every method uses one RMS
-band for samples whose variance differs (`combine/rejection/pass.rs:44-90`).
 
 ---
 
@@ -100,7 +74,7 @@ a stated tolerance. Interpolate the LUT.
 | CMB-7 | The master quantization σ costs an extra loop over the survivors for each pixel to give one worst-pixel scalar. | `combine/stack/mod.rs:341-392` | confirmed |
 
 **Direction:** Carry a per-pixel flat variance factor with the frame, as confidence is carried,
-and warp it with the frame. Use it in `CcdNoise`, in the rejection floor (Batch 5) and in the
+and warp it with the frame. Use it in `CcdNoise`, in the rejection floor (`Pass::model_sigma`) and in the
 cosmic-ray model. For a median, write only `Σw`.
 
 Decided:
@@ -350,12 +324,12 @@ disk-space probe. Fail with a typed `InsufficientSpace { needed, available }`.
 | ID | Finding | Where | Conf. |
 |---|---|---|---|
 | CMB-6 | The gather tests six unchanging `Option`s for each sample, divides for each sample, and walks up to 4N plane streams for each pixel. Above about 32 streams the prefetcher loses track, and nothing is vectorized except the f64 sum. | `combine/cache/mod.rs:469-511` | likely |
-| CMB-17 | Winsorized can cost up to about 50·N² per pixel in the worst case, with two passes for each clamp step. | `combine/rejection/winsorized_clip_config.rs:144-169` | confirmed |
+| CMB-17 | Winsorized walks its clamped copy twice per clamp step, up to 50 steps × N per pixel. | `combine/rejection/winsorized_clip_config.rs` (`estimate`) | confirmed |
 
 **Direction:** For each row tile of 64–256 px, loop over the frames on the outside, and transpose
 into a `[tile][frame]` buffer with `simd::Isa` gain/offset, mask bits, weights and noise terms.
 Remove the `Option`s with monomorphization. Precompute `1/electrons`. Fuse each winsorized step
-into one f64 pass. Add the large-N and linear-fit bench rows from CMB-14 first.
+into one f64 pass. Measure with `bench_stack_300` (`combine/bench.rs`), its large-N and ragged rows.
 
 ---
 
@@ -449,7 +423,6 @@ Each decision is also written into the direction of its batch.
 | DRZ-3 | Warp confidence `q` stays in the per-sample noise model only (rejection, variance plane). The mean uses frame weights only. | 6 |
 | CMB-9 | Publish an inverse-variance plane in place of the variance plane, so 0 means "no information". Refuse `Manual` weights of 0 at validation. | 7 |
 | CAL-11 / CMB-7 | `quantization_sigma` means the source's ADC step noise before flat division. It stays unchanged through calibration, and that is documented. Remove the master's worst-pixel computation. The 1/f part goes into the flat-aware noise model. | 7 |
-| CMB-13 | Use per-sample bands `|x−c|/σᵢ` for the `CcdModel` rejection scale only. The robust scales keep the sorted window. | 5 |
 | RAW-5 | Add a separate `camera_temperature` field. Calibration uses it only to match darks when no sensor temperature exists, and reports which one it used. | 17 |
 | RAW-8 | Use the bounds-checked `linear_max` (RAW-7), minus a small stated ADU margin, as the saturation level when present. Keep 95 % only for `maximum`. | 17 |
 | RAW-16 | Fill `instrument`, `date_obs` and `focal_length` from LibRaw. Leave the pixel size empty. Calibration refuses masters from another camera model. | 17 |

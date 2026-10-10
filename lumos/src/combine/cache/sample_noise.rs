@@ -3,8 +3,10 @@
 
 use crate::combine::cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
+use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::math::noise::ccd_noise::CcdNoise;
+use crate::math::statistics::spread::Spread;
 
 /// Each frame's [`CcdNoise`] per slot, carried through its normalization into the units the frames
 /// are combined in.
@@ -88,9 +90,21 @@ impl NoiseColumns<'_> {
         self.background[index] + (x - self.sky[index]).max(0.0) * self.inverse_electrons[index]
     }
 
-    /// The root mean square of the samples' background σ: the floor under a measured spread.
-    pub(crate) fn background_rms(&self) -> f32 {
-        (self.background.iter().sum::<f32>() / self.background.len() as f32).sqrt()
+    /// Whether `value`, the sample at gather `position`, lies within `bounds` of `centre` in units
+    /// of its own model σ there, raised to the resolution at the centre.
+    pub(crate) fn within(
+        &self,
+        position: usize,
+        value: f32,
+        centre: f32,
+        bounds: SigmaBounds,
+    ) -> bool {
+        let sigma = self
+            .variance_at(position, centre)
+            .sqrt()
+            .max(Spread::resolution(centre));
+        let deviation = value - centre;
+        -bounds.low * sigma <= deviation && deviation <= bounds.high * sigma
     }
 }
 
@@ -200,8 +214,11 @@ mod tests {
         assert!(mosaic.every_gain_known());
     }
 
-    /// A column's variance at `x`: background 0.25, sky 1, 1/4 per unit above it. The background
-    /// RMS of variances 0.25 and 0.75 is √0.5.
+    /// A column's variance at `x`: background 0.25, sky 1, 1/4 per unit above it.
+    ///
+    /// Each sample's band is in its own σ: at a centre of 1, at the sky, sample 0's σ is
+    /// √0.25 = 0.5 and sample 1's √0.75 ≈ 0.866, so a band of 2σ reaches 2 and ≈ 2.732. A value of
+    /// 2.5 is outside sample 0's band and inside sample 1's.
     #[test]
     fn columns_evaluate_the_model_per_sample() {
         let columns = NoiseColumns {
@@ -212,6 +229,11 @@ mod tests {
         assert_eq!(columns.variance_at(0, 3.0), 0.75);
         assert_eq!(columns.variance_at(0, 0.0), 0.25);
         assert_eq!(columns.variance_at(1, 3.0), 0.75);
-        assert_eq!(columns.background_rms(), 0.5f32.sqrt());
+        let band = SigmaBounds::symmetric(2.0);
+        assert!(columns.within(0, 2.0, 1.0, band));
+        assert!(!columns.within(0, 2.5, 1.0, band));
+        assert!(columns.within(1, 2.5, 1.0, band));
+        assert!(columns.within(1, -0.5, 1.0, band));
+        assert!(!columns.within(1, -0.75, 1.0, band));
     }
 }

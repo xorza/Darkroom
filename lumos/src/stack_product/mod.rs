@@ -62,8 +62,11 @@ pub struct StackProduct {
     /// Unbiased where each sample's variance is inversely proportional to its weight — as `Noise`
     /// weighting makes it at the sky — and with equal weights the squared standard error of the
     /// mean. It checks [`Self::variance`]: where the two disagree beyond the scatter of a
-    /// scatter, the noise model or the frames are off. Rejection trims the tails, so a clipped
-    /// pixel reads below the frames' full scatter. NaN where fewer than two samples survive.
+    /// scatter, the noise model or the frames are off. A clip in a band of σ — sigma clip,
+    /// winsorized, linear fit — leaves survivors that scatter as a Gaussian truncated to the band,
+    /// so their sum of squares is divided by that variance, 0.911 at ±2.5σ; trim and GESD cut by
+    /// rank and by test, and read below the frames' full scatter. NaN where fewer than two samples
+    /// survive.
     ///
     /// Absent for median output and for drizzle, and unless asked for.
     pub dispersion: Option<QualityMap>,

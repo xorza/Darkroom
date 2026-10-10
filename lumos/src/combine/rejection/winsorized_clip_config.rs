@@ -1,5 +1,5 @@
-//! Winsorized sigma clipping: a Huber estimate of the centre and σ, then a clip about them,
-//! repeated until a clip rejects nothing.
+//! Winsorized sigma clipping: a Huber estimate of the centre and σ of every sample, then one clip
+//! about them.
 
 use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
@@ -8,11 +8,18 @@ use crate::math::statistics::spread::Spread;
 
 /// Configuration for winsorized sigma clipping, after PixInsight's `WinsorizedSigmaClipping`.
 ///
-/// Each pass starts from the median and the floored MAD σ of the samples still kept. It then
-/// clamps a copy of them to ±1.5σ about the centre, takes the centre again as the mean of the
-/// clamped copy and σ as its corrected standard deviation, and repeats on the clamped copy until σ
-/// moves by at most 0.05%. Then it rejects the samples outside the bounds about that centre. Passes repeat until one
-/// rejects nothing. The clamped copy is only an estimate: no sample is replaced in the mean.
+/// The estimate starts from the median and the floored MAD σ of every sample. It then clamps a copy
+/// of them to ±1.5σ about the centre, takes the centre again as the mean of the clamped copy and σ
+/// as its corrected standard deviation, and repeats on the clamped copy until σ moves by at most
+/// 0.05%. Then it rejects the samples outside the bounds about that centre, once. The clamped copy
+/// is only an estimate: no sample is replaced in the mean.
+///
+/// One clip, where PixInsight and Siril repeat the estimate on the survivors until a clip rejects
+/// nothing: a rejected sample lies beyond the bound, at least as far as the clamp reaches, so the
+/// estimate already holds it at the clamp, which is all its rejection says of it. Estimated again
+/// without it, the survivors look like a complete sample with their tails cut, σ shrinks at each
+/// repeat, and clean samples are rejected at several times the Gaussian tail share: 2.3% instead
+/// of 0.27% at k = 3 over ten samples.
 ///
 /// The robust start departs from Siril, which starts from the plain standard deviation: with three
 /// outliers at 10σ among ten samples that start puts all three inside the clamp, and none is
@@ -60,12 +67,12 @@ impl WinsorizedClipConfig {
     }
 
     pub(crate) fn narrow(self, pass: &Pass<'_>, clamped: &mut Vec<f32>) -> Proposal {
-        let estimate = Self::estimate(pass.samples(), pass.background, clamped);
+        let estimate = Self::estimate(pass.samples(), |centre| pass.model_sigma(centre), clamped);
         pass.keep(self.sigma, estimate.centre, estimate.sigma)
     }
 
     /// The Huber estimate of an ascending window, in `clamped`'s working copy, with σ floored by
-    /// [`Spread::floored`] at every step.
+    /// [`Spread::floored`] at every step, at the `floor` a centre has.
     ///
     /// Each step clamps the last step's copy, as Siril and PixInsight do: a sample once cut short
     /// stays cut short when σ grows. Clamping the samples themselves at each step is Huber's
@@ -73,11 +80,15 @@ impl WinsorizedClipConfig {
     /// the centre and σ up step by step until the band holds them. The copy stays sorted, since the
     /// clamp is monotonic. Sums run in f64: the mean of samples a few steps apart at 0.5 would lose
     /// those steps in an f32 sum.
-    pub(crate) fn estimate(sorted: &[f32], background: f32, clamped: &mut Vec<f32>) -> Spread {
+    pub(crate) fn estimate(
+        sorted: &[f32],
+        floor: impl Fn(f32) -> f32,
+        clamped: &mut Vec<f32>,
+    ) -> Spread {
         debug_assert!(sorted.len() >= 2);
         let start = Spread::of_sorted(sorted);
         let mut centre = start.centre;
-        let mut sigma = start.floored(background);
+        let mut sigma = start.floored(floor(centre));
         clamped.clear();
         clamped.extend_from_slice(sorted);
         for _ in 0..MAX_CLAMP_STEPS {
@@ -98,7 +109,7 @@ impl WinsorizedClipConfig {
                 sigma: (WINSORIZED_CORRECTION * (squares / (count - 1.0)).sqrt()) as f32,
             };
             centre = next.centre;
-            let next_sigma = next.floored(background);
+            let next_sigma = next.floored(floor(next.centre));
             let converged =
                 (f64::from(next_sigma) - f64::from(sigma)).abs() <= f64::from(sigma) * CONVERGENCE;
             sigma = next_sigma;

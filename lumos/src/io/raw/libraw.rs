@@ -297,6 +297,7 @@ pub(crate) mod internals {
 
     impl Libraw {
         /// Set the orientation LibRaw saved at unpack, which its processing turns by.
+        #[cfg(feature = "real-data")]
         pub(crate) const fn set_saved_flip(&mut self, flip: i32) {
             // SAFETY: as `params_mut`.
             unsafe { self.handle.as_mut().rawdata.sizes.flip = flip };
