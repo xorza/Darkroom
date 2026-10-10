@@ -118,9 +118,60 @@ impl QualityFlags {
 #[derive(Debug, Clone)]
 pub struct PixelFlags {
     bits: Buffer2<u8>,
-    /// Pixels holding each flag, by bit position. Kept current by every mutation, so whether a flag
-    /// is present anywhere is answered without a scan.
-    counts: [usize; 8],
+    /// Pixels holding each flag. Kept current by every mutation, so whether a flag is present
+    /// anywhere is answered without a scan.
+    counts: FlagCounts,
+}
+
+/// How many pixels hold each flag, by bit position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FlagCounts([usize; 8]);
+
+impl FlagCounts {
+    /// Count each flag `byte` holds once more.
+    #[inline]
+    pub(crate) const fn tally(&mut self, byte: u8) {
+        let mut remaining = byte;
+        while remaining != 0 {
+            self.0[remaining.trailing_zeros() as usize] += 1;
+            remaining &= remaining - 1;
+        }
+    }
+
+    /// The two counts together.
+    pub(crate) const fn merged(mut self, other: Self) -> Self {
+        let mut bit = 0;
+        while bit < 8 {
+            self.0[bit] += other.0[bit];
+            bit += 1;
+        }
+        self
+    }
+
+    /// The counts of `bytes`, in parallel spans.
+    fn of(bytes: &[u8]) -> Self {
+        bytes
+            .par_chunks(1 << 16)
+            .map(|span| {
+                let mut counts = Self::default();
+                for &byte in span {
+                    counts.tally(byte);
+                }
+                counts
+            })
+            .reduce(Self::default, Self::merged)
+    }
+
+    const fn any(&self) -> bool {
+        let mut bit = 0;
+        while bit < 8 {
+            if self.0[bit] > 0 {
+                return true;
+            }
+            bit += 1;
+        }
+        false
+    }
 }
 
 impl PixelFlags {
@@ -135,11 +186,23 @@ impl PixelFlags {
             .enumerate()
             .for_each(|(index, byte)| *byte = flags_at(index).0);
         let flags = Self::from_plane(bits);
-        flags.counts.iter().any(|&count| count > 0).then_some(flags)
+        flags.counts.any().then_some(flags)
+    }
+
+    /// Flags from a plane of their bytes whose `counts` its producer tallied as it wrote them;
+    /// `None` when no pixel holds one.
+    pub(crate) fn from_counted(bits: Buffer2<u8>, counts: FlagCounts) -> Option<Self> {
+        debug_assert_eq!(
+            counts,
+            FlagCounts::of(bits.pixels()),
+            "counts of other bytes"
+        );
+        counts.any().then_some(Self { bits, counts })
     }
 
     /// OR `flags` into every pixel whose row-major index satisfies `holds`, creating the plane in
-    /// `slot` when it has none and some pixel does.
+    /// `slot` when it has none and some pixel does. The counts take the bits it sets, row by row,
+    /// rather than a recount of the plane.
     pub(crate) fn add_where(
         slot: &mut Option<Self>,
         size: Size2us,
@@ -149,17 +212,24 @@ impl PixelFlags {
         match slot {
             Some(existing) => {
                 debug_assert_eq!(existing.size(), size, "flags for another geometry");
-                existing
+                let width = size.width.max(1);
+                let added = existing
                     .bits
                     .pixels_mut()
-                    .par_iter_mut()
+                    .par_chunks_mut(width)
                     .enumerate()
-                    .for_each(|(index, byte)| {
-                        if holds(index) {
-                            *byte |= flags.0;
+                    .map(|(y, row)| {
+                        let mut added = FlagCounts::default();
+                        for (x, byte) in row.iter_mut().enumerate() {
+                            if holds(y * width + x) {
+                                added.tally(flags.0 & !*byte);
+                                *byte |= flags.0;
+                            }
                         }
-                    });
-                existing.counts = counts_of(existing.bits.pixels());
+                        added
+                    })
+                    .reduce(FlagCounts::default, FlagCounts::merged);
+                existing.counts = existing.counts.merged(added);
             }
             None => {
                 *slot = Self::from_fn(size, |index| {
@@ -170,6 +240,29 @@ impl PixelFlags {
                     }
                 });
             }
+        }
+    }
+
+    /// OR `flags` into the pixels at `indices`, creating the plane in `slot` when it has none and
+    /// some index is given; the counts take the bits it sets.
+    pub(crate) fn add_at(
+        slot: &mut Option<Self>,
+        size: Size2us,
+        flags: QualityFlags,
+        indices: &[usize],
+    ) {
+        if indices.is_empty() {
+            return;
+        }
+        let existing = slot.get_or_insert_with(|| Self {
+            bits: Buffer2::new_default(size.width, size.height),
+            counts: FlagCounts::default(),
+        });
+        debug_assert_eq!(existing.size(), size, "flags for another geometry");
+        let bytes = existing.bits.pixels_mut();
+        for &index in indices {
+            existing.counts.tally(flags.0 & !bytes[index]);
+            bytes[index] |= flags.0;
         }
     }
 
@@ -233,13 +326,13 @@ impl PixelFlags {
                 or_into(out, &prefix[at * width..(at + 1) * width]);
             }
         });
-        self.counts = counts_of(self.bits.pixels());
+        self.counts = FlagCounts::of(self.bits.pixels());
     }
 
     /// Flags from a plane of their bytes; `None` when no pixel holds one.
     pub(crate) fn from_buffer(bits: Buffer2<u8>) -> Option<Self> {
         let flags = Self::from_plane(bits);
-        flags.counts.iter().any(|&count| count > 0).then_some(flags)
+        flags.counts.any().then_some(flags)
     }
 
     /// Whether any pixel holds a flag other than those in `except`.
@@ -253,7 +346,7 @@ impl PixelFlags {
     }
 
     fn from_plane(bits: Buffer2<u8>) -> Self {
-        let counts = counts_of(bits.pixels());
+        let counts = FlagCounts::of(bits.pixels());
         Self { bits, counts }
     }
 
@@ -288,14 +381,14 @@ impl PixelFlags {
     ///
     /// If `flag` is not a single flag.
     pub const fn count(&self, flag: QualityFlags) -> usize {
-        self.counts[flag.index()]
+        self.counts.0[flag.index()]
     }
 
     /// Whether any pixel holds a flag of `flags`.
     pub const fn contains(&self, flags: QualityFlags) -> bool {
         let mut bit = 0;
-        while bit < self.counts.len() {
-            if self.counts[bit] > 0 && flags.0 & (1 << bit) != 0 {
+        while bit < self.counts.0.len() {
+            if self.counts.0[bit] > 0 && flags.0 & (1 << bit) != 0 {
                 return true;
             }
             bit += 1;
@@ -338,18 +431,6 @@ impl PixelFlags {
 }
 
 /// How many of `bytes` hold each flag, by bit position.
-fn counts_of(bytes: &[u8]) -> [usize; 8] {
-    let mut counts = [0; 8];
-    for &byte in bytes {
-        let mut remaining = byte;
-        while remaining != 0 {
-            counts[remaining.trailing_zeros() as usize] += 1;
-            remaining &= remaining - 1;
-        }
-    }
-    counts
-}
-
 /// OR `source` into `target`, element by element.
 fn or_into(target: &mut [u8], source: &[u8]) {
     for (target, &source) in target.iter_mut().zip(source) {

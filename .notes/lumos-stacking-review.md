@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–11 are done and committed. Every finding below was re-checked against the code after
+Batches 1–12 are done and committed. Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -48,43 +48,15 @@ Batch 7 and still holds.
  ├─── 16
  └─── 22
 13, 17, 24, 26   independent
-12 ── 23 ── 27
+23 ── 27
 18 ── 19
 21 ── 20 ── 25
 ```
 
 - 14 before 15 and 16: CFA drizzle and the scatter rework build on the per-frame drizzle.
 - 14 before 22: the hot-loop rework is done on the final gather, which reads the drizzle weight.
-- 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
+- 23 before 27: the dark scale is fitted on the hot candidates 23 builds.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
-
----
-
-## Batch 12: Fused per-light calibration pass — medium
-
-**Findings:** CAL-8, DMS-10.
-
-**Design:**
-1. One row-parallel kernel in `CalibrationMasters::calibrate`:
-   `x = (L − B·g_b − o_b − k·(D·g_d + o_d)) / F`, computed in f64 per sample and rounded once,
-   where `(g, o)` are the masters' domain maps and `k` is the dark scale (the exposure ratio now;
-   Batch 27 supplies a fitted one). Saturation (`record_saturation`) and the masters' flags are
-   taken in the same pass.
-2. `PreparedFlat` precomputes `FLAT_FLOOR` into the divisor's own flags once; `take_master_flags`
-   ORs it, so the light needs no `add_where` for it.
-3. `PixelFlags` keeps its counts incrementally: `add_where` and the fused pass count per row and
-   add, instead of the single-threaded `counts_of` rescan.
-4. Defect flags are set by index (the map holds indices) with the same incremental count.
-5. **DMS-10:** null repair has one owner, `calibrate`. `CfaImage::demosaic` repairs only a frame
-   that no calibration touched (its record is empty), and otherwise `debug_assert`s that every
-   `NO_DATA` pixel is `REPAIRED`.
-6. The flat gain grid (`ImageMetadata::flat_gain`) is still set where the flat divides.
-
-**Tests:** the existing calibration tests stay exact. Add one that a light through the fused kernel
-equals a reference computed step by step in f64 in the test, within the one rounding; and one that
-the flag counts equal a full recount after a calibration with every flag kind.
-
-**Acceptance:** `calibration_masters/bench.rs` per-light time falls; report the figure.
 
 ---
 
@@ -441,7 +413,7 @@ stem collision with another path is a miss.
 2. The light's excess at the same pixels, `l_p = L_p − med(L)` over the same neighbours (taken
    after the bias and before the dark), is fitted as `l_p = k·d_p` by least squares, iterated with
    a 3σ clip on the residuals, so stars and hits fall out.
-3. With at least 100 pixels left, `k` replaces the exposure ratio in Batch 12's kernel; otherwise
+3. With at least 100 pixels left, `k` replaces the exposure ratio as the dark's scale in `LightCalibration`, the fused calibration kernel; otherwise
    the exposure ratio stands. The outcome records `k`, the pixel count, and which was used.
 4. Only for a bias-removed dark (`DarkBias::Removed`); a dark that holds the bias keeps today's
    rules.

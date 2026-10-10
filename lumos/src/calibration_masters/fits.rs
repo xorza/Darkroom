@@ -102,22 +102,24 @@ pub(super) fn load(path: &Path, context: &LoadContext) -> io::Result<Calibration
             "a calibration-master bundle holds no flat-dark: the flat is stored prepared",
         ));
     }
-    let masters = CalibrationMasters {
-        bias: read_master(
+    // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
+    // trustworthy as one just built — and neither can exist in a state the other would reject.
+    let masters = CalibrationMasters::assemble(
+        read_master(
             &mut reader,
             indices.masters.bias,
             MasterRole::Bias,
             path,
             context,
         )?,
-        dark: read_master(
+        read_master(
             &mut reader,
             indices.masters.dark,
             MasterRole::Dark,
             path,
             context,
         )?,
-        flat: read_master(
+        read_master(
             &mut reader,
             indices.masters.flat,
             MasterRole::Flat,
@@ -125,14 +127,9 @@ pub(super) fn load(path: &Path, context: &LoadContext) -> io::Result<Calibration
             context,
         )?
         .map(PreparedFlat::from_divisor),
-        defect_map: read_defect_map(&mut reader, indices.defects)?,
-    };
-    // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
-    // trustworthy as one just built — and neither can exist in a state the other would reject.
-    masters
-        .validate_dimensions()
-        .and_then(|()| masters.validate_records())
-        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
+        read_defect_map(&mut reader, indices.defects)?,
+    )
+    .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
     Ok(masters)
 }
 

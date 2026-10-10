@@ -308,9 +308,10 @@ impl CfaImage {
     ///
     /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
     /// reason and through the same neighbour search — mask included, so a null is never repaired
-    /// from another null, nor from a value another repair made. Calibration runs it once its
-    /// arithmetic is done, so a pixel a master left without a measurement holds a fill, not a
-    /// difference against a bound.
+    /// from another null, nor from a value another repair made. Each repaired null is flagged
+    /// [`QualityFlags::REPAIRED`] beside its `NO_DATA`, and a null already flagged so is left as
+    /// it is. Calibration owns the repair and runs it once its arithmetic is done, so a pixel a
+    /// master left without a measurement holds a fill, not a difference against a bound.
     pub(crate) fn repair_nulls(&mut self) {
         let Some(flags) = self
             .flags
@@ -321,13 +322,17 @@ impl CfaImage {
         };
         let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let nulls = flags.mask_of(QualityFlags::NO_DATA);
+        let mut nulls = flags.mask_of(QualityFlags::NO_DATA);
+        nulls.and_not(&flags.mask_of(QualityFlags::REPAIRED));
         let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
         let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         nulls.for_each_set(|pos| {
             let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
+        });
+        PixelFlags::add_where(&mut self.flags, size, QualityFlags::REPAIRED, |index| {
+            nulls.get(index)
         });
     }
 
@@ -338,7 +343,22 @@ impl CfaImage {
         passes: MarkesteijnPasses,
         cancel: &CancelToken,
     ) -> Result<LinearImage, Cancelled> {
-        self.repair_nulls();
+        // Calibration repairs a light's nulls; a frame no calibration touched has them repaired
+        // here.
+        if self.metadata.calibration.is_none() {
+            self.repair_nulls();
+        } else {
+            debug_assert!(
+                self.flags
+                    .as_ref()
+                    .is_none_or(|flags| flags.bytes().iter().all(|&byte| {
+                        let flags = QualityFlags::from_byte(byte);
+                        !flags.intersects(QualityFlags::NO_DATA)
+                            || flags.intersects(QualityFlags::REPAIRED)
+                    })),
+                "a calibrated frame holds a null calibration did not repair"
+            );
+        }
         let width = self.data.width();
         let height = self.data.height();
         // Through the checked accessor, then shared: the grid is the flat's, not this frame's.
@@ -476,33 +496,15 @@ impl CfaImage {
             dark.metadata.domain,
             self.metadata.domain
         );
-        let (gain, offset) = ((map.gain * scale) as f32, map.offset as f32);
+        let gain = map.gain * scale;
         self.data
             .par_iter_mut()
             .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l -= d * gain + offset);
+            .for_each(|(l, d)| *l = (f64::from(*l) - (f64::from(*d) * gain + map.offset)) as f32);
         self.take_master_flags(dark);
         if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
             light.pedestal = light.after_subtracting(dark);
         }
-    }
-
-    /// Flag [`QualityFlags::SATURATED`] at the samples' saturation level, unless the decoder
-    /// flagged saturation, and drop `data_max`: calibration runs this on a light before it moves
-    /// the samples, after which no level marks the saturated ones and the flags are the record.
-    /// The level is the one the detector applies to a frame as decoded; a master is not tested
-    /// against it, since a ceiling no file declared is a guess the detector makes for lights alone.
-    pub(crate) fn record_saturation(&mut self) {
-        if !self.metadata.saturation_flagged {
-            let level = self.metadata.saturation_level();
-            let size = self.size();
-            let samples = self.data.pixels();
-            PixelFlags::add_where(&mut self.flags, size, QualityFlags::SATURATED, |index| {
-                samples[index] >= level
-            });
-            self.metadata.saturation_flagged = true;
-        }
-        self.metadata.data_max = None;
     }
 
     /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
