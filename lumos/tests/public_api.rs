@@ -321,7 +321,11 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
-        coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
+        coverage: Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
+            2,
+            1,
+            vec![1.0, 0.5],
+        )))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         inverse_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
@@ -359,7 +363,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         value: 0.5,
         size: (2, 1).into(),
     };
-    assert_eq!(uniform.to_plane().pixels(), &[0.5, 0.5]);
+    assert_eq!(uniform.to_plane(0).pixels(), &[0.5, 0.5]);
 
     // The conversions to an image move the planes rather than copy them.
     let shared_plane = Buffer2::new(2, 1, vec![3.0, 4.0]);

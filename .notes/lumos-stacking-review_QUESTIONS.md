@@ -40,3 +40,33 @@ wanted: B is correct today, A is research.
 the X-Trans part of CAL-9 (local recompute). The rest of Batch 13 is done: the saturated-star mask
 (CAL-6), the σ normalization of the X-Trans significance and its noise-only test (CAL-7), the
 detector types (CAL-17), and the mono and Bayer local recompute (CAL-9).
+
+## Q2. How to normalize a CFA drizzle above scale 1 (Batch 15)
+
+**Finding.** A CFA-drizzled frame reaches each colour at only part of the output grid: its red
+and blue drops sit on a lattice of `2s` output pixels. The combine normalizes by pixel pairs
+(`photometric_gain`'s errors-in-variables fit, or a ratio of medians over shared pixels). The
+pixels every frame reached thin out with every frame added, so Batch 15 measures each frame
+against the reference over the pixels both reached in the slot's channel (`pairwise_norms`). At
+scale 1 a sub-pixel dither shares every pixel. Above scale 1, two frames about one photosite
+apart put one's red where the other's green fell and share no red pixel: the normalized combine
+then fails with `NoCommonCoverage` (loud, not wrong). Eight frames of random dither at scale 2,
+pixfrac 0.8 fail this way under `StackConfig::light()`.
+
+**Practice.** PixInsight takes the normalization of a drizzle from ImageIntegration on the
+registered, interpolated frames, with per-frame location and scale estimates (not pixel pairs).
+Siril measures per-frame location and scale on the drizzled frames, leaving out pixels with no
+data. Neither pairs pixels between frames.
+
+**Options.**
+
+| Option | What it does | Cost |
+|---|---|---|
+| A. Source statistics, unpaired | For per-channel frames, location from each frame's per-colour source median (already in `FrameStats`), scale from a per-colour robust scale of the mosaic with the measured white noise taken out (`√(MAD² − σ²)`); gain = scale ratio, offset from the medians. Multiplicative uses the source medians as unwarped frames do | A per-colour scale in `FrameStats`; a second normalization estimator beside the paired fit; a scale ratio is undefined on a frame with no signal structure, so that case needs its own error |
+| B. Binned pairs | Bin each frame's channel into blocks of one colour period (`2s` Bayer, `6s` X-Trans), each block's `Σw·x/Σw`, and run the paired fit on the blocks both frames reach — every block holds a drop of each colour | A new binning stage; the binned values sample the scene at different points in each frame, so stars inflate the fit's scatter; no reference tool does this |
+| C. Keep pairs, refuse | The current interim: exact when pairs overlap, `NoCommonCoverage` when not | CFA drizzle above scale 1 needs `Normalization::None` |
+
+**Recommendation.** A: it is the established practice, it never fails for lack of overlap, and
+`FrameStats` already holds the medians and the white noise it needs. C stays until then.
+
+**Blocked.** Nothing else in the plan. Batch 15 ships with C.

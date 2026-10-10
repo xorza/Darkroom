@@ -5,7 +5,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
-use crate::internals::synthetic::observe::{Observation, SimFrame, render};
+use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::registration::register;
 use crate::registration::tests::helpers::{self, max_deviation};
@@ -13,7 +13,6 @@ use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::{RegistrationConfig, TransformType};
 use crate::star_detection::config::Config as DetConfig;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::star::Star;
 
 /// A scene of `stars` over `size`, its reference frame and the frame `truth` maps it to.
 #[derive(Debug)]
@@ -80,7 +79,8 @@ impl Rendered {
         let result = register(&reference_stars, &target_stars, &config)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
 
-        let sigma = centroid_sigma(&[(&reference, &reference_stars), (&target, &target_stars)]);
+        let sigma =
+            metrics::centroid_sigma(&[(&reference, &reference_stars), (&target, &target_stars)]);
         let n = result.num_inliers() as f64;
         let pair_sigma = sigma * 2f64.sqrt();
         let bound = 5.0 * pair_sigma * (2.0 * 7.0 / n).sqrt();
@@ -117,23 +117,6 @@ fn detector() -> StarDetector {
     config.filter.min_snr = 5.0;
     config.detection.sigma_threshold = 3.0;
     StarDetector::from_config(config).unwrap()
-}
-
-/// The RMS centroid error per axis of `frames`' detections against their renders' truth, over the
-/// detections within 1.5 px of a true source.
-fn centroid_sigma(frames: &[(&SimFrame, &Vec<Star>)]) -> f64 {
-    let mut sum = 0.0;
-    let mut count = 0;
-    for (frame, stars) in frames {
-        let truth: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
-        let found: Vec<DVec2> = stars.iter().map(|s| s.pos).collect();
-        for (t, f) in metrics::match_catalogs(&truth, &found, 1.5) {
-            sum += truth[t].distance_squared(found[f]);
-            count += 2;
-        }
-    }
-    assert!(count > 0, "no detection matched a source");
-    (sum / f64::from(count)).sqrt()
 }
 
 #[test]

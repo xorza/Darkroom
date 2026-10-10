@@ -42,12 +42,13 @@ impl CommonDomain {
         BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
     }
 
-    /// Intersect every frame's coverage into the pixels all of them contribute at.
+    /// Intersect every frame's coverage of `channel` into the pixels all of them contribute at.
     ///
     /// In parallel over spans of the mask, each reading its span of every frame: AND is
     /// order-independent, so the mask is the serial one, and only one mask is ever held.
     pub(super) fn build(
-        frames: &[StoredFrame],
+        frames: &[&StoredFrame],
+        channel: usize,
         pixel_count: usize,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
@@ -62,7 +63,7 @@ impl CommonDomain {
                 if base < pixel_count {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
                     for frame in frames {
-                        let gate = FrameGate::of(frame, base, end);
+                        let gate = FrameGate::of(frame, channel, base, end);
                         if !gate.everywhere() {
                             intersect_span(words, end - base, |index| gate.sample(index).is_some());
                         }

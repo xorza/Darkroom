@@ -487,13 +487,12 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         );
     }
     assert_eq!(
-        all.coverage.as_ref().unwrap().per_pixel().unwrap().pixels(),
+        all.coverage.as_ref().unwrap().to_plane(0).pixels(),
         coverage_only
             .coverage
             .as_ref()
             .unwrap()
-            .per_pixel()
-            .unwrap()
+            .to_plane(0)
             .pixels(),
         "coverage differed when the other planes were declined"
     );
@@ -542,7 +541,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
         .coverage
         .as_ref()
         .expect("coverage was requested")
-        .to_plane();
+        .to_plane(0);
     let weight = product
         .weight
         .as_ref()

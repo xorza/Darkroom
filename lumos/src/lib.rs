@@ -178,7 +178,7 @@ pub use drizzle::accumulator::DrizzleFrame;
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use drizzle::drizzle_result::DrizzleResult;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};
-pub use drizzle::stack::{drizzle_images, drizzle_stack};
+pub use drizzle::stack::{drizzle_cfa_images, drizzle_cfa_stack, drizzle_images, drizzle_stack};
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 

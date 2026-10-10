@@ -142,10 +142,16 @@ impl ImageMetadata {
     }
 
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts. A
-    /// monochrome sensor's frame is copied straight through, with nothing interpolated.
+    /// monochrome sensor's frame is copied straight through, a CFA drizzle interpolates no colour
+    /// from another, and a green proxy fills its other photosites from green alone.
     pub(crate) fn is_demosaiced(&self) -> bool {
-        self.provenance
-            .as_ref()
-            .is_some_and(|provenance| provenance.demosaic != DemosaicProvenance::None)
+        self.provenance.as_ref().is_some_and(|provenance| {
+            matches!(
+                provenance.demosaic,
+                DemosaicProvenance::LumosRcd
+                    | DemosaicProvenance::LumosMarkesteijn { .. }
+                    | DemosaicProvenance::LibRaw
+            )
+        })
     }
 }

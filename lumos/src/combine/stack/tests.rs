@@ -252,8 +252,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
 
             let bits = |plane: &Buffer2<f32>| bits(plane.pixels());
             assert_eq!(
-                bits(&ram.coverage.as_ref().unwrap().to_plane()),
-                bits(&disk.coverage.as_ref().unwrap().to_plane()),
+                bits(&ram.coverage.as_ref().unwrap().to_plane(0)),
+                bits(&disk.coverage.as_ref().unwrap().to_plane(0)),
                 "{label}: coverage differs"
             );
             let ram_variance = ram.inverse_variance.as_ref().unwrap();
@@ -430,7 +430,13 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     // The reported coverage counts the same contributors the value was built from — two of three
     // frames at the masked pixel, all three elsewhere. It is per-pixel because a frame
     // declaring nulls is a frame that carries support, which is what makes the plane exist at all.
-    let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
+    let coverage = stacked
+        .coverage
+        .as_ref()
+        .unwrap()
+        .per_pixel()
+        .unwrap()
+        .channel(0);
     assert_eq!(coverage.pixels(), &[1.0, 2.0 / 3.0, 1.0, 1.0]);
     // Some frame reached every pixel, so the stack flags none.
     assert!(stacked.image.flags.is_none());
@@ -446,7 +452,13 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     )
     .unwrap();
     assert_eq!(stacked.image.channel(0).pixels(), &[2.0, 2.0, 2.0, 0.0]);
-    let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
+    let coverage = stacked
+        .coverage
+        .as_ref()
+        .unwrap()
+        .per_pixel()
+        .unwrap()
+        .channel(0);
     assert_eq!(coverage.pixels(), &[1.0, 1.0, 1.0, 0.0]);
     let flags = stacked.image.flags.as_ref().unwrap();
     assert_eq!(
@@ -1073,7 +1085,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     .unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[20.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane().pixels(),
+        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 2.0 / 3.0]
     );
     assert_eq!(
@@ -1093,7 +1105,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     let alone = combine(vec![covered(10.0, [1.0, 0.0])], &config).unwrap();
     assert_eq!(alone.image.channel(0).pixels(), &[10.0, 0.0]);
     assert_eq!(
-        alone.coverage.as_ref().unwrap().to_plane().pixels(),
+        alone.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 0.0]
     );
     // The uncovered pixel holds no information, not an exact value.
@@ -1287,7 +1299,7 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     let product = combine(frames, &config).unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[15.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane().pixels(),
+        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 0.5]
     );
     assert_eq!(
@@ -1463,12 +1475,12 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let pixel = 12 * dims.width() + 12;
     let identity_confidence = cache.frames[0]
         .quality
-        .confidence()
+        .confidence(0)
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     let half_pixel_confidence = cache.frames[1]
         .quality
-        .confidence()
+        .confidence(0)
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     assert_eq!(identity_confidence, 1.0);
@@ -1879,7 +1891,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     // The middle frame is the median at every pixel, sample for sample.
     assert_eq!(explicit.image.channel(0).pixels(), mk(100.0, 2.0));
     assert_eq!(
-        explicit.coverage.as_ref().unwrap().to_plane().pixels(),
+        explicit.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0; 8]
     );
     assert_eq!(

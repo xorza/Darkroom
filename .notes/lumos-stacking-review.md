@@ -13,7 +13,8 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12 and 14 are done and committed, and Batch 13 except its X-Trans part (Q1). Every finding below was re-checked against the code after
+Batches 1–12, 14 and 15 are done and committed, Batch 13 except its X-Trans part (Q1), and Batch
+15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -44,7 +45,7 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-13 (X-Trans, Q1), 15, 16, 17, 22, 24, 26   independent
+13 (X-Trans, Q1), 15 (rest, Q2), 16, 17, 22, 24, 26   independent
 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -67,28 +68,12 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 
 ---
 
-## Batch 15: CFA (Bayer / X-Trans) drizzle — medium (feature)
+## Batch 15 (rest): CFA drizzle normalization above scale 1 — blocked
 
-**Finding:** DMS-5 / DRZ-5. Every OSC frame is interpolated twice (demosaic, then warp).
-
-**Design:**
-1. The drizzle takes a calibrated `CfaImage`. Each photosite deposits only into the plane of its
-   own colour, with a per-channel weight and `q` plane (Siril `cdrizzlebox.c`: `chan =
-   FC_array(...)`). Batch 14's `FrameQuality::Drizzled` holds one drop-weight plane and one
-   Kish-size plane that every channel shares; this batch gives each channel its own pair, read
-   per slot by `FrameGate`, `FrameCheck::stored_quality`, the frame stores and the fill gate's
-   depth.
-2. Registration runs on a green proxy, as Siril does (`registration/global.c`: "a copy of the orig
-   image … to interpolate non green pixels"): green interpolated at the R and B sites (Bayer: mean
-   of the four green neighbours; X-Trans: mean of the hex greens), never a full demosaic.
-3. A light's statistics (noise per colour) come from the mosaic (`MosaicNoise`), as now.
-4. RCD/Markesteijn stay the default path for undithered or few-frame sets; CFA drizzle is a
-   config choice.
-
-**Tests:** a dithered synthetic RGGB set (known scene) drizzled at s = 1, p = 1 recovers each
-colour plane where every output pixel is covered; a pixel covered only by red photosites has zero
-green weight; the green proxy registers a shifted pair to the same transform as the demosaiced
-frames within the registration tolerance.
+**Blocked on Q2** in `lumos-stacking-review_QUESTIONS.md`. Batch 15 normalizes CFA-drizzled
+frames pair by pair, each against the reference over the pixels both reached in a colour. Above
+scale 1 a pair can share none, and a normalized combine then fails with `NoCommonCoverage`. Left
+here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale 2.
 
 ---
 

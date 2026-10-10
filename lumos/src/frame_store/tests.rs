@@ -157,7 +157,7 @@ fn light_frame_keeps_quality_with_its_planes() {
         &[1.0, 0.5, 0.25, 0.0]
     );
     assert_eq!(
-        frame.quality.confidence().unwrap().chunk(0, 4),
+        frame.quality.confidence(0).unwrap().chunk(0, 4),
         &[4.0, 3.0, 2.0, 0.0]
     );
     assert_eq!(frame.source_stats.medians[0], 2.5);
@@ -240,7 +240,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     let quality = FrameQuality::for_unwarped(&image);
     assert_eq!(quality.mask(), Some(QualityFlags::NO_DATA));
     let frame = StoredFrame::from_memory(image.clone(), quality, FrameStats::measure(&image));
-    let gate = FrameGate::of(&frame, 0, 4);
+    let gate = FrameGate::of(&frame, 0, 0, 4);
     assert_eq!(
         (0..4)
             .map(|index| gate.sample(index).map(|sample| sample.confidence))

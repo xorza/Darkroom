@@ -91,7 +91,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
         };
         assert_eq!((invalid.field, invalid.value), ("pixfrac", 0.0));
         assert!(matches!(
-            DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), config, 0),
+            DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), Deposit::Channels(1), config, 0),
             Err(DrizzleError::Config(DrizzleConfigError::Field(invalid)))
                 if invalid.field == "pixfrac"
         ));
@@ -99,6 +99,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 
     let error = DrizzleAccumulator::new(
         ImageDimensions::new((2, 2), 1),
+        Deposit::Channels(1),
         DrizzleConfig::default().with_pixfrac(1.5),
         0,
     )

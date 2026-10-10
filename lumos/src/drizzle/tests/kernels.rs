@@ -255,7 +255,7 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
     for (x, y) in [(1, 0), (1, 1)] {
         assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
     }
-    let coverage = product.coverage.as_ref().unwrap().to_plane();
+    let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for (x, y) in [(0, 0), (0, 1)] {
         assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
         assert_eq!(weight[(x, y)], 0.0, "cell ({x},{y}) weight");
@@ -490,7 +490,7 @@ fn a_frame_of_zero_pixel_weights_is_not_gathered() {
         };
         assert_eq!(value, expected, "pixel {index}");
     }
-    assert_eq!(product.coverage.as_ref().unwrap().to_plane()[(8, 8)], 0.5);
+    assert_eq!(product.coverage.as_ref().unwrap().to_plane(0)[(8, 8)], 0.5);
 }
 
 /// A radial drop that hangs off the output grid loses the part that missed it.
@@ -611,7 +611,7 @@ fn a_zero_lanczos_tap_marks_no_coverage() {
         },
     ];
     let product = drizzle_plain(frames, &config).unwrap().product;
-    let coverage = product.coverage.as_ref().unwrap().to_plane();
+    let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for &(x, y) in &zero_cells {
         assert_eq!(coverage[(x, y)], 0.5, "({x}, {y}) coverage");
     }

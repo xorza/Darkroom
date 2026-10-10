@@ -4,6 +4,7 @@ use imaginarium::Buffer2;
 
 use crate::combine::cache::core::CacheTier;
 use crate::combine::config::StackConfig;
+use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
@@ -39,21 +40,23 @@ pub(crate) enum DrizzleTier {
 
 impl DrizzleTier {
     /// The tier of a run of `frame_count` frames of `input` from `origin`, drizzled onto `output`
-    /// and combined under `stack`: resident when the drizzled set fits beside the combine's output
-    /// and the frame being drizzled with its input.
+    /// as `deposit` says and combined under `stack`: resident when the drizzled set fits beside the
+    /// combine's output and the frame being drizzled with its input.
     pub(crate) fn for_run(
         input: ImageDimensions,
         output: ImageDimensions,
+        deposit: Deposit,
         frame_count: usize,
         origin: FrameOrigin,
         stack: &StackConfig,
         run: &IngestRun,
     ) -> Result<Self, DrizzleError> {
-        // A drizzled frame holds its channels, its drop weight and Kish size, and a flag byte. Its
-        // accumulator holds the same sums and becomes it in place, so the frame in flight adds only
-        // its input.
+        // A drizzled frame holds its channels, a drop weight and Kish size per weight plane, and a
+        // flag byte. Its accumulator holds the same sums and becomes it in place, so the frame in
+        // flight adds only its input.
+        let weight_plane = output.pixel_count() * size_of::<f32>();
         let drizzled = output.frame_bytes()
-            + 2 * output.pixel_count() * size_of::<f32>()
+            + 2 * deposit.weight_planes() * weight_plane
             + output.pixel_count();
         let input_bytes = input.frame_bytes() + input.pixel_count();
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
@@ -71,9 +74,14 @@ impl DrizzleTier {
             held_bytes,
             detection_bytes: 0,
             warp: None,
-            // The run's drop depth, which the fill gate reads after the combine.
+            // The run's drop depth in each weight plane, which the fill gate reads after the
+            // combine, and a coverage plane per channel beyond the one counted when each channel
+            // is gathered by its own weights.
             output_bytes: stack.quality.resident_bytes(output)
-                + output.pixel_count() * size_of::<f32>(),
+                + deposit.weight_planes() * weight_plane
+                + usize::from(stack.quality.coverage)
+                    * (deposit.weight_planes() - 1)
+                    * weight_plane,
         };
         let plan = MemoryPlan::plan(shape, rayon::current_num_threads(), run.memory.planning());
         if plan.fits_in_ram {

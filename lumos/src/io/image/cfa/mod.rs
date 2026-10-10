@@ -7,6 +7,7 @@
 pub(crate) mod cfa_lattice;
 pub(crate) mod colour_raster;
 
+use std::f64::consts::FRAC_1_SQRT_2;
 use std::io;
 use std::path::Path;
 
@@ -451,6 +452,102 @@ impl CfaImage {
                 image
             }
         })
+    }
+
+    /// A plane to register this mosaic on, as Siril registers CFA frames for its CFA drizzle
+    /// (`interpolate_nongreen`): each green photosite as it is, and every other filled from the
+    /// green photosites of its 3×3 neighbourhood, weighed 1 beside it and 1/√2 on a diagonal. On
+    /// a Bayer mosaic that is the mean of its four green neighbours, on X-Trans of the hexagon's.
+    /// Stars are measured on green alone, at its full resolution, with no colour interpolated
+    /// across an edge as a demosaic would.
+    ///
+    /// A filled photosite carries the flags of the greens it was filled from. One with no green
+    /// neighbour, which only a frame narrower than its pattern has, keeps its own sample and
+    /// flags. A mono frame is its own proxy.
+    pub fn green_proxy(&self) -> LinearImage {
+        const GREEN: u8 = 1;
+        let size = self.size();
+        let mut metadata = ImageMetadata {
+            quantization_sigma: None,
+            mosaic_noise: None,
+            flat_gain: None,
+            ..self.metadata.clone()
+        };
+        if let Some(provenance) = &mut metadata.provenance {
+            provenance.demosaic = DemosaicProvenance::GreenProxy;
+        }
+        let dimensions = ImageDimensions::new(size, 1);
+        if !self.cfa_type.is_mosaic() {
+            let mut image = LinearImage::from_pixels(dimensions, self.data.pixels().to_vec());
+            image.metadata = metadata;
+            image.flags.clone_from(&self.flags);
+            return image;
+        }
+        let cfa_type = self.cfa_type;
+        let flags = self.flags.as_ref();
+        let mut pixels = vec![0.0f32; size.pixel_count()];
+        let mut proxy_flags = flags.map(|_| vec![0u8; size.pixel_count()]);
+        let rows = pixels.par_chunks_mut(size.width).enumerate();
+        let fill_row = |y: usize, row: &mut [f32], mut row_flags: Option<&mut [u8]>| {
+            for (x, sample) in row.iter_mut().enumerate() {
+                let index = y * size.width + x;
+                let own_flags = flags.map_or(0, |flags| flags.at(index).byte());
+                if cfa_type.color_at(Vec2us::new(x, y)) == GREEN {
+                    *sample = self.data[index];
+                    if let Some(row_flags) = row_flags.as_deref_mut() {
+                        row_flags[x] = own_flags;
+                    }
+                    continue;
+                }
+                let (mut sum, mut weight, mut carried) = (0.0f64, 0.0f64, 0u8);
+                for dy in -1isize..=1 {
+                    for dx in -1isize..=1 {
+                        let (Some(nx), Some(ny)) =
+                            (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                        else {
+                            continue;
+                        };
+                        if (dx, dy) == (0, 0)
+                            || nx >= size.width
+                            || ny >= size.height
+                            || cfa_type.color_at(Vec2us::new(nx, ny)) != GREEN
+                        {
+                            continue;
+                        }
+                        let tap = if dx == 0 || dy == 0 {
+                            1.0
+                        } else {
+                            FRAC_1_SQRT_2
+                        };
+                        let neighbour = ny * size.width + nx;
+                        sum += tap * f64::from(self.data[neighbour]);
+                        weight += tap;
+                        carried |= flags.map_or(0, |flags| flags.at(neighbour).byte());
+                    }
+                }
+                let (value, value_flags) = if weight > 0.0 {
+                    ((sum / weight) as f32, carried)
+                } else {
+                    (self.data[index], own_flags)
+                };
+                *sample = value;
+                if let Some(row_flags) = row_flags.as_deref_mut() {
+                    row_flags[x] = value_flags;
+                }
+            }
+        };
+        match proxy_flags.as_mut() {
+            Some(proxy_flags) => rows
+                .zip(proxy_flags.par_chunks_mut(size.width))
+                .for_each(|((y, row), row_flags)| fill_row(y, row, Some(row_flags))),
+            None => rows.for_each(|(y, row)| fill_row(y, row, None)),
+        }
+        let mut image = LinearImage::from_pixels(dimensions, pixels);
+        image.metadata = metadata;
+        image.flags = proxy_flags.and_then(|bytes| {
+            PixelFlags::from_buffer(Buffer2::new(size.width, size.height, bytes))
+        });
+        image
     }
 
     /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
