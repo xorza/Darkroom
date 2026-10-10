@@ -18,6 +18,13 @@ use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 /// the nodes' by a second-order fraction of that.
 const STRETCH_GRID: usize = 32;
 
+/// The weight below which a tap is left out of a window: `2⁻²⁷`, a sixteenth of f32's step at 1.
+/// The band it cuts from the kernel's ends is under a source pixel wide at any stretch below 2800,
+/// so an axis drops at most a tap at each end. An axis's weight sum is about its stretch, so at
+/// least near 1, and its `Σ|w|` stays under twice that sum: an axis drops under `2·2·2⁻²⁷` of the
+/// window's weight sum, the two together under `2⁻²⁴`, half of f32's step at 1.
+const NEGLIGIBLE_WEIGHT: f64 = 1.0 / (1u32 << 27) as f64;
+
 /// A separable filter the warp offers: every method but Nearest, which reads one pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Filter {
@@ -48,6 +55,21 @@ impl Filter {
         }
     }
 
+    /// How far inside the radius the unstretched kernel's magnitude falls under
+    /// [`NEGLIGIBLE_WEIGHT`] `w`, so that a stretch a hair above 1 keeps the window.
+    /// - Lanczos-`a` at `a − ε`: each sinc factor is under `ε/(a − ε)`, so the kernel is under `w`
+    ///   from `ε = a·√w/(1 + √w)`, 2.6e-4 for Lanczos3.
+    /// - Catmull-Rom at `2 − ε`: `−½(1 − ε)ε²`, under `w` from `ε = √(2w)`, 1.2e-4.
+    /// - Bilinear at `1 − ε`: `ε` itself.
+    fn edge_tolerance(self) -> f64 {
+        let w = NEGLIGIBLE_WEIGHT;
+        match self {
+            Self::Bilinear => w,
+            Self::Bicubic => (2.0 * w).sqrt(),
+            Self::Lanczos(order) => order.a() as f64 * w.sqrt() / (1.0 + w.sqrt()),
+        }
+    }
+
     /// Whether some tap can weigh less than zero: what the ringing clamp acts on.
     pub(crate) const fn has_negative_lobes(self) -> bool {
         !matches!(self, Self::Bilinear)
@@ -56,15 +78,16 @@ impl Filter {
 
 /// A [`Filter`] at the stretch one frame's warp needs.
 ///
-/// Where the warp shrinks the frame — an output pixel spans more than one source pixel — the
-/// source holds frequencies past the output's Nyquist limit, and an unstretched kernel folds them
-/// back as aliases. Widening the kernel by the scale lowers its cut-off by the same factor, the
-/// prefilter every minifying resampler applies (DeForest 2004, "On re-sampling of solar images";
-/// astropy's `reproject` adaptive mode): the stretch is the largest singular value of the
-/// output-to-source Jacobian, held to at least 1, so a warp that keeps or enlarges the scale
-/// leaves the kernel as it is. One stretch serves the whole frame, at the largest scale on it: a
-/// per-pixel stretch would move every window's reach, which the flag propagation reads once per
-/// frame. The stretch is isotropic, so a warp that shrinks one axis only blurs the other too.
+/// Where the warp shrinks the frame — an output pixel spans more than one source pixel — the source
+/// holds frequencies past the output's Nyquist limit, and an unstretched kernel folds them back as
+/// aliases. Widening the kernel by the scale lowers its cut-off by the same factor, the prefilter
+/// every minifying resampler applies (DeForest 2004, "On re-sampling of solar images"; astropy's
+/// `reproject` adaptive mode): the stretch is the largest singular value of the output-to-source
+/// Jacobian, held to at least 1, so a warp that keeps or enlarges the scale leaves the kernel as it
+/// is. One stretch serves the whole frame, at the largest scale on it: a per-pixel stretch would
+/// move every window's reach, which the masked sources read once per frame to mark where a window
+/// can meet a flagged pixel. The stretch is isotropic, so a warp that shrinks one axis only blurs
+/// the other too.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WarpKernel {
     filter: Filter,
@@ -73,7 +96,8 @@ pub(crate) struct WarpKernel {
     inverse_stretch: f32,
     /// The table's entries per unit of stretched distance.
     lut_scale: f32,
-    /// `radius · stretch`: a tap this far from the sample or farther weighs nothing.
+    /// `(radius − edge tolerance) · stretch`: a tap this far from the sample or farther weighs
+    /// nothing.
     reach: f32,
 }
 
@@ -144,7 +168,7 @@ impl WarpKernel {
             stretch,
             inverse_stretch: 1.0 / stretch,
             lut_scale: LANCZOS_LUT_RESOLUTION as f32 / stretch,
-            reach: filter.radius() as f32 * stretch,
+            reach: ((filter.radius() as f64 - filter.edge_tolerance()) * f64::from(stretch)) as f32,
         }
     }
 
@@ -199,17 +223,22 @@ impl WarpKernel {
     /// The taps of the sample at `cell + frac` on one axis, `frac` in `[0, 1]`.
     ///
     /// Unstretched, the window is the kernel's `2·radius` taps from `cell − (radius − 1)`, a tap at
-    /// exactly the radius weighing the kernel's zero. Stretched, it is every source coordinate
-    /// strictly within the stretched radius, which leaves such a tap out.
+    /// or past the reach weighing zero. Stretched, it is every source coordinate whose distance,
+    /// as [`Self::weight_lanes`] rounds it, is within the reach, which leaves such a tap out. The
+    /// bounds from `frac ± reach` round apart from those distances by at most a tap, which the
+    /// distances themselves then settle.
     #[inline(always)]
     pub(crate) fn taps(&self, frac: f32) -> TapRange {
         let (first, last) = if self.stretch == 1.0 {
             let radius = self.filter.radius() as i32;
             (1 - radius, radius)
         } else {
+            let within = |t: i32| (t as f32 - frac).abs() < self.reach;
+            let first = floor(frac - self.reach) + 1;
+            let last = -floor(-(frac + self.reach)) - 1;
             (
-                floor(frac - self.reach) + 1,
-                -floor(-(frac + self.reach)) - 1,
+                first + i32::from(!within(first)) - i32::from(within(first - 1)),
+                last + i32::from(within(last + 1)) - i32::from(!within(last)),
             )
         };
         TapRange {
@@ -218,29 +247,31 @@ impl WarpKernel {
         }
     }
 
-    /// The weights of the [`F32_LANES`] taps from `cell + first` on, for a sample at `cell + frac`.
+    /// The weights of the [`F32_LANES`] taps from `cell + first` on, for a sample at `cell + frac`:
+    /// the kernel at each tap's distance, and zero at or past the reach.
     ///
     /// A tap's distance is `|t − frac|`, which rounds as `−t + frac` at or below the cell and
-    /// `t − frac` above it. Past the window the distance reaches the stretched radius, where every
-    /// kernel is zero — the table read clamps to its last entry, the kernel's zero at `a` — so the
-    /// lanes past a window's taps weigh nothing.
+    /// `t − frac` above it.
     #[inline(always)]
     pub(crate) fn weight_lanes<S: Isa>(&self, isa: S, first: i32, frac: f32) -> S::F32 {
         let signed = isa.load_f32(&LANE_INDEX) + isa.splat_f32(first as f32) - isa.splat_f32(frac);
         let distance = signed.max(isa.splat_f32(0.0) - signed);
-        match self.filter {
+        let weight = match self.filter {
             Filter::Lanczos(_) => {
                 let lut = self.lut.expect("a Lanczos kernel holds its table");
-                // `distance · scale + 0.5`, unfused, then the gather's truncation: the scalar
-                // `LanczosLut::at` read, lane by lane.
-                let index = distance * isa.splat_f32(self.lut_scale) + isa.splat_f32(0.5);
-                isa.lookup_f32(&lut.values, index)
+                // The scalar `LanczosLut::at` read, lane by lane.
+                let position = distance * isa.splat_f32(self.lut_scale);
+                let below = position.floor();
+                let low = isa.lookup_f32(&lut.values, below);
+                let high = isa.lookup_f32(&lut.values, below + isa.splat_f32(1.0));
+                (high - low).mul_add(position - below, low)
             }
             Filter::Bicubic => bicubic_lanes(isa, distance * isa.splat_f32(self.inverse_stretch)),
             Filter::Bilinear => (isa.splat_f32(1.0)
                 - distance * isa.splat_f32(self.inverse_stretch))
             .max(isa.splat_f32(0.0)),
-        }
+        };
+        distance.lanes_lt(isa.splat_f32(self.reach)).keep(weight)
     }
 
     /// The taps of the sample at `cell + frac` and their weights, into `axis`.

@@ -289,7 +289,7 @@ impl CfaImage {
     ///
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
     /// mask does not cover. The resampler answers the same problem by sampling over the taps that
-    /// hold data and normalizing by their weight — `resample::masked_sources` — but an adaptive
+    /// hold data and normalizing by their weight — `resample::flagged_sources` — but an adaptive
     /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's
     /// frame-median fill there would spread a value with no local meaning; a same-colour neighbour
     /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
@@ -370,9 +370,9 @@ impl CfaImage {
                 });
         }
         let pixels = self.data.into_vec();
-        // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest: these
-        // pixels were reconstructed rather than measured, and the combine still has to know that.
-        // Every other fact spreads as far as the demosaic reads.
+        // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest:
+        // these pixels were reconstructed rather than measured, and the combine still has to know
+        // that. Every other fact spreads as far as the demosaic reads.
         let mut flags = self.flags;
         if let Some(flags) = &mut flags {
             flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
@@ -444,7 +444,8 @@ impl CfaImage {
     }
 
     /// [`Self::subtract`] with `dark`'s signal scaled by `scale` first, as a bias-removed dark is
-    /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not signal.
+    /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not
+    /// signal.
     pub(crate) fn subtract_scaled(&mut self, dark: &CfaImage, map: DomainMap, scale: f64) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),

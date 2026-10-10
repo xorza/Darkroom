@@ -6,9 +6,9 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// A sample at or past this fraction of its channel's span above black is flagged
-/// [`QualityFlags::SATURATED`]. Many sensors clip a little below their nominal white level, which LibRaw's
-/// own `adjust_maximum` allows for down to 75% of it; 95% catches those clips and stays above any
-/// unsaturated star core.
+/// [`QualityFlags::SATURATED`]. Many sensors clip a little below their nominal white level, which
+/// LibRaw's own `adjust_maximum` allows for down to 75% of it; 95% catches those clips and stays
+/// above any unsaturated star core.
 pub(crate) const SATURATION_FRACTION: f32 = 0.95;
 
 /// One pixel's data-quality bits.
@@ -48,6 +48,17 @@ impl QualityFlags {
         }
         Self(bits)
     };
+    /// The flags a resampler leaves a pixel out for: the value measures nothing of the photosite —
+    /// a fill under a null, a hit, a defect or a neighbours' replacement. The space-telescope
+    /// pipelines (DrizzlePac, the JWST resample step) give such a pixel no weight, so it never
+    /// enters an output sample, and the output's coverage records its loss.
+    pub(crate) const RESAMPLE_EXCLUDED: Self =
+        Self(Self::NO_DATA.0 | Self::COSMIC_RAY.0 | Self::DEFECT.0 | Self::REPAIRED.0);
+    /// The flags a resampler samples through and carries to its output: the value bounds the
+    /// measurement — at saturation, or corrected short at the flat's floor. It is still the best
+    /// figure for its pixel, and where every frame clips a star's core the only one, so the
+    /// combine leaves such samples out only while enough clean ones remain.
+    pub(crate) const RESAMPLE_CARRIED: Self = Self(Self::SATURATED.0 | Self::FLAT_FLOOR.0);
     /// Each flag and its name, by bit position, as the FITS extension documents them.
     pub(crate) const NAMED: [(Self, &'static str); 6] = [
         (Self::NO_DATA, "NO_DATA"),
@@ -75,6 +86,13 @@ impl QualityFlags {
     #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
+    }
+
+    /// The flags `self` and `other` both hold.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
     }
 
     /// Whether `self` and `other` hold a flag in common.
@@ -225,21 +243,8 @@ impl PixelFlags {
     }
 
     /// Whether any pixel holds a flag other than those in `except`.
-    pub(crate) fn contains_other_than(&self, except: QualityFlags) -> bool {
-        self.counts
-            .iter()
-            .enumerate()
-            .any(|(bit, &count)| count > 0 && except.0 & (1 << bit) == 0)
-    }
-
-    /// The flags with those in `removed` cleared everywhere; `None` when nothing else remains.
-    pub(crate) fn without(&self, removed: QualityFlags) -> Option<Self> {
-        let keep = !removed.0;
-        Self::from_buffer(Buffer2::new(
-            self.bits.width(),
-            self.bits.height(),
-            self.bits.pixels().iter().map(|&byte| byte & keep).collect(),
-        ))
+    pub(crate) const fn contains_other_than(&self, except: QualityFlags) -> bool {
+        self.contains(QualityFlags(!except.0))
     }
 
     /// Flags restored from the bytes [`Self::bytes`] holds, as a spill wrote them.
@@ -271,12 +276,6 @@ impl PixelFlags {
         QualityFlags(self.bits.pixels()[index])
     }
 
-    /// The raw byte of the pixel at `index`, for a copy that keeps every flag.
-    #[inline]
-    pub(crate) fn byte(&self, index: usize) -> u8 {
-        self.bits.pixels()[index]
-    }
-
     /// The flags of the pixel at `pos`.
     #[inline]
     pub fn at_pos(&self, pos: Vec2us) -> QualityFlags {
@@ -292,13 +291,16 @@ impl PixelFlags {
         self.counts[flag.index()]
     }
 
-    /// Whether any pixel holds `flag`.
-    ///
-    /// # Panics
-    ///
-    /// If `flag` is not a single flag.
-    pub const fn contains(&self, flag: QualityFlags) -> bool {
-        self.count(flag) > 0
+    /// Whether any pixel holds a flag of `flags`.
+    pub const fn contains(&self, flags: QualityFlags) -> bool {
+        let mut bit = 0;
+        while bit < self.counts.len() {
+            if self.counts[bit] > 0 && flags.0 & (1 << bit) != 0 {
+                return true;
+            }
+            bit += 1;
+        }
+        false
     }
 
     /// The pixels holding `flag`, as the bit buffer a neighbour search takes, so a pixel
@@ -310,13 +312,12 @@ impl PixelFlags {
         mask
     }
 
-    /// The pixels without [`QualityFlags::NO_DATA`] as a plane: `1.0` where a pixel holds a measurement,
-    /// `0.0` where it does not.
+    /// The pixels as a plane: `0.0` where a pixel holds any of `excluded`, `1.0` elsewhere.
     ///
     /// The form the measurement consumers want it in — the combine gates on a coverage plane, and
     /// the warp resamples this one through the same kernel as the image to find how much real data
     /// backs each output pixel.
-    pub(crate) fn validity_plane(&self) -> Buffer2<f32> {
+    pub(crate) fn validity_plane(&self, excluded: QualityFlags) -> Buffer2<f32> {
         let size = self.size();
         let bytes = self.bits.pixels();
         Buffer2::new(
@@ -325,7 +326,7 @@ impl PixelFlags {
             bytes
                 .par_iter()
                 .map(|&byte| {
-                    if QualityFlags(byte).intersects(QualityFlags::NO_DATA) {
+                    if QualityFlags(byte).intersects(excluded) {
                         0.0
                     } else {
                         1.0
@@ -475,8 +476,9 @@ pub(crate) mod internals {
     use crate::math::size2us::Size2us;
 
     impl PixelFlags {
-        /// The pixels where any of `planes` holds a non-finite sample, flagged [`QualityFlags::NO_DATA`],
-        /// or `None` when none do: the flags a FITS decode of those samples gives.
+        /// The pixels where any of `planes` holds a non-finite sample, flagged
+        /// [`QualityFlags::NO_DATA`], or `None` when none do: the flags a FITS decode of those
+        /// samples gives.
         pub(crate) fn of_non_finite(size: Size2us, planes: &[&[f32]]) -> Option<Self> {
             debug_assert!(
                 planes
@@ -513,6 +515,27 @@ mod tests {
         let flags = PixelFlags::of_non_finite(size, &[&red, &green, &blue]).unwrap();
 
         assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
+        // A set is held when any of its flags is; the empty set never is.
+        for (set, held) in [
+            (QualityFlags::NO_DATA, true),
+            (QualityFlags::SATURATED, false),
+            (QualityFlags::UNMEASURED, true),
+            (QualityFlags::RESAMPLE_EXCLUDED, true),
+            (QualityFlags::default(), false),
+        ] {
+            assert_eq!(flags.contains(set), held, "{set:?}");
+        }
+        assert!(!flags.contains_other_than(QualityFlags::NO_DATA));
+        // Every flag is either left out of a resample or carried through it, never both.
+        assert_eq!(
+            QualityFlags::RESAMPLE_EXCLUDED.union(QualityFlags::RESAMPLE_CARRIED),
+            QualityFlags::KNOWN
+        );
+        assert_eq!(
+            QualityFlags::RESAMPLE_EXCLUDED.intersection(QualityFlags::RESAMPLE_CARRIED),
+            QualityFlags::default()
+        );
+        assert!(flags.contains_other_than(QualityFlags::SATURATED));
         let mask = flags.mask_of(QualityFlags::NO_DATA);
         for index in 0..6 {
             let expected = index == 1 || index == 4;
@@ -524,12 +547,12 @@ mod tests {
             assert_eq!(mask.get(index), expected, "index {index}");
         }
         assert_eq!(
-            flags.validity_plane().pixels(),
+            flags.validity_plane(QualityFlags::NO_DATA).pixels(),
             &[1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
         );
 
-        // The same planes with the nulls removed produce no flags at all, so a caller cannot mistake
-        // "nothing missing" for "an empty plane".
+        // The same planes with the nulls removed produce no flags at all, so a caller cannot
+        // mistake "nothing missing" for "an empty plane".
         assert!(PixelFlags::of_non_finite(size, &[&green]).is_none());
 
         // The bytes round-trip with their counts, as a spill reads them back.
@@ -547,9 +570,9 @@ mod tests {
         assert!(flags.contains(QualityFlags::NO_DATA));
     }
 
-    /// The separable dilation equals the brute-force window OR, for symmetric reaches from 1 to past
-    /// the image and for the one-sided kernel reach a warp needs, on widths and heights that do not
-    /// divide into blocks; `NO_DATA` does not spread.
+    /// The separable dilation equals the brute-force window OR, for symmetric reaches from 1 to
+    /// past the image and for the one-sided kernel reach a warp needs, on widths and heights that
+    /// do not divide into blocks; `NO_DATA` does not spread.
     #[test]
     fn dilation_matches_the_brute_force_window() {
         let mut rng = TestRng::new(7);

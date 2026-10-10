@@ -1,14 +1,14 @@
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
+use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
 };
 use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::kernel::{self, LANCZOS_LUT_RESOLUTION, LanczosOrder};
-use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
@@ -23,13 +23,16 @@ struct Expected {
     confidence: f64,
     /// The rounding the engine's f32 sums may carry, per value.
     tolerance: f64,
+    flags: QualityFlags,
 }
 
-/// A frame's planes, and its validity when it declares nulls: the sources the oracle reads.
+/// A frame's planes, its validity when it excludes pixels, and its flags when it has any: the
+/// sources the oracle reads.
 #[derive(Debug)]
 struct Oracle<'a> {
     planes: Vec<SourcePlane<'a>>,
     validity: Option<SourcePlane<'a>>,
+    flags: Option<&'a PixelFlags>,
     size: Size2us,
     border: f32,
 }
@@ -71,26 +74,34 @@ impl Oracle<'_> {
     }
 
     /// The taps of `filter` at `stretch` around `cell + frac` and their f32 weights, from the
-    /// definitions: the fixed window of `2·radius` taps unstretched, every tap strictly inside the
-    /// stretched radius otherwise.
+    /// definitions: the fixed window of `2·radius` taps unstretched, every tap whose f32 distance
+    /// is within the reach otherwise, and a tap at or past the reach weighing zero. The reach stops
+    /// short of the stretched radius by where the kernel falls under `w = 2⁻²⁷`: `a·√w/(1 + √w)`
+    /// for Lanczos-`a`, `√(2w)` for Catmull-Rom, `w` for the tent.
     fn axis(filter: Filter, stretch: f32, cell: i32, frac: f32) -> Vec<(i64, f32)> {
-        let radius = match filter {
-            Filter::Bilinear => 1,
-            Filter::Bicubic => 2,
-            Filter::Lanczos(order) => order.a() as i32,
+        let w = 2f64.powi(-27);
+        let (radius, tolerance) = match filter {
+            Filter::Bilinear => (1, w),
+            Filter::Bicubic => (2, (2.0 * w).sqrt()),
+            Filter::Lanczos(order) => (
+                order.a() as i32,
+                order.a() as f64 * w.sqrt() / (1.0 + w.sqrt()),
+            ),
         };
-        let reach = f64::from(radius as f32 * stretch);
+        let reach = ((f64::from(radius) - tolerance) * f64::from(stretch)) as f32;
+        let distance = |t: i32| (t as f32 - frac).abs();
         let taps: Vec<i32> = if stretch == 1.0 {
             (1 - radius..=radius).collect()
         } else {
             (-4 * radius..=4 * radius + 1)
-                .filter(|&t| (f64::from(t) - f64::from(frac)).abs() < reach)
+                .filter(|&t| distance(t) < reach)
                 .collect()
         };
         taps.into_iter()
             .map(|t| {
-                let distance = (t as f32 - frac).abs();
+                let distance = distance(t);
                 let weight = match filter {
+                    _ if distance >= reach => 0.0,
                     Filter::Lanczos(order) => order
                         .lut()
                         .at(distance * (LANCZOS_LUT_RESOLUTION as f32 / stretch)),
@@ -165,7 +176,37 @@ impl Oracle<'_> {
             coverage: 0.0,
             confidence: 0.0,
             tolerance: 0.0,
+            flags: QualityFlags::default(),
         }
+    }
+
+    /// The carried flags of pixel `index`: none on a pixel the warp excludes.
+    fn carried(&self, index: usize) -> QualityFlags {
+        let Some(flags) = self.flags.map(|flags| flags.at(index)) else {
+            return QualityFlags::default();
+        };
+        if flags.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
+            QualityFlags::default()
+        } else {
+            flags.intersection(QualityFlags::RESAMPLE_CARRIED)
+        }
+    }
+
+    /// The carried flags of every in-bounds tap whose weight `wₓ·w_y` is not zero.
+    fn carried_in(&self, xs: &[(i64, f32)], ys: &[(i64, f32)]) -> QualityFlags {
+        let size = self.size();
+        let mut carried = QualityFlags::default();
+        for &(y, wy) in ys {
+            for &(x, wx) in xs {
+                let inside =
+                    (0..size.width as i64).contains(&x) && (0..size.height as i64).contains(&y);
+                if inside && wx != 0.0 && wy != 0.0 {
+                    let (x, y) = Self::index(x, y);
+                    carried = carried.union(self.carried(y * size.width + x));
+                }
+            }
+        }
+        carried
     }
 
     fn sample(
@@ -192,6 +233,7 @@ impl Oracle<'_> {
                 coverage: 1.0,
                 confidence: 1.0,
                 tolerance: 0.0,
+                flags: self.carried(index),
             };
         };
         let xs = Self::axis(filter, stretch, position.cell_x, position.fx);
@@ -249,6 +291,7 @@ impl Oracle<'_> {
             coverage,
             confidence: sums.total * sums.total / sums.square,
             tolerance,
+            flags: self.carried_in(&xs, &ys),
         }
     }
 }
@@ -286,12 +329,14 @@ fn positions(size: Size2us) -> Vec<Option<SourcePosition>> {
     positions
 }
 
-/// What [`sample`] returns: every channel's samples and the two quality values, per position.
+/// What [`sample`] returns: every channel's samples, the two quality values and the flags, per
+/// position.
 #[derive(Debug)]
 struct Sampled {
     channels: Vec<Vec<f32>>,
     coverage: Vec<f32>,
     confidence: Vec<f32>,
+    flags: Vec<u8>,
 }
 
 /// Every channel and the quality of `positions` sampled by `sampler` on `tier`.
@@ -299,6 +344,7 @@ fn sample(tier: Tier, sampler: &FrameSampler<'_>, positions: &[Option<SourcePosi
     let mut channels = vec![vec![f32::NAN; positions.len()]; sampler.sources.len()];
     let mut coverage = vec![f32::NAN; positions.len()];
     let mut confidence = vec![f32::NAN; positions.len()];
+    let mut flags = vec![u8::MAX; positions.len()];
     let mut rows: Vec<&mut [f32]> = channels.iter_mut().map(Vec::as_mut_slice).collect();
     let mut axes = WindowAxes::default();
     tier.run(SampleRow {
@@ -309,12 +355,14 @@ fn sample(tier: Tier, sampler: &FrameSampler<'_>, positions: &[Option<SourcePosi
             channels: &mut rows,
             coverage: &mut coverage,
             confidence: &mut confidence,
+            flags: Some(&mut flags),
         },
     });
     Sampled {
         channels,
         coverage,
         confidence,
+        flags,
     }
 }
 
@@ -334,8 +382,8 @@ struct Case {
     clamp: Option<f32>,
 }
 
-/// The methods the sampler offers: Nearest, and every filter at two stretches with the clamp on
-/// and off.
+/// The methods the sampler offers: Nearest, and every filter with the clamp on and off at three
+/// stretches: none, one within the edge tolerance of 1, and 1.3.
 fn methods() -> Vec<Case> {
     let mut methods = vec![Case {
         method: SampleMethod::Nearest,
@@ -350,7 +398,7 @@ fn methods() -> Vec<Case> {
         Filter::Lanczos(LanczosOrder::Four),
     ];
     for filter in filters {
-        for stretch in [1.0, 1.3] {
+        for stretch in [1.0, 1.000_05, 1.3] {
             for clamp in [None, Some(0.3)] {
                 let kernel = WarpKernel::new(filter, stretch);
                 methods.push(Case {
@@ -372,8 +420,10 @@ fn methods() -> Vec<Case> {
 /// Every pixel matches the rules computed in f64 from the same tap weights — the whole kernel in
 /// the interior, its in-bounds and valid taps normalized where they are well conditioned, Bilinear
 /// over its own valid taps otherwise, the clamp where it is on, and the quality of the
-/// coefficients used — for every method at two stretches, with and without the clamp and nulls,
-/// across the interior, the edge band, the rim and outside.
+/// coefficients used, and the carried flags of the taps it gave weight — for every method at three
+/// stretches, with and without the clamp and the flags, across the interior, the edge band, the rim
+/// and outside. The flags hold nulls, a cosmic ray, saturated pixels, a flat-floor one and a
+/// saturated pixel a cosmic ray also hit, which is excluded and so carries nothing.
 ///
 /// The engine sums in f32: each of its sums rounds by up to `n²·ε` of its absolute sum, so a
 /// normalized value by `4·n²·ε·max|f|·Σ|L|/Σ L`, the bound each pixel is held to. Coverage and
@@ -382,20 +432,29 @@ fn methods() -> Vec<Case> {
 fn every_pixel_follows_the_rules() {
     let size = Size2us::new(24, 20);
     let planes = [fixture(size, 0), fixture(size, 5)];
-    let mut nulls = vec![0.0f32; size.pixel_count()];
-    for index in [5 * 24 + 7, 5 * 24 + 8, 12 * 24 + 15, 19 * 24, 9 * 24 + 23] {
-        nulls[index] = f32::NAN;
-    }
-    let flags = PixelFlags::of_non_finite(size, &[&nulls]).unwrap();
+    let flags = PixelFlags::from_fn(size, |index| match index {
+        index if [5 * 24 + 7, 5 * 24 + 8, 12 * 24 + 15, 19 * 24, 9 * 24 + 23].contains(&index) => {
+            QualityFlags::NO_DATA
+        }
+        index if index == 14 * 24 + 4 => QualityFlags::COSMIC_RAY,
+        index if [3 * 24 + 3, 3 * 24 + 4, 10 * 24 + 23, 16 * 24 + 11].contains(&index) => {
+            QualityFlags::SATURATED
+        }
+        index if index == 8 * 24 + 12 => QualityFlags::FLAT_FLOOR,
+        index if index == 15 * 24 + 18 => QualityFlags::SATURATED.union(QualityFlags::COSMIC_RAY),
+        _ => QualityFlags::default(),
+    })
+    .unwrap();
     let positions = positions(size);
     let mut decided = [0usize; 3];
+    let mut carried = [0usize; 2];
     for Case {
         method,
         filter,
         clamp,
     } in methods()
     {
-        for masked in [false, true] {
+        for flagged in [false, true] {
             let rgb = LinearImage::from_planar_channels(
                 ImageDimensions::new((size.width, size.height), 3),
                 [
@@ -405,11 +464,12 @@ fn every_pixel_follows_the_rules() {
                 ],
             );
             let source = SourceImage::of(&rgb);
-            let sources = masked.then(|| MaskedSources::new(&source, &flags, method.reach()));
+            let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
             let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
             let oracle = Oracle {
                 planes: sampler.sources.iter().copied().collect(),
-                validity: sources.as_ref().map(MaskedSources::validity),
+                validity: sources.as_ref().and_then(FlaggedSources::validity),
+                flags: flagged.then_some(&flags),
                 size,
                 border: -7.0,
             };
@@ -417,10 +477,11 @@ fn every_pixel_follows_the_rules() {
                 channels,
                 coverage,
                 confidence,
+                flags: sampled_flags,
             } = sample(Tier::portable(), &sampler, &positions);
             for (index, &position) in positions.iter().enumerate() {
                 let expected = oracle.sample(position, filter, clamp);
-                let what = format!("{filter:?} clamp {clamp:?} masked {masked} at {position:?}");
+                let what = format!("{filter:?} clamp {clamp:?} flagged {flagged} at {position:?}");
                 for (channel, &value) in expected.values.iter().enumerate() {
                     let actual = f64::from(channels[channel][index]);
                     assert!(
@@ -441,13 +502,21 @@ fn every_pixel_follows_the_rules() {
                     confidence[index],
                     expected.confidence
                 );
+                assert_eq!(
+                    QualityFlags::from_byte(sampled_flags[index]),
+                    expected.flags,
+                    "{what}: flags"
+                );
                 decided[usize::from(expected.coverage > 0.0)
                     + usize::from(expected.coverage == 1.0)] += 1;
+                carried[usize::from(expected.flags != QualityFlags::default())] += 1;
             }
         }
     }
-    // The positions reach every case: no data, partial coverage and the whole kernel.
+    // The positions reach every case: no data, partial coverage and the whole kernel, and samples
+    // with carried flags and without.
     assert!(decided.iter().all(|&count| count > 0), "{decided:?}");
+    assert!(carried.iter().all(|&count| count > 0), "{carried:?}");
 }
 
 /// Every tier samples every case to `Portable`'s bits: the fold of each sum is fixed, so a pixel
@@ -463,15 +532,17 @@ fn every_tier_samples_to_portables_bits() {
             fixture(size, 9).pixels().to_vec(),
         ],
     );
-    let mut nulls = vec![0.0f32; size.pixel_count()];
-    nulls[6 * 24 + 6] = f32::NAN;
-    nulls[6 * 24 + 7] = f32::NAN;
-    let flags = PixelFlags::of_non_finite(size, &[&nulls]).unwrap();
+    let flags = PixelFlags::from_fn(size, |index| match index {
+        index if index == 6 * 24 + 6 || index == 6 * 24 + 7 => QualityFlags::NO_DATA,
+        index if index == 12 * 24 + 9 => QualityFlags::SATURATED,
+        _ => QualityFlags::default(),
+    })
+    .unwrap();
     let positions = positions(size);
     for Case { method, .. } in methods() {
-        for masked in [false, true] {
+        for flagged in [false, true] {
             let source = SourceImage::of(&rgb);
-            let sources = masked.then(|| MaskedSources::new(&source, &flags, method.reach()));
+            let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
             let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
             let reference = sample(Tier::portable(), &sampler, &positions);
             for tier in Tier::supported() {
@@ -481,7 +552,7 @@ fn every_tier_samples_to_portables_bits() {
                     assert_eq!(
                         bits(channel),
                         bits(expected),
-                        "{tier} {method:?} masked {masked}"
+                        "{tier} {method:?} flagged {flagged}"
                     );
                 }
                 assert_eq!(
@@ -494,6 +565,7 @@ fn every_tier_samples_to_portables_bits() {
                     bits(&reference.confidence),
                     "{tier} {method:?}"
                 );
+                assert_eq!(sampled.flags, reference.flags, "{tier} {method:?}");
             }
         }
     }
@@ -615,13 +687,14 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
         clamp: Some(RingingClamp::new(0.3)),
     });
     let source = SourceImage::of(&image);
-    let sources = MaskedSources::new(&source, image.flags.as_ref().unwrap(), method.reach());
+    let sources = FlaggedSources::new(&source, image.flags.as_ref().unwrap(), method.reach());
     let sampler = FrameSampler::new(method, &source, Some(&sources), -7.0);
     let positions = [SourcePosition::within(DVec2::new(8.5, 8.5), size)];
     let Sampled {
         channels,
         coverage,
         confidence,
+        ..
     } = sample(Tier::portable(), &sampler, &positions);
     assert_eq!(channels[0][0], 98.5);
     assert_eq!(confidence[0], 2.0);
@@ -672,12 +745,13 @@ fn coverage_and_confidence_vanish_together() {
 ///
 /// Columns alternate 2 and 0, `1 + cos(πx)`. A warp with output-to-source scale 2 samples every
 /// even column at phase 0, so the unstretched Lanczos3, its centre tap 1 and the rest the table's
-/// residue, reads 2 everywhere: the grating folds to an offset of its whole amplitude. Stretched
-/// by 2, the taps `t = −5..=5` weigh `L(|t|/2)` — 1, 0.6079, 0, −0.1351, 0, 0.0243 from the centre
-/// out — and the sample is `1 + Σ(−1)ᵗL(t/2)/ΣL(t/2)` = `1 + (1 − 1.2158 + 0.2702 − 0.0486)/
-/// (1 + 1.2158 − 0.2702 + 0.0486)` = `1 + 0.0058/1.9942` = 1.0029: the alias is 0.3% of the
-/// grating. The warp finds the stretch from the transform itself. The expectations come from the
-/// table's own entries; the f32 sums of up to 121 terms of at most 2 round within `121·ε·2·2`.
+/// residue, reads 2 everywhere: the grating folds to an offset of its whole amplitude. Stretched by
+/// 2, the taps `t = −5..=5` weigh `L(|t|/2)` — 1, 0.6079, 0, −0.1351, 0, 0.0243 from the centre out
+/// — and the sample is `1 + Σ(−1)ᵗL(t/2)/ΣL(t/2)` =
+/// `1 + (1 − 1.2158 + 0.2702 − 0.0486)/ (1 + 1.2158 − 0.2702 + 0.0486)` = `1 + 0.0058/1.9942` =
+/// 1.0029: the alias is 0.3% of the grating. The warp finds the stretch from the transform itself.
+/// The expectations come from the table's own entries; the f32 sums of up to 121 terms of at most 2
+/// round within `121·ε·2·2`.
 #[test]
 fn a_halved_nyquist_grating_does_not_alias() {
     let size = Size2us::new(64, 64);

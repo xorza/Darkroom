@@ -142,6 +142,11 @@ impl F32x8 for Avx2F32 {
     }
 
     #[inline(always)]
+    fn floor(self) -> Self {
+        Self(unsafe { _mm256_floor_ps(self.0) })
+    }
+
+    #[inline(always)]
     fn lanes_gt(self, other: Self) -> Avx2Mask {
         Avx2Mask(unsafe { _mm256_cmp_ps::<_CMP_GT_OQ>(self.0, other.0) })
     }

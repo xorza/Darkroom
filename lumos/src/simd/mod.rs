@@ -138,6 +138,9 @@ pub(crate) trait F32x8:
 
     fn sqrt(self) -> Self;
 
+    /// The largest integer at or below each lane, exact.
+    fn floor(self) -> Self;
+
     fn lanes_gt(self, other: Self) -> Self::Mask;
 
     fn lanes_lt(self, other: Self) -> Self::Mask;

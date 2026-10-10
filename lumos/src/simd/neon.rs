@@ -186,6 +186,16 @@ impl F32x8 for NeonF32 {
     }
 
     #[inline(always)]
+    fn floor(self) -> Self {
+        unsafe {
+            Self {
+                low: vrndmq_f32(self.low),
+                high: vrndmq_f32(self.high),
+            }
+        }
+    }
+
+    #[inline(always)]
     fn lanes_gt(self, other: Self) -> NeonMask {
         self.compare(other, |a, b| unsafe { vcgtq_f32(a, b) })
     }

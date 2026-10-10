@@ -67,24 +67,25 @@ impl StoredImage {
         })
     }
 
-    /// The image as a frame for the combine, unwarped, its channels the planes already on disk:
-    /// only the quality planes its nulls imply are written, to `store`. Its flags plane stays
-    /// when it holds a flag the quality planes do not.
-    pub(crate) fn into_frame(
+    /// The image as the reference frame of a registered stack, its channels the planes already on
+    /// disk: only the quality planes its flags imply are written, to `store` — see
+    /// [`FrameQuality::for_reference`]. Its flags plane stays when it holds a flag the warp
+    /// carries.
+    pub(crate) fn into_reference_frame(
         self,
         store: &impl PlaneStore,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, FrameStoreError> {
         let flags = self.flags();
-        let quality = FrameQuality::for_flags(flags.as_ref())
+        let quality = FrameQuality::for_reference(flags.as_ref())
             .try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
-        let kept_flags = flags
+        let carries = flags
             .as_ref()
-            .is_some_and(|flags| flags.contains_other_than(QualityFlags::NO_DATA));
+            .is_some_and(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED));
         Ok(StoredFrame {
             channels: self.channels,
             quality,
-            flags: self.flags.filter(|_| kept_flags),
+            flags: self.flags.filter(|_| carries),
             source_stats,
         })
     }

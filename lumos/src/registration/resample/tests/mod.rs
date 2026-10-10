@@ -2,8 +2,8 @@ use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
-use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
+use crate::registration::resample::{WarpBuffers, WarpResult};
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
@@ -377,39 +377,133 @@ fn assert_bitwise(actual: &[f32], expected: &[f32], method: InterpolationMethod)
 
 mod plane;
 
-/// A flag reaches every output pixel whose kernel window reads the flagged source pixel. Under a
-/// half-pixel shift output x samples source x + 0.5, whose cell is x, and a Lanczos-3 window reads
-/// cells x − 2 ..= x + 3. A saturated source pixel at (10, 10) is therefore read by the outputs
-/// x, y ∈ 7..=12: 6 × 6 = 36 of them, and no others. `NO_DATA` becomes coverage, not a flag.
+/// A flag that says the value measures nothing leaves its pixel out of the interpolation as a null
+/// does: the warp of a frame whose one flagged pixel holds a fill is, bit for bit, the warp with
+/// that pixel `NO_DATA`, and carries no flags. A flag that says the value is a bound leaves the
+/// value in and carries the flag to every output pixel whose sample gave the pixel weight. Such a
+/// window sums its taps in another order than the unflagged warp's, so it matches that warp to the
+/// rounding of 36 additions, each within half an ulp of a sum under `Σ|L|·999` =
+/// `1.534678²·999` = 2353: `36·2353·ε` = 1.01e-2 for the values, and `36·Σ|L|²·ε` = 1.02e-5 for
+/// the confidence, a ratio of sums of order `Σ|L|²`.
+///
+/// Under a half-pixel shift output x samples source x + 0.5, whose cell is x, and a Lanczos-3
+/// window reads cells x − 2 ..= x + 3 with every tap weighing, so a pixel at (10, 10) reaches the
+/// outputs x, y ∈ 7..=12 and no others. A null there costs them coverage, and the fill reaches none
+/// of them. The coverage it leaves is graded: output (10, 10) has it at distance ½ on both axes,
+/// where each axis's six taps weigh `L(½) = 6/π² = 0.607927`, `L(1.5) = −(2/3π)·(2/π) = −0.135095`
+/// and `L(2.5) = (2/5π)·(3/5π) = 0.024317`, two of each, so `Σ|w| = 1.534678` and its coverage is
+/// `1 − (0.607927 / 1.534678)² = 0.843083`. Each table weight is within 1.1e-7 of the kernel and
+/// the f32 sums round by a few ulps, so 2e-6 holds it.
+///
+/// Under a whole-pixel shift by (1, 0) every tap but the centre sits at a whole distance, where the
+/// kernel is exactly zero, so a carried flag reaches the one output (9, 10).
 #[test]
-fn a_flag_reaches_every_output_its_kernel_window_reads() {
+fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
+    const CONSTANT: f32 = 0.25;
     let size = Size2us::new(24, 24);
-    let mut image = gray_image(size, vec![0.25; size.pixel_count()]);
-    image.flags = PixelFlags::from_fn(size, |index| match index {
-        index if index == 10 * 24 + 10 => QualityFlags::SATURATED,
-        index if index == 20 * 24 + 20 => QualityFlags::NO_DATA,
-        _ => QualityFlags::default(),
-    });
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
-    let warped = resample::warp(
-        &image,
-        &transform,
-        WarpParams {
-            method: InterpolationMethod::Lanczos3,
-            border_value: 0.0,
-            ..Default::default()
-        },
-    );
-    let flags = warped.image.flags.unwrap();
-    assert_eq!(flags.count(QualityFlags::SATURATED), 36);
-    assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
-    for y in 7..=12 {
-        for x in 7..=12 {
+    let flagged = 10 * 24 + 10;
+    let warp = |flag: Option<QualityFlags>, shift: DVec2| {
+        let mut pixels = vec![CONSTANT; size.pixel_count()];
+        pixels[flagged] = 999.0;
+        let mut image = gray_image(size, pixels);
+        image.flags = flag.and_then(|flag| {
+            PixelFlags::from_fn(size, |index| {
+                if index == flagged {
+                    flag
+                } else {
+                    QualityFlags::default()
+                }
+            })
+        });
+        resample::warp(
+            &image,
+            &WarpTransform::new(Transform::translation(shift)),
+            WarpParams {
+                method: InterpolationMethod::Lanczos3,
+                border_value: 0.0,
+                ..Default::default()
+            },
+        )
+    };
+    let half = DVec2::splat(0.5);
+    let within = |x: usize, y: usize| (7..=12).contains(&x) && (7..=12).contains(&y);
+
+    let null = warp(Some(QualityFlags::NO_DATA), half);
+    assert!(null.image.flags.is_none());
+    let plain = warp(None, half);
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let index = y * size.width + x;
+            let coverage = null.coverage.pixels()[index];
             assert_eq!(
-                flags.at_pos(Vec2us::new(x, y)),
-                QualityFlags::SATURATED,
-                "({x}, {y})"
+                coverage < plain.coverage.pixels()[index],
+                within(x, y),
+                "({x}, {y}): coverage {coverage}"
             );
+            if coverage > 0.0 {
+                let value = null.image.channel(0).pixels()[index];
+                assert!((value - CONSTANT).abs() <= TOL, "({x}, {y}): {value}");
+            }
         }
     }
+    let centre = null.coverage.pixels()[flagged];
+    assert!((centre - 0.843_083).abs() <= 2e-6, "coverage {centre}");
+
+    let close = |a: &WarpResult, b: &WarpResult| {
+        let within = |a: &Buffer2<f32>, b: &Buffer2<f32>, tolerance: f32| {
+            a.pixels()
+                .iter()
+                .zip(b.pixels())
+                .all(|(a, b)| (a - b).abs() <= tolerance)
+        };
+        within(a.image.channel(0), b.image.channel(0), 1.01e-2)
+            && within(&a.coverage, &b.coverage, 0.0)
+            && within(&a.confidence, &b.confidence, 1.02e-5)
+    };
+    let same_bits = |a: &WarpResult, b: &WarpResult| {
+        [
+            (a.image.channel(0), b.image.channel(0)),
+            (&a.coverage, &b.coverage),
+            (&a.confidence, &b.confidence),
+        ]
+        .iter()
+        .all(|(a, b)| {
+            a.pixels()
+                .iter()
+                .zip(b.pixels())
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        })
+    };
+    let mut carried = 0;
+    for (flag, name) in QualityFlags::NAMED {
+        let warped = warp(Some(flag), half);
+        if flag.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
+            assert!(warped.image.flags.is_none(), "{name}");
+            assert!(same_bits(&warped, &null), "{name}");
+            continue;
+        }
+        carried += 1;
+        assert!(close(&warped, &plain), "{name}");
+        let flags = warped.image.flags.as_ref().unwrap();
+        for y in 0..size.height {
+            for x in 0..size.width {
+                let expected = if within(x, y) {
+                    flag
+                } else {
+                    QualityFlags::default()
+                };
+                assert_eq!(
+                    flags.at_pos(Vec2us::new(x, y)),
+                    expected,
+                    "{name} ({x}, {y})"
+                );
+            }
+        }
+
+        let whole = warp(Some(flag), DVec2::new(1.0, 0.0));
+        let flags = whole.image.flags.as_ref().unwrap();
+        assert_eq!(flags.count(flag), 1, "{name}");
+        assert_eq!(flags.at_pos(Vec2us::new(9, 10)), flag, "{name}");
+    }
+    assert_eq!(carried, 2);
 }

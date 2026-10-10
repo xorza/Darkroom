@@ -17,7 +17,8 @@ use std::fmt::Formatter;
 /// Which of a frame's planes a validation failure is about.
 ///
 /// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
-/// fraction of a pixel that had support, confidence an interpolation weight with no upper bound.
+/// fraction of a pixel that had support, confidence an interpolation's noise factor with no upper
+/// bound.
 /// Carrying the kind rather than its label is what keeps that rule out of a string comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramePlane {
@@ -53,8 +54,8 @@ impl Display for FramePlane {
     }
 }
 
-/// The per-pixel quality a frame carries: how much of each pixel had support, and how confident
-/// the interpolation that produced it was.
+/// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
+/// interpolation that produced it was.
 ///
 /// Both planes or neither. Two things produce the pair — a warp, and a decoder that found pixels
 /// its source declared undefined (see [`Self::for_unwarped`]) — every consumer's rule for "does
@@ -64,9 +65,10 @@ impl Display for FramePlane {
 ///
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::frame_sampler` establishes that — a pixel the warp has no sample for
-/// takes zero for both, and every sample it takes has positive coverage and confidence — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
-/// on it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it
-/// by, and `source_noise_variance` a non-zero one to divide by.
+/// takes zero for both, and every sample it takes has positive coverage and confidence — and
+/// [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans on
+/// it: a sample that clears the coverage floor is guaranteed a positive confidence to divide its
+/// noise by, and `source_noise_variance` a non-zero one too.
 ///
 /// [`FrameCheck::quality_pair`]: crate::combine::cache::frame_check::FrameCheck::quality_pair
 #[derive(Debug, Clone)]
@@ -91,15 +93,25 @@ impl FrameQuality<Buffer2<f32>> {
     /// value for every photosite, so no RAW frame and almost no camera FITS allocates anything
     /// here.
     pub(crate) fn for_unwarped(image: &impl StackableImage) -> Self {
-        Self::for_flags(image.flags())
+        Self::excluding(image.flags(), QualityFlags::NO_DATA)
     }
 
-    /// [`Self::for_unwarped`] from the frame's flags alone.
-    pub(crate) fn for_flags(flags: Option<&PixelFlags>) -> Self {
-        let Some(flags) = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA)) else {
+    /// The quality the reference of a registered stack carries, from its flags: zero coverage
+    /// wherever a flag of [`QualityFlags::RESAMPLE_EXCLUDED`] stands, as the warp of every other
+    /// frame leaves those pixels out. The reference is the frame a warp would sample at whole
+    /// pixels, where every other tap weighs exactly zero, so its excluded pixels are left out
+    /// exactly, and its carried flags stand where they are.
+    pub(crate) fn for_reference(flags: Option<&PixelFlags>) -> Self {
+        Self::excluding(flags, QualityFlags::RESAMPLE_EXCLUDED)
+    }
+
+    /// Zero coverage and confidence where a pixel holds a flag of `excluded`, one elsewhere;
+    /// [`None`](Self::None) when no pixel does.
+    fn excluding(flags: Option<&PixelFlags>, excluded: QualityFlags) -> Self {
+        let Some(flags) = flags.filter(|flags| flags.contains(excluded)) else {
             return Self::None;
         };
-        let coverage = flags.validity_plane();
+        let coverage = flags.validity_plane(excluded);
         Self::Planes {
             confidence: coverage.clone(),
             coverage,

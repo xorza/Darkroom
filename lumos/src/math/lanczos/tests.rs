@@ -1,12 +1,6 @@
 use std::f64::consts::PI;
 
-use crate::internals::assertions::assert_close;
 use crate::math::lanczos::kernel;
-
-/// `sinc` at a nonzero integer reads `sin` of the rounded f32 product `n·π`, which is off a true
-/// zero by that rounding: at most half an ulp of `4π` (2⁻²¹ ≈ 4.8e-7) plus `n` times π's own
-/// rounding (8.7e-8), over a divisor of at least π. 1e-6 covers it.
-const TOL: f32 = 1e-6;
 
 #[test]
 fn lanczos_kernel_at_zero() {
@@ -16,14 +10,14 @@ fn lanczos_kernel_at_zero() {
     }
 }
 
+/// `sinc(πn) = 0` at every nonzero integer `n`, so `L(n, a)` is an exact zero: `sin(πt)` reads
+/// `t − round(t)`, which is 0 there.
 #[test]
 fn lanczos_kernel_at_integers() {
-    // sinc(n) = sin(n*pi) / (n*pi) = 0 for all nonzero integers
-    // So L(n, a) = 0 for integer n != 0
     for a in [2.0, 3.0, 4.0] {
         for n in 1..(a as i32) {
-            assert_close!(kernel(n as f32, a), 0.0, TOL, "L({n}, {a})");
-            assert_close!(kernel(-(n as f32), a), 0.0, TOL, "L(-{n}, {a})");
+            assert_eq!(kernel(n as f32, a), 0.0, "L({n}, {a})");
+            assert_eq!(kernel(-(n as f32), a), 0.0, "L(-{n}, {a})");
         }
     }
 }
@@ -48,16 +42,16 @@ fn lanczos_kernel_outside_support() {
 /// - a = 3: `sinc(π/6) = ½·6/π`, so `6/π²` = 0.607927;
 /// - a = 2: `sinc(π/4) = (√2/2)·4/π`, so `4√2/π²` = 0.573159.
 ///
-/// The two differ, so `a` reaches the window. The f32 kernel rounds π, its two products, two
-/// quotients and two `sin`s by half an ulp or so each: within 8ε of the f64 values.
+/// The two differ, so `a` reaches the window. The f64 evaluation is a few f64 ulps off these, far
+/// inside an f32 rounding step, so the one rounding lands on the f32 nearest each.
 #[test]
 fn lanczos_kernel_at_half() {
     for (a, expected) in [(3.0, 6.0 / (PI * PI)), (2.0, 4.0 * 2f64.sqrt() / (PI * PI))] {
-        assert_close!(kernel(0.5, a), expected, 8.0 * f32::EPSILON, "L(0.5, {a})");
+        assert_eq!(kernel(0.5, a), expected as f32, "L(0.5, {a})");
     }
 }
 
-/// `L(−x) = L(x)` exactly: `π·(−x)` is the negated product, and `sin` is odd bit for bit.
+/// `L(−x) = L(x)` exactly: the kernel reads `|x|`.
 #[test]
 fn lanczos_kernel_symmetry() {
     for &x in &[0.1, 0.5, 1.0, 1.5, 2.5] {

@@ -40,32 +40,6 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
   - For the square kernel, compute the corner lattice once per input row (shared between neighbours: `W+1` points at pixfrac = 1, `2W` otherwise). For affine maps, use `centre ± J·h` instead of 4 full maps.
   - Add a 45° and a 90° leg to `bench_drizzle_kernels`, and a SIP leg.
 
-### DRZ-3 — Interpolation confidence used as a per-pixel combine weight down-weights the reference and makes weights depend on sub-pixel phase
-- **Where:** `combine/cache/mod.rs:481-496` (`eff_weights = frame weight × q`), `registration/resample/tap_window.rs:59` / `interior_window.rs:81` (`confidence` = Kish ESS), `pipeline/frame_tier.rs:172-183` (reference stored with `for_unwarped` → no confidence → `q = 1`)
-- **Category:** precision / design
-- **Impact:** medium. Every warped sample is weighted by the white-noise ESS of its interpolation weights, which ranges 1 to 1.62 for Lanczos3 (mean 1.27) and 1 to 4 for bilinear (mean 2.47). Consequences:
-  - The unwarped reference, which `Reference::Auto` picks as the *sharpest* frame, enters at ~0.79× (Lanczos3) or ~0.41× (bilinear) the weight of an average warped frame.
-  - A frame whose shift is near-integer weighs less than one shifted by half a pixel.
-  - With rotation the phase beats across the field, so per-pixel weights, and with them the stack's effective PSF mix and noise, form a moiré pattern.
-- **Confidence:** confirmed (code path). The ESS values are computed from the Lanczos/bilinear definitions: Lanczos3 2D ESS is 1.000 at phase 0, 1.252 at 0.25 and 1.620 at 0.5.
-- **Evidence:** `q` multiplies the weight and also divides the noise model (`noise_background / q`). The noise division is right: the sample's white-noise variance really is σ²/q. Using `q` as a weight, though, prefers samples that were *smoothed more*, and the reduced variance was paid for in resolution. Siril, PixInsight and DSS weight per frame, not per interpolation phase. DrizzlePac's per-pixel overlap weights are a different mechanism (geometric share of a measurement), not a reward for smoothing.
-- **Direction:** Keep `q` in the per-sample noise model (rejection, variance plane), but weight with frame-level weights only. At most, use a frame-constant mean `q` so per-pixel weights do not beat with phase. If per-pixel `q` weighting stays, give the reference its own, otherwise it is systematically discounted. Either way, state the trade-off on `WarpResult::confidence`.
-
-### DRZ-4 — Warp flags are dilated over the whole kernel window, whatever each tap's weight
-- **Where:** `registration/resample/mod.rs:178-186` (`dilate_window(reach, ..)`), `registration/resample/mod.rs:201-211` (one byte per output pixel from the dilated map), `registration/resample/kernel/warp_kernel/mod.rs:191` (`window_reach`), `combine/cache/sample.rs:10-14` (`SOFT_EXCLUDED`)
-- **Category:** correctness / precision
-- **Impact:** medium.
-  - With Lanczos3, each flagged source pixel (`COSMIC_RAY`, `REPAIRED`, `DEFECT`, `SATURATED`, `FLAT_FLOOR`) marks 36 output pixels, and 64 once the stretch exceeds 1 by any amount (see DRZ-10). The combine then soft-excludes all of them.
-  - This happens even at integer phase, where only the centre tap has non-zero weight.
-  - A frame with a 0.1% defect/CR fraction loses ~3.6% of its samples.
-  - Around stars saturated only in good-seeing frames, the sharp frames are excluded over a 6×6-grown halo, so core and wings come from different frame subsets.
-  - The unwarped reference keeps its flags undilated, so warped frames and the reference are treated inconsistently.
-- **Confidence:** confirmed (code path); the impact sizes are estimated, not measured.
-- **Evidence:** The flag plane is the source flags grown by the kernel reach, then read at the sample's cell. No tap weight enters. The `NO_DATA` path already does this properly: normalized convolution over the surviving taps, with coverage taken as the share of `Σ|L|` they keep (`masked_sources.rs`, `frame_sampler/mod.rs:235-283`).
-- **Direction:**
-  - Treat the fill-type flags (`COSMIC_RAY`, `REPAIRED`, `DEFECT`) as `NO_DATA` inside the interpolation, through the existing masked path, so a fill never enters the sample and the loss is graded.
-  - Propagate the bound-type flags (`SATURATED`, `FLAT_FLOOR`) only where the flagged taps carry a non-negligible share of `|L|`. The share can come from a second validity plane through `masked_weights`.
-
 ### DRZ-5 — No CFA (Bayer/X-Trans) drizzle
 - **Where:** `drizzle/accumulator/mod.rs:40` (`DrizzleFrame<T>` is only ever `LinearImage`), `drizzle/accumulator/mod.rs:368` (`cfa_type: None`, "Drizzle takes demosaiced frames")
 - **Category:** precision (missing capability)
@@ -104,26 +78,12 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
 - **Confidence:** confirmed
 - **Direction:** Define the exclusion policy once, in `pixel_flags`, and use it from both producers. Drizzle cannot apply a survivor floor, so it should exclude the full fill/bias set. Emit `NO_DATA` flags on gated pixels, and count excluded deposits into the `RunReport`.
 
-### DRZ-9 — Nearest-entry Lanczos table read quantizes tap weights to ~1.7e-4
-- **Where:** `registration/resample/kernel/mod.rs:16` (`LANCZOS_LUT_RESOLUTION = 4096`), `registration/resample/kernel/warp_kernel/mod.rs:233-237` (index `d·4096 + 0.5`, gather)
-- **Category:** precision
-- **Impact:** low. The worst per-tap weight error is `max|K'|/8192`: 1.37/8192 ≈ 1.7e-4 for Lanczos 2, 3 and 4. A point source's interpolated value is off by up to ~1.7e-4 of its peak per axis (simulated worst case 1.69e-4 in 1D). That is about a 1.2e-4 px position quantization, after `SourcePosition` keeps the fraction to 6e-8 specifically for precision. It is not systematic across frames, so it averages down in the stack.
-- **Confidence:** confirmed (computed)
-- **Direction:** Interpolate linearly between adjacent table entries: one more gather and an FMA, with error ≈ `max|K''|·h²/8` ≈ 1e-8. That makes the table no longer the precision limit. Update `a_lanczos_table_read_is_within_half_a_step_of_the_kernel` to the new bound.
-
-### DRZ-10 — Kernel stretch has no tolerance band
-- **Where:** `registration/resample/kernel/warp_kernel/mod.rs:160-177` (`frame_stretch`, `largest.max(1.0)`), `:191` (`window_reach` = `ceil(radius·stretch)`)
-- **Category:** design / performance
-- **Impact:** low. A frame whose largest singular value exceeds 1 by any amount, including fit noise or rounding (1 + 1e-12), leaves the `stretch == 1.0` branch, and its window reach jumps from `ceil(3) = 3` to `ceil(3.000…) = 4`. That changes the Lanczos3 flag dilation from 6×6 to 8×8 (feeds DRZ-4) and the null/clip windows likewise, while the anti-aliasing gained at stretch 1 + 1e-4 is nil. Roughly half the frames of a typical set sit on either side of 1.
-- **Confidence:** confirmed (code); the frequency claim is likely.
-- **Direction:** Treat a stretch within a small, justified tolerance of 1 as 1, for example where the cut-off moves by less than the table resolution. Alternatively, derive the reach from the kernel's support where it is non-negligible rather than `ceil`.
-
 ### DRZ-11 — Smaller per-drop costs in the droplet kernels
 - **Where:** `drizzle/accumulator/frame_source.rs:141-159` (`landing` computes the homography Jacobian determinant, or the SIP inverse Jacobian through `InverseWarp::apply`, before any band test), `drizzle/accumulator/output_band.rs:102` (drizzle Lanczos: two `sin` and two divisions per tap, 14 taps per drop)
 - **Category:** performance
 - **Impact:** low. This compounds DRZ-2 for homography and SIP frames. The resample side already has an exact-enough Lanczos3 table.
 - **Confidence:** confirmed
-- **Direction:** Return the landing position first, reject on rows and columns, then compute magnification for drops that land. For drizzle Lanczos, reuse `LanczosOrder::Three.lut()` (interpolated, per DRZ-9).
+- **Direction:** Return the landing position first, reject on rows and columns, then compute magnification for drops that land. For drizzle Lanczos, reuse `LanczosOrder::Three.lut()`, which interpolates between its entries.
 
 ### DRZ-12 — Layout / style
 - **Where:**
@@ -165,7 +125,7 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
 - **Parallel scatter:** bands own rows and process inputs in serial order, so the output is bit-identical for any band count (tested). `input_rows` is a true bound (homography horizon guard, SIP sampled outline plus 1 row), tested against a brute-force reach. The coverage bitset is cleared per frame on the workers.
 - **f32 accumulators:** at ~850 deposits per pixel (500 frames, s = 2, p = 0.8, square), naive f32 summation gives ~2e-6 relative RMS error and 5e-5 worst case, below a stacked pixel's noise. STScI accumulates in float too. f64 would double ~8 output-grid planes (7.8 GB at 61 MP RGB, s = 2), which is not worth it.
 - **Warp transform precision:** f64 throughout. The position is split into cell and fraction before narrowing. `RowPositions` is bit-identical to `WarpTransform::apply` (affine/homography), and SIP agrees to ~1e-15.
-- **Anti-alias stretch:** the largest singular value of the output→source Jacobian (DeForest 2004 / reproject adaptive) is correctly directed and applied only when the frame is minified (apart from DRZ-10's tolerance).
+- **Anti-alias stretch:** the largest singular value of the output→source Jacobian (DeForest 2004 / reproject adaptive) is correctly directed and applied only when the frame is minified.
 - **Ringing clamp:** matches PCL's rule: lobe ratio, soft `1 − ((r−t)/(1−t))²` factor, positive-lobe mean past `r = 1`. It is invariant on a flat field, and the default threshold 0.3 is PixInsight's. Siril's alternative (fall back to a guide image below 0.98× it) is cruder.
 - **Edges and nulls:** normalized convolution over surviving taps, with Kish conditioning (`(ΣL)² ≥ ΣL²`) and a bilinear fallback. Coverage is the share of `Σ|L|`, so coverage and confidence vanish together (tested). Oracle and cross-ISA bit-identity tests are thorough.
 - **No Jacobian in the warp:** the surface-brightness convention matches flat-fielded data, where the flat already removes pixel-area variation. It is the same convention as the drizzle output. A global plate-scale difference is absorbed by the normalization gain.
@@ -177,7 +137,6 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
 
 1. **Drizzle as a science producer** (DRZ-1, DRZ-7, DRZ-8, DRZ-13): rejection and normalization fed in from the combine, finite-sample validation, a shared flag policy plus output flags, and the unit stated on the API.
 2. **Drizzle scatter performance** (DRZ-2, DRZ-11): per-row column intervals, reject before transforming fully, a shared corner lattice, and bench legs at 45°/90° and with SIP.
-3. **Warp quality planes and flags** (DRZ-3, DRZ-4, DRZ-10): how confidence enters weights, weight-aware or masked flag propagation, and a tolerance on the stretch.
-4. **CFA drizzle** (DRZ-5): a feature of its own, with a per-channel weight plane.
-5. **Small precision fixes** (DRZ-6, DRZ-9): a consistent kernel weighting principle, and an interpolated Lanczos table.
-6. **Layout cleanup** (DRZ-12).
+3. **CFA drizzle** (DRZ-5): a feature of its own, with a per-channel weight plane.
+4. **Small precision fixes** (DRZ-6): a consistent kernel weighting principle.
+5. **Layout cleanup** (DRZ-12).

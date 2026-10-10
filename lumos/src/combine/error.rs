@@ -234,8 +234,9 @@ pub enum StackError {
 
     /// The two frame-quality planes disagree about whether the frame has support at a pixel. A warp
     /// produces support and confidence together or neither, and the combine gates on coverage while
-    /// weighting by confidence, so a pixel covered at zero confidence would enter the statistics
-    /// weightless and one confident at zero coverage would be dropped despite having data.
+    /// dividing the noise by confidence, so a pixel covered at zero confidence would enter the
+    /// statistics with no finite noise and one confident at zero coverage would be dropped despite
+    /// having data.
     #[error(
         "frame {index} has coverage {coverage} with confidence {confidence} at pixel {pixel}: a warped pixel has support and confidence together or neither"
     )]

@@ -61,8 +61,8 @@ pub(crate) struct CombineOutput {
     weight: Option<LinearPixels>,
     variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
-    /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`] where
-    /// no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
+    /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`]
+    /// where no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
     flags: Option<Buffer2<u8>>,
     report: RunReport,
 }
@@ -328,11 +328,11 @@ impl FrameCache {
     /// The combine: for each output pixel, gather the frames that cover it, hand them to
     /// `combine`, and write the reduced value plus whichever [`QualityPlanes`] were requested.
     ///
-    /// [`PixelCoverage`] alone decides whether a frame is gathered at a pixel; its confidence then
-    /// scales the weight the sample carries into the reduction, and is guaranteed positive wherever
-    /// the frame was gathered. A frame carrying neither plane contributes everywhere at unit
-    /// confidence, which is what lets calibration masters and registered light stacks share this
-    /// loop. A pixel no frame supports gets `0`.
+    /// [`PixelCoverage`] alone decides whether a frame is gathered at a pixel; the sample carries
+    /// its frame's weight into the reduction, and its confidence, guaranteed positive wherever the
+    /// frame was gathered, divides its noise model. A frame carrying neither plane contributes
+    /// everywhere at unit confidence, which is what lets calibration masters and registered light
+    /// stacks share this loop. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked<Combine>(
         &self,
         request: CombineRequest<'_>,
@@ -501,9 +501,10 @@ impl FrameCache {
                                         None => chunk[pixel_idx],
                                     };
                                     values[covered] = v;
+                                    // The frame's weight alone: the warp's confidence enters the
+                                    // noise model below, never the mean (`WarpResult`).
                                     eff_weights[covered] = weights
-                                        .map_or(1.0, |weights| weights.weight(frame_idx, slot))
-                                        * q;
+                                        .map_or(1.0, |weights| weights.weight(frame_idx, slot));
                                     sample_flags[covered] =
                                         flags[frame_idx].map_or(0, |plane| plane[pixel_idx]);
                                     frame_ids[covered] = frame_idx as u32;
