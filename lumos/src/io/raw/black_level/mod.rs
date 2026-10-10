@@ -43,6 +43,9 @@ pub(crate) struct DngLevels<'a> {
 /// the masked pixels, or a DNG's rational `BlackLevel`. Where it keeps the unrounded value — the
 /// masked sums in `black_stat`, the DNG levels in `dng_levels` — and that value rounds to LibRaw's
 /// own, the unrounded one is used; elsewhere every term is LibRaw's integer, and exact.
+///
+/// A DNG's `BlackLevelDeltaH` and `BlackLevelDeltaV`, an offset per column and per row, reach no
+/// further than their means: LibRaw adds those to `black` and keeps neither array.
 #[derive(Debug)]
 pub(crate) struct BlackLevel {
     common: f64,
@@ -98,12 +101,18 @@ impl BlackLevel {
                 }
             }
         } else {
+            // A masked-area black leaves no spatial pattern, and `unpack` moves the least channel
+            // mean into `black` (LibRaw `unpack.cpp`), so each channel's truncated mean is the sum
+            // of the two.
             let [sums @ .., _, _, _, _] = libraw.masked;
             let counts = &libraw.masked[4..];
-            let masked_mean = libraw.black == 0
+            let masked_mean = pattern_len == 0
                 && counts.iter().all(|&count| count > 0)
-                && (0..4).all(|c| raw[c] == sums[c] / counts[c]);
+                && (0..4).all(|c| {
+                    u64::from(libraw.black) + u64::from(raw[c]) == u64::from(sums[c] / counts[c])
+                });
             if masked_mean {
+                black = 0.0;
                 for c in 0..4 {
                     cblack[c] = f64::from(sums[c]) / f64::from(counts[c]);
                 }

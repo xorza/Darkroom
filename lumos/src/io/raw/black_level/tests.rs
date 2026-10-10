@@ -113,45 +113,48 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     }
 }
 
-/// Where LibRaw truncated a mean of the masked pixels into `cblack`, the mean itself is used:
-/// sums 204 837, 204 900, 205 012, 204 899 over 100 pixels each truncate to 2048, 2049, 2050,
-/// 2048, and are 2048.37, 2049, 2050.12, 2048.99. The least, 2048.37, is the common level; a channel
-/// is that plus its difference from it, which rounds at f64's 2⁻⁴² of 2048, so 1e-9. A `cblack`
-/// that is not those truncations — LibRaw took its black elsewhere — keeps its integers.
+/// Where LibRaw truncated a mean of the masked pixels, the mean itself is used. Sums 204 837,
+/// 204 900, 205 012, 204 899 over 100 pixels each truncate to 2048, 2049, 2050, 2048, and `unpack`
+/// moves the least, 2048, into `black`, leaving `cblack` 0, 1, 2, 0: the state LibRaw hands over.
+/// The means are 2048.37, 2049, 2050.12, 2048.99; the least, 2048.37, is the common level, and a
+/// channel is that plus its difference from it, which rounds at f64's 2⁻⁴² of 2048, so 1e-9.
+///
+/// A `cblack` that is not those truncations — LibRaw took its black elsewhere — keeps its integers,
+/// as does one beside a spatial pattern, which a masked-area black never leaves.
 #[test]
 fn the_masked_mean_replaces_its_truncation() {
     let sums = [204_837, 204_900, 205_012, 204_899];
-    let mut cblack = no_black();
-    for c in 0..4 {
-        cblack[c] = sums[c] / 100;
-    }
     let masked = [sums[0], sums[1], sums[2], sums[3], 100, 100, 100, 100];
-    let exact = BlackLevel::from_libraw(&LibrawBlack {
-        black: 0,
-        cblack: &cblack,
-        maximum: 16_383,
-        filters: RGGB,
-        dng: None,
-        masked,
-    })
-    .unwrap();
+    let mut cblack = no_black();
+    cblack[..4].copy_from_slice(&[0, 1, 2, 0]);
+    let from = |cblack: &[u32; 4104]| {
+        BlackLevel::from_libraw(&LibrawBlack {
+            black: 2048,
+            cblack,
+            maximum: 16_383,
+            filters: RGGB,
+            dng: None,
+            masked,
+        })
+        .unwrap()
+    };
+    let exact = from(&cblack);
     assert_eq!(exact.common, 2048.37);
     for (c, &sum) in sums.iter().enumerate() {
         let mean = f64::from(sum) / 100.0;
         assert!((exact.of_channel(c) - mean).abs() < 1e-9, "channel {c}");
     }
 
-    cblack[1] += 1;
-    let elsewhere = BlackLevel::from_libraw(&LibrawBlack {
-        black: 0,
-        cblack: &cblack,
-        maximum: 16_383,
-        filters: RGGB,
-        dng: None,
-        masked,
-    })
-    .unwrap();
-    assert_eq!(elsewhere.common, 2048.0);
+    let mut elsewhere = cblack.clone();
+    elsewhere[1] += 1;
+    assert_eq!(from(&elsewhere).common, 2048.0);
+    // A 1×1 pattern of 0 on top of the same channels: a pattern says the black came from no mask.
+    let mut patterned = cblack.clone();
+    patterned[4] = 1;
+    patterned[5] = 1;
+    let patterned = from(&patterned);
+    assert_eq!(patterned.common, 2048.0);
+    assert_eq!(patterned.of_channel(2), 2050.0);
 }
 
 /// A DNG's float levels replace LibRaw's roundings of them when each is within one ADU: a

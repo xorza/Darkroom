@@ -92,8 +92,16 @@ fn load_raw_rejects_invalid_files() {
 }
 
 /// A synthetic camera file through LibRaw's `open_bayer`: `samples` laid out `side` square under
-/// one-pixel masked margins, RGGB, black `black`, maximum 65535; `procflags` 2 marks zeros dead.
-fn bayer_dump(samples: &[u16], side: usize, procflags: u8, black: u32) -> UnpackedRaw {
+/// one-pixel margins, RGGB, black `black`, maximum 65535; `procflags` 2 marks zeros dead. `mask`,
+/// when given, is the raw area `[top, left, bottom, right)` LibRaw measures the black on, as a
+/// camera's table names its masked pixels.
+fn bayer_dump(
+    samples: &[u16],
+    side: usize,
+    procflags: u8,
+    black: u32,
+    mask: Option<[i32; 4]>,
+) -> UnpackedRaw {
     let mut bytes: Vec<u8> = samples
         .iter()
         .flat_map(|sample| sample.to_le_bytes())
@@ -129,6 +137,10 @@ fn bayer_dump(samples: &[u16], side: usize, procflags: u8, black: u32) -> Unpack
         )
     };
     assert_eq!(opened, 0);
+    if let Some(mask) = mask {
+        // SAFETY: the handle is valid and open; `unpack` reads the mask.
+        unsafe { (*state.as_ptr()).sizes.mask[0] = mask };
+    }
     unpack(state, Path::new("bayer-dump")).unwrap()
 }
 
@@ -161,10 +173,11 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
             .collect()
     };
     let context = LoadContext::default();
-    let preview = |margin| bayer_dump(&samples(margin), SIDE, 0, 1004).into_linear_image(&context);
+    let preview =
+        |margin| bayer_dump(&samples(margin), SIDE, 0, 1004, None).into_linear_image(&context);
     let dark = preview(0).unwrap();
     let bright = preview(65_535).unwrap();
-    let science = bayer_dump(&samples(0), SIDE, 0, 1004)
+    let science = bayer_dump(&samples(0), SIDE, 0, 1004, None)
         .into_cfa_image()
         .unwrap()
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
@@ -345,7 +358,7 @@ fn the_raw_values_settle_no_data_and_saturation() {
         samples[0] = 0;
         samples[10 * SIDE + 10] = 62_309;
         samples[12 * SIDE + 12] = 62_308;
-        bayer_dump(&samples, SIDE, procflags, 1000)
+        bayer_dump(&samples, SIDE, procflags, 1000, None)
             .decode_flags()
             .unwrap()
             .unwrap()
@@ -362,4 +375,45 @@ fn the_raw_values_settle_no_data_and_saturation() {
     let flags = flags_for(0);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
     assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::default());
+}
+
+/// LibRaw measures a camera's black on its masked pixels and keeps each channel's mean truncated,
+/// after `unpack` moved the least of them into `black`; the decode uses the means themselves.
+/// The masked raw columns 0 and 1 hold 13 pixels of each of the four parities `p` (row parity
+/// times 2 plus column parity), the one at row pair `r` worth `2048 + p + [r ≤ p]`: a sum of
+/// 13·(2048 + p) + p + 1, so a mean of `2048 + p + (p + 1)/13`. LibRaw keeps 2048 + p, a loss
+/// of (p + 1)/13 ADU in each channel.
+#[test]
+fn the_decode_takes_the_masked_means_libraw_truncates() {
+    const SIDE: usize = 26;
+    let parity = |row: usize, col: usize| (row % 2) * 2 + col % 2;
+    let samples: Vec<u16> = (0..SIDE * SIDE)
+        .map(|index| {
+            let (row, col) = (index / SIDE, index % SIDE);
+            if col < 2 {
+                let p = parity(row, col);
+                (2048 + p + usize::from(row / 2 <= p)) as u16
+            } else {
+                3000
+            }
+        })
+        .collect();
+    let raw = bayer_dump(&samples, SIDE, 0, 0, Some([0, 0, SIDE as i32, 2]));
+    // SAFETY: the state is valid and unpacked, and outlives the borrow.
+    let color = unsafe { &(*raw.libraw.as_ptr()).color };
+    assert_eq!(
+        color.black, 2048,
+        "unpack moved the least truncated mean into black"
+    );
+    for (row, col) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let p = parity(row, col);
+        let channel = libraw_filter_color(raw.visible_filters, row, col);
+        let mean = 2048.0 + p as f64 + (p + 1) as f64 / 13.0;
+        assert_eq!(color.black + color.cblack[channel], 2048 + p as u32);
+        assert!(
+            (raw.black_level.of_channel(channel) - mean).abs() < 1e-9,
+            "parity {p}, channel {channel}: {} against {mean}",
+            raw.black_level.of_channel(channel)
+        );
+    }
 }

@@ -8,33 +8,11 @@ Scope: `lumos/src/io/raw/{mod.rs, black_level/, sensor_layout.rs, raw_files/, qu
 Paths below: `lumos/…` and `libraw-sys/…` are relative to `/home/xxorza/Projects/darkroom`; `LibRaw/…` is
 `libraw-sys/LibRaw/…`; reference projects are under `/home/xxorza/Projects/darkroom/.tmp/`.
 
-`cargo test -p lumos --tests --features ml io::raw`: 54 passed. One finding (RAW-1) was confirmed with a
-small C++ probe linked against the built `libraw.a`
-(`/tmp/claude-1000/-home-xxorza-Projects-darkroom/6bc4f528-17ee-491c-974f-ae0950bb173f/scratchpad/maskprobe/probe.cpp`).
+`cargo test -p lumos --tests --features ml io::raw`: 54 passed.
 
 ---
 
 ## Findings
-
-### RAW-1 — Exact masked-area black never applies: the detection checks a LibRaw state that no longer exists after `unpack`
-- **Where:** `lumos/src/io/raw/black_level/mod.rs:100-111`; test `lumos/src/io/raw/black_level/tests.rs:116-155`
-- **Category:** precision
-- **Impact:** high. Every camera whose black LibRaw reads from the masked area (the Canon CR2/CR3 table cameras, the main astro DSLRs, plus old Sony and others) keeps LibRaw's truncated integer mean. That leaves a per-frame, per-channel black error of 0 to 1 ADU, about 0.5 ADU on average, which is what the code says it removes.
-- **Confidence:** confirmed (code reading plus a probe)
-- **Evidence:** `crop_masked_pixels` sets `cblack[c] = sum/count` (integer) and `black = 0`
-  (`LibRaw/src/utils/utils_dcraw.cpp:242-243`). `unpack()` then folds the least channel into `black`
-  (`LibRaw/src/decoders/unpack.cpp:494-502`: `i = min(cblack[0..3]); cblack[c] -= i; C.black += i`). So after
-  `libraw_unpack` the state is `black = min mean`, `cblack[c] = mean_c − min`. The condition
-  `libraw.black == 0 && raw[c] == sums[c] / counts[c]` holds only if the darkest masked mean is 0. The probe ran
-  `open_bayer` with a 4-column mask, then `unpack`, and printed `black 2048 cblack 0 0 1 1`. The true means were
-  2048.94 and 2049.00, and `lumos_check=0` for every channel. The unit test builds the pre-fold state (`black: 0`,
-  `cblack = sums/100`), so it passes and covers nothing that can actually happen. RawTherapee
-  (`rawtherapee/rtengine/rawimage.cc:1017-1019`) and dcraw also use the integer mean. Fixing this would put lumos
-  ahead of them, as intended.
-- **Direction:** Check `black + cblack[c] == sums[c] / counts[c]` (with no spatial pattern), then rebuild every
-  channel from `sums[c] / counts[c]` with `common = min` of those means. Build the test fixture from LibRaw itself
-  (`libraw_open_bayer`, then set `sizes.mask`, then `unpack`, as the probe does), not from hand-written `cblack`
-  values.
 
 ### RAW-2 — Corrupt RAW data decodes "successfully", and LibRaw writes to stderr
 - **Where:** `lumos/src/io/raw/mod.rs:68` (`libraw_init(0)`), `mod.rs:522-529` (only the return code of `unpack` is checked)
@@ -264,14 +242,6 @@ small C++ probe linked against the built `libraw.a`
 - **Direction:** Test the extension first and use `entry.file_type()`, following a link only for RAW-named
   entries. Return a typed error that names the entry.
 
-### RAW-19 — DNG `BlackLevelDeltaH/V` collapse to a scalar mean
-- **Where:** inherited; `lumos/src/io/raw/black_level/mod.rs:91-99` takes `dng_fblack` as is
-- **Category:** precision
-- **Impact:** low (rare in astro files). Per-column and per-row black offsets that the file states are averaged away.
-- **Confidence:** confirmed (LibRaw `tiff.cpp:1338-1347` adds `num/len` to `black` and `dng_fblack`)
-- **Direction:** Document the limit in `BlackLevel`'s doc. Lifting it needs the per-column and per-row arrays,
-  which LibRaw does not keep.
-
 ### RAW-20 — A load cannot be cancelled while LibRaw runs
 - **Where:** `lumos/src/io/raw/mod.rs:743-788` (checks only between stages)
 - **Category:** design
@@ -321,10 +291,9 @@ small C++ probe linked against the built `libraw.a`
 
 ## Suggested change batches
 
-1. **Black-level precision:** RAW-1, plus the RAW-19 doc note. The test fixture should be built through LibRaw (`open_bayer` + mask + `unpack`).
-2. **LibRaw boundary rewrite:** RAW-9, RAW-10, RAW-11, RAW-2, RAW-20, plus RAW-21's struct/file, visibility, guard and shim items. These all land in one new `Libraw` wrapper file: the data-error counter and the cancel hook need its user-data pointer, and the typed errors come out of its methods.
-3. **Trusting what LibRaw reports (classification and refusals):** RAW-3, RAW-6, RAW-4, RAW-15, RAW-7, RAW-17. Each needs either a small shim accessor (`fuji_lossless`, CRX header, `is_phaseone_compressed`) or a `colors`/`cdesc` check. Do it after batch 2.
-4. **Hot-path fusion:** RAW-12 and the fallback deinterleave from RAW-21. Measure RAW-13 here before deciding on OpenMP.
-5. **Build and coverage:** RAW-14, plus the OpenMP decision from RAW-13. Both need user approval for new system or crate dependencies.
-6. **Metadata and policy decisions (user calls):** RAW-5, RAW-8, RAW-16.
-7. **Standalone:** RAW-18.
+1. **LibRaw boundary rewrite:** RAW-9, RAW-10, RAW-11, RAW-2, RAW-20, plus RAW-21's struct/file, visibility, guard and shim items. These all land in one new `Libraw` wrapper file: the data-error counter and the cancel hook need its user-data pointer, and the typed errors come out of its methods.
+2. **Trusting what LibRaw reports (classification and refusals):** RAW-3, RAW-6, RAW-4, RAW-15, RAW-7, RAW-17. Each needs either a small shim accessor (`fuji_lossless`, CRX header, `is_phaseone_compressed`) or a `colors`/`cdesc` check. Do it after batch 1.
+3. **Hot-path fusion:** RAW-12 and the fallback deinterleave from RAW-21. Measure RAW-13 here before deciding on OpenMP.
+4. **Build and coverage:** RAW-14, plus the OpenMP decision from RAW-13. Both need user approval for new system or crate dependencies.
+5. **Metadata and policy decisions (user calls):** RAW-5, RAW-8, RAW-16.
+6. **Standalone:** RAW-18.
