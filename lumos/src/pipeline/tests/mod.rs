@@ -262,7 +262,8 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
 fn stacked_master_inherits_reference_frame_metadata() {
     // The master's metadata comes from the reference frame (the alignment anchor), not frame 0,
     // so the RAM and streaming tiers agree. With reference = index 1, frame 0 is a (warped)
-    // non-reference frame whose metadata must NOT win.
+    // non-reference frame whose metadata must NOT win. The exposure is the exception: the master
+    // states one only where every frame shares it, and 10, 20 and 30 s do not.
     let base = base_field();
     let mut f0 = shifted(&base, 5.0, 3.0);
     let mut f1 = base.clone(); // the reference (index 1)
@@ -287,11 +288,7 @@ fn stacked_master_inherits_reference_frame_metadata() {
     .expect("stack");
 
     assert_eq!(result.alignment.reference, 1);
-    assert_eq!(
-        result.product.image.metadata.exposure_time,
-        Some(20.0),
-        "master must inherit the reference (index 1) metadata, not frame 0's"
-    );
+    assert_eq!(result.product.image.metadata.exposure_time, None);
     assert_eq!(
         result.product.image.metadata.camera_white_balance,
         Some([2.0, 1.0, 1.25, 1.0])
@@ -615,8 +612,9 @@ fn public_input_errors() {
 
 /// Persist `image` as a single-channel (`CfaType::Mono`) Lumos CFA FITS light — the cheapest
 /// input `calibrate_align_stack` accepts, since the mono demosaic is a passthrough and the frame
-/// reaches detection unchanged. `exposure_time` is distinct per frame so the stacked master's
-/// metadata identifies which frame it was inherited from.
+/// reaches detection unchanged. `date_obs` is distinct per frame so the stacked master's metadata
+/// identifies which frame it was inherited from; the 10 s exposure every frame shares is what the
+/// master states.
 fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> PathBuf {
     let path = directory.join(format!("light_{index}.fits"));
     let mut cfa = make_cfa(
@@ -624,7 +622,8 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
         image.channel(0).pixels().to_vec(),
         CfaType::Mono,
     );
-    cfa.metadata.exposure_time = Some(10.0 + index as f64);
+    cfa.metadata.date_obs = Some(format!("2026-01-01T00:00:{index:02}"));
+    cfa.metadata.exposure_time = Some(10.0);
     save_cfa_fits(&path, &cfa).expect("write synthetic CFA FITS light");
     path
 }
@@ -879,13 +878,14 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         5,
         "every dithered frame should register against the reference"
     );
-    // The master inherits the reference frame's metadata. Distinct per-frame exposure times make
-    // the comparison below non-vacuous.
+    // The master inherits the reference frame's metadata. Distinct per-frame observation times make
+    // the comparison below non-vacuous; the shared exposure is the stack's own.
     assert!(
-        ram.product.image.metadata.exposure_time.is_some(),
-        "per-frame exposure time did not survive the FITS round-trip; \
+        ram.product.image.metadata.date_obs.is_some(),
+        "per-frame observation time did not survive the FITS round-trip; \
          the metadata comparison would be vacuous"
     );
+    assert_eq!(ram.product.image.metadata.exposure_time, Some(10.0));
 
     // Naming the reference the automatic choice found takes each light through one pass, on both
     // tiers, and the stack is the same. The spilled one-pass run writes each light once, warped:
@@ -999,7 +999,7 @@ fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, lab
         "{label}: coverage"
     );
     assert_eq!(
-        expected.image.metadata.exposure_time, actual.image.metadata.exposure_time,
+        expected.image.metadata.date_obs, actual.image.metadata.date_obs,
         "{label}: the master inherits another frame's metadata"
     );
 }

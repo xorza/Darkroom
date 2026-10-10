@@ -2,6 +2,7 @@
 
 use fits_well::image::SampleType;
 
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::SATURATION_FRACTION;
@@ -85,9 +86,10 @@ pub struct ImageMetadata {
     /// `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
     /// leaves a consumer to test the samples itself.
     pub saturation_flagged: bool,
-    /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
-    /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
-    pub calibrated: bool,
+    /// The parts of the signal calibration removed: set by `CalibrationMasters::calibrate` on a
+    /// light, and by a calibration stack that subtracts a master from each frame. It guards
+    /// against removing a part twice, and travels with the frame through demosaic.
+    pub calibration: CalibrationState,
 }
 
 impl ImageMetadata {

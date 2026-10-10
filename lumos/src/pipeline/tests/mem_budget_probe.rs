@@ -153,6 +153,7 @@ fn pipeline_budget_probe() -> io::Result<()> {
         let stage_start = Instant::now();
         let master = stack_cfa_master(
             &calibration,
+            role,
             config,
             None,
             ProgressCallback::default(),

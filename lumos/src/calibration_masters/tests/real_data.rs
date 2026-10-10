@@ -29,7 +29,7 @@ use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::io::raw;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
+use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, MasterRole, StackConfig};
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
@@ -67,7 +67,7 @@ fn builds_full_master_set() {
     );
 
     // Every supplied role yields a master; the flat-dark is spent on the flat and not kept.
-    let dark = &masters.dark.as_ref().expect("master dark").image;
+    let dark = masters.dark.as_ref().expect("master dark");
     let flat = masters
         .flat
         .as_ref()
@@ -225,6 +225,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     let detect = |dark_paths: &[&PathBuf]| {
         let dark = stack_cfa_master(
             dark_paths,
+            MasterRole::Dark,
             StackConfig::bias_or_dark(),
             None,
             ProgressCallback::default(),
@@ -319,6 +320,7 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.darks,
+                MasterRole::Dark,
                 StackConfig::bias_or_dark(),
                 None,
                 ProgressCallback::default(),
@@ -337,6 +339,7 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.flats,
+                MasterRole::Flat,
                 StackConfig::flat(),
                 None,
                 ProgressCallback::default(),
@@ -355,6 +358,7 @@ fn bench_stack_master_bias(b: ::quickbench::Bencher) {
         black_box(
             stack_cfa_master(
                 &paths.bias,
+                MasterRole::Bias,
                 StackConfig::bias_or_dark(),
                 None,
                 ProgressCallback::default(),

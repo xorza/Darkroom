@@ -2,8 +2,10 @@
 
 use thiserror::Error;
 
+use crate::calibration_masters::error::DarkMismatch;
+use crate::calibration_masters::master_role::MasterRole;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
-use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::error::{ConditionMismatch, FrameStoreError};
 use crate::frame_store::frame_quality::FramePlane;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaType;
@@ -81,6 +83,45 @@ pub enum StackError {
         index: usize,
         frame: Box<SampleDomain>,
         subtractor: Box<SampleDomain>,
+    },
+
+    /// The master a calibration stack would subtract from every frame lost, when it was itself
+    /// stacked, everything its role holds, or more than its role may lose: a bias anything, a dark
+    /// or a flat-dark more than its bias.
+    #[error("the {subtractor} master is calibrated past anything it could subtract")]
+    OverCalibratedSubtractor { subtractor: MasterRole },
+
+    /// The master a calibration stack would subtract holds more than a frame of the stacked role
+    /// may lose before it is combined: a dark or a flat-dark only its bias, a bias nothing, and no
+    /// frame its flat response.
+    #[error(
+        "the {subtractor} master holds more than a {target} frame may lose before it is combined"
+    )]
+    SubtractorForRole {
+        target: MasterRole,
+        subtractor: MasterRole,
+    },
+
+    /// Frame `index` already lost a part of what the subtracted master holds: subtracted again,
+    /// that part would be removed twice.
+    #[error("frame {index} already lost part of what the {subtractor} master holds")]
+    SubtractedTwice {
+        index: usize,
+        subtractor: MasterRole,
+    },
+
+    /// The master holding dark signal that a calibration stack subtracts was taken under other
+    /// conditions than frame `index`.
+    #[error("frame {index} cannot take the subtracted master: {source}")]
+    SubtractorConditions { index: usize, source: DarkMismatch },
+
+    /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
+    /// flat-dark — were not all taken under one: the master would state one frame's conditions and
+    /// hold the majority's signal.
+    #[error("the {role} frames must share one exposure and one temperature: {source}")]
+    MasterConditions {
+        role: MasterRole,
+        source: ConditionMismatch,
     },
 
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured

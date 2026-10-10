@@ -11,7 +11,7 @@ use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
     CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext, MasterRole,
-    stack_cfa_master,
+    Subtractor, stack_cfa_master,
 };
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
@@ -137,7 +137,7 @@ fn build_masters_cached(
     let role = |frames: Option<Vec<PathBuf>>,
                 role: MasterRole,
                 file: &str,
-                subtract: Option<(&CfaImage, &[PathBuf])>|
+                subtract: Option<(Subtractor<'_>, &[PathBuf])>|
      -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
             return Err(BuildMastersError::Cancelled);
@@ -184,8 +184,9 @@ fn build_masters_cached(
 
         let master = stack_cfa_master(
             &frames,
+            role,
             role.stack_config(),
-            subtract.map(|(master, _)| master),
+            subtract.map(|(subtractor, _)| subtractor),
             ProgressCallback::default(),
             cancel.clone(),
         )?
@@ -219,9 +220,20 @@ fn build_masters_cached(
     )?;
     // Each flat takes its flat-dark, else the bias, before the flats are normalized and combined.
     let flat_subtractor = match (&flat_dark_master, &flat_darks, &bias_master, &bias) {
-        (Some(master), Some(frames), _, _) | (None, _, Some(master), Some(frames)) => {
-            Some((master, frames.as_slice()))
-        }
+        (Some(master), Some(frames), _, _) => Some((
+            Subtractor {
+                role: MasterRole::FlatDark,
+                master,
+            },
+            frames.as_slice(),
+        )),
+        (None, _, Some(master), Some(frames)) => Some((
+            Subtractor {
+                role: MasterRole::Bias,
+                master,
+            },
+            frames.as_slice(),
+        )),
         _ => None,
     };
     let flat_master = role(flats, MasterRole::Flat, "master_flat.fits", flat_subtractor)?;

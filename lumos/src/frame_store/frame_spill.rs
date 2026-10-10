@@ -26,7 +26,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "8ec5c0344cd40a6d";
+pub(crate) const SIDECAR_PIN: &str = "d10ea573f47dd686";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -282,6 +282,7 @@ mod tests {
     use common::{FileIdentity, SerdeFormat, TempDir};
 
     use crate::frame_store::cache_key::{CacheKey, DecoderKind};
+    use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::frame_store::frame_spill::{
@@ -314,6 +315,10 @@ mod tests {
                 row_order: Some(RowOrder::BottomUp),
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Gbrg)),
                 saturation_flagged: true,
+                conditions: CaptureConditions {
+                    exposure_time: Some(300.0),
+                    ccd_temp: Some(-10.0),
+                },
             },
         }
     }

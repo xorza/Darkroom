@@ -114,6 +114,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     let stack = |paths: &[PathBuf], role: MasterRole| {
         stack_cfa_master(
             paths,
+            role,
             role.stack_config(),
             None,
             ProgressCallback::default(),
