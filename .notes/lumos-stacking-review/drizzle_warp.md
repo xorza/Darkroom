@@ -22,7 +22,8 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
   - Siril drizzles at registration (`registration/applyreg.c`, `driz->scale = regargs->output_scale`) and then stacks the drizzled frames through its normal normalization and rejection.
   - PixInsight DrizzleIntegration reads ImageIntegration's normalization and rejection data (`.xdrz`).
   - DrizzlePac runs median, then blot, then `driz_cr`, before the final drizzle.
-- **Direction:** Feed drizzle the statistical combine's results. Run the regular warp+combine first, which already normalizes and rejects. Map each frame's rejected samples back to input pixels (blot the per-frame rejection mask, or use a `driz_cr`-style test of input pixel against the blotted median) and pass them as zero pixel weight or `COSMIC_RAY`. Apply the frame's normalization gain and offset at deposit, and take frame weights from the same `FrameWeights` resolution.
+- **Decided (plan Batch 14):** Siril's design. Each frame is drizzled on its own and enters the normal combine with its drop-weight plane; the drop weight multiplies the frame weight in the mean. The direction below is superseded.
+- **Direction (superseded):** Feed drizzle the statistical combine's results. Run the regular warp+combine first, which already normalizes and rejects. Map each frame's rejected samples back to input pixels (blot the per-frame rejection mask, or use a `driz_cr`-style test of input pixel against the blotted median) and pass them as zero pixel weight or `COSMIC_RAY`. Apply the frame's normalization gain and offset at deposit, and take frame weights from the same `FrameWeights` resolution.
 
 ### DRZ-2 — Band overscan grows with field rotation and with thread count; square/SIP pay the full transform before rejection
 - **Where:** `drizzle/accumulator/output_band.rs:116-145` (`scan`, `for ix in 0..width`), `drizzle/accumulator/frame_source.rs:282-310` (`quad`: 4 `map.position` per visit), `drizzle/accumulator/frame_source.rs:326-347` (`input_rows`, row extent only), `drizzle/accumulator/mod.rs:434` (bands = 4 × threads)
@@ -76,7 +77,8 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
   - Pixels at the fill value are not marked `NO_DATA`, unlike the combine's product. With `QualityPlanes::IMAGE_ONLY` they cannot be told apart from measured zeros.
   - The `RunReport` reports nothing excluded.
 - **Confidence:** confirmed
-- **Direction:** Define the exclusion policy once, in `pixel_flags`, and use it from both producers. Drizzle cannot apply a survivor floor, so it should exclude the full fill/bias set. Emit `NO_DATA` flags on gated pixels, and count excluded deposits into the `RunReport`.
+- **Decided (plan Batch 14):** drizzle follows the warp's flag split. `RESAMPLE_EXCLUDED` pixels deposit nothing, `RESAMPLE_CARRIED` pixels deposit and carry their flag. The combine then gives the product its flags and report. The direction below is superseded.
+- **Direction (superseded):** Define the exclusion policy once, in `pixel_flags`, and use it from both producers. Drizzle cannot apply a survivor floor, so it should exclude the full fill/bias set. Emit `NO_DATA` flags on gated pixels, and count excluded deposits into the `RunReport`.
 
 ### DRZ-11 — Smaller per-drop costs in the droplet kernels
 - **Where:** `drizzle/accumulator/frame_source.rs:141-159` (`landing` computes the homography Jacobian determinant, or the SIP inverse Jacobian through `InverseWarp::apply`, before any band test), `drizzle/accumulator/output_band.rs:102` (drizzle Lanczos: two `sin` and two divisions per tap, 14 taps per drop)

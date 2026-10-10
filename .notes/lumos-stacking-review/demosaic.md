@@ -43,6 +43,7 @@ register/stack. The main defects:
   - The result is a level-dependent magenta/green offset in exactly the faint, dark-subtracted backgrounds (narrowband, short subs) where a science product needs linearity. It also makes the output depend on whether a pedestal is kept, because the step is not offset-invariant.
 - **Confidence:** confirmed analytically from the code. The existing test `constant_colour_reconstructs_on_every_phase` hides it by keeping every LPF ≥ 2 (its doc names the `EPS/(2·lpf)` error).
 - **Evidence:** librtprocess `rcd.cc:72,183-186` and darktable `rcd.c:76,248-251` use the same `eps`. It is harmless there because inputs are photo-scaled and clipped to [0, 1] (`LIM01`), so the shadows that matter are far above 1e-5 relative. Siril sidesteps it by shifting the data to [0, 65535] by its global minimum before RCD (`siril/src/algos/demosaicing_rtp.cpp:247-265`). That shift is a different offset dependence, not a cure. lumos already has a well-defined fallback for ill-conditioned denominators (the signed blend, `mod.rs:89-103`).
+- **Decided (plan Batch 11):** drop `EPS` with a scale-relative transition, and regenerate the librtprocess digests with `eps = 0`.
 - **Direction:** Drop `EPS` from the well-conditioned branch: pure ratio when `c + s` is far from zero, and route the conditioning test through the existing additive blend, which is continuous and has no 0/0. Alternatively, scale the epsilon to the frame's noise or level. Pin the result with a low-level, flat-field exactness test (v = 1e-5…1e-3, exact per-plane means).
 
 ### DMS-4 — The white-balance round trip through demosaic does not return native samples bit for bit
@@ -175,7 +176,7 @@ register/stack. The main defects:
 
 ## Suggested batches
 
-1. **Signed-data correctness:** DMS-1 + DMS-3 + the low-level/signed tests of DMS-12. These are small kernel edits pinned by new exact tests, and the librtprocess digests stay valid.
+1. **Signed-data correctness:** DMS-1 + DMS-3 + the low-level/signed tests of DMS-12. These are small kernel edits pinned by new exact tests. The librtprocess digests move with DMS-3: regenerate them with librtprocess built with `eps = 0`.
 2. **X-Trans pattern contract:** DMS-2 + DMS-14 (build the hex table inside the validated pattern, delete `HexLookup`, return errors for unsupported layouts).
 3. **Shared tiled driver and gains in-kernel:** DMS-11 + DMS-8 + DMS-4 (one driver, one border fill, gains applied at tile input and output).
 4. **RCD vectorization:** DMS-7, then retune `TILE`. Optionally DMS-9 for Markesteijn.
