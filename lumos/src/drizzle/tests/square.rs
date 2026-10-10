@@ -128,7 +128,6 @@ fn a_rotated_square_drop_keeps_its_flux() {
     acc.add_image(
         gray_image(size, pixels),
         &Transform::rotation_around(DVec2::new(10.0, 10.0), 15.0_f64.to_radians()),
-        1.0,
         None,
     );
     let flux = acc.accumulated_flux_sum(0);
@@ -136,7 +135,7 @@ fn a_rotated_square_drop_keeps_its_flux() {
         (flux - 160.0).abs() <= 18.0 * f64::from(f32::EPSILON) * 160.0,
         "Σ flux·w {flux}"
     );
-    let centre = acc.finalize().product.image.channel(0)[(10, 10)];
+    let centre = acc.finalize().image.channel(0)[(10, 10)];
     assert!(
         (centre - 10.0).abs() <= 19.0 * f32::EPSILON * 10.0,
         "{centre}"

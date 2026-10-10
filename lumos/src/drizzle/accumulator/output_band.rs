@@ -43,11 +43,6 @@ pub(super) struct OutputBand<'a> {
     /// Output pixels per row. Every band spans the full output width.
     width: usize,
     planes: PlaneSpan<'a>,
-    /// One bit per pixel of the band, indexed identically to its planes — band-local, so it needs
-    /// no padding and no coordinates, just the index the deposit already computed. Cleared per
-    /// frame, which is what "this frame has not been counted here yet" means. Empty unless the
-    /// config asks for coverage.
-    touched: &'a mut [u64],
     /// Which band this is, and the input rows every band scans for this frame — this one's, and the
     /// earlier ones', which decide whether a pixel that failed to invert is this band's to count.
     index: usize,
@@ -58,7 +53,6 @@ impl<'a> OutputBand<'a> {
         rows: Range<usize>,
         width: usize,
         planes: PlaneSpan<'a>,
-        touched: &'a mut [u64],
         index: usize,
         scans: &'a [Range<usize>],
     ) -> Self {
@@ -66,7 +60,6 @@ impl<'a> OutputBand<'a> {
             rows,
             width,
             planes,
-            touched,
             index,
             scans,
         }
@@ -80,10 +73,6 @@ impl<'a> OutputBand<'a> {
         plan: KernelPlan,
         radial: &JobScratchPool<RadialScratch>,
     ) -> usize {
-        // Here rather than where the band is built: this runs on a worker, so clearing the bitset
-        // is spread across the pool instead of paid serially between frames.
-        self.touched.fill(0);
-
         match plan {
             KernelPlan::Square { half_drop } => self.distribute_square(source, half_drop),
             KernelPlan::Turbo {
@@ -394,9 +383,8 @@ impl<'a> OutputBand<'a> {
     /// signature there is no input/output pair to mix up, and the samples are read once per drop
     /// instead of once per output pixel it covers.
     ///
-    /// The quality planes stay tested per deposit although the config fixes them for the whole
-    /// run: the test is on a value the loop cannot change, so it hoists, and monomorphizing the
-    /// band over the combinations to prove it would multiply every kernel below.
+    /// The flags stay tested per deposit although a frame fixes whether it has any: the test is on
+    /// a value the loop cannot change, so it hoists.
     #[inline]
     fn accumulate(&mut self, fluxes: &Fluxes, index: usize, weight: f32) {
         for (plane, &flux) in self.planes.data.iter_mut().zip(&fluxes.values) {
@@ -404,22 +392,13 @@ impl<'a> OutputBand<'a> {
         }
         // Weight is channel-independent, so accumulate it once per output pixel.
         self.planes.weight[index] += weight;
-        for (plane, &variance) in self.planes.variance.iter_mut().zip(&fluxes.variances) {
-            plane[index] += weight * weight * variance;
-        }
-
-        // A frame reaches an output pixel through however many of its input pixels land on it, so
-        // coverage cannot simply count deposits; the bitmap is what makes it one per frame. A tap
-        // of zero weight, where a Lanczos lobe crosses zero, deposits nothing and reaches nothing.
+        self.planes.weight_sq[index] += weight * weight;
+        // A tap of zero weight, where a Lanczos lobe crosses zero, deposits nothing and carries
+        // nothing.
         if weight != 0.0
-            && let Some(counts) = &mut self.planes.counts
+            && let Some(flags) = &mut self.planes.flags
         {
-            let mask = 1u64 << (index % u64::BITS as usize);
-            let word = &mut self.touched[index / u64::BITS as usize];
-            if *word & mask == 0 {
-                *word |= mask;
-                counts[index] += 1.0;
-            }
+            flags[index] |= fluxes.carried;
         }
     }
 }

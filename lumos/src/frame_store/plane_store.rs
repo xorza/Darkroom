@@ -12,7 +12,8 @@ pub(crate) trait PlaneStore {
     fn store_channel(&self, channel: usize, pixels: &[f32])
     -> Result<StoredPlane, FrameStoreError>;
 
-    /// A quality plane: [`FramePlane::Coverage`] or [`FramePlane::Confidence`].
+    /// A quality plane: [`FramePlane::Coverage`], [`FramePlane::Confidence`] or
+    /// [`FramePlane::DropWeight`].
     fn store_quality(
         &self,
         plane: FramePlane,

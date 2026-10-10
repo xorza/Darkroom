@@ -5,6 +5,8 @@ pub(crate) mod coverage;
 pub(crate) mod quality_map;
 pub(crate) mod quality_planes;
 
+use rayon::prelude::*;
+
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
 use crate::run_report::RunReport;
@@ -85,6 +87,47 @@ pub struct StackProduct {
 }
 
 impl StackProduct {
+    /// Hold every pixel `empty` names at `fill_value`, a value no frame measured: it carries no
+    /// weight, inverse variance, dispersion or coverage, so no plane claims a measurement there.
+    pub(crate) fn fill_where(&mut self, empty: impl Fn(usize) -> bool + Sync, fill_value: f32) {
+        for channel in 0..self.image.channels() {
+            self.image
+                .channel_mut(channel)
+                .pixels_mut()
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(index, value)| {
+                    if empty(index) {
+                        *value = fill_value;
+                    }
+                });
+        }
+        let maps = [
+            &mut self.weight,
+            &mut self.inverse_variance,
+            &mut self.dispersion,
+        ];
+        let planes = maps
+            .into_iter()
+            .flatten()
+            .flat_map(QualityMap::planes_mut)
+            .chain(match &mut self.coverage {
+                Some(Coverage::PerPixel(plane)) => Some(plane),
+                Some(Coverage::Uniform { .. }) | None => None,
+            });
+        for plane in planes {
+            plane
+                .pixels_mut()
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(index, value)| {
+                    if empty(index) {
+                        *value = 0.0;
+                    }
+                });
+        }
+    }
+
     /// Reinterpret a combined mosaic stack as the calibration master it is.
     ///
     /// # Panics

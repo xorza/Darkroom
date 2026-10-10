@@ -90,10 +90,8 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
         close(gain.at(0, x, 4.0), expected, &format!("x = {x}"));
     }
 
-    let shifted = gain.warped(
-        &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
-        size,
-    );
+    let shift = WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0)));
+    let shifted = gain.warped(|p| shift.apply(p), size);
     assert_eq!(shifted.size(), size);
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875), (8.0, 1.875)] {
         close(shifted.at(0, x, 0.0), expected, &format!("warped x = {x}"));

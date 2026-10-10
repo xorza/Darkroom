@@ -459,7 +459,8 @@ impl FrameCache {
                             let gain_point = gain_grid.point(pixel_in_row as f32, y as f32);
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
-                                if let Some(q) = gates[frame_idx].confidence(pixel_idx) {
+                                if let Some(gathered) = gates[frame_idx].sample(pixel_idx) {
+                                    let q = gathered.confidence;
                                     let v = match frame_norms {
                                         Some(fnm) => {
                                             let norm = fnm[frame_idx].slots[slot];
@@ -468,10 +469,12 @@ impl FrameCache {
                                         None => chunk[pixel_idx],
                                     };
                                     values[covered] = v;
-                                    // The frame's weight alone: the warp's confidence enters the
-                                    // noise model below, never the mean (`WarpResult`).
+                                    // The frame's weight, times a drizzle's drop weight: the
+                                    // warp's confidence enters the noise model below, never the
+                                    // mean (`WarpResult`).
                                     eff_weights[covered] = weights
-                                        .map_or(1.0, |weights| weights.weight(frame_idx, slot));
+                                        .map_or(1.0, |weights| weights.weight(frame_idx, slot))
+                                        * gathered.weight;
                                     sample_flags[covered] =
                                         flags[frame_idx].map_or(0, |plane| plane[pixel_idx]);
                                     if let Some(noise) = noise {

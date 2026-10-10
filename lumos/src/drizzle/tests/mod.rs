@@ -1,4 +1,5 @@
 mod accumulation;
+mod combine;
 mod config;
 mod geometry;
 mod jacobian;
@@ -9,9 +10,11 @@ mod synthetic;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::frame_source::internals::input_rows;
 use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::drizzle::geometry::{boxer, sgarea};
 use crate::drizzle::stack::{drizzle_images, drizzle_stack};
@@ -21,12 +24,44 @@ use crate::io::image::pixel_flags::PixelFlags;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::StackProduct;
-use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 
+/// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are
+/// 7×7.
+const MAX_DEPOSITS: f32 = 49.0;
+
+/// How far `Σ|wᵢ|` can exceed `Σwᵢ` at an interior pixel: Lanczos-3's negative lobes, about 1.3 per
+/// axis. The other kernels' weights are all positive, so it is 1 for them.
+const LOBE_EXCESS: f32 = 1.7;
+
 fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
-    DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
+    DrizzleAccumulator::new(input_dims, config, 0).expect("test drizzle config must be valid")
+}
+
+/// The combine that makes the drizzled frames the single-pass drizzle: a mean of every sample,
+/// equally weighted and unnormalized, with the standard quality planes.
+fn plain_stack() -> StackConfig {
+    StackConfig {
+        combine: Combine::mean(),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    }
+}
+
+/// Drizzle `frames` and combine them under [`plain_stack`].
+fn drizzle_plain(
+    frames: Vec<DrizzleFrame<LinearImage>>,
+    config: &DrizzleConfig,
+) -> Result<DrizzleResult, DrizzleError> {
+    drizzle_images(
+        frames,
+        config,
+        &plain_stack(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
 }
 
 /// A drizzle config for `kernel`. `min_weight_fraction` is 0 everywhere in these tests so nothing
@@ -60,8 +95,8 @@ fn drizzle_one(
     pixel_weights: Option<&Buffer2<f32>>,
 ) -> StackProduct {
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
-    acc.add_image(image, transform, 1.0, pixel_weights);
-    acc.finalize().product
+    acc.add_image(image, transform, pixel_weights);
+    acc.finalize()
 }
 
 fn constant_image(size: Size2us, value: f32) -> LinearImage {

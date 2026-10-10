@@ -146,7 +146,7 @@ impl<'a> FrameRegistrar<'a> {
         let metadata = image
             .metadata()
             .clone()
-            .warped(&warp, image.dimensions().size());
+            .warped(|p| warp.apply(p), image.dimensions().size());
         drop(image);
         self.resolved.complete_one();
         let stored = self.tier.store(metadata, warped, stats)?;

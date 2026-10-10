@@ -895,9 +895,10 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
                 StackError::FrameQualityPairMismatch {
                     index: 0,
                     pixel: 1,
-                    coverage,
+                    plane: FramePlane::Coverage,
+                    support,
                     confidence,
-                } if coverage == expected_coverage && confidence == expected_confidence
+                } if support == expected_coverage && confidence == expected_confidence
             ),
             "expected a pair mismatch at pixel 1, got {error:?}"
         );

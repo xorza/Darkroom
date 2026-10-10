@@ -95,7 +95,7 @@ pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpPar
             metadata: image
                 .metadata
                 .clone()
-                .warped(warp_transform, image.dimensions().size()),
+                .warped(|p| warp_transform.apply(p), image.dimensions().size()),
             pixels: buffers.pixels,
             flags: buffers.flags,
         },

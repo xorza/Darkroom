@@ -11,7 +11,6 @@ use crate::io::image::cfa::CfaType;
 use crate::math::noise::background_split::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::registration::transform::WarpTransform;
 
 /// Pixels between the grid's nodes on each axis.
 ///
@@ -89,9 +88,9 @@ impl FlatGain {
         Self { size, nodes, bins }
     }
 
-    /// This gain as an output frame of `size` sees it through `warp`, its output-to-source map:
-    /// each node the source's gain where the warp samples it.
-    pub(crate) fn warped(&self, warp: &WarpTransform, size: Size2us) -> Self {
+    /// This gain as an output frame of `size` sees it through `to_source`, its output-to-source
+    /// map: each node the source's gain where the map samples it.
+    pub(crate) fn warped(&self, to_source: impl Fn(DVec2) -> DVec2 + Sync, size: Size2us) -> Self {
         let columns = nodes_along(size.width);
         let rows = nodes_along(size.height);
         let mut nodes: ArrayVec<Buffer2<f32>, 3> = self
@@ -99,11 +98,12 @@ impl FlatGain {
             .iter()
             .map(|_| Buffer2::new_default(columns, rows))
             .collect();
+        let to_source = &to_source;
         let sources: Vec<DVec2> = (0..rows)
             .into_par_iter()
             .flat_map_iter(|j| {
                 (0..columns)
-                    .map(move |i| warp.apply(DVec2::new((STEP * i) as f64, (STEP * j) as f64)))
+                    .map(move |i| to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64)))
             })
             .collect();
         for (channel, plane) in nodes.iter_mut().enumerate() {

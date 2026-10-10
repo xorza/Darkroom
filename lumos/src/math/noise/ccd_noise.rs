@@ -31,13 +31,6 @@ impl CcdNoise {
             .max(self.quantization_variance * gain * gain)
     }
 
-    pub(crate) fn variance_at(self, x: f32, gain: f32) -> f32 {
-        self.background_at(gain)
-            + self
-                .electrons_per_unit
-                .map_or(0.0, |electrons| (x - self.sky).max(0.0) * gain / electrons)
-    }
-
     /// Electrons per unit of an image's samples: the camera's electrons per ADU times the ADU one
     /// unit is worth. Only a declared scale says what one unit is worth; an assumed one is a guess
     /// the gain cannot be applied through.
@@ -55,16 +48,13 @@ mod tests {
     use super::*;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain};
 
-    /// Below the sky only the background counts; above it, each unit carries `g/electrons` more
-    /// variance. Background 1/4 at gain 1, half of it read noise, sky 1, 4 electrons per unit, all
-    /// dyadic so exact:
-    /// - gain 1: 1/4 at 0.5 and at 1, 1/4 + 2/4 = 3/4 at 3, and without a gain the source term is
-    ///   absent;
-    /// - gain 2: the background is `1/4·2·(½·2 + ½)` = 3/4, the source term at 3 is `2·2/4` = 1;
+    /// The background where a flat multiplied the sample by `g`. Background 1/4 at gain 1, half of
+    /// it read noise, all dyadic so exact:
+    /// - gain 1: 1/4; gain 2: `1/4·2·(½·2 + ½)` = 3/4;
     /// - the split matters: all read noise gives `1/4·4` = 1 at gain 2, all sky `1/4·2` = 1/2;
     /// - a step of σ 1/4 floors a silent background at `(1/4·2)²` = 1/4 at gain 2.
     #[test]
-    fn the_source_term_counts_photons_above_the_sky() {
+    fn the_background_follows_the_flat_gain() {
         let noise = CcdNoise {
             background: BackgroundSplit {
                 variance: 0.25,
@@ -74,16 +64,12 @@ mod tests {
             sky: 1.0,
             electrons_per_unit: Some(4.0),
         };
-        assert_eq!(noise.variance_at(0.5, 1.0), 0.25);
-        assert_eq!(noise.variance_at(1.0, 1.0), 0.25);
-        assert_eq!(noise.variance_at(3.0, 1.0), 0.75);
+        assert_eq!(noise.background_at(1.0), 0.25);
+        assert_eq!(noise.background_at(2.0), 0.75);
         let no_gain = CcdNoise {
             electrons_per_unit: None,
             ..noise
         };
-        assert_eq!(no_gain.variance_at(3.0, 1.0), 0.25);
-        assert_eq!(noise.variance_at(1.0, 2.0), 0.75);
-        assert_eq!(noise.variance_at(3.0, 2.0), 1.75);
         for (read_share, expected) in [(1.0, 1.0), (0.0, 0.5)] {
             let split = CcdNoise {
                 background: BackgroundSplit {
