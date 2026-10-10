@@ -6,6 +6,7 @@ use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
@@ -15,6 +16,7 @@ use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::mad_to_sigma;
 use crate::progress::progress_callback::ProgressCallback;
+use common::TempDir;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
@@ -640,10 +642,10 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
     }
 }
 
-/// Past `PHOTOMETRIC_SAMPLE_LIMIT` measured pixels the samples are those of rank `⌊k·n/m⌋`. Over
-/// 200 000 pixels with no domain the k-th of 65 536 is `⌊k·3.0518⌋`: 0, 3, 6, 9, …, and 199 996
-/// last. Over a domain of the 100 000 even pixels the rank is `⌊k·1.5259⌋` — 0, 1, 3, 4 — and the
-/// pixel twice that: 0, 2, 6, 8, …, 199 996 last. Ten pixels are under the limit: every one.
+/// Past `SAMPLE_LIMIT` measured pixels the samples are those of rank `⌊k·n/m⌋`. Over 200 000
+/// pixels with no domain the k-th of 65 536 is `⌊k·3.0518⌋`: 0, 3, 6, 9, …, and 199 996 last. Over a
+/// domain of the 100 000 even pixels the rank is `⌊k·1.5259⌋` — 0, 1, 3, 4 — and the pixel twice
+/// that: 0, 2, 6, 8, …, 199 996 last. Ten pixels are under the limit: every one.
 ///
 /// A 4096×64 RGGB mosaic, sampled as one plane, would take every 4th pixel: even columns only, red
 /// and the green of the red rows. Each colour is drawn by rank among its own photosites instead:
@@ -654,16 +656,17 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     let cancel = CancelToken::never();
     let pixel_count = 200_000;
     let check = |indices: Vec<usize>, first: [usize; 4], last: usize| {
-        assert_eq!(indices.len(), PHOTOMETRIC_SAMPLE_LIMIT);
+        assert_eq!(indices.len(), SAMPLE_LIMIT);
         assert_eq!(indices[..4], first);
         assert_eq!(indices[indices.len() - 1], last);
         assert!(indices.is_sorted() && indices.windows(2).all(|pair| pair[0] < pair[1]));
     };
-    check(
-        stratified_indices(pixel_count, None, &cancel).unwrap(),
-        [0, 3, 6, 9],
-        199_996,
-    );
+    let every = |size: Size2us| {
+        StratifiedSamples::new(size, None, 0)
+            .indices()
+            .collect::<Vec<_>>()
+    };
+    check(every(Size2us::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
 
     let even = (0..pixel_count)
         .map(|pixel| if pixel % 2 == 0 { 1.0 } else { 0.0 })
@@ -679,27 +682,21 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     let domain = CommonDomain::build(&[frame], pixel_count, &cancel).unwrap();
     assert_eq!(domain.sample_count, 100_000);
     check(
-        stratified_indices(pixel_count, Some(&domain), &cancel).unwrap(),
+        stratified_indices(&domain, &cancel).unwrap(),
         [0, 2, 6, 8],
         199_996,
     );
 
-    assert_eq!(
-        stratified_indices(10, None, &cancel).unwrap(),
-        (0..10).collect::<Vec<_>>()
-    );
+    assert_eq!(every(Size2us::new(10, 1)), (0..10).collect::<Vec<_>>());
 
-    let dimensions = ImageDimensions::new((4096, 64), 1);
-    let slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
-    let pixels = SlotPixels::of_slots(slots, None, dimensions, &cancel).unwrap();
+    let size = Size2us::new(4096, 64);
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
     for (slot, expected) in [[65_536, 0, 0, 0], [0, 32_768, 32_768, 0], [0, 0, 0, 65_536]]
         .into_iter()
         .enumerate()
     {
-        let indices =
-            stratified_indices(dimensions.pixel_count(), pixels[slot].sampled(), &cancel).unwrap();
         let mut phases = [0; 4];
-        for index in indices {
+        for index in StratifiedSamples::new(size, Some(&rggb), slot).indices() {
             phases[(index / 4096 % 2) * 2 + index % 2] += 1;
         }
         assert_eq!(
@@ -793,5 +790,114 @@ fn twilight_flats_normalize_per_colour() {
             .iter()
             .all(|&weight| weight == 3.0),
         "a frame was rejected"
+    );
+}
+
+/// A frame of no quality written to disk gathers each slot's normalization samples as it goes, so
+/// a global normalization reads none of its planes again; the samples are its plane at the
+/// stratified indices, and the norms the resident frames give, bit for bit. Four frames of
+/// independent noise at different gains and offsets, as RGB and as an RGGB mosaic, each 300×240,
+/// past the sample limit for every slot of the RGB frames, and under it for the mosaic's colours.
+#[test]
+fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
+    let size = Size2us::new(300, 240);
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let pixels = |frame: usize, channel: usize| -> Vec<f32> {
+        let mut rng = TestRng::new(frame as u64 * 3 + channel as u64);
+        let gain = 1.0 + 0.25 * frame as f32;
+        (0..size.pixel_count())
+            .map(|index| {
+                let level = 0.2 + 0.1 * channel as f32 + (index % 300) as f32 / 3000.0;
+                level * gain + 0.01 * frame as f32 + 0.01 * (rng.next_f32() - 0.5)
+            })
+            .collect()
+    };
+    let scratch = TempDir::new("normalization_stored_samples");
+    let run_scratch = RunScratch::create(&scratch.join("run")).unwrap();
+    let check = |frames: Vec<StoredFrame>, spilled: Vec<StoredFrame>, dimensions, mosaic| {
+        let slots = Slots::of_frames(&frames, dimensions);
+        for frame in &spilled {
+            let samples = frame
+                .samples
+                .as_ref()
+                .expect("a frame of no quality on disk");
+            assert_eq!(samples.len(), slots.count());
+            for (slot, stored) in samples.iter().enumerate() {
+                let expected = StratifiedSamples::new(dimensions.size(), mosaic, slot)
+                    .gather(frame.channels[slots.channel(slot)].chunk(0, size.pixel_count()));
+                assert_eq!(stored.chunk(0, stored.samples()), expected, "slot {slot}");
+            }
+        }
+        let norms = |frames: &[StoredFrame]| {
+            FrameNorm::measure(
+                frames,
+                dimensions,
+                slots,
+                Normalization::Global,
+                &CancelToken::never(),
+            )
+            .unwrap()
+            .unwrap()
+            .iter()
+            .flat_map(|norm| {
+                norm.slots
+                    .iter()
+                    .map(|slot| (slot.gain.to_bits(), slot.offset.to_bits()))
+            })
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(norms(&frames), norms(&spilled));
+    };
+
+    let rgb = |frame| {
+        LinearImage::from_planar_channels(
+            ImageDimensions::new(size, 3),
+            (0..3)
+                .map(|channel| pixels(frame, channel))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let store = |image: &LinearImage| {
+        StoredFrame::spill(
+            &run_scratch,
+            image,
+            &FrameQuality::None,
+            FrameStats::measure(image),
+        )
+        .unwrap()
+    };
+    check(
+        (0..4)
+            .map(|frame| StackFrame::from(rgb(frame)))
+            .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.source_stats))
+            .collect(),
+        (0..4).map(|frame| store(&rgb(frame))).collect(),
+        ImageDimensions::new(size, 3),
+        None,
+    );
+
+    let mosaic = |frame| make_cfa(size, pixels(frame, 0), rggb);
+    check(
+        (0..4)
+            .map(|frame| {
+                let image = mosaic(frame);
+                let stats = FrameStats::measure(&image);
+                StoredFrame::from_memory(image, FrameQuality::None, stats)
+            })
+            .collect(),
+        (0..4)
+            .map(|frame| {
+                let image = mosaic(frame);
+                StoredFrame::spill(
+                    &run_scratch,
+                    &image,
+                    &FrameQuality::None,
+                    FrameStats::measure(&image),
+                )
+                .unwrap()
+            })
+            .collect(),
+        ImageDimensions::new(size, 1),
+        Some(&rggb),
     );
 }

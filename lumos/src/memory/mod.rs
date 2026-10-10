@@ -80,9 +80,9 @@ pub(crate) fn load_concurrency(
     ((headroom / transient).max(1) as usize).min(max_workers.max(1))
 }
 
-/// Quality planes a frame carries beside its image: `coverage` and `confidence`, one image-sized
-/// plane each. A warp emits them, and so does a decoder that found pixels the source declared no
-/// measurement for — see `registration::resample::WarpResult` and `frame_store::FrameQuality`.
+/// Quality planes a warped frame carries beside its image: `coverage` and `confidence`, one
+/// image-sized plane each, channel-independent — see `registration::resample::WarpResult` and
+/// `frame_store::FrameQuality`.
 pub(crate) const FRAME_QUALITY_PLANES: usize = 2;
 
 /// Image-sized planes the star detector's pool holds at its high-water mark over every preset:

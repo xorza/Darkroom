@@ -1,6 +1,7 @@
 use crate::combine::cache::*;
 use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::config::Weighting;
+use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::Rejection;
 use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
 use crate::frame_store::frame_stats::FrameStats;
@@ -375,20 +376,21 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     };
     let cache = frames(false);
 
-    // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
-    // Residents: 3 channels × (pixels + weight + variance), and the dispersion when asked for.
+    // Inputs: 3 frames × 3 channels, a chunk of each read for every channel, plus the coverage +
+    // confidence pair frames 1 and 2 each carry. Residents: 3 channels × (pixels + weight +
+    // variance), the coverage plane the gather writes, and the dispersion when asked for.
     assert_eq!(
         cache.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
-            resident_bytes: 9 * 4,
+            input_bytes: 13 * 4,
+            resident_bytes: 10 * 4,
         }
     );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
-            resident_bytes: 12 * 4,
+            input_bytes: 13 * 4,
+            resident_bytes: 13 * 4,
         }
     );
 
@@ -396,35 +398,48 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     assert_eq!(
         cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
+            input_bytes: 13 * 4,
             resident_bytes: 3 * 4,
         }
     );
 
-    // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
-    // accumulating to the combine's residents.
-    assert_eq!(
-        cache.coverage_layout(QualityPlanes::STANDARD, false),
-        ChunkMemoryLayout {
-            input_bytes: 2 * 4,
-            resident_bytes: 10 * 4,
-        }
-    );
-
     // A frame with flags is read a byte a pixel, and the output flag plane it gives the stack is
-    // held a byte a pixel through both passes.
+    // held a byte a pixel.
     let flagged = frames(true);
     assert_eq!(
         flagged.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4 + 1,
-            resident_bytes: 9 * 4 + 1,
+            input_bytes: 13 * 4 + 1,
+            resident_bytes: 10 * 4 + 1,
         }
     );
+
+    // A frame whose source declared a null is a mask of its flags: its three channels and the
+    // flag byte its mask reads, 3 × 4 + 1, with no quality plane. Three of them give the stack a
+    // coverage plane and a flag plane.
+    let masked = FrameCache::from_stack_frames(
+        (0..3)
+            .map(|_| {
+                let mut image = image();
+                image.flags = PixelFlags::from_fn(Size2us::new(2, 1), |index| {
+                    if index == 1 {
+                        QualityFlags::NO_DATA
+                    } else {
+                        QualityFlags::default()
+                    }
+                });
+                StackFrame::from(image)
+            })
+            .collect(),
+        Normalization::None,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("frames are valid");
     assert_eq!(
-        flagged.coverage_layout(QualityPlanes::STANDARD, true),
+        masked.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 2 * 4,
+            input_bytes: 3 * (3 * 4 + 1),
             resident_bytes: 10 * 4 + 1,
         }
     );

@@ -25,10 +25,11 @@ use crate::combine::CANCEL_POLL_CHUNK;
 use crate::combine::cache::slots::Slots;
 use crate::combine::config::Normalization;
 use crate::combine::error::StackError;
-use crate::combine::normalization::common_domain::CommonDomain;
+use crate::combine::normalization::common_domain::{CommonDomain, WORD_BITS};
 use crate::combine::normalization::photometric_gain::{paired_photometric_gain, sample_stats};
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
@@ -125,12 +126,6 @@ struct PlaneMeasurement {
     samples: Vec<f32>,
 }
 
-/// Paired samples the gain fit of a slot runs on, at most: a stratified 65 536 of its measured
-/// pixels.
-const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
-
-/// Pixels per word of the common-domain mask.
-const WORD_BITS: usize = u64::BITS as usize;
 const _: () = assert!(
     CANCEL_POLL_CHUNK.is_multiple_of(WORD_BITS),
     "a gather chunk starts on a mask word"
@@ -139,10 +134,9 @@ const _: () = assert!(
 /// The pixels one slot is measured over.
 #[derive(Debug)]
 enum SlotPixels<'a> {
-    /// Every pixel of its channel, each frame covering all of them.
-    Everywhere,
-    /// The photosites of one colour of a mosaic, each frame covering all of them.
-    Colour(CommonDomain),
+    /// Every pixel of the slot — a channel's, or a colour's photosites — each frame covering all of
+    /// them, sampled the way a frame on disk sampled itself.
+    Everywhere(StratifiedSamples),
     /// The pixels every frame covers.
     Common(&'a CommonDomain),
     /// The photosites of one colour among the pixels every frame covers.
@@ -152,48 +146,53 @@ enum SlotPixels<'a> {
 impl<'a> SlotPixels<'a> {
     /// Each slot's pixels: its channel's, or its colour's photosites, among the pixels every frame
     /// covers when `domain` holds them.
+    ///
+    /// # Errors
+    /// [`StackError::NoCommonCoverage`] when a slot has no pixel to measure.
     fn of_slots(
         slots: Slots,
         domain: Option<&'a CommonDomain>,
         dimensions: ImageDimensions,
         cancel: &CancelToken,
     ) -> Result<ArrayVec<Self, 3>, StackError> {
+        let mosaic = slots.mosaic();
         (0..slots.count())
-            .map(|slot| {
-                let Some(cfa_type) = slots.mosaic() else {
-                    return Ok(domain.map_or(Self::Everywhere, Self::Common));
-                };
-                let colour = CommonDomain::of_colour(
+            .map(|slot| match (domain, &mosaic) {
+                (None, mosaic) => {
+                    let samples = StratifiedSamples::new(dimensions.size(), mosaic.as_ref(), slot);
+                    if samples.len() == 0 {
+                        return Err(StackError::NoCommonCoverage);
+                    }
+                    Ok(Self::Everywhere(samples))
+                }
+                (Some(domain), None) => Ok(Self::Common(domain)),
+                (Some(domain), Some(cfa_type)) => Ok(Self::CommonColour(CommonDomain::of_colour(
                     domain,
                     dimensions.size(),
-                    &cfa_type,
+                    cfa_type,
                     slot as u8,
                     cancel,
-                )?;
-                Ok(match domain {
-                    Some(_) => Self::CommonColour(colour),
-                    None => Self::Colour(colour),
-                })
+                )?)),
             })
             .collect()
-    }
-
-    /// The pixels sampled; `None` for every pixel.
-    const fn sampled(&self) -> Option<&CommonDomain> {
-        match self {
-            Self::Everywhere => None,
-            Self::Colour(domain) | Self::CommonColour(domain) => Some(domain),
-            Self::Common(domain) => Some(domain),
-        }
     }
 
     /// The pixels a median is measured over again, when the frames do not all cover every pixel;
     /// `None` when the statistics measured on each source at load describe the pixels combined.
     const fn shared(&self) -> Option<&CommonDomain> {
         match self {
-            Self::Everywhere | Self::Colour(_) => None,
+            Self::Everywhere(_) => None,
             Self::CommonColour(domain) => Some(domain),
             Self::Common(domain) => Some(domain),
+        }
+    }
+
+    /// The sampled pixel indices, ascending.
+    fn indices(&self, cancel: &CancelToken) -> Result<Vec<usize>, StackError> {
+        match self {
+            Self::Everywhere(samples) => Ok(samples.indices().collect()),
+            Self::Common(domain) => stratified_indices(domain, cancel),
+            Self::CommonColour(domain) => stratified_indices(domain, cancel),
         }
     }
 }
@@ -400,20 +399,32 @@ fn global_norms(
     let slot_count = pixels.len();
     let indices = pixels
         .iter()
-        .map(|pixels| stratified_indices(pixel_count, pixels.sampled(), cancel))
+        .map(|pixels| pixels.indices(cancel))
         .collect::<Result<ArrayVec<_, 3>, StackError>>()?;
+    let measure = |frame: usize, slot: usize, median: &mut RadixMedian| {
+        if let (SlotPixels::Everywhere(_), Some(samples)) = (&pixels[slot], &frames[frame].samples)
+        {
+            let samples = &samples[slot];
+            debug_assert_eq!(samples.samples(), indices[slot].len());
+            return Ok(PlaneMeasurement {
+                median: None,
+                samples: samples.chunk(0, samples.samples()).to_vec(),
+            });
+        }
+        measure_plane(
+            planes.plane(frame, slot),
+            pixel_count,
+            pixels[slot].shared(),
+            &indices[slot],
+            median,
+            cancel,
+        )
+    };
     let reference_slots = (0..slot_count)
         .into_par_iter()
         .map(|slot| {
             let frame = &frames[reference];
-            let measured = measure_plane(
-                planes.plane(reference, slot),
-                pixel_count,
-                pixels[slot].shared(),
-                &indices[slot],
-                &mut RadixMedian::default(),
-                cancel,
-            )?;
+            let measured = measure(reference, slot, &mut RadixMedian::default())?;
             Ok(ReferenceSlot {
                 median: measured.median.unwrap_or(frame.source_stats.medians[slot]),
                 stats: sample_stats(&measured.samples, cancel)?,
@@ -438,14 +449,7 @@ fn global_norms(
                 return Ok(SlotNorm::IDENTITY);
             }
             let frame = &frames[frame_index];
-            let measured = measure_plane(
-                planes.plane(frame_index, slot),
-                pixel_count,
-                pixels[slot].shared(),
-                &indices[slot],
-                median,
-                cancel,
-            )?;
+            let measured = measure(frame_index, slot, median)?;
             let median = measured.median.unwrap_or(frame.source_stats.medians[slot]);
             let reference = &reference_slots[slot];
             let gain = paired_photometric_gain(
@@ -536,21 +540,15 @@ fn for_each_in_domain(
     Ok(())
 }
 
-/// Up to [`PHOTOMETRIC_SAMPLE_LIMIT`] pixel indices, ascending and evenly spread by rank over the
-/// measured pixels — every pixel, or those `domain` holds: the `k`-th of `m` is the one of rank
-/// `⌊k·n/m⌋` among the `n`. Drawn by rank within a colour's own photosites, a sample cannot alias
-/// with the mosaic.
+/// Up to [`SAMPLE_LIMIT`] pixel indices, ascending and evenly spread by rank over the pixels
+/// `domain` holds, as [`StratifiedSamples`] spreads them over every pixel: the `k`-th of `m` is the
+/// one of rank `⌊k·n/m⌋` among the `n`.
 fn stratified_indices(
-    pixel_count: usize,
-    domain: Option<&CommonDomain>,
+    domain: &CommonDomain,
     cancel: &CancelToken,
 ) -> Result<Vec<usize>, StackError> {
-    let Some(domain) = domain else {
-        let retained = pixel_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
-        return Ok((0..retained).map(|k| k * pixel_count / retained).collect());
-    };
     let sample_count = domain.sample_count;
-    let retained = sample_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
+    let retained = sample_count.min(SAMPLE_LIMIT);
     let mut indices = Vec::with_capacity(retained);
     let mut rank = 0;
     // The mask is one row, so word `w` covers pixels `64w..64w + 64`; the cancel poll runs per

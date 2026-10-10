@@ -145,13 +145,6 @@ impl Libraw {
         Some(unsafe { slice::from_raw_parts(image.as_ptr(), len) })
     }
 
-    /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
-    /// and some cameras its size table identifies. Settled by the open, before `unpack`.
-    pub(super) fn zero_is_bad(&self) -> bool {
-        // SAFETY: the handle is valid and open; the shim only reads.
-        unsafe { sys::libraw_lumos_zero_is_bad(self.handle.as_ptr()) != 0 }
-    }
-
     /// Run LibRaw's own processing under [`Self::params_mut`] and take the image it makes.
     ///
     /// # Errors

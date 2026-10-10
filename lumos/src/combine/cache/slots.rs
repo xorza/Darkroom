@@ -15,7 +15,7 @@ pub(crate) struct Slots {
 
 impl Slots {
     pub(crate) fn new(cfa_type: Option<CfaType>, channels: usize) -> Self {
-        let mosaic = cfa_type.filter(|cfa| matches!(cfa, CfaType::Bayer(_) | CfaType::XTrans(_)));
+        let mosaic = cfa_type.filter(CfaType::is_mosaic);
         Self {
             mosaic,
             count: mosaic.map_or(channels, |cfa| cfa.num_colors()),

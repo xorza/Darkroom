@@ -134,9 +134,6 @@ fn frame_info(libraw: &Libraw) -> Result<CfaFrameInfo, RawError> {
     Ok(CfaFrameInfo {
         dimensions: ImageDimensions::new(layout.active, 1),
         cfa_type,
-        // Only a `zero_is_bad` camera reports photosites with no measurement, and the identified
-        // camera settles that before a pixel is read.
-        may_carry_nulls: libraw.zero_is_bad(),
         // The file LibRaw parses in place, and the raw buffer it unpacks into, both held while
         // the frame is normalized out of them.
         decoder_bytes: libraw.file_len() + layout.raw.pixel_count() * size_of::<u16>(),

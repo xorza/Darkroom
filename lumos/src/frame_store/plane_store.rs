@@ -21,6 +21,10 @@ pub(crate) trait PlaneStore {
 
     fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError>;
 
+    /// One slot's stratified samples of a frame — see
+    /// [`StratifiedSamples`](crate::frame_store::stratified_samples::StratifiedSamples).
+    fn store_samples(&self, slot: usize, samples: &[f32]) -> Result<StoredPlane, FrameStoreError>;
+
     /// One channel's nodes of a frame's flat gain grid.
     fn store_gain(&self, channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError>;
 }

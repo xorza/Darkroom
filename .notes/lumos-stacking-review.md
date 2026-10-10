@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–8 are done and committed. Every finding below was re-checked against the code after
+Batches 1–9 are done and committed. Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -44,51 +44,19 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-9 ── 14 ── 15
-      └─── 16
-9, 14 ── 22
+14 ── 15
+ ├─── 16
+ └─── 22
 10, 11, 13, 17, 24, 26   independent
 12 ── 23 ── 27
 18 ── 19
 21 ── 20 ── 25
 ```
 
-- 9 before 14: drizzled frames add a per-pixel weight plane to the gather 9 restructures.
 - 14 before 15 and 16: CFA drizzle and the scatter rework build on the per-frame drizzle.
-- 9 and 14 before 22: the hot-loop rework is done on the final gather.
+- 14 before 22: the hot-loop rework is done on the final gather, which reads the drizzle weight.
 - 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
-
----
-
-## Batch 9: Combine I/O passes — medium-high (performance, bit-identical)
-
-**Findings:** PIP-2, PIP-3 / CMB-8, PIP-27, PIP-7. An RGB warped spilled light is read about
-18.75 plane-equivalents in the combine phase against 5.25 needed.
-
-**Design:**
-1. **PIP-2:** `process_chunks` runs chunk-outer, channel-inner. Each chunk gathers the frames'
-   coverage, confidence, flag and flat-gain slices once and reduces every channel against them.
-   `ChunkMemoryLayout::input_bytes` per frame becomes
-   `(channels + quality planes) · 4 + flags + gain` bytes per pixel.
-2. **PIP-3 / CMB-8:** the gather writes `covered / frame_count` into the coverage plane on the
-   first channel of each chunk. Delete the coverage pass in `finish_product` and
-   `coverage_layout`.
-3. **PIP-3:** `CommonDomain` is built in parallel: per-frame word masks, then an AND-reduce in
-   index order.
-4. **PIP-27:** the no-domain normalization samples depend only on `pixel_count`. `FrameStats`
-   gathers them at measure time, while the frame is in RAM, and the sidecar carries them. Charge
-   the samples' bytes in the memory plan.
-5. **PIP-7:** add `FrameQuality::Mask`: coverage = confidence = valid, from the frame's flags
-   (`RESAMPLE_EXCLUDED` for a registered reference, `NO_DATA` otherwise). The gather reads the
-   flag byte instead of two f32 planes.
-
-**Tests:** the tier sweep `disk_tier_output_is_bit_identical_to_memory_tier` and
-`ram_and_streaming_tiers_produce_identical_stacks` stay green with unchanged pins. Add a
-chunk-layout unit test that pins the per-frame input bytes for an RGB warped frame at
-`3·4 + 2·4 + 1 + gain` and a mask frame at `C·4 + 1`.
-
-**Acceptance:** characterization pins unchanged (bit identical).
 
 ---
 
