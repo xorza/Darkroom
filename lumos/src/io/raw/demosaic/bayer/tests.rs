@@ -1,8 +1,11 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::prelude::*;
+use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
@@ -159,6 +162,11 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
     assert_eq!(run(1), run(parallel_threads));
 }
 
+/// What a few f32 roundings of each RCD step leave of a value: 2⁻²¹, eight units in its last
+/// place. On a field RCD reconstructs exactly in exact arithmetic — a constant, a linear ramp, the
+/// two sides of an edge — every output stays within it.
+const ROUNDING: f32 = 1.0 / (1 << 21) as f32;
+
 /// Demosaic `data` laid out as `size` under `pattern`, with no margins.
 fn demosaic(data: &[f32], size: Size2us, pattern: CfaPattern) -> [Vec<f32>; 3] {
     rcd::demosaic(&make_bayer(data, size, pattern), &CancelToken::never()).unwrap()
@@ -178,10 +186,9 @@ fn mosaic(size: Size2us, pattern: CfaPattern, scene: impl Fn(Vec2us, usize) -> f
 /// comes back as itself at every pixel, the interpolated border included, and each native sample
 /// exactly.
 ///
-/// The ratio correction scales by `2·lpf / (EPS + 2·lpf)`, off by `EPS / (2·lpf)` relative; these
-/// colours put every low-pass value at 2 or above, so each of the two chained corrections is off
-/// by at most 2.5e-6 of a value below 1, plus a few f32 roundings: under 5e-6 together. The border
-/// averages equal neighbours and is exact up to rounding.
+/// The ratio correction is level-free, so a constant colour comes back to a few f32 roundings of
+/// each step: 2⁻²¹ of the value, eight units in the last place, holds them. The border averages
+/// equal neighbours and is exact up to rounding.
 #[test]
 fn constant_colour_reconstructs_on_every_phase() {
     let size = Size2us::new(40, 36);
@@ -197,7 +204,7 @@ fn constant_colour_reconstructs_on_every_phase() {
                     assert_close!(
                         value,
                         colour[channel],
-                        5e-6,
+                        colour[channel] * ROUNDING,
                         "{pattern:?} {colour:?} channel {channel} at {pos:?}: {value}"
                     );
                 }
@@ -251,30 +258,72 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
     }
 }
 
+/// Every native sample comes out as it went in, bit for bit, and every output is finite: through
+/// RCD in each Bayer phase, and through `CfaImage::demosaic` — RCD and Markesteijn at each pass
+/// count — under a camera white balance of red 2.13 and blue 1.71 over green, on a frame of 130
+/// that both kernels tile as well as fill at its border. The kernels read the samples balanced and
+/// write each native one from the input, so no `(x·g)/g` round trip rounds it, and an
+/// interpolated sample is balanced back by its own colour's gain.
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
-    let size = Size2us::new(20, 20);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|i| i as f32 / size.pixel_count() as f32)
-        .collect();
-
-    for pattern in CfaPattern::ALL {
-        let planes = demosaic(&data, size, pattern);
+    let ramp = |size: Size2us| -> Vec<f32> {
+        (0..size.pixel_count())
+            .map(|i| i as f32 / size.pixel_count() as f32)
+            .collect()
+    };
+    let assert_native = |planes: &[Vec<f32>; 3],
+                         data: &[f32],
+                         colour: &dyn Fn(Vec2us) -> usize,
+                         size: Size2us,
+                         case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
             for (index, &value) in plane.iter().enumerate() {
                 assert!(
                     value.is_finite(),
-                    "{pattern:?} channel {channel} at {index} = {value}"
+                    "{case} channel {channel} at {index} = {value}"
                 );
             }
         }
-        for index in 0..size.pixel_count() {
-            let channel = pattern.color_at(size.point_of(index));
+        for (index, &sample) in data.iter().enumerate() {
+            let channel = colour(size.point_of(index));
             assert_eq!(
-                planes[channel][index], data[index],
-                "{pattern:?}: native sample changed at {index}"
+                planes[channel][index].to_bits(),
+                sample.to_bits(),
+                "{case}: native sample changed at {index}"
             );
         }
+    };
+    let size = Size2us::new(20, 20);
+    let data = ramp(size);
+    for pattern in CfaPattern::ALL {
+        assert_native(
+            &demosaic(&data, size, pattern),
+            &data,
+            &|pos| pattern.color_at(pos),
+            size,
+            &format!("{pattern:?}"),
+        );
+    }
+
+    let size = Size2us::new(130, 130);
+    let data = ramp(size);
+    for (cfa_type, passes) in [
+        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
+        (CfaType::Bayer(CfaPattern::Gbrg), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
+    ] {
+        let mut cfa = make_cfa(size, data.clone(), cfa_type);
+        cfa.metadata.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);
+        let image = cfa.demosaic(passes, &CancelToken::never()).unwrap();
+        let planes = [0, 1, 2].map(|channel| image.channel(channel).pixels().to_vec());
+        assert_native(
+            &planes,
+            &data,
+            &|pos| usize::from(cfa_type.color_at(pos)),
+            size,
+            &format!("{cfa_type:?} {passes:?}, balanced"),
+        );
     }
 }
 
@@ -380,109 +429,126 @@ fn rcd_is_the_same_on_every_bayer_phase() {
     }
 }
 
-/// RCD interpolates along an edge, not across it. Rows on both sides of a horizontal edge, and
-/// columns on both sides of a vertical one, keep their side's value in green to the ratio
-/// correction's EPS-level error, where interpolating across the edge — as bilinear does — would
-/// mix in a quarter of the other side: 0.15 here.
+/// RCD interpolates along an edge, not across it: inside the border, every pixel of every channel
+/// on either side of a horizontal or a vertical edge keeps its side's value to [`ROUNDING`], the
+/// two rows or columns at the edge among them, where interpolating across it — as bilinear does —
+/// would mix in a quarter of the other side, 0.15 here.
 #[test]
 fn rcd_interpolates_along_an_edge() {
     fn side(coordinate: usize) -> f32 {
         if coordinate < 16 { 0.8 } else { 0.2 }
     }
     let size = Size2us::new(32, 32);
-    for (name, scene) in [
-        (
-            "horizontal",
-            (|pos: Vec2us, _| side(pos.y)) as fn(Vec2us, usize) -> f32,
-        ),
-        ("vertical", |pos: Vec2us, _| side(pos.x)),
-    ] {
-        let data = mosaic(size, CfaPattern::Rggb, scene);
-        let green = &demosaic(&data, size, CfaPattern::Rggb)[1];
-        for edge in [15, 16] {
-            for along in INTERPOLATED_BORDER..size.width - INTERPOLATED_BORDER {
-                let pos = if name == "horizontal" {
-                    Vec2us::new(along, edge)
-                } else {
-                    Vec2us::new(edge, along)
-                };
-                let value = green[size.index_of(pos)];
-                assert_close!(
-                    value,
-                    side(edge),
-                    1e-5,
-                    "{name} edge, green at {pos:?}: {value}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn rcd_gradient_image_green_smoothness() {
-    // A horizontal gradient should produce a smooth green channel.
-    // No abrupt jumps between adjacent green values in the interior.
-    let size = Size2us::new(32, 16);
-    let data = mosaic(size, CfaPattern::Rggb, |pos, _| {
-        0.1 + 0.8 * (pos.x as f32 / (size.width - 1) as f32)
-    });
-    let green = &demosaic(&data, size, CfaPattern::Rggb)[1];
-
-    let border = 5;
-    for y in border..size.height - border {
-        let mut prev_g = 0.0f32;
-        for x in border..size.width - border {
-            let g = green[y * size.width + x];
-            if x > border {
-                assert!(
-                    g > prev_g - 0.05,
-                    "Green not monotonic at ({x},{y}): {g} < {prev_g} - 0.05"
-                );
-            }
-            prev_g = g;
-        }
-    }
-}
-
-#[test]
-fn rcd_sharp_edge_no_excessive_artifacts() {
-    // A sharp vertical edge at column 16: left half = 0.9, right half = 0.1.
-    // Verify that the transition zone is bounded (no extreme overshoots from
-    // the ratio correction or direction interpolation).
-    let size = Size2us::new(32, 32);
-    let data = mosaic(
-        size,
-        CfaPattern::Rggb,
-        |pos, _| if pos.x < 16 { 0.9 } else { 0.1 },
-    );
-    let planes = demosaic(&data, size, CfaPattern::Rggb);
-    for plane in &planes {
-        for (i, &val) in plane.iter().enumerate() {
-            assert!(val.is_finite(), "pixel {i} is non-finite: {val}");
-        }
-    }
-
-    let border = 5;
-    for y in border..size.height - border {
-        for (range, check) in [
-            (6..11, (|v: f32| v > 0.7) as fn(f32) -> bool),
-            (21..26, |v: f32| v < 0.3),
+    for pattern in CfaPattern::ALL {
+        for (name, across) in [
+            ("horizontal", (|pos: Vec2us| pos.y) as fn(Vec2us) -> usize),
+            ("vertical", |pos: Vec2us| pos.x),
         ] {
-            for x in range {
-                for (c, plane) in planes.iter().enumerate() {
-                    let value = plane[y * size.width + x];
-                    assert!(check(value), "({x},{y}) ch {c}={value}");
+            let data = mosaic(size, pattern, |pos, _| side(across(pos)));
+            let planes = demosaic(&data, size, pattern);
+            for index in 0..size.pixel_count() {
+                let pos = size.point_of(index);
+                if pos
+                    .x
+                    .min(pos.y)
+                    .min(size.width - 1 - pos.x)
+                    .min(size.height - 1 - pos.y)
+                    < INTERPOLATED_BORDER
+                {
+                    continue;
+                }
+                let expected = side(across(pos));
+                for (channel, plane) in planes.iter().enumerate() {
+                    assert_close!(
+                        plane[index],
+                        expected,
+                        expected * ROUNDING,
+                        "{pattern:?} {name} edge, channel {channel} at {pos:?}"
+                    );
                 }
             }
         }
-        let mut prev = 1.0f32;
-        for x in 13..20 {
-            let g = planes[1][y * size.width + x];
-            assert!(
-                g < prev + 0.15,
-                "Edge transition not bounded at ({x},{y}): g={g}, prev={prev}"
-            );
-            prev = g;
+    }
+}
+
+/// A linear ramp `0.1 + 0.015x + 0.01y` comes back as itself inside the border in every channel
+/// and phase: each RCD step is exact on a linear field — a ratio `g·2c/(c + s)` of a neighbour one
+/// pixel off and low-pass values two apart is `(v ± b)·2v/(2v ± 2b) = v` — so only rounding is
+/// left.
+#[test]
+fn rcd_reproduces_a_linear_ramp_inside_the_border() {
+    let size = Size2us::new(48, 40);
+    let ramp = |pos: Vec2us| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
+    for pattern in CfaPattern::ALL {
+        let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), size, pattern);
+        for index in 0..size.pixel_count() {
+            let pos = size.point_of(index);
+            if pos
+                .x
+                .min(pos.y)
+                .min(size.width - 1 - pos.x)
+                .min(size.height - 1 - pos.y)
+                < INTERPOLATED_BORDER
+            {
+                continue;
+            }
+            for (channel, plane) in planes.iter().enumerate() {
+                assert_close!(
+                    plane[index],
+                    ramp(pos),
+                    ramp(pos) * ROUNDING,
+                    "{pattern:?} channel {channel} at {pos:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A flat field comes back as its level at every level, the faint and the signed among them: the
+/// ratio carries no `eps`, which at 1e-5 would have put green 11% low at red and blue sites,
+/// `8v/(eps + 8v)`. Each sample is the level to one unit in its last place.
+#[test]
+fn rcd_returns_a_flat_field_at_any_level() {
+    let size = Size2us::new(32, 24);
+    for pattern in CfaPattern::ALL {
+        for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2] {
+            let planes = demosaic(&vec![level; size.pixel_count()], size, pattern);
+            for (channel, plane) in planes.iter().enumerate() {
+                for &value in plane {
+                    assert_close!(
+                        value,
+                        level,
+                        level.abs() * f32::EPSILON,
+                        "{pattern:?} level {level} channel {channel}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// RCD is odd: every step is a ratio, a difference, an absolute value or a square, so the
+/// negated mosaic demosaics to the negated output, bit for bit — a signed field, as calibration
+/// leaves the background, is treated as its mirror is.
+#[test]
+fn rcd_is_odd() {
+    let size = Size2us::new(40, 32);
+    let mut rng = TestRng::new(11);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|_| 0.02 * (rng.next_f32() - 0.5))
+        .collect();
+    let negated: Vec<f32> = data.iter().map(|&value| -value).collect();
+    for pattern in CfaPattern::ALL {
+        let planes = demosaic(&data, size, pattern);
+        let mirrored = demosaic(&negated, size, pattern);
+        for (channel, (plane, mirror)) in planes.iter().zip(&mirrored).enumerate() {
+            for (index, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
+                assert_eq!(
+                    (-value).to_bits(),
+                    negative.to_bits(),
+                    "{pattern:?} channel {channel} at {index}"
+                );
+            }
         }
     }
 }

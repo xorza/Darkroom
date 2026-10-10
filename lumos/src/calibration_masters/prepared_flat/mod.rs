@@ -11,7 +11,7 @@ use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::flat_gain::FlatGain;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::vec2us::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
@@ -74,39 +74,20 @@ impl PreparedFlat {
         self.floored
     }
 
-    /// Divide `image` by the flat and record it, with the gain that scaled its noise; flag
-    /// [`QualityFlags::NO_DATA`] where the flat holds no measurement, and
-    /// [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor.
-    pub(crate) fn apply(&self, image: &mut CfaImage) {
+    /// Whether the divisor sits at its floor at `index`.
+    pub(crate) fn is_floored(&self, index: usize) -> bool {
+        self.divisor.data.pixels()[index] <= MIN_NORMALIZED_FLAT
+    }
+
+    /// Record in `image`, divided by this flat, that it lost the flat, and the gain that scaled its
+    /// noise.
+    pub(crate) fn record(&self, image: &mut CfaImage) {
         debug_assert!(
             !image.metadata.calibration.flat,
             "the flat is divided out twice"
         );
-        let flat = &self.divisor;
-        assert!(
-            image.data.width() == flat.data.width() && image.data.height() == flat.data.height(),
-            "Flat dimensions mismatch: {}x{} vs {}x{}",
-            image.data.width(),
-            image.data.height(),
-            flat.data.width(),
-            flat.data.height()
-        );
-
-        image
-            .data
-            .par_iter_mut()
-            .zip(flat.data.par_iter())
-            .for_each(|(pixel, divisor)| *pixel /= divisor);
-        image.take_master_flags(flat);
         image.metadata.calibration = image.metadata.calibration.union(CalibrationState::FLAT);
         image.metadata.flat_gain = Some(Arc::clone(&self.gain));
-        if self.floored > 0 {
-            let divisors = flat.data.pixels();
-            let size = image.size();
-            PixelFlags::add_where(&mut image.flags, size, QualityFlags::FLAT_FLOOR, |index| {
-                divisors[index] <= MIN_NORMALIZED_FLAT
-            });
-        }
     }
 }
 

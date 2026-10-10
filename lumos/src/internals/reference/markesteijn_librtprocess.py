@@ -6,6 +6,10 @@ the FNV-1a 64 digest of the output's interior: the three planes in order, rows f
 count's border to `HEIGHT` less it, the same columns, each f32's little-endian bytes. Outside that
 band librtprocess reads colours it never computed, and lumos fills the border from neighbours.
 
+The harness writes each native sample as the input holds it, as lumos does: librtprocess takes
+it from the mean of the chosen directions, which rounds it where three or more are chosen. Every
+interpolated sample is compared as librtprocess makes it.
+
 Two lines are changed. The loop that fills red and blue for 2x2 blocks of green runs to the
 direction count in steps of two, so one pass, of four directions, fills two and leaves the others'
 red and blue at zero (LibRaw issue 441); the harness runs it over all four. And the tile is one
@@ -21,12 +25,12 @@ operations, so their samples are the same bits on every platform.
 Run: python3 markesteijn_librtprocess.py (needs g++ and network access).
 """
 
+import array
 import pathlib
 import subprocess
+import sys
 import tempfile
 import urllib.request
-
-import numpy as np
 
 COMMIT = "9a858270acb2096e2e403d932760ee688fcac425"
 FILES = [
@@ -106,7 +110,11 @@ int main() {
             }
             markesteijn_demosaic(W, H, rows.data(), rr.data(), gr.data(), br.data(), PATTERN, rgb_cam,
                                  [](double) { return false; }, passes, false, 1, false);
-            for (auto *plane : {&r, &g, &b}) std::fwrite(plane->data(), sizeof(float), plane->size(), stdout);
+            // Each native sample as the input holds it, as lumos writes it.
+            std::vector<float> *planes[3] = {&r, &g, &b};
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x) (*planes[PATTERN[y % 6][x % 6]])[y * W + x] = raw[y * W + x];
+            for (auto *plane : planes) std::fwrite(plane->data(), sizeof(float), plane->size(), stdout);
         }
     }
 }
@@ -142,13 +150,24 @@ def main():
             check=True,
         )
         output = subprocess.run([str(root / "harness")], capture_output=True, check=True).stdout
-    planes = np.frombuffer(output, dtype="<f4").reshape(2, 4, 3, HEIGHT, WIDTH)
+    samples = array.array("f")
+    samples.frombytes(output)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    plane = WIDTH * HEIGHT
     for index, passes in enumerate([1, 3]):
         border = BORDERS[passes]
         row = []
         for scene in range(4):
-            interior = planes[index, scene, :, border : HEIGHT - border, border : WIDTH - border]
-            row.append(f"0x{fnv1a64(np.ascontiguousarray(interior).tobytes()):016x}")
+            interior = array.array("f")
+            for channel in range(3):
+                start = ((index * 4 + scene) * 3 + channel) * plane
+                for y in range(border, HEIGHT - border):
+                    line = start + y * WIDTH
+                    interior.extend(samples[line + border : line + WIDTH - border])
+            if sys.byteorder != "little":
+                interior.byteswap()
+            row.append(f"0x{fnv1a64(interior.tobytes()):016x}")
         print(f"[{', '.join(row)}],")
 
 

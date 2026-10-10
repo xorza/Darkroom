@@ -12,7 +12,8 @@ pub(crate) trait PlaneStore {
     fn store_channel(&self, channel: usize, pixels: &[f32])
     -> Result<StoredPlane, FrameStoreError>;
 
-    /// A quality plane: [`FramePlane::Coverage`] or [`FramePlane::Confidence`].
+    /// A quality plane: [`FramePlane::Coverage`], [`FramePlane::Confidence`] or
+    /// [`FramePlane::DropWeight`].
     fn store_quality(
         &self,
         plane: FramePlane,
@@ -20,6 +21,10 @@ pub(crate) trait PlaneStore {
     ) -> Result<StoredPlane, FrameStoreError>;
 
     fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError>;
+
+    /// One slot's stratified samples of a frame — see
+    /// [`StratifiedSamples`](crate::frame_store::stratified_samples::StratifiedSamples).
+    fn store_samples(&self, slot: usize, samples: &[f32]) -> Result<StoredPlane, FrameStoreError>;
 
     /// One channel's nodes of a frame's flat gain grid.
     fn store_gain(&self, channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError>;

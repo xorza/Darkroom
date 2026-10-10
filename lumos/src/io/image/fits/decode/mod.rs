@@ -246,7 +246,6 @@ pub(crate) fn fits_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,
-        may_carry_nulls: selected.plan.may_carry_nulls(),
         decoder_bytes: 0,
     })
 }

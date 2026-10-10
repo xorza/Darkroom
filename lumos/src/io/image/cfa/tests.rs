@@ -4,6 +4,7 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::rewrite_fits;
 use crate::internals::test_rng::TestRng;
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::*;
 use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
@@ -26,6 +27,34 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     nulls[5] = f32::NAN;
     let mut cfa = make_cfa(size, pixels, CfaType::Mono);
     cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
+
+    // A repaired null is flagged so, and a second repair leaves it as it is, though a neighbour
+    // moved: the repair has one owner, and the demosaic does not repair it again.
+    let mut repaired = cfa.clone();
+    repaired.repair_nulls();
+    assert_eq!(repaired.data[5], 0.5);
+    assert_eq!(
+        repaired.flags.as_ref().unwrap().at(5),
+        QualityFlags::NO_DATA.union(QualityFlags::REPAIRED)
+    );
+    repaired.data[4] = 0.25;
+    repaired.repair_nulls();
+    assert_eq!(repaired.data[5], 0.5);
+    repaired.data[5] = 0.75;
+    repaired.metadata.calibration = CalibrationState::FLAT;
+    let calibrated = repaired
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(calibrated.channel(0).pixels()[5], 0.75);
+
+    // A calibrated frame read back from FITS holds the decoder's fill under its null, which the
+    // file does not flag repaired (see the round trip below): the demosaic repairs it.
+    let mut reloaded = cfa.clone();
+    reloaded.metadata.calibration = CalibrationState::FLAT;
+    let reloaded = reloaded
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(reloaded.channel(0).pixels()[5], 0.5);
 
     let demosaiced = cfa
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
@@ -53,14 +82,16 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
 
 /// Every flag survives the trip. `NO_DATA` goes back as NaN, the blank of the float `BITPIX`, so
 /// any reader finds it; without it the repaired sample would reload as a measurement. All of them
-/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`.
+/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`,
+/// but a null's `REPAIRED`: the NaN, not the repair, is what the file holds there.
 ///
-/// The 3×2 plane holds, row-major: nothing, `NO_DATA`, `SATURATED | DEFECT` (2 + 4 = 6), nothing,
-/// `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32).
+/// The 3×2 plane holds, row-major: nothing, `NO_DATA | REPAIRED` (1 + 16 = 17), `SATURATED |
+/// DEFECT` (2 + 4 = 6), nothing, `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32). It
+/// reloads with the null `NO_DATA` alone, 1.
 #[test]
 fn a_masters_flags_survive_the_fits_round_trip() {
     let size = Size2us::new(3, 2);
-    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let bytes = [0u8, 17, 6, 0, 24, 32];
     let cfa = |bytes: [u8; 6]| CfaImage {
         data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
         cfa_type: CfaType::Mono,
@@ -80,7 +111,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     cfa(bytes).save_fits(&path).unwrap();
     assert_eq!(hdu_count(&path), 2);
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &bytes);
+    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 6, 0, 24, 32]);
     assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".
@@ -90,12 +121,11 @@ fn a_masters_flags_survive_the_fits_round_trip() {
         [0.1f32, 0.3, 0.4, 0.5, 0.6]
     );
 
-    let nulls_only = [0u8, 1, 0, 0, 0, 0];
     let nulls_path = dir.join("nulls.fits");
-    cfa(nulls_only).save_fits(&nulls_path).unwrap();
+    cfa([0u8, 17, 0, 0, 0, 0]).save_fits(&nulls_path).unwrap();
     assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
     let loaded = CfaImage::from_file(&nulls_path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &nulls_only);
+    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 0, 0, 0, 0]);
 }
 
 /// A flat gain survives the trip in its `LUMGAIN` extension, node for node, so a light saved after
@@ -571,14 +601,18 @@ fn data_len() {
     assert_eq!(img.metadata.quantization_sigma, None);
 }
 
-/// LibRaw's `filters` and `colors` classify a sensor: one colour is mono whatever the word says,
-/// `filters == 0` with three colours is a linear DNG, sRAW or Foveon that LibRaw processes itself,
+/// LibRaw's `filters`, `colors` and `cdesc` classify a sensor: one colour is mono whatever the word
+/// says, `filters == 0` with three colours is a linear DNG or sRAW that LibRaw processes itself,
 /// `9` is X-Trans with the pattern LibRaw keeps apart, a 2-row-periodic word is Bayer, and any
-/// other word is an exotic CFA that LibRaw processes too.
+/// other word is an exotic CFA that LibRaw processes too. Four colours are no RGB mosaic whatever
+/// the word: the Sony DSC-F828's `0x9c9c9c9c` reads R, E / G, B (emerald where a Bayer phase has
+/// green) and the Nikon E950's CMYG `0x1e1e1e1e` reads as BGGR's phases; LibRaw describes them
+/// `RGBE` and `CMYG`, with four colours.
 #[test]
 fn from_libraw_classifies_the_sensor() {
     let xtrans = *XTRANS_PATTERN.rows();
-    let classify = |filters, colors| CfaType::from_libraw(filters, colors, xtrans).unwrap();
+    let classify =
+        |filters, colors| CfaType::from_libraw(filters, colors, *b"RGBG", xtrans).unwrap();
     assert_eq!(classify(0, 1), Some(CfaType::Mono));
     assert_eq!(classify(0x9494_9494, 1), Some(CfaType::Mono));
     assert_eq!(classify(0, 3), None);
@@ -592,11 +626,27 @@ fn from_libraw_classifies_the_sensor() {
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
     assert_eq!(classify(0x1234_5678, 3), None);
+    for (filters, cdesc) in [(0x9c9c_9c9c, *b"RGBE"), (0x1e1e_1e1e, *b"CMYG")] {
+        assert!(
+            CfaPattern::from_filters(filters).is_some(),
+            "{cdesc:?}: the word alone passes for Bayer"
+        );
+        assert_eq!(
+            CfaType::from_libraw(filters, 4, cdesc, xtrans).unwrap(),
+            None,
+            "{cdesc:?}"
+        );
+        assert_eq!(
+            CfaType::from_libraw(filters, 3, cdesc, xtrans).unwrap(),
+            None,
+            "{cdesc:?} described as three colours"
+        );
+    }
     // An X-Trans sensor whose layout is not one is a corrupt file, refused with the reason.
     let mut corrupt = xtrans;
     corrupt[0][0] = 3;
     assert!(matches!(
-        CfaType::from_libraw(9, 3, corrupt),
+        CfaType::from_libraw(9, 3, *b"RGBG", corrupt),
         Err(XTransPatternError::Value {
             row: 0,
             column: 0,
@@ -817,4 +867,57 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
             );
         }
     }
+}
+
+/// The green proxy keeps every green photosite and fills the others from the greens of their 3×3
+/// neighbourhood, weighed 1 beside and 1/√2 on a diagonal, over the mosaic `v = x + 10y`.
+///
+/// RGGB: red (0, 0) has greens (1, 0) and (0, 1) beside it, 1 and 10, so 5.5; blue (1, 1) has
+/// greens 10, 12, 1 and 21 beside it, so 11 — a Bayer site's diagonals are never green. X-Trans:
+/// red (2, 0) has greens (1, 0) and (3, 0) beside it, 1 and 3, and (1, 1) and (3, 1) on its
+/// diagonals, 11 and 13, so `(4 + 24r) / (2 + 2r)` with `r = 1/√2`. A filled photosite carries
+/// the flags of the greens it was filled from, a green its own: green (1, 0) is saturated, and
+/// so are the red (0, 0) and blue (1, 1) it fills, while blue (3, 3), whose greens are (2, 3),
+/// (4, 3), (3, 2) and (3, 4), carries nothing.
+#[test]
+fn the_green_proxy_fills_each_photosite_from_its_greens() {
+    let size = Size2us::new(6, 6);
+    let pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| (index % 6 + 10 * (index / 6)) as f32)
+        .collect();
+    let mut bayer = make_cfa(size, pixels.clone(), CfaType::Bayer(CfaPattern::Rggb));
+    PixelFlags::add_where(&mut bayer.flags, size, QualityFlags::SATURATED, |index| {
+        index == 1
+    });
+    let proxy = bayer.green_proxy();
+    let plane = proxy.channel(0);
+    assert_eq!(plane[(0, 0)], 5.5);
+    assert_eq!(plane[(1, 1)], 11.0);
+    assert_eq!(plane[(1, 0)], 1.0, "a green photosite is kept");
+    let flags = proxy.flags.as_ref().unwrap();
+    for (pixel, expected) in [
+        (1, QualityFlags::SATURATED),
+        (0, QualityFlags::SATURATED),
+        (7, QualityFlags::SATURATED),
+        (21, QualityFlags::default()),
+    ] {
+        assert_eq!(flags.at(pixel), expected, "pixel {pixel}");
+    }
+    assert_eq!(
+        proxy.metadata.provenance.as_ref().map(|p| p.demosaic),
+        bayer
+            .metadata
+            .provenance
+            .as_ref()
+            .map(|_| DemosaicProvenance::GreenProxy)
+    );
+
+    let xtrans = make_cfa(size, pixels, CfaType::XTrans(XTRANS_PATTERN)).green_proxy();
+    let r = FRAC_1_SQRT_2;
+    let expected = ((4.0 + 24.0 * r) / (2.0 + 2.0 * r)) as f32;
+    let actual = xtrans.channel(0)[(2, 0)];
+    assert!(
+        (actual - expected).abs() <= f32::EPSILON * expected,
+        "{actual}, expected {expected}"
+    );
 }

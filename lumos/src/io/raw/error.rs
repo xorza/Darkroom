@@ -47,16 +47,36 @@ pub enum RawError {
     /// A Fuji SuperCCD lays its photosites out 45° to the rows, which neither demosaic reads.
     #[error("a Fuji SuperCCD's 45° photosite layout is not supported")]
     SuperCcd,
+    /// A Phase One IIQ: LibRaw leaves its black in the raw buffer and subtracts it, with its
+    /// per-row and per-column corrections, only in its own processing.
+    #[error(
+        "a Phase One IIQ is not supported: LibRaw subtracts its black only in its own processing"
+    )]
+    PhaseOne,
+    /// A floating-point DNG: LibRaw converts its samples to 16-bit integers on unpack, negatives
+    /// clamped to 0 and the rest truncated.
+    #[error("a floating-point DNG is not supported: LibRaw quantizes it to 16-bit integers")]
+    FloatingPoint,
+    /// A header read of a file whose decoder settles the mosaic only as it decodes — a Raspberry
+    /// Pi or Nokia sensor dump, a Pentax 4-shot: the header's pattern is not the frame's. The file
+    /// loads; its frame has to be decoded to be described.
+    #[error("the decoder settles this file's mosaic as it decodes, which a header read cannot")]
+    MosaicSetAtDecode,
     /// The file's black-level metadata is unusable.
     #[error(transparent)]
     BlackLevel(#[from] BlackLevelError),
     /// The file's X-Trans layout is not one.
     #[error(transparent)]
     XTrans(#[from] XTransPatternError),
-    /// A CFA load of a sensor LibRaw delivers no mosaic for: a linear DNG, sRAW or Foveon, or an
-    /// exotic CFA. Such a file loads as a `LinearImage` through LibRaw's own processing.
+    /// A CFA load of a sensor LibRaw delivers no mosaic for: a linear DNG or sRAW, or an exotic
+    /// CFA. Such a file loads as a `LinearImage` through LibRaw's own processing.
     #[error("not a CFA frame: LibRaw delivers this sensor's image already processed")]
     NotACfaFrame,
+    /// A sensor of four colours — Sony's RGBE, Nikon's CMYG — that lumos does not demosaic, and
+    /// whose colours LibRaw's processing would either hand through as four planes or fold to RGB
+    /// through a camera matrix lumos does not check.
+    #[error("a four-colour sensor ({colours}) is not supported")]
+    FourColourSensor { colours: String },
     /// LibRaw's own processing failed.
     #[error("LibRaw could not process the image: {0}")]
     Process(LibrawCode),

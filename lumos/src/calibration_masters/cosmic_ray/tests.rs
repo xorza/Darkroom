@@ -8,6 +8,7 @@ use crate::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::calibration_masters::cosmic_ray::mono::internals::median_window;
 use crate::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::calibration_masters::cosmic_ray::*;
+use crate::internals::assertions::bits;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::cfa_from_plane;
 use crate::internals::prelude::*;
@@ -375,7 +376,7 @@ fn replace_flagged_matches_a_snapshot_reference() {
     let want = replace_flagged_via_snapshot(&pixels, size, &mask);
 
     let mut got = pixels.clone();
-    replace_flagged(&mut got, size, &mask, &mut Vec::new());
+    replace_flagged(&mut got, size, &mask, None, &mut Vec::new());
 
     assert_eq!(got, want);
     // The fully-masked interior keeps its original value rather than picking up a neighbour.
@@ -533,13 +534,19 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
         ..CosmicRayConfig::default()
     };
     let mut masks = CrMasks::new(size);
-    assert_eq!(masks.detect_and_grow(&significance, &fine, &noise, &cfg), 4);
+    assert_eq!(
+        masks.detect_and_grow(&significance, &fine, &noise, &cfg, None),
+        4
+    );
     let flagged: Vec<usize> = (0..size.pixel_count())
         .filter(|&index| masks.accumulated.get(index))
         .collect();
     assert_eq!(flagged, [at(2, 1), at(3, 1), at(4, 1), at(2, 2)]);
     // A second pass finds nothing new: every pixel it would take is held already.
-    assert_eq!(masks.detect_and_grow(&significance, &fine, &noise, &cfg), 0);
+    assert_eq!(
+        masks.detect_and_grow(&significance, &fine, &noise, &cfg, None),
+        0
+    );
 }
 
 /// Every window median is the value `median_mut` picks from the pixel's replicated window, to the
@@ -597,4 +604,217 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
             }
         }
     }
+}
+
+/// A saturated star's core, a flat top with steep edges, is L.A.Cosmic's classic false positive:
+/// astroscrappy masks a saturated pixel whose 5×5 median passes a tenth of the saturation level,
+/// grown 4 pixels, and so does this pass. A star of σ 1.6 and peak 40 clipped at 0.9 has a core of
+/// 69 pixels to a radius of about 4.4, of which the same frame without its saturation flags marks
+/// 24 cosmic rays at this seed; with them none is, while a hit that saturates a single pixel 14
+/// pixels off, its 5×5 median the sky, is still found and repaired from the sky around it.
+#[test]
+fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
+    let sky = Sky {
+        level: 0.05,
+        noise: 0.003,
+        clamp: false,
+    };
+    let size = Size2us::new(64, 64);
+    let mut data = SkyField::render(size, sky, 1.6, &[(Vec2::new(30.0, 30.0), 40.0)], 11).pixels;
+    let hit = Vec2us::new(44, 30);
+    data[size.index_of(hit)] = 2.0;
+    for value in data.pixels_mut() {
+        *value = value.min(0.9);
+    }
+    let clipped: Vec<usize> = (0..size.pixel_count())
+        .filter(|&index| data.pixels()[index] >= 0.9)
+        .collect();
+    let core: Vec<usize> = clipped
+        .iter()
+        .copied()
+        .filter(|&index| index != size.index_of(hit))
+        .collect();
+    assert_eq!(core.len(), 69);
+    let rejected = |data: Buffer2<f32>, flag: bool| {
+        let mut image = cfa_from_plane(data, CfaType::Mono);
+        if flag {
+            image.flags = PixelFlags::from_fn(size, |index| {
+                if clipped.contains(&index) {
+                    QualityFlags::SATURATED
+                } else {
+                    QualityFlags::default()
+                }
+            });
+        }
+        reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
+        image
+    };
+    let cosmic = |image: &CfaImage, index: usize| {
+        image
+            .flags
+            .as_ref()
+            .is_some_and(|flags| flags.at(index).intersects(QualityFlags::COSMIC_RAY))
+    };
+
+    let unflagged = rejected(data.clone(), false);
+    assert_eq!(
+        core.iter()
+            .filter(|&&index| cosmic(&unflagged, index))
+            .count(),
+        24,
+        "without its flags the core is taken for a hit, or the test tells nothing"
+    );
+
+    let kept = rejected(data, true);
+    for &index in &core {
+        assert!(
+            !cosmic(&kept, index),
+            "core pixel {:?}",
+            size.point_of(index)
+        );
+        assert_eq!(kept.data[index], 0.9);
+    }
+    assert!(cosmic(&kept, size.index_of(hit)));
+    assert!(
+        (kept.data[size.index_of(hit)] - 0.05).abs() < 0.02,
+        "the hit is repaired from the sky: {}",
+        kept.data[size.index_of(hit)]
+    );
+}
+
+/// Each entry of `MEDIAN_EXCESS_SIGMA` is `√(1 + Var(median_n))` for `n` iid unit Gaussians, to
+/// f32: the variance integrated by the trapezoid rule over ±12σ in 48 000 steps, whose error is
+/// far below an f32's. For odd `n` the median is the order statistic `k = (n + 1)/2`, of density
+/// `n!/((k−1)!(n−k)!)·Φᵏ⁻¹(1−Φ)ⁿ⁻ᵏφ`; for even `n` the mean of `j = n/2` and `j + 1`, whose cross
+/// moment integrates `x·y` over their joint density `n!/((j−1)!(n−j−1)!)·Φ(x)ʲ⁻¹(1−Φ(y))ⁿ⁻ʲ⁻¹φ(x)φ(y)`
+/// on `x < y`, the inner integral accumulated as `y` rises. One and two values give 1 and ½.
+#[test]
+fn median_excess_sigma_is_the_integrated_order_statistics() {
+    use crate::calibration_masters::cosmic_ray::xtrans::MEDIAN_EXCESS_SIGMA;
+    use crate::math::error_function::erfc;
+
+    const STEPS: usize = 48_000;
+    let (low, step) = (-12.0f64, 24.0 / STEPS as f64);
+    let x: Vec<f64> = (0..=STEPS).map(|i| low + step * i as f64).collect();
+    let phi: Vec<f64> = x
+        .iter()
+        .map(|&x| (-x * x / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt())
+        .collect();
+    let cdf: Vec<f64> = x
+        .iter()
+        .map(|&x| 0.5 * erfc(-x / std::f64::consts::SQRT_2))
+        .collect();
+    let ln_factorial = |n: usize| (1..=n).map(|k| (k as f64).ln()).sum::<f64>();
+    let trapezoid = |f: &dyn Fn(usize) -> f64| {
+        step * ((1..STEPS).map(f).sum::<f64>() + f64::midpoint(f(0), f(STEPS)))
+    };
+    let second_moment = |n: usize, k: usize| {
+        let c = (ln_factorial(n) - ln_factorial(k - 1) - ln_factorial(n - k)).exp();
+        trapezoid(&|i| {
+            c * cdf[i].powi((k - 1) as i32)
+                * (1.0 - cdf[i]).powi((n - k) as i32)
+                * phi[i]
+                * x[i]
+                * x[i]
+        })
+    };
+    let variance = |n: usize| {
+        if n % 2 == 1 {
+            return second_moment(n, n.div_ceil(2));
+        }
+        let j = n / 2;
+        let c = (ln_factorial(n) - ln_factorial(j - 1) - ln_factorial(n - j - 1)).exp();
+        let mut inner = 0.0;
+        let mut cross = 0.0;
+        let mut previous_inner = x[0] * phi[0] * cdf[0].powi((j - 1) as i32);
+        let mut previous_outer = 0.0;
+        for i in 1..=STEPS {
+            let current = x[i] * phi[i] * cdf[i].powi((j - 1) as i32);
+            inner += step * f64::midpoint(previous_inner, current);
+            previous_inner = current;
+            let outer = c * x[i] * phi[i] * (1.0 - cdf[i]).powi((n - j - 1) as i32) * inner;
+            cross += step * f64::midpoint(previous_outer, outer);
+            previous_outer = outer;
+        }
+        (second_moment(n, j) + second_moment(n, j + 1) + 2.0 * cross) / 4.0
+    };
+    assert!((variance(1) - 1.0).abs() < 1e-9);
+    assert!((variance(2) - 0.5).abs() < 1e-9);
+    for (index, &sigma) in MEDIAN_EXCESS_SIGMA.iter().enumerate() {
+        let n = index + 1;
+        let expected = (1.0 + variance(n)).sqrt() as f32;
+        assert!(
+            (sigma - expected).abs() <= f32::EPSILON * expected,
+            "n = {n}: {sigma} against {expected}"
+        );
+    }
+}
+
+/// The X-Trans path on noise alone flags nothing at the defaults: a 256² mosaic of each colour's
+/// sky, 0.04, 0.05 and 0.06, with white noise of σ 0.003. Its significance is the excess over the
+/// fine same-colour median in that excess's own σ, so `sigclip` 4.5 means the tail it means on the
+/// mono path.
+#[test]
+fn xtrans_noise_alone_flags_nothing() {
+    let cfa = CfaType::XTrans(XTRANS_PATTERN);
+    let size = Size2us::new(256, 256);
+    let mut data: Vec<f32> = (0..size.pixel_count())
+        .map(|index| 0.04 + 0.01 * f32::from(cfa.color_at(size.point_of(index))))
+        .collect();
+    patterns::add_gaussian_noise(&mut data, 0.003, 21);
+    let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data), cfa);
+    let count = reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
+    assert_eq!(count, 0);
+    assert!(image.flags.is_none());
+}
+
+/// Recomputing only the rows a repair can move gives what recomputing every row gives, bit for bit:
+/// a 96² field of noise about a sky of 0.1 with stars and hits of one to nine pixels, which the
+/// detect-and-repair loop takes several passes over, cleaned both ways to the same samples and the
+/// same pixels found.
+#[test]
+fn the_local_recompute_is_the_full_one() {
+    use crate::calibration_masters::cosmic_ray::mono::internals::reject_recomputing;
+
+    let size = Size2us::new(96, 96);
+    let sky = Sky {
+        level: 0.1,
+        noise: 0.01,
+        clamp: false,
+    };
+    let stars = [(Vec2::new(20.0, 70.0), 0.8), (Vec2::new(60.0, 30.0), 0.5)];
+    let mut data = SkyField::render(size, sky, 1.5, &stars, 23).pixels;
+    let mut hits = Vec::new();
+    for (centre, half) in [
+        ((10, 10), 0),
+        ((40, 50), 1),
+        ((75, 75), 1),
+        ((30, 88), 0),
+        ((85, 12), 1),
+    ] {
+        for dy in 0..=2 * half {
+            for dx in 0..=2 * half {
+                hits.push(Vec2us::new(centre.0 + dx - half, centre.1 + dy - half));
+            }
+        }
+    }
+    for &hit in &hits {
+        data[size.index_of(hit)] = 0.9;
+    }
+    let config = CosmicRayConfig::default();
+    let mut local = data.pixels().to_vec();
+    let mut full = data.pixels().to_vec();
+    let found_local = reject_recomputing(&mut local, size, &config, false);
+    let found_full = reject_recomputing(&mut full, size, &config, true);
+    assert!(
+        hits.iter().all(|&hit| found_full.get_at(hit)),
+        "every hit is found"
+    );
+    assert_eq!(
+        found_full.count_ones(),
+        30,
+        "the 29 hit pixels and one the growth takes"
+    );
+    assert_eq!(found_local.words, found_full.words);
+    assert_eq!(bits(&local), bits(&full));
 }

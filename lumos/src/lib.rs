@@ -64,6 +64,7 @@ pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimati
 pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use calibration_masters::defect_map::DefectMap;
 pub use calibration_masters::error::{CalibrationError, DarkMismatch};
+pub use calibration_masters::temperature_source::TemperatureSource;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::calibration_state::CalibrationState;
@@ -174,11 +175,11 @@ pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;
 pub use pipeline::result::{AlignStackResult, AlignmentSummary};
 
-pub use drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+pub use drizzle::accumulator::DrizzleFrame;
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use drizzle::drizzle_result::DrizzleResult;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};
-pub use drizzle::stack::{drizzle_images, drizzle_stack};
+pub use drizzle::stack::{drizzle_cfa_images, drizzle_cfa_stack, drizzle_images, drizzle_stack};
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 

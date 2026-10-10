@@ -106,10 +106,13 @@ impl CacheCore {
     }
 
     /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),
-    /// gather each frame's channel slice for the chunk via
+    /// and every channel within a chunk, gather each frame's channel slice for the chunk via
     /// [`StoredPlane::chunk`](crate::frame_store::stored_plane::StoredPlane::chunk), and hand
     /// `(output_slice, ChunkContext)` to `process`. The frames live in the owning cache, so they're
     /// passed in. Returns the combined `LinearPixels`.
+    ///
+    /// Chunk-outer, so a frame's quality planes and flags, which every channel reads, are read
+    /// from a spilled frame once rather than once per channel.
     pub(super) fn process_chunks<Process>(
         &self,
         frames: &[StoredFrame],
@@ -132,13 +135,12 @@ impl CacheCore {
 
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
 
-        for channel in 0..channel_count {
-            for chunk_idx in 0..num_chunks {
-                let start_row = chunk_idx * chunk_rows;
-                let end_row = (start_row + chunk_rows).min(height);
-                let rows_in_chunk = end_row - start_row;
-                let pixels_in_chunk = rows_in_chunk * width;
-
+        for chunk_idx in 0..num_chunks {
+            let start_row = chunk_idx * chunk_rows;
+            let end_row = (start_row + chunk_rows).min(height);
+            let rows_in_chunk = end_row - start_row;
+            let pixels_in_chunk = rows_in_chunk * width;
+            for channel in 0..channel_count {
                 chunks.clear();
                 chunks.extend(frames.iter().map(|frame| {
                     frame.channels[channel].chunk(start_row * width, end_row * width)
@@ -158,7 +160,7 @@ impl CacheCore {
                 );
 
                 self.progress.report(
-                    channel * num_chunks + chunk_idx + 1,
+                    chunk_idx * channel_count + channel + 1,
                     total_work,
                     StackingStage::Combining,
                 );

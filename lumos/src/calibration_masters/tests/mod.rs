@@ -10,6 +10,7 @@ use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
 use crate::calibration_masters::master_subtraction::Subtractor;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
+use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::combine::config::{Combine, CombineMethod, SmallN, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
@@ -222,6 +223,42 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         );
         assert_eq!(light.data.pixels(), original_data);
         assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+    }
+
+    // A master of another camera is refused when both name theirs, and calibrates when they name
+    // the same one or either names none.
+    let named = |instrument: Option<&str>| {
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.1, CfaType::Mono);
+        master.metadata.instrument = instrument.map(str::to_owned);
+        bundle(CalibrationSet {
+            bias: Some(master),
+            ..CalibrationSet::default()
+        })
+    };
+    let light = |instrument: Option<&str>| {
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.instrument = instrument.map(str::to_owned);
+        light
+    };
+    let mut other = light(Some("Canon EOS 600D"));
+    assert_eq!(
+        named(Some("Canon EOS 6D")).calibrate(&mut other),
+        Err(CalibrationError::InstrumentMismatch {
+            component: MasterRole::Bias,
+            light: "Canon EOS 600D".to_owned(),
+            master: "Canon EOS 6D".to_owned(),
+        })
+    );
+    assert_eq!(other.metadata.calibration, CalibrationState::NONE);
+    for (master, frame) in [
+        (Some("Canon EOS 6D"), Some("Canon EOS 6D")),
+        (None, Some("Canon EOS 6D")),
+        (Some("Canon EOS 6D"), None),
+    ] {
+        assert!(
+            named(master).calibrate(&mut light(frame)).is_ok(),
+            "master {master:?}, light {frame:?}"
+        );
     }
 
     // A master on another declared span converts by the exact ratio of the spans. The light
@@ -715,10 +752,13 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
     });
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
+    // Where a master held no measurement the light holds none either, and calibration repairs it.
     let flags = light.flags.as_ref().unwrap();
     assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
-    assert_eq!(flags.at(5), QualityFlags::NO_DATA);
-    assert_eq!(flags.at(9), QualityFlags::NO_DATA);
+    assert_eq!(flags.count(QualityFlags::REPAIRED), 2);
+    let null = QualityFlags::NO_DATA.union(QualityFlags::REPAIRED);
+    assert_eq!(flags.at(5), null);
+    assert_eq!(flags.at(9), null);
 
     let mut bias = flagged(0.0625, 9, QualityFlags::NO_DATA);
     bias.data[9] = 0.5;
@@ -1246,6 +1286,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
             CfaType::Mono,
         ))),
         defect_map: Some(defects),
+        imposed: None,
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 24 + 128.
     assert_eq!(
@@ -1561,6 +1602,7 @@ fn a_dark_is_matched_to_the_light() {
         separated.calibrate(&mut scaled),
         Ok(CalibrationOutcome {
             dark_scale: Some(2.5),
+            dark_temperature: Some(TemperatureSource::Sensor),
             ..CalibrationOutcome::default()
         })
     );
@@ -1570,7 +1612,10 @@ fn a_dark_is_matched_to_the_light() {
         let mut matched = light(Some(exposure), Some(-10.0));
         assert_eq!(
             separated.calibrate(&mut matched),
-            Ok(CalibrationOutcome::default())
+            Ok(CalibrationOutcome {
+                dark_temperature: Some(TemperatureSource::Sensor),
+                ..CalibrationOutcome::default()
+            })
         );
         assert_eq!(matched.data.pixels(), &[0.3125; 16], "{exposure} s");
     }
@@ -1579,13 +1624,14 @@ fn a_dark_is_matched_to_the_light() {
         Err(CalibrationError::DarkMismatch {
             component: MasterRole::Dark,
             source: DarkMismatch::Temperature {
+                reading: TemperatureSource::Sensor,
                 frame: -8.5,
                 dark: -10.0
             }
         })
     );
     // A condition one side does not state is reported, and recorded on the light.
-    for (exposure, temperature, unverified) in [
+    for (exposure, temperature, unverified, dark_temperature) in [
         (
             None,
             Some(-10.0),
@@ -1593,6 +1639,7 @@ fn a_dark_is_matched_to_the_light() {
                 exposure: true,
                 temperature: false,
             },
+            Some(TemperatureSource::Sensor),
         ),
         (
             Some(120.0),
@@ -1601,6 +1648,7 @@ fn a_dark_is_matched_to_the_light() {
                 exposure: false,
                 temperature: true,
             },
+            None,
         ),
     ] {
         let mut silent = light(exposure, temperature);
@@ -1608,6 +1656,7 @@ fn a_dark_is_matched_to_the_light() {
             separated.calibrate(&mut silent),
             Ok(CalibrationOutcome {
                 unverified,
+                dark_temperature,
                 ..CalibrationOutcome::default()
             })
         );
@@ -1632,6 +1681,7 @@ fn a_dark_is_matched_to_the_light() {
             stacked_calibrated.calibrate(&mut scaled),
             Ok(CalibrationOutcome {
                 dark_scale: Some(2.5),
+                dark_temperature: Some(TemperatureSource::Sensor),
                 ..CalibrationOutcome::default()
             })
         );
@@ -1765,6 +1815,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
         (
             -8.5,
             DarkMismatch::Temperature {
+                reading: TemperatureSource::Sensor,
                 frame: -10.0,
                 dark: -8.5,
             },
@@ -1977,4 +2028,65 @@ fn dark_frames_share_one_exposure_and_temperature() {
             temperature: true,
         }
     );
+}
+
+/// Every flag a calibration sets is counted as it is set, and the counts are what a recount of the
+/// plane finds: a light saturated at one pixel and holding a null at another, against a bias with
+/// no measurement at a third, a dark with a hot pixel, and a flat at its floor at a fourth, is
+/// left with `SATURATED`, `NO_DATA`, `REPAIRED`, `DEFECT` and `FLAT_FLOOR`, each where its cause
+/// is, and the counts agree with the bytes.
+#[test]
+fn calibration_counts_its_flags_as_it_sets_them() {
+    let size = Size2us::new(16, 16);
+    let at = |x: usize, y: usize| y * size.width + x;
+    let mut bias = constant_cfa(size, 0.0625, CfaType::Mono);
+    bias.flags = PixelFlags::from_fn(size, |index| {
+        if index == at(4, 4) {
+            QualityFlags::NO_DATA
+        } else {
+            QualityFlags::default()
+        }
+    });
+    let mut dark = constant_cfa(size, 0.125, CfaType::Mono);
+    dark.data[at(8, 8)] = 0.9;
+    let mut flat = constant_cfa(size, 0.5, CfaType::Mono);
+    flat.data[at(12, 3)] = 0.01;
+    let masters = bundle(CalibrationSet {
+        dark: Some(dark),
+        flat: Some(flat),
+        bias: Some(bias),
+        flat_dark: None,
+    });
+    let mut light = constant_cfa(size, 0.5, CfaType::Mono);
+    light.data[at(2, 10)] = 0.99;
+    light.flags = PixelFlags::from_fn(size, |index| {
+        if index == at(10, 12) {
+            QualityFlags::NO_DATA
+        } else {
+            QualityFlags::default()
+        }
+    });
+    masters.calibrate(&mut light).unwrap();
+
+    let flags = light.flags.as_ref().unwrap();
+    let bytes = flags.bytes();
+    for flag in [
+        QualityFlags::NO_DATA,
+        QualityFlags::SATURATED,
+        QualityFlags::DEFECT,
+        QualityFlags::REPAIRED,
+        QualityFlags::FLAT_FLOOR,
+    ] {
+        let recount = bytes
+            .iter()
+            .filter(|&&byte| QualityFlags::from_byte(byte).intersects(flag))
+            .count();
+        assert!(recount > 0, "{flag:?} was set somewhere");
+        assert_eq!(flags.count(flag), recount, "{flag:?}");
+    }
+    assert!(flags.at(at(2, 10)).intersects(QualityFlags::SATURATED));
+    assert!(flags.at(at(4, 4)).intersects(QualityFlags::NO_DATA));
+    assert!(flags.at(at(10, 12)).intersects(QualityFlags::REPAIRED));
+    assert!(flags.at(at(8, 8)).intersects(QualityFlags::DEFECT));
+    assert!(flags.at(at(12, 3)).intersects(QualityFlags::FLAT_FLOOR));
 }

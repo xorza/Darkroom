@@ -1,3 +1,4 @@
+use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Combine, Normalization, SmallN};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
@@ -231,14 +232,15 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
             // With no memory at all the floor holds the whole 30-row image past the budget: its
-            // resident image, weight and inverse variance planes, 40 × 30 × 12c B, beside the rows
-            // of 12 frame planes, the six coverage-and-confidence pairs and the four flat gain
-            // grids at a byte a pixel, 40 × 30 × 100 B. The coverage pass holds less. The stack is
-            // the same.
+            // resident image, weight and inverse variance planes, the coverage plane the gather
+            // writes and the flag byte a pixel no frame reached is flagged in, 40 × 30 × (12c + 5)
+            // B, beside the rows of every channel of the 12 frames, the six coverage-and-confidence
+            // pairs and the four flat gain grids at a byte a pixel, 40 × 30 × (48c + 52) B. The
+            // stack is the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.chunk_overcommit_bytes,
-                14_400 * channels as u64 + 120_000,
+                72_000 * channels as u64 + 68_400,
                 "{label}"
             );
             for channel in 0..channels {
@@ -251,8 +253,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
 
             let bits = |plane: &Buffer2<f32>| bits(plane.pixels());
             assert_eq!(
-                bits(&ram.coverage.as_ref().unwrap().to_plane()),
-                bits(&disk.coverage.as_ref().unwrap().to_plane()),
+                bits(&ram.coverage.as_ref().unwrap().to_plane(0)),
+                bits(&disk.coverage.as_ref().unwrap().to_plane(0)),
                 "{label}: coverage differs"
             );
             let ram_variance = ram.inverse_variance.as_ref().unwrap();
@@ -429,8 +431,46 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     // The reported coverage counts the same contributors the value was built from — two of three
     // frames at the masked pixel, all three elsewhere. It is per-pixel because a frame
     // declaring nulls is a frame that carries support, which is what makes the plane exist at all.
-    let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
+    let coverage = stacked
+        .coverage
+        .as_ref()
+        .unwrap()
+        .per_pixel()
+        .unwrap()
+        .channel(0);
     assert_eq!(coverage.pixels(), &[1.0, 2.0 / 3.0, 1.0, 1.0]);
+    // Some frame reached every pixel, so the stack flags none.
+    assert!(stacked.image.flags.is_none());
+
+    // A pixel every frame declares null is reached by none: 0, with no coverage, and flagged.
+    let stacked = combine(
+        vec![
+            frame(1.0, Some(3)),
+            frame(2.0, Some(3)),
+            frame(3.0, Some(3)),
+        ],
+        &config.clone(),
+    )
+    .unwrap();
+    assert_eq!(stacked.image.channel(0).pixels(), &[2.0, 2.0, 2.0, 0.0]);
+    let coverage = stacked
+        .coverage
+        .as_ref()
+        .unwrap()
+        .per_pixel()
+        .unwrap()
+        .channel(0);
+    assert_eq!(coverage.pixels(), &[1.0, 1.0, 1.0, 0.0]);
+    let flags = stacked.image.flags.as_ref().unwrap();
+    assert_eq!(
+        (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        [
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::NO_DATA
+        ]
+    );
 
     // A frame null everywhere contributes nowhere, so the stack is the other two throughout —
     // (2 + 3) / 2 = 2.5 — rather than a division by a zero contributor count.
@@ -868,9 +908,10 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
                 StackError::FrameQualityPairMismatch {
                     index: 0,
                     pixel: 1,
-                    coverage,
+                    plane: FramePlane::Coverage,
+                    support,
                     confidence,
-                } if coverage == expected_coverage && confidence == expected_confidence
+                } if support == expected_coverage && confidence == expected_confidence
             ),
             "expected a pair mismatch at pixel 1, got {error:?}"
         );
@@ -1045,7 +1086,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     .unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[20.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane().pixels(),
+        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 2.0 / 3.0]
     );
     assert_eq!(
@@ -1065,7 +1106,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     let alone = combine(vec![covered(10.0, [1.0, 0.0])], &config).unwrap();
     assert_eq!(alone.image.channel(0).pixels(), &[10.0, 0.0]);
     assert_eq!(
-        alone.coverage.as_ref().unwrap().to_plane().pixels(),
+        alone.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 0.0]
     );
     // The uncovered pixel holds no information, not an exact value.
@@ -1099,7 +1140,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                 FrameQuality::from_coverage(coverage.clone()),
             );
             frame.source_stats = FrameStats {
-                channels: [MedianMad { median, mad }].into_iter().collect(),
+                medians: [median].into_iter().collect(),
                 noise: [mad_to_sigma(mad)].into_iter().collect(),
                 read_share: [0.0; 3].into_iter().collect(),
                 sky: [median].into_iter().collect(),
@@ -1132,10 +1173,10 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     ];
     for cache in &caches {
         let norms = cache.frame_norms.as_ref().unwrap();
-        assert_eq!(norms[0].channels[0].gain, 31.0 / 12.0);
-        assert_eq!(norms[1].channels[0].gain, 31.0 / 24.0);
-        assert_eq!(norms[2].channels[0].gain, 1.0);
-        assert!(norms.iter().all(|norm| norm.channels[0].offset == 0.0));
+        assert_eq!(norms[0].slots[0].gain, 31.0 / 12.0);
+        assert_eq!(norms[1].slots[0].gain, 31.0 / 24.0);
+        assert_eq!(norms[2].slots[0].gain, 1.0);
+        assert!(norms.iter().all(|norm| norm.slots[0].offset == 0.0));
 
         // σ, its gain, square, inverse, the sum and the quotient: 7 f32 roundings, 4ε relative.
         let weights = FrameWeights::resolve(
@@ -1181,18 +1222,21 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
 }
 
+/// Two warped frames that share no pixel cannot be normalized, but combine without it: each
+/// pixel is the one frame that reached it, and the third, which neither reached, is 0 and flagged
+/// `NO_DATA` although neither frame carries a flag.
 #[test]
 fn only_normalization_requires_common_coverage() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((3, 1), 1);
     let frames = || {
         vec![
             stack_frame(
-                LinearImage::from_pixels(dims, vec![1.0, 2.0]),
-                FrameQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
+                LinearImage::from_pixels(dims, vec![1.0, 2.0, 5.0]),
+                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![1.0, 0.0, 0.0])),
             ),
             stack_frame(
-                LinearImage::from_pixels(dims, vec![3.0, 4.0]),
-                FrameQuality::from_coverage(Buffer2::new(2, 1, vec![0.0, 1.0])),
+                LinearImage::from_pixels(dims, vec![3.0, 4.0, 6.0]),
+                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![0.0, 1.0, 0.0])),
             ),
         ]
     };
@@ -1216,7 +1260,16 @@ fn only_normalization_requires_common_coverage() {
         },
     )
     .unwrap();
-    assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0]);
+    assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0, 0.0]);
+    let flags = product.image.flags.as_ref().unwrap();
+    assert_eq!(
+        (0..3).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        [
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::NO_DATA
+        ]
+    );
 }
 
 #[test]
@@ -1259,7 +1312,7 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     let product = combine(frames, &config).unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[15.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane().pixels(),
+        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0, 0.5]
     );
     assert_eq!(
@@ -1353,6 +1406,8 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     };
     let a = field(0.0, 1.0, 0.002, 1);
     let b = field(1.0, 0.8, 0.006, 2);
+    let mads = [&a, &b]
+        .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
     let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
     let warped_b = resample::warp(
         &b,
@@ -1367,7 +1422,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     )
     .unwrap();
     let norms = cache.frame_norms.as_ref().unwrap();
-    let gain = f64::from(norms[1].channels[0].gain);
+    let gain = f64::from(norms[1].slots[0].gain);
 
     let truth = SkyField::render(size, sky, 1.5, &stars, 0).pixels;
     let mean = truth.pixels().iter().map(|&t| f64::from(t)).sum::<f64>() / truth.len() as f64;
@@ -1377,11 +1432,8 @@ fn registered_global_normalization_uses_paired_signal_samples() {
         .map(|&t| (0.8 * (f64::from(t) - mean)).powi(2))
         .sum();
     let standard_error = ((0.002f64.powi(2) + 1.25f64.powi(2) * 0.006f64.powi(2)) / spread).sqrt();
-    assert_eq!(norms[0].channels[0].gain, 1.0, "frame A is the reference");
+    assert_eq!(norms[0].slots[0].gain, 1.0, "frame A is the reference");
     assert_close!(gain, 1.25, 5.0 * standard_error);
-    let mads = source_stats(&cache)
-        .map(|stats| f64::from(stats.channels[0].mad))
-        .collect::<Vec<_>>();
     assert!(
         (mads[0] / mads[1] - 1.25).abs() > 100.0 * standard_error,
         "premise: the sky spreads alone must miss the gain"
@@ -1436,12 +1488,12 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let pixel = 12 * dims.width() + 12;
     let identity_confidence = cache.frames[0]
         .quality
-        .confidence()
+        .confidence(0)
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     let half_pixel_confidence = cache.frames[1]
         .quality
-        .confidence()
+        .confidence(0)
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     assert_eq!(identity_confidence, 1.0);
@@ -1852,7 +1904,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     // The middle frame is the median at every pixel, sample for sample.
     assert_eq!(explicit.image.channel(0).pixels(), mk(100.0, 2.0));
     assert_eq!(
-        explicit.coverage.as_ref().unwrap().to_plane().pixels(),
+        explicit.coverage.as_ref().unwrap().to_plane(0).pixels(),
         &[1.0; 8]
     );
     assert_eq!(

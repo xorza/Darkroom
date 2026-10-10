@@ -1,8 +1,8 @@
+use crate::combine::cache::frame_gate::FrameGate;
 use crate::frame_store::cache_key::{CacheKey, DecoderKind};
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
@@ -157,35 +157,31 @@ fn light_frame_keeps_quality_with_its_planes() {
         &[1.0, 0.5, 0.25, 0.0]
     );
     assert_eq!(
-        frame.quality.confidence().unwrap().chunk(0, 4),
+        frame.quality.confidence(0).unwrap().chunk(0, 4),
         &[4.0, 3.0, 2.0, 0.0]
     );
-    assert_eq!(frame.source_stats.channels[0].median, 2.5);
-    assert_eq!(frame.source_stats.channels[0].mad, 1.0);
+    assert_eq!(frame.source_stats.medians[0], 2.5);
 }
 
-/// One median and MAD per channel, each over that channel alone. Hand-computed:
-/// - `[1..=9]`: median 5, absolute deviations 4,3,2,1,0,1,2,3,4 → MAD 2.
-/// - `[10,10,10,20,20,20,30,30,30]`: median 20, deviations six 10s and three 0s → MAD 10.
-/// - `[1,3,5,7]`: median (3+5)/2 = 4, deviations 3,1,1,3 → MAD (1+3)/2 = 2.
-/// - `[0,0,100,100]`: median 50, every deviation 50 → MAD 50.
-/// - `[1,2,3,4]`: median 2.5, deviations 1.5,0.5,0.5,1.5 → MAD 1.
+/// One median per channel, each over that channel alone: 5 for nine 5s and for `[1..=9]`, 20 for
+/// three each of 10, 20 and 30; `[1,3,5,7]`, `[0,0,100,100]` and `[1,2,3,4]` the means of their
+/// middle pair, 4, 50 and 2.5.
 #[test]
-fn frame_statistics_are_a_median_and_mad_per_channel() {
+fn frame_statistics_are_a_median_per_channel() {
     let gray = ImageDimensions::new((3, 3), 1);
     let rgb = ImageDimensions::new((2, 2), 3);
-    let cases: [(LinearImage, &[(f32, f32)]); 4] = [
-        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[(5.0, 0.0)]),
+    let cases: [(LinearImage, &[f32]); 4] = [
+        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[5.0]),
         (
             LinearImage::from_pixels(gray, (1..=9).map(|i| i as f32).collect()),
-            &[(5.0, 2.0)],
+            &[5.0],
         ),
         (
             LinearImage::from_pixels(
                 gray,
                 vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
             ),
-            &[(20.0, 10.0)],
+            &[20.0],
         ),
         (
             LinearImage::from_planar_channels(
@@ -196,53 +192,36 @@ fn frame_statistics_are_a_median_and_mad_per_channel() {
                     vec![1.0, 2.0, 3.0, 4.0],
                 ],
             ),
-            &[(4.0, 2.0), (50.0, 50.0), (2.5, 1.0)],
+            &[4.0, 50.0, 2.5],
         ),
     ];
     for (image, expected) in cases {
-        let stats = FrameStats::measure(&image);
-        let measured: Vec<(f32, f32)> = stats
-            .channels
-            .iter()
-            .map(|channel| (channel.median, channel.mad))
-            .collect();
-        assert_eq!(measured, expected);
+        assert_eq!(FrameStats::measure(&image).medians.as_slice(), expected);
     }
 }
 
 #[test]
 fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
-    // Eight pixels: four real samples and four the source declared null, which the decoder filled
-    // at the frame's own median. Those fills are zero-deviation samples, so counting them collapses
-    // the MAD — and MAD is what weighting divides by, so the frame would be trusted far beyond what
-    // its noise deserves.
-    //
-    // Valid 1, 3, 5, 7 → median (3 + 5) / 2 = 4, deviations 3, 1, 1, 3 → MAD (1 + 3) / 2 = 2.
-    // All eight → median still 4, deviations 3, 1, 1, 3, 0, 0, 0, 0 → MAD (0 + 1) / 2 = 0.5.
+    // Eight pixels: four real samples and four the source declared null, filled at 0. Valid 1, 3,
+    // 5, 7 → median (3 + 5) / 2 = 4; all eight → (0 + 1) / 2 = 0.5, the fill's level.
     let dimensions = ImageDimensions::new((8, 1), 1);
-    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 4.0, 4.0, 4.0, 4.0];
+    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 0.0, 0.0, 0.0, 0.0];
     let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
     masked.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
     );
 
-    let stats = FrameStats::measure(&masked);
-    assert_eq!(stats.channels[0].median, 4.0);
-    assert_eq!(stats.channels[0].mad, 2.0);
-
-    // The same pixels with nothing declared null, so the fills count as data and the spread halves
-    // twice over. The two must not agree, or the exclusion is doing nothing.
+    assert_eq!(FrameStats::measure(&masked).medians[0], 4.0);
     let plain = LinearImage::from_pixels(dimensions, samples);
-    assert_eq!(FrameStats::measure(&plain).channels[0].mad, 0.5);
+    assert_eq!(FrameStats::measure(&plain).medians[0], 0.5);
 
     // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
     // set would panic rather than say so.
     let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
     all_null.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
     let empty = FrameStats::measure(&all_null);
-    assert_eq!(empty.channels[0].median, 0.0);
-    assert_eq!(empty.channels[0].mad, 0.0);
+    assert_eq!(empty.medians[0], 0.0);
 }
 
 #[test]
@@ -254,22 +233,26 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     // keeps this free for every RAW frame and almost every camera FITS.
     assert!(FrameQuality::for_unwarped(&image).is_none());
 
-    // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
-    // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
-    // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
+    // Declaring pixel 2 null makes the frame a mask of its nulls, which the stored frame keeps its
+    // flags for: the combine gathers every pixel but 2, each at unit confidence, as nothing was
+    // interpolated.
     image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let quality = FrameQuality::for_unwarped(&image);
-    assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
+    assert_eq!(quality.mask(), Some(QualityFlags::NO_DATA));
+    let frame = StoredFrame::from_memory(image.clone(), quality, FrameStats::measure(&image));
+    let gate = FrameGate::of(&frame, 0, 0, 4);
     assert_eq!(
-        quality.confidence().unwrap().pixels(),
-        quality.coverage().unwrap().pixels()
+        (0..4)
+            .map(|index| gate.sample(index).map(|sample| sample.confidence))
+            .collect::<Vec<_>>(),
+        [Some(1.0), Some(1.0), None, Some(1.0)]
     );
 }
 
-/// A cached frame comes back whole or not at all. Its quality planes return with its channels —
-/// reusing the channels without them would put the fill under its nulls into the stack as data on
-/// every run after the first — and a frame committed with them is rebuilt when one or both are
-/// gone, rather than read as a frame with no nulls. Another key finds nothing: another decode
+/// A cached frame comes back whole or not at all. Its mask returns with its channels — reusing the
+/// channels without it would put the fill under its nulls into the stack as data on every run after
+/// the first — and a frame committed with one is rebuilt when its flags are gone, rather than read
+/// as a frame with no nulls. Another key finds nothing: another decode
 /// version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
@@ -294,13 +277,10 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         .unwrap()
         .unwrap();
     assert_eq!(reused.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(reused.quality.mask(), Some(QualityFlags::NO_DATA));
     assert_eq!(
-        reused.quality.coverage().unwrap().chunk(0, 4),
-        &[1.0, 1.0, 0.0, 1.0]
-    );
-    assert_eq!(
-        reused.quality.confidence().unwrap().chunk(0, 4),
-        &[1.0, 1.0, 0.0, 1.0]
+        reused.flags.as_ref().unwrap().chunk(0, 4),
+        &[0, 0, QualityFlags::NO_DATA.byte(), 0]
     );
     drop(reused);
 
@@ -348,17 +328,12 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         "planes of another size"
     );
 
-    fs::remove_file(spill.quality_path(FramePlane::Confidence)).unwrap();
+    fs::remove_file(spill.flags_path()).unwrap();
     assert!(
         StoredFrame::reuse(&spill, key, dimensions)
             .unwrap()
-            .is_none()
-    );
-    fs::remove_file(spill.quality_path(FramePlane::Coverage)).unwrap();
-    assert!(
-        StoredFrame::reuse(&spill, key, dimensions)
-            .unwrap()
-            .is_none()
+            .is_none(),
+        "a mask without its flags"
     );
 
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
@@ -425,16 +400,12 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         assert_ne!(other.channel_path(0), channel);
     }
     assert_eq!(
-        hashed.quality_path(FramePlane::Coverage),
-        cache_dir.join(format!("{stem}_coverage.bin"))
+        hashed.flags_path(),
+        cache_dir.join(format!("{stem}_flags.bin"))
     );
 
     let plain = FrameSpill::named(cache_dir, "frame");
     assert_eq!(plain.channel_path(2), cache_dir.join("frame_c2.bin"));
-    assert_eq!(
-        plain.quality_path(FramePlane::Confidence),
-        cache_dir.join("frame_confidence.bin")
-    );
     assert_eq!(plain.flags_path(), cache_dir.join("frame_flags.bin"));
 }
 

@@ -1,4 +1,5 @@
 use crate::internals::prelude::*;
+use crate::io::raw::demosaic::tiled::TilePlace;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern};
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
@@ -10,7 +11,9 @@ const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasse
 /// `internals/reference/markesteijn_librtprocess.py` builds librtprocess's `markesteijn.cc` at a
 /// pinned commit, on its scalar paths and with YPbPr at both pass counts, and prints each case's
 /// FNV-1a 64 digest of the output inside the pass count's border: the planes in order, then rows,
-/// then columns, each f32's little-endian bytes. The script changes two lines: the 2×2 green
+/// then columns, each f32's little-endian bytes. Its harness writes each native sample as the
+/// input holds it, as lumos does, where librtprocess's mean of the chosen directions rounds it;
+/// every interpolated sample is librtprocess's own. The script changes two lines: the 2×2 green
 /// blocks take red and blue in all four of one pass's directions, not two, and one tile covers the
 /// frame, whose seams would differ from an untiled run. The 160×120 frame spans several of lumos's
 /// tiles, so their seams are in the digest. The scenes use only correctly rounded operations, so
@@ -26,14 +29,14 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
         [
             0x6ce19c3e3aaefce5,
             0xbe8c9f31a4aed927,
-            0x67eea713c538876b,
-            0x7a207fa29d1a84e5,
+            0xa6d2cb7ab9308a29,
+            0x4beb7658fb994afe,
         ],
         [
-            0xb2fecff3b5416a2d,
+            0x48abd900893aa395,
             0x949566b3f3644e3e,
-            0x261009dc275379eb,
-            0x9cefbe2bac38b375,
+            0x21fe55725b3d0290,
+            0xeba522bd3b1ae528,
         ],
     ];
     let scenes: [(&str, Scene); 4] = [
@@ -175,17 +178,18 @@ fn margin_is_the_least_that_reads_only_computed_colours() {
     for passes in PASSES {
         let mut least = 0;
         for phase in 0..3 {
+            let extent = Size2us::new(TILE - 1, TILE - 3);
             let place = TilePlace {
                 top: 3 + phase,
                 left: 3 + phase,
+                size: extent,
             };
-            let extent = Size2us::new(TILE - 1, TILE - 3);
             let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
             let data: Vec<f32> = (0..size.pixel_count())
                 .map(|_| 0.1 + 0.8 * rng.next_f32())
                 .collect();
             let xtrans = XTransImage::new(&data, size, pattern);
-            let hex = HexTable::new(pattern, size.width);
+            let hex = HexTable::new(pattern);
             let mut tile = Tile::new(passes.directions());
             let high = tile
                 .interpolate_poisoned(&xtrans, &hex, place, passes.count(), POISON)

@@ -5,6 +5,7 @@
 //! - X-Trans 6x6 patterns (Fujifilm sensors)
 
 pub(crate) mod bayer;
+pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
 /// What one decode costs: the bytes it leaves, and its peak on the way there, the output included.
@@ -49,10 +50,13 @@ mod memory_tests {
         assert_eq!(mono.peak_bytes, 80 * 4);
 
         for (cfa_type, workspace) in [
-            (CfaType::Bayer(CfaPattern::Rggb), rcd::workspace_bytes()),
+            (
+                CfaType::Bayer(CfaPattern::Rggb),
+                rcd::internals::workspace_bytes(),
+            ),
             (
                 CfaType::XTrans(XTRANS_PATTERN),
-                markesteijn::workspace_bytes(),
+                markesteijn::internals::workspace_bytes(),
             ),
         ] {
             for dimensions in [even, odd] {

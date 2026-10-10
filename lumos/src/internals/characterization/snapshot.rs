@@ -22,6 +22,11 @@ impl Snapshot {
         self
     }
 
+    pub(crate) fn bytes(&mut self, values: &[u8]) -> &mut Snapshot {
+        self.0.update(values);
+        self
+    }
+
     pub(crate) fn count(&mut self, count: usize) -> &mut Snapshot {
         self.0.update(&(count as u64).to_le_bytes());
         self

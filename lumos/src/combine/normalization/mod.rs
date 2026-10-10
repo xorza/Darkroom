@@ -2,15 +2,17 @@
 //!
 //! Frames of the same field differ in sky level and transparency, so combining them raw would let
 //! the brightest dominate and turn rejection into a vote about exposure rather than about
-//! outliers. Each frame gets an affine `gain`/`offset` per channel measured against a reference —
-//! the least noisy of the set — and the combine applies it as it gathers.
+//! outliers. Each frame gets an affine `gain`/`offset` per slot — a channel, or a colour of a
+//! mosaic, whose colours drift apart over a session of twilight flats — measured against a
+//! reference, the least noisy of the set, and the combine applies it as it gathers.
 //!
 //! `Normalization::Global` fits every frame's gain against the reference by
 //! [`photometric_gain`]'s errors-in-variables fit over paired pixels, and its offset from the two
-//! medians. `Normalization::Multiplicative` takes the ratio of medians. Which pixels the
-//! statistics come from is the one thing coverage changes: frames that each cover every pixel are
-//! measured over all of them, and when any frame contributes at only some pixels — a warp's edge,
-//! or a source's declared nulls — over [`common_domain`], the pixels every frame reached.
+//! medians. `Normalization::Multiplicative` takes the ratio of medians. A slot is measured over
+//! its own pixels — a colour over its photosites — and coverage narrows them: frames that each
+//! cover every pixel are measured over all of them, and when any frame contributes at only some
+//! pixels — a warp's edge, or a source's declared nulls — over [`common_domain`], the pixels every
+//! frame reached.
 
 pub(crate) mod common_domain;
 pub(crate) mod photometric_gain;
@@ -20,37 +22,68 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::combine::CANCEL_POLL_CHUNK;
+use crate::combine::cache::slots::Slots;
 use crate::combine::config::Normalization;
 use crate::combine::error::StackError;
-use crate::combine::normalization::common_domain::CommonDomain;
+use crate::combine::normalization::common_domain::{CommonDomain, WORD_BITS};
 use crate::combine::normalization::photometric_gain::{paired_photometric_gain, sample_stats};
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
 use crate::math::statistics::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
-use std::iter;
 
-/// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
+/// One slot's affine normalization, applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ChannelNorm {
+pub(crate) struct SlotNorm {
     pub(crate) gain: f32,
     pub(crate) offset: f32,
 }
 
-impl ChannelNorm {
+impl SlotNorm {
     const IDENTITY: Self = Self {
         gain: 1.0,
         offset: 0.0,
     };
+
+    /// `gain = median_ref / median` for slot `slot` of the frame of `(index, median)` against the
+    /// reference's `(index, median)`.
+    ///
+    /// # Errors
+    /// [`StackError::NonPositiveMedian`] when a median is not positive: a ratio to it scales
+    /// nothing, and unit gain in its place would combine the frame at a scale no one measured.
+    fn median_ratio(
+        (index, median): (usize, f32),
+        (reference, reference_median): (usize, f32),
+        slot: usize,
+    ) -> Result<Self, StackError> {
+        if median > 0.0 && reference_median > 0.0 {
+            Ok(Self {
+                gain: reference_median / median,
+                offset: 0.0,
+            })
+        } else {
+            let (index, median) = if median > 0.0 {
+                (reference, reference_median)
+            } else {
+                (index, median)
+            };
+            Err(StackError::NonPositiveMedian {
+                index,
+                slot,
+                median,
+            })
+        }
+    }
 }
 
-/// Per-frame affine normalization parameters.
+/// A frame's affine normalization, one per [`Slots`] slot.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameNorm {
-    pub(crate) channels: ArrayVec<ChannelNorm, 3>,
+    pub(crate) slots: ArrayVec<SlotNorm, 3>,
 }
 
 impl FrameNorm {
@@ -66,6 +99,7 @@ impl FrameNorm {
     pub(crate) fn measure(
         frames: &[StoredFrame],
         dimensions: ImageDimensions,
+        slots: Slots,
         normalization: Normalization,
         cancel: &CancelToken,
     ) -> Result<Option<Vec<Self>>, StackError> {
@@ -75,12 +109,11 @@ impl FrameNorm {
                 .iter()
                 .any(|&map| map != DomainMap::IDENTITY)
                 .then(|| {
-                    frames
+                    to_domain
                         .iter()
-                        .zip(&to_domain)
-                        .map(|(frame, map)| FrameNorm {
-                            channels: (0..frame.source_stats.channels.len())
-                                .map(|_| ChannelNorm {
+                        .map(|map| FrameNorm {
+                            slots: (0..slots.count())
+                                .map(|_| SlotNorm {
                                     gain: map.gain as f32,
                                     offset: map.offset as f32,
                                 })
@@ -91,46 +124,108 @@ impl FrameNorm {
         }
         Cancelled::check(cancel)?;
         let reference = select_reference_frame(frames, &to_domain);
-        let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
+        let mut norms =
+            fitted_frame_norms(frames, dimensions, slots, normalization, reference, cancel)?;
         // A fitted norm lands each frame on the reference frame's raw values; the reference's own
         // map then carries those into the shared domain: `map(gain·x + offset)`.
         let map = to_domain[reference];
         if map != DomainMap::IDENTITY {
-            for channel in norms.iter_mut().flat_map(|norm| norm.channels.iter_mut()) {
-                channel.gain = (map.gain * f64::from(channel.gain)) as f32;
-                channel.offset = (map.gain * f64::from(channel.offset) + map.offset) as f32;
+            for slot in norms.iter_mut().flat_map(|norm| norm.slots.iter_mut()) {
+                slot.gain = (map.gain * f64::from(slot.gain)) as f32;
+                slot.offset = (map.gain * f64::from(slot.offset) + map.offset) as f32;
             }
         }
         Ok(Some(norms))
     }
 }
 
-/// One channel of the reference frame, measured once and paired against every other frame.
+/// One slot of the reference frame, measured once and paired against every other frame.
 #[derive(Debug)]
-struct ReferenceChannel {
+struct ReferenceSlot {
     median: f32,
     samples: Vec<f32>,
     stats: MedianMad,
     noise_variance: f64,
 }
 
-/// What [`measure_plane`] measures: a plane's median over the common domain when there is one,
-/// and its values at the stratified sample indices.
+/// What [`measure_plane`] measures: a slot's median over the pixels the frames share when they
+/// do not all cover every pixel, and its values at the stratified sample indices.
 #[derive(Debug)]
 struct PlaneMeasurement {
     median: Option<f32>,
     samples: Vec<f32>,
 }
 
-/// Paired samples the gain fit runs on, at most: a stratified 65 536 of the measured pixels.
-const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
-
-/// Pixels per word of the common-domain mask.
-const WORD_BITS: usize = u64::BITS as usize;
 const _: () = assert!(
     CANCEL_POLL_CHUNK.is_multiple_of(WORD_BITS),
     "a gather chunk starts on a mask word"
 );
+
+/// The pixels one slot is measured over.
+#[derive(Debug)]
+enum SlotPixels<'a> {
+    /// Every pixel of the slot — a channel's, or a colour's photosites — each frame covering all of
+    /// them, sampled the way a frame on disk sampled itself.
+    Everywhere(StratifiedSamples),
+    /// The pixels every frame covers.
+    Common(&'a CommonDomain),
+    /// The photosites of one colour among the pixels every frame covers.
+    CommonColour(CommonDomain),
+}
+
+impl<'a> SlotPixels<'a> {
+    /// Each slot's pixels: its channel's, or its colour's photosites, among the pixels every frame
+    /// covers when `domain` holds them.
+    ///
+    /// # Errors
+    /// [`StackError::NoCommonCoverage`] when a slot has no pixel to measure.
+    fn of_slots(
+        slots: Slots,
+        domain: Option<&'a CommonDomain>,
+        dimensions: ImageDimensions,
+        cancel: &CancelToken,
+    ) -> Result<ArrayVec<Self, 3>, StackError> {
+        let mosaic = slots.mosaic();
+        (0..slots.count())
+            .map(|slot| match (domain, &mosaic) {
+                (None, mosaic) => {
+                    let samples = StratifiedSamples::new(dimensions.size(), mosaic.as_ref(), slot);
+                    if samples.len() == 0 {
+                        return Err(StackError::NoCommonCoverage);
+                    }
+                    Ok(Self::Everywhere(samples))
+                }
+                (Some(domain), None) => Ok(Self::Common(domain)),
+                (Some(domain), Some(cfa_type)) => Ok(Self::CommonColour(CommonDomain::of_colour(
+                    domain,
+                    dimensions.size(),
+                    cfa_type,
+                    slot as u8,
+                    cancel,
+                )?)),
+            })
+            .collect()
+    }
+
+    /// The pixels a median is measured over again, when the frames do not all cover every pixel;
+    /// `None` when the statistics measured on each source at load describe the pixels combined.
+    const fn shared(&self) -> Option<&CommonDomain> {
+        match self {
+            Self::Everywhere(_) => None,
+            Self::CommonColour(domain) => Some(domain),
+            Self::Common(domain) => Some(domain),
+        }
+    }
+
+    /// The sampled pixel indices, ascending.
+    fn indices(&self, cancel: &CancelToken) -> Result<Vec<usize>, StackError> {
+        match self {
+            Self::Everywhere(samples) => Ok(samples.indices().collect()),
+            Self::Common(domain) => stratified_indices(domain, cancel),
+            Self::CommonColour(domain) => stratified_indices(domain, cancel),
+        }
+    }
+}
 
 /// The map that expresses each frame in the domain of the first frame declaring one; the identity
 /// for a frame that declares none, or when none does.
@@ -159,54 +254,162 @@ fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
 /// The fitted norms, measured where the frames allow: over every pixel when each frame covers
 /// all of them, where the statistics measured on the sources at load already describe the
 /// pixels combined; over the common domain otherwise, since each source was measured over a
-/// different set of pixels than the one the frames share.
+/// different set of pixels than the one the frames share; and pair by pair when a frame is
+/// gathered in each channel by its own rule — see [`pairwise_norms`].
 fn fitted_frame_norms(
     frames: &[StoredFrame],
     dimensions: ImageDimensions,
+    slots: Slots,
     normalization: Normalization,
     reference: usize,
     cancel: &CancelToken,
 ) -> Result<Vec<FrameNorm>, StackError> {
     let pixel_count = dimensions.pixel_count();
-    let domain = frames
-        .iter()
-        .any(|frame| !frame.quality.is_none())
-        .then(|| CommonDomain::build(frames, pixel_count, cancel))
-        .transpose()?;
-    let norms = match normalization {
-        Normalization::Global => {
-            global_norms(frames, pixel_count, domain.as_ref(), reference, cancel)?
+    let planes = SlotPlanes {
+        frames,
+        slots,
+        pixel_count,
+    };
+    let gated = frames.iter().any(|frame| !frame.quality.is_none());
+    let per_channel = frames.iter().any(|frame| frame.quality.per_channel());
+    let norms = if per_channel {
+        pairwise_norms(planes, normalization, reference, cancel)?
+    } else {
+        let all: Vec<&StoredFrame> = frames.iter().collect();
+        let domain = gated
+            .then(|| CommonDomain::build(&all, 0, pixel_count, cancel))
+            .transpose()?;
+        let pixels = SlotPixels::of_slots(slots, domain.as_ref(), dimensions, cancel)?;
+        match normalization {
+            Normalization::Global => global_norms(planes, &pixels, reference, cancel)?,
+            Normalization::Multiplicative => {
+                let medians = match domain {
+                    Some(_) => slot_medians(planes, &pixels, cancel)?,
+                    None => frames
+                        .iter()
+                        .map(|frame| frame.source_stats.medians.clone())
+                        .collect(),
+                };
+                multiplicative_norms(&medians, reference)?
+            }
+            Normalization::None => unreachable!("handled by the caller"),
         }
-        Normalization::Multiplicative => {
-            let medians = match &domain {
-                Some(domain) => domain_medians(frames, pixel_count, domain, cancel)?,
-                None => frames.iter().map(source_medians).collect(),
-            };
-            multiplicative_norms(&medians, reference)?
-        }
-        Normalization::None => unreachable!("handled by the caller"),
     };
     tracing::info!(
         frame_count = frames.len(),
-        channels = frames[0].channels.len(),
+        slots = slots.count(),
         ref_frame = reference,
-        common_domain = domain.is_some(),
+        common_domain = gated && !per_channel,
+        pairwise = per_channel,
         ?normalization,
         "Computed normalization"
     );
     Ok(norms)
 }
 
-/// The least noisy frame: the lowest mean noise variance over its channels, each σ carried into
-/// the shared domain by `to_domain`, so frames decoded at different scales compare in one unit.
-/// The first wins a tie.
+/// The norms of frames gathered in each channel by its own rule — a mosaic drizzled into the
+/// channels of its colours — measured pair by pair: each frame against the reference over the
+/// pixels both reached in the slot's channel, by the same fit [`global_norms`] makes and the same
+/// ratio [`multiplicative_norms`] takes.
+///
+/// The pixels every frame reached are no domain for these: each frame's drops reach a colour at
+/// only part of the grid — at scale 2 and pixfrac 1, a Bayer red at 9 output pixels of 16 — so
+/// their intersection thins out with every frame added. A pair keeps as many as two frames share,
+/// and a pair is all either fit compares. Above scale 1 a pair can still share none: two frames a
+/// photosite apart put one's red where the other's green fell. The pair's domain is then empty,
+/// and the normalization fails with [`StackError::NoCommonCoverage`] rather than compare the
+/// frames over nothing.
+fn pairwise_norms(
+    planes: SlotPlanes<'_>,
+    normalization: Normalization,
+    reference: usize,
+    cancel: &CancelToken,
+) -> Result<Vec<FrameNorm>, StackError> {
+    let frames = planes.frames;
+    let slots = planes.slots;
+    let pixel_count = planes.pixel_count;
+    let slot_count = slots.count();
+    let fitted = (0..frames.len() * slot_count)
+        .into_par_iter()
+        .map_init(RadixMedian::default, |median, pair_index| {
+            let frame_index = pair_index / slot_count;
+            let slot = pair_index % slot_count;
+            if frame_index == reference {
+                return Ok(SlotNorm::IDENTITY);
+            }
+            let pair = [&frames[frame_index], &frames[reference]];
+            let domain = CommonDomain::build(&pair, slots.channel(slot), pixel_count, cancel)?;
+            let indices = stratified_indices(&domain, cancel)?;
+            let [ours, theirs] = [frame_index, reference].map(|index| {
+                measure_plane(
+                    planes.plane(index, slot),
+                    pixel_count,
+                    Some(&domain),
+                    &indices,
+                    median,
+                    cancel,
+                )
+            });
+            let (ours, theirs) = (ours?, theirs?);
+            let measured_median = |measured: &PlaneMeasurement| {
+                measured
+                    .median
+                    .expect("a pair's medians are measured over its domain")
+            };
+            let (frame_median, reference_median) =
+                (measured_median(&ours), measured_median(&theirs));
+            match normalization {
+                Normalization::Global => {
+                    let variance = |index| {
+                        source_noise_variance(
+                            &frames[index],
+                            slots,
+                            slot,
+                            &indices,
+                            pixel_count,
+                            cancel,
+                        )
+                    };
+                    let gain = paired_photometric_gain(
+                        &ours.samples,
+                        &theirs.samples,
+                        sample_stats(&theirs.samples, cancel)?,
+                        variance(frame_index)?,
+                        variance(reference)?,
+                        cancel,
+                    )?;
+                    Ok(SlotNorm {
+                        gain,
+                        offset: reference_median - frame_median * gain,
+                    })
+                }
+                Normalization::Multiplicative => SlotNorm::median_ratio(
+                    (frame_index, frame_median),
+                    (reference, reference_median),
+                    slot,
+                ),
+                Normalization::None => unreachable!("handled by the caller"),
+            }
+        })
+        .collect::<Result<Vec<_>, StackError>>()?;
+    Ok(fitted
+        .chunks(slot_count)
+        .map(|slots| FrameNorm {
+            slots: slots.iter().copied().collect(),
+        })
+        .collect())
+}
+
+/// The least noisy frame: the lowest mean noise variance over its slots, each σ carried into the
+/// shared domain by `to_domain`, so frames decoded at different scales compare in one unit. The
+/// first wins a tie.
 fn select_reference_frame(frames: &[StoredFrame], to_domain: &[DomainMap]) -> usize {
     let mean_variance = |(frame, map): (&StoredFrame, &DomainMap)| {
         let stats = &frame.source_stats;
-        (0..stats.channels.len())
-            .map(|channel| (map.gain * f64::from(stats.channel_noise(channel))).powi(2))
+        (0..stats.medians.len())
+            .map(|slot| (map.gain * f64::from(stats.slot_noise(slot))).powi(2))
             .sum::<f64>()
-            / stats.channels.len() as f64
+            / stats.medians.len() as f64
     };
     let mut scores = frames.iter().zip(to_domain).map(mean_variance).enumerate();
     let (_, mut best_score) = scores.next().expect("normalization requires frames");
@@ -220,26 +423,10 @@ fn select_reference_frame(frames: &[StoredFrame], to_domain: &[DomainMap]) -> us
     best_frame
 }
 
-fn source_medians(frame: &StoredFrame) -> ArrayVec<f32, 3> {
-    frame
-        .source_stats
-        .channels
-        .iter()
-        .map(|channel| channel.median)
-        .collect()
-}
-
-fn identity_norm(channel_count: usize) -> FrameNorm {
-    let mut channels = ArrayVec::new();
-    channels.extend(iter::repeat_n(ChannelNorm::IDENTITY, channel_count));
-    FrameNorm { channels }
-}
-
-/// `gain = median_ref / median`, per channel.
+/// `gain = median_ref / median`, per slot.
 ///
 /// # Errors
-/// [`StackError::NonPositiveMedian`] when a median is not positive: a ratio to it scales nothing, and
-/// unit gain in its place would combine the frame at a scale no one measured.
+/// As [`SlotNorm::median_ratio`].
 fn multiplicative_norms(
     medians: &[ArrayVec<f32, 3>],
     reference: usize,
@@ -248,98 +435,118 @@ fn multiplicative_norms(
         .iter()
         .enumerate()
         .map(|(index, frame)| {
-            let channels = frame
+            let slots = frame
                 .iter()
                 .zip(&medians[reference])
                 .enumerate()
-                .map(|(channel, (&median, &reference_median))| {
-                    if median > 0.0 && reference_median > 0.0 {
-                        Ok(ChannelNorm {
-                            gain: reference_median / median,
-                            offset: 0.0,
-                        })
-                    } else {
-                        let (index, median) = if median > 0.0 {
-                            (reference, reference_median)
-                        } else {
-                            (index, median)
-                        };
-                        Err(StackError::NonPositiveMedian {
-                            index,
-                            channel,
-                            median,
-                        })
-                    }
+                .map(|(slot, (&median, &reference_median))| {
+                    SlotNorm::median_ratio((index, median), (reference, reference_median), slot)
                 })
                 .collect::<Result<_, _>>()?;
-            Ok(FrameNorm { channels })
+            Ok(FrameNorm { slots })
         })
         .collect()
 }
 
-/// Every frame's channel medians over the common domain, one pass per plane.
-fn domain_medians(
-    frames: &[StoredFrame],
+/// The frames' planes, read by slot.
+#[derive(Debug, Clone, Copy)]
+struct SlotPlanes<'a> {
+    frames: &'a [StoredFrame],
+    slots: Slots,
     pixel_count: usize,
-    domain: &CommonDomain,
+}
+
+impl SlotPlanes<'_> {
+    /// The plane holding `slot` of `frame`.
+    fn plane(&self, frame: usize, slot: usize) -> &StoredPlane {
+        &self.frames[frame].channels[self.slots.channel(slot)]
+    }
+}
+
+/// Every frame's slot medians over the pixels the frames share, one pass per slot.
+fn slot_medians(
+    planes: SlotPlanes<'_>,
+    pixels: &[SlotPixels<'_>],
     cancel: &CancelToken,
 ) -> Result<Vec<ArrayVec<f32, 3>>, StackError> {
-    let channel_count = frames[0].channels.len();
-    let medians = (0..frames.len() * channel_count)
+    let slot_count = pixels.len();
+    let medians = (0..planes.frames.len() * slot_count)
         .into_par_iter()
         .map_init(RadixMedian::default, |median, pair_index| {
-            let plane = &frames[pair_index / channel_count].channels[pair_index % channel_count];
-            let measured = measure_plane(plane, pixel_count, Some(domain), &[], median, cancel)?;
-            Ok(measured.median.expect("a domain was given"))
+            let slot = pair_index % slot_count;
+            let measured = measure_plane(
+                planes.plane(pair_index / slot_count, slot),
+                planes.pixel_count,
+                pixels[slot].shared(),
+                &[],
+                median,
+                cancel,
+            )?;
+            Ok(measured.median.expect("the frames share only some pixels"))
         })
         .collect::<Result<Vec<_>, StackError>>()?;
     Ok(medians
-        .chunks(channel_count)
-        .map(|channels| channels.iter().copied().collect())
+        .chunks(slot_count)
+        .map(|slots| slots.iter().copied().collect())
         .collect())
 }
 
-/// Fit every frame's gain and offset against the reference frame directly.
+/// Fit every frame's gain and offset against the reference frame directly, slot by slot.
 ///
 /// Each non-reference frame is paired with the reference through [`paired_photometric_gain`]'s
-/// errors-in-variables fit, on a stratified sample of the measured pixels; the offset then puts
-/// the frame's median on the reference's. The reference itself is the identity by definition.
+/// errors-in-variables fit, on a stratified sample of the slot's measured pixels; the offset then
+/// puts the frame's median on the reference's. The reference itself is the identity by definition.
 ///
 /// Fitting against the reference rather than against frame 0 and rescaling afterwards matters:
 /// the fit clips residuals and weights each side by its own noise, so `gain(a→c)` is not
 /// `gain(a→b) / gain(c→b)` — chaining through an arbitrary frame would put its noise into every
 /// other frame's scale.
 fn global_norms(
-    frames: &[StoredFrame],
-    pixel_count: usize,
-    domain: Option<&CommonDomain>,
+    planes: SlotPlanes<'_>,
+    pixels: &[SlotPixels<'_>],
     reference: usize,
     cancel: &CancelToken,
 ) -> Result<Vec<FrameNorm>, StackError> {
-    let channel_count = frames[0].channels.len();
-    let indices = stratified_indices(pixel_count, domain, cancel)?;
-    let reference_channels = (0..channel_count)
+    let frames = planes.frames;
+    let pixel_count = planes.pixel_count;
+    let slot_count = pixels.len();
+    let indices = pixels
+        .iter()
+        .map(|pixels| pixels.indices(cancel))
+        .collect::<Result<ArrayVec<_, 3>, StackError>>()?;
+    let measure = |frame: usize, slot: usize, median: &mut RadixMedian| {
+        if let (SlotPixels::Everywhere(_), Some(samples)) = (&pixels[slot], &frames[frame].samples)
+        {
+            let samples = &samples[slot];
+            debug_assert_eq!(samples.samples(), indices[slot].len());
+            return Ok(PlaneMeasurement {
+                median: None,
+                samples: samples.chunk(0, samples.samples()).to_vec(),
+            });
+        }
+        measure_plane(
+            planes.plane(frame, slot),
+            pixel_count,
+            pixels[slot].shared(),
+            &indices[slot],
+            median,
+            cancel,
+        )
+    };
+    let reference_slots = (0..slot_count)
         .into_par_iter()
-        .map(|channel| {
+        .map(|slot| {
             let frame = &frames[reference];
-            let measured = measure_plane(
-                &frame.channels[channel],
-                pixel_count,
-                domain,
-                &indices,
-                &mut RadixMedian::default(),
-                cancel,
-            )?;
-            Ok(ReferenceChannel {
-                median: measured
-                    .median
-                    .unwrap_or(frame.source_stats.channels[channel].median),
+            let measured = measure(reference, slot, &mut RadixMedian::default())?;
+            Ok(ReferenceSlot {
+                median: measured.median.unwrap_or(frame.source_stats.medians[slot]),
                 stats: sample_stats(&measured.samples, cancel)?,
                 samples: measured.samples,
                 noise_variance: source_noise_variance(
                     frame,
-                    channel,
-                    &indices,
+                    planes.slots,
+                    slot,
+                    &indices[slot],
                     pixel_count,
                     cancel,
                 )?,
@@ -347,52 +554,46 @@ fn global_norms(
         })
         .collect::<Result<Vec<_>, StackError>>()?;
 
-    let fitted = (0..frames.len() * channel_count)
+    let fitted = (0..frames.len() * slot_count)
         .into_par_iter()
         .map_init(RadixMedian::default, |median, pair_index| {
-            let frame_index = pair_index / channel_count;
-            let channel = pair_index % channel_count;
+            let frame_index = pair_index / slot_count;
+            let slot = pair_index % slot_count;
             if frame_index == reference {
-                return Ok(ChannelNorm::IDENTITY);
+                return Ok(SlotNorm::IDENTITY);
             }
             let frame = &frames[frame_index];
-            let measured = measure_plane(
-                &frame.channels[channel],
-                pixel_count,
-                domain,
-                &indices,
-                median,
-                cancel,
-            )?;
-            let median = measured
-                .median
-                .unwrap_or(frame.source_stats.channels[channel].median);
-            let reference = &reference_channels[channel];
+            let measured = measure(frame_index, slot, median)?;
+            let median = measured.median.unwrap_or(frame.source_stats.medians[slot]);
+            let reference = &reference_slots[slot];
             let gain = paired_photometric_gain(
                 &measured.samples,
                 &reference.samples,
                 reference.stats,
-                source_noise_variance(frame, channel, &indices, pixel_count, cancel)?,
+                source_noise_variance(
+                    frame,
+                    planes.slots,
+                    slot,
+                    &indices[slot],
+                    pixel_count,
+                    cancel,
+                )?,
                 reference.noise_variance,
                 cancel,
             )?;
-            Ok(ChannelNorm {
+            Ok(SlotNorm {
                 gain,
                 offset: reference.median - median * gain,
             })
         })
         .collect::<Result<Vec<_>, StackError>>()?;
 
-    let mut norms = frames
-        .iter()
-        .map(|frame| identity_norm(frame.channels.len()))
-        .collect::<Vec<_>>();
-    for (frame_index, channels) in fitted.chunks(channel_count).enumerate() {
-        for (channel, &norm) in channels.iter().enumerate() {
-            norms[frame_index].channels[channel] = norm;
-        }
-    }
-    Ok(norms)
+    Ok(fitted
+        .chunks(slot_count)
+        .map(|slots| FrameNorm {
+            slots: slots.iter().copied().collect(),
+        })
+        .collect())
 }
 
 /// `plane`'s median over `domain` when one is given, and its values at the ascending `indices`.
@@ -460,20 +661,15 @@ fn for_each_in_domain(
     Ok(())
 }
 
-/// Up to [`PHOTOMETRIC_SAMPLE_LIMIT`] pixel indices, ascending and evenly spread by rank over the
-/// measured pixels — every pixel, or the common domain's: the `k`-th of `m` is the one of rank
-/// `⌊k·n/m⌋` among the `n`.
+/// Up to [`SAMPLE_LIMIT`] pixel indices, ascending and evenly spread by rank over the pixels
+/// `domain` holds, as [`StratifiedSamples`] spreads them over every pixel: the `k`-th of `m` is the
+/// one of rank `⌊k·n/m⌋` among the `n`.
 fn stratified_indices(
-    pixel_count: usize,
-    domain: Option<&CommonDomain>,
+    domain: &CommonDomain,
     cancel: &CancelToken,
 ) -> Result<Vec<usize>, StackError> {
-    let Some(domain) = domain else {
-        let retained = pixel_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
-        return Ok((0..retained).map(|k| k * pixel_count / retained).collect());
-    };
     let sample_count = domain.sample_count;
-    let retained = sample_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
+    let retained = sample_count.min(SAMPLE_LIMIT);
     let mut indices = Vec::with_capacity(retained);
     let mut rank = 0;
     // The mask is one row, so word `w` covers pixels `64w..64w + 64`; the cancel poll runs per
@@ -502,18 +698,19 @@ fn stratified_indices(
     Ok(indices)
 }
 
-/// The noise variance of one frame's channel at the sampled pixels: the source's white noise σ²,
+/// The noise variance of one frame's slot at the sampled pixels: the source's white noise σ²,
 /// scaled by the mean inverse confidence there, since interpolation that averaged several source
 /// pixels left less noise than the source had.
 fn source_noise_variance(
     frame: &StoredFrame,
-    channel: usize,
+    slots: Slots,
+    slot: usize,
     indices: &[usize],
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<f64, StackError> {
-    let sigma = f64::from(frame.source_stats.channel_noise(channel));
-    let Some(confidence) = frame.quality.confidence() else {
+    let sigma = f64::from(frame.source_stats.slot_noise(slot));
+    let Some(confidence) = frame.quality.confidence(slots.channel(slot)) else {
         return Ok(sigma * sigma);
     };
     let values = confidence.chunk(0, pixel_count);

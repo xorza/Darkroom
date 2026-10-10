@@ -1,14 +1,15 @@
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
 };
+use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
-use crate::registration::resample::kernel::{self, LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;

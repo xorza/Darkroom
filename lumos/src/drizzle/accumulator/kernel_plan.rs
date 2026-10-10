@@ -2,15 +2,16 @@
 
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::math::fwhm::FWHM_PER_SIGMA;
+use crate::math::lanczos::lanczos_lut::LanczosOrder;
 
-/// Output rows of slack on every kernel's input-row estimate. `OutputBand::deposit_rows` rounds a
-/// drop's extent to the nearest row, so a drop stopping half a row short of the band still reaches
-/// it; nothing else separates a drop's centre from the rows it touches.
-const ROW_ROUNDING_SLACK: f64 = 0.5;
+/// Output pixels of slack on every kernel's reach. `OutputBand::deposit_rows` and `deposit_cols`
+/// round a drop's extent to the nearest pixel, so a drop stopping half a pixel short of the band or
+/// the grid still reaches it; nothing else separates a drop's centre from the pixels it touches.
+const ROUNDING_SLACK: f64 = 0.5;
 /// Where the Gaussian is truncated, in σ — it has fallen to ~1% of its peak by there.
 const GAUSSIAN_RADIUS_SIGMAS: f64 = 3.0;
 /// The drizzle Lanczos kernel is `STScI`'s Lanczos-3: support radius 3, defined on [-3, 3].
-pub(super) const LANCZOS_A: f32 = 3.0;
+pub(super) const LANCZOS_ORDER: LanczosOrder = LanczosOrder::Three;
 
 /// Everything a kernel needs beyond the frame, resolved once per run.
 ///
@@ -63,31 +64,31 @@ impl KernelPlan {
                 }
             }
             DrizzleKernel::Lanczos => Self::Lanczos {
-                radius: LANCZOS_A as isize,
+                radius: LANCZOS_ORDER.a() as isize,
             },
         }
     }
 
-    /// How far a drop reaches from its pixel's centre: in output rows, and in input rows — the
+    /// How far a drop reaches from its pixel's centre: in output pixels, and in input pixels — the
     /// square kernel's drop is a box in the input, mapped corner by corner. Each includes
-    /// [`ROW_ROUNDING_SLACK`] where the deposit rounds an output extent to rows.
+    /// [`ROUNDING_SLACK`] where the deposit rounds an output extent to whole pixels.
     pub(super) fn reach(self) -> DropReach {
         match self {
             Self::Square { half_drop } => DropReach {
-                output_rows: ROW_ROUNDING_SLACK,
-                input_rows: half_drop,
+                output: ROUNDING_SLACK,
+                input: half_drop,
             },
             Self::Turbo { half_drop, .. } => DropReach {
-                output_rows: half_drop + ROW_ROUNDING_SLACK,
-                input_rows: 0.0,
+                output: half_drop + ROUNDING_SLACK,
+                input: 0.0,
             },
             Self::Point => DropReach {
-                output_rows: ROW_ROUNDING_SLACK,
-                input_rows: 0.0,
+                output: ROUNDING_SLACK,
+                input: 0.0,
             },
             Self::Gaussian { radius, .. } | Self::Lanczos { radius } => DropReach {
-                output_rows: radius as f64 + ROW_ROUNDING_SLACK,
-                input_rows: 0.0,
+                output: radius as f64 + ROUNDING_SLACK,
+                input: 0.0,
             },
         }
     }
@@ -96,6 +97,6 @@ impl KernelPlan {
 /// How far a drop reaches from its pixel's centre, in the two grids — see [`KernelPlan::reach`].
 #[derive(Debug, Clone, Copy)]
 pub(super) struct DropReach {
-    pub(super) output_rows: f64,
-    pub(super) input_rows: f64,
+    pub(super) output: f64,
+    pub(super) input: f64,
 }

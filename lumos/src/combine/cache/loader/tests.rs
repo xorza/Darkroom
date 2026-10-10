@@ -76,8 +76,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     let first = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(first.channels[0].chunk(0, 12), pixels);
-    assert_eq!(first.source_stats.channels[0].median, 5.5);
-    assert_eq!(first.source_stats.channels[0].mad, 3.0);
+    assert_eq!(first.source_stats.medians[0], 5.5);
     drop(first);
 
     // A sample and the statistics changed on disk come back as they are: the frame was mapped and
@@ -91,21 +90,11 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
         &LoadContext::default(),
     );
     let mut sentinel = spill.committed(key).unwrap().stats;
-    sentinel.channels[0].median = 99.0;
-    spill
-        .commit(
-            key,
-            Carries {
-                quality: false,
-                flags: false,
-            },
-            &sentinel,
-        )
-        .unwrap();
+    sentinel.medians[0] = 99.0;
+    spill.commit(key, Carries::Channels, &sentinel).unwrap();
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
-    assert_eq!(reused.source_stats.channels[0].median, 99.0);
-    assert_eq!(reused.source_stats.channels[0].mad, 3.0);
+    assert_eq!(reused.source_stats.medians[0], 99.0);
     drop(reused);
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();
@@ -123,8 +112,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     assert_eq!(decoded.channels[0].chunk(0, 12), rewritten);
 }
 
-/// A reused frame is held to the same checks as a decoded one: a non-finite sample, and quality
-/// planes whose coverage and confidence disagree on where there is support, each name the pixel.
+/// A reused frame is held to the same checks as a decoded one: a non-finite sample names its pixel.
 #[test]
 fn cache_frame_validates_a_reused_frame() {
     let temp_dir = TempDir::new("lumos_cache_frame_validates");
@@ -148,36 +136,6 @@ fn cache_frame_validates_a_reused_frame() {
             value: f32::INFINITY,
         }
     ));
-    poke(&spill.channel_path(0), 2, 2.0);
-
-    // Committed as carrying quality planes, then given a pair with zero confidence at pixel 5 under
-    // full coverage.
-    let image = LinearImage::from_pixels(dims, (0..12).map(|i| i as f32).collect());
-    let mut confidence = vec![1.0f32; 12];
-    confidence[5] = 0.0;
-    let quality = FrameQuality::Planes {
-        coverage: Buffer2::new(4, 3, vec![1.0; 12]),
-        confidence: Buffer2::new(4, 3, confidence),
-    };
-    let key = CacheKey::new(
-        CachedSource::of(&source).unwrap().identity,
-        DecoderKind::Linear,
-        &LoadContext::default(),
-    );
-    let stats = FrameStats::measure(&image);
-    drop(StoredFrame::cache(&spill, key, &image, &quality, stats).unwrap());
-    let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
-    assert!(
-        matches!(
-            error,
-            StackError::FrameQualityPairMismatch {
-                index: 1,
-                pixel: 5,
-                ..
-            }
-        ),
-        "{error:?}"
-    );
 }
 
 /// A cache written by one decoder is invisible to the other. A float TIFF is a `LinearImage` input

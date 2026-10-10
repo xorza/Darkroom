@@ -9,13 +9,57 @@ use crate::math::vec2us::Vec2us;
 /// indexed `[row % 6][column % 6]`.
 ///
 /// Only a layout the demosaic can work on exists: every value is a colour, the counts are the
-/// X-Trans 8 red, 20 green and 8 blue, and every green has as many red as blue neighbours.
-/// Deserializing checks the same, so a stored pattern cannot bring an invalid one back.
+/// X-Trans 8 red, 20 green and 8 blue, every green has as many red as blue neighbours, the greens
+/// repeat every three rows and columns, and their 3×3 cell holds the solitary green Markesteijn's
+/// hexagons are built around. Deserializing checks the same, so a stored pattern cannot bring
+/// an invalid one back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct XTransPattern {
     rows: [[u8; 6]; 6],
 }
+
+/// Markesteijn's hexagons over a pattern's 3×3 cell of greens, as dcraw's `xtrans_interpolate`
+/// builds them (`allhex`, `sgrow`, `sgcol`): for each `(row % 3, column % 3)`, the eight
+/// `(dy, dx)` offsets its interpolation reads, and the cell's solitary green, the one whose four
+/// neighbours are none of them green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Hexagons {
+    offsets: [[[HexOffset; 8]; 3]; 3],
+    solitary: Vec2us,
+}
+
+/// One hexagon neighbour's offset from its pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HexOffset {
+    pub(crate) dy: i8,
+    pub(crate) dx: i8,
+}
+
+impl Hexagons {
+    /// The eight offsets of the hexagon at `(row, column)`.
+    #[inline(always)]
+    pub(crate) const fn at(&self, row: usize, column: usize) -> &[HexOffset; 8] {
+        &self.offsets[row % 3][column % 3]
+    }
+
+    /// Where the cell's solitary green lies, within the first 3×3 cell.
+    pub(crate) const fn solitary(&self) -> Vec2us {
+        self.solitary
+    }
+}
+
+/// Unit steps cycled through four directions, dcraw's `orth`: direction `d` (even) steps
+/// `(orth[d], orth[d + 2])` and its basis is `(orth[d], orth[d + 1])` down, `(orth[d + 2],
+/// orth[d + 3])` across.
+const ORTH: [i8; 12] = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1];
+
+/// dcraw's `patt`: each hexagon's eight neighbours in a direction's basis, for a pixel that is not
+/// green (`[0]`) and one that is (`[1]`).
+const PATT: [[i8; 16]; 2] = [
+    [0, 1, 0, -1, 2, 0, -1, 0, 1, 1, 1, -1, 0, 0, 0, 0],
+    [0, 1, 0, -2, 1, 0, -2, 0, 1, 1, -2, -2, 1, -1, -1, 1],
+];
 
 /// Why a 6×6 array is not an X-Trans layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -36,6 +80,19 @@ pub enum XTransPatternError {
         column: usize,
         neighbors: [usize; 3],
     },
+    /// The demosaic reads greens in a 3×3 cell, so the 6×6 layout must repeat them every three.
+    #[error(
+        "invalid X-Trans greens: row {row}, column {column} is not green as row {}, column {} is",
+        row % 3,
+        column % 3
+    )]
+    GreenPeriod { row: usize, column: usize },
+    /// Markesteijn's hexagons are built around a solitary green, a green whose four neighbours are
+    /// none of them green, which the layout's 3×3 cell of greens must hold exactly one of. With
+    /// greens that repeat every three, a layout has one exactly when every hexagon fills: of the
+    /// layouts that pass every other check, an enumeration of them all finds no third kind.
+    #[error("invalid X-Trans greens: no solitary green to build the demosaic's hexagons around")]
+    Hexagons,
 }
 
 impl XTransPattern {
@@ -84,7 +141,27 @@ impl XTransPattern {
             }
             row += 1;
         }
-        Ok(Self { rows })
+        let mut row = 0;
+        while row < 6 {
+            let mut column = 0;
+            while column < 6 {
+                if (rows[row][column] == 1) != (rows[row % 3][column % 3] == 1) {
+                    return Err(XTransPatternError::GreenPeriod { row, column });
+                }
+                column += 1;
+            }
+            row += 1;
+        }
+        match hexagons(&rows) {
+            Some(_) => Ok(Self { rows }),
+            None => Err(XTransPatternError::Hexagons),
+        }
+    }
+
+    /// Markesteijn's hexagons over the layout, built by the function [`Self::new`] checks them
+    /// with.
+    pub(crate) const fn hexagons(&self) -> Hexagons {
+        hexagons(&self.rows).expect("a pattern's hexagons were checked when it was made")
     }
 
     /// The colour indices, `[row][column]` over one 6×6 period.
@@ -96,6 +173,67 @@ impl XTransPattern {
     #[inline(always)]
     pub const fn color_at(&self, pos: Vec2us) -> u8 {
         self.rows[pos.y % 6][pos.x % 6]
+    }
+}
+
+/// dcraw's `allhex` construction: each pixel of the 3×3 cell walks its four neighbours, cycling to
+/// a fifth, counting the run of neighbours that are not green; its hexagon is laid out along the
+/// direction where that run first reaches one past whether the pixel itself is green, and a run of
+/// four marks the solitary green. `None` when an entry stays unset or the cell holds other than one
+/// solitary green.
+const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
+    let mut offsets = [[[HexOffset { dy: 0, dx: 0 }; 8]; 3]; 3];
+    let mut set = [[[false; 8]; 3]; 3];
+    let mut solitary = None;
+    let mut solitary_count = 0;
+    let mut row = 0;
+    while row < 3 {
+        let mut column = 0;
+        while column < 3 {
+            let g = (rows[row][column] == 1) as usize;
+            let mut run = 0;
+            let mut d = 0;
+            while d < 10 {
+                // From `row + 6`, a unit step back stays in range and reads the same colour.
+                let neighbour_row = (row + 6).wrapping_add_signed(ORTH[d] as isize);
+                let neighbour_column = (column + 6).wrapping_add_signed(ORTH[d + 2] as isize);
+                if rows[neighbour_row % 6][neighbour_column % 6] == 1 {
+                    run = 0;
+                } else {
+                    run += 1;
+                }
+                if run == 4 {
+                    solitary = Some(Vec2us::new(column, row));
+                    solitary_count += 1;
+                }
+                if run == g + 1 {
+                    let mut c = 0;
+                    while c < 8 {
+                        let entry = c ^ ((g * 2) & d);
+                        offsets[row][column][entry] = HexOffset {
+                            dy: ORTH[d] * PATT[g][c * 2] + ORTH[d + 1] * PATT[g][c * 2 + 1],
+                            dx: ORTH[d + 2] * PATT[g][c * 2] + ORTH[d + 3] * PATT[g][c * 2 + 1],
+                        };
+                        set[row][column][entry] = true;
+                        c += 1;
+                    }
+                }
+                d += 2;
+            }
+            let mut entry = 0;
+            while entry < 8 {
+                if !set[row][column][entry] {
+                    return None;
+                }
+                entry += 1;
+            }
+            column += 1;
+        }
+        row += 1;
+    }
+    match solitary {
+        Some(solitary) if solitary_count == 1 => Some(Hexagons { offsets, solitary }),
+        _ => None,
     }
 }
 

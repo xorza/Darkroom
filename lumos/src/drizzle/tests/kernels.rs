@@ -7,14 +7,6 @@ use std::f64::consts::PI;
 
 use super::*;
 
-/// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are
-/// 7×7.
-const MAX_DEPOSITS: f32 = 49.0;
-
-/// How far `Σ|wᵢ|` can exceed `Σwᵢ` at an interior pixel: Lanczos-3's negative lobes, about 1.3 per
-/// axis. The other kernels' weights are all positive, so it is 1 for them.
-const LOBE_EXCESS: f32 = 1.7;
-
 /// An image of `value` with `pixel` set to `bright`.
 fn one_pixel_image(size: Size2us, value: f32, pixel: Vec2us, bright: f32) -> LinearImage {
     let mut pixels = vec![value; size.pixel_count()];
@@ -102,16 +94,28 @@ fn a_constant_reads_back_wherever_weight_landed() {
 }
 
 /// Two frames of 2 and 6 at frame weights 1 and 3 combine to `(2·1 + 6·3) / 4` = 5 wherever they
-/// landed, every kernel: both deposit through the same geometry, which divides out. The point
-/// kernel at scale 2 leaves three cells in four to the fill.
+/// landed, every kernel: both deposit through the same geometry, which divides out, and the
+/// combine multiplies each frame's weight by its drops'. The point kernel at scale 2 leaves three
+/// cells in four to the fill.
 #[test]
 fn two_frames_combine_to_their_weighted_mean() {
     let size = Size2us::new(12, 12);
     for kernel in DrizzleKernel::ALL {
-        let mut acc = accumulator(ImageDimensions::new(size, 1), usual_config(kernel));
-        acc.add_image(constant_image(size, 2.0), &Transform::identity(), 1.0, None);
-        acc.add_image(constant_image(size, 6.0), &Transform::identity(), 3.0, None);
-        let product = acc.finalize().product;
+        let product = drizzle_images(
+            drizzle_frames(
+                vec![constant_image(size, 2.0), constant_image(size, 6.0)],
+                &[Transform::identity(); 2],
+            ),
+            &usual_config(kernel),
+            &StackConfig {
+                weighting: Weighting::Manual(vec![1.0, 3.0]),
+                ..plain_stack()
+            },
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product;
         // Two frames' deposits, at the larger value.
         let bound = (4.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * 6.0 * LOBE_EXCESS;
         for (index, (&value, &weight)) in product
@@ -237,19 +241,21 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
         min_weight_fraction: 0.6,
         ..kernel_config(DrizzleKernel::Turbo, 2.0, 0.5)
     };
-    let product = drizzle_one(
-        size,
-        config,
-        one_pixel_image(size, 0.0, Vec2us::new(0, 0), 1.0),
-        &Transform::translation(DVec2::new(0.1, 0.0)),
-        None,
-    );
+    let product = drizzle_plain(
+        drizzle_frames(
+            vec![one_pixel_image(size, 0.0, Vec2us::new(0, 0), 1.0)],
+            &[Transform::translation(DVec2::new(0.1, 0.0))],
+        ),
+        &config,
+    )
+    .unwrap()
+    .product;
     let out = product.image.channel(0);
     let weight = weight_plane(&product);
     for (x, y) in [(1, 0), (1, 1)] {
         assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
     }
-    let coverage = product.coverage.as_ref().unwrap().to_plane();
+    let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for (x, y) in [(0, 0), (0, 1)] {
         assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
         assert_eq!(weight[(x, y)], 0.0, "cell ({x},{y}) weight");
@@ -300,7 +306,12 @@ fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
         fill_value: -999.0,
         ..kernel_config(DrizzleKernel::Point, 2.0, 0.8)
     };
-    let product = drizzle_one(size, config, image, &Transform::identity(), None);
+    let product = drizzle_plain(
+        drizzle_frames(vec![image], &[Transform::identity()]),
+        &config,
+    )
+    .unwrap()
+    .product;
     let weight = weight_plane(&product);
     let coverage = product.coverage.as_ref().unwrap();
     for y in 0..8 {
@@ -349,23 +360,23 @@ fn unit_sampling_copies_the_input() {
     }
 }
 
-/// An unmagnified drop deposits its frame weight in total, whatever its kernel spreads it over:
-/// the shares of a drop sum to 1, and a frame registered at unit scale is not magnified. One pixel
-/// at frame weight 2.5, well inside the grid, so nothing of it falls off.
+/// A drop deposits its pixel weight in total, whatever its kernel spreads it over: the shares of a
+/// drop sum to 1. One pixel at weight 2.5, well inside the grid, so nothing of it falls off.
 ///
 /// The deposited weights' sum adds at most 49 deposits, each a share rounded once. Read before the
 /// gate, which zeroes the cells it fills, a Lanczos lobe's negative ones among them.
 #[test]
-fn an_unmagnified_drop_deposits_its_frame_weight() {
+fn a_drop_deposits_its_pixel_weight() {
     let size = Size2us::new(16, 16);
     let pixel = Vec2us::new(7, 7);
+    let mut weights = only(size, pixel);
+    weights[(pixel.x, pixel.y)] = 2.5;
     for kernel in DrizzleKernel::ALL {
         let mut acc = accumulator(ImageDimensions::new(size, 1), usual_config(kernel));
         acc.add_image(
             constant_image(size, 1.0),
             &Transform::translation(DVec2::new(0.3, -0.2)),
-            2.5,
-            Some(&only(size, pixel)),
+            Some(&weights),
         );
         let total: f32 = acc.accumulated_weights().pixels().iter().sum();
         assert!(
@@ -420,7 +431,6 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
         alone.add_image(
             constant_image(size, 4.0),
             &transform,
-            1.0,
             Some(&only(size, pixel)),
         );
         let reached = alone
@@ -448,35 +458,39 @@ fn pixel_weights_scale_their_pixel_share() {
     acc.add_image(
         constant_image(size, 2.0),
         &Transform::identity(),
-        1.0,
         Some(&half),
     );
-    acc.add_image(constant_image(size, 6.0), &Transform::identity(), 1.0, None);
-    let product = acc.finalize().product;
+    acc.add_image(constant_image(size, 6.0), &Transform::identity(), None);
+    let product = acc.finalize();
     let out = product.image.channel(0);
     assert!((out[(1, 1)] - 14.0 / 3.0).abs() <= 4.0 * f32::EPSILON * 6.0);
     assert_eq!(out[(0, 0)], 4.0);
 }
 
-/// A frame of weight zero deposits nothing and does not count as covering anything: one frame of 3
-/// and one of 100 at weight 0 read 3, at coverage one frame in two.
+/// A frame whose pixel weights are all zero drops nothing, so the combine never gathers it: one
+/// frame of 3 and one of 100 at pixel weight 0 read 3 wherever the first landed, and the coverage
+/// counts one frame of two, 0.5.
 #[test]
-fn a_zero_weight_frame_is_ignored() {
+fn a_frame_of_zero_pixel_weights_is_not_gathered() {
     let size = Size2us::new(8, 8);
-    let mut acc = accumulator(
-        ImageDimensions::new(size, 1),
-        usual_config(DrizzleKernel::Turbo),
+    let mut frames = drizzle_frames(
+        vec![constant_image(size, 3.0), constant_image(size, 100.0)],
+        &[Transform::identity(); 2],
     );
-    acc.add_image(constant_image(size, 3.0), &Transform::identity(), 1.0, None);
-    acc.add_image(
-        constant_image(size, 100.0),
-        &Transform::identity(),
-        0.0,
-        None,
-    );
-    let product = acc.finalize().product;
-    assert!(product.image.channel(0).pixels().iter().all(|&v| v == 3.0));
-    assert_eq!(product.coverage.as_ref().unwrap()[(8, 8)], 0.5);
+    frames[1].pixel_weight_map = Some(Buffer2::new_filled(size.width, size.height, 0.0));
+    let product = drizzle_plain(frames, &usual_config(DrizzleKernel::Turbo))
+        .unwrap()
+        .product;
+    let weight = weight_plane(&product);
+    for (index, &value) in product.image.channel(0).pixels().iter().enumerate() {
+        let expected = if weight.pixels()[index] > 0.0 {
+            3.0
+        } else {
+            0.0
+        };
+        assert_eq!(value, expected, "pixel {index}");
+    }
+    assert_eq!(product.coverage.as_ref().unwrap().to_plane(0)[(8, 8)], 0.5);
 }
 
 /// A radial drop that hangs off the output grid loses the part that missed it.
@@ -549,8 +563,8 @@ fn rgb_channels_drizzle_independently() {
         ImageDimensions::new(size, 3),
         kernel_config(DrizzleKernel::Turbo, 2.0, 0.8),
     );
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let product = acc.finalize().product;
+    acc.add_image(image, &Transform::identity(), None);
+    let product = acc.finalize();
     for (channel, expected) in [1.0, 2.0, 3.0].into_iter().enumerate() {
         for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
             assert_eq!(
@@ -562,36 +576,43 @@ fn rgb_channels_drizzle_independently() {
     }
 }
 
-/// A tap where the Lanczos window ends deposits nothing and reaches nothing. Shifted
-/// half a pixel along x, a lone pixel at (6, 6) lands at (6.5, 6) at scale 1. Its neighbourhood is
-/// the 7 × 7 about the rounded centre (7, 6): columns 4 to 10 at distances −2.5 to 3.5, rows 3 to 9
-/// at distances −3 to 3. `L` is 0 from distance 3 on, so column 10 and rows 3 and 9 receive exactly
-/// zero weight from it and are not marked covered by it. A first, unshifted frame covers
-/// every cell, so the gate keeps those cells, and their coverage counts that frame alone: 1/2.
+/// A tap where the Lanczos window ends deposits nothing and reaches nothing. Shifted half a pixel
+/// along x, a lone pixel at (6, 6) lands at (6.5, 6) at scale 1. Its neighbourhood is the 7 × 7
+/// about the rounded centre (7, 6): columns 4 to 10 at distances −2.5 to 3.5, rows 3 to 9 at
+/// distances −3 to 3. `L` is 0 from distance 3 on, so column 10 and rows 3 and 9 receive exactly
+/// zero weight from it: the frame is not gathered there. A first, unshifted frame covers every
+/// cell, so the coverage of those cells counts that frame alone: 1/2.
 #[test]
 fn a_zero_lanczos_tap_marks_no_coverage() {
     let size = Size2us::new(13, 13);
     let pixel = Vec2us::new(6, 6);
-    let mut acc = accumulator(
-        ImageDimensions::new(size, 1),
-        kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
-    );
-    acc.add_image(constant_image(size, 1.0), &Transform::identity(), 1.0, None);
-    let first = acc.accumulated_weights().clone();
-    acc.add_image(
-        constant_image(size, 1.0),
-        &Transform::translation(DVec2::new(0.5, 0.0)),
-        1.0,
-        Some(&only(size, pixel)),
-    );
-    let weights = acc.accumulated_weights().clone();
-    let product = acc.finalize().product;
-    let coverage = product.coverage.as_ref().unwrap().to_plane();
-    let zero_cells = (4..=10)
+    let config = kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0);
+    let shift = Transform::translation(DVec2::new(0.5, 0.0));
+    let mut alone = accumulator(ImageDimensions::new(size, 1), config.clone());
+    alone.add_image(constant_image(size, 1.0), &shift, Some(&only(size, pixel)));
+    let zero_cells: Vec<(usize, usize)> = (4..=10)
         .flat_map(|x| [(x, 3), (x, 9)])
-        .chain((3..=9).map(|y| (10, y)));
-    for (x, y) in zero_cells {
-        assert_eq!(weights[(x, y)], first[(x, y)], "({x}, {y}) weight");
+        .chain((3..=9).map(|y| (10, y)))
+        .collect();
+    for &(x, y) in &zero_cells {
+        assert_eq!(
+            alone.accumulated_weights()[(x, y)],
+            0.0,
+            "({x}, {y}) weight"
+        );
+    }
+
+    let frames = vec![
+        DrizzleFrame::new(constant_image(size, 1.0), warp_of(Transform::identity())),
+        DrizzleFrame {
+            source: constant_image(size, 1.0),
+            warp: warp_of(shift),
+            pixel_weight_map: Some(only(size, pixel)),
+        },
+    ];
+    let product = drizzle_plain(frames, &config).unwrap().product;
+    let coverage = product.coverage.as_ref().unwrap().to_plane(0);
+    for &(x, y) in &zero_cells {
         assert_eq!(coverage[(x, y)], 0.5, "({x}, {y}) coverage");
     }
     assert_eq!(coverage[(6, 6)], 1.0);

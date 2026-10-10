@@ -5,13 +5,15 @@ scene in each Bayer phase, and prints, per case, the FNV-1a 64 digest of the out
 three planes in order, rows from `BORDER` to `HEIGHT - BORDER`, the same columns, each f32's
 little-endian bytes. Outside that band librtprocess fills a border by its own interpolation.
 
-One step is changed. RCD 2.3 (Luis Sanz Rodríguez, 2017) defines the diagonal statistics at a red
+Two steps are changed. RCD 2.3 (Luis Sanz Rodríguez, 2017) defines the diagonal statistics at a red
 or blue site as the squared diagonal high-pass filter summed over the site and its two neighbours
 along the diagonal; its closed forms expand exactly that sum. librtprocess, RawTherapee and darktable
 keep the filter on odd columns only, in a half-width buffer, so on every row step 4.1 reads one or
 two of the three from a pixel beside the diagonal, and which ones depends on the Bayer phase. The
-harness computes the filter at every column and reads the three diagonal sites; every other step is
-librtprocess's own.
+harness computes the filter at every column and reads the three diagonal sites. And step 3's green
+ratio `cfa·2c/(eps + c + s)` drops its `eps`, which biases faint signal by `eps/(c + s)`: lumos
+takes the ratio level-free. The scenes are positive, so `c + s` never cancels. Every other step,
+the `eps` that keeps the gradient weights finite among them, is librtprocess's own.
 
 The frame fits in one of librtprocess's 194-pixel tiles. Its tiles overlap by 9 pixels, and RCD
 reaches 10, so the two columns at a seam differ from an untiled run.
@@ -22,12 +24,12 @@ bits on every platform. The build disables contraction: Rust never fuses a multi
 Run: python3 rcd_librtprocess.py (needs g++ and network access).
 """
 
+import array
 import pathlib
 import subprocess
+import sys
 import tempfile
 import urllib.request
-
-import numpy as np
 
 COMMIT = "9a858270acb2096e2e403d932760ee688fcac425"
 FILES = [
@@ -60,6 +62,14 @@ THREE_SITES = [
         "float Q_Stat = std::max(epssq, Q_CDiff_Hpf[indx3 + 1] + Q_CDiff_Hpf[indx2] + Q_CDiff_Hpf[indx4]);",
         "float Q_Stat = std::max(epssq, Q_CDiff_Hpf[indx - w1 + 1] + Q_CDiff_Hpf[indx] + Q_CDiff_Hpf[indx + w1 - 1]);",
     ),
+]
+
+LEVEL_FREE_RATIO = [
+    (
+        f"const float {direction}_Est = cfa[indx {step}] * (lpfi + lpfi) / (eps + lpfi + lpf[lpindx {step}]);",
+        f"const float {direction}_Est = cfa[indx {step}] * (lpfi + lpfi) / (lpfi + lpf[lpindx {step}]);",
+    )
+    for direction, step in [("N", "- w1"), ("S", "+ w1"), ("W", "-  1"), ("E", "+  1")]
 ]
 
 STUBS = {
@@ -142,7 +152,7 @@ def main():
             url = f"https://raw.githubusercontent.com/CarVac/librtprocess/{COMMIT}/{file}"
             (root / pathlib.Path(file).name).write_bytes(urllib.request.urlopen(url).read())
         source = (root / "rcd.cc").read_text()
-        for old, new in THREE_SITES:
+        for old, new in THREE_SITES + LEVEL_FREE_RATIO:
             assert source.count(old) == 1, old
             source = source.replace(old, new)
         (root / "rcd.cc").write_text(source)
@@ -156,12 +166,22 @@ def main():
             check=True,
         )
         output = subprocess.run([str(root / "harness")], capture_output=True, check=True).stdout
-    planes = np.frombuffer(output, dtype="<f4").reshape(4, 4, 3, HEIGHT, WIDTH)
+    samples = array.array("f", output)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    plane = WIDTH * HEIGHT
     for scene in range(4):
         row = []
         for phase in range(4):
-            interior = planes[scene, phase, :, BORDER : HEIGHT - BORDER, BORDER : WIDTH - BORDER]
-            row.append(f"0x{fnv1a64(np.ascontiguousarray(interior).tobytes()):016x}")
+            interior = array.array("f")
+            for channel in range(3):
+                base = ((scene * 4 + phase) * 3 + channel) * plane
+                for y in range(BORDER, HEIGHT - BORDER):
+                    start = base + y * WIDTH
+                    interior.extend(samples[start + BORDER : start + WIDTH - BORDER])
+            if sys.byteorder != "little":
+                interior.byteswap()
+            row.append(f"0x{fnv1a64(interior.tobytes()):016x}")
         print(f"[{', '.join(row)}],")
 
 
