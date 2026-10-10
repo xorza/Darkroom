@@ -53,28 +53,35 @@ impl CrMasks {
     /// against `objlim·F`) puts `F` in the same units as `S'`, so the `objlim` default carries the
     /// same star-core protection as astroscrappy/ccdproc. (Raw `L⁺ > objlim·F` is ~2× more
     /// aggressive.)
+    ///
+    /// No pixel `never_flagged` holds is a candidate or grown into, as astroscrappy keeps its
+    /// saturated stars and bad pixels out with `goodpix`.
     pub(super) fn detect_and_grow(
         &mut self,
         significance: &[f32],
         f: &[f32],
         noise: &[f32],
         cfg: &CosmicRayConfig,
+        never_flagged: Option<&BitBuffer2>,
     ) -> usize {
         let Self {
             accumulated,
             primary,
             flags,
         } = self;
+        let allowed = |i: usize| never_flagged.is_none_or(|never| !never.get(i));
         primary.fill_from_predicate(|i| {
             let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
-            significance[i] > cfg.sigclip && significance[i] > cfg.objlim * f_norm
+            allowed(i) && significance[i] > cfg.sigclip && significance[i] > cfg.objlim * f_norm
         });
         primary.and_not(accumulated);
         grow_box(primary, flags, accumulated, |i| {
-            significance[i] > cfg.sigclip
+            allowed(i) && significance[i] > cfg.sigclip
         });
         let lowered = cfg.sigclip * cfg.sigfrac;
-        grow_box(flags, primary, accumulated, |i| significance[i] > lowered);
+        grow_box(flags, primary, accumulated, |i| {
+            allowed(i) && significance[i] > lowered
+        });
         let flags = primary;
 
         // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`.

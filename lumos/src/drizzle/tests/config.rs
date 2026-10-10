@@ -91,7 +91,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
         };
         assert_eq!((invalid.field, invalid.value), ("pixfrac", 0.0));
         assert!(matches!(
-            DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), config),
+            DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), Deposit::Channels(1), config, 0),
             Err(DrizzleError::Config(DrizzleConfigError::Field(invalid)))
                 if invalid.field == "pixfrac"
         ));
@@ -99,7 +99,9 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 
     let error = DrizzleAccumulator::new(
         ImageDimensions::new((2, 2), 1),
+        Deposit::Channels(1),
         DrizzleConfig::default().with_pixfrac(1.5),
+        0,
     )
     .unwrap_err();
     assert_eq!(
@@ -112,7 +114,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 fn drizzle_output_grid_is_the_input_scaled() {
     let config = DrizzleConfig::x2();
     let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
-    let dims = acc.finalize().product.image.dimensions();
+    let dims = acc.finalize().image.dimensions();
     assert_eq!(dims.width(), 200);
     assert_eq!(dims.height(), 160);
     assert_eq!(dims.channels(), 3);

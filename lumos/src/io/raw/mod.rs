@@ -2,6 +2,7 @@ mod black_level;
 pub(crate) mod demosaic;
 pub(crate) mod error;
 mod libraw;
+mod raw_decoder;
 pub(crate) mod raw_files;
 mod sensor_layout;
 mod unpacked_raw;
@@ -18,17 +19,20 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::Libraw;
+use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::raw::unpacked_raw::UnpackedRaw;
 
 /// Camera-RAW extensions accepted by this decoder: the formats LibRaw decodes, as digiKam's
-/// libkdcraw lists them, with Canon's CR3 and GoPro's GPR that later LibRaw added. `.hdr`, which
-/// LibRaw reads for Hasselblad, is left out: it names Radiance HDR images far more often.
+/// libkdcraw lists them, with Canon's CR3 that later LibRaw added. `.hdr`, which LibRaw reads for
+/// Hasselblad, is left out: it names Radiance HDR images far more often. Sigma's X3F and GoPro's
+/// GPR are left out too: LibRaw decodes them only with the X3F tools and the GPR SDK, which this
+/// build does not include.
 pub const RAW_EXTENSIONS: &[&str] = &[
     "3fr", "arw", "bay", "bmq", "cap", "cine", "cr2", "cr3", "crw", "cs1", "dc2", "dcr", "dng",
-    "drf", "dsc", "erf", "fff", "gpr", "ia", "iiq", "k25", "kc2", "kdc", "mdc", "mef", "mos",
-    "mrw", "nef", "nrw", "orf", "pef", "ptx", "pxn", "qtk", "raf", "raw", "rdc", "rw2", "rwl",
-    "rwz", "sr2", "srf", "srw", "sti", "x3f",
+    "drf", "dsc", "erf", "fff", "ia", "iiq", "k25", "kc2", "kdc", "mdc", "mef", "mos", "mrw",
+    "nef", "nrw", "orf", "pef", "ptx", "pxn", "qtk", "raf", "raw", "rdc", "rw2", "rwl", "rwz",
+    "sr2", "srf", "srw", "sti",
 ];
 
 /// The balance left to apply to a file's samples, normalized so its smallest multiplier is 1:
@@ -78,12 +82,19 @@ fn xtrans_pattern_from_libraw(pattern: [[ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
     pattern.map(|row| row.map(|color| u8::from_ne_bytes(color.to_ne_bytes())))
 }
 
+/// The colours LibRaw's `cdesc` names, one letter each, its terminator left off.
+fn colour_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
+    let [a, b, c, d, _] = cdesc.map(|letter| u8::from_ne_bytes(letter.to_ne_bytes()));
+    [a, b, c, d]
+}
+
 /// The mosaic LibRaw's state `data` describes — see [`CfaType::from_libraw`].
 fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawError> {
     let idata = &data.idata;
     Ok(CfaType::from_libraw(
         idata.filters,
         idata.colors,
+        colour_description(idata.cdesc),
         xtrans_pattern_from_libraw(idata.xtrans),
     )?)
 }
@@ -103,15 +114,16 @@ fn open(path: &Path, context: &LoadContext) -> Result<Libraw, ImageError> {
 /// Open and unpack `path`.
 fn open_raw(path: &Path, context: &LoadContext) -> Result<UnpackedRaw, ImageError> {
     let libraw = open(path, context)?;
-    UnpackedRaw::unpack(libraw, path).map_err(|source| ImageError::raw(path, source))
+    UnpackedRaw::unpack(libraw, path, context.decode_threads)
+        .map_err(|source| ImageError::raw(path, source))
 }
 
 /// Load a raw file as a linear image within `[0, 1]`: the light-frame preview.
 ///
 /// A sensor lumos demosaics goes the science path — [`load_raw_cfa`]'s frame, its demosaic over
 /// the visible area alone, then a clamp — so the preview and a calibrated frame cannot disagree
-/// anywhere, the masked margins included. Anything else — a linear DNG, sRAW or Foveon, or an
-/// exotic CFA — is LibRaw's own processing.
+/// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
+/// three-colour CFA — is LibRaw's own processing.
 pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
     let raw = open_raw(path, context)?;
     context.check_cancelled(path)?;
@@ -127,16 +139,36 @@ pub(crate) fn raw_cfa_frame_info(
     frame_info(&open(path, context)?).map_err(|source| ImageError::raw(path, source))
 }
 
+/// The refusals LibRaw's identify stage settles, before any decode, which the header read and the
+/// load share: a Fuji SuperCCD's 45° layout, which neither demosaic reads; a Phase One IIQ, whose
+/// black LibRaw subtracts only in its own processing; a float DNG, which LibRaw quantizes on
+/// unpack. Returns the decoder the rest of the decode reads.
+fn identified(libraw: &Libraw) -> Result<RawDecoder, RawError> {
+    if libraw.super_ccd() {
+        return Err(RawError::SuperCcd);
+    }
+    match libraw.decoder() {
+        RawDecoder::PhaseOne => Err(RawError::PhaseOne),
+        RawDecoder::FloatingPoint => Err(RawError::FloatingPoint),
+        decoder => Ok(decoder),
+    }
+}
+
 /// What the open `libraw` settles of its frame before `unpack`.
+///
+/// # Errors
+///
+/// [`identified`]'s refusals, and [`RawError::MosaicSetAtDecode`] for a decoder that settles the
+/// mosaic only as it decodes: the header's pattern is not the frame's.
 fn frame_info(libraw: &Libraw) -> Result<CfaFrameInfo, RawError> {
+    if identified(libraw)? == RawDecoder::FiltersAtDecode {
+        return Err(RawError::MosaicSetAtDecode);
+    }
     let layout = SensorLayout::of(&libraw.data().sizes)?;
     let cfa_type = sensor_cfa_type(libraw.data())?.ok_or(RawError::NotACfaFrame)?;
     Ok(CfaFrameInfo {
         dimensions: ImageDimensions::new(layout.active, 1),
         cfa_type,
-        // Only a `zero_is_bad` camera reports photosites with no measurement, and the identified
-        // camera settles that before a pixel is read.
-        may_carry_nulls: libraw.zero_is_bad(),
         // The file LibRaw parses in place, and the raw buffer it unpacks into, both held while
         // the frame is normalized out of them.
         decoder_bytes: libraw.file_len() + layout.raw.pixel_count() * size_of::<u16>(),

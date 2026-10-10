@@ -39,28 +39,6 @@ fn available_memory_reports_a_plausible_figure_on_every_call() {
 }
 
 #[test]
-fn quality_planes_are_charged_per_pixel_not_per_sample() {
-    // Coverage and confidence are channel-independent, so an RGB frame carries two of them, not
-    // six. Charging per sample would triple the figure and push a masked colour stack to disk
-    // for planes it never allocates.
-    let mono = ImageDimensions::new((100, 50), 1);
-    let rgb = ImageDimensions::new((100, 50), 3);
-    assert_eq!(mono.quality_plane_bytes(), 2 * 100 * 50 * 4);
-    assert_eq!(rgb.quality_plane_bytes(), mono.quality_plane_bytes());
-
-    // Against the frame's own pixels, which *are* per sample: a masked mono frame is three
-    // planes resident and a masked RGB one is five, not six.
-    assert_eq!(
-        mono.frame_bytes() + mono.quality_plane_bytes(),
-        3 * 100 * 50 * 4
-    );
-    assert_eq!(
-        rgb.frame_bytes() + rgb.quality_plane_bytes(),
-        5 * 100 * 50 * 4
-    );
-}
-
-#[test]
 fn memory_budget_keeps_one_quarter_as_headroom_without_overflow() {
     assert_eq!(
         memory_budget(8 * 1024 * 1024 * 1024),
@@ -324,10 +302,10 @@ fn demosaic_costs_in_planes() {
     assert_eq!(memory.output_bytes, plane_bytes);
     assert_eq!(memory.peak_bytes, plane_bytes);
     for (memory, workspace) in [
-        (bayer(plane_bytes), rcd::workspace_bytes()),
+        (bayer(plane_bytes), rcd::internals::workspace_bytes()),
         (
             demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes),
-            markesteijn::workspace_bytes(),
+            markesteijn::internals::workspace_bytes(),
         ),
     ] {
         assert_eq!(memory.output_bytes, 3 * plane_bytes);

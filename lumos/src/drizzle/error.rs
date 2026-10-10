@@ -2,7 +2,9 @@
 
 use thiserror::Error;
 
+use crate::combine::error::StackError;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
@@ -30,7 +32,7 @@ pub enum DrizzleError {
     #[error("drizzle cancelled")]
     Cancelled,
 
-    /// A file that could not be decoded — see [`StackError::ImageLoad`](crate::StackError::ImageLoad)
+    /// A file that could not be decoded — see [`StackError::ImageLoad`]
     /// for why the decoder's own error travels rather than a wrapper. A cancelled decode arrives as
     /// [`Self::Cancelled`], never here.
     #[error(transparent)]
@@ -39,8 +41,30 @@ pub enum DrizzleError {
     #[error(transparent)]
     DimensionMismatch(#[from] FrameDimensionMismatch),
 
-    #[error("drizzle frame {index} weight must be finite and non-negative, got {value}")]
-    InvalidFrameWeight { index: usize, value: f32 },
+    /// A sample no drop can carry: its value would turn every output pixel the drop reaches, and
+    /// its variance, into the same non-finite number.
+    #[error(
+        "drizzle frame {index} has non-finite sample {value} in channel {channel} at pixel {pixel}"
+    )]
+    NonFiniteSample {
+        index: usize,
+        channel: usize,
+        pixel: usize,
+        value: f32,
+    },
+
+    /// A frame whose mosaic pattern is not the first frame's: its photosites would reach other
+    /// channels at the same positions. `None` is a frame that is no mosaic.
+    #[error("drizzle frame {index} has mosaic pattern {actual:?}, expected {expected:?}")]
+    PatternMismatch {
+        index: usize,
+        expected: Option<CfaType>,
+        actual: Option<CfaType>,
+    },
+
+    /// The combine of the drizzled frames failed: its configuration, or storing a frame.
+    #[error(transparent)]
+    Stack(#[from] StackError),
 
     #[error(
         "pixel weight map dimensions for drizzle frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"

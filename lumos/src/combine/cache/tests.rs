@@ -1,8 +1,9 @@
 use crate::combine::cache::*;
 use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::config::Weighting;
+use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::Rejection;
-use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
+use crate::frame_store::frame_quality::{DropPlanes, FramePlane, FrameQuality};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::cfa::make_cfa;
@@ -270,50 +271,92 @@ fn stored_frames_must_share_one_cfa_pattern() {
 
 /// Stored frames are held to the same pairing as caller-supplied ones
 /// (`stack_images_rejects_warp_quality_planes_that_disagree_about_support`): support and confidence
-/// must agree on which pixels a frame reaches.
+/// must agree on which pixels a frame reaches, for a warp's coverage and a drizzle's drop weight
+/// alike, and a drop weight is never negative.
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
     let core = || CacheCore::plain(CacheTier::Resident, dimensions);
-    let frame = |coverage: Vec<f32>, confidence: Vec<f32>| {
+    let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
+        |support, confidence| FrameQuality::Planes {
+            coverage: Buffer2::new(4, 1, support),
+            confidence: Buffer2::new(4, 1, confidence),
+        };
+    let drizzled: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
+        |support, confidence| FrameQuality::Drizzled {
+            drops: [DropPlanes {
+                weight: Buffer2::new(4, 1, support),
+                confidence: Buffer2::new(4, 1, confidence),
+            }]
+            .into_iter()
+            .collect(),
+        };
+    let frame = |quality: FrameQuality<Buffer2<f32>>| {
         let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
         let stats = FrameStats::measure(&image);
-        StoredFrame::from_memory(
-            image,
-            FrameQuality::Planes {
-                coverage: Buffer2::new(4, 1, coverage),
-                confidence: Buffer2::new(4, 1, confidence),
-            },
-            stats,
-        )
+        StoredFrame::from_memory(image, quality, stats)
     };
 
+    for (kind, quality) in [
+        (FramePlane::Coverage, warped),
+        (FramePlane::DropWeight, drizzled),
+    ] {
+        let error = validate_frames(
+            &[frame(quality(
+                vec![1.0, 1.0, 1.0, 1.0],
+                vec![1.0, 1.0, 0.0, 1.0],
+            ))],
+            dimensions,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StackError::FrameQualityPairMismatch {
+                    index: 0,
+                    pixel: 2,
+                    plane,
+                    support: 1.0,
+                    confidence: 0.0,
+                } if plane == kind
+            ),
+            "{kind}: expected a pair mismatch at pixel 2, got {error:?}"
+        );
+
+        // The pair the warp or the drizzle would have produced there builds.
+        assert!(
+            FrameCache::from_stored_frames(
+                vec![frame(quality(
+                    vec![1.0, 1.0, 0.0, 1.0],
+                    vec![1.0, 1.0, 0.0, 1.0]
+                ))],
+                core(),
+                Normalization::None,
+            )
+            .is_ok(),
+            "{kind}"
+        );
+    }
+
     let error = validate_frames(
-        &[frame(vec![1.0, 1.0, 1.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
+        &[frame(drizzled(
+            vec![1.0, -0.5, 1.0, 1.0],
+            vec![1.0, 1.0, 1.0, 1.0],
+        ))],
         dimensions,
     )
     .unwrap_err();
     assert!(
         matches!(
             error,
-            StackError::FrameQualityPairMismatch {
+            StackError::InvalidWarpPlaneValue {
                 index: 0,
-                pixel: 2,
-                coverage: 1.0,
-                confidence: 0.0,
+                plane: FramePlane::DropWeight,
+                pixel: 1,
+                value: -0.5,
             }
         ),
-        "expected a pair mismatch at pixel 2, got {error:?}"
-    );
-
-    // The pair the warp would have produced there builds.
-    assert!(
-        FrameCache::from_stored_frames(
-            vec![frame(vec![1.0, 1.0, 0.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
-            core(),
-            Normalization::None,
-        )
-        .is_ok()
+        "expected a negative drop weight at pixel 1, got {error:?}"
     );
 }
 
@@ -375,20 +418,22 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     };
     let cache = frames(false);
 
-    // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
-    // Residents: 3 channels × (pixels + weight + variance), and the dispersion when asked for.
+    // Inputs: 3 frames × 3 channels, a chunk of each read for every channel, plus the coverage +
+    // confidence pair frames 1 and 2 each carry. Residents: 3 channels × (pixels + weight +
+    // variance), the coverage plane the gather writes, the dispersion when asked for, and the flag
+    // byte a pixel no frame reached would be flagged in.
     assert_eq!(
         cache.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
-            resident_bytes: 9 * 4,
+            input_bytes: 13 * 4,
+            resident_bytes: 10 * 4 + 1,
         }
     );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
-            resident_bytes: 12 * 4,
+            input_bytes: 13 * 4,
+            resident_bytes: 13 * 4 + 1,
         }
     );
 
@@ -396,35 +441,47 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     assert_eq!(
         cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4,
-            resident_bytes: 3 * 4,
+            input_bytes: 13 * 4,
+            resident_bytes: 3 * 4 + 1,
         }
     );
 
-    // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
-    // accumulating to the combine's residents.
-    assert_eq!(
-        cache.coverage_layout(QualityPlanes::STANDARD, false),
-        ChunkMemoryLayout {
-            input_bytes: 2 * 4,
-            resident_bytes: 10 * 4,
-        }
-    );
-
-    // A frame with flags is read a byte a pixel, and the output flag plane it gives the stack is
-    // held a byte a pixel through both passes.
+    // A frame with flags is read a byte a pixel, and the stack's flag plane is the same one byte.
     let flagged = frames(true);
     assert_eq!(
         flagged.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 7 * 4 + 1,
-            resident_bytes: 9 * 4 + 1,
+            input_bytes: 13 * 4 + 1,
+            resident_bytes: 10 * 4 + 1,
         }
     );
+
+    // A frame whose source declared a null is a mask of its flags: its three channels and the
+    // flag byte its mask reads, 3 × 4 + 1, with no quality plane. Three of them give the stack a
+    // coverage plane and a flag plane.
+    let masked = FrameCache::from_stack_frames(
+        (0..3)
+            .map(|_| {
+                let mut image = image();
+                image.flags = PixelFlags::from_fn(Size2us::new(2, 1), |index| {
+                    if index == 1 {
+                        QualityFlags::NO_DATA
+                    } else {
+                        QualityFlags::default()
+                    }
+                });
+                StackFrame::from(image)
+            })
+            .collect(),
+        Normalization::None,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("frames are valid");
     assert_eq!(
-        flagged.coverage_layout(QualityPlanes::STANDARD, true),
+        masked.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
-            input_bytes: 2 * 4,
+            input_bytes: 3 * (3 * 4 + 1),
             resident_bytes: 10 * 4 + 1,
         }
     );
@@ -461,7 +518,7 @@ fn finish_product_uniform_equal_weights() {
         "fully-covered stack should not materialize a plane: {coverage:?}"
     );
     // It still materializes like the plane it stands for.
-    assert_eq!(coverage.to_plane().pixels(), &[1.0; 6]);
+    assert_eq!(coverage.to_plane(0).pixels(), &[1.0; 6]);
     let Some(QualityMap::Shared(weight)) = product.weight.as_ref() else {
         panic!("a mono stack has one weight plane");
     };

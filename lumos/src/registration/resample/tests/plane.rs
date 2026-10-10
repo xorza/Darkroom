@@ -4,10 +4,10 @@
 )]
 
 use crate::internals::prelude::*;
+use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::internals::warp_plane;
-use crate::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
 use crate::registration::resample::kernel::warp_kernel::Filter;
 use crate::registration::transform::{Transform, WarpTransform};
 

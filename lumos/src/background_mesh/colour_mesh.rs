@@ -5,6 +5,7 @@ use imaginarium::Buffer2;
 
 use crate::background_mesh::tile_stats::TileStats;
 use crate::background_mesh::workspace::MeshWorkspace;
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::math::vec2us::Vec2us;
 
@@ -41,10 +42,13 @@ struct Span {
 }
 
 impl ColourMesh {
+    /// The mesh of `pixels` under `cfa`, in tiles of `tile_size`, leaving out the pixels `excluded`
+    /// holds.
     pub(crate) fn measure(
         pixels: &Buffer2<f32>,
         cfa: &CfaType,
         tile_size: usize,
+        excluded: Option<&BitBuffer2>,
         workspace: &mut MeshWorkspace,
     ) -> Self {
         let mut colours = ArrayVec::new();
@@ -52,12 +56,15 @@ impl ColourMesh {
         let mut y = Vec::new();
         for colour in 0..cfa.num_colors() {
             let grid = if *cfa == CfaType::Mono {
-                workspace.tile_stats(pixels, None, tile_size, SIGMA_CLIP_ITERATIONS, true)
+                workspace.tile_stats(pixels, excluded, tile_size, SIGMA_CLIP_ITERATIONS, true)
             } else {
                 let colour = u8::try_from(colour).expect("three colours");
                 workspace.tile_stats_where(
                     pixels,
-                    &|position| cfa.color_at(position) == colour,
+                    &|position| {
+                        cfa.color_at(position) == colour
+                            && excluded.is_none_or(|excluded| !excluded.get_at(position))
+                    },
                     tile_size,
                     SIGMA_CLIP_ITERATIONS,
                     true,
@@ -159,7 +166,7 @@ mod tests {
                 })
                 .collect(),
         );
-        let mesh = ColourMesh::measure(&pixels, &cfa, 64, &mut MeshWorkspace::default());
+        let mesh = ColourMesh::measure(&pixels, &cfa, 64, None, &mut MeshWorkspace::default());
         for position in [
             Vec2us::new(31, 31),
             Vec2us::new(64, 10),

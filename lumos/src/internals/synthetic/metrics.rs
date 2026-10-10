@@ -7,6 +7,26 @@
 use glam::DVec2;
 use std::collections::HashSet;
 
+use crate::internals::synthetic::observe::SimFrame;
+use crate::star_detection::star::Star;
+
+/// The RMS centroid error per axis of `frames`' detections against their renders' truth, over the
+/// detections within 1.5 px of a true source.
+pub(crate) fn centroid_sigma(frames: &[(&SimFrame, &Vec<Star>)]) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0;
+    for (frame, stars) in frames {
+        let truth: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
+        let found: Vec<DVec2> = stars.iter().map(|s| s.pos).collect();
+        for (t, f) in match_catalogs(&truth, &found, 1.5) {
+            sum += truth[t].distance_squared(found[f]);
+            count += 2;
+        }
+    }
+    assert!(count > 0, "no detection matched a source");
+    (sum / f64::from(count)).sqrt()
+}
+
 /// Match recovered points to truth by nearest-neighbour within `max_dist`.
 ///
 /// Greedy in ascending distance; each truth and each recovered point is used at most once.

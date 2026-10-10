@@ -261,13 +261,14 @@ impl DefectMap {
                 &mut scratch,
             );
         }
-        let mask = &self.mask;
-        PixelFlags::add_where(
-            &mut image.flags,
-            self.dimensions,
-            QualityFlags::DEFECT.union(QualityFlags::REPAIRED),
-            |index| mask.get(index),
-        );
+        for indices in [&self.hot_indices, &self.cold_indices] {
+            PixelFlags::add_at(
+                &mut image.flags,
+                self.dimensions,
+                QualityFlags::DEFECT.union(QualityFlags::REPAIRED),
+                indices,
+            );
+        }
     }
 }
 
@@ -315,6 +316,7 @@ fn detect_hot_pixels(
         data,
         &cfa_type,
         DARK_BACKGROUND_TILE_SIZE,
+        None,
         &mut MeshWorkspace::default(),
     );
     if cancel.is_cancelled() {

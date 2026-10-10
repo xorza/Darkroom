@@ -105,6 +105,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     );
 
     let admission = FrameAdmission::new(dimensions, &context.cancel);
+    let context = context.for_decode_slots(plan.decode_concurrency);
     let load = TierLoad {
         paths,
         progress: &progress,

@@ -17,7 +17,6 @@ use crate::combine::cache::core::{CacheCore, CacheTier};
 use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::sample::CombinedSample;
 use crate::combine::cache::sample_noise::SampleNoise;
-use crate::combine::cache::slots::Slots;
 use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
@@ -288,10 +287,7 @@ pub(crate) fn run_stacking(
     warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
     let norms = cache.frame_norms.as_deref();
-    let slots = Slots::new(
-        cache.frames[0].source_stats.facts.cfa_type,
-        cache.core.dimensions.channels(),
-    );
+    let slots = cache.slots;
     let weights = if weighted_combine {
         FrameWeights::resolve(&config.weighting, stats(), norms, slots)?
     } else {

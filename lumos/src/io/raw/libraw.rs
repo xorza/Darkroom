@@ -2,7 +2,7 @@
 //! report.
 
 use std::cell::Cell;
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fmt;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -13,6 +13,7 @@ use libraw_sys as sys;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::error::{LibrawCode, RawError};
+use crate::io::raw::raw_decoder::{CodecFacts, CrxCoding, RawDecoder};
 use crate::math::size2us::Size2us;
 
 /// One open LibRaw instance, the file bytes it parses in place, and the state its callbacks
@@ -110,21 +111,81 @@ impl Libraw {
         unsafe { self.handle.as_ref() }
     }
 
+    /// The decoder LibRaw chose for the open file, with its codec's facts — see [`RawDecoder`].
+    pub(super) fn decoder(&self) -> RawDecoder {
+        let handle = self.handle.as_ptr();
+        let mut info = sys::libraw_decoder_info_t::default();
+        let (mut enc_type, mut image_levels) = (0, 0);
+        // SAFETY: the handle is valid and open, which is all the decoder report and the shim's
+        // accessors read; LibRaw points the decoder's name at a string literal of its own.
+        let (name, floating_point, fuji_lossless, crx) = unsafe {
+            sys::libraw_get_decoder_info(handle, &raw mut info);
+            let name = if info.decoder_name.is_null() {
+                &[][..]
+            } else {
+                CStr::from_ptr(info.decoder_name).to_bytes()
+            };
+            (
+                name,
+                sys::libraw_lumos_is_floating_point(handle) != 0,
+                sys::libraw_lumos_fuji_lossless(handle) != 0,
+                sys::libraw_lumos_crx_coding(handle, &raw mut enc_type, &raw mut image_levels) != 0,
+            )
+        };
+        RawDecoder::classify(CodecFacts {
+            name,
+            floating_point,
+            fuji_lossless,
+            crx: crx.then_some(CrxCoding {
+                enc_type,
+                image_levels,
+            }),
+        })
+    }
+
+    /// The camera's clock at capture as ISO 8601 text with no zone, or `None` when the file states
+    /// no time. LibRaw reads it as a local time of this machine; read back in the same zone, it is
+    /// the camera's own clock, in whatever zone that was set to.
+    pub(super) fn camera_clock(&self) -> Option<String> {
+        let mut text: [c_char; 20] = [0; 20];
+        // SAFETY: the handle is valid and open, and the shim writes at most `text.len()` bytes.
+        let written = unsafe {
+            sys::libraw_lumos_camera_clock(self.handle.as_ptr(), text.as_mut_ptr(), text.len())
+        };
+        // SAFETY: the shim wrote a NUL-terminated string into `text` when it answered.
+        (written != 0).then(|| {
+            unsafe { CStr::from_ptr(text.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+
+    /// Whether the sensor is a Fuji SuperCCD, its photosites laid out 45° to the rows.
+    pub(super) fn super_ccd(&self) -> bool {
+        // SAFETY: the handle is valid and open.
+        unsafe { sys::libraw_lumos_fuji_width(self.handle.as_ptr()) != 0 }
+    }
+
     /// The parameters LibRaw's own processing runs with.
     pub(super) const fn params_mut(&mut self) -> &mut sys::libraw_output_params_t {
         // SAFETY: as `data`, and `&mut self` makes this the only reference.
         unsafe { &mut self.handle.as_mut().params }
     }
 
-    /// Decode the sensor data.
+    /// Decode the sensor data, a decoder that parallelizes itself on `threads` threads.
     ///
     /// # Errors
     ///
     /// [`RawError::Unpack`] when LibRaw fails, and [`RawError::CorruptData`] when it decoded past
     /// values the format cannot hold.
-    pub(super) fn unpack(&mut self) -> Result<(), RawError> {
-        // SAFETY: the handle is valid and open.
-        let code = unsafe { sys::libraw_unpack(self.handle.as_ptr()) };
+    pub(super) fn unpack(&mut self, threads: usize) -> Result<(), RawError> {
+        let threads = c_int::try_from(threads.max(1)).unwrap_or(c_int::MAX);
+        // SAFETY: the shim sets the calling thread's OpenMP count, which the decode below reads on
+        // this same thread; the handle is valid and open.
+        let code = unsafe {
+            sys::libraw_lumos_set_decode_threads(threads);
+            sys::libraw_unpack(self.handle.as_ptr())
+        };
         if let Some(code) = LibrawCode::of(code) {
             return Err(RawError::Unpack(code));
         }
@@ -143,13 +204,6 @@ impl Libraw {
         // SAFETY: LibRaw allocated the buffer for `raw_height` rows of `raw_pitch` bytes, and frees
         // it no sooner than the handle, which `self` borrows.
         Some(unsafe { slice::from_raw_parts(image.as_ptr(), len) })
-    }
-
-    /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
-    /// and some cameras its size table identifies. Settled by the open, before `unpack`.
-    pub(super) fn zero_is_bad(&self) -> bool {
-        // SAFETY: the handle is valid and open; the shim only reads.
-        unsafe { sys::libraw_lumos_zero_is_bad(self.handle.as_ptr()) != 0 }
     }
 
     /// Run LibRaw's own processing under [`Self::params_mut`] and take the image it makes.

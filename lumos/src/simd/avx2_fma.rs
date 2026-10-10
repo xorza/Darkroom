@@ -142,6 +142,11 @@ impl F32x8 for Avx2F32 {
     }
 
     #[inline(always)]
+    fn abs(self) -> Self {
+        Self(unsafe { _mm256_andnot_ps(_mm256_set1_ps(-0.0), self.0) })
+    }
+
+    #[inline(always)]
     fn floor(self) -> Self {
         Self(unsafe { _mm256_floor_ps(self.0) })
     }

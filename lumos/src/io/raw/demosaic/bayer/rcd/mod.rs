@@ -11,122 +11,128 @@
 
 mod tile;
 
-use std::ops::Range;
-
 use common::CancelToken;
-use rayon::prelude::*;
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::BayerImage;
-use crate::io::raw::demosaic::bayer::rcd::tile::{OutputPlanes, Tile, TilePlace};
+use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
+use crate::io::raw::demosaic::tiled;
+use crate::io::raw::demosaic::tiled::Tiling;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use crate::simd::{F32x8, Isa, Mask8};
 
+/// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;
-// Limit the ratio's relative condition number to four before blending.
+/// The share of `|c| + |s|` below which the ratio's denominator `c + s` hands over to the additive
+/// estimate: the ratio's relative condition number stays at most `1/0.25 = 4`.
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
-/// The band bilinear interpolation fills. RCD's stages chain stencils — the direction maps and
-/// low-pass filter reach 4 pixels, and the colour steps read values earlier steps computed up to 3
-/// pixels further out — so a pixel nearer an edge than this reads values no stage computed. A
-/// test pins the reach: from this distance in, a frame demosaics bit for bit as it does inside a
-/// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
+/// The band the border fill takes from neighbours (see [`tiled`]). RCD's stages chain stencils —
+/// the direction maps and low-pass filter reach 4 pixels, and the colour steps read values earlier
+/// steps computed up to 3 pixels further out — so a pixel nearer an edge than this reads values no
+/// stage computed. A test pins the reach: from this distance in, a frame demosaics bit for bit as
+/// it does inside a larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same
+/// reason.
 pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
-/// The side of a tile, where its seven planes stay in a core's cache, and even, so that every tile
-/// starts on the frame's phase. On a Ryzen 7 6800U (512 KiB of L2 per core) a 24 MP frame
-/// demosaics in 125 ms with tiles of 128, against 129 ms at 96, 127 ms at 160, 182 ms at 256 and
-/// 227 ms untiled.
+/// The side of a tile, where its phase planes stay in a core's cache, and even, so that every
+/// tile starts on the frame's phase. On a Ryzen 7 6800U (512 KiB of L2 per core), built for plain
+/// x86-64, a 24 MP frame demosaics in 66 ms with tiles of 128, against 66 ms at 96, 65 ms at 112,
+/// 67 ms at 144, 69 ms at 160, 77 ms at 192 and 105 ms at 256.
 const TILE: usize = 128;
 
-/// The output's three planes, and the peak: the caller's input, the output, and the workers' tile
-/// buffers. The workers are the pool's, which demosaics running at once share, so the charge to
-/// each is an upper bound.
+/// The memory a demosaic of a frame of `size` holds — see [`tiled::demosaic_memory`].
 pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
-    let plane_bytes = size
-        .width
-        .saturating_mul(size.height)
-        .saturating_mul(size_of::<f32>());
-    let output_bytes = plane_bytes.saturating_mul(3);
-    DemosaicMemory {
-        output_bytes,
-        peak_bytes: plane_bytes
-            .saturating_add(output_bytes)
-            .saturating_add(workspace_bytes()),
-    }
-}
-
-/// The tile buffers of every worker of the pool, at most one each: a worker makes its tile for a
-/// run of tiles and drops it before it takes other work.
-pub(crate) fn workspace_bytes() -> usize {
-    rayon::current_num_threads().saturating_mul(Tile::bytes())
-}
-
-/// Where each tile along an axis of `extent` pixels starts: from 0, every `step`, until one reaches
-/// the far edge.
-fn tile_starts(extent: usize, step: usize) -> impl Iterator<Item = usize> {
-    let count = extent.saturating_sub(TILE).div_ceil(step) + 1;
-    (0..count).map(move |index| index * step)
+    tiled::demosaic_memory(size, Tile::bytes())
 }
 
 /// Linear interpolation: `(1 - a) * b + a * c`.
 #[inline(always)]
-fn intp(a: f32, b: f32, c: f32) -> f32 {
+fn intp<V: F32x8>(a: V, b: V, c: V) -> V {
     b + a * (c - b)
 }
 
+/// The green at red or blue sites from a neighbouring green `g`, as RCD's ratio `g·2c/(c + s)`
+/// of each site's low-pass value `c` and its same-colour neighbour's `s`.
+///
+/// The ratio is level-free: librtprocess's `eps` in the denominator would bias faint signal by
+/// `eps/(c + s)`, a colour cast in a dark-subtracted background. Where `c + s` nears cancellation
+/// against `|c| + |s|`, only possible on signed data, it blends into the additive midpoint
+/// estimate, which it equals at `c = s = 0`.
+///
+/// Every lane computes each case and keeps its own, so a lane another case divides by zero in
+/// never reaches the output.
 #[inline(always)]
-fn estimate_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
+fn estimate_green<S: Isa>(
+    isa: S,
+    neighbor_green: S::F32,
+    center_lpf: S::F32,
+    same_color_lpf: S::F32,
+) -> S::F32 {
+    let one = isa.splat_f32(1.0);
+    let scale = center_lpf.abs() + same_color_lpf.abs();
     let numerator = neighbor_green * (center_lpf + center_lpf);
-    let denominator = EPS + center_lpf + same_color_lpf;
-    if center_lpf >= 0.0 && same_color_lpf >= 0.0 {
-        return numerator / denominator;
-    }
-
-    let scale = EPS + center_lpf.abs() + same_color_lpf.abs();
-    let transition = MIN_SIGNED_DENOMINATOR_RATIO * scale;
-    if denominator.abs() >= transition {
-        return numerator / denominator;
-    }
+    let denominator = center_lpf + same_color_lpf;
+    let transition = isa.splat_f32(MIN_SIGNED_DENOMINATOR_RATIO) * scale;
+    let ratio = numerator / denominator;
 
     // Same-color LPFs are two pixels apart; midpoint correction halves their 4× gain.
-    let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
+    let additive = neighbor_green + (center_lpf - same_color_lpf) * isa.splat_f32(0.125);
     let t = denominator.abs() / transition;
-    let curve = t * (3.0 - 2.0 * t);
+    let curve = t * (isa.splat_f32(3.0) - isa.splat_f32(2.0) * t);
     let ratio_weight = t * curve;
+    // `f32::signum`, whose −0 is −1: 1/x has the sign of x, a zero's included.
+    let signum = (one / denominator)
+        .lanes_lt(isa.splat_f32(0.0))
+        .select(isa.splat_f32(-1.0), one);
     // Fold the reciprocal into smoothstep so exact cancellation cannot form 0/0.
-    let weighted_ratio = numerator * denominator.signum() * curve / transition;
-    additive * (1.0 - ratio_weight) + weighted_ratio
+    let weighted_ratio = numerator * signum * curve / transition;
+    let blended = additive * (one - ratio_weight) + weighted_ratio;
+
+    let estimate = denominator
+        .abs()
+        .lanes_lt(transition)
+        .select(blended, ratio);
+    scale
+        .lanes_eq(isa.splat_f32(0.0))
+        .select(neighbor_green, estimate)
 }
 
-/// Mean of the four diagonal neighbours of `idx` (stride `w1`) in the V/H direction map: the
-/// discriminator's local average, which pulls a pixel's estimate toward its neighbourhood.
+/// A direction map at a site whose own value is `central` and whose diagonal neighbours' mean is
+/// `neighbourhood`: the neighbourhood where it is the further from ½, which pulls the site's
+/// estimate toward its neighbours'.
+#[inline(always)]
+fn discriminate<S: Isa>(isa: S, central: S::F32, neighbourhood: S::F32) -> S::F32 {
+    let half = isa.splat_f32(0.5);
+    (half - central)
+        .abs()
+        .lanes_lt((half - neighbourhood).abs())
+        .select(neighbourhood, central)
+}
+
+/// Mean of a site's four diagonal neighbours `[nw, ne, sw, se]` in the V/H direction map.
 ///
 /// Summed in pairs, and the P/Q map's in order, as librtprocess sums them: the cross-check holds
 /// the output to librtprocess's bits.
 #[inline(always)]
-fn vh_neighbourhood(vh_dir: &[f32], idx: usize, w1: usize) -> f32 {
-    0.25 * ((vh_dir[idx - w1 - 1] + vh_dir[idx - w1 + 1])
-        + (vh_dir[idx + w1 - 1] + vh_dir[idx + w1 + 1]))
+fn vh_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
+    isa.splat_f32(0.25) * ((nw + ne) + (sw + se))
 }
 
 /// [`vh_neighbourhood`] in the P/Q direction map.
 #[inline(always)]
-fn pq_neighbourhood(pq_dir: &[f32], idx: usize, w1: usize) -> f32 {
-    0.25 * (pq_dir[idx - w1 - 1]
-        + pq_dir[idx - w1 + 1]
-        + pq_dir[idx + w1 - 1]
-        + pq_dir[idx + w1 + 1])
+fn pq_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
+    isa.splat_f32(0.25) * (nw + ne + sw + se)
 }
 
 /// RCD demosaic implementation.
 ///
-/// Input: a Bayer frame, whose calibrated samples may be outside `[0, 1]`.
-/// Output: planar RGB f32 channels of its size.
+/// Input: a Bayer frame, whose calibrated samples may be outside `[0, 1]`, and the gains that
+/// balance its colours.
+/// Output: planar RGB f32 channels of its size, in the frame's own balance.
 ///
 /// The frame is demosaiced in tiles of [`TILE`], each run as a frame of its own: from
 /// [`INTERPOLATED_BORDER`] in, a crop demosaics bit for bit as inside the frame, so each tile
@@ -136,124 +142,33 @@ pub(crate) fn demosaic(
     bayer: &BayerImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let Size2us { width, height } = bayer.size;
-    let pixels = bayer.size.pixel_count();
-    let mut r = vec![0.0f32; pixels];
-    let mut g = vec![0.0f32; pixels];
-    let mut b = vec![0.0f32; pixels];
-    let border = INTERPOLATED_BORDER;
-    let step = TILE - 2 * border;
-    let places: Vec<TilePlace> = if width > 2 * border && height > 2 * border {
-        tile_starts(height, step)
-            .flat_map(|top| {
-                tile_starts(width, step).map(move |left| TilePlace {
-                    top,
-                    left,
-                    size: Size2us::new((width - left).min(TILE), (height - top).min(TILE)),
-                })
-            })
-            .collect()
-    } else {
-        Vec::new()
+    let tiling = Tiling {
+        tile: TILE,
+        inset: 0,
+        margin: INTERPOLATED_BORDER,
     };
-    let out = OutputPlanes {
-        r: UnsafeSendPtr::new(r.as_mut_ptr()),
-        g: UnsafeSendPtr::new(g.as_mut_ptr()),
-        b: UnsafeSendPtr::new(b.as_mut_ptr()),
-    };
-    places
-        .par_iter()
-        .try_for_each_init(Tile::new, |tile, &place| {
-            Cancelled::check(cancel)?;
-            // SAFETY: the planes cover the frame, and the tiles at `step` own disjoint parts.
-            unsafe { tile.demosaic(bayer.data, width, bayer.pattern, place, out) };
-            Ok(())
-        })?;
-    Cancelled::check(cancel)?;
-    let border = if places.is_empty() {
-        width.max(height)
-    } else {
-        border
-    };
-    border_interpolate([&mut r, &mut g, &mut b], bayer, border);
-    Ok([r, g, b])
+    tiled::demosaic(
+        bayer.data,
+        bayer.size,
+        |position| bayer.pattern.color_at(position),
+        tiling,
+        || Tile::new(bayer.pattern),
+        // SAFETY: the driver hands each place's own part to this tile alone, which writes no
+        // other.
+        |tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
+        cancel,
+    )
 }
 
-/// Bilinear interpolation of the pixels within `border` of the frame's edge, row by row in
-/// parallel: the whole of each row in the band at the top and bottom, and the ends of each row
-/// between.
-fn border_interpolate(
-    [out_r, out_g, out_b]: [&mut [f32]; 3],
-    bayer: &BayerImage<'_>,
-    border: usize,
-) {
-    let Size2us { width, height } = bayer.size;
-    out_r
-        .par_chunks_mut(width)
-        .zip(out_g.par_chunks_mut(width))
-        .zip(out_b.par_chunks_mut(width))
-        .enumerate()
-        .for_each(|(y, ((row_r, row_g), row_b))| {
-            let mut fill_span = |span: Range<usize>| {
-                for x in span {
-                    row_r[x] = bilinear(bayer, 0, x, y);
-                    row_g[x] = bilinear(bayer, 1, x, y);
-                    row_b[x] = bilinear(bayer, 2, x, y);
-                }
-            };
-            if y < border || y + border >= height || 2 * border >= width {
-                fill_span(0..width);
-            } else {
-                fill_span(0..border);
-                fill_span(width - border..width);
-            }
-        });
-}
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
+    use crate::io::raw::demosaic::tiled;
 
-/// `channel` at `(x, y)`: the pixel's own sample in its colour, and otherwise the mean of that
-/// colour's samples among its 8 neighbours, or among its 24 when those hold none.
-fn bilinear(bayer: &BayerImage<'_>, channel: usize, x: usize, y: usize) -> f32 {
-    let Size2us { width, height } = bayer.size;
-    let pattern = bayer.pattern;
-    let cfa = bayer.data;
-    if pattern.color_at(Vec2us::new(x, y)) == channel {
-        return cfa[y * width + x];
+    /// The tile buffers of every worker of the pool — see [`tiled::workspace_bytes`].
+    pub(crate) fn workspace_bytes() -> usize {
+        tiled::workspace_bytes(Tile::bytes())
     }
-    // The pixel `(dy, dx)` away, when it lies inside the frame.
-    let neighbour = |dy: isize, dx: isize| {
-        y.checked_add_signed(dy)
-            .zip(x.checked_add_signed(dx))
-            .filter(|&(ny, nx)| ny < height && nx < width)
-    };
-    let mut sum = 0.0f32;
-    let mut count = 0u32;
-    for dy in -1isize..=1 {
-        for dx in -1isize..=1 {
-            if dy == 0 && dx == 0 {
-                continue;
-            }
-            if let Some((ny, nx)) = neighbour(dy, dx)
-                && pattern.color_at(Vec2us::new(nx, ny)) == channel
-            {
-                sum += cfa[ny * width + nx];
-                count += 1;
-            }
-        }
-    }
-    if count > 0 {
-        return sum / count as f32;
-    }
-    for dy in -2isize..=2 {
-        for dx in -2isize..=2 {
-            if let Some((ny, nx)) = neighbour(dy, dx)
-                && pattern.color_at(Vec2us::new(nx, ny)) == channel
-            {
-                sum += cfa[ny * width + nx];
-                count += 1;
-            }
-        }
-    }
-    if count > 0 { sum / count as f32 } else { 0.0 }
 }
 
 #[cfg(test)]

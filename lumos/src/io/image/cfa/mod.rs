@@ -5,7 +5,9 @@
 //! flats, bias) and hot pixel correction on raw data.
 
 pub(crate) mod cfa_lattice;
+pub(crate) mod colour_raster;
 
+use std::f64::consts::FRAC_1_SQRT_2;
 use std::io;
 use std::path::Path;
 
@@ -31,7 +33,7 @@ use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
-use crate::io::raw::demosaic::xtrans;
+use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
@@ -69,6 +71,20 @@ impl CfaType {
         }
     }
 
+    /// Whether the pattern is a mosaic of colours: Bayer or X-Trans, not mono.
+    pub(crate) const fn is_mosaic(&self) -> bool {
+        matches!(self, CfaType::Bayer(_) | CfaType::XTrans(_))
+    }
+
+    /// The pattern's period on each axis: `color_at` repeats every `period` pixels.
+    pub(crate) const fn period(&self) -> usize {
+        match self {
+            CfaType::Mono => 1,
+            CfaType::Bayer(_) => 2,
+            CfaType::XTrans(_) => 6,
+        }
+    }
+
     /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
     pub const fn num_colors(&self) -> usize {
         match self {
@@ -77,20 +93,27 @@ impl CfaType {
         }
     }
 
-    /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters` and `colors` and its
-    /// visible-origin X-Trans pattern, or `None` when LibRaw has to produce the image itself.
+    /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters`, `colors` and `cdesc` and
+    /// its visible-origin X-Trans pattern, or `None` when LibRaw has to produce the image itself.
     ///
-    /// `None` covers `filters == 0` with three colours — a linear DNG, sRAW or Foveon, whose
-    /// samples LibRaw unpacks already per pixel and so never as a mosaic — and a filter word that
-    /// is neither X-Trans nor a 2×2 Bayer phase. An X-Trans sensor whose layout is not one is an
-    /// error: the file is corrupt, not exotic.
+    /// `None` covers `filters == 0` with three colours — a linear DNG or sRAW, whose samples LibRaw
+    /// unpacks already per pixel and so never as a mosaic — a filter word that is neither X-Trans
+    /// nor a 2×2 Bayer phase, and any sensor whose colours are not LibRaw's red, green and blue: a
+    /// word reads colour 3 as a second green only where `cdesc` says so, and Sony's RGBE or Nikon's
+    /// CMYG laid out in a Bayer word's phases would otherwise demosaic as RGB with the wrong
+    /// filters. An X-Trans sensor whose layout is not one is an error: the file is corrupt, not
+    /// exotic.
     pub(crate) fn from_libraw(
         filters: u32,
         colors: i32,
+        cdesc: [u8; 4],
         xtrans: [[u8; 6]; 6],
     ) -> Result<Option<Self>, XTransPatternError> {
         if colors == 1 {
             return Ok(Some(Self::Mono));
+        }
+        if colors != 3 || &cdesc != b"RGBG" {
+            return Ok(None);
         }
         Ok(match filters {
             0 => None,
@@ -153,10 +176,6 @@ impl CfaType {
 pub(crate) struct CfaFrameInfo {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) cfa_type: CfaType,
-    /// Whether decoding could produce pixels with no measurement, which a frame pays two quality
-    /// planes for beside its own. Answered from the header alone, so it is conservative where the
-    /// header cannot settle it — see `FitsDecodePlan::may_carry_nulls`.
-    pub(crate) may_carry_nulls: bool,
     /// What the decoder holds beside the frame while it makes it: a camera RAW's whole file, which
     /// LibRaw parses in place, and the raw buffer it unpacks into; nothing for a FITS file, which
     /// is streamed.
@@ -297,9 +316,10 @@ impl CfaImage {
     ///
     /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
     /// reason and through the same neighbour search — mask included, so a null is never repaired
-    /// from another null, nor from a value another repair made. Calibration runs it once its
-    /// arithmetic is done, so a pixel a master left without a measurement holds a fill, not a
-    /// difference against a bound.
+    /// from another null, nor from a value another repair made. Each repaired null is flagged
+    /// [`QualityFlags::REPAIRED`] beside its `NO_DATA`, and a null already flagged so is left as
+    /// it is. Calibration owns the repair and runs it once its arithmetic is done, so a pixel a
+    /// master left without a measurement holds a fill, not a difference against a bound.
     pub(crate) fn repair_nulls(&mut self) {
         let Some(flags) = self
             .flags
@@ -310,13 +330,17 @@ impl CfaImage {
         };
         let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let nulls = flags.mask_of(QualityFlags::NO_DATA);
+        let mut nulls = flags.mask_of(QualityFlags::NO_DATA);
+        nulls.and_not(&flags.mask_of(QualityFlags::REPAIRED));
         let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
         let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         nulls.for_each_set(|pos| {
             let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
+        });
+        PixelFlags::add_where(&mut self.flags, size, QualityFlags::REPAIRED, |index| {
+            nulls.get(index)
         });
     }
 
@@ -327,6 +351,9 @@ impl CfaImage {
         passes: MarkesteijnPasses,
         cancel: &CancelToken,
     ) -> Result<LinearImage, Cancelled> {
+        // Calibration repairs a light's nulls, and this leaves those alone; it repairs the rest: a
+        // frame no calibration touched, or one read back from a file, which holds the decoder's
+        // fill under each null.
         self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
@@ -353,25 +380,15 @@ impl CfaImage {
             ));
             metadata.quantization_sigma = None;
         }
-        // The direction decisions compare neighbours of different colours, so they read a colour
-        // cast as structure: dcraw, RawTherapee, darktable and ART all balance before they
-        // demosaic. The gains are relative to green, and come back out after, so the samples keep
-        // the sensor's balance.
+        // The direction decisions compare neighbours of different colours, so the kernels balance
+        // the colours by these gains as they read and take them back out as they write (see
+        // `tiled`). Relative to green, so the samples keep the sensor's balance.
         let gains = (cfa_type != CfaType::Mono)
             .then_some(metadata.camera_white_balance)
             .flatten()
-            .map(|[red, green, blue, _]| [red / green, 1.0, blue / green]);
-        if let Some(gains) = gains {
-            self.data
-                .pixels_mut()
-                .par_chunks_mut(width)
-                .enumerate()
-                .for_each(|(y, row)| {
-                    for (x, sample) in row.iter_mut().enumerate() {
-                        *sample *= gains[cfa_type.color_at(Vec2us::new(x, y)) as usize];
-                    }
-                });
-        }
+            .map_or([1.0; 3], |[red, green, blue, _]| {
+                [red / green, 1.0, blue / green]
+            });
         let pixels = self.data.into_vec();
         // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest:
         // these pixels were reconstructed rather than measured, and the combine still has to know
@@ -380,14 +397,6 @@ impl CfaImage {
         if let Some(flags) = &mut flags {
             flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
         }
-
-        let unbalance = |planes: &mut [Vec<f32>; 3]| {
-            if let Some(gains) = gains {
-                for (plane, gain) in planes.iter_mut().zip(gains) {
-                    plane.par_iter_mut().for_each(|sample| *sample /= gain);
-                }
-            }
-        };
 
         Ok(match cfa_type {
             CfaType::Mono => {
@@ -399,9 +408,9 @@ impl CfaImage {
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
-                let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern);
-                let mut planes = rcd::demosaic(&bayer, cancel)?;
-                unbalance(&mut planes);
+                let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern)
+                    .with_gains(gains);
+                let planes = rcd::demosaic(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
@@ -409,14 +418,9 @@ impl CfaImage {
                 image
             }
             CfaType::XTrans(pattern) => {
-                let mut planes = xtrans::demosaic(
-                    &pixels,
-                    Size2us::new(width, height),
-                    pattern,
-                    passes,
-                    cancel,
-                )?;
-                unbalance(&mut planes);
+                let xtrans = XTransImage::new(&pixels, Size2us::new(width, height), pattern)
+                    .with_gains(gains);
+                let planes = markesteijn::demosaic(&xtrans, passes, cancel)?;
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
@@ -425,6 +429,102 @@ impl CfaImage {
                 image
             }
         })
+    }
+
+    /// A plane to register this mosaic on, as Siril registers CFA frames for its CFA drizzle
+    /// (`interpolate_nongreen`): each green photosite as it is, and every other filled from the
+    /// green photosites of its 3×3 neighbourhood, weighed 1 beside it and 1/√2 on a diagonal. On
+    /// a Bayer mosaic that is the mean of its four green neighbours, on X-Trans of the hexagon's.
+    /// Stars are measured on green alone, at its full resolution, with no colour interpolated
+    /// across an edge as a demosaic would.
+    ///
+    /// A filled photosite carries the flags of the greens it was filled from. One with no green
+    /// neighbour, which only a frame narrower than its pattern has, keeps its own sample and
+    /// flags. A mono frame is its own proxy.
+    pub fn green_proxy(&self) -> LinearImage {
+        const GREEN: u8 = 1;
+        let size = self.size();
+        let mut metadata = ImageMetadata {
+            quantization_sigma: None,
+            mosaic_noise: None,
+            flat_gain: None,
+            ..self.metadata.clone()
+        };
+        if let Some(provenance) = &mut metadata.provenance {
+            provenance.demosaic = DemosaicProvenance::GreenProxy;
+        }
+        let dimensions = ImageDimensions::new(size, 1);
+        if !self.cfa_type.is_mosaic() {
+            let mut image = LinearImage::from_pixels(dimensions, self.data.pixels().to_vec());
+            image.metadata = metadata;
+            image.flags.clone_from(&self.flags);
+            return image;
+        }
+        let cfa_type = self.cfa_type;
+        let flags = self.flags.as_ref();
+        let mut pixels = vec![0.0f32; size.pixel_count()];
+        let mut proxy_flags = flags.map(|_| vec![0u8; size.pixel_count()]);
+        let rows = pixels.par_chunks_mut(size.width).enumerate();
+        let fill_row = |y: usize, row: &mut [f32], mut row_flags: Option<&mut [u8]>| {
+            for (x, sample) in row.iter_mut().enumerate() {
+                let index = y * size.width + x;
+                let own_flags = flags.map_or(0, |flags| flags.at(index).byte());
+                if cfa_type.color_at(Vec2us::new(x, y)) == GREEN {
+                    *sample = self.data[index];
+                    if let Some(row_flags) = row_flags.as_deref_mut() {
+                        row_flags[x] = own_flags;
+                    }
+                    continue;
+                }
+                let (mut sum, mut weight, mut carried) = (0.0f64, 0.0f64, 0u8);
+                for dy in -1isize..=1 {
+                    for dx in -1isize..=1 {
+                        let (Some(nx), Some(ny)) =
+                            (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                        else {
+                            continue;
+                        };
+                        if (dx, dy) == (0, 0)
+                            || nx >= size.width
+                            || ny >= size.height
+                            || cfa_type.color_at(Vec2us::new(nx, ny)) != GREEN
+                        {
+                            continue;
+                        }
+                        let tap = if dx == 0 || dy == 0 {
+                            1.0
+                        } else {
+                            FRAC_1_SQRT_2
+                        };
+                        let neighbour = ny * size.width + nx;
+                        sum += tap * f64::from(self.data[neighbour]);
+                        weight += tap;
+                        carried |= flags.map_or(0, |flags| flags.at(neighbour).byte());
+                    }
+                }
+                let (value, value_flags) = if weight > 0.0 {
+                    ((sum / weight) as f32, carried)
+                } else {
+                    (self.data[index], own_flags)
+                };
+                *sample = value;
+                if let Some(row_flags) = row_flags.as_deref_mut() {
+                    row_flags[x] = value_flags;
+                }
+            }
+        };
+        match proxy_flags.as_mut() {
+            Some(proxy_flags) => rows
+                .zip(proxy_flags.par_chunks_mut(size.width))
+                .for_each(|((y, row), row_flags)| fill_row(y, row, Some(row_flags))),
+            None => rows.for_each(|(y, row)| fill_row(y, row, None)),
+        }
+        let mut image = LinearImage::from_pixels(dimensions, pixels);
+        image.metadata = metadata;
+        image.flags = proxy_flags.and_then(|bytes| {
+            PixelFlags::from_buffer(Buffer2::new(size.width, size.height, bytes))
+        });
+        image
     }
 
     /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
@@ -470,33 +570,15 @@ impl CfaImage {
             dark.metadata.domain,
             self.metadata.domain
         );
-        let (gain, offset) = ((map.gain * scale) as f32, map.offset as f32);
+        let gain = map.gain * scale;
         self.data
             .par_iter_mut()
             .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l -= d * gain + offset);
+            .for_each(|(l, d)| *l = (f64::from(*l) - (f64::from(*d) * gain + map.offset)) as f32);
         self.take_master_flags(dark);
         if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
             light.pedestal = light.after_subtracting(dark);
         }
-    }
-
-    /// Flag [`QualityFlags::SATURATED`] at the samples' saturation level, unless the decoder
-    /// flagged saturation, and drop `data_max`: calibration runs this on a light before it moves
-    /// the samples, after which no level marks the saturated ones and the flags are the record.
-    /// The level is the one the detector applies to a frame as decoded; a master is not tested
-    /// against it, since a ceiling no file declared is a guess the detector makes for lights alone.
-    pub(crate) fn record_saturation(&mut self) {
-        if !self.metadata.saturation_flagged {
-            let level = self.metadata.saturation_level();
-            let size = self.size();
-            let samples = self.data.pixels();
-            PixelFlags::add_where(&mut self.flags, size, QualityFlags::SATURATED, |index| {
-                samples[index] >= level
-            });
-            self.metadata.saturation_flagged = true;
-        }
-        self.metadata.data_max = None;
     }
 
     /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no

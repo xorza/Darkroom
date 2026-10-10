@@ -30,7 +30,7 @@ impl SourceSigmas {
             .map(Self)
     }
 
-    /// The step the master states: the largest σ any frame contributes in any channel once
+    /// The step the master states: the largest σ any frame contributes in any slot once
     /// normalization has scaled it.
     pub(super) fn largest(&self, frame_norms: Option<&[FrameNorm]>) -> Option<f32> {
         self.0
@@ -39,9 +39,9 @@ impl SourceSigmas {
             .map(|(index, sigma)| {
                 frame_norms.map_or(*sigma, |norms| {
                     norms[index]
-                        .channels
+                        .slots
                         .iter()
-                        .map(|channel| channel.gain.abs() * sigma)
+                        .map(|slot| slot.gain.abs() * sigma)
                         .fold(0.0, f32::max)
                 })
             })
@@ -53,22 +53,17 @@ impl SourceSigmas {
 mod tests {
     use arrayvec::ArrayVec;
 
-    use crate::combine::normalization::{ChannelNorm, FrameNorm};
+    use crate::combine::normalization::{FrameNorm, SlotNorm};
     use crate::combine::stack::quantization::SourceSigmas;
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::frame_store::frame_stats::FrameStats;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
-    use crate::math::statistics::{MedianMad, mad_to_sigma};
+    use crate::math::statistics::mad_to_sigma;
 
     fn stats(quantization_sigma: Option<f32>) -> FrameStats {
         FrameStats {
-            channels: [MedianMad {
-                median: 0.5,
-                mad: 0.1,
-            }]
-            .into_iter()
-            .collect(),
+            medians: [0.5].into_iter().collect(),
             noise: [mad_to_sigma(0.1)].into_iter().collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: [0.5].into_iter().collect(),
@@ -89,9 +84,9 @@ mod tests {
         gains
             .iter()
             .map(|&gain| {
-                let mut channels = ArrayVec::new();
-                channels.push(ChannelNorm { gain, offset: 0.0 });
-                FrameNorm { channels }
+                let mut slots = ArrayVec::new();
+                slots.push(SlotNorm { gain, offset: 0.0 });
+                FrameNorm { slots }
             })
             .collect()
     }
@@ -128,9 +123,9 @@ mod tests {
         assert_eq!(quarter.largest(Some(&norms(&[-2.0, 1.0]))), Some(0.5));
         let two_channels: Vec<FrameNorm> = (0..2)
             .map(|_| FrameNorm {
-                channels: [1.0, 2.0]
+                slots: [1.0, 2.0]
                     .into_iter()
-                    .map(|gain| ChannelNorm { gain, offset: 0.0 })
+                    .map(|gain| SlotNorm { gain, offset: 0.0 })
                     .collect(),
             })
             .collect();

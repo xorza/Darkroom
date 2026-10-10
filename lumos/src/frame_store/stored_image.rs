@@ -68,10 +68,9 @@ impl StoredImage {
         })
     }
 
-    /// The image as the reference frame of a registered stack, its channels the planes already on
-    /// disk: only the quality planes its flags imply are written, to `store` — see
-    /// [`FrameQuality::for_reference`]. Its flags plane stays when it holds a flag the warp
-    /// carries.
+    /// The image as the reference frame of a registered stack, its channels and flags the planes
+    /// already on disk — see [`FrameQuality::for_reference`]. Its flags plane stays for that mask or
+    /// when it holds a flag the warp carries.
     pub(crate) fn into_reference_frame(
         self,
         store: &impl PlaneStore,
@@ -80,9 +79,9 @@ impl StoredImage {
         let flags = self.flags();
         let quality = FrameQuality::for_reference(flags.as_ref())
             .try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
-        let carries = flags
-            .as_ref()
-            .is_some_and(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED));
+        let keeps = flags.as_ref().is_some_and(|flags| {
+            quality.mask().is_some() || flags.contains(QualityFlags::RESAMPLE_CARRIED)
+        });
         let flat_gain = self
             .metadata
             .flat_gain
@@ -91,8 +90,9 @@ impl StoredImage {
             .transpose()?;
         Ok(StoredFrame {
             channels: self.channels,
+            samples: None,
             quality,
-            flags: self.flags.filter(|_| carries),
+            flags: self.flags.filter(|_| keeps),
             flat_gain,
             source_stats,
         })

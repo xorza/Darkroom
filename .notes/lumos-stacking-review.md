@@ -13,7 +13,8 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–7 are done and committed. Every finding below was re-checked against the code after
+Batches 1–12 and 14–18 are done and committed, Batch 13 except its X-Trans part (Q1), and
+Batch 15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -28,7 +29,7 @@ Batch 7 and still holds.
   RUSTDOCFLAGS="-D warnings" cargo doc -p lumos --no-deps --document-private-items
   --all-features && cargo test -p lumos --tests --features ml`. Add `-p lens` / `-p darkroom`
   when a public lumos API changes. A batch that touches `libraw-sys` also runs its chain.
-- **SIMD kernels** (Batches 11, 18, 19, 22): after the change,
+- **SIMD kernels** (Batches 19, 22): after the change,
   `cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)"
   $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter` must print 0.
 - **Snapshots.** `internals/characterization` pins outputs. A batch that changes an output on
@@ -38,361 +39,54 @@ Batch 7 and still holds.
   identical (or the batch states the precision change).
 - **Real data.** `lumos/test_data/lumos_data` is not present. Items marked *needs real data* are
   implemented and tested on synthetic data; their real-data check is left for the user, and the
-  report says so.
+  report says so. Batch 17 left `DECODE_PINS.raw_cfa` a placeholder, since its digest now covers
+  the RAW decode's flags and quantization σ: run `raw_decode_snapshot` with `real-data` and pin
+  the digest it prints.
 - **New dependencies** are only the approved ones listed in "Decisions".
 
 ## Dependency graph
 
 ```
-8                     independent
-9 ── 14 ── 15
-      └─── 16
-9, 14 ── 22
-10, 11, 13, 17, 24, 26   independent
-12 ── 23 ── 27
-18 ── 19
+13 (X-Trans, Q1), 15 (rest, Q2), 19 (rest), 22, 24, 26   independent
+23 ── 27
 21 ── 20 ── 25
 ```
 
-- 9 before 14: drizzled frames add a per-pixel weight plane to the gather 9 restructures.
-- 14 before 15 and 16: CFA drizzle and the scatter rework build on the per-frame drizzle.
-- 9 and 14 before 22: the hot-loop rework is done on the final gather.
-- 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
+- 23 before 27: the dark scale is fitted on the hot candidates 23 builds.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
 
 ---
 
-## Batch 8: CFA-aware normalization — medium
+## Batch 13 (rest): X-Trans cosmic-ray statistic — blocked
 
-**Findings:** CMB-4 / CAL-20. A mosaic gets one normalization affine for all colours, while noise
-and weights are per colour; twilight flats drift in colour, so rejection clips real frames. The
-stratified sample aliases with the CFA (a 4096-wide mosaic samples only R and G2).
-
-**Design:**
-1. `FrameNorm` holds one `ChannelNorm` per slot (`Slots`), as `SampleNoise` and `FrameWeights`
-   already do. For RGB and mono, slot = channel, so nothing changes there.
-2. For a mosaic, medians, MADs and Global gains are measured per colour over that colour's
-   photosites. The common domain stays per pixel (a pixel's colour is fixed).
-3. Stratified sampling draws `MAX_STATISTIC_SAMPLES / colours` indices per colour from that
-   colour's photosites in raster order (`k·n_c/m` over the colour's own index list), so no colour
-   can alias out.
-4. The gather reads the norm by slot, not by channel (`Slots::channel` stops being used for
-   norms; remove it if nothing else needs it).
-
-**Tests:**
-- Twilight flats: an RGGB set where each frame's R, G and B scale by different known factors.
-  Multiplicative normalization gives each colour its exact gain (dyadic factors, exact), and a
-  σ-clip keeps every frame.
-- Aliasing: on a 4096×8 RGGB mosaic the sampled indices hold all four phases in equal counts.
-- Existing RGB and mono normalization tests unchanged.
+**Blocked on Q1** in `lumos-stacking-review_QUESTIONS.md`. The X-Trans significance `v − median₈` is
+positive on a star's convex wings, so the pass eats well-sampled stars on X-Trans at any `objlim`.
+Left here: the X-Trans contrast calibration and its star-preservation test (CAL-7), and the
+X-Trans local recompute (CAL-9), both of which depend on the statistic Q1 chooses. Done in Batch
+13: the saturated-star mask (CAL-6), the σ normalization of the X-Trans significance with its
+noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer local recompute
+(CAL-9).
 
 ---
 
-## Batch 9: Combine I/O passes — medium-high (performance, bit-identical)
+## Batch 15 (rest): CFA drizzle normalization above scale 1 — blocked
 
-**Findings:** PIP-2, PIP-3 / CMB-8, PIP-27, PIP-7. An RGB warped spilled light is read about
-18.75 plane-equivalents in the combine phase against 5.25 needed.
-
-**Design:**
-1. **PIP-2:** `process_chunks` runs chunk-outer, channel-inner. Each chunk gathers the frames'
-   coverage, confidence, flag and flat-gain slices once and reduces every channel against them.
-   `ChunkMemoryLayout::input_bytes` per frame becomes
-   `(channels + quality planes) · 4 + flags + gain` bytes per pixel.
-2. **PIP-3 / CMB-8:** the gather writes `covered / frame_count` into the coverage plane on the
-   first channel of each chunk. Delete the coverage pass in `finish_product` and
-   `coverage_layout`.
-3. **PIP-3:** `CommonDomain` is built in parallel: per-frame word masks, then an AND-reduce in
-   index order.
-4. **PIP-27:** the no-domain normalization samples depend only on `pixel_count`. `FrameStats`
-   gathers them at measure time, while the frame is in RAM, and the sidecar carries them. Charge
-   the samples' bytes in the memory plan.
-5. **PIP-7:** add `FrameQuality::Mask`: coverage = confidence = valid, from the frame's flags
-   (`RESAMPLE_EXCLUDED` for a registered reference, `NO_DATA` otherwise). The gather reads the
-   flag byte instead of two f32 planes.
-
-**Tests:** the tier sweep `disk_tier_output_is_bit_identical_to_memory_tier` and
-`ram_and_streaming_tiers_produce_identical_stacks` stay green with unchanged pins. Add a
-chunk-layout unit test that pins the per-frame input bytes for an RGB warped frame at
-`3·4 + 2·4 + 1 + gain` and a mask frame at `C·4 + 1`.
-
-**Acceptance:** characterization pins unchanged (bit identical).
+**Blocked on Q2** in `lumos-stacking-review_QUESTIONS.md`. Batch 15 normalizes CFA-drizzled
+frames pair by pair, each against the reference over the pixels both reached in a colour. Above
+scale 1 a pair can share none, and a normalized combine then fails with `NoCommonCoverage`. Left
+here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale 2.
 
 ---
 
-## Batch 10: X-Trans pattern contract — medium
+## Batch 19 (rest): Markesteijn tile tuning — small (measure first, optional)
 
-**Findings:** DMS-2, DMS-14. `XTransPattern::new` accepts layouts that the hex table cannot
-handle; an untrusted FITS header can panic `HexLookup` (an `assert!`) or demosaic wrongly.
+**Finding:** DMS-9. The RCD part (DMS-7) is done.
 
-**Design:**
-1. `XTransPattern::new` checks, each with its own `XTransPatternError` variant: greens repeat with
-   period 3 (`rows[r][c] == 1 ⇔ rows[r%3][c%3] == 1`); exactly one solitary green per 3×3 cell, as
-   dcraw's hex construction requires; every hex entry fills.
-2. The hex table is built once inside `XTransPattern::new` and stored on it, so the check and the
-   table cannot drift. Delete `HexLookup`/`HexOffset`; `HexTable` reads the pattern's table.
-3. DMS-14: call `markesteijn::demosaic` from `CfaImage::demosaic` as RCD is called (drop the
-   timing wrapper); give `XTransImage::new` the finite-data `debug_assert` `BayerImage::new` has;
-   trim the narrating comments.
+**Steps:** compute Markesteijn's YPbPr and derivatives row by row and retune its tile per pass
+count.
 
-**Tests:** the 257-panic example from the report is refused with its variant; a period-3 violation
-and an unfilled table each give their variant; the standard X-Trans pattern's full hex table is
-asserted against dcraw's values (replacing the `|offset| ≤ 3` checks). Markesteijn digests
-unchanged.
-
----
-
-## Batch 11: Demosaic on signed, faint data — medium
-
-**Findings:** DMS-1, DMS-3, DMS-12.
-
-**Design:**
-1. **DMS-1:** `markesteijn/tile.rs` green bounds start `maxval` at `f32::NEG_INFINITY` (and
-   `minval` at `f32::INFINITY`).
-2. **DMS-3:** `estimate_green` (`bayer/rcd/mod.rs`) drops `EPS`:
-   - `scale = |c| + |s|`; if `scale == 0`, return `neighbor_green` (the additive branch's value
-     there).
-   - `transition = MIN_SIGNED_DENOMINATOR_RATIO · scale`; when `|c + s| ≥ transition`, return
-     `neighbor_green · 2c / (c + s)`; otherwise the existing smoothstep blend with the additive
-     estimate.
-   - The ratio is then exact at any level; its relative condition number stays at most 4.
-   - Remove `EPS` (keep `EPSSQ` where the direction weights use it).
-3. **The librtprocess oracle:** `rcd_matches_librtprocess_bit_for_bit` pins librtprocess digests
-   built with its `eps = 1e-5`, so it moves. Regenerate the digests with
-   `internals/reference/rcd_librtprocess.py`, building librtprocess at the pinned commit with
-   `eps` patched to `0.0f` (add an `--eps` option to the script and document it in the test doc).
-   The test scenes are positive, so librtprocess never meets `c + s = 0`. This needs a C++
-   compiler; if none is present, stop and report.
-
-**Tests (DMS-12):**
-- Table-driven flat field over levels {−1e-4, 0, 1e-5, 1e-4, 1e-2} with symmetric ±noise
-  (antithetic pairs, so the exact mean is the level): for both kernels, each output plane's mean
-  equals the level within a stated f32 rounding bound.
-- Replace the threshold assertions in `bayer/tests.rs` (`rcd_gradient_image_green_smoothness`,
-  `rcd_sharp_edge_no_excessive_artifacts`) with exact expectations: a linear ramp is reproduced
-  exactly inside the border.
-- Markesteijn: a zero-mean signed field gives a symmetric clamp (negate the input, the output
-  negates bit for bit).
-
----
-
-## Batch 12: Fused per-light calibration pass — medium
-
-**Findings:** CAL-8, DMS-10.
-
-**Design:**
-1. One row-parallel kernel in `CalibrationMasters::calibrate`:
-   `x = (L − B·g_b − o_b − k·(D·g_d + o_d)) / F`, computed in f64 per sample and rounded once,
-   where `(g, o)` are the masters' domain maps and `k` is the dark scale (the exposure ratio now;
-   Batch 27 supplies a fitted one). Saturation (`record_saturation`) and the masters' flags are
-   taken in the same pass.
-2. `PreparedFlat` precomputes `FLAT_FLOOR` into the divisor's own flags once; `take_master_flags`
-   ORs it, so the light needs no `add_where` for it.
-3. `PixelFlags` keeps its counts incrementally: `add_where` and the fused pass count per row and
-   add, instead of the single-threaded `counts_of` rescan.
-4. Defect flags are set by index (the map holds indices) with the same incremental count.
-5. **DMS-10:** null repair has one owner, `calibrate`. `CfaImage::demosaic` repairs only a frame
-   that no calibration touched (its record is empty), and otherwise `debug_assert`s that every
-   `NO_DATA` pixel is `REPAIRED`.
-6. The flat gain grid (`ImageMetadata::flat_gain`) is still set where the flat divides.
-
-**Tests:** the existing calibration tests stay exact. Add one that a light through the fused kernel
-equals a reference computed step by step in f64 in the test, within the one rounding; and one that
-the flag counts equal a full recount after a calibration with every flag kind.
-
-**Acceptance:** `calibration_masters/bench.rs` per-light time falls; report the figure.
-
----
-
-## Batch 13: Cosmic-ray quality — medium
-
-**Findings:** CAL-6, CAL-7, CAL-9, CAL-17.
-
-**Design:**
-1. **CAL-6, astroscrappy's rule** (`update_mask` in `astroscrappy.pyx`): a pixel joins the star
-   mask when it is flagged `SATURATED` and its 5×5 median is above a tenth of the frame's
-   saturation level (the median of the frame's saturated values stands for the level, since
-   calibration moved the units). The mask is dilated twice with a 5×5 kernel. The mask and
-   `NO_DATA` pixels are excluded from candidates and from the background estimate. An isolated
-   saturated pixel stays a candidate, so a saturating cosmic ray is still found. In-paints read
-   only pixels that are neither in the mask nor `UNMEASURED`.
-2. **CAL-7:** the X-Trans statistic `(v − median₈)/N` is normalized by its own σ on white noise, so
-   `sigclip` keeps astroscrappy's tail probability. Derive the factor (the σ of `v − median₈` for
-   unit Gaussian samples, about 1.1) by numerical integration of the order-statistic density in a
-   test-side helper, and pin it as a constant with the derivation. Calibrate `objlim` the same way
-   against the mono fine-structure statistic.
-3. **CAL-9:** iterations 2..n recompute only the rows within 6 px of a pixel repaired in the last
-   iteration (Laplacian ±1, noise median ±2, `med₅(S)` ±2, `med₃∘med₇` ±4, growth ±2: 6 bounds
-   each chain).
-4. **CAL-17:** `XtransDetector::new(config, noise, pattern: XTransPattern)` and
-   `BayerDetector::new(config, noise, pattern: CfaPattern)`; the panic arm goes away.
-
-**Tests:**
-- A clipped star core (flat top, steep edge) is not flagged; a saturated single-pixel hit beside
-  it is.
-- X-Trans noise-only false positives: exact count 0 at the default seed on a 256² field; a
-  star-preservation test as mono has.
-- CAL-9: the local recompute equals the full recompute bit for bit on a field with several hits
-  (keep the full recompute as a gated test oracle).
-
----
-
-## Batch 14: Drizzle as a science producer — medium
-
-**Findings:** DRZ-1, DRZ-6, DRZ-7, DRZ-8, DRZ-13.
-
-**Design (decided: Siril's design, drop weight in the mean):**
-1. Each frame is drizzled onto the output grid on its own (the scatter code stays). The result is
-   a drizzled frame: its pixels `Σw·x / Σw`, its per-channel drop weight plane `Σw`, and its noise
-   factor `q = (Σw)² / Σw²` (the Kish size of its drops).
-2. The drizzled frames enter the normal combine as stored frames with a new quality form
-   `FrameQuality::Drizzled { weight, confidence }`, one weight plane per channel:
-   - the sample is gathered where `weight > 0`;
-   - the mean's weight is `frame_weight · weight` (Siril `median_and_mean.c`:
-     `n *= dstack[frame]`; DrizzlePac weights the same way);
-   - the noise model divides by `confidence = q`, as for a warped frame;
-   - rejection stays unweighted, over the gathered samples.
-   With `Rejection::None` and equal frame weights this is the single-pass drizzle.
-3. Normalization, noise weights, flags and the quality planes come from the combine as for any
-   stack. Flags follow the warp's split: `RESAMPLE_EXCLUDED` pixels deposit nothing;
-   `RESAMPLE_CARRIED` pixels deposit and carry their flag to every output pixel they reach.
-4. **DRZ-6:** only the square kernel divides by the local magnification (STScI).
-5. **DRZ-7:** `validate` refuses non-finite samples with a new `DrizzleError` variant; the
-   accumulator stays unchanged on error.
-6. **DRZ-13:** state the output unit on `DrizzleConfig::scale` and the result: surface brightness
-   in input-pixel units; total flux is `s²` × the input's; divide by `s²` for flux per output
-   pixel.
-7. **Memory:** a drizzled frame is `s²` times a warped one plus its weight planes; the memory plan
-   charges it, and the spill tier holds it.
-8. The multi-frame accumulator's direct output becomes a gated test oracle, not a public path.
-   The public entries (`drizzle_stack`, `drizzle_images`) take a `StackConfig` beside their
-   `DrizzleConfig`.
-
-**Tests:**
-- With no rejection and equal weights, the combine of drizzled frames equals the old accumulator
-  to f32 rounding (state the bound), for each kernel.
-- A sliver frame gets its drop-weight share: a hand-computed two-frame case.
-- A satellite trail in one frame of ten is rejected.
-- DRZ-6: extend `a_magnified_frame_weighs_less_per_output_pixel` to the mean weight over one
-  lattice period, equal across the fixed-footprint kernels.
-- DRZ-7: a NaN sample is refused, the accumulator unchanged.
-
----
-
-## Batch 15: CFA (Bayer / X-Trans) drizzle — medium (feature)
-
-**Finding:** DMS-5 / DRZ-5. Every OSC frame is interpolated twice (demosaic, then warp).
-
-**Design:**
-1. The drizzle takes a calibrated `CfaImage`. Each photosite deposits only into the plane of its
-   own colour, with a per-channel weight and `q` plane (Siril `cdrizzlebox.c`: `chan =
-   FC_array(...)`); Batch 14's `FrameQuality::Drizzled` holds one weight plane per channel.
-2. Registration runs on a green proxy, as Siril does (`registration/global.c`: "a copy of the orig
-   image … to interpolate non green pixels"): green interpolated at the R and B sites (Bayer: mean
-   of the four green neighbours; X-Trans: mean of the hex greens), never a full demosaic.
-3. A light's statistics (noise per colour) come from the mosaic (`MosaicNoise`), as now.
-4. RCD/Markesteijn stay the default path for undithered or few-frame sets; CFA drizzle is a
-   config choice.
-
-**Tests:** a dithered synthetic RGGB set (known scene) drizzled at s = 1, p = 1 recovers each
-colour plane where every output pixel is covered; a pixel covered only by red photosites has zero
-green weight; the green proxy registers a shifted pair to the same transform as the demosaiced
-frames within the registration tolerance.
-
----
-
-## Batch 16: Drizzle scatter performance — medium (measure first)
-
-**Findings:** DRZ-2, DRZ-11.
-
-**Steps:**
-1. Add bench legs to `bench_drizzle_kernels`: 45°, 90°, and a SIP map. Record the baseline.
-2. Limit each scanned input row to the column interval whose drops can reach the band: closed
-   form for affine and homography maps; for SIP the sampled outline plus one column of margin.
-3. Return the landing position first and reject on row and column before computing magnification
-   or the other corners.
-4. Square kernel: compute the corner lattice once per input row (shared by neighbours); for affine
-   maps use `centre ± J·h`.
-5. Drizzle Lanczos reads `LanczosOrder::Three.lut()`, which interpolates between entries.
-
-**Acceptance:** the 90° leg at least 2× faster; output bit identical to before (the band-invariance
-and closed-form tests pin it), except Lanczos, which moves within the table's stated 1.1e-7.
-
----
-
-## Batch 17: RAW sensor classification and refusals — medium
-
-**Findings:** RAW-3, RAW-4, RAW-5, RAW-6, RAW-7, RAW-8, RAW-13, RAW-14, RAW-15, RAW-16, RAW-17.
-
-**Design:**
-1. **RAW-3:** accept Bayer only for `colors == 3` and `cdesc == "RGBG"` (read `idata.cdesc`);
-   everything else goes to `None`, and the fallback refuses `colors == 4` with a typed error.
-2. **RAW-4:** shim accessors for `unpacker_data.fuji_lossless` and the CRX header
-   `encType`/`imageLevels`. Canon C-RAW (lossy CRX) and Fuji lossy RAF get no quantization σ
-   (`None`), since their step is not one ADU. Fix the doc comment.
-3. **RAW-5 (decided):** a separate `camera_temperature` field. Calibration uses it only to match
-   darks when no sensor temperature exists, and the outcome says which it used.
-4. **RAW-6 and RAW-15 (decided):** refuse Phase One compressed IIQ (shim
-   `is_phaseone_compressed`) and float DNG (LibRaw's float-image flag) with typed `RawError`
-   variants that name the format.
-5. **RAW-7 + RAW-8 (decided):** use `linear_max[c]` only when `black_c < linear_max[c] ≤ maximum`.
-   Then the saturation level is `linear_max[c]` less 0.5% of the stated span
-   `linear_max[c] − black_c`: RawTherapee's conservative white level, 50–100 units below the clip
-   at 14 bits and 10–20 at 12 bits (`rtengine/camconst.json`, "How to Measure White Levels").
-   Keep `SATURATION_FRACTION = 0.95` only for `maximum`. Correct the `pixel_flags.rs` doc claim.
-6. **RAW-13 (decided, approved system dependency):** `libraw-sys/build.rs` compiles with OpenMP
-   when the compiler supports it (`-fopenmp` with gcc/clang and libgomp/libomp; `/openmp` with
-   MSVC). On macOS it looks for libomp (Homebrew prefix); when OpenMP is not available it builds
-   without and emits a `cargo:warning`. The shim exposes `omp_set_num_threads`; each decode sets
-   its thread's OpenMP count to `max(1, cores / decode_slots)` before `unpack`, so rayon slots ×
-   OpenMP threads stay within the cores.
-7. **RAW-14 (decided, approved dependency):** add `libz-sys` and define `USE_ZLIB` so deflate DNG
-   decodes. Remove `x3f` and `gpr` from `RAW_EXTENSIONS` and the Foveon claim. Lossy DNG stays
-   refused.
-8. **RAW-16 (decided):** fill `instrument` (normalized make and model), `date_obs`
-   (`other.timestamp`, ISO 8601 UTC) and `focal_length`; leave the pixel size empty. Calibration
-   refuses a master whose `instrument` differs from the light's when both state one.
-9. **RAW-17:** one identify-stage validator shared by peek and load, including the SuperCCD
-   refusal; peek refuses the decoders that change `filters` inside `load_raw` (OmniVision/RPi,
-   Pentax 4-shot).
-
-**Tests:** table tests for RAW-7/8 (the bounds and the margin, per channel); RAW-3 with the F828
-(`0x9c9c9c9c`, colors 4, "RGBE") and a CMYG filter word refused; RAW-16 fields read from a
-synthetic metadata struct; the OpenMP thread bound as a pure function of `cores` and `slots`; the
-decode pins (`DECODE_PINS`) move where RAW-8 moves a flag (state it). Formats without test files
-(C-RAW, IIQ, float DNG) are covered by unit tests on the classification functions.
-
----
-
-## Batch 18: Shared demosaic driver, gains inside the kernel — medium
-
-**Findings:** DMS-11, DMS-8, DMS-4.
-
-**Design:** one generic tiled driver (a kernel-tile trait with `bytes()`, `margin`, `border`,
-`demosaic(place, out)`, plus a shared `OutputPlanes`, tile scheduling and memory accounting) and
-one CFA-generic border fill over `CfaType::color_at` (the weighted 3×3 form with the radius
-fallback). The white-balance gains are applied as each tile reads its input; native samples are
-written from the unbalanced input, so they are exact (DMS-4); interpolated samples are unbalanced
-by the reciprocal at the tile's write.
-
-**Tests:** `rcd_all_patterns_preserve_native_samples…` extended to the production path through
-`CfaImage::demosaic` with non-unit gains: native samples bit exact. Digests unchanged where gains
-are 1.
-
-**Acceptance:** `demosaic` wall time on a 24 MP bench frame falls by the removed passes; report it.
-
----
-
-## Batch 19: RCD vectorization — medium (measure first)
-
-**Findings:** DMS-7, DMS-9.
-
-**Steps:** split the frame into per-phase half-resolution planes at copy-in; write the RCD loops as
-`simd::Isa` kernels over them; compute the low-pass filter only at R/B sites; keep the high-pass
-filter in ring rows; retune `TILE`. Optionally (DMS-9) compute Markesteijn's YPbPr and derivatives
-row by row and retune its tile per pass count.
-
-**Acceptance:** `bench_rcd_demosaic_core` 6000×4000 at least 1.5× faster without
-`target-cpu=x86-64-v3`, and the librtprocess digests (regenerated in Batch 11) unchanged.
+**Acceptance:** `bench_cfa_demosaic_balanced` X-Trans 6240×4160 at least 10% faster, and the
+librtprocess digests unchanged.
 
 ---
 
@@ -556,7 +250,7 @@ stem collision with another path is a miss.
 2. The light's excess at the same pixels, `l_p = L_p − med(L)` over the same neighbours (taken
    after the bias and before the dark), is fitted as `l_p = k·d_p` by least squares, iterated with
    a 3σ clip on the residuals, so stars and hits fall out.
-3. With at least 100 pixels left, `k` replaces the exposure ratio in Batch 12's kernel; otherwise
+3. With at least 100 pixels left, `k` replaces the exposure ratio as the dark's scale in `LightCalibration`, the fused calibration kernel; otherwise
    the exposure ratio stands. The outcome records `k`, the pixel count, and which was used.
 4. Only for a bias-removed dark (`DarkBias::Removed`); a dark that holds the bias keeps today's
    rules.
@@ -590,9 +284,6 @@ Each decision is also written into its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| CMB-4 | Normalization per slot (colour) for mosaics, sampled per colour. | 8 |
-| DMS-3 | Drop `EPS` from RCD's ratio; regenerate the librtprocess digests with `eps = 0`. | 11 |
-| CAL-6 | astroscrappy's saturated-star mask (5×5 median above a tenth of saturation, dilated twice). | 13 |
 | DRZ-1 | Siril's design: drizzle each frame, then the normal combine. | 14 |
 | DRZ-1 | A drizzled frame's drop weight multiplies its frame weight in the mean (Siril, DrizzlePac). | 14 |
 | DRZ-6 | Only the square kernel divides by the magnification (STScI). | 14 |

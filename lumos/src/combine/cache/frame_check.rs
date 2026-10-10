@@ -58,18 +58,25 @@ impl FrameCheck<'_> {
         frame: &StoredFrame,
         dimensions: ImageDimensions,
     ) -> Result<(), StackError> {
-        if let FrameQuality::Planes {
-            coverage,
-            confidence,
-        } = &frame.quality
-        {
-            let pixel_count = dimensions.pixel_count();
-            self.quality_pair(
+        let pixel_count = dimensions.pixel_count();
+        match &frame.quality {
+            FrameQuality::Planes {
+                coverage,
+                confidence,
+            } => self.quality_pair(
+                FramePlane::Coverage,
                 coverage.chunk(0, pixel_count),
                 confidence.chunk(0, pixel_count),
-            )?;
+            ),
+            FrameQuality::Drizzled { drops } => drops.iter().try_for_each(|drops| {
+                self.quality_pair(
+                    FramePlane::DropWeight,
+                    drops.weight.chunk(0, pixel_count),
+                    drops.confidence.chunk(0, pixel_count),
+                )
+            }),
+            FrameQuality::None | FrameQuality::Mask { .. } => Ok(()),
         }
-        Ok(())
     }
 
     /// Every sample of a stored frame's channel planes is finite.
@@ -81,40 +88,38 @@ impl FrameCheck<'_> {
         self.sample_channels(channels.iter().map(|plane| plane.chunk(0, pixel_count)))
     }
 
-    /// A frame-quality pair: each plane's own range, and that the two agree on where the frame
-    /// has support.
+    /// A frame-quality pair: the `support` plane, a warp's coverage or a drizzle's drop weight,
+    /// and its confidence, each in its own range, and agreeing on where the frame has support.
     ///
-    /// That agreement — `coverage == 0` exactly where `confidence == 0`, the invariant
-    /// [`FrameQuality`] documents — is what lets the combine gate a sample on coverage and be sure
+    /// That agreement — `support == 0` exactly where `confidence == 0`, the invariant
+    /// [`FrameQuality`] documents — is what lets the combine gate a sample on support and be sure
     /// of a positive confidence to divide its noise by, and what keeps `source_noise_variance`'s
-    /// reciprocal finite. The warp produces planes that satisfy it; this is where caller-supplied
-    /// and spilled ones are held to it.
+    /// reciprocal finite. The warp and the drizzle produce planes that satisfy it; this is where
+    /// caller-supplied and spilled ones are held to it.
     ///
     /// One walk over the pair rather than one per plane, so the pairing costs nothing beyond the
     /// range checks that were already reading both.
-    pub(crate) fn quality_pair(
+    fn quality_pair(
         self,
-        coverage: &[f32],
+        kind: FramePlane,
+        support: &[f32],
         confidence: &[f32],
     ) -> Result<(), StackError> {
         debug_assert_eq!(
-            coverage.len(),
+            support.len(),
             confidence.len(),
             "frame quality planes are validated for geometry before their values"
         );
         let index = self.index;
-        for (chunk, (coverage, confidence)) in coverage
+        for (chunk, (support, confidence)) in support
             .chunks(CANCEL_POLL_CHUNK)
             .zip(confidence.chunks(CANCEL_POLL_CHUNK))
             .enumerate()
         {
             Cancelled::check(self.cancel)?;
             let pixel = |offset| chunk * CANCEL_POLL_CHUNK + offset;
-            for (offset, (&coverage, &confidence)) in coverage.iter().zip(confidence).enumerate() {
-                for (kind, value) in [
-                    (FramePlane::Coverage, coverage),
-                    (FramePlane::Confidence, confidence),
-                ] {
+            for (offset, (&support, &confidence)) in support.iter().zip(confidence).enumerate() {
+                for (kind, value) in [(kind, support), (FramePlane::Confidence, confidence)] {
                     if !kind.accepts(value) {
                         return Err(StackError::InvalidWarpPlaneValue {
                             index,
@@ -124,11 +129,12 @@ impl FrameCheck<'_> {
                         });
                     }
                 }
-                if (coverage > 0.0) != (confidence > 0.0) {
+                if (support > 0.0) != (confidence > 0.0) {
                     return Err(StackError::FrameQualityPairMismatch {
                         index,
                         pixel: pixel(offset),
-                        coverage,
+                        plane: kind,
+                        support,
                         confidence,
                     });
                 }
@@ -149,6 +155,14 @@ impl FrameCheck<'_> {
                 expected: dimensions.channels(),
                 actual: frame.channels.len(),
             });
+        }
+        if let FrameQuality::Drizzled { drops } = &frame.quality {
+            assert!(
+                drops.len() == 1 || drops.len() == dimensions.channels(),
+                "a drizzled frame's drops are shared or one per channel, not {} for {}",
+                drops.len(),
+                dimensions.channels()
+            );
         }
         let expected = dimensions.pixel_count();
         let planes = frame

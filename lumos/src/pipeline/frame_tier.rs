@@ -12,7 +12,6 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::QualityFlags;
 use crate::memory::memory_plan::MemoryPlan;
 
 use crate::frame_store::stored_image::StoredImage;
@@ -158,22 +157,22 @@ impl FrameTier {
         }
     }
 
-    /// Park a reference frame, which is stored unwarped: it carries quality planes only if its
-    /// source flagged pixels the warp leaves out of every other frame, and flags only if it holds
-    /// one the warp carries — see [`FrameQuality::for_reference`]. One already parked on disk keeps
-    /// its planes there.
+    /// Park a reference frame, which is stored unwarped: it carries a mask of its flags only if its
+    /// source flagged pixels the warp leaves out of every other frame, and its flags only for that
+    /// mask or a flag the warp carries — see [`FrameQuality::for_reference`]. One already parked on
+    /// disk keeps its planes there.
     pub(crate) fn store_reference(
         &self,
         frame: PipelineFrame,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, AlignStackError> {
         match (self, frame) {
-            (Self::Ram, PipelineFrame::Resident(mut image)) => {
-                let quality = Self::reference_quality(&mut image);
+            (Self::Ram, PipelineFrame::Resident(image)) => {
+                let quality = Self::reference_quality(&image);
                 Ok(StoredFrame::from_memory(image, quality, source_stats))
             }
-            (Self::Spill { scratch, .. }, PipelineFrame::Resident(mut image)) => {
-                let quality = Self::reference_quality(&mut image);
+            (Self::Spill { scratch, .. }, PipelineFrame::Resident(image)) => {
+                let quality = Self::reference_quality(&image);
                 StoredFrame::spill(scratch, &image, &quality, source_stats)
                     .map_err(AlignStackError::from)
             }
@@ -186,14 +185,10 @@ impl FrameTier {
         }
     }
 
-    /// A resident reference's quality, its flags dropped unless it holds one the warp carries.
-    fn reference_quality(image: &mut LinearImage) -> FrameQuality<Buffer2<f32>> {
-        let quality = FrameQuality::for_reference(image.flags.as_ref());
-        image.flags = image
-            .flags
-            .take()
-            .filter(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED));
-        quality
+    /// A resident reference's quality: the stored frame keeps its flags for a mask or a flag the
+    /// warp carries.
+    fn reference_quality(image: &LinearImage) -> FrameQuality<Buffer2<f32>> {
+        FrameQuality::for_reference(image.flags.as_ref())
     }
 
     /// The tier the combine reads the stored frames through.
@@ -213,6 +208,7 @@ mod tests {
 
     use common::TempDir;
 
+    use crate::combine::cache::frame_gate::FrameGate;
     use crate::frame_store::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::internals::prelude::*;
@@ -222,8 +218,8 @@ mod tests {
 
     /// A reference leaves out what the warp leaves out of every other frame and keeps the flags it
     /// carries, on either tier and whether or not it was parked on disk. Four pixels, the second a
-    /// cosmic ray: its coverage is 0 and the rest 1. With the first saturated the flags stay, with
-    /// the hit alone they are dropped.
+    /// cosmic ray: a mask of the excluded flags gathers every pixel but that one, and the flags the
+    /// mask reads stay, the first's saturation among them when it is saturated.
     #[test]
     fn a_reference_leaves_out_the_excluded_and_keeps_the_carried() {
         let directory = TempDir::new("frame_tier_reference");
@@ -253,11 +249,22 @@ mod tests {
                 let stored = tier
                     .store_reference(frame, FrameStats::measure(&image))
                     .unwrap();
-                let coverage = stored.quality.coverage().unwrap().chunk(0, 4);
-                assert_eq!(coverage, [1.0, 0.0, 1.0, 1.0], "{label} {saturated}");
+                let gate = FrameGate::of(&stored, 0, 0, 4);
                 assert_eq!(
-                    stored.flags.as_ref().map(|flags| flags.chunk(0, 4)[0]),
-                    saturated.then_some(QualityFlags::SATURATED.byte()),
+                    (0..4)
+                        .map(|index| gate.sample(index).map(|sample| sample.confidence))
+                        .collect::<Vec<_>>(),
+                    [Some(1.0), None, Some(1.0), Some(1.0)],
+                    "{label} {saturated}"
+                );
+                let first = if saturated {
+                    QualityFlags::SATURATED.byte()
+                } else {
+                    0
+                };
+                assert_eq!(
+                    stored.flags.as_ref().unwrap().chunk(0, 4),
+                    [first, QualityFlags::COSMIC_RAY.byte(), 0, 0],
                     "{label} {saturated}"
                 );
             }

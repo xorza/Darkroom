@@ -10,11 +10,13 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+use crate::calibration_masters::cosmic_ray::kept_out::KeptOut;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 
@@ -26,6 +28,39 @@ const XTRANS_LARGE: usize = 24;
 /// Nearest unmasked same-color neighbors used to in-paint a flagged pixel.
 const XTRANS_REPLACE: usize = 12;
 
+/// The standard deviation of `v − median_n` over unit white noise, `√(1 + Var(median_n))`, for a
+/// median of `n` same-colour neighbours: entry `n − 1`. The excess over the fine median is divided
+/// by it, so the significance has unit σ on noise as the mono path's does, and `sigclip` keeps
+/// astroscrappy's tail probability. `Var(median_n)` is the second moment of the middle order
+/// statistic, or of the mean of the middle two for even `n`, integrated numerically
+/// (`median_excess_sigma_is_the_integrated_order_statistics` re-derives every entry).
+pub(super) const MEDIAN_EXCESS_SIGMA: [f32; XTRANS_LARGE] = [
+    std::f32::consts::SQRT_2,
+    1.2247449,
+    1.2036076,
+    1.1393856,
+    1.1343869,
+    1.1021537,
+    1.1002032,
+    1.0808241,
+    1.0798616,
+    1.0669239,
+    1.0663782,
+    1.0571264,
+    1.0567871,
+    1.0498419,
+    1.0496165,
+    1.0442103,
+    1.044053,
+    1.0397252,
+    1.039611,
+    1.0360681,
+    1.0359825,
+    1.0330286,
+    1.0329629,
+    1.0304624,
+];
+
 /// Frame-sized `f32` planes the X-Trans detector holds: `lplus`, `f`, `signal`, `noise` and
 /// `frame`.
 pub(crate) const XTRANS_SCRATCH_PLANES: usize = 5;
@@ -35,8 +70,8 @@ pub(crate) const XTRANS_SCRATCH_PLANES: usize = 5;
 /// on the X-Trans path.
 #[derive(Debug, Default)]
 struct XtransScratch {
-    /// `max(0, v − median(nearest same-color))` — sharpness vs the same-color surroundings — then
-    /// the significance `S = L⁺/N` in place.
+    /// `max(0, v − median(nearest same-color))` over that difference's σ in unit noise —
+    /// sharpness vs the same-color surroundings — then the significance `S = L⁺/N` in place.
     lplus: Vec<f32>,
     /// Same-color fine structure `median_small − median_large` (large for sources, ~0 at a CR).
     f: Vec<f32>,
@@ -55,7 +90,7 @@ struct XtransScratch {
 /// mono and Bayer detectors take, so the dispatch reads alike for every pattern.
 #[derive(Debug)]
 pub(super) struct XtransDetector<'a> {
-    cfa: &'a CfaType,
+    cfa: CfaType,
     config: &'a CosmicRayConfig,
     noise: NoiseModel,
     /// Same-colour neighbour geometry, built once per detector: recomputing the neighbour set per
@@ -65,15 +100,17 @@ pub(super) struct XtransDetector<'a> {
 }
 
 impl<'a> XtransDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel, cfa: &'a CfaType) -> Self {
-        let CfaType::XTrans(pattern) = cfa else {
-            panic!("XtransDetector requires an X-Trans pattern, got {cfa:?}");
-        };
+    pub(super) fn new(
+        config: &'a CosmicRayConfig,
+        noise: NoiseModel,
+        pattern: XTransPattern,
+    ) -> Self {
+        let cfa = CfaType::XTrans(pattern);
         Self {
             cfa,
             config,
             noise,
-            lattice: CfaLattice::new(&CfaType::XTrans(*pattern)),
+            lattice: CfaLattice::new(&cfa),
             scratch: XtransScratch::default(),
         }
     }
@@ -92,12 +129,13 @@ impl<'a> XtransDetector<'a> {
     /// Median-based, so a ray inside a stencil cannot drag its own reference, and **without** the
     /// mono path's ×2 subsample — same-colour sampling is already coarse and the iteration handles
     /// multi-pixel hits. Significance is `S = L⁺/N` with no `S'` median subtraction, since `L⁺`
-    /// (excess over the same-colour median) is already a local high-pass.
+    /// (excess over the same-colour median, in that excess's own σ) is already a local high-pass.
     pub(super) fn reject(
         &mut self,
         data: &mut [f32],
         size: Size2us,
         backgrounds: &PixelBackgrounds<'_>,
+        kept_out: Option<&KeptOut>,
         found: &mut BitBuffer2,
     ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
@@ -113,7 +151,7 @@ impl<'a> XtransDetector<'a> {
             let scene = CfaScene {
                 pix: data,
                 size,
-                cfa: self.cfa,
+                cfa: &self.cfa,
                 mask: &masks.accumulated,
             };
             scratch.fill_structure(&scene, &self.lattice);
@@ -123,14 +161,23 @@ impl<'a> XtransDetector<'a> {
                 *l /= nz;
             }
 
-            if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, self.config) == 0 {
+            let never_flagged = kept_out.map(|kept_out| &kept_out.never_flagged);
+            if masks.detect_and_grow(
+                &scratch.lplus,
+                &scratch.f,
+                &scratch.noise,
+                self.config,
+                never_flagged,
+            ) == 0
+            {
                 break;
             }
             xtrans_replace(
                 data,
                 size,
-                self.cfa,
+                &self.cfa,
                 &masks.accumulated,
+                kept_out.map(|kept_out| &kept_out.unread),
                 &self.lattice,
                 &mut scratch.frame,
             );
@@ -178,6 +225,7 @@ impl XtransScratch {
                         gathered,
                     );
                     if gathered.values.is_empty() {
+                        lrow[x] = 0.0;
                         frow[x] = 0.0;
                         srow[x] = v;
                         continue;
@@ -187,7 +235,7 @@ impl XtransScratch {
                     let small = gathered.tie_end(XTRANS_SMALL);
                     let med_small = median_mut(&mut gathered.values[..small]);
                     let med_large = median_mut(&mut gathered.values);
-                    lrow[x] = (v - med_small).max(0.0);
+                    lrow[x] = (v - med_small).max(0.0) / MEDIAN_EXCESS_SIGMA[small - 1];
                     // Non-negative only — see the mono detector: the σ-unit floor downstream
                     // is what guards the contrast ratio, at any sample scale.
                     frow[x] = (med_small - med_large).max(0.0);
@@ -221,14 +269,15 @@ impl XtransScratch {
     }
 }
 
-/// Replace masked pixels with the median of their nearest unmasked same-color neighbors. Gathers
-/// from a snapshot in the caller's `snapshot` buffer, for the reason
+/// Replace masked pixels with the median of their nearest same-color neighbors that neither `mask`
+/// nor `unread` holds. Gathers from a snapshot in the caller's `snapshot` buffer, for the reason
 /// [`replace_flagged`](super::mono::replace_flagged) gives.
 fn xtrans_replace(
     data: &mut [f32],
     size: Size2us,
     cfa: &CfaType,
     mask: &BitBuffer2,
+    unread: Option<&BitBuffer2>,
     lattice: &CfaLattice,
     snapshot: &mut Vec<f32>,
 ) {
@@ -253,7 +302,7 @@ fn xtrans_replace(
                     scene.size,
                     Vec2us::new(x, y),
                     XTRANS_REPLACE,
-                    |index| !mask.get(index),
+                    |index| !mask.get(index) && unread.is_none_or(|unread| !unread.get(index)),
                     gathered,
                 );
                 if gathered.values.is_empty() {
@@ -288,14 +337,24 @@ pub(crate) mod internals {
             &Buffer2::new(size.width, size.height, data.to_vec()),
             cfa,
             64,
+            None,
             &mut MeshWorkspace::default(),
         );
-        let mut detector = XtransDetector::new(&config, noise, cfa);
+        let CfaType::XTrans(pattern) = cfa else {
+            panic!("an X-Trans pattern, not {cfa:?}");
+        };
+        let mut detector = XtransDetector::new(&config, noise, *pattern);
         let backgrounds = PixelBackgrounds {
             mesh: &mesh,
             flat_gain: None,
         };
-        detector.reject(data, size, &backgrounds, &mut BitBuffer2::new_default(size));
+        detector.reject(
+            data,
+            size,
+            &backgrounds,
+            None,
+            &mut BitBuffer2::new_default(size),
+        );
         let XtransScratch {
             lplus,
             f,

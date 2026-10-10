@@ -5,6 +5,8 @@
 //! phase, whose dense neighbours are same-colour in the mosaic.
 
 use std::array;
+use std::iter;
+use std::ops::Range;
 
 use rayon::prelude::*;
 
@@ -14,6 +16,7 @@ use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+use crate::calibration_masters::cosmic_ray::kept_out::KeptOut;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
 
@@ -28,24 +31,37 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 /// planes differ by at most a row and a column, so one scratch serves all four: the `resize` in
 /// each producer keeps the largest allocation.
 ///
-/// Five planes, not the eight the stages name: `significance` and `fine` are rewritten in place by
-/// the elementwise step that consumes them, and `median` is handed from one stage to the next. On a
-/// 6144² mono frame that is 720 MB of working set instead of 1.1 GB — and, the point of the struct,
-/// no allocation at all after the first iteration.
+/// Five planes, not the eight the stages name. `significance`, `fine` and `noise` hold each pass's
+/// result, which the next pass updates only where a repair can have moved it; `staged` and `median`
+/// hold a stage's input and its window median, one stage at a time. On a 6144² mono frame that is
+/// 720 MB of working set instead of 1.1 GB — and, the point of the struct, no allocation at all
+/// after the first iteration.
 #[derive(Debug, Default)]
 struct MonoScratch {
-    /// `L⁺`, then the significance `S = L⁺/(2N)`, then `S' = S − median₅(S)`, each in place.
+    /// The significance with its smooth part taken out, `S' = S − median₅(S)`.
     significance: Vec<f32>,
-    /// `median₃(I)`, then the object fine structure `F = median₃ − median₇(median₃)` in place.
+    /// The object fine structure `F = median₃ − median₇(median₃)`.
     fine: Vec<f32>,
     /// Per-pixel noise `N`.
     noise: Vec<f32>,
     /// The window medians, one at a time: `median₇(median₃(I))`, then `median₅(I)`, then
     /// `median₅(S)`. Each is consumed by the step immediately after it, so the three never overlap.
     median: Vec<f32>,
-    /// The read-only snapshot [`replace_flagged`] gathers from.
-    frame: Vec<f32>,
+    /// A stage's input, one at a time: `median₃(I)`, then `S = L⁺/(2N)`; then the read-only
+    /// snapshot [`replace_flagged`] gathers from.
+    staged: Vec<f32>,
 }
+
+/// The rows a stage's output can move by, beyond the rows a repair changed: `median₃` reaches 1,
+/// `median₇` 3 more, so `F` moves within 4; `median₅` reaches 2, so `N` moves within 2, and `S`,
+/// whose Laplacian reaches 1, within 2 too; `median₅(S)` 2 more, so `S'` moves within 4.
+const FINE_REACH: usize = 4;
+const NOISE_REACH: usize = 2;
+const SIGNIFICANCE_REACH: usize = 4;
+/// Rows of `median₃(I)` that `median₇` reads to give `F` within [`FINE_REACH`].
+const MEDIAN3_REACH: usize = FINE_REACH + 3;
+/// Rows of `S` that `median₅(S)` reads to give `S'` within [`SIGNIFICANCE_REACH`].
+const S_REACH: usize = SIGNIFICANCE_REACH + 2;
 
 /// The mono cosmic-ray detector: its configuration, and the working set it reuses.
 ///
@@ -57,6 +73,9 @@ pub(super) struct MonoDetector<'a> {
     config: &'a CosmicRayConfig,
     noise: NoiseModel,
     scratch: MonoScratch,
+    /// Recompute every row on every pass: the oracle the update of changed rows is held to.
+    #[cfg(test)]
+    full_recompute: bool,
 }
 
 impl<'a> MonoDetector<'a> {
@@ -65,6 +84,8 @@ impl<'a> MonoDetector<'a> {
             config,
             noise,
             scratch: MonoScratch::default(),
+            #[cfg(test)]
+            full_recompute: false,
         }
     }
 
@@ -90,6 +111,7 @@ impl<'a> MonoDetector<'a> {
         data: &mut [f32],
         size: Size2us,
         local: &(dyn Fn(usize) -> PixelBackground + Sync),
+        kept_out: Option<&KeptOut>,
         found: &mut BitBuffer2,
     ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
@@ -97,6 +119,11 @@ impl<'a> MonoDetector<'a> {
             return 0;
         }
         let mut masks = CrMasks::new(size);
+        let width = size.width;
+        // The rows the last repair changed; `None` before the first pass, which computes them all.
+        // A row no repair reached recomputes to the same bits, so only the rows a stage's reach
+        // takes from a changed one are worked again.
+        let mut changed: Option<Vec<bool>> = None;
 
         for _ in 0..self.config.niter {
             let MonoScratch {
@@ -104,44 +131,91 @@ impl<'a> MonoDetector<'a> {
                 fine,
                 noise,
                 median,
-                frame,
+                staged,
             } = &mut self.scratch;
+            for plane in [
+                &mut *significance,
+                &mut *fine,
+                &mut *noise,
+                &mut *median,
+                &mut *staged,
+            ] {
+                plane.resize(size.pixel_count(), 0.0);
+            }
             let pix = &*data;
-
-            // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
-            laplacian_plus_into(pix, size, significance);
+            let rows = |reach: usize| match &changed {
+                Some(changed) => rows_within(changed, reach),
+                None => iter::once(0..size.height).collect(),
+            };
 
             // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources,
-            // ~0 at a CR (median₃ already erased the spike). The difference is elementwise, so it
-            // lands back over median₃ in `fine` rather than in a buffer of its own.
-            median_window_into(pix, size, 1, fine);
-            median_window_into(fine, size, 3, median);
-            // Clamped non-negative and no further: the only consumer divides by the noise and
-            // floors the result at `FINE_STRUCTURE_SIGMA_FLOOR`, so the guard against a vanishing
-            // F belongs there, in σ units, where it holds whatever scale the samples are in. An
-            // absolute floor here would instead read as enormous fine structure on a frame whose
-            // noise is below it, and suppress every detection.
-            for (a, &b) in fine.iter_mut().zip(&*median) {
-                *a = (*a - b).max(0.0);
+            // ~0 at a CR (median₃ already erased the spike). Clamped non-negative and no further:
+            // the only consumer divides by the noise and floors the result at
+            // `FINE_STRUCTURE_SIGMA_FLOOR`, so the guard against a vanishing F belongs there, in σ
+            // units, where it holds whatever scale the samples are in. An absolute floor here would
+            // instead read as enormous fine structure on a frame whose noise is below it, and
+            // suppress every detection.
+            for band in rows(MEDIAN3_REACH) {
+                median_window_rows(pix, size, 1, band, staged);
+            }
+            for band in rows(FINE_REACH) {
+                median_window_rows(staged, size, 3, band.clone(), median);
+                let span = band.start * width..band.end * width;
+                for ((f, &m3), &m7) in fine[span.clone()]
+                    .iter_mut()
+                    .zip(&staged[span.clone()])
+                    .zip(&median[span])
+                {
+                    *f = (m3 - m7).max(0.0);
+                }
             }
 
-            // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale
-            // structure. Both steps are elementwise over the same extent, so they run in place down
-            // the Laplacian buffer instead of allocating a frame each.
-            median_window_into(pix, size, 2, median);
-            noise_map_into(median, local, self.noise, noise);
-            for (l, &nz) in significance.iter_mut().zip(&*noise) {
-                *l /= 2.0 * nz;
-            }
-            median_window_into(significance, size, 2, median);
-            for (v, &m) in significance.iter_mut().zip(&*median) {
-                *v -= m;
+            for band in rows(NOISE_REACH) {
+                median_window_rows(pix, size, 2, band.clone(), median);
+                noise_map_rows(median, local, self.noise, band, width, noise);
             }
 
-            if masks.detect_and_grow(significance, fine, noise, self.config) == 0 {
+            // Significance S = L⁺/(2N), L⁺ the clipped Laplacian of the ×2-subsampled frame, then
+            // S' = S − median₅(S) to strip smooth large-scale structure.
+            for band in rows(S_REACH) {
+                laplacian_plus_rows(pix, size, band.clone(), staged);
+                let span = band.start * width..band.end * width;
+                for (l, &nz) in staged[span.clone()].iter_mut().zip(&noise[span]) {
+                    *l /= 2.0 * nz;
+                }
+            }
+            for band in rows(SIGNIFICANCE_REACH) {
+                median_window_rows(staged, size, 2, band.clone(), median);
+                let span = band.start * width..band.end * width;
+                for ((v, &l), &m) in significance[span.clone()]
+                    .iter_mut()
+                    .zip(&staged[span.clone()])
+                    .zip(&median[span])
+                {
+                    *v = l - m;
+                }
+            }
+
+            let never_flagged = kept_out.map(|kept_out| &kept_out.never_flagged);
+            if masks.detect_and_grow(significance, fine, noise, self.config, never_flagged) == 0 {
                 break;
             }
-            replace_flagged(data, size, &masks.accumulated, frame);
+            let unread = kept_out.map(|kept_out| &kept_out.unread);
+            replace_flagged(data, size, &masks.accumulated, unread, staged);
+            changed = Some(
+                data.par_chunks(width)
+                    .zip(staged.par_chunks(width))
+                    .map(|(now, before)| {
+                        now.iter()
+                            .zip(before)
+                            .any(|(now, before)| now.to_bits() != before.to_bits())
+                    })
+                    .collect(),
+            );
+            #[cfg(test)]
+            if self.full_recompute {
+                changed = None;
+            }
         }
 
         found.copy_from(&masks.accumulated);
@@ -149,7 +223,8 @@ impl<'a> MonoDetector<'a> {
     }
 }
 
-/// Clipped Laplacian of the ×2-subsampled frame, block-averaged back down to `size`.
+/// Clipped Laplacian of the ×2-subsampled frame, block-averaged back down to `size`, over `rows` of
+/// `out`.
 ///
 /// Convolves the ×2 image with `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clips negatives to 0 (keeping only
 /// sharp positive peaks), then averages each 2×2 block. Edge-clamped on the ×2 grid.
@@ -158,18 +233,18 @@ impl<'a> MonoDetector<'a> {
 /// sample is `data[y2 / 2][x2 / 2]` — so it is read through that index instead of being written to
 /// a buffer four times pixel count, and the clipped Laplacian is averaged as it is produced rather
 /// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
-/// removed from every iteration; what remains is the `n`-length result, written into the caller's
-/// buffer.
-fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
+/// removed from every iteration; what remains is the result, written into the caller's buffer.
+fn laplacian_plus_rows(data: &[f32], size: Size2us, rows: Range<usize>, out: &mut [f32]) {
     let (w2, h2) = (size.width * 2, size.height * 2);
     // The ×2 sample at (x2, y2), which is the native pixel under it.
     let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
 
-    // Every element is written below, so only the length matters.
-    out.resize(size.pixel_count(), 0.0);
-    out.par_chunks_mut(size.width)
+    let first = rows.start;
+    out[rows.start * size.width..rows.end * size.width]
+        .par_chunks_mut(size.width)
         .enumerate()
-        .for_each(|(y, row)| {
+        .for_each(|(row_in_band, row)| {
+            let y = first + row_in_band;
             for (x, o) in row.iter_mut().enumerate() {
                 let mut sum = 0.0f32;
                 for dy in 0..2 {
@@ -191,7 +266,7 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 }
 
 /// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
-/// every output sees a full window. Row-parallel.
+/// every output sees a full window, over `rows` of `out`. Row-parallel.
 ///
 /// Deliberately not star detection's own `median_filter_3x3`, even
 /// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
@@ -205,53 +280,56 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
 /// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
 /// gathers its replicated window and takes `median_mut`.
-fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
+fn median_window_rows(data: &[f32], size: Size2us, r: usize, rows: Range<usize>, out: &mut [f32]) {
     let side = 2 * r + 1;
-    // Every element is written below, so only the length matters.
-    out.resize(size.pixel_count(), 0.0);
-    out.par_chunks_mut(size.width).enumerate().for_each_init(
-        || WindowScratch {
-            values: Vec::with_capacity(side * side),
-            lanes: Vec::with_capacity(side * side),
-        },
-        |scratch, (y, row)| {
-            let width = size.width;
-            let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
-            let mut x = 0;
-            while x < width {
-                if x >= r && x + LANES + r <= width {
-                    scratch.lanes.clear();
-                    for dy in 0..side {
-                        let start = rows(dy) * width + x - r;
-                        for dx in 0..side {
-                            let at = &data[start + dx..start + dx + LANES];
-                            scratch
-                                .lanes
-                                .push(array::from_fn(|lane| total_key(at[lane])));
+    let first = rows.start;
+    out[rows.start * size.width..rows.end * size.width]
+        .par_chunks_mut(size.width)
+        .enumerate()
+        .for_each_init(
+            || WindowScratch {
+                values: Vec::with_capacity(side * side),
+                lanes: Vec::with_capacity(side * side),
+            },
+            |scratch, (row_in_band, row)| {
+                let y = first + row_in_band;
+                let width = size.width;
+                let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
+                let mut x = 0;
+                while x < width {
+                    if x >= r && x + LANES + r <= width {
+                        scratch.lanes.clear();
+                        for dy in 0..side {
+                            let start = rows(dy) * width + x - r;
+                            for dx in 0..side {
+                                let at = &data[start + dx..start + dx + LANES];
+                                scratch
+                                    .lanes
+                                    .push(array::from_fn(|lane| total_key(at[lane])));
+                            }
                         }
-                    }
-                    let medians = median_of_lanes(&mut scratch.lanes);
-                    for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
-                        *o = from_total_key(key);
-                    }
-                    x += LANES;
-                } else {
-                    scratch.values.clear();
-                    for dy in 0..side {
-                        let yy = rows(dy);
-                        for dx in 0..side {
-                            let xx = (x + dx).saturating_sub(r).min(width - 1);
-                            scratch
-                                .values
-                                .push(data[size.index_of(Vec2us::new(xx, yy))]);
+                        let medians = median_of_lanes(&mut scratch.lanes);
+                        for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
+                            *o = from_total_key(key);
                         }
+                        x += LANES;
+                    } else {
+                        scratch.values.clear();
+                        for dy in 0..side {
+                            let yy = rows(dy);
+                            for dx in 0..side {
+                                let xx = (x + dx).saturating_sub(r).min(width - 1);
+                                scratch
+                                    .values
+                                    .push(data[size.index_of(Vec2us::new(xx, yy))]);
+                            }
+                        }
+                        row[x] = median_mut(&mut scratch.values);
+                        x += 1;
                     }
-                    row[x] = median_mut(&mut scratch.values);
-                    x += 1;
                 }
-            }
-        },
-    );
+            },
+        );
 }
 
 /// The pixels one forgetful selection runs over at once: an AVX2 register of `i32`s.
@@ -319,22 +397,41 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
 }
 
 /// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5` and each pixel's
-/// local background, into `out`.
-fn noise_map_into(
+/// local background, over `rows`, `width` wide, of `out`.
+fn noise_map_rows(
     m5: &[f32],
     local: &(dyn Fn(usize) -> PixelBackground + Sync),
     noise: NoiseModel,
-    out: &mut Vec<f32>,
+    rows: Range<usize>,
+    width: usize,
+    out: &mut [f32],
 ) {
-    out.resize(m5.len(), 0.0);
-    out.par_iter_mut()
-        .zip(m5)
+    let span = rows.start * width..rows.end * width;
+    let first = span.start;
+    out[span.clone()]
+        .par_iter_mut()
+        .zip(&m5[span])
         .enumerate()
-        .for_each(|(index, (out, &signal))| *out = noise.noise(signal, local(index)));
+        .for_each(|(index, (out, &signal))| *out = noise.noise(signal, local(first + index)));
 }
 
-/// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped);
-/// fully-masked neighborhoods (huge CRs) are left for the next iteration to shrink.
+/// The rows within `reach` of a row `changed` marks, as ascending, disjoint bands.
+fn rows_within(changed: &[bool], reach: usize) -> Vec<Range<usize>> {
+    let height = changed.len();
+    let mut bands: Vec<Range<usize>> = Vec::new();
+    for (row, _) in changed.iter().enumerate().filter(|&(_, &changed)| changed) {
+        let band = row.saturating_sub(reach)..(row + reach + 1).min(height);
+        match bands.last_mut() {
+            Some(last) if band.start <= last.end => last.end = last.end.max(band.end),
+            _ => bands.push(band),
+        }
+    }
+    bands
+}
+
+/// Replace masked pixels with the median of their 5×5 neighbors (edge-clamped) that neither `mask`
+/// nor `unread` holds; fully-masked neighborhoods (huge CRs) are left for the next iteration to
+/// shrink.
 ///
 /// The frame copy is not what makes replacements independent of each other — writes land only on
 /// masked pixels and reads only on unmasked ones, so no replacement can consult a replaced
@@ -348,6 +445,7 @@ pub(super) fn replace_flagged(
     data: &mut [f32],
     size: Size2us,
     mask: &BitBuffer2,
+    unread: Option<&BitBuffer2>,
     snapshot: &mut Vec<f32>,
 ) {
     snapshot.clear();
@@ -367,7 +465,7 @@ pub(super) fn replace_flagged(
                     for dx in 0..=4 {
                         let xx = (x + dx).saturating_sub(2).min(size.width - 1);
                         let j = size.index_of(Vec2us::new(xx, yy));
-                        if !mask.get(j) {
+                        if !mask.get(j) && unread.is_none_or(|unread| !unread.get(j)) {
                             buf.push(src[j]);
                         }
                     }
@@ -386,7 +484,7 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
     use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
-    use crate::calibration_masters::cosmic_ray::mono::median_window_into;
+    use crate::calibration_masters::cosmic_ray::mono::median_window_rows;
     use crate::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
     use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
     use crate::io::image::image_metadata::ImageMetadata;
@@ -394,9 +492,33 @@ pub(crate) mod internals {
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
     pub(crate) fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
-        let mut out = Vec::new();
-        median_window_into(data, size, r, &mut out);
+        let mut out = vec![0.0; size.pixel_count()];
+        median_window_rows(data, size, r, 0..size.height, &mut out);
         out
+    }
+
+    /// Clean `data` as the mono detector does, every row recomputed on every pass when `full`,
+    /// against a flat background of sky 0.1 and σ 0.01; the pixels it found.
+    pub(crate) fn reject_recomputing(
+        data: &mut [f32],
+        size: Size2us,
+        config: &CosmicRayConfig,
+        full: bool,
+    ) -> BitBuffer2 {
+        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
+            .expect("the measured model needs nothing from the frame");
+        let local = |_| PixelBackground {
+            local: LocalBackground {
+                sky: 0.1,
+                noise: 0.01,
+            },
+            flat_gain: 1.0,
+        };
+        let mut detector = MonoDetector::new(config, noise);
+        detector.full_recompute = full;
+        let mut found = BitBuffer2::new_default(size);
+        detector.reject(data, size, &local, None, &mut found);
+        found
     }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
@@ -420,18 +542,18 @@ pub(crate) mod internals {
             flat_gain: 1.0,
         };
         let mut detector = MonoDetector::new(config, noise);
-        detector.reject(data, size, &local, &mut BitBuffer2::new_default(size));
+        detector.reject(data, size, &local, None, &mut BitBuffer2::new_default(size));
         let MonoScratch {
             significance,
             fine,
             noise,
             median,
-            frame,
+            staged,
         } = &detector.scratch;
         significance.capacity()
             + fine.capacity()
             + noise.capacity()
             + median.capacity()
-            + frame.capacity()
+            + staged.capacity()
     }
 }

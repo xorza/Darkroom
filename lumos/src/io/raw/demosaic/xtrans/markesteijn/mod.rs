@@ -15,28 +15,27 @@
 //! matrix, which a calibrated frame does not carry; the derivatives only choose a direction, and
 //! librtprocess calls the two nearly indistinguishable.
 //!
-//! Each stage reads only what the stage before computed, which lies further from a tile's edge
-//! than its own input, so a tile computes its pixels in full only a margin inside its edges.
-//! librtprocess's tiles write all but 8 pixels at each side, nearer than that, so its pixels
-//! beside a seam depend on where the tiles lie. Here each tile writes only the part its
-//! passes compute in full, and the tiles overlap by twice the margin. The pixels nearest the
-//! frame's edge, which no tile computes in full, come from their neighbours. The interior is librtprocess's to the bit, run as one tile over the frame, which a test holds
-//! it to.
+//! Each stage reads only what the stage before computed, which lies further from a tile's edge than
+//! its own input, so a tile computes its pixels in full only a margin inside its edges.
+//! librtprocess's tiles write all but 8 pixels at each side, nearer than that, so its pixels beside
+//! a seam depend on where the tiles lie. Here each tile writes only the part its passes compute in
+//! full, and the tiles overlap by twice the margin. The pixels nearest the frame's edge, which no
+//! tile computes in full, come from their neighbours. The interior is librtprocess's to the bit,
+//! run as one tile over the frame, which a test holds it to.
 
-mod border;
 mod hex_table;
 mod tile;
 
 use common::CancelToken;
-use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
+use crate::io::raw::demosaic::tiled;
+use crate::io::raw::demosaic::tiled::Tiling;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
-use crate::io::raw::demosaic::xtrans::markesteijn::tile::{Tile, TilePlace};
+use crate::io::raw::demosaic::xtrans::markesteijn::tile::Tile;
 use crate::math::size2us::Size2us;
 
 /// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
@@ -44,6 +43,10 @@ use crate::math::size2us::Size2us;
 /// against 251 and 866 ms at librtprocess's 114 and 431 and 1152 ms at 144; below 84 the overlap
 /// each tile computes again costs more than the cache saves.
 const TILE: usize = 96;
+/// How far beyond its own pixels a tile reads the frame: the reach of the green interpolation.
+const READ_REACH: usize = 3;
+/// The side of a tile's input: the tile and [`READ_REACH`] each side.
+const CROP: usize = TILE + 2 * READ_REACH;
 
 /// How many passes the X-Trans demosaic makes: four directions, or eight with the green computed
 /// again from nearer pixels — LibRaw's default and RawTherapee's best, at about twice the time.
@@ -79,99 +82,69 @@ impl MarkesteijnPasses {
         }
     }
 
-    /// The pixels nearest the frame's edge that come from their neighbours: the first tile starts
-    /// 3 pixels in, for the reach of the green interpolation, and writes from its margin.
-    const fn border(self) -> usize {
-        3 + self.margin()
+    /// How the passes tile a frame: tiles start [`READ_REACH`] inside the frame, for the reach of
+    /// the green interpolation, and write from their margin.
+    const fn tiling(self) -> Tiling {
+        Tiling {
+            tile: TILE,
+            inset: READ_REACH,
+            margin: self.margin(),
+        }
     }
 }
 
-/// Where each tile along an axis of `extent` pixels starts: from 3, every `step`, until one reaches
-/// 3 pixels from the far edge.
-fn tile_starts(extent: usize, step: usize) -> impl Iterator<Item = usize> {
-    let count = extent.saturating_sub(6 + TILE).div_ceil(step) + 1;
-    (0..count).map(move |index| 3 + index * step)
-}
-
-/// The output planes, written by every tile at the pixels it alone owns.
-#[derive(Debug, Clone, Copy)]
-struct OutputPlanes {
-    r: UnsafeSendPtr<f32>,
-    g: UnsafeSendPtr<f32>,
-    b: UnsafeSendPtr<f32>,
-}
-
-/// The output's three planes, and the peak: the caller's input, the output, and the workers' tile
-/// buffers. The workers are the pool's, which demosaics running at once share, so the charge to
-/// each is an upper bound.
+/// The memory a demosaic of a frame of `size` holds — see [`tiled::demosaic_memory`] — charged at
+/// eight directions, the most.
 pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
-    let plane_bytes = size
-        .width
-        .saturating_mul(size.height)
-        .saturating_mul(size_of::<f32>());
-    let output_bytes = plane_bytes.saturating_mul(3);
-    DemosaicMemory {
-        output_bytes,
-        peak_bytes: plane_bytes
-            .saturating_add(output_bytes)
-            .saturating_add(workspace_bytes()),
-    }
+    tiled::demosaic_memory(size, Tile::bytes(8))
 }
 
-/// The tile buffers of every worker of the pool, at most one each: a worker makes its tile for a
-/// run of tiles and drops it before it takes other work. Charged at eight directions, the most.
-pub(crate) fn workspace_bytes() -> usize {
-    rayon::current_num_threads().saturating_mul(Tile::bytes(8))
-}
-
-/// Demosaic an X-Trans frame with `passes` passes.
+/// Demosaic an X-Trans frame with `passes` passes, its colours balanced by its gains.
 ///
-/// Returns unclipped planar channels `[R, G, B]`, each `width * height`.
+/// Returns unclipped planar channels `[R, G, B]`, each `width * height`, in the frame's own
+/// balance.
 pub(crate) fn demosaic(
     xtrans: &XTransImage<'_>,
     passes: MarkesteijnPasses,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let Size2us { width, height } = xtrans.size;
-    let pixels = width * height;
-    let mut r = vec![0.0f32; pixels];
-    let mut g = vec![0.0f32; pixels];
-    let mut b = vec![0.0f32; pixels];
-    let hex = HexTable::new(xtrans.pattern, width);
-    let border = passes.border();
-    let step = TILE - 2 * passes.margin();
-    let places: Vec<TilePlace> = if width > 2 * border && height > 2 * border {
-        tile_starts(height, step)
-            .flat_map(|top| tile_starts(width, step).map(move |left| TilePlace { top, left }))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let out = OutputPlanes {
-        r: UnsafeSendPtr::new(r.as_mut_ptr()),
-        g: UnsafeSendPtr::new(g.as_mut_ptr()),
-        b: UnsafeSendPtr::new(b.as_mut_ptr()),
-    };
-    places.par_iter().try_for_each_init(
+    let hex = HexTable::new(xtrans.pattern);
+    tiled::demosaic(
+        xtrans.data,
+        xtrans.size,
+        |position| usize::from(xtrans.pattern.color_at(position)),
+        passes.tiling(),
         || Tile::new(passes.directions()),
-        |tile, &place| {
-            Cancelled::check(cancel)?;
-            // SAFETY: the planes cover the frame, and the tiles at `step` own disjoint parts.
-            unsafe { tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out) };
-            Ok(())
+        // SAFETY: the driver hands each place's own part to this tile alone, which writes no
+        // other.
+        |tile, place, out| unsafe {
+            tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out);
         },
-    )?;
-    Cancelled::check(cancel)?;
-    let border = if places.is_empty() {
-        width.max(height)
-    } else {
-        border
-    };
-    border::fill(xtrans, [&mut r, &mut g, &mut b], border);
-    Ok([r, g, b])
+        cancel,
+    )
 }
 
 #[cfg(all(test, feature = "bench"))]
 mod bench;
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::io::raw::demosaic::tiled;
+    use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+    use crate::io::raw::demosaic::xtrans::markesteijn::tile::Tile;
+
+    impl MarkesteijnPasses {
+        /// The pixels nearest the frame's edge that come from their neighbours.
+        pub(crate) const fn border(self) -> usize {
+            self.tiling().border()
+        }
+    }
+
+    /// The tile buffers of every worker of the pool — see [`tiled::workspace_bytes`] — charged at
+    /// eight directions, the most.
+    pub(crate) fn workspace_bytes() -> usize {
+        tiled::workspace_bytes(Tile::bytes(8))
+    }
+}
+
 #[cfg(test)]
 mod tests;

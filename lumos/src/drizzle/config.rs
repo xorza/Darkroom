@@ -3,7 +3,7 @@
 use crate::drizzle::error::DrizzleConfigError;
 use crate::error::InvalidConfigField;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::stack_product::quality_planes::QualityPlanes;
+use crate::math::size2us::Size2us;
 
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,6 +47,10 @@ impl DrizzleKernel {
 pub struct DrizzleConfig {
     /// Output scale factor relative to input (e.g., 2.0 = 2x resolution).
     /// Common values: 1.5, 2.0, 3.0
+    ///
+    /// The output keeps the input's surface brightness, value per input-pixel area: a flat field
+    /// of 1 drizzles to 1 at any scale, so the image total is `scale²` times the input's. Divide by
+    /// `scale²` for flux per output pixel, DrizzlePac's convention.
     pub scale: f32,
     /// Pixel fraction - ratio of drop size to input pixel before mapping.
     /// Range: greater than 0.0 and at most 1.0
@@ -65,18 +69,8 @@ pub struct DrizzleConfig {
     /// the share of *frames* that reached a pixel. This gate asks how much signal landed there,
     /// which dithering geometry varies independently of how many frames contributed.
     pub min_weight_fraction: f32,
-    /// Which ancillary planes the drizzle should produce, as [`StackConfig::quality`] asks of a
-    /// statistical combine.
-    ///
-    /// Each is an output-grid plane, and a drizzle's output grid is `scale²` times its input — so
-    /// declining one here saves more than it does on the statistical side. `variance` declines the
-    /// most: its `Σwᵢ²` accumulator is resident for the whole run, where coverage and weight are
-    /// shaped from the weight map that normalizing the image needs anyway.
-    ///
-    /// [`StackConfig::quality`]: crate::StackConfig::quality
-    pub quality: QualityPlanes,
-    /// How [`drizzle_stack`](crate::drizzle_stack) reads its frames. It streams them one at a time
-    /// and never spills, so only the decode policy and the memory reading apply.
+    /// How [`drizzle_stack`](crate::drizzle_stack) reads its frames, and where a run whose
+    /// drizzled frames do not fit in memory spills them.
     pub ingest: IngestConfig,
 }
 
@@ -88,13 +82,25 @@ impl Default for DrizzleConfig {
             kernel: DrizzleKernel::Square,
             fill_value: 0.0,
             min_weight_fraction: 0.1,
-            quality: QualityPlanes::STANDARD,
             ingest: IngestConfig::default(),
         }
     }
 }
 
 impl DrizzleConfig {
+    /// The output grid an `input` frame drizzles onto: each side `scale` times the input's, rounded
+    /// up so every drop of a validated config lands inside it.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "validate holds the scale positive, so each output side is non-negative"
+    )]
+    pub(crate) fn output_size(&self, input: Size2us) -> Size2us {
+        Size2us::new(
+            (input.width as f32 * self.scale).ceil() as usize,
+            (input.height as f32 * self.scale).ceil() as usize,
+        )
+    }
+
     /// Create config for 2x super-resolution with default parameters.
     pub fn x2() -> Self {
         Self::default()
