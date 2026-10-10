@@ -29,7 +29,8 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
-use crate::math::statistics::{MedianMad, median_mut};
+use crate::math::statistics::MedianMad;
+use crate::math::statistics::radix_median::RadixMedian;
 use std::iter;
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
@@ -113,8 +114,8 @@ struct ReferenceChannel {
     noise_variance: f64,
 }
 
-/// What one pass over a plane measures: its median over the common domain when there is one, and
-/// its values at the stratified sample indices.
+/// What [`measure_plane`] measures: a plane's median over the common domain when there is one,
+/// and its values at the stratified sample indices.
 #[derive(Debug)]
 struct PlaneMeasurement {
     median: Option<f32>,
@@ -286,9 +287,9 @@ fn domain_medians(
     let channel_count = frames[0].channels.len();
     let medians = (0..frames.len() * channel_count)
         .into_par_iter()
-        .map_init(Vec::new, |buffer, pair_index| {
+        .map_init(RadixMedian::default, |median, pair_index| {
             let plane = &frames[pair_index / channel_count].channels[pair_index % channel_count];
-            let measured = measure_plane(plane, pixel_count, Some(domain), &[], buffer, cancel)?;
+            let measured = measure_plane(plane, pixel_count, Some(domain), &[], median, cancel)?;
             Ok(measured.median.expect("a domain was given"))
         })
         .collect::<Result<Vec<_>, StackError>>()?;
@@ -304,9 +305,8 @@ fn domain_medians(
 /// errors-in-variables fit, on a stratified sample of the measured pixels; the offset then puts
 /// the frame's median on the reference's. The reference itself is the identity by definition.
 ///
-/// Every plane is read once: the pass that gathers its median also takes its samples. Fitting
-/// against the reference rather than against frame 0 and rescaling afterwards matters: the fit
-/// clips residuals and weights each side by its own noise, so `gain(a→c)` is not
+/// Fitting against the reference rather than against frame 0 and rescaling afterwards matters:
+/// the fit clips residuals and weights each side by its own noise, so `gain(a→c)` is not
 /// `gain(a→b) / gain(c→b)` — chaining through an arbitrary frame would put its noise into every
 /// other frame's scale.
 fn global_norms(
@@ -322,13 +322,12 @@ fn global_norms(
         .into_par_iter()
         .map(|channel| {
             let frame = &frames[reference];
-            let mut buffer = Vec::new();
             let measured = measure_plane(
                 &frame.channels[channel],
                 pixel_count,
                 domain,
                 &indices,
-                &mut buffer,
+                &mut RadixMedian::default(),
                 cancel,
             )?;
             Ok(ReferenceChannel {
@@ -350,7 +349,7 @@ fn global_norms(
 
     let fitted = (0..frames.len() * channel_count)
         .into_par_iter()
-        .map_init(Vec::new, |buffer, pair_index| {
+        .map_init(RadixMedian::default, |median, pair_index| {
             let frame_index = pair_index / channel_count;
             let channel = pair_index % channel_count;
             if frame_index == reference {
@@ -362,7 +361,7 @@ fn global_norms(
                 pixel_count,
                 domain,
                 &indices,
-                buffer,
+                median,
                 cancel,
             )?;
             let median = measured
@@ -396,55 +395,69 @@ fn global_norms(
     Ok(norms)
 }
 
-/// One walk over `plane`: its median over `domain` when one is given — gathered into `buffer`,
-/// which the caller reuses across planes — and its values at the ascending `indices`.
+/// `plane`'s median over `domain` when one is given, and its values at the ascending `indices`.
+///
+/// The median is exact and holds no copy of the plane: `median`'s histogram, which the caller
+/// reuses across planes, ranks the domain's values in two walks over it. A copy for every plane
+/// measured at once would be a plane per worker, which no memory plan charges.
 fn measure_plane(
     plane: &StoredPlane,
     pixel_count: usize,
     domain: Option<&CommonDomain>,
     indices: &[usize],
-    buffer: &mut Vec<f32>,
+    median: &mut RadixMedian,
     cancel: &CancelToken,
 ) -> Result<PlaneMeasurement, StackError> {
     debug_assert!(indices.is_sorted(), "the sample indices ascend");
     let values = plane.chunk(0, pixel_count);
-    buffer.clear();
-    if let Some(domain) = domain {
-        buffer.reserve_exact(domain.sample_count);
-    }
     let mut samples = Vec::with_capacity(indices.len());
-    let mut next = 0;
-    for (chunk, chunk_values) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
+    for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
         Cancelled::check(cancel)?;
-        let base = chunk * CANCEL_POLL_CHUNK;
-        let end = base + chunk_values.len();
-        while next < indices.len() && indices[next] < end {
-            samples.push(chunk_values[indices[next] - base]);
-            next += 1;
-        }
-        if let Some(domain) = domain {
-            // The mask is one row, so word `w` covers pixels `64w..64w + 64`, and a chunk starts
-            // on a word: its words are read once each instead of a bit lookup per pixel.
-            let words = &domain.valid.words[base / WORD_BITS..end.div_ceil(WORD_BITS)];
-            for (offset, &word) in words.iter().enumerate() {
-                let word_base = offset * WORD_BITS;
-                let mut bits = word;
-                while bits != 0 {
-                    let bit = bits.trailing_zeros() as usize;
-                    bits &= bits - 1;
-                    buffer.push(chunk_values[word_base + bit]);
-                }
-            }
-        }
+        samples.extend(chunk.iter().map(|&index| values[index]));
     }
     let median = match domain {
-        Some(_) => {
-            Cancelled::check(cancel)?;
-            Some(median_mut(buffer))
+        Some(domain) => {
+            let mut high = median.high_pass();
+            for_each_in_domain(values, domain, cancel, |value| high.add(value))?;
+            debug_assert_eq!(
+                high.len(),
+                domain.sample_count,
+                "the walk visits the domain"
+            );
+            let mut low = high.finish();
+            for_each_in_domain(values, domain, cancel, |value| low.add(value))?;
+            Some(low.median())
         }
         None => None,
     };
     Ok(PlaneMeasurement { median, samples })
+}
+
+/// Call `visit` with every value of `values` the domain holds, in pixel order.
+fn for_each_in_domain(
+    values: &[f32],
+    domain: &CommonDomain,
+    cancel: &CancelToken,
+    mut visit: impl FnMut(f32),
+) -> Result<(), StackError> {
+    for (chunk, chunk_values) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
+        Cancelled::check(cancel)?;
+        let base = chunk * CANCEL_POLL_CHUNK;
+        let end = base + chunk_values.len();
+        // The mask is one row, so word `w` covers pixels `64w..64w + 64`, and a chunk starts on a
+        // word: its words are read once each instead of a bit lookup per pixel.
+        let words = &domain.valid.words[base / WORD_BITS..end.div_ceil(WORD_BITS)];
+        for (offset, &word) in words.iter().enumerate() {
+            let word_base = offset * WORD_BITS;
+            let mut bits = word;
+            while bits != 0 {
+                let bit = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                visit(chunk_values[word_base + bit]);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Up to [`PHOTOMETRIC_SAMPLE_LIMIT`] pixel indices, ascending and evenly spread by rank over the

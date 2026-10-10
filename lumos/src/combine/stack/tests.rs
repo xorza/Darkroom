@@ -184,78 +184,119 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
 
 /// The load-bearing guarantee for memory-aware stacking: spilling frames to disk (mmap) and
 /// combining must be **bit-identical** to the all-RAM combine — same frames, same math, only the
-/// plane storage differs. Exercises σ-clip rejection + noise weighting + global norm + a partial
-/// coverage map (so the coverage spill round-trips too).
+/// plane storage differs. Exercises σ-clip rejection + noise weighting + a partial coverage map (so
+/// the coverage spill round-trips too), mono and RGB, with no normalization and with the global
+/// one, whose common-domain medians are then read from mapped planes.
 #[test]
 fn disk_tier_output_is_bit_identical_to_memory_tier() {
     let (w, h, n) = (40usize, 30usize, 12usize);
-    let dims = ImageDimensions::new((w, h), 1);
-    let make_frame = |f: usize| -> StackFrame {
-        let mut rng = TestRng::new(f as u64);
-        let mut px: Vec<f32> = (0..w * h)
-            .map(|_| 0.2 + (f as f32) * 0.01 + (rng.next_f32() - 0.5) * 0.02)
-            .collect();
-        px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires
-        let image = LinearImage::from_planar_channels(dims, [px]);
-        // Every other frame gets a partial coverage map (warped-border emulation).
-        let quality = if f.is_multiple_of(2) {
-            let mut coverage = Buffer2::new_filled(w, h, 1.0f32);
-            coverage[0] = 0.0;
-            FrameQuality::from_coverage(coverage)
-        } else {
-            FrameQuality::None
-        };
-        stack_frame(image, quality)
-    };
-    let config = StackConfig::light();
+    for channels in [1, 3] {
+        for normalization in [Normalization::None, Normalization::Global] {
+            let label = format!("{channels} channels, {normalization:?}");
+            let dims = ImageDimensions::new((w, h), channels);
+            let make_frame = |f: usize| -> StackFrame {
+                let mut rng = TestRng::new(f as u64);
+                let planes = (0..channels).map(|channel| {
+                    let mut px: Vec<f32> = (0..w * h)
+                        .map(|_| {
+                            0.2 + (f as f32) * 0.01
+                                + channel as f32 * 0.05
+                                + (rng.next_f32() - 0.5) * 0.02
+                        })
+                        .collect();
+                    px[(f * 7 + channel) % (w * h)] = 0.95; // an outlier so rejection fires
+                    px
+                });
+                let image = LinearImage::from_planar_channels(dims, planes.collect::<Vec<_>>());
+                // Every other frame gets a partial coverage map (warped-border emulation).
+                let quality = if f.is_multiple_of(2) {
+                    let mut coverage = Buffer2::new_filled(w, h, 1.0f32);
+                    coverage[0] = 0.0;
+                    FrameQuality::from_coverage(coverage)
+                } else {
+                    FrameQuality::None
+                };
+                stack_frame(image, quality)
+            };
+            let config = StackConfig {
+                normalization,
+                ..StackConfig::light()
+            };
 
-    // `make_frame` is deterministic, so building each tier's frames from it is what makes the two
-    // sets identical — the alternative, cloning one set, has to restate that the stats came along.
-    let ram = combine((0..n).map(make_frame).collect(), &config.clone()).unwrap();
-    let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
+            // `make_frame` is deterministic, so building each tier's frames from it is what makes
+            // the two sets identical — the alternative, cloning one set, has to restate that the
+            // stats came along.
+            let ram = combine((0..n).map(make_frame).collect(), &config.clone()).unwrap();
 
-    let scratch = TempDir::new("lumos_tier_test");
-    let run_scratch = RunScratch::create(&scratch.join("cache")).unwrap();
-    let metadata = frames[0].image.metadata.clone();
-    let stored = frames
-        .into_iter()
-        .map(|f| StoredFrame::spill(&run_scratch, &f.image, &f.quality, f.source_stats).unwrap())
-        .collect();
-    let disk = stack_stored_frames(
-        stored,
-        CacheTier::of(true, RunMemory::new(1 << 30, None)),
-        dims,
-        metadata,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
+            let scratch = TempDir::new("lumos_tier_test");
+            let run_scratch = RunScratch::create(&scratch.join("cache")).unwrap();
+            let spilled = |memory: u64| {
+                let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
+                let metadata = frames[0].image.metadata.clone();
+                let stored = frames
+                    .into_iter()
+                    .map(|f| {
+                        StoredFrame::spill(&run_scratch, &f.image, &f.quality, f.source_stats)
+                            .unwrap()
+                    })
+                    .collect();
+                stack_stored_frames(
+                    stored,
+                    CacheTier::of(true, RunMemory::new(memory, None)),
+                    dims,
+                    metadata,
+                    &config,
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+                .unwrap()
+            };
+            let disk = spilled(1 << 30);
+            assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
+            // With no memory at all the floor holds the whole 30-row image past the budget: its
+            // resident image, weight and variance planes, 40 × 30 × 12c B, beside the rows of 12
+            // frame planes and the six coverage-and-confidence pairs, 40 × 30 × 96 B. The coverage
+            // pass holds less. The stack is the same.
+            let starved = spilled(0);
+            assert_eq!(
+                starved.report.chunk_overcommit_bytes,
+                14_400 * channels as u64 + 115_200,
+                "{label}"
+            );
+            for channel in 0..channels {
+                assert_eq!(
+                    bits(ram.image.channel(channel).pixels()),
+                    bits(starved.image.channel(channel).pixels()),
+                    "{label}: starved channel {channel} differs"
+                );
+            }
 
-    let bits = |plane: &Buffer2<f32>| bits(plane.pixels());
-    assert_eq!(
-        bits(ram.image.channel(0)),
-        bits(disk.image.channel(0)),
-        "stacked image differs between RAM and disk tiers"
-    );
-    assert_eq!(
-        bits(&ram.coverage.as_ref().unwrap().to_plane()),
-        bits(&disk.coverage.as_ref().unwrap().to_plane()),
-        "coverage differs"
-    );
-    let ram_variance = ram.variance.as_ref().unwrap();
-    let disk_variance = disk.variance.as_ref().unwrap();
-    for channel in 0..ram.image.channels() {
-        assert_eq!(
-            bits(ram.weight.as_ref().unwrap().channel(channel)),
-            bits(disk.weight.as_ref().unwrap().channel(channel)),
-            "weight channel {channel} differs"
-        );
-        assert_eq!(
-            bits(ram_variance.channel(channel)),
-            bits(disk_variance.channel(channel)),
-            "variance channel {channel} differs"
-        );
+            let bits = |plane: &Buffer2<f32>| bits(plane.pixels());
+            assert_eq!(
+                bits(&ram.coverage.as_ref().unwrap().to_plane()),
+                bits(&disk.coverage.as_ref().unwrap().to_plane()),
+                "{label}: coverage differs"
+            );
+            let ram_variance = ram.variance.as_ref().unwrap();
+            let disk_variance = disk.variance.as_ref().unwrap();
+            for channel in 0..channels {
+                assert_eq!(
+                    bits(ram.image.channel(channel)),
+                    bits(disk.image.channel(channel)),
+                    "{label}: stacked channel {channel} differs"
+                );
+                assert_eq!(
+                    bits(ram.weight.as_ref().unwrap().channel(channel)),
+                    bits(disk.weight.as_ref().unwrap().channel(channel)),
+                    "{label}: weight channel {channel} differs"
+                );
+                assert_eq!(
+                    bits(ram_variance.channel(channel)),
+                    bits(disk_variance.channel(channel)),
+                    "{label}: variance channel {channel} differs"
+                );
+            }
+        }
     }
 }
 

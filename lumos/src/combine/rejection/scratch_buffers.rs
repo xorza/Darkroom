@@ -20,6 +20,12 @@ pub(crate) struct GesdScratch {
 }
 
 impl GesdScratch {
+    /// Room for the critical values of up to `frame_count` samples, so no pixel allocates.
+    fn reserve(&mut self, frame_count: usize) {
+        self.statistics.reserve(frame_count);
+        self.critical_values.reserve(frame_count + 1);
+    }
+
     /// Forget the critical values when alpha changed.
     pub(crate) fn prepare(&mut self, alpha: f32) {
         if self.alpha.to_bits() != alpha.to_bits() {
@@ -80,7 +86,8 @@ impl ScratchBuffers {
         self.sorted.reserve(frame_count);
         self.weights.reserve(frame_count);
         self.methods.clamped.reserve(frame_count);
-        self.methods.gesd.statistics.reserve(frame_count);
+        self.methods.scores.reserve(frame_count);
+        self.methods.gesd.reserve(frame_count);
     }
 
     /// The gather positions of the last pixel's survivors, or `None` when all of its samples

@@ -53,12 +53,13 @@ impl QualityPlanes {
     }
 
     /// Bytes a resident combine holds beside its frames for an output of `dimensions`: the
-    /// per-channel planes, and the one coverage plane if coverage was asked for. An upper bound
-    /// for a run whose frames turn out to carry no quality planes, whose coverage is a constant.
+    /// per-channel planes, the one coverage plane if coverage was asked for, and the flag byte of
+    /// each pixel. An upper bound for a run whose frames turn out to carry no quality planes, whose
+    /// coverage is a constant, or no flags, which leave the flag plane out.
     pub(crate) const fn resident_bytes(self, dimensions: ImageDimensions) -> usize {
         let planes =
             dimensions.channels() * self.resident_planes_per_channel() + self.coverage as usize;
-        planes * dimensions.pixel_count() * size_of::<f32>()
+        (planes * size_of::<f32>() + 1) * dimensions.pixel_count()
     }
 
     /// Drop the planes this combine method cannot produce, so the request reaching the reducer

@@ -6,8 +6,9 @@
 //!
 //! - [`pipeline_budget_probe`] — the **total-budget** regime. Runs the pipeline's own stages on
 //!   synthetic FITS under one budget: the dark and flat masters through [`stack_cfa_master`], then
-//!   the lights through [`calibrate_align_stack`] — calibrate, detect, register, warp, combine. The
-//!   probe asserts peak heap stays under the budget **across every stage**, plus the masters the
+//!   the lights through [`calibrate_align_stack`] — calibrate, detect, register, warp, combine
+//!   under [`StackConfig::light`], whose global normalization measures every warped plane over the
+//!   frames' common domain. The probe asserts peak heap stays under the budget **across every stage**, plus the masters the
 //!   caller holds, proving each stage's frames free before the next loads.
 //!
 //! - [`align_stack_memory_probe`] — the **bounded-working-set** regime. Runs the real
@@ -46,6 +47,7 @@ use glam::DVec2;
 use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::master_role::MasterRole;
 use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master};
+use crate::combine::config::StackConfig;
 use crate::internals::cfa::make_cfa;
 use crate::internals::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, env_parse, measured, parse_budget,
@@ -61,6 +63,7 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::memory::DETECTION_WORKING_PLANES;
 use crate::memory::memory_plan::PerFrameBytes;
 use crate::pipeline::align::align_and_stack;
@@ -181,7 +184,10 @@ fn pipeline_budget_probe() -> io::Result<()> {
     )
     .expect("assemble the masters");
 
-    let mut config = AlignStackConfig::default();
+    let mut config = AlignStackConfig {
+        stack: StackConfig::light(),
+        ..AlignStackConfig::default()
+    };
     config.stack.ingest.memory_override = budget.memory_override;
     config.stack.ingest.cache_dir = base.join("cache_2");
     let stage_start = Instant::now();
@@ -238,7 +244,9 @@ fn pipeline_budget_probe() -> io::Result<()> {
 }
 
 /// `n` mono-CFA FITS frames of `size` in `dir`, frame `i` holding the samples `frame(i)` gives,
-/// skipping any already present so a re-run reuses the set.
+/// skipping any already present so a re-run reuses the set. The samples carry no pedestal, and the
+/// files say so: one that states none reads back as holding an unknown offset, and a flat with no
+/// bias to remove it is refused.
 fn ensure_cfa_frames(
     dir: &Path,
     n: usize,
@@ -253,7 +261,13 @@ fn ensure_cfa_frames(
         if path.exists() {
             continue;
         }
-        let cfa = make_cfa(size, frame(i), CfaType::Mono);
+        let mut cfa = make_cfa(size, frame(i), CfaType::Mono);
+        cfa.metadata.domain = Some(SampleDomain {
+            scale: 1.0,
+            origin: ScaleOrigin::Declared,
+            pedestal: Pedestal::Removed,
+            unit: None,
+        });
         save_cfa_fits(path, &cfa)?;
         print!("\r  generating {}… {}/{n}", dir.display(), i + 1);
         io::stdout().flush().ok();
