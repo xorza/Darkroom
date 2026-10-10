@@ -6,11 +6,18 @@ use glam::DVec2;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::PlaneSpan;
-use crate::drizzle::accumulator::frame_source::{Drop, Fluxes, FrameSource, InputPixel};
-use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_A};
+use crate::drizzle::accumulator::frame_source::{
+    BandScan, Drop, DropQuad, Fluxes, FrameSource, InputPixel,
+};
+use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::drizzle::geometry::boxer;
-use crate::math::lanczos;
+use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::vec2us::Vec2us;
+
+/// The lattice points of [`QUAD_CORNERS`](crate::drizzle::accumulator::frame_source::QUAD_CORNERS)
+/// about pixel `(x, y)`, as `(x + dx, y + dy)`: lattice
+/// point `(j, k)` is input point `(j − ½, k − ½)`.
+const LATTICE_CORNERS: [[usize; 2]; 4] = [[0, 0], [1, 0], [1, 1], [0, 1]];
 
 /// A drop whose kernel taps sum to less than this has no normalizer worth dividing by: the radial
 /// kernels' taps sum to about the drop's area in output pixels, so this is far below any drop.
@@ -24,6 +31,53 @@ const KERNEL_WEIGHT_MIN: f32 = 1e-10;
 pub(super) struct RadialScratch {
     columns: Vec<f32>,
     rows: Vec<f32>,
+}
+
+/// The square kernel's corner lattice at pixfrac 1, where neighbouring drops share their corners:
+/// lattice point `(j, k)` is input point `(j − ½, k − ½)`, the corner the up to four drops around
+/// it meet at, mapped once for all of them instead of once for each — a fourth of the transforms,
+/// and of a SIP map's Newton inversions. The points are the ones each drop would map itself, so
+/// the deposits are too.
+///
+/// Two lattice rows are held, the two an input row's drops span. Each point carries the lattice
+/// row it was mapped for, so a row is reused without being cleared, by the next input row and by
+/// the next band on the same worker alike.
+#[derive(Debug, Default)]
+pub(super) struct CornerLattice {
+    rows: [LatticeRow; 2],
+}
+
+/// One lattice row of a [`CornerLattice`].
+#[derive(Debug, Default)]
+struct LatticeRow {
+    /// `k + 1` for a point mapped for lattice row `k`, 0 for one not mapped this frame.
+    stamps: Vec<usize>,
+    points: Vec<Option<DVec2>>,
+}
+
+impl CornerLattice {
+    /// Forget every point: a lattice row has a point more than a frame `width` pixels wide has
+    /// pixels, and a new frame maps every one of them differently.
+    fn reset(&mut self, width: usize) {
+        for row in &mut self.rows {
+            row.stamps.clear();
+            row.stamps.resize(width + 1, 0);
+            row.points.clear();
+            row.points.resize(width + 1, None);
+        }
+    }
+
+    /// Lattice point `(j, k)` on the output grid, mapped through `source` the first time it is
+    /// asked for in lattice row `k`.
+    #[inline]
+    fn corner(&mut self, source: &FrameSource<'_>, j: usize, k: usize) -> Option<DVec2> {
+        let row = &mut self.rows[k % 2];
+        if row.stamps[j] != k + 1 {
+            row.points[j] = source.position(DVec2::new(j as f64 - 0.5, k as f64 - 0.5));
+            row.stamps[j] = k + 1;
+        }
+        row.points[j]
+    }
 }
 
 /// One horizontal slice of the output grid: the rows it owns, and every accumulator restricted to
@@ -43,10 +97,11 @@ pub(super) struct OutputBand<'a> {
     /// Output pixels per row. Every band spans the full output width.
     width: usize,
     planes: PlaneSpan<'a>,
-    /// Which band this is, and the input rows every band scans for this frame — this one's, and the
-    /// earlier ones', which decide whether a pixel that failed to invert is this band's to count.
+    /// Which band this is, and the input pixels every band scans for this frame — this one's, and
+    /// the earlier ones', which decide whether a pixel that failed to invert is this band's to
+    /// count.
     index: usize,
-    scans: &'a [Range<usize>],
+    scans: &'a [BandScan],
 }
 impl<'a> OutputBand<'a> {
     pub(super) const fn new(
@@ -54,7 +109,7 @@ impl<'a> OutputBand<'a> {
         width: usize,
         planes: PlaneSpan<'a>,
         index: usize,
-        scans: &'a [Range<usize>],
+        scans: &'a [BandScan],
     ) -> Self {
         Self {
             rows,
@@ -72,9 +127,24 @@ impl<'a> OutputBand<'a> {
         source: &FrameSource<'_>,
         plan: KernelPlan,
         radial: &JobScratchPool<RadialScratch>,
+        lattice: &JobScratchPool<CornerLattice>,
     ) -> usize {
         match plan {
-            KernelPlan::Square { half_drop } => self.distribute_square(source, half_drop),
+            // Pixfrac 1: every drop's corners are lattice points its neighbours share.
+            KernelPlan::Square { half_drop: 0.5 } => {
+                let mut lattice = lattice.acquire();
+                lattice.reset(source.width());
+                self.distribute_square(source, |pixel| {
+                    let Vec2us { x, y } = pixel.position;
+                    source.quad_of(pixel, |corner| {
+                        let [dx, dy] = LATTICE_CORNERS[corner];
+                        lattice.corner(source, x + dx, y + dy)
+                    })
+                })
+            }
+            KernelPlan::Square { half_drop } => {
+                self.distribute_square(source, |pixel| source.quad(pixel, half_drop))
+            }
             KernelPlan::Turbo {
                 half_drop,
                 inv_area,
@@ -87,8 +157,11 @@ impl<'a> OutputBand<'a> {
                 (-d * d * inv_2sigma_sq).exp()
             }),
             KernelPlan::Lanczos { radius } => {
+                // The warp's table, within 1.1e-7 of the kernel: two `sin`s and two divisions a
+                // tap, fourteen taps a drop, become two reads and a fused multiply-add.
+                let lut = LANCZOS_ORDER.lut();
                 self.distribute_radial(source, radius, &mut radial.acquire(), |d| {
-                    lanczos::kernel(d, LANCZOS_A)
+                    lut.at(d.abs() * LANCZOS_LUT_RESOLUTION as f32)
                 })
             }
         }
@@ -105,14 +178,15 @@ impl<'a> OutputBand<'a> {
     fn scan<T>(
         &mut self,
         source: &FrameSource<'_>,
-        drop: impl Fn(InputPixel) -> Drop<T>,
+        mut drop: impl FnMut(InputPixel) -> Drop<T>,
         mut deposit: impl FnMut(&mut Self, InputPixel, T),
     ) -> usize {
         let width = source.width();
         let mut unconverged = 0;
-        for iy in self.scans[self.index].clone() {
+        let scan = &self.scans[self.index];
+        for iy in scan.rows() {
             let row = iy * width;
-            for ix in 0..width {
+            for ix in scan.columns(iy) {
                 let pixel = InputPixel {
                     position: Vec2us::new(ix, iy),
                     index: row + ix,
@@ -124,7 +198,7 @@ impl<'a> OutputBand<'a> {
                         unconverged += usize::from(
                             !self.scans[..self.index]
                                 .iter()
-                                .any(|scan| scan.contains(&iy)),
+                                .any(|scan| scan.contains(pixel.position)),
                         );
                     }
                 }
@@ -190,44 +264,44 @@ impl<'a> OutputBand<'a> {
     /// overlap via `boxer()`.
     ///
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square`.
-    fn distribute_square(&mut self, source: &FrameSource<'_>, half_drop: f64) -> usize {
-        self.scan(
-            source,
-            |pixel| source.quad(pixel, half_drop),
-            |band, pixel, drop| {
-                let min = drop
-                    .corners
-                    .iter()
-                    .copied()
-                    .fold(DVec2::splat(f64::INFINITY), DVec2::min);
-                let max = drop
-                    .corners
-                    .iter()
-                    .copied()
-                    .fold(DVec2::splat(f64::NEG_INFINITY), DVec2::max);
-                let Some(rows) = band.deposit_rows(min.y, max.y) else {
-                    return;
-                };
-                let cols = band.deposit_cols(min.x, max.x);
-                if cols.is_empty() {
-                    return;
-                }
+    fn distribute_square(
+        &mut self,
+        source: &FrameSource<'_>,
+        quad: impl FnMut(InputPixel) -> Drop<DropQuad>,
+    ) -> usize {
+        self.scan(source, quad, |band, pixel, drop| {
+            let min = drop
+                .corners
+                .iter()
+                .copied()
+                .fold(DVec2::splat(f64::INFINITY), DVec2::min);
+            let max = drop
+                .corners
+                .iter()
+                .copied()
+                .fold(DVec2::splat(f64::NEG_INFINITY), DVec2::max);
+            let Some(rows) = band.deposit_rows(min.y, max.y) else {
+                return;
+            };
+            let cols = band.deposit_cols(min.x, max.x);
+            if cols.is_empty() {
+                return;
+            }
 
-                let fluxes = source.fluxes(pixel);
-                for oy in rows {
-                    let base = band.row_base(oy);
-                    for ox in cols.clone() {
-                        // `boxer` clips against the unit square, so it takes the cell's lower-left
-                        // corner rather than its centre.
-                        let corner = DVec2::new(ox as f64 - 0.5, oy as f64 - 0.5);
-                        let overlap = boxer(corner, &drop.corners);
-                        if overlap > 0.0 {
-                            band.accumulate(&fluxes, base + ox, (overlap * drop.weight) as f32);
-                        }
+            let fluxes = source.fluxes(pixel);
+            for oy in rows {
+                let base = band.row_base(oy);
+                for ox in cols.clone() {
+                    // `boxer` clips against the unit square, so it takes the cell's lower-left
+                    // corner rather than its centre.
+                    let corner = DVec2::new(ox as f64 - 0.5, oy as f64 - 0.5);
+                    let overlap = boxer(corner, &drop.corners);
+                    if overlap > 0.0 {
+                        band.accumulate(&fluxes, base + ox, (overlap * drop.weight) as f32);
                     }
                 }
-            },
-        )
+            }
+        })
     }
 
     /// Point kernel: fastest, needs good dithering.
@@ -409,6 +483,85 @@ impl<'a> OutputBand<'a> {
             && let Some(flags) = &mut self.planes.flags
         {
             flags[index] |= fluxes.carried;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::drizzle::deposit::Deposit;
+    use crate::internals::prelude::*;
+    use crate::registration::distortion::sip::SipPolynomial;
+    use crate::registration::transform::{Transform, WarpTransform};
+
+    /// The corner lattice gives every drop at pixfrac 1 the quadrilateral it would map itself, bit
+    /// for bit — corners, weight, and the failures of a SIP inverse alike — whatever order its
+    /// drops are asked for in: rows forward, as the scan walks them, and a column at a time, which
+    /// leaves every lattice row half stale. Over a homography, whose corners each divide by their
+    /// own denominator, and a SIP warp whose field `−0.05·d²` folds 10 pixels right of the centre,
+    /// so its inverse fails at the input pixels past the fold.
+    #[test]
+    fn the_corner_lattice_maps_the_corners_each_drop_would() {
+        let size = Size2us::new(24, 16);
+        let image = gray_image(size, vec![1.0; size.pixel_count()]);
+        let centre = DVec2::new(12.0, 8.0);
+        let reference: Vec<DVec2> = (0..size.height)
+            .flat_map(|y| (0..size.width).map(move |x| DVec2::new(x as f64, y as f64)))
+            .collect();
+        let bend = |r: DVec2| {
+            let d = r - centre;
+            r + DVec2::new(-0.05 * d.x * d.x, 0.004 * d.x * d.y)
+        };
+        let target: Vec<DVec2> = reference.iter().map(|&r| bend(r)).collect();
+        let identity = Transform::identity();
+        let sip = SipPolynomial::fitted_under(&identity, &reference, &target, 3, centre);
+        let warps = [
+            (
+                "homography",
+                WarpTransform::new(Transform::homography([
+                    1.01, 0.02, 1.5, -0.01, 0.99, -0.7, 3e-4, -2e-4,
+                ])),
+            ),
+            ("sip", WarpTransform::with_sip(identity, sip)),
+        ];
+        let same = |a: Drop<DropQuad>, b: Drop<DropQuad>| match (a, b) {
+            (Drop::Landed(a), Drop::Landed(b)) => {
+                a.corners.map(|c| c.to_array().map(f64::to_bits))
+                    == b.corners.map(|c| c.to_array().map(f64::to_bits))
+                    && a.weight.to_bits() == b.weight.to_bits()
+            }
+            (Drop::Empty, Drop::Empty) | (Drop::Unconverged, Drop::Unconverged) => true,
+            _ => false,
+        };
+        for (name, warp) in warps {
+            let source = FrameSource::new(&image, Deposit::of(&image), &warp, 2.0, None);
+            let pixel = |x: usize, y: usize| InputPixel {
+                position: Vec2us::new(x, y),
+                index: y * size.width + x,
+            };
+            let rows_first = (0..size.height).flat_map(|y| (0..size.width).map(move |x| (x, y)));
+            let columns_first = (0..size.width).flat_map(|x| (0..size.height).map(move |y| (x, y)));
+            let mut unconverged = 0;
+            for (order, walk) in [
+                ("rows", rows_first.collect::<Vec<_>>()),
+                ("columns", columns_first.collect()),
+            ] {
+                let mut lattice = CornerLattice::default();
+                lattice.reset(size.width);
+                for (x, y) in walk {
+                    let own = source.quad(pixel(x, y), 0.5);
+                    unconverged += usize::from(matches!(own, Drop::Unconverged));
+                    let shared = source.quad_of(pixel(x, y), |corner| {
+                        let [dx, dy] = LATTICE_CORNERS[corner];
+                        lattice.corner(&source, x + dx, y + dy)
+                    });
+                    assert!(same(own, shared), "{name} {order}: pixel ({x}, {y})");
+                }
+            }
+            if name == "sip" {
+                assert!(unconverged > 0, "the SIP fixture must fail somewhere");
+            }
         }
     }
 }

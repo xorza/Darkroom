@@ -577,42 +577,78 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
 ///
 /// Parallelizing a float accumulation is only sound because each output pixel belongs to exactly
 /// one band and a band walks its inputs in the order the serial loop did, so every pixel's
-/// contributions are summed in the same sequence whatever the band count. Run over transforms whose
-/// bands need *different* input rows — a rotation makes a band's input strip diagonal, so a row
-/// estimate that was even one row too tight would drop flux and show up here as a mismatch.
+/// contributions are summed in the same sequence whatever the band count. Run over warps whose
+/// bands need *different* input pixels — a rotation makes a band's input strip diagonal, a quarter
+/// turn makes it a few columns of every row, a SIP field bends it — so a scan that was even one row
+/// or one column too tight would drop flux and show up here as a mismatch. One band reads the
+/// whole output, so it scans every pixel whose drop lands anywhere on it.
 #[test]
 fn band_count_does_not_change_the_result() {
     let image = star_field(Size2us::new(64, 64), 24, 4242).image;
     let dimensions = image.dimensions();
+    let centre = DVec2::new(32.0, 32.0);
+    let warp = |transform: Transform| WarpTransform::new(transform.inverse());
 
-    let transforms = [
-        ("translation", Transform::translation(DVec2::new(3.7, -2.4))),
+    let warps = [
+        (
+            "translation",
+            warp(Transform::translation(DVec2::new(3.7, -2.4))),
+        ),
         (
             "rotation",
-            Transform::euclidean(DVec2::new(5.0, -3.0), 0.05),
+            warp(Transform::euclidean(DVec2::new(5.0, -3.0), 0.05)),
         ),
         (
             "similarity",
-            Transform::similarity(DVec2::new(2.0, 1.0), -0.03, 1.02),
+            warp(Transform::similarity(DVec2::new(2.0, 1.0), -0.03, 1.02)),
         ),
         (
             "homography",
-            Transform::homography([1.0, 0.002, 4.0, -0.001, 1.0, -2.0, 2e-5, 1e-5]),
+            warp(Transform::homography([
+                1.0, 0.002, 4.0, -0.001, 1.0, -2.0, 2e-5, 1e-5,
+            ])),
+        ),
+        (
+            "45°",
+            warp(Transform::rotation_around(
+                centre,
+                std::f64::consts::FRAC_PI_4,
+            )),
+        ),
+        (
+            "quarter turn",
+            warp(Transform::translation(DVec2::new(0.3, -0.6)).compose(
+                &Transform::rotation_around(centre, std::f64::consts::FRAC_PI_2),
+            )),
+        ),
+        (
+            "sip",
+            sip_warp(
+                dimensions.size(),
+                Transform::similarity(DVec2::new(0.7, -0.4), 0.3, 1.0),
+                |d| d * 2e-5 * d.length_squared(),
+            ),
         ),
     ];
 
-    for (name, transform) in transforms {
+    for (name, warp) in &warps {
         for kernel in DrizzleKernel::ALL {
             let drizzle = |band_rows: usize| {
                 let mut accumulator = accumulator(dimensions, usual_config(kernel));
-                accumulator.add_image_with_band_rows(image.clone(), &transform, band_rows);
-                accumulator.finalize()
+                let frame = DrizzleFrame {
+                    source: image.clone(),
+                    warp: warp.clone(),
+                    pixel_weight_map: None,
+                };
+                accumulator.add_frame_with_band_rows(&frame, band_rows);
+                let unconverged = accumulator.unconverged_points();
+                (accumulator.finalize(), unconverged)
             };
 
             // One band is the serial walk; 5 rows over a 64- or 128-row output is a dozen or more
             // of them, so most drops land inside a band and some straddle a boundary.
-            let single = drizzle(dimensions.height() * 2);
-            let many = drizzle(5);
+            let (single, single_unconverged) = drizzle(dimensions.height() * 2);
+            let (many, many_unconverged) = drizzle(5);
 
             let case = format!("{name}/{kernel:?}");
             for channel in 0..dimensions.channels() {
@@ -623,20 +659,30 @@ fn band_count_does_not_change_the_result() {
                 );
             }
             assert_eq!(weight_plane(&single), weight_plane(&many), "{case}: weight");
+            assert_eq!(single_unconverged, many_unconverged, "{case}: unconverged");
         }
     }
 }
 
-/// The input-row estimate covers every drop that can reach the band, and a band straddling the
+/// The band's scan covers every drop that can reach the band, and a band straddling the
 /// transform's vanishing line scans the whole frame.
 ///
-/// `input_rows` bounds the input by inverse-mapping the band's four corners, which encloses the
+/// `band_scan` bounds the input by inverse-mapping the band's four corners, which encloses the
 /// interior only while the homogeneous divisor keeps one sign across the band. Where it changes
-/// sign the mapped region is unbounded and four corners bound nothing, so the estimate has to widen
-/// to the frame — a tight answer there drops flux with no diagnostic.
+/// sign the mapped region is unbounded and four corners bound nothing, so the scan has to widen to
+/// the frame — a tight answer there drops flux with no diagnostic.
 #[test]
-fn input_row_estimate_covers_every_reaching_drop() {
+fn a_band_scan_covers_every_reaching_drop() {
     let image = constant_image(Size2us::new(16, 12), 1.0);
+    let scan = |warp: &WarpTransform, width: usize, output_margin: f64, input_margin: f64| {
+        band_scan(&image, warp, 1.0, 0..4, width, output_margin, input_margin).collect::<Vec<_>>()
+    };
+    let rows = |warp: &WarpTransform, width: usize, output_margin: f64, input_margin: f64| {
+        let scanned = scan(warp, width, output_margin, input_margin);
+        scanned
+            .first()
+            .map_or(0..0, |first| first.0..scanned.last().unwrap().0 + 1)
+    };
 
     // Inverse divisor `1 − 0.01·x`, which is zero at output column 100 and so takes both signs over
     // a 200-wide grid.
@@ -644,39 +690,48 @@ fn input_row_estimate_covers_every_reaching_drop() {
     let straddling = WarpTransform::new(Transform::homography([
         1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.01, 0.0,
     ]));
-    assert_eq!(
-        input_rows(&image, &straddling, 1.0, 0..4, 200, 0.5, 0.0),
-        0..12
+    assert_eq!(rows(&straddling, 200, 0.5, 0.0), 0..12);
+    assert!(
+        scan(&straddling, 200, 0.5, 0.0)
+            .iter()
+            .all(|(_, columns)| *columns == (0..16)),
+        "an unbounded band scans every column"
     );
 
     // A grid narrow enough to stay on one side of it keeps the corner bound. It is not the linear
     // answer: the divisor is 0.51 at column 49, so the far corner of output rows [-0.5, 3.5] maps
-    // back to input row 3.5/0.51 = 6.86, and the estimate runs to 8 rather than 4.
-    assert_eq!(
-        input_rows(&image, &straddling, 1.0, 0..4, 50, 0.5, 0.0),
-        0..8
-    );
+    // back to input row 3.5/0.51 = 6.86, and the scan runs to 8 rather than 4.
+    assert_eq!(rows(&straddling, 50, 0.5, 0.0), 0..8);
 
     // And the linear case, whose divisor is a constant 1: output rows [-0.5, 3.5] shifted up by
     // two are input rows [-2.5, 1.5], so rows 0, 1 and 2. A drop reaching 1.5 input rows from its
     // centre — the square kernel's — widens that to [-4, 3], rows 0 to 3.
     let shifted = WarpTransform::new(Transform::translation(DVec2::new(0.0, -2.0)));
-    assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 0.0), 0..3);
-    assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 1.5), 0..4);
+    assert_eq!(rows(&shifted, 200, 0.5, 0.0), 0..3);
+    assert_eq!(rows(&shifted, 200, 0.5, 1.5), 0..4);
 
-    // A quarter turn sends output column x to input row x − 2.25, so the input rows come from the
-    // band's horizontal extent. A Lanczos-3 drop reaches 3.5 output pixels, so the columns widen to
-    // [−3.5, 8.5] on a 6-wide grid and the rows to [−5.75, 6.25]: rows 0 to 7. Without the column
-    // margin they stop at [−2.25, 2.75], rows 0 to 3, and the drops centred just right of the
-    // grid's last column lose the taps that land inside it.
+    // A quarter turn sends output pixel (x, y) to input (−y, x − 2.25), so the input rows come
+    // from the band's horizontal extent and its columns from the band's rows. A Lanczos-3 drop
+    // reaches 3.5 output pixels, so the columns widen to [−3.5, 8.5] on a 6-wide grid and the rows
+    // to [−5.75, 6.25]: rows 0 to 7. Without the column margin they stop at [−2.25, 2.75], rows 0
+    // to 3, and the drops centred just right of the grid's last column lose the taps that land
+    // inside it. The band's rows [−3.5, 6.5] come back as input columns [−6.5, 3.5]: in every row
+    // the outline spans, columns 0 to 4 of the 16, not all of them, and none in the slack row 7
+    // past it.
     let quarter_turn = WarpTransform::new(Transform::euclidean(
         DVec2::new(0.0, -2.25),
         std::f64::consts::FRAC_PI_2,
     ));
-    assert_eq!(
-        input_rows(&image, &quarter_turn, 1.0, 0..4, 6, 3.5, 0.0),
-        0..8
+    assert_eq!(rows(&quarter_turn, 6, 3.5, 0.0), 0..8);
+    let columns: Vec<_> = scan(&quarter_turn, 6, 3.5, 0.0)
+        .into_iter()
+        .map(|(_, columns)| columns)
+        .collect();
+    assert!(
+        columns[..7].iter().all(|columns| *columns == (0..5)),
+        "{columns:?}"
     );
+    assert!(columns[7].is_empty(), "the slack row reaches no column");
 }
 
 #[test]

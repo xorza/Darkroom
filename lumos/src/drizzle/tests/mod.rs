@@ -12,7 +12,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 
 use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
-use crate::drizzle::accumulator::frame_source::internals::input_rows;
+use crate::drizzle::accumulator::frame_source::internals::band_scan;
 use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::deposit::Deposit;

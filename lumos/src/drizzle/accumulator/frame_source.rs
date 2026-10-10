@@ -14,17 +14,17 @@ use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::inverse_warp::InverseWarp;
-use crate::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::registration::transform::{Transform, WarpTransform};
 
-/// Area magnification below which a drop is discarded: the transform has collapsed the input pixel
-/// to nothing, so there is no output area to spread its flux over.
+/// Area below which a square drop is discarded: the transform has collapsed the input pixel to
+/// nothing, so there is no output area to spread its flux over.
 const JACOBIAN_MIN: f64 = 1e-30;
 
 /// Output pixels between boundary samples when a SIP band's outline is taken back to the input.
 ///
 /// A SIP edge bends away from the chord between two samples by at most `stride²/8·|∂²W|`, and a
 /// fitted field's second derivative is far under 1e-2 per pixel, so at this stride the bend is
-/// under 0.1 input row — inside the extra row [`FrameSource::input_rows`] adds for it.
+/// under 0.1 input pixel — inside the extra pixel [`FrameSource::band_scan`] adds for it.
 const SIP_BOUNDARY_STRIDE: usize = 8;
 
 /// One input pixel's samples, one per channel, and the flags it carries to every output pixel its
@@ -90,12 +90,10 @@ pub(super) enum Drop<T> {
 /// Input pixels onto the output grid, and output points back onto the input.
 #[derive(Debug)]
 enum InputMap {
-    /// A warp without SIP: one transform each way. A model below a homography magnifies area by
-    /// one factor everywhere, which is held once.
+    /// A warp without SIP: one transform each way.
     Transform {
         to_output: Transform,
         to_input: Transform,
-        uniform_magnification: Option<f64>,
     },
     /// A warp with SIP — boxed, since it carries two copies of the polynomial and the source is
     /// built once per frame.
@@ -122,12 +120,9 @@ impl InputMap {
             }));
         }
         let to_output = grid.compose(&warp.transform.inverse());
-        let uniform_magnification = (to_output.transform_type() != TransformType::Homography)
-            .then(|| to_output.jacobian(DVec2::ZERO).determinant().abs());
         Self::Transform {
             to_output,
             to_input: to_output.inverse(),
-            uniform_magnification,
         }
     }
 
@@ -143,57 +138,111 @@ impl InputMap {
                 .map(|position| sip.grid.apply(position)),
         }
     }
+}
 
-    /// [`Self::position`], with the area the map magnifies by there.
-    #[inline]
-    fn landing(&self, p: DVec2) -> Option<Landing> {
-        match self {
-            Self::Transform {
-                to_output,
-                uniform_magnification,
-                ..
-            } => Some(Landing {
-                position: to_output.apply(p),
-                magnification: uniform_magnification
-                    .unwrap_or_else(|| to_output.jacobian(p).determinant().abs()),
-            }),
-            Self::Sip(sip) => sip.inverse.apply(p).map(|mapped| Landing {
-                position: sip.grid.apply(mapped.position),
-                magnification: (sip.grid.jacobian(mapped.position) * mapped.jacobian)
-                    .determinant()
-                    .abs(),
-            }),
+/// A square drop's corners about its centre, in units of its half side, wound counterclockwise:
+/// BL, BR, TR, TL.
+pub(super) const QUAD_CORNERS: [DVec2; 4] = [
+    DVec2::new(-1.0, -1.0),
+    DVec2::new(1.0, -1.0),
+    DVec2::new(1.0, 1.0),
+    DVec2::new(-1.0, 1.0),
+];
+
+/// Input rows of slack on the strip an outline is cut by: far above the rounding of an outline's
+/// vertices — coordinates of 10⁵ pixels carry 10⁻¹¹ — and far below a pixel, so it scans no
+/// column more, while a pixel centred exactly on a vertex is not lost to that rounding.
+const STRIP_GUARD: f64 = 1e-6;
+
+/// A band's widened output rectangle taken back onto the input as a closed outline, and how far
+/// from it, in input pixels, a pixel whose drop reaches inside can lie.
+#[derive(Debug, Clone)]
+struct Outline {
+    vertices: Vec<DVec2>,
+    reach: f64,
+    /// Whether its columns bound a scan: a closed-form outline's do, see
+    /// [`FrameSource::band_scan`].
+    bounds_columns: bool,
+}
+
+impl Outline {
+    /// The least and greatest input row the outline spans, widened by its reach.
+    fn rows(&self) -> [f64; 2] {
+        let [first, last] = self.vertices.iter().fold(
+            [f64::INFINITY, f64::NEG_INFINITY],
+            |[first, last], vertex| [first.min(vertex.y), last.max(vertex.y)],
+        );
+        [first - self.reach, last + self.reach]
+    }
+
+    /// The input columns of row `row` within reach of the outline, on a frame `width` wide.
+    ///
+    /// The outline bounds a region, so the region's widest point within the strip of rows a drop
+    /// reaches from `row` lies on the outline inside the strip, or where the outline crosses its
+    /// edges: the edges cut to the strip give the extent, for any outline, convex or not.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each bound is held at 0 or above first, and the cast saturates at the top"
+    )]
+    fn columns(&self, row: usize, width: usize) -> Range<usize> {
+        let low = row as f64 - self.reach - STRIP_GUARD;
+        let high = row as f64 + self.reach + STRIP_GUARD;
+        let mut extent = [f64::INFINITY, f64::NEG_INFINITY];
+        let edges = self
+            .vertices
+            .iter()
+            .zip(self.vertices.iter().cycle().skip(1));
+        for (&a, &b) in edges {
+            if a.y.max(b.y) < low || a.y.min(b.y) > high {
+                continue;
+            }
+            let [enter, leave] = if a.y == b.y {
+                [0.0, 1.0]
+            } else {
+                let [to_low, to_high] = [low, high].map(|y| (y - a.y) / (b.y - a.y));
+                [to_low.min(to_high).max(0.0), to_low.max(to_high).min(1.0)]
+            };
+            for t in [enter, leave] {
+                let x = a.x + t * (b.x - a.x);
+                extent = [extent[0].min(x), extent[1].max(x)];
+            }
         }
+        if extent[0] > extent[1] {
+            return 0..0;
+        }
+        let start = ((extent[0] - self.reach).floor().max(0.0) as usize).min(width);
+        let end = ((extent[1] + self.reach).ceil() + 1.0).max(0.0) as usize;
+        start..end.min(width).max(start)
     }
 }
 
-/// Where an input point lands on the output grid, and the area the map magnifies by there.
-#[derive(Debug, Clone, Copy)]
-struct Landing {
-    position: DVec2,
-    magnification: f64,
+/// The input pixels whose drops can reach one band of the output: a run of rows, and in each row
+/// the columns its outline spans.
+#[derive(Debug, Clone)]
+pub(super) struct BandScan {
+    rows: Range<usize>,
+    /// `None` when nothing bounds the band's input, and every column of a row is scanned.
+    outline: Option<Outline>,
+    width: usize,
 }
 
-/// The input rows a region of the output maps onto, before any margin.
-#[derive(Debug, Clone, Copy)]
-struct RowExtent {
-    first: f64,
-    last: f64,
-}
+impl BandScan {
+    /// The input rows the band scans.
+    pub(super) fn rows(&self) -> Range<usize> {
+        self.rows.clone()
+    }
 
-impl RowExtent {
-    /// The least and greatest of `rows`.
-    fn of(rows: impl IntoIterator<Item = f64>) -> Self {
-        rows.into_iter().fold(
-            Self {
-                first: f64::INFINITY,
-                last: f64::NEG_INFINITY,
-            },
-            |extent, row| Self {
-                first: extent.first.min(row),
-                last: extent.last.max(row),
-            },
-        )
+    /// The input columns the band scans in `row`.
+    pub(super) fn columns(&self, row: usize) -> Range<usize> {
+        match &self.outline {
+            Some(outline) => outline.columns(row, self.width),
+            None => 0..self.width,
+        }
+    }
+
+    /// Whether the band scans input pixel `pixel`.
+    pub(super) fn contains(&self, pixel: Vec2us) -> bool {
+        self.rows.contains(&pixel.y) && self.columns(pixel.y).contains(&pixel.x)
     }
 }
 
@@ -254,43 +303,56 @@ impl<'a> FrameSource<'a> {
         }
     }
 
-    /// The drop at `pixel`.
+    /// The drop at `pixel`: where its centre lands, the one thing a fixed-footprint kernel reads
+    /// of the map. Its weight is the pixel's whatever the map magnifies by, so no Jacobian is
+    /// computed — none of a homography's per pixel, nor the one a SIP inverse would add to its
+    /// Newton steps — as STScI's point, turbo, Gaussian and Lanczos kernels compute none.
     #[inline]
     pub(super) fn droplet(&self, pixel: InputPixel) -> Drop<Droplet> {
         let Some(weight) = self.deposit_weight(pixel) else {
             return Drop::Empty;
         };
         let position = DVec2::new(pixel.position.x as f64, pixel.position.y as f64);
-        let Some(landing) = self.map.landing(position) else {
-            return Drop::Unconverged;
-        };
-        if landing.magnification < JACOBIAN_MIN {
-            return Drop::Empty;
+        match self.map.position(position) {
+            Some(centre) => Drop::Landed(Droplet { centre, weight }),
+            None => Drop::Unconverged,
         }
-        Drop::Landed(Droplet {
-            centre: landing.position,
-            weight,
+    }
+
+    /// Where input point `p` lands on the output grid, or `None` when the SIP inverse does not
+    /// converge there.
+    #[inline]
+    pub(super) fn position(&self, p: DVec2) -> Option<DVec2> {
+        self.map.position(p)
+    }
+
+    /// The drop at `pixel` as the quadrilateral its corners map to, shrunk by the pixel fraction to
+    /// `half_drop` either side of its centre.
+    #[inline]
+    pub(super) fn quad(&self, pixel: InputPixel, half_drop: f64) -> Drop<DropQuad> {
+        let centre = DVec2::new(pixel.position.x as f64, pixel.position.y as f64);
+        self.quad_of(pixel, |corner| {
+            self.map.position(centre + QUAD_CORNERS[corner] * half_drop)
         })
     }
 
-    /// The drop at `pixel` as the quadrilateral its corners map to, shrunk by the pixel fraction.
+    /// The drop at `pixel` as the quadrilateral of its mapped corners, `corner(i)` the `i`-th of
+    /// [`QUAD_CORNERS`], asked for only when the pixel deposits.
     #[inline]
-    pub(super) fn quad(&self, pixel: InputPixel, half_drop: f64) -> Drop<DropQuad> {
+    pub(super) fn quad_of(
+        &self,
+        pixel: InputPixel,
+        mut corner: impl FnMut(usize) -> Option<DVec2>,
+    ) -> Drop<DropQuad> {
         let Some(weight) = self.deposit_weight(pixel) else {
             return Drop::Empty;
         };
-        let centre = DVec2::new(pixel.position.x as f64, pixel.position.y as f64);
         let mut corners = [DVec2::ZERO; 4];
-        for (corner, offset) in corners.iter_mut().zip([
-            DVec2::new(-half_drop, -half_drop),
-            DVec2::new(half_drop, -half_drop),
-            DVec2::new(half_drop, half_drop),
-            DVec2::new(-half_drop, half_drop),
-        ]) {
-            let Some(position) = self.map.position(centre + offset) else {
+        for (index, mapped) in corners.iter_mut().enumerate() {
+            let Some(position) = corner(index) else {
                 return Drop::Unconverged;
             };
-            *corner = position;
+            *mapped = position;
         }
 
         // The magnification is the quadrilateral's own signed area, from the cross product of its
@@ -305,64 +367,89 @@ impl<'a> FrameSource<'a> {
         })
     }
 
-    /// The input rows whose drops can reach output `rows`: a drop reaching `output_margin` output
-    /// rows, or `input_margin` input rows, from its pixel's centre.
+    /// The input pixels whose drops can reach output `rows`: a drop reaching `output_margin`
+    /// output rows, or `input_margin` input rows, from its pixel's centre.
     ///
     /// The output rows widened by `output_margin` — and the columns too, since a rotated drop
     /// reaches the band from beside the grid as well as from above and below it — taken back to the
-    /// input, and the input rows they span widened by `input_margin`. Exact rather than estimated:
-    /// a drop that reaches the band has a point inside it, and that point's input row lies within
-    /// `input_margin` of its pixel's, or its output row within `output_margin` of the band.
-    /// Deliberately generous at the row level — over-scanning costs one transform and a rejected
-    /// row test per pixel, measured at ~0.9 ns against ~100 ns for a deposit, while under-scanning
-    /// would drop flux.
+    /// input, and the pixels within `input_margin` of that. Exact rather than estimated: a drop that
+    /// reaches the band has a point inside it, and that point lies within `input_margin` of its
+    /// pixel's centre, or its output position within `output_margin` of the band. Deliberately
+    /// generous by a row and a column, since over-scanning costs one transform and a rejected test
+    /// per pixel while under-scanning would drop flux.
+    ///
+    /// A closed-form map also limits each row to the columns its outline spans there, so a band of
+    /// a rotated frame reads the slanted strip of the input that reaches it rather than every
+    /// column of every row the strip touches — at a quarter turn, a few columns of each row instead
+    /// of all of them. A SIP map scans whole rows: its outline is sampled, a fold it does not see
+    /// would lose drops at its columns where whole rows lose none, and every pixel of a row is then
+    /// tried, so the pixels its inverse cannot place are counted the same whatever the bands.
     #[expect(
         clippy::cast_sign_loss,
         reason = "each bound is held at 0 or above first, and the cast saturates at the top"
     )]
-    pub(super) fn input_rows(
+    pub(super) fn band_scan(
         &self,
         rows: &Range<usize>,
         output_width: usize,
         output_margin: f64,
         input_margin: f64,
-    ) -> Range<usize> {
+    ) -> BandScan {
         let low = rows.start as f64 - output_margin;
         let high = rows.end as f64 - 1.0 + output_margin;
         let left = -output_margin;
         let right = output_width as f64 - 1.0 + output_margin;
-        let Some(extent) = self.input_row_extent(low, high, left, right) else {
-            return 0..self.size.height;
+        let width = self.size.width;
+        let height = self.size.height;
+        let Some(outline) = self.outline(low, high, left, right, input_margin) else {
+            return BandScan {
+                rows: 0..height,
+                outline: None,
+                width,
+            };
         };
 
-        // Saturating float casts, so a degenerate inverse (non-finite corners) yields an empty
+        // Saturating float casts, so a degenerate inverse (non-finite vertices) yields an empty
         // range rather than a wild one.
-        let height = self.size.height;
-        let start = ((extent.first - input_margin).floor().max(0.0) as usize).min(height);
-        let end = ((extent.last + input_margin).ceil() + 1.0).max(0.0) as usize;
-        start..end.min(height).max(start)
+        let [first, last] = outline.rows();
+        let start = (first.floor().max(0.0) as usize).min(height);
+        let end = (last.ceil() + 1.0).max(0.0) as usize;
+        BandScan {
+            rows: start..end.min(height).max(start),
+            outline: outline.bounds_columns.then_some(outline),
+            width,
+        }
     }
 
-    /// The lowest and highest input row the output rectangle `[left, right] × [low, high]` maps
-    /// onto, or `None` when no bound exists and the whole frame has to be scanned.
+    /// The output rectangle `[left, right] × [low, high]` taken back onto the input, reaching
+    /// `input_margin` beyond, or `None` when no outline bounds it and the whole frame has to be
+    /// scanned.
     #[expect(
         clippy::cast_sign_loss,
         reason = "an output rectangle's width and height are non-negative, and an empty one saturates to 0"
     )]
-    fn input_row_extent(&self, low: f64, high: f64, left: f64, right: f64) -> Option<RowExtent> {
+    fn outline(
+        &self,
+        low: f64,
+        high: f64,
+        left: f64,
+        right: f64,
+        input_margin: f64,
+    ) -> Option<Outline> {
         match &self.map {
             InputMap::Transform { to_input, .. } => {
                 let corners = [
                     DVec2::new(left, low),
                     DVec2::new(right, low),
-                    DVec2::new(left, high),
                     DVec2::new(right, high),
+                    DVec2::new(left, high),
                 ];
                 // The corner hull bounds the interior only while the inverse's homogeneous divisor
                 // keeps one sign across the rectangle. That divisor is affine in the output
                 // coordinates, so a sign change between corners means the rectangle straddles the
                 // vanishing line, where the mapped region is unbounded and four corners bound
                 // nothing. Only a homography can do it — every other model divides by a constant 1.
+                // On one side of it a homography maps the rectangle's edges to straight edges.
                 let m = to_input.matrix();
                 let divisor = |p: DVec2| m[6] * p.x + m[7] * p.y + m[8];
                 let reference = divisor(corners[0]);
@@ -372,33 +459,39 @@ impl<'a> FrameSource<'a> {
                 {
                     return None;
                 }
-                Some(RowExtent::of(
-                    corners.map(|corner| to_input.apply(corner).y),
-                ))
+                Some(Outline {
+                    vertices: corners.map(|corner| to_input.apply(corner)).to_vec(),
+                    reach: input_margin,
+                    bounds_columns: true,
+                })
             }
             InputMap::Sip(sip) => {
                 // A non-linear map bends straight edges, so the outline is sampled rather than its
-                // corners taken, and one input row is added for the bend between samples — see
+                // corners taken, and one input pixel is added for the bend between samples — see
                 // `SIP_BOUNDARY_STRIDE`. The image of a region's boundary bounds the image of the
                 // region for any map without folds, which a converging inverse guarantees here.
                 let from_grid = sip.grid.inverse();
-                let back = |p: DVec2| sip.warp.apply(from_grid.apply(p)).y;
-                let columns = (0..=(right - left).ceil() as usize)
-                    .step_by(SIP_BOUNDARY_STRIDE)
-                    .map(|dx| (left + dx as f64).min(right))
-                    .chain([right]);
-                let rows = (0..=(high - low).ceil() as usize)
-                    .step_by(SIP_BOUNDARY_STRIDE)
-                    .map(|dy| (low + dy as f64).min(high))
-                    .chain([high]);
-                let horizontal =
-                    columns.flat_map(|x| [back(DVec2::new(x, low)), back(DVec2::new(x, high))]);
-                let vertical =
-                    rows.flat_map(|y| [back(DVec2::new(left, y)), back(DVec2::new(right, y))]);
-                let extent = RowExtent::of(horizontal.chain(vertical));
-                Some(RowExtent {
-                    first: extent.first - 1.0,
-                    last: extent.last + 1.0,
+                let back = |p: DVec2| sip.warp.apply(from_grid.apply(p));
+                let along = |extent: f64| {
+                    (0..=extent.ceil() as usize)
+                        .step_by(SIP_BOUNDARY_STRIDE)
+                        .map(move |offset| (offset as f64).min(extent))
+                        .chain([extent])
+                };
+                let (width, height) = (right - left, high - low);
+                let bottom = along(width).map(|dx| DVec2::new(left + dx, low));
+                let right_edge = along(height).map(|dy| DVec2::new(right, low + dy));
+                let top = along(width).map(|dx| DVec2::new(right - dx, high));
+                let left_edge = along(height).map(|dy| DVec2::new(left, high - dy));
+                Some(Outline {
+                    vertices: bottom
+                        .chain(right_edge)
+                        .chain(top)
+                        .chain(left_edge)
+                        .map(back)
+                        .collect(),
+                    reach: input_margin + 1.0,
+                    bounds_columns: false,
                 })
             }
         }
@@ -447,8 +540,9 @@ pub(crate) mod internals {
     use crate::io::image::linear::LinearImage;
     use crate::registration::transform::WarpTransform;
 
-    /// The input rows a band covering `rows` would scan, without running a drizzle to find out.
-    pub(crate) fn input_rows(
+    /// The input rows a band covering `rows` would scan, each with its columns, without running a
+    /// drizzle to find out.
+    pub(crate) fn band_scan(
         image: &LinearImage,
         warp: &WarpTransform,
         scale: f64,
@@ -456,12 +550,13 @@ pub(crate) mod internals {
         output_width: usize,
         output_margin: f64,
         input_margin: f64,
-    ) -> Range<usize> {
-        FrameSource::new(image, Deposit::of(image), warp, scale, None).input_rows(
+    ) -> impl Iterator<Item = (usize, Range<usize>)> {
+        let scan = FrameSource::new(image, Deposit::of(image), warp, scale, None).band_scan(
             &rows,
             output_width,
             output_margin,
             input_margin,
-        )
+        );
+        scan.rows().map(move |row| (row, scan.columns(row)))
     }
 }
