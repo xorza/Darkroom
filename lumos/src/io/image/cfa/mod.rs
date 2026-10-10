@@ -95,7 +95,7 @@ impl CfaType {
         Ok(match filters {
             0 => None,
             // LibRaw's marker for the 6×6 X-Trans layout, whose pattern it keeps apart.
-            9 => Some(Self::XTrans(XTransPattern::new(xtrans)?)),
+            libraw_sys::LIBRAW_XTRANS => Some(Self::XTrans(XTransPattern::new(xtrans)?)),
             _ => CfaPattern::from_filters(filters).map(Self::Bayer),
         })
     }
@@ -157,6 +157,10 @@ pub(crate) struct CfaFrameInfo {
     /// planes for beside its own. Answered from the header alone, so it is conservative where the
     /// header cannot settle it — see `FitsDecodePlan::may_carry_nulls`.
     pub(crate) may_carry_nulls: bool,
+    /// What the decoder holds beside the frame while it makes it: a camera RAW's whole file, which
+    /// LibRaw parses in place, and the raw buffer it unpacks into; nothing for a FITS file, which
+    /// is streamed.
+    pub(crate) decoder_bytes: usize,
 }
 
 impl CfaFrameInfo {

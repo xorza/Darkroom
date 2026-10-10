@@ -25,43 +25,18 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **Corrupt RAW files decode "successfully"** (Batch 4).
-2. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
+1. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
    nominal rate at small N (Batch 5).
-3. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
+2. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
    the samples. The confidence weighting gives the reference frame less weight (Batch 6).
-4. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
+3. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
    too little variance (Batch 7).
-5. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
+4. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
 
 Reading guide: batches are sorted by impact. Each batch is one change that should land in one
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 4: LibRaw boundary rewrite — **high**
-
-These items all land in one new `Libraw` wrapper file: the data-error counter and the cancel hook
-need its user-data pointer, and the typed errors come from its methods.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| RAW-2 | A corrupt (not truncated) file decodes with garbage pixels and no flag. LibRaw's `derror()` throws only at EOF. Otherwise it counts the error and prints to stderr through the default callback of `libraw_init(0)`. No `libraw_set_dataerror_handler` is installed. | `io/raw/mod.rs:68, 522-529` | confirmed |
-| RAW-9 | The FFI boundary is spread over about 25 `unsafe` blocks. `extract_iso` and `open_libraw_input` are safe fns that dereference a raw pointer. The `data.as_ptr()` read of the flexible array at `:448/:480` is UB under Stacked Borrows. | `io/raw/mod.rs` | confirmed |
-| RAW-10 | Platform `#[cfg]`s with two different LibRaw input paths (`open_file` on Unix, `fs::read` + `open_buffer` elsewhere). Its premise is outdated: `libraw_open_wfile` exists, and Siril and darktable use it. | `io/raw/mod.rs:10-14, 51-61, 705-735` | confirmed |
-| RAW-11 | Errors are strings. LibRaw codes print as bare integers, and `BlackLevelError` and `XTransPatternError` are flattened with `to_string()`. | `io/raw/mod.rs:154-159` + call sites, `io/image/error.rs:28` | confirmed |
-| RAW-20 | A load cannot be cancelled while LibRaw runs. The fallback `dcraw_process` takes seconds on 50 MP+. | `io/raw/mod.rs:743-788` | confirmed |
-| RAW-21 | Small items: `CBLACK_LEN` and the X-Trans marker `9` duplicate the `sys::` constants, `raw_err` is too visible, metadata construction is duplicated, there is a dead null check in `ProcessedImageGuard`, `Debug` prints the whole file buffer, and the fallback deinterleave makes a second copy. | see report | confirmed |
-
-**Direction:** Use one `struct Libraw` in its own file. It has one `unsafe` accessor for
-`&libraw_data_t`, plus `unpack()`, `raw_image() -> Option<&[u16]>`, and an RAII
-`ProcessedImage` type that gives a typed slice through `&raw const`. Use one input path on every
-OS (decided): `fs::read` + `open_buffer`. Count the compressed file in the memory plan for each
-decode slot, and measure unpack time against `open_file` first. Install a data-error
-handler that counts into the wrapper and fails with a typed `CorruptData` error. Add a shim for
-`setCancelFlag`. Add a `RawError` enum with a `LibrawCode` mapping.
 
 ---
 
@@ -273,7 +248,7 @@ Lanczos LUT. Add bench legs for 45°, 90° and SIP first.
 
 ## Batch 17: RAW sensor classification and refusals — **medium (rare cameras, silent)**
 
-Do this after Batch 4. Most items need a shim accessor or a `colors`/`cdesc` check.
+Most items need a shim accessor or a `colors`/`cdesc` check, behind the `Libraw` wrapper (`io/raw/libraw.rs`).
 
 | ID | Finding | Where | Conf. |
 |---|---|---|---|
@@ -358,7 +333,7 @@ high-pass filter in ring rows, and retune `TILE`. The librtprocess digest stays 
 
 | ID | Finding | Where | Conf. |
 |---|---|---|---|
-| PIP-14 | Platform `cfg`s are spread over `stored_plane.rs`, `run_scratch.rs`, `ingest_config.rs` (`cfg!`), `memory/mod.rs` (a macOS workaround) and `io/raw` (Batch 4). Windows Job-object limits are never read. | `frame_store/stored_plane.rs:27-65`, `run_scratch.rs:68-93`, `ingest/ingest_config.rs:57-68`, `memory/mod.rs:48-53` | confirmed |
+| PIP-14 | Platform `cfg`s are spread over `stored_plane.rs`, `run_scratch.rs`, `ingest_config.rs` (`cfg!`), `memory/mod.rs` (a macOS workaround). Windows Job-object limits are never read. | `frame_store/stored_plane.rs:27-65`, `run_scratch.rs:68-93`, `ingest/ingest_config.rs:57-68`, `memory/mod.rs:48-53` | confirmed |
 | PIP-15 | Statics: `SYSTEM: LazyLock<Mutex<System>>`, `GROUPS`, and `COUNTER`. The outside world does not force any of them. | `memory/mod.rs:32,40`, `frame_store/run_scratch.rs:53` | confirmed |
 | PIP-16 | There is no free-space check before a spill, so `ENOSPC` comes only after hours of work. Siril tests the free space first. | `pipeline/frame_tier.rs:67-82` | confirmed |
 | PIP-22 | A `Display` string is used as an on-disk file name. | `frame_store/frame_spill.rs:66-73` | confirmed |
@@ -459,6 +434,7 @@ These items need a benchmark or a real-world trigger before work starts.
 | PIP-18 | Statistics copy every channel, so the decode transient factor is 2. An exact radix select without a copy would remove the copy. |
 | PIP-19 | Disk I/O and compute do not overlap (no `WILLNEED` prefetch of the next chunk). DSS measured reads at about 7 % of combine time. |
 | PIP-20 | The progress callback runs under a non-reentrant `Mutex` on rayon workers. A callback that uses rayon can deadlock. |
+| RAW-10 | Every RAW load now reads the file whole and opens it from memory. Run `bench_unpack_file_vs_buffer` (`io/raw/bench.rs`, features `bench` and `real-data`) to compare its unpack with LibRaw's file datastream on CR2, CR3, NEF and RAF. |
 | RAW-12 | Decode makes two passes over the raw buffer, with a `%`/`/` for each pixel and a flag plane that is always allocated. Fuse it into one row pass. |
 | DMS-6 | Derive per-colour gains from the background for third-party OSC FITS (no WB). Compare star colour and zipper artifacts on real data with and without them, and adopt only if it helps. |
 
@@ -474,7 +450,6 @@ Each decision is also written into the direction of its batch.
 | CMB-9 | Publish an inverse-variance plane in place of the variance plane, so 0 means "no information". Refuse `Manual` weights of 0 at validation. | 7 |
 | CAL-11 / CMB-7 | `quantization_sigma` means the source's ADC step noise before flat division. It stays unchanged through calibration, and that is documented. Remove the master's worst-pixel computation. The 1/f part goes into the flat-aware noise model. | 7 |
 | CMB-13 | Use per-sample bands `|x−c|/σᵢ` for the `CcdModel` rejection scale only. The robust scales keep the sorted window. | 5 |
-| RAW-10 | Use `fs::read` + `libraw_open_buffer` on every OS. Count the compressed file in the memory plan for each decode slot. Measure unpack time against `open_file` first. | 4 |
 | RAW-5 | Add a separate `camera_temperature` field. Calibration uses it only to match darks when no sensor temperature exists, and reports which one it used. | 17 |
 | RAW-8 | Use the bounds-checked `linear_max` (RAW-7), minus a small stated ADU margin, as the saturation level when present. Keep 95 % only for `maximum`. | 17 |
 | RAW-16 | Fill `instrument`, `date_obs` and `focal_length` from LibRaw. Leave the pixel size empty. Calibration refuses masters from another camera model. | 17 |

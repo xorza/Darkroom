@@ -4,8 +4,21 @@ use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use common::CancelToken;
 
 use crate::internals::cfa::XTRANS_PATTERN;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::error::LibrawCode;
+use crate::io::raw::libraw::internals::BayerDump;
 use crate::io::raw::*;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+
+/// A dump at black `black`, with no other option.
+fn black(black: u32) -> BayerDump {
+    BayerDump {
+        black,
+        ..BayerDump::default()
+    }
+}
 
 #[test]
 fn load_raw_invalid_path() {
@@ -33,17 +46,6 @@ fn load_raw_invalid_path() {
         raw_cfa_frame_info(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
-}
-
-#[cfg(unix)]
-#[test]
-fn load_raw_rejects_interior_nul_path() {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
-    let path = Path::new(OsStr::from_bytes(b"invalid\0path.raf"));
-    let error = load_raw(path, &LoadContext::default()).unwrap_err();
-    assert!(error.to_string().contains("interior NUL byte"));
 }
 
 #[test]
@@ -74,74 +76,28 @@ fn load_raw_rejects_invalid_files() {
             "{case:?}"
         );
 
-        // The rejection happens while libraw is being opened, so the state exists and has to free
-        // itself on the way out — the failure path most likely to leak the instance.
-        //
-        // The file reads back, so what libraw refuses is its contents: a `Raw` error on every
-        // platform, worded alike whether libraw was handed the path or the bytes.
-        let error = LibrawState::open(&path).unwrap_err();
+        // The rejection happens while libraw is being opened, so the handle exists and has to
+        // free itself on the way out — the failure path most likely to leak the instance. The file
+        // reads back, so what libraw refuses is its contents: a `Raw` error naming the open.
+        let error = load_raw_cfa(&path, &LoadContext::default()).unwrap_err();
         assert!(
-            matches!(&error, ImageError::Raw { .. }),
-            "{case:?}: contents libraw refuses should read as a Raw error, got: {error}",
-        );
-        assert!(
-            error.to_string().contains("Failed to open file"),
-            "{case:?}: {error}",
+            matches!(
+                &error,
+                ImageError::Raw {
+                    source: RawError::Open(_),
+                    ..
+                }
+            ),
+            "{case:?}: contents libraw refuses should read as a Raw open error, got: {error}",
         );
     }
 }
 
-/// A synthetic camera file through LibRaw's `open_bayer`: `samples` laid out `side` square under
-/// one-pixel margins, RGGB, black `black`, maximum 65535; `procflags` 2 marks zeros dead. `mask`,
-/// when given, is the raw area `[top, left, bottom, right)` LibRaw measures the black on, as a
-/// camera's table names its masked pixels.
-fn bayer_dump(
-    samples: &[u16],
-    side: usize,
-    procflags: u8,
-    black: u32,
-    mask: Option<[i32; 4]>,
-) -> UnpackedRaw {
-    let mut bytes: Vec<u8> = samples
-        .iter()
-        .flat_map(|sample| sample.to_le_bytes())
-        .collect();
-    let data = bytes.as_mut_ptr();
-    let len = bytes.len() as u32;
-    // SAFETY: libraw_init returns a valid pointer or null.
-    let inner = unsafe { sys::libraw_init(0) };
-    assert!(!inner.is_null());
-    // The state owns the bytes LibRaw reads in place, as it does a file read into memory: moving
-    // the vector leaves its buffer where `data` points.
-    let state = LibrawState {
-        inner,
-        buf: Some(bytes),
-    };
-    // SAFETY: the handle is valid, and the buffer lives as long as the state.
-    let opened = unsafe {
-        sys::libraw_open_bayer(
-            state.as_ptr(),
-            data,
-            len,
-            side as u16,
-            side as u16,
-            1,
-            1,
-            1,
-            1,
-            procflags,
-            0x94, // RGGB in LibRaw's filter byte
-            0,
-            0,
-            black,
-        )
-    };
-    assert_eq!(opened, 0);
-    if let Some(mask) = mask {
-        // SAFETY: the handle is valid and open; `unpack` reads the mask.
-        unsafe { (*state.as_ptr()).sizes.mask[0] = mask };
-    }
-    unpack(state, Path::new("bayer-dump")).unwrap()
+/// A synthetic camera file through LibRaw's `open_bayer`, unpacked: `samples` laid out `side`
+/// square under one-pixel margins, RGGB, as `dump` describes it.
+fn bayer_dump(samples: &[u16], side: usize, dump: BayerDump) -> Result<UnpackedRaw, RawError> {
+    let libraw = Libraw::open_bayer(samples, side as u16, dump, &CancelToken::never())?;
+    UnpackedRaw::unpack(libraw, Path::new("bayer-dump"))
 }
 
 /// The preview is the science frame demosaicked and clamped, bit for bit, and what lies in the
@@ -173,11 +129,15 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
             .collect()
     };
     let context = LoadContext::default();
-    let preview =
-        |margin| bayer_dump(&samples(margin), SIDE, 0, 1004, None).into_linear_image(&context);
+    let preview = |margin| {
+        bayer_dump(&samples(margin), SIDE, black(1004))
+            .unwrap()
+            .into_linear_image(&context)
+    };
     let dark = preview(0).unwrap();
     let bright = preview(65_535).unwrap();
-    let science = bayer_dump(&samples(0), SIDE, 0, 1004, None)
+    let science = bayer_dump(&samples(0), SIDE, black(1004))
+        .unwrap()
         .into_cfa_image()
         .unwrap()
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
@@ -263,17 +223,16 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
     use crate::internals::real_data::raw_frames;
 
     for path in raw_frames("raw_samples") {
-        let raw = open_raw(&path).unwrap();
+        let mut raw = open_raw(&path, &LoadContext::default()).unwrap();
         let visible = raw.layout.active;
         assert_ne!(
             visible.width, visible.height,
             "a square frame cannot show a turn"
         );
-        // SAFETY: the instance is open and unpacked.
-        unsafe { (*raw.libraw.as_ptr()).rawdata.sizes.flip = 6 };
-        let processed = raw.demosaic_libraw_fallback().unwrap();
+        raw.libraw.set_saved_flip(6);
+        let processed = raw.processed_by_libraw().unwrap();
         assert_eq!(
-            (processed.dimensions.width(), processed.dimensions.height()),
+            (processed.width(), processed.height()),
             (visible.width, visible.height),
             "{}",
             path.display()
@@ -358,10 +317,16 @@ fn the_raw_values_settle_no_data_and_saturation() {
         samples[0] = 0;
         samples[10 * SIDE + 10] = 62_309;
         samples[12 * SIDE + 12] = 62_308;
-        bayer_dump(&samples, SIDE, procflags, 1000, None)
-            .decode_flags()
-            .unwrap()
-            .unwrap()
+        let raw = bayer_dump(
+            &samples,
+            SIDE,
+            BayerDump {
+                procflags,
+                ..black(1000)
+            },
+        )
+        .unwrap();
+        raw.decode_flags(raw.libraw.raw_image().unwrap()).unwrap()
     };
 
     let flags = flags_for(2);
@@ -398,9 +363,16 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
             }
         })
         .collect();
-    let raw = bayer_dump(&samples, SIDE, 0, 0, Some([0, 0, SIDE as i32, 2]));
-    // SAFETY: the state is valid and unpacked, and outlives the borrow.
-    let color = unsafe { &(*raw.libraw.as_ptr()).color };
+    let raw = bayer_dump(
+        &samples,
+        SIDE,
+        BayerDump {
+            mask: Some([0, 0, SIDE as i32, 2]),
+            ..BayerDump::default()
+        },
+    )
+    .unwrap();
+    let color = &raw.libraw.data().color;
     assert_eq!(
         color.black, 2048,
         "unpack moved the least truncated mean into black"
@@ -415,5 +387,84 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
             "parity {p}, channel {channel}: {} against {mean}",
             raw.black_level.of_channel(channel)
         );
+    }
+}
+
+/// A sample above the bit depth the file declares is data LibRaw decodes past: `otherflags` 0x20
+/// narrows the 16-bit samples to 14, a maximum of 2¹⁴ − 1 = 16383, so one visible sample of 20 000
+/// makes the unpack a `CorruptData` error. The same sample is valid at 16 bits, and 16 000 is valid
+/// at 14.
+#[test]
+fn a_value_past_the_bit_depth_is_corrupt_data() {
+    const SIDE: usize = 24;
+    let mut samples = vec![2000u16; SIDE * SIDE];
+    samples[10 * SIDE + 10] = 20_000;
+    let narrow = BayerDump {
+        otherflags: 0x20,
+        ..BayerDump::default()
+    };
+    assert!(matches!(
+        bayer_dump(&samples, SIDE, narrow),
+        Err(RawError::CorruptData)
+    ));
+    assert!(bayer_dump(&samples, SIDE, BayerDump::default()).is_ok());
+    samples[10 * SIDE + 10] = 16_000;
+    assert!(bayer_dump(&samples, SIDE, narrow).is_ok());
+}
+
+/// A cancel the load's token sees stops LibRaw at its next stage, and reads as the load's own
+/// cancel rather than as a failure of the file.
+#[test]
+fn a_cancelled_token_stops_libraw() {
+    let samples = vec![2000u16; 24 * 24];
+    let cancel = CancelToken::new();
+    let libraw = Libraw::open_bayer(&samples, 24, BayerDump::default(), &cancel).unwrap();
+    cancel.cancel();
+    let path = Path::new("bayer-dump");
+    let error = UnpackedRaw::unpack(libraw, path).unwrap_err();
+    assert!(
+        matches!(error, RawError::Unpack(LibrawCode::Cancelled)),
+        "{error:?}"
+    );
+    assert!(matches!(
+        ImageError::raw(path, error),
+        ImageError::Cancelled { .. }
+    ));
+}
+
+/// The peek counts what LibRaw holds beside the frame: the 24 × 24 × 2 = 1152-byte file it parses
+/// in place, and the raw buffer of as many samples it unpacks into.
+#[test]
+fn the_peek_counts_the_file_and_the_raw_buffer() {
+    let samples = vec![2000u16; 24 * 24];
+    let libraw =
+        Libraw::open_bayer(&samples, 24, BayerDump::default(), &CancelToken::never()).unwrap();
+    let info = frame_info(&libraw).unwrap();
+    assert_eq!(info.dimensions, ImageDimensions::new((22, 22), 1));
+    assert_eq!(info.decoder_bytes, 1152 + 1152);
+}
+
+/// LibRaw's own processing, the path of a sensor lumos does not demosaic, run on a uniform field:
+/// 2000 over a black of 1000, a span of 65535 − 1000 = 64 535, comes out as three equal planes of
+/// LibRaw's 16-bit 1000 · 65535 / 64 535 over 65535 — within one 16-bit step of 1000 / 64 535 —
+/// and declares that span.
+#[test]
+fn libraws_processing_declares_its_own_span() {
+    const SIDE: usize = 24;
+    let samples = vec![2000u16; SIDE * SIDE];
+    let image = bayer_dump(&samples, SIDE, black(1000))
+        .unwrap()
+        .processed_by_libraw()
+        .unwrap();
+    assert_eq!(image.dimensions(), ImageDimensions::new((22, 22), 3));
+    assert_eq!(image.metadata.domain.as_ref().unwrap().scale, 64_535.0);
+    let expected = 1000.0 / 64_535.0;
+    for channel in 0..3 {
+        for &value in image.channel(channel).pixels() {
+            assert!(
+                (f64::from(value) - expected).abs() <= 1.0 / 65_535.0,
+                "channel {channel}: {value}"
+            );
+        }
     }
 }
