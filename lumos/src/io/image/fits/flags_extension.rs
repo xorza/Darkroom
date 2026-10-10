@@ -25,8 +25,9 @@ const FLAGS_VERSION: i64 = 1;
 ///
 /// The byte holds every flag, [`QualityFlags::NO_DATA`] too, so a reader of the extension alone
 /// sees all of them. The image's NaN samples state the same `NO_DATA` pixels, and a read refuses
-/// the file when the two disagree. An image whose flags hold nothing but `NO_DATA` needs no
-/// extension: its NaNs carry all of it.
+/// the file when the two disagree. A null's [`QualityFlags::REPAIRED`] stays out: the file holds
+/// NaN there, not the repair, and a reader fills it again. An image whose flags hold nothing but
+/// `NO_DATA` needs no extension: its NaNs carry all of it.
 #[derive(Debug)]
 pub(crate) struct FlagsExtension {
     pub(crate) image: Image,
@@ -45,6 +46,23 @@ impl FlagsExtension {
         else {
             return Ok(None);
         };
+        let bytes: Vec<u8> = flags
+            .bytes()
+            .par_iter()
+            .map(|&byte| {
+                if QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA) {
+                    byte & !QualityFlags::REPAIRED.byte()
+                } else {
+                    byte
+                }
+            })
+            .collect();
+        if bytes
+            .par_iter()
+            .all(|&byte| byte & !QualityFlags::NO_DATA.byte() == 0)
+        {
+            return Ok(None);
+        }
         let mut header = Header::new();
         header
             .set("EXTNAME", FLAGS_EXTNAME)
@@ -57,8 +75,7 @@ impl FlagsExtension {
             header.set(&bit_keyword(flag), name).map_err(fits_to_io)?;
         }
         let size = flags.size();
-        let image =
-            Image::new([size.width, size.height], flags.bytes().to_vec()).map_err(fits_to_io)?;
+        let image = Image::new([size.width, size.height], bytes).map_err(fits_to_io)?;
         Ok(Some(Self { image, header }))
     }
 
@@ -225,15 +242,22 @@ mod tests {
     }
 
     /// Flags that hold nothing but `NO_DATA`, or no flags, need no extension: the NaNs say it all.
+    /// Nor do repaired nulls, whose repair the NaN replaces.
     #[test]
     fn only_flags_past_no_data_need_an_extension() {
         let size = Size2us::new(2, 1);
-        let nulls = PixelFlags::from_fn(size, |_| QualityFlags::NO_DATA);
-        assert!(
-            FlagsExtension::encode(nulls.as_ref(), None, 1)
-                .unwrap()
-                .is_none()
-        );
+        for null in [
+            QualityFlags::NO_DATA,
+            QualityFlags::NO_DATA.union(QualityFlags::REPAIRED),
+        ] {
+            let nulls = PixelFlags::from_fn(size, |_| null);
+            assert!(
+                FlagsExtension::encode(nulls.as_ref(), None, 1)
+                    .unwrap()
+                    .is_none(),
+                "{null:?}"
+            );
+        }
         assert!(FlagsExtension::encode(None, None, 1).unwrap().is_none());
         let defect = PixelFlags::from_fn(size, |index| {
             if index == 0 {

@@ -107,22 +107,24 @@ fn cosmic_ray_xtrans_scratch_is_five_frame_planes() {
 }
 
 /// What the decode budget charges for a cosmic-ray pass, from the planes above and the masks. A
-/// 64-wide mask row pads to 128 bits, two words, so a 64×64 mask is 1024 B and three are 3072.
-/// Mono: 5 planes of 4096 px = 81 920 B, plus the masks. Bayer runs on its 32×32 phases: the
-/// phase plane, 4096 B, and the mono scratch over it, 20 480 B plus three 512 B masks. X-Trans at
-/// 66×66: 5 planes of 4356 px = 87 120 B, plus three 66-row masks of 1056 B. A frame too small to
-/// scan allocates nothing.
+/// mask row pads to 128 bits, two words, so a 64×64 mask is 1024 B and three are 3072. Mono: 5
+/// planes of 4096 px = 81 920 B, plus the detector's three masks and the pass's three. Bayer runs
+/// on its 32×32 phases: the phase plane, 4096 B, and the mono scratch over it, 20 480 B plus three
+/// 512 B masks, three more 512 B masks for the phase's kept-out pixels and repairs, and the pass's
+/// three frame masks. X-Trans at 66×66: 5 planes of 4356 px = 87 120 B, plus three 66-row masks of
+/// 1056 B for the detector and three for the pass. A frame too small to scan still holds the
+/// pass's three masks: 2 rows of 16 B each at 2×2, 4 at 4×4 and 6 at 6×6.
 #[test]
 fn cosmic_ray_heap_bytes_count_planes_and_masks() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     let xtrans = CfaType::XTrans(XTRANS_PATTERN);
     for (cfa, side, expected) in [
-        (CfaType::Mono, 64, 81_920 + 3_072),
-        (bayer, 64, 4_096 + 20_480 + 1_536),
-        (xtrans, 66, 87_120 + 3_168),
-        (CfaType::Mono, 2, 0),
-        (bayer, 4, 0),
-        (xtrans, 6, 0),
+        (CfaType::Mono, 64, 81_920 + 3_072 + 3_072),
+        (bayer, 64, 4_096 + 20_480 + 1_536 + 1_536 + 3_072),
+        (xtrans, 66, 87_120 + 3_168 + 3_168),
+        (CfaType::Mono, 2, 3 * 2 * 16),
+        (bayer, 4, 3 * 4 * 16),
+        (xtrans, 6, 3 * 6 * 16),
     ] {
         assert_eq!(
             cosmic_ray::heap_bytes(&cfa, Size2us::new(side, side)),

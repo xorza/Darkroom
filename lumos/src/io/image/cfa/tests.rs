@@ -29,7 +29,7 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
 
     // A repaired null is flagged so, and a second repair leaves it as it is, though a neighbour
-    // moved: the repair has one owner, and a frame calibration touched is not repaired again.
+    // moved: the repair has one owner, and the demosaic does not repair it again.
     let mut repaired = cfa.clone();
     repaired.repair_nulls();
     assert_eq!(repaired.data[5], 0.5);
@@ -46,6 +46,15 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
     assert_eq!(calibrated.channel(0).pixels()[5], 0.75);
+
+    // A calibrated frame read back from FITS holds the decoder's fill under its null, which the
+    // file does not flag repaired (see the round trip below): the demosaic repairs it.
+    let mut reloaded = cfa.clone();
+    reloaded.metadata.calibration = CalibrationState::FLAT;
+    let reloaded = reloaded
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(reloaded.channel(0).pixels()[5], 0.5);
 
     let demosaiced = cfa
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
@@ -73,14 +82,16 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
 
 /// Every flag survives the trip. `NO_DATA` goes back as NaN, the blank of the float `BITPIX`, so
 /// any reader finds it; without it the repaired sample would reload as a measurement. All of them
-/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`.
+/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`,
+/// but a null's `REPAIRED`: the NaN, not the repair, is what the file holds there.
 ///
-/// The 3×2 plane holds, row-major: nothing, `NO_DATA`, `SATURATED | DEFECT` (2 + 4 = 6), nothing,
-/// `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32).
+/// The 3×2 plane holds, row-major: nothing, `NO_DATA | REPAIRED` (1 + 16 = 17), `SATURATED |
+/// DEFECT` (2 + 4 = 6), nothing, `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32). It
+/// reloads with the null `NO_DATA` alone, 1.
 #[test]
 fn a_masters_flags_survive_the_fits_round_trip() {
     let size = Size2us::new(3, 2);
-    let bytes = [0u8, 1, 6, 0, 24, 32];
+    let bytes = [0u8, 17, 6, 0, 24, 32];
     let cfa = |bytes: [u8; 6]| CfaImage {
         data: Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
         cfa_type: CfaType::Mono,
@@ -100,7 +111,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     cfa(bytes).save_fits(&path).unwrap();
     assert_eq!(hdu_count(&path), 2);
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &bytes);
+    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 6, 0, 24, 32]);
     assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".
@@ -110,12 +121,11 @@ fn a_masters_flags_survive_the_fits_round_trip() {
         [0.1f32, 0.3, 0.4, 0.5, 0.6]
     );
 
-    let nulls_only = [0u8, 1, 0, 0, 0, 0];
     let nulls_path = dir.join("nulls.fits");
-    cfa(nulls_only).save_fits(&nulls_path).unwrap();
+    cfa([0u8, 17, 0, 0, 0, 0]).save_fits(&nulls_path).unwrap();
     assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
     let loaded = CfaImage::from_file(&nulls_path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &nulls_only);
+    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 0, 0, 0, 0]);
 }
 
 /// A flat gain survives the trip in its `LUMGAIN` extension, node for node, so a light saved after

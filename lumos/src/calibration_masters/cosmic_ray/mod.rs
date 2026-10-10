@@ -55,6 +55,11 @@ const BACKGROUND_TILE_SIZE: usize = 64;
 /// is ~0 so a CR (F→0) doesn't divide by zero.
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
+/// Frame-sized masks a pass holds beside its detector's: [`KeptOut`]'s two and the mask of the
+/// pixels it repaired, or, before that mask exists, the three that building `KeptOut` holds at
+/// once.
+const PASS_MASKS: usize = 3;
+
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
 /// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
 /// [`QualityFlags::REPAIRED`]. Saturated star cores and pixels with no measurement are kept out of
@@ -123,15 +128,16 @@ pub(crate) fn reject_cosmic_rays(
 }
 
 /// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at
-/// its peak: the frame-sized planes and masks. The background mesh is left out: a few tiles per
-/// colour, and one tile's samples per worker, about 20 KB each, under a thousandth of the planes
-/// of any frame large enough to plan for.
+/// its peak: the detector's planes and masks, and the pass's own [`PASS_MASKS`]. Left out are the
+/// fixed sizes: the background mesh, a few tiles per colour and one tile's samples per worker,
+/// about 20 KB each, and the 256 KiB histogram the saturation level is ranked in.
 pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> usize {
-    match cfa_type {
+    let detector = match cfa_type {
         CfaType::Bayer(_) => BayerDetector::heap_bytes(size),
         CfaType::XTrans(_) => XtransDetector::heap_bytes(size),
         CfaType::Mono => MonoDetector::heap_bytes(size),
-    }
+    };
+    detector + PASS_MASKS * BitBuffer2::heap_bytes(size)
 }
 
 #[cfg(test)]

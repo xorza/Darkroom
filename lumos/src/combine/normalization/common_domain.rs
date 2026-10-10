@@ -95,28 +95,23 @@ impl CommonDomain {
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();
         let mut valid = domain.valid.clone();
-        let words_per_check = CANCEL_POLL_CHUNK / WORD_BITS;
-        for (w, word) in valid.words.iter_mut().enumerate() {
-            let base = w * WORD_BITS;
-            if base >= pixel_count {
-                break;
-            }
-            if w % words_per_check == 0 {
+        valid
+            .words
+            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+            .enumerate()
+            .try_for_each(|(span, words)| {
                 Cancelled::check(cancel)?;
-            }
-            let mut position = Vec2us::new(base % size.width, base / size.width);
-            let mut incoming = 0u64;
-            for bit in 0..WORD_BITS.min(pixel_count - base) {
-                if cfa_type.color_at(position) == colour {
-                    incoming |= 1u64 << bit;
+                let base = span * CANCEL_POLL_CHUNK;
+                if base < pixel_count {
+                    let end = (base + words.len() * WORD_BITS).min(pixel_count);
+                    intersect_span(words, end - base, |index| {
+                        let pixel = base + index;
+                        let position = Vec2us::new(pixel % size.width, pixel / size.width);
+                        cfa_type.color_at(position) == colour
+                    });
                 }
-                position.x += 1;
-                if position.x == size.width {
-                    position = Vec2us::new(0, position.y + 1);
-                }
-            }
-            *word &= incoming;
-        }
+                Ok::<_, StackError>(())
+            })?;
         let sample_count = valid.count_ones();
         if sample_count == 0 {
             return Err(StackError::NoCommonCoverage);
