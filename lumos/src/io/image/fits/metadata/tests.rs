@@ -294,12 +294,14 @@ fn every_alias_reads_into_its_field() {
             MetadataField::Instrument => text(metadata.instrument),
             MetadataField::Telescope => text(metadata.telescope),
             MetadataField::DateObs => text(metadata.date_obs),
+            MetadataField::DateLocal => text(metadata.date_local),
             MetadataField::Filter => text(metadata.filter),
             MetadataField::ImageType => text(metadata.image_type),
             MetadataField::ExposureTime => real(metadata.exposure_time),
             MetadataField::Gain => real(metadata.gain),
             MetadataField::Egain => real(metadata.egain),
             MetadataField::CcdTemp => real(metadata.ccd_temp),
+            MetadataField::CameraTemp => real(metadata.camera_temp),
             MetadataField::SetTemp => real(metadata.set_temp),
             MetadataField::FocalLength => real(metadata.focal_length),
             MetadataField::Airmass => real(metadata.airmass),
@@ -319,6 +321,7 @@ fn every_alias_reads_into_its_field() {
                 | MetadataField::Instrument
                 | MetadataField::Telescope
                 | MetadataField::DateObs
+                | MetadataField::DateLocal
                 | MetadataField::Filter
                 | MetadataField::ImageType
         ) {

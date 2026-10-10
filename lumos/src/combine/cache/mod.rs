@@ -254,6 +254,7 @@ impl FrameCache {
                 saturation_flagged,
                 exposure_time: conditions.exposure_time,
                 ccd_temp: conditions.ccd_temp,
+                camera_temp: conditions.camera_temp,
                 unverified_dark,
                 ..self.core.metadata.clone()
             },

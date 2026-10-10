@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct UnverifiedConditions {
     /// The exposures were not compared.
     pub exposure: bool,
-    /// The sensor temperatures were not compared. A DSLR states none.
+    /// No temperature was compared: the two did not both state the sensor's, nor the camera
+    /// body's. Most DSLRs state neither, Canon only the body's.
     pub temperature: bool,
 }
 

@@ -2,6 +2,7 @@
 
 use crate::calibration_masters::calibration_component::CalibrationComponent;
 use crate::calibration_masters::master_role::MasterRole;
+use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::size2us::Size2us;
@@ -64,6 +65,14 @@ pub enum CalibrationError {
         expected: CfaType,
         master: CfaType,
     },
+    /// A calibration master was taken with another camera than the light: both state one, and they
+    /// differ. Its bias, dark current, defects and vignetting are another sensor's.
+    #[error("{component} master was taken with {master}, the light with {light}")]
+    InstrumentMismatch {
+        component: MasterRole,
+        light: String,
+        master: String,
+    },
     /// A calibration master's samples cannot be expressed in the domain of the frame it calibrates.
     ///
     /// Subtracting a master divided by one span from a frame divided by another is not a small
@@ -99,7 +108,11 @@ pub enum DarkMismatch {
         "the dark's exposure {dark} s does not match the frame's {frame} s, and the dark cannot be scaled to it"
     )]
     Exposure { frame: f64, dark: f64 },
-    /// The dark was taken at another sensor temperature than the frame.
-    #[error("the dark's temperature {dark} °C does not match the frame's {frame} °C")]
-    Temperature { frame: f64, dark: f64 },
+    /// The dark was taken at another temperature than the frame, by the `reading` both state.
+    #[error("the dark's {reading} temperature {dark} °C does not match the frame's {frame} °C")]
+    Temperature {
+        reading: TemperatureSource,
+        frame: f64,
+        dark: f64,
+    },
 }

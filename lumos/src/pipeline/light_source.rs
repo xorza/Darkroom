@@ -14,6 +14,7 @@ use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::{DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES};
@@ -132,20 +133,21 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         };
         let cancel = &run.context.cancel;
         let admission = FrameAdmission::new(shape.dimensions, cancel);
+        let slots = plan.decode_concurrency.min(total);
+        let context = run.context.for_decode_slots(slots);
         let done = StageCounter::new(progress, StackingStage::Preparing, total);
         // Bounded by the plan, which charges each in-flight frame its decode and the detector's
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
         // is also what a cancel has to drain.
-        let mut detectors =
-            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
-                .map_err(AlignStackError::DetectionConfig)?;
+        let mut detectors = DetectorPool::from_config(&config.detection, slots)
+            .map_err(AlignStackError::DetectionConfig)?;
         let frames = detectors.try_map(total, |detector, index| {
             // Cancelled: abort the batch rather than spend the rest of the budget preparing
             // frames the run will discard.
             if cancel.is_cancelled() {
                 return Err(AlignStackError::Cancelled);
             }
-            let image = lights.take(index, run)?;
+            let image = lights.take(index, &context)?;
             let stats = admission.admit(index, &image)?;
             let result = detector.detect(&image);
             let image = match lights {
@@ -202,14 +204,14 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
 }
 
 impl<P: AsRef<Path> + Sync> Lights<'_, P> {
-    fn take(&self, index: usize, run: &IngestRun) -> Result<LinearImage, AlignStackError> {
+    fn take(&self, index: usize, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
         match self {
             Self::Held(cells) => Ok(cells[index]
                 .lock()
                 .expect("no holder of this lock panicked")
                 .take()
                 .expect("each light is taken once")),
-            Self::Raw(raw) => raw.prepare(raw.paths[index].as_ref(), run),
+            Self::Raw(raw) => raw.prepare(raw.paths[index].as_ref(), context),
         }
     }
 }
@@ -302,7 +304,8 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         if cancel.is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
-        let image = self.prepare(self.paths[reference].as_ref(), run)?;
+        // The reference decodes alone, on every thread a decode may use.
+        let image = self.prepare(self.paths[reference].as_ref(), &run.context)?;
         let stats = admission.admit(reference, &image)?;
         let result = detectors.first().detect(&image);
         log_detection(prepared.complete_one(), total, &result);
@@ -330,6 +333,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             cancel,
         );
         let mut buffers: Vec<Option<WarpBuffers>> = (0..workers.min(total)).map(|_| None).collect();
+        let context = run.context.for_decode_slots(workers.min(total));
         let reference_frame = registrar.park(
             &mut buffers[0],
             FrameToPark {
@@ -347,7 +351,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             if cancel.is_cancelled() {
                 return Err(AlignStackError::Cancelled);
             }
-            let image = self.prepare(self.paths[index].as_ref(), run)?;
+            let image = self.prepare(self.paths[index].as_ref(), &context)?;
             let stats = admission.admit(index, &image)?;
             let result = detector.detect(&image);
             log_detection(prepared.complete_one(), total, &result);
@@ -389,8 +393,8 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
     }
 
     /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.
-    fn prepare(&self, path: &Path, run: &IngestRun) -> Result<LinearImage, AlignStackError> {
-        let mut cfa = match CfaImage::from_file(path, &run.context) {
+    fn prepare(&self, path: &Path, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
+        let mut cfa = match CfaImage::from_file(path, context) {
             Ok(image) => image,
             Err(ImageError::Cancelled { .. }) => return Err(AlignStackError::Cancelled),
             Err(source) => {
@@ -411,7 +415,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             tracing::info!(removed, "rejected cosmic rays");
         }
         // The demosaic polls the cancel token between its passes.
-        cfa.demosaic(run.context.xtrans_passes, &run.context.cancel)
+        cfa.demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
 }

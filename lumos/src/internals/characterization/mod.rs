@@ -87,6 +87,15 @@ fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
     )
 }
 
+/// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
+/// quantization σ, so a change to any of the three moves its decode pin.
+fn cfa_snapshot(snapshot: &mut Snapshot, cfa: &CfaImage) {
+    snapshot.f32s(cfa.data.pixels());
+    let flags = cfa.flags().map_or(&[][..], |flags| flags.bytes());
+    snapshot.count(flags.len()).bytes(flags);
+    snapshot.f32s(&[cfa.metadata.quantization_sigma.unwrap_or(f32::NAN)]);
+}
+
 fn detect(image: &LinearImage) -> Vec<Star> {
     StarDetector::from_config(StarDetectionConfig::default())
         .unwrap()
@@ -135,7 +144,7 @@ fn decode_snapshot() {
     save_cfa_fits(&fits, &mosaic).unwrap();
     let cfa = CfaImage::from_file(&fits, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
-    snapshot.f32s(cfa.data.pixels());
+    cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("mosaic FITS decode", &snapshot, DECODE_PINS.fits_cfa);
 }
 
@@ -365,7 +374,7 @@ fn stretch_snapshot() {
     assert_snapshot("stretch", &snapshot, "262d78318d67a2d8");
 }
 
-/// The first RAW light of the dataset, decoded to its CFA plane.
+/// The first RAW light of the dataset, decoded to its CFA plane — see [`cfa_snapshot`].
 #[cfg(feature = "real-data")]
 #[test]
 fn raw_decode_snapshot() {
@@ -378,6 +387,6 @@ fn raw_decode_snapshot() {
     let path = &raw_frames("Lights")[0];
     let cfa = load_raw_cfa(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
-    snapshot.f32s(cfa.data.pixels());
+    cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("RAW decode", &snapshot, DECODE_PINS.raw_cfa);
 }

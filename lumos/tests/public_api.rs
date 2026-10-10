@@ -38,6 +38,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             pedestal: Pedestal::Unknown,
         },
         xtrans_passes: MarkesteijnPasses::Three,
+        decode_threads: 4,
     };
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.
