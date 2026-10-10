@@ -25,8 +25,7 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **The exact masked-area black level never applies**, so Canon frames keep LibRaw's truncated
-   black (Batch 3). **Corrupt RAW files decode "successfully"** (Batch 4).
+1. **Corrupt RAW files decode "successfully"** (Batch 4).
 2. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
    nominal rate at small N (Batch 5).
 3. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
@@ -39,19 +38,6 @@ Reading guide: batches are sorted by impact. Each batch is one change that shoul
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 3: RAW black level precision — **high (small change)**
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| RAW-1 | The exact masked-area black level never applies. The check requires `libraw.black == 0`, but `unpack()` moves the lowest channel mean into `black` (`LibRaw/src/decoders/unpack.cpp:494-502`). A probe against `libraw.a` printed `black 2048 cblack 0 0 1 1`, and the check failed on every channel. Canon CR2/CR3 and other masked-area cameras keep a truncation error of 0–1 ADU per channel per frame. The unit test passes only because it builds a state that cannot occur after unpack. | `io/raw/black_level/mod.rs:100-111`, `black_level/tests.rs:116-155` | confirmed |
-| RAW-19 | DNG `BlackLevelDeltaH/V` collapse to a scalar mean inside LibRaw. Document the limit. | `io/raw/black_level/mod.rs:91-99` | confirmed |
-
-**Direction:** Test `black + cblack[c] == sums[c] / counts[c]`, then rebuild each channel from
-`sums[c] / counts[c]`. Build the test fixture through LibRaw itself (`open_bayer`, a mask, then
-`unpack`), not by hand.
 
 ---
 
