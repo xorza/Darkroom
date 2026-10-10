@@ -35,7 +35,7 @@ impl SampleNoise {
                 let model = stats.ccd_noise(slot);
                 match frame_norms {
                     Some(norms) => {
-                        let norm = norms[frame].channels[slots.channel(slot)];
+                        let norm = norms[frame].slots[slot];
                         Self::normalized(model, norm.gain, norm.offset)
                     }
                     None => model,
@@ -119,23 +119,17 @@ mod tests {
     use arrayvec::ArrayVec;
 
     use super::*;
-    use crate::combine::normalization::ChannelNorm;
+    use crate::combine::normalization::SlotNorm;
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::io::image::cfa::CfaType;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
     use crate::io::raw::demosaic::bayer::CfaPattern;
-    use crate::math::statistics::MedianMad;
     use crate::math::vec2us::Vec2us;
 
     fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {
         FrameStats {
-            channels: [MedianMad {
-                median: 0.5,
-                mad: 0.1,
-            }]
-            .into_iter()
-            .collect(),
+            medians: [0.5].into_iter().collect(),
             noise: noise.iter().copied().collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: noise.iter().map(|_| 0.5).collect(),
@@ -154,9 +148,9 @@ mod tests {
 
     fn norms(gains: &[f32], offset: f32) -> FrameNorm {
         FrameNorm {
-            channels: gains
+            slots: gains
                 .iter()
-                .map(|&gain| ChannelNorm { gain, offset })
+                .map(|&gain| SlotNorm { gain, offset })
                 .collect::<ArrayVec<_, 3>>(),
         }
     }
@@ -166,7 +160,8 @@ mod tests {
     ///   sky 0.5 maps to 1, 0.5 and 0.25 (offset 0); 8 electrons per unit become 4, 8 and 16.
     /// - Frame 1 without a gain: its quantization σ 1/2 raises the 1/4 to 1/2, and not every gain
     ///   is known.
-    /// - An RGGB mosaic takes the colour of the pixel, each with the gain of its one channel.
+    /// - An RGGB mosaic takes the colour of the pixel, each with its colour's norm: gains 2, 2, 1/2
+    ///   and offset 1/8 put σ² 1/16, 1/4, 1 at 1/4, 1 and 1/4, and the sky 1/2 at 9/8, 9/8, 3/8.
     #[test]
     fn models_follow_the_normalization_and_the_quantization_floor() {
         let frames = [
@@ -201,14 +196,14 @@ mod tests {
         let mosaic_slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
         let mosaic = SampleNoise::new(
             &[stats(&[0.25, 0.5, 1.0], None, Some(8.0))],
-            Some(&[norms(&[2.0], 0.125)]),
+            Some(&[norms(&[2.0, 2.0, 0.5], 0.125)]),
             mosaic_slots,
         );
-        for (x, y, colour, variance) in [
-            (0, 0, 0, 0.25),
-            (1, 0, 1, 1.0),
-            (0, 1, 1, 1.0),
-            (1, 1, 2, 4.0),
+        for (x, y, colour, variance, sky) in [
+            (0, 0, 0, 0.25, 1.125),
+            (1, 0, 1, 1.0, 1.125),
+            (0, 1, 1, 1.0, 1.125),
+            (1, 1, 2, 0.25, 0.375),
         ] {
             let slot = mosaic_slots.slot(0, Vec2us::new(x, y));
             assert_eq!(slot, colour, "({x}, {y})");
@@ -217,7 +212,7 @@ mod tests {
                 variance,
                 "({x}, {y})"
             );
-            assert_eq!(mosaic.model(0, slot).sky, 1.125);
+            assert_eq!(mosaic.model(0, slot).sky, sky, "({x}, {y})");
         }
         assert!(mosaic.every_gain_known());
     }

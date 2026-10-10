@@ -160,32 +160,28 @@ fn light_frame_keeps_quality_with_its_planes() {
         frame.quality.confidence().unwrap().chunk(0, 4),
         &[4.0, 3.0, 2.0, 0.0]
     );
-    assert_eq!(frame.source_stats.channels[0].median, 2.5);
-    assert_eq!(frame.source_stats.channels[0].mad, 1.0);
+    assert_eq!(frame.source_stats.medians[0], 2.5);
 }
 
-/// One median and MAD per channel, each over that channel alone. Hand-computed:
-/// - `[1..=9]`: median 5, absolute deviations 4,3,2,1,0,1,2,3,4 → MAD 2.
-/// - `[10,10,10,20,20,20,30,30,30]`: median 20, deviations six 10s and three 0s → MAD 10.
-/// - `[1,3,5,7]`: median (3+5)/2 = 4, deviations 3,1,1,3 → MAD (1+3)/2 = 2.
-/// - `[0,0,100,100]`: median 50, every deviation 50 → MAD 50.
-/// - `[1,2,3,4]`: median 2.5, deviations 1.5,0.5,0.5,1.5 → MAD 1.
+/// One median per channel, each over that channel alone: 5 for nine 5s and for `[1..=9]`, 20 for
+/// three each of 10, 20 and 30; `[1,3,5,7]`, `[0,0,100,100]` and `[1,2,3,4]` the means of their
+/// middle pair, 4, 50 and 2.5.
 #[test]
-fn frame_statistics_are_a_median_and_mad_per_channel() {
+fn frame_statistics_are_a_median_per_channel() {
     let gray = ImageDimensions::new((3, 3), 1);
     let rgb = ImageDimensions::new((2, 2), 3);
-    let cases: [(LinearImage, &[(f32, f32)]); 4] = [
-        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[(5.0, 0.0)]),
+    let cases: [(LinearImage, &[f32]); 4] = [
+        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[5.0]),
         (
             LinearImage::from_pixels(gray, (1..=9).map(|i| i as f32).collect()),
-            &[(5.0, 2.0)],
+            &[5.0],
         ),
         (
             LinearImage::from_pixels(
                 gray,
                 vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
             ),
-            &[(20.0, 10.0)],
+            &[20.0],
         ),
         (
             LinearImage::from_planar_channels(
@@ -196,53 +192,36 @@ fn frame_statistics_are_a_median_and_mad_per_channel() {
                     vec![1.0, 2.0, 3.0, 4.0],
                 ],
             ),
-            &[(4.0, 2.0), (50.0, 50.0), (2.5, 1.0)],
+            &[4.0, 50.0, 2.5],
         ),
     ];
     for (image, expected) in cases {
-        let stats = FrameStats::measure(&image);
-        let measured: Vec<(f32, f32)> = stats
-            .channels
-            .iter()
-            .map(|channel| (channel.median, channel.mad))
-            .collect();
-        assert_eq!(measured, expected);
+        assert_eq!(FrameStats::measure(&image).medians.as_slice(), expected);
     }
 }
 
 #[test]
 fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
-    // Eight pixels: four real samples and four the source declared null, which the decoder filled
-    // at the frame's own median. Those fills are zero-deviation samples, so counting them collapses
-    // the MAD — and MAD is what weighting divides by, so the frame would be trusted far beyond what
-    // its noise deserves.
-    //
-    // Valid 1, 3, 5, 7 → median (3 + 5) / 2 = 4, deviations 3, 1, 1, 3 → MAD (1 + 3) / 2 = 2.
-    // All eight → median still 4, deviations 3, 1, 1, 3, 0, 0, 0, 0 → MAD (0 + 1) / 2 = 0.5.
+    // Eight pixels: four real samples and four the source declared null, filled at 0. Valid 1, 3,
+    // 5, 7 → median (3 + 5) / 2 = 4; all eight → (0 + 1) / 2 = 0.5, the fill's level.
     let dimensions = ImageDimensions::new((8, 1), 1);
-    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 4.0, 4.0, 4.0, 4.0];
+    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 0.0, 0.0, 0.0, 0.0];
     let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
     masked.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
     );
 
-    let stats = FrameStats::measure(&masked);
-    assert_eq!(stats.channels[0].median, 4.0);
-    assert_eq!(stats.channels[0].mad, 2.0);
-
-    // The same pixels with nothing declared null, so the fills count as data and the spread halves
-    // twice over. The two must not agree, or the exclusion is doing nothing.
+    assert_eq!(FrameStats::measure(&masked).medians[0], 4.0);
     let plain = LinearImage::from_pixels(dimensions, samples);
-    assert_eq!(FrameStats::measure(&plain).channels[0].mad, 0.5);
+    assert_eq!(FrameStats::measure(&plain).medians[0], 0.5);
 
     // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
     // set would panic rather than say so.
     let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
     all_null.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
     let empty = FrameStats::measure(&all_null);
-    assert_eq!(empty.channels[0].median, 0.0);
-    assert_eq!(empty.channels[0].mad, 0.0);
+    assert_eq!(empty.medians[0], 0.0);
 }
 
 #[test]

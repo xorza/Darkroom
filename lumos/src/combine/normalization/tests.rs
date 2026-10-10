@@ -1,25 +1,25 @@
 use crate::combine::cache::FrameCache;
 use crate::combine::config::{Combine, StackConfig, Weighting};
 use crate::combine::normalization::*;
-use crate::combine::stack::{StackFrame, stack_images};
+use crate::combine::stack::{StackFrame, run_stacking, stack_images};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::mad_to_sigma;
 use crate::progress::progress_callback::ProgressCallback;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
     FrameStats {
-        channels: channels
-            .iter()
-            .map(|&(median, mad)| MedianMad { median, mad })
-            .collect(),
+        medians: channels.iter().map(|&(median, _)| median).collect(),
         noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
         read_share: [0.0; 3].into_iter().collect(),
         sky: channels.iter().map(|&(median, _)| median).collect(),
@@ -92,7 +92,7 @@ fn reference_selection_uses_lowest_channel_noise_in_one_domain() {
         let frames: Vec<StoredFrame> = stats
             .into_iter()
             .map(|stats| {
-                let channels = stats.channels.len();
+                let channels = stats.medians.len();
                 StoredFrame::from_memory(
                     LinearImage::from_pixels(
                         ImageDimensions::new((1, 1), channels),
@@ -213,6 +213,7 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
     let result = FrameNorm::measure(
         &cache.frames,
         cache.core.dimensions,
+        cache.slots,
         Normalization::Multiplicative,
         &CancelToken::never(),
     );
@@ -220,7 +221,7 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
         result,
         Err(StackError::NonPositiveMedian {
             index: 1,
-            channel: 0,
+            slot: 0,
             median: 0.0
         })
     ));
@@ -233,17 +234,14 @@ fn norms(images: Vec<LinearImage>, normalization: Normalization) -> Vec<(f32, f3
     FrameNorm::measure(
         &cache.frames,
         cache.core.dimensions,
+        cache.slots,
         normalization,
         &CancelToken::never(),
     )
     .unwrap()
     .unwrap()
     .iter()
-    .flat_map(|norm| {
-        norm.channels
-            .iter()
-            .map(|channel| (channel.gain, channel.offset))
-    })
+    .flat_map(|norm| norm.slots.iter().map(|slot| (slot.gain, slot.offset)))
     .collect()
 }
 
@@ -432,6 +430,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     let norms = FrameNorm::measure(
         &frames,
         dimensions,
+        Slots::of_frames(&frames, dimensions),
         Normalization::Global,
         &CancelToken::never(),
     )
@@ -446,11 +445,11 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     for (frame_index, frame) in norms.iter().enumerate() {
         for (channel, &(gain, offset)) in expected[frame_index].iter().enumerate() {
             assert_eq!(
-                frame.channels[channel].gain, gain,
+                frame.slots[channel].gain, gain,
                 "frame {frame_index} channel {channel} gain"
             );
             assert_eq!(
-                frame.channels[channel].offset, offset,
+                frame.slots[channel].offset, offset,
                 "frame {frame_index} channel {channel} offset"
             );
         }
@@ -467,9 +466,15 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let dimensions = ImageDimensions::new((5, 1), 3);
     let frames = affine_rgb_frames([1.0; 3]);
     let norms = |normalization| {
-        FrameNorm::measure(&frames, dimensions, normalization, &CancelToken::never())
-            .unwrap()
-            .unwrap()
+        FrameNorm::measure(
+            &frames,
+            dimensions,
+            Slots::of_frames(&frames, dimensions),
+            normalization,
+            &CancelToken::never(),
+        )
+        .unwrap()
+        .unwrap()
     };
 
     let expected_gains = [
@@ -480,8 +485,8 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     for (frame_index, frame) in norms(Normalization::Multiplicative).iter().enumerate() {
         for (channel, &gain) in expected_gains[frame_index].iter().enumerate() {
             assert_eq!(
-                frame.channels[channel],
-                ChannelNorm { gain, offset: 0.0 },
+                frame.slots[channel],
+                SlotNorm { gain, offset: 0.0 },
                 "frame {frame_index} channel {channel}"
             );
         }
@@ -495,8 +500,8 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     for (frame_index, frame) in norms(Normalization::Global).iter().enumerate() {
         for (channel, &(gain, offset)) in expected_norms[frame_index].iter().enumerate() {
             assert_eq!(
-                frame.channels[channel],
-                ChannelNorm { gain, offset },
+                frame.slots[channel],
+                SlotNorm { gain, offset },
                 "frame {frame_index} channel {channel}"
             );
         }
@@ -504,8 +509,14 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let error =
-        FrameNorm::measure(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
+    let error = FrameNorm::measure(
+        &frames,
+        dimensions,
+        Slots::of_frames(&frames, dimensions),
+        Normalization::Global,
+        &cancel,
+    )
+    .unwrap_err();
     assert!(matches!(error, StackError::Cancelled));
 }
 
@@ -581,13 +592,14 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
         FrameNorm::measure(
             frames,
             dimensions,
+            Slots::of_frames(frames, dimensions),
             Normalization::Global,
             &CancelToken::never(),
         )
         .unwrap()
         .unwrap()
         .iter()
-        .map(|norm| norm.channels[0].gain)
+        .map(|norm| norm.slots[0].gain)
         .collect()
     };
 
@@ -632,6 +644,11 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
 /// 200 000 pixels with no domain the k-th of 65 536 is `⌊k·3.0518⌋`: 0, 3, 6, 9, …, and 199 996
 /// last. Over a domain of the 100 000 even pixels the rank is `⌊k·1.5259⌋` — 0, 1, 3, 4 — and the
 /// pixel twice that: 0, 2, 6, 8, …, 199 996 last. Ten pixels are under the limit: every one.
+///
+/// A 4096×64 RGGB mosaic, sampled as one plane, would take every 4th pixel: even columns only, red
+/// and the green of the red rows. Each colour is drawn by rank among its own photosites instead:
+/// red's and blue's 65 536 are all taken, and every second of green's 131 072, 1024 a row, half of
+/// them on each green phase.
 #[test]
 fn samples_spread_evenly_by_rank_past_the_limit() {
     let cancel = CancelToken::never();
@@ -671,6 +688,25 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
         stratified_indices(10, None, &cancel).unwrap(),
         (0..10).collect::<Vec<_>>()
     );
+
+    let dimensions = ImageDimensions::new((4096, 64), 1);
+    let slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
+    let pixels = SlotPixels::of_slots(slots, None, dimensions, &cancel).unwrap();
+    for (slot, expected) in [[65_536, 0, 0, 0], [0, 32_768, 32_768, 0], [0, 0, 0, 65_536]]
+        .into_iter()
+        .enumerate()
+    {
+        let indices =
+            stratified_indices(dimensions.pixel_count(), pixels[slot].sampled(), &cancel).unwrap();
+        let mut phases = [0; 4];
+        for index in indices {
+            phases[(index / 4096 % 2) * 2 + index % 2] += 1;
+        }
+        assert_eq!(
+            phases, expected,
+            "slot {slot}: R, Gr, Gb, B photosites sampled"
+        );
+    }
 }
 
 /// A warped frame's noise variance at the samples is its source σ² scaled by the mean inverse
@@ -700,5 +736,62 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     assert_eq!(
         source_noise_variance(&unwarped, 0, &indices, 4, &cancel).unwrap(),
         sigma * sigma
+    );
+}
+
+/// Twilight flats drift in colour: three RGGB flats whose red, green and blue scale by (1, 1, 1),
+/// (2, 1, 4) and (1/2, 2, 2) over one 16×16 pattern of levels `1/4 + (37i mod 64)/1024`. Every
+/// level and scale is dyadic, so each frame's colour medians are the pattern's times its scales,
+/// exactly. Frame 0 has the lowest noise in every colour and is the reference; a multiplicative
+/// norm per colour is the ratio of scales: (1/2, 1, 1/4) and (2, 1/2, 1/2). One norm per frame
+/// would leave two colours of every frame off the reference, which a σ-clip of the flat preset
+/// reads as outliers. Normalized per colour, the three frames are the reference to the bit: every
+/// pixel keeps all three, a survivor weight of 3, and the master is frame 0.
+#[test]
+fn twilight_flats_normalize_per_colour() {
+    let size = Size2us::new(16, 16);
+    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let pattern: Vec<f32> = (0..size.pixel_count())
+        .map(|index| 0.25 + (37 * index % 64) as f32 / 1024.0)
+        .collect();
+    let scales = [[1.0, 1.0, 1.0], [2.0, 1.0, 4.0], [0.5, 2.0, 2.0]];
+    let images: Vec<CfaImage> = scales
+        .iter()
+        .map(|scale: &[f32; 3]| {
+            let pixels = pattern
+                .iter()
+                .enumerate()
+                .map(|(index, &level)| {
+                    let colour = cfa.color_at(Vec2us::new(index % 16, index / 16));
+                    level * scale[usize::from(colour)]
+                })
+                .collect();
+            make_cfa(size, pixels, cfa)
+        })
+        .collect();
+    let reference = images[0].data.pixels().to_vec();
+    let cache = FrameCache::from_images(images, Normalization::Multiplicative);
+    let expected = [[1.0, 1.0, 1.0], [0.5, 1.0, 0.25], [2.0, 0.5, 0.5]];
+    let norms = cache.frame_norms.as_ref().expect("a fitted normalization");
+    for (frame, gains) in expected.iter().enumerate() {
+        let slots: Vec<SlotNorm> = gains
+            .iter()
+            .map(|&gain| SlotNorm { gain, offset: 0.0 })
+            .collect();
+        assert_eq!(norms[frame].slots.as_slice(), slots, "frame {frame}");
+    }
+
+    let product = run_stacking(&cache, &StackConfig::flat()).unwrap();
+    assert_eq!(product.image.channel(0).pixels(), reference);
+    let weight = product
+        .weight
+        .expect("the flat preset keeps the weight plane");
+    assert!(
+        weight
+            .channel(0)
+            .pixels()
+            .iter()
+            .all(|&weight| weight == 3.0),
+        "a frame was rejected"
     );
 }

@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–7 are done and committed. Every finding below was re-checked against the code after
+Batches 1–8 are done and committed. Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -44,7 +44,6 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-8                     independent
 9 ── 14 ── 15
       └─── 16
 9, 14 ── 22
@@ -59,32 +58,6 @@ Batch 7 and still holds.
 - 9 and 14 before 22: the hot-loop rework is done on the final gather.
 - 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
-
----
-
-## Batch 8: CFA-aware normalization — medium
-
-**Findings:** CMB-4 / CAL-20. A mosaic gets one normalization affine for all colours, while noise
-and weights are per colour; twilight flats drift in colour, so rejection clips real frames. The
-stratified sample aliases with the CFA (a 4096-wide mosaic samples only R and G2).
-
-**Design:**
-1. `FrameNorm` holds one `ChannelNorm` per slot (`Slots`), as `SampleNoise` and `FrameWeights`
-   already do. For RGB and mono, slot = channel, so nothing changes there.
-2. For a mosaic, medians, MADs and Global gains are measured per colour over that colour's
-   photosites. The common domain stays per pixel (a pixel's colour is fixed).
-3. Stratified sampling draws `MAX_STATISTIC_SAMPLES / colours` indices per colour from that
-   colour's photosites in raster order (`k·n_c/m` over the colour's own index list), so no colour
-   can alias out.
-4. The gather reads the norm by slot, not by channel (`Slots::channel` stops being used for
-   norms; remove it if nothing else needs it).
-
-**Tests:**
-- Twilight flats: an RGGB set where each frame's R, G and B scale by different known factors.
-  Multiplicative normalization gives each colour its exact gain (dyadic factors, exact), and a
-  σ-clip keeps every frame.
-- Aliasing: on a 4096×8 RGGB mosaic the sampled indices hold all four phases in equal counts.
-- Existing RGB and mono normalization tests unchanged.
 
 ---
 
@@ -590,7 +563,6 @@ Each decision is also written into its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| CMB-4 | Normalization per slot (colour) for mosaics, sampled per colour. | 8 |
 | DMS-3 | Drop `EPS` from RCD's ratio; regenerate the librtprocess digests with `eps = 0`. | 11 |
 | CAL-6 | astroscrappy's saturated-star mask (5×5 median above a tenth of saturation, dilated twice). | 13 |
 | DRZ-1 | Siril's design: drizzle each frame, then the normal combine. | 14 |

@@ -19,7 +19,9 @@ use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::cancelled::Cancelled;
+use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 #[derive(Debug)]
 pub(crate) struct CommonDomain {
@@ -63,6 +65,56 @@ impl CommonDomain {
         }
         Ok(Self {
             valid: common_domain,
+            sample_count,
+        })
+    }
+
+    /// The photosites of `colour` of a `cfa_type` mosaic over an image of `size`, among those
+    /// `domain` holds, or among every pixel without one.
+    ///
+    /// # Errors
+    /// [`StackError::NoCommonCoverage`] when the frames share none of them.
+    pub(super) fn of_colour(
+        domain: Option<&Self>,
+        size: Size2us,
+        cfa_type: &CfaType,
+        colour: u8,
+        cancel: &CancelToken,
+    ) -> Result<Self, StackError> {
+        const BITS: usize = 64;
+        let pixel_count = size.pixel_count();
+        let mut valid = match domain {
+            Some(domain) => domain.valid.clone(),
+            None => Self::full_mask(pixel_count),
+        };
+        let words_per_check = CANCEL_POLL_CHUNK.div_ceil(BITS);
+        for (w, word) in valid.words.iter_mut().enumerate() {
+            let base = w * BITS;
+            if base >= pixel_count {
+                break;
+            }
+            if w % words_per_check == 0 {
+                Cancelled::check(cancel)?;
+            }
+            let mut position = Vec2us::new(base % size.width, base / size.width);
+            let mut incoming = 0u64;
+            for bit in 0..BITS.min(pixel_count - base) {
+                if cfa_type.color_at(position) == colour {
+                    incoming |= 1u64 << bit;
+                }
+                position.x += 1;
+                if position.x == size.width {
+                    position = Vec2us::new(0, position.y + 1);
+                }
+            }
+            *word &= incoming;
+        }
+        let sample_count = valid.count_ones();
+        if sample_count == 0 {
+            return Err(StackError::NoCommonCoverage);
+        }
+        Ok(Self {
+            valid,
             sample_count,
         })
     }
