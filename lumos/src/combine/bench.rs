@@ -10,7 +10,7 @@ use crate::internals::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::combine::config::StackConfig;
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::progress::progress_callback::ProgressCallback;
 
@@ -48,8 +48,16 @@ fn bench_stack_30(b: ::quickbench::Bencher) {
     // median, the rejection-free baseline; winsorized σ-clip, the dark and bias masters' rejection.
     for (label, config) in [
         ("light", StackConfig::light()),
-        ("median", StackConfig::median()),
-        ("winsorized", StackConfig::winsorized(3.0)),
+        (
+            "median",
+            StackConfig {
+                combine: Combine::median(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        ("winsorized", StackConfig::bias_or_dark()),
     ] {
         b.bench_labeled(label, || {
             black_box(

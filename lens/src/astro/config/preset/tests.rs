@@ -2,8 +2,8 @@ use std::fmt;
 
 use lumos::detection;
 use lumos::{
-    BackgroundMode, ColorMode, ExtractBackground, RegistrationConfig, Scnr, StackConfig, Stretch,
-    StretchMethod,
+    BackgroundMode, ColorMode, Combine, ExtractBackground, RegistrationConfig, Scnr, StackConfig,
+    Stretch, StretchMethod,
 };
 use scenarium::{ConstValue, DataType, DynamicValue, TypeId};
 
@@ -150,21 +150,24 @@ fn each_pick_builds_the_preset_it_names() {
     ] {
         same(&pick.config(), &preset);
     }
-    // Compared on `method` alone: a stack config's default cache directory is
-    // unique per instance.
-    for (pick, preset) in [
+    // A pick sets the method; the lights keep their policy.
+    for (pick, combine) in [
         (
             CombineMethodChoice::SigmaClipped,
-            StackConfig::sigma_clipped(3.0),
+            Combine::sigma_clipped(3.0),
         ),
-        (
-            CombineMethodChoice::Winsorized,
-            StackConfig::winsorized(3.0),
-        ),
-        (CombineMethodChoice::Median, StackConfig::median()),
-        (CombineMethodChoice::Mean, StackConfig::mean()),
+        (CombineMethodChoice::Winsorized, Combine::winsorized(3.0)),
+        (CombineMethodChoice::Median, Combine::median()),
+        (CombineMethodChoice::Mean, Combine::mean()),
     ] {
-        assert_eq!(pick.config().method, preset.method, "{pick:?}");
+        assert_eq!(
+            pick.config(),
+            StackConfig {
+                combine,
+                ..StackConfig::light()
+            },
+            "{pick:?}"
+        );
     }
 }
 

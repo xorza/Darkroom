@@ -26,6 +26,7 @@ use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::math;
 use crate::progress::progress_callback::ProgressCallback;
@@ -83,6 +84,7 @@ impl From<LinearImage> for StackFrame {
 ///
 /// * `paths` - Paths to input images
 /// * `config` - Stacking configuration
+/// * `ingest` - How the frames are decoded, the memory the run plans against, and where it spills
 ///
 /// # Returns
 ///
@@ -106,28 +108,30 @@ impl From<LinearImage> for StackFrame {
 ///
 /// ```no_run
 /// use common::CancelToken;
-/// use lumos::{ProgressCallback, StackConfig, stack};
+/// use lumos::{Combine, IngestConfig, ProgressCallback, StackConfig, stack};
 ///
 /// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
-/// let result = stack(&paths, &StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
-/// let result = stack(&paths, &StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
+/// let ingest = IngestConfig::default();
+/// let config = StackConfig::light();
+/// let result = stack(&paths, &config, &ingest, ProgressCallback::default(), CancelToken::never())?;
+/// let median = StackConfig {
+///     combine: Combine::median(),
+///     ..StackConfig::light()
+/// };
+/// let result = stack(&paths, &median, &ingest, ProgressCallback::default(), CancelToken::never())?;
 /// # Ok::<(), lumos::StackError>(())
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
+    ingest: &IngestConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, StackError> {
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     combine_cached(config, paths.len(), "paths", || {
-        FrameCache::from_paths(
-            paths,
-            config,
-            IngestRun::new(&config.ingest, cancel),
-            progress,
-        )
+        FrameCache::from_paths(paths, config, IngestRun::new(ingest, cancel), progress)
     })
 }
 
@@ -212,7 +216,7 @@ pub(crate) fn combine_cached(
     tracing::info!(
         source,
         frame_count,
-        method = ?config.method,
+        method = ?config.combine.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
         disk_tier = cache.core.tier.spills(),
@@ -243,12 +247,14 @@ const fn validate_manual_weights(
     Ok(())
 }
 
-/// Warn when frame weighting was requested but the resolved combine is a median, which has no
+/// Warn when manual frame weights were given but the resolved combine is a median, which has no
 /// weighted form here — the weights would be silently dropped. Fires both for an explicit `Median`
 /// and for a method downgraded to its small-N fallback (see
-/// [`SmallN::resolve`](crate::combine::config::SmallN::resolve)).
+/// [`SmallN::resolve`](crate::combine::config::SmallN::resolve)). Noise weighting is a role's
+/// policy rather than a request, as [`StackConfig::light`] carries it whatever the method, so a
+/// median that leaves it unused says nothing.
 fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
-    if matches!(method, CombineMethod::Median) && *weighting != Weighting::Equal {
+    if matches!(method, CombineMethod::Median) && matches!(weighting, Weighting::Manual(_)) {
         tracing::warn!(
             ?weighting,
             "frame weighting is ignored by the median combine; use a Mean method to apply weights",
@@ -276,7 +282,10 @@ pub(crate) fn run_stacking(
 ) -> Result<StackProduct, StackError> {
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
-    let method = config.small_n.resolve(config.method, frame_count);
+    let method = config
+        .combine
+        .small_n
+        .resolve(config.combine.method, frame_count);
     warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
     let norms = cache.frame_norms.as_deref();

@@ -9,7 +9,7 @@
 mod mem_budget;
 mod mem_budget_probe;
 
-use crate::combine::config::{StackConfig, Weighting};
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::internals::prelude::*;
 use crate::internals::synthetic::camera::Camera;
@@ -93,7 +93,15 @@ fn mean_stack_reduces_noise_as_sqrt_n() {
 
     // Residual RMS vs the clean truth: a single frame vs the N-frame mean.
     let single_rms = rms_diff(sims[0].image.channel(0).pixels(), clean.pixels());
-    let stack = stack_frames(&sims, &StackConfig::mean());
+    let stack = stack_frames(
+        &sims,
+        &StackConfig {
+            combine: Combine::mean(),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    );
     let stack_rms = rms_diff(stack.channel(0).pixels(), clean.pixels());
 
     // Averaging N independent frames shrinks the noise by √N. Each RMS over 16 384 pixels carries
@@ -124,8 +132,24 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
         inject_spike(&mut sims[f], Vec2us::new(x, y), 1.0);
     }
 
-    let mean = stack_frames(&sims, &StackConfig::mean());
-    let clipped = stack_frames(&sims, &StackConfig::sigma_clipped(2.5));
+    let mean = stack_frames(
+        &sims,
+        &StackConfig {
+            combine: Combine::mean(),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    );
+    let clipped = stack_frames(
+        &sims,
+        &StackConfig {
+            combine: Combine::sigma_clipped(2.5),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    );
 
     // A plain mean is dragged toward the spike by (1 − 0.1)/14 = 0.0643, give or take the 14
     // frames' noise, SKY_SIGMA/√14 = 3.8e-4. Sigma clipping drops the spike, and the 13 frames
@@ -166,17 +190,65 @@ fn all_rejection_methods_remove_outliers() {
 
     // Every rejecting combine (and the robust median) recovers the clean background.
     let configs: [(&str, StackConfig); 6] = [
-        ("sigma_clip", StackConfig::sigma_clipped(2.5)),
-        ("winsorized", StackConfig::winsorized(2.5)),
-        ("linear_fit", StackConfig::linear_fit(2.5)),
-        ("trim", StackConfig::trim(20.0)),
-        ("gesd", StackConfig::gesd()),
-        ("median", StackConfig::median()),
+        (
+            "sigma_clip",
+            StackConfig {
+                combine: Combine::sigma_clipped(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "winsorized",
+            StackConfig {
+                combine: Combine::winsorized(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "linear_fit",
+            StackConfig {
+                combine: Combine::linear_fit(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "trim",
+            StackConfig {
+                combine: Combine::trim(20.0),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "gesd",
+            StackConfig {
+                combine: Combine::gesd(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "median",
+            StackConfig {
+                combine: Combine::median(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
     ];
     for (name, config) in configs {
         assert_eq!(
-            config.small_n.resolve(config.method, n),
-            config.method,
+            config.combine.small_n.resolve(config.combine.method, n),
+            config.combine.method,
             "{name} must run as configured"
         );
         let stacked = stack_frames(&sims, &config);
@@ -211,14 +283,18 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
         &sims,
         &StackConfig {
             weighting: Weighting::Equal,
-            ..StackConfig::mean()
+            combine: Combine::mean(),
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
     );
     let weighted = stack_frames(
         &sims,
         &StackConfig {
             weighting: Weighting::Noise,
-            ..StackConfig::mean()
+            combine: Combine::mean(),
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
     );
 
@@ -264,15 +340,47 @@ fn rejection_methods_preserve_clean_frames() {
     let camera = Camera::realistic(4.0);
     let FrameSet { sims, clean } = frame_set(&scene, &camera, 15, 500);
     let mean_rms = rms_diff(
-        stack_frames(&sims, &StackConfig::mean())
-            .channel(0)
-            .pixels(),
+        stack_frames(
+            &sims,
+            &StackConfig {
+                combine: Combine::mean(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        )
+        .channel(0)
+        .pixels(),
         clean.pixels(),
     );
     for (name, config) in [
-        ("sigma_clip", StackConfig::sigma_clipped(2.5)),
-        ("winsorized", StackConfig::winsorized(2.5)),
-        ("gesd", StackConfig::gesd()),
+        (
+            "sigma_clip",
+            StackConfig {
+                combine: Combine::sigma_clipped(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "winsorized",
+            StackConfig {
+                combine: Combine::winsorized(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "gesd",
+            StackConfig {
+                combine: Combine::gesd(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
     ] {
         let rms = rms_diff(
             stack_frames(&sims, &config).channel(0).pixels(),

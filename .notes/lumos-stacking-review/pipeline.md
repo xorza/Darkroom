@@ -10,20 +10,17 @@ relative to `lumos/src/` unless noted otherwise.
 The pipeline holds up well on the basics. Spills are lossless f32. Scratch files are deleted
 while still open, so cancel, panic and crash all clean up on their own. The tier decision is read
 once per run. Results are deterministic, and RAM-tier and spill-tier runs are bit-identical.
-Statistics are measured before the warp. The problems are in four places:
+Statistics are measured before the warp. The problems are in three places:
 
-1. **The memory budget misses the normalization scratch.** With the `light()` preset, every
-   registered stack builds one full-plane f32 gather buffer per rayon thread, and no plan charges
-   for it (PIP-1).
-2. **The combine reads spilled data too often.** Channel-independent quality planes are re-read
+1. **The combine reads spilled data too often.** Channel-independent quality planes are re-read
    once per channel. On top of that, three extra full passes run after the warp: the
    common-domain build, normalization, and the coverage pass. An RGB warped spilled light is read
-   about 15.75 plane-equivalents in the combine phase, against 5.25 needed (PIP-2, PIP-3, PIP-27).
-3. **Ingestion is implemented twice.** `combine/cache/loader` and `pipeline/light_source` each
+   about 18.75 plane-equivalents in the combine phase, against 5.25 needed (PIP-2, PIP-3, PIP-27).
+2. **Ingestion is implemented twice.** `combine/cache/loader` and `pipeline/light_source` each
    implement peek, plan, admit, bounded decode and tier store. The tier decision has four
    representations, and frame carriers multiply. The `ingest` module holds only config and
    admission, and depends on `combine` in a cycle (PIP-11 to PIP-13).
-4. **Gaps in the public API and the cache.** Already-calibrated lights have no tiered path from
+3. **Gaps in the public API and the cache.** Already-calibrated lights have no tiered path from
    disk (PIP-10). `keep_cache` silently does nothing on the RAM tier and in registered runs (PIP-4).
    Kept-cache integrity rests on length and mtime only (PIP-17).
 
@@ -33,14 +30,6 @@ survivors rather than inputs, and calibration errors without the light's path.
 ---
 
 ## Findings
-
-### PIP-1 — Normalization holds one full-plane gather buffer per thread, and no memory plan charges for it
-- **Where:** `combine/normalization/mod.rs:289` (`domain_medians`, `map_init(Vec::new, …)`), `:353` (`global_norms`, same), `:413` (`buffer.reserve_exact(domain.sample_count)`); planners `memory/memory_plan.rs:100-167`, `combine/cache/mod.rs:624-652`
-- **Category:** correctness (memory budget)
-- **Impact:** high. `StackConfig::light()` (`combine/config/mod.rs:302-309`) uses `Normalization::Global`. Every warped light set therefore builds a `CommonDomain`, and `measure_plane` grows a buffer of up to `pixel_count` f32 on every rayon worker that is running a `map_init` piece. Example: 61 MP and 32 threads gives about 7.8 GB on top of a plan that already used 75 % of available memory. That is an OOM on the very machines the spill tier exists for.
-- **Confidence:** confirmed (code reading; neither `RunShape` nor `ChunkMemoryLayout` has a term for it).
-- **Evidence:** Siril bounds normalization threads by memory per image (`.tmp/siril/src/stacking/normalization.c:183-215`, `normalization_get_max_number_of_threads`). It computes `nb_threads = max_memory_MB / memory_per_image_MB`, capped at `com.max_thread`, and refuses when one image does not fit. `mem_budget_probe.rs` runs `AlignStackConfig::default()` (normalization `None`), so this path is never probed.
-- **Direction:** Make the common-domain median exact without a copy. One option is a two- or three-pass radix/histogram select over the f32 bit pattern of the mapped plane, masked by the domain bits, using bounded scratch. Otherwise bound the `par_iter` width by `budget / plane_bytes` the way Siril does, and charge it in `MemoryPlan`/`ChunkMemoryLayout`.
 
 ### PIP-2 — The combine re-reads every frame's coverage, confidence and flags once per channel
 - **Where:** `combine/cache/core.rs:119-120` (`for channel { for chunk { … } }`), `combine/cache/mod.rs:378-394` (`quality_chunks` and `flags` rebuilt inside the per-chunk closure), budget at `combine/cache/mod.rs:624-636`
@@ -187,26 +176,12 @@ survivors rather than inputs, and calibration errors without the light's path.
 - **Confidence:** speculative (no in-tree callback does this; lens passes the default).
 - **Direction:** Use an atomic counter, and deliver reports in order through a small sequencer that never calls out while holding a lock (for example, the thread whose increment completes a contiguous run reports it). Or document the restriction on `ProgressCallback::new`.
 
-### PIP-21 — `IngestConfig` lives inside the combine's `StackConfig`
-- **Where:** `combine/config/mod.rs:156` (`pub ingest: IngestConfig`), consumed by `pipeline/calibrate.rs:50`, `pipeline/align.rs:52`; lens builds the `StackConfig` from `CombineMethodChoice::resolve` (`lens/src/astro/nodes/stacking.rs:66-75`)
-- **Category:** design / API
-- **Impact:** low. The combine-method config decides the X-Trans demosaic passes, FITS options, cache directory and memory override of the lights' decode. A lens node that rebuilds `stack` silently inherits the ingest defaults. Relatedly, `AlignStackConfig::default()` uses `StackConfig::default()` (no normalization, equal weights) rather than `StackConfig::light()`.
-- **Confidence:** confirmed.
-- **Direction:** Hoist `IngestConfig` to the run level (`AlignStackConfig.ingest`, and a parameter or a run config for `stack()`). Decide whether a lights pipeline should default to the light preset.
-
 ### PIP-22 — A human-readable `Display` string is used as an on-disk file name
 - **Where:** `frame_store/frame_spill.rs:66-73` (`format_args!("_{plane}.bin")`), `frame_store/frame_quality.rs:46-53` (`Display` = prose for errors)
 - **Category:** style (types over strings)
 - **Impact:** low. Rewording an error message renames the cache files. The commit's `carries.quality` then finds them missing and silently rebuilds, leaving orphans.
 - **Confidence:** confirmed.
 - **Direction:** Add a `FramePlane::file_tag()`, as `DecoderKind::tag` does.
-
-### PIP-23 — Two small gaps in the budget arithmetic
-- **Where:** `memory/chunk_memory_layout.rs:36-37` (`.max(MIN_CHUNK_ROWS)` silently overcommits); output flags plane (1 B/px) allocated at `combine/cache/mod.rs:353-355` but absent from `QualityPlanes::resident_bytes` (`stack_product/quality_planes.rs:58-62`) and from `weighted_layout`
-- **Category:** correctness (planning)
-- **Impact:** low. Example: 1000 frames × 9576 px × 13 B × 64 rows is about 8 GB per chunk, whatever the budget. The mapped pages are reclaimable cache, so the risk is thrashing rather than OOM. Still, nothing tells the user.
-- **Confidence:** confirmed.
-- **Direction:** When the floor binds, log the overcommit and add it to the `RunReport`. Charge the flags plane when any frame carries flags.
 
 ### PIP-24 — Smaller style deviations
 - **Where:**
@@ -218,13 +193,6 @@ survivors rather than inputs, and calibration errors without the light's path.
 - **Impact:** low.
 - **Confidence:** confirmed.
 - **Direction:** Fold these into the batches that touch each file.
-
-### PIP-25 — The tests that would catch PIP-1 and PIP-2 do not exercise those paths
-- **Where:** `pipeline/tests/mod.rs:784-916` (`ram_and_streaming_tiers_produce_identical_stacks`: mono CFA, `AlignStackConfig::default()` = `Normalization::None`); `pipeline/tests/mem_budget_probe.rs:183` (default config)
-- **Category:** test gap
-- **Impact:** low-medium. The tier-equivalence test never covers the RGB channel loop over quality planes or normalization over mapped planes. The memory probes never run the normalization scratch.
-- **Confidence:** confirmed.
-- **Direction:** Extend the same test into a sweep over {mono, RGB} × {None, Global}. Run one probe with `StackConfig::light()`.
 
 ### PIP-26 — "Richest frame" wording does not match what `Auto` does
 - **Where:** `lens/src/astro/nodes/stacking.rs:39,131` ("unset picks the richest frame"); test name `pipeline/tests/mod.rs:490` (`auto_reference_picks_the_richest_frame`); behavior `pipeline/config.rs:13-16`, `pipeline/align.rs:168-217` (lowest median FWHM among frames with enough stars)
@@ -287,13 +255,13 @@ and writes 2 identical P when nulls exist (PIP-7).
 |---|------|-------|-------|
 | 10 | Debug-only contract check | `combine/cache/mod.rs:120-128` | everything (debug builds) |
 | 11 | Common domain | `common_domain.rs:41-63` | 1P coverage (serial over frames) |
-| 12 | Normalization medians + samples | `normalization/mod.rs:401-440` | 3P channels (+ up to 3P gathered into the per-thread buffers, PIP-1) |
+| 12 | Normalization medians + samples | `normalization/mod.rs:398-456` | 2 × 3P channels: the two radix passes of the common-domain median |
 | 13 | Normalization noise | `normalization/mod.rs:495-523` | ≈1P confidence (stratified, about every page) |
 | 14 | Combine | `core.rs:119-157`, `mod.rs:361-582` | per channel: 1P + 2P quality + F → **3 × 3.25P = 9.75P** for RGB (PIP-2) |
 | 15 | Coverage pass | `mod.rs:255-302` | 1P coverage |
 
-**Total combine-phase reads per RGB warped frame: about 15.75P; needed: 5.25P (3 channels + 2
-quality + F).** For mono: about 7.25P against 3.25P.
+**Total combine-phase reads per RGB warped frame: about 18.75P; needed: 5.25P (3 channels + 2
+quality + F).** For mono: about 8.25P against 3.25P.
 
 ### `stack()` / masters (`combine/cache/loader/mod.rs`)
 
@@ -362,15 +330,13 @@ parking and the RAM tier never maps. The re-reads are all in the combine phase.
 
 ## Suggested batches
 
-1. **Memory-budget correctness:** PIP-1, PIP-23, and PIP-25 (extend the tier sweep and the probe
-   first, so the fix is measured).
-2. **Combine I/O passes:** PIP-2, PIP-3, PIP-27, PIP-7. All are bit-identical changes guarded by
-   the tier-equivalence sweep. Expected effect: combine-phase spill reads go from about 15.75P to
+1. **Combine I/O passes:** PIP-2, PIP-3, PIP-27, PIP-7. All are bit-identical changes guarded by
+   the tier-equivalence sweep. Expected effect: combine-phase spill reads go from about 18.75P to
    about 5.25P per RGB frame.
-3. **One ingest stage:** PIP-11, PIP-12, PIP-13, then PIP-10 (a decoded-paths light source) and
-   PIP-4 (the kept cache as a decode memo) on top. Also PIP-21.
-4. **Platform entity and statics:** PIP-14, PIP-15, PIP-16 (the disk-space probe lives in the new
+2. **One ingest stage:** PIP-11, PIP-12, PIP-13, then PIP-10 (a decoded-paths light source) and
+   PIP-4 (the kept cache as a decode memo) on top.
+3. **Platform entity and statics:** PIP-14, PIP-15, PIP-16 (the disk-space probe lives in the new
    platform module), PIP-22, PIP-24.
-5. **Diagnostics:** PIP-8, PIP-9, PIP-26.
-6. **Kept-cache integrity:** PIP-17. Do it after batch 3, since the cache moves there.
-7. **Measure first (benchmarks before changes):** PIP-5, PIP-6, PIP-18, PIP-19, PIP-20.
+4. **Diagnostics:** PIP-8, PIP-9, PIP-26.
+5. **Kept-cache integrity:** PIP-17. Do it after batch 2, since the cache moves there.
+6. **Measure first (benchmarks before changes):** PIP-5, PIP-6, PIP-18, PIP-19, PIP-20.

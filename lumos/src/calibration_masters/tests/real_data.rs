@@ -25,6 +25,7 @@ use quickbench::quick_bench;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::internals::masters_from_files;
 use crate::calibration_masters::stack_cfa_master;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::io::raw;
@@ -227,6 +228,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
             dark_paths,
             MasterRole::Dark,
             StackConfig::bias_or_dark(),
+            &IngestConfig::default(),
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -322,6 +324,7 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
                 &paths.darks,
                 MasterRole::Dark,
                 StackConfig::bias_or_dark(),
+                &IngestConfig::default(),
                 None,
                 ProgressCallback::default(),
                 CancelToken::never(),
@@ -341,6 +344,7 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
                 &paths.flats,
                 MasterRole::Flat,
                 StackConfig::flat(),
+                &IngestConfig::default(),
                 None,
                 ProgressCallback::default(),
                 CancelToken::never(),
@@ -360,6 +364,7 @@ fn bench_stack_master_bias(b: ::quickbench::Bencher) {
                 &paths.bias,
                 MasterRole::Bias,
                 StackConfig::bias_or_dark(),
+                &IngestConfig::default(),
                 None,
                 ProgressCallback::default(),
                 CancelToken::never(),

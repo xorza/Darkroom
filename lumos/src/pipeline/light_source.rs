@@ -112,7 +112,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             rayon::current_num_threads(),
             run.memory.planning(),
         );
-        let stage = StagePlan::new(&plan, &config.stack.ingest, run.memory)?;
+        let stage = StagePlan::new(&plan, run)?;
         tracing::info!(
             frames = total,
             planning_mb = run.memory.planning() / (1024 * 1024),
@@ -274,7 +274,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         let StagePlan {
             tier,
             warp_concurrency: workers,
-        } = StagePlan::new(&plan, &config.stack.ingest, run.memory)?;
+        } = StagePlan::new(&plan, run)?;
         tracing::info!(
             frames = total,
             reference,

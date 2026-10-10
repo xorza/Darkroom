@@ -10,7 +10,7 @@ use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
 use crate::calibration_masters::master_subtraction::Subtractor;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
-use crate::combine::config::{CombineMethod, SmallN, StackConfig, Weighting};
+use crate::combine::config::{Combine, CombineMethod, SmallN, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::frame_store::capture_conditions::CaptureCondition;
@@ -518,6 +518,7 @@ fn empty_roles_yield_no_masters() {
             &empty,
             role,
             role.stack_config(),
+            &IngestConfig::default(),
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -1275,13 +1276,17 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
 
     for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
         let config = StackConfig {
-            method: CombineMethod::Mean(rejection),
+            combine: Combine {
+                method: CombineMethod::Mean(rejection),
+                small_n: SmallN::median_below(5),
+            },
             ..StackConfig::bias_or_dark()
         };
         let error = stack_cfa_master(
             &missing,
             MasterRole::Dark,
             config,
+            &IngestConfig::default(),
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -1305,6 +1310,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
             weighting: Weighting::Manual(vec![1.0, 1.0]),
             ..StackConfig::bias_or_dark()
         },
+        &IngestConfig::default(),
         None,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1327,6 +1333,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
         &missing,
         MasterRole::Dark,
         StackConfig::bias_or_dark(),
+        &IngestConfig::default(),
         None,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1824,18 +1831,22 @@ fn flats_are_calibrated_before_they_are_combined() {
     let corner_over_centre = |master: &CfaImage| master.data[(0, 0)] / master.data[(3, 3)];
     for memory_override in [None, Some(1)] {
         let config = StackConfig {
-            small_n: SmallN::none(),
-            ingest: IngestConfig {
-                memory_override,
-                cache_dir: directory.join("cache"),
-                ..IngestConfig::default()
+            combine: Combine {
+                small_n: SmallN::none(),
+                ..Combine::sigma_clipped(2.5)
             },
             ..StackConfig::flat()
+        };
+        let ingest = IngestConfig {
+            memory_override,
+            cache_dir: directory.join("cache"),
+            ..IngestConfig::default()
         };
         let calibrated = stack_cfa_master(
             &paths,
             MasterRole::Flat,
             config.clone(),
+            &ingest,
             Some(Subtractor {
                 role: MasterRole::Bias,
                 master: &bias,
@@ -1852,6 +1863,7 @@ fn flats_are_calibrated_before_they_are_combined() {
             &paths,
             MasterRole::Flat,
             config,
+            &ingest,
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -1898,6 +1910,7 @@ fn dark_frames_share_one_exposure_and_temperature() {
             paths,
             role,
             role.stack_config(),
+            &IngestConfig::default(),
             subtract,
             ProgressCallback::default(),
             CancelToken::never(),

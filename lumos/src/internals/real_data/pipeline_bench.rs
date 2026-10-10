@@ -10,6 +10,7 @@ use common::{CancelToken, TempDir};
 use crate::combine::cache::FrameCache;
 use crate::combine::stack::run_stacking;
 use crate::concurrency;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
@@ -21,8 +22,9 @@ use crate::star_detection::config::Config as StarDetectionConfig;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::star::Star;
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
-    Normalization, ProgressCallback, RegistrationConfig, StackConfig, register, stack, warp,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, Combine, DEFAULT_SIGMA_THRESHOLD,
+    MasterRole, Normalization, ProgressCallback, RegistrationConfig, StackConfig, Weighting,
+    register, stack, warp,
 };
 
 #[test]
@@ -51,8 +53,8 @@ fn bench_full_pipeline() {
         }
         let config = if paths.len() < 8 {
             StackConfig {
-                normalization: config.normalization,
-                ..StackConfig::median()
+                combine: Combine::median(),
+                ..config
             }
         } else {
             config
@@ -62,7 +64,7 @@ fn bench_full_pipeline() {
         let cache = FrameCache::from_cfa_paths(
             paths,
             &config,
-            IngestRun::new(&config.ingest, CancelToken::never()),
+            IngestRun::new(&IngestConfig::default(), CancelToken::never()),
             None,
             ProgressCallback::default(),
         )
@@ -237,12 +239,15 @@ fn bench_full_pipeline() {
 
     let stack_config = StackConfig {
         normalization: Normalization::Global,
-        ..StackConfig::sigma_clipped(2.5)
+        combine: Combine::sigma_clipped(2.5),
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
 
     let stacked = stack(
         &registered_paths,
         &stack_config,
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )

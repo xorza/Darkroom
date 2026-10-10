@@ -3,6 +3,7 @@
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::combine::config::{StackConfig, Weighting};
 use crate::combine::error::StackConfigError;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::pipeline::error::AlignStackError;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::star_detection::config::Config as StarDetectionConfig;
@@ -18,15 +19,33 @@ pub enum Reference {
     Index(usize),
 }
 
-/// One configuration per pipeline stage plus the reference choice.
-#[derive(Debug, Clone, Default)]
+/// One configuration per pipeline stage plus the reference choice and how the run reads and
+/// parks its frames.
+#[derive(Debug, Clone)]
 pub struct AlignStackConfig {
     pub detection: StarDetectionConfig,
     pub registration: RegistrationConfig,
+    /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
     /// Optional single-frame cosmic-ray rejection after calibration and before demosaic.
     pub cosmic_ray: Option<CosmicRayConfig>,
+    /// How the run decodes its lights, the memory it plans against, and where it spills them.
+    pub ingest: IngestConfig,
+}
+
+impl Default for AlignStackConfig {
+    /// The default of every stage, the lights combined as [`StackConfig::light`].
+    fn default() -> Self {
+        Self {
+            detection: StarDetectionConfig::default(),
+            registration: RegistrationConfig::default(),
+            stack: StackConfig::light(),
+            reference: Reference::default(),
+            cosmic_ray: None,
+            ingest: IngestConfig::default(),
+        }
+    }
 }
 
 impl AlignStackConfig {

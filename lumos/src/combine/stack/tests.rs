@@ -1,3 +1,4 @@
+use crate::combine::config::{Combine, Normalization, SmallN};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::internals::prelude::*;
@@ -6,13 +7,11 @@ use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::frame_quality::FramePlane;
 
-use crate::combine::config::{Normalization, SmallN};
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
 use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
@@ -97,11 +96,13 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     let normalized = run_stacking(
         &normalized_cache,
         &StackConfig {
-            method: CombineMethod::Mean(Rejection::None),
+            combine: Combine {
+                method: CombineMethod::Mean(Rejection::None),
+                small_n: SmallN::none(),
+            },
             weighting: Weighting::Manual(vec![0.25, 0.75]),
             normalization: Normalization::Multiplicative,
-            small_n: SmallN::none(),
-            ..Default::default()
+            ..StackConfig::light()
         },
     )
     .expect("this cache is never cancelled");
@@ -124,8 +125,16 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
         dimensions,
         Normalization::None,
     );
-    let median =
-        run_stacking(&median_cache, &StackConfig::median()).expect("this cache is never cancelled");
+    let median = run_stacking(
+        &median_cache,
+        &StackConfig {
+            combine: Combine::median(),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    )
+    .expect("this cache is never cancelled");
     let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
     assert_eq!(median.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
     assert_eq!(
@@ -140,8 +149,16 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
         dimensions,
         Normalization::None,
     );
-    let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5))
-        .expect("this cache is never cancelled");
+    let winsorized = run_stacking(
+        &winsorized_cache,
+        &StackConfig {
+            combine: Combine::winsorized(2.5),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    )
+    .expect("this cache is never cancelled");
     #[expect(
         clippy::imprecise_flops,
         reason = "the expected value repeats the sum of squares `quantization` computes, so the comparison stays exact"
@@ -164,9 +181,13 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     let rejected = run_stacking(
         &rejection_cache,
         &StackConfig {
-            method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
-            small_n: SmallN::none(),
-            ..Default::default()
+            combine: Combine {
+                method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+                small_n: SmallN::none(),
+            },
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
     )
     .expect("this cache is never cancelled");
@@ -309,7 +330,12 @@ fn stack_empty_paths() {
     let paths: Vec<PathBuf> = vec![];
     let result = stack(
         &paths,
-        &StackConfig::default(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -318,7 +344,14 @@ fn stack_empty_paths() {
 
 #[test]
 fn stack_images_empty() {
-    let result = combine(Vec::new(), &StackConfig::default());
+    let result = combine(
+        Vec::new(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    );
     assert!(matches!(result.unwrap_err(), StackError::NoFrames));
 }
 
@@ -327,7 +360,12 @@ fn stack_nonexistent_file() {
     let paths = vec![PathBuf::from("/nonexistent/image.fits")];
     let result = stack(
         &paths,
-        &StackConfig::default(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -343,7 +381,12 @@ fn stack_rejects_invalid_config_before_loading() {
     ];
     let error = stack(
         &paths,
-        &StackConfig::weighted(vec![1.0, 2.0]),
+        &StackConfig {
+            weighting: Weighting::Manual(vec![1.0, 2.0]),
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -358,7 +401,13 @@ fn stack_rejects_invalid_config_before_loading() {
 
     let error = stack(
         &paths,
-        &StackConfig::sigma_clipped(-1.0),
+        &StackConfig {
+            combine: Combine::sigma_clipped(-1.0),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -380,8 +429,10 @@ fn stack_images_in_memory_mean() {
         LinearImage::from_pixels(dims, vec![30.0; 16]),
     ];
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
-        ..Default::default()
+        combine: Combine::mean(),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     let frames = images.into_iter().map(StackFrame::from).collect();
     let result = combine(frames, &config).unwrap().image;
@@ -405,9 +456,10 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
         StackFrame::from(image)
     };
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
 
     let stacked = combine(
@@ -469,9 +521,10 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
     high.flags =
         PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]]);
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::Multiplicative,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
 
     let stacked = combine(
@@ -524,7 +577,11 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     let stack = |orders: [Option<RowOrder>; 2]| {
         combine(
             orders.map(frame).into_iter().collect(),
-            &StackConfig::default(),
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         )
     };
 
@@ -578,7 +635,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 .map(|declared| frame(declared).into())
                 .into_iter()
                 .collect(),
-            &StackConfig::default(),
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         )
     };
 
@@ -622,7 +683,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
             pedestal_frame(Pedestal::Kept(0.5)).into(),
             pedestal_frame(Pedestal::Removed).into(),
         ],
-        &StackConfig::default(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
     )
     .unwrap();
     assert_eq!(offset.image.channel(0).pixels(), &[1.25; 4]);
@@ -660,7 +725,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 .map(|declared| frame(declared).into())
                 .into_iter()
                 .collect(),
-                &StackConfig::default()
+                &StackConfig {
+                    weighting: Weighting::Equal,
+                    normalization: Normalization::None,
+                    ..StackConfig::light()
+                }
             )
             .unwrap_err(),
             StackError::SampleDomainMismatch {
@@ -701,7 +770,14 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
 fn stack_images_dimension_errors() {
     let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let b = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-    let result = combine(vec![a.into(), b.into()], &StackConfig::default());
+    let result = combine(
+        vec![a.into(), b.into()],
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    );
     assert!(matches!(
         result.unwrap_err(),
         StackError::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
@@ -727,7 +803,15 @@ fn stack_images_dimension_errors() {
                 confidence,
             },
         );
-        let error = combine(vec![frame], &StackConfig::default()).unwrap_err();
+        let error = combine(
+            vec![frame],
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 error,
@@ -772,7 +856,11 @@ fn stack_images_rejects_invalid_warp_quality_values() {
                     confidence,
                 },
             )],
-            &StackConfig::default(),
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         )
         .unwrap_err();
         assert!(
@@ -810,7 +898,11 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
                     confidence: Buffer2::new(2, 1, confidence),
                 },
             )],
-            &StackConfig::default(),
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         )
         .unwrap_err();
         assert!(
@@ -837,9 +929,10 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
             },
         )],
         &StackConfig {
-            method: CombineMethod::Mean(Rejection::None),
+            combine: Combine::mean(),
             normalization: Normalization::None,
-            ..Default::default()
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
         },
     )
     .unwrap();
@@ -863,7 +956,12 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         );
         let error = combine(
             vec![finite.clone().into(), invalid.into()],
-            &StackConfig::mean(),
+            &StackConfig {
+                combine: Combine::mean(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         )
         .unwrap_err();
 
@@ -893,10 +991,13 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
     // rather than the loader's own cancellation check.
     let dimensions = ImageDimensions::new((2, 1), 1);
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::None),
+            small_n: SmallN::none(),
+        },
         normalization: Normalization::None,
-        small_n: SmallN::none(),
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
 
     let without_sigmas = FrameCache::from_images(
@@ -938,7 +1039,11 @@ fn cancelled_stack_returns_cancelled_error() {
     cancel.cancel();
     let result = stack_images(
         vec![a.into(), b.into()],
-        &StackConfig::default(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
         ProgressCallback::default(),
         cancel,
     );
@@ -955,9 +1060,10 @@ fn cancelled_stack_returns_cancelled_error() {
 fn coverage_decides_which_frames_reach_each_pixel() {
     let dims = ImageDimensions::new((2, 1), 1);
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
     let covered = |value: f32, coverage: [f32; 2]| {
         with_noise(
@@ -1084,10 +1190,10 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     }
 
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         weighting: Weighting::Noise,
         normalization: Normalization::Multiplicative,
-        ..Default::default()
+        ..StackConfig::light()
     };
     let first = run_stacking(&caches[0], &config).expect("this cache is never cancelled");
     let second = run_stacking(&caches[1], &config).expect("this cache is never cancelled");
@@ -1126,7 +1232,8 @@ fn only_normalization_requires_common_coverage() {
         frames(),
         &StackConfig {
             normalization: Normalization::Global,
-            ..Default::default()
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
         },
     )
     .unwrap_err();
@@ -1136,7 +1243,8 @@ fn only_normalization_requires_common_coverage() {
         frames(),
         &StackConfig {
             normalization: Normalization::None,
-            ..Default::default()
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
         },
     )
     .unwrap();
@@ -1155,9 +1263,10 @@ fn confidence_scales_a_contribution_rather_than_gating_it() {
     let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
     let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
     let frames = vec![
         with_noise(
@@ -1207,9 +1316,10 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     let source = LinearImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(-2.37, 1.43)));
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
 
     for method in InterpolationMethod::ALL {
@@ -1370,11 +1480,13 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
     let product = run_stacking(
         &cache,
         &StackConfig {
-            method: CombineMethod::Mean(Rejection::None),
+            combine: Combine {
+                method: CombineMethod::Mean(Rejection::None),
+                small_n: SmallN::none(),
+            },
             weighting: Weighting::Noise,
             normalization: Normalization::None,
-            small_n: SmallN::none(),
-            ..Default::default()
+            ..StackConfig::light()
         },
     )
     .expect("this cache is never cancelled");
@@ -1398,9 +1510,11 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // A mean asked for everything gets everything.
     let all = stack(StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         quality: QualityPlanes::ALL,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     });
     assert!(all.coverage.is_some());
     assert!(all.weight.is_some());
@@ -1409,18 +1523,24 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // The default asks for the standard planes, which leave out the dispersion.
     let standard = stack(StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
-        ..Default::default()
+        combine: Combine::mean(),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     });
     assert!(standard.variance.is_some() && standard.dispersion.is_none());
 
     // A median is not a linear combination, so its variance plane is absent even though the
     // request asked for it — and is never allocated, not allocated and cleared.
     let median = stack(StackConfig {
-        method: CombineMethod::Median,
-        small_n: SmallN::none(),
+        combine: Combine {
+            method: CombineMethod::Median,
+            small_n: SmallN::none(),
+        },
         quality: QualityPlanes::ALL,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     });
     assert!(median.coverage.is_some());
     assert!(median.weight.is_some(), "a median still reports weight");
@@ -1431,9 +1551,11 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // Image only: no ancillary plane survives, whatever the method would support.
     let bare = stack(StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         quality: QualityPlanes::IMAGE_ONLY,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     });
     assert!(bare.coverage.is_none());
     assert!(bare.weight.is_none());
@@ -1463,9 +1585,13 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         })
         .collect();
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            small_n: SmallN::median_below(5),
+        },
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
     let edge = combine(frames, &config).unwrap();
     assert_eq!(edge.image.channel(0).pixels(), &[0.125]);
@@ -1475,9 +1601,10 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         .map(|&v| LinearImage::from_pixels(dims, vec![v]).into())
         .collect();
     let mean = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
     let dark = combine(uncovered, &mean).unwrap();
     assert_eq!(dark.image.channel(0).pixels(), &[0.05]);
@@ -1501,11 +1628,13 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
         StackFrame::from(image)
     };
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::None),
+            small_n: SmallN::none(),
+        },
         weighting: Weighting::Noise,
         normalization: Normalization::None,
-        small_n: SmallN::none(),
-        ..Default::default()
+        ..StackConfig::light()
     };
     let product = combine(
         vec![
@@ -1546,13 +1675,14 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
         frame(vec![100.0, 3.0, 3.0]),
     ];
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(0.0, 34.0))),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(0.0, 34.0))),
+            small_n: SmallN::none(),
+        },
         weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
         normalization: Normalization::None,
-        small_n: SmallN::none(),
         min_survivors: 2,
         quality: QualityPlanes::ALL,
-        ..Default::default()
     };
 
     let result = combine(frames, &config).unwrap();
@@ -1628,11 +1758,11 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
         })
         .collect();
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         weighting: Weighting::Manual(SIGMAS.iter().map(|sigma| 1.0 / (sigma * sigma)).collect()),
         normalization: Normalization::None,
         quality: QualityPlanes::ALL,
-        ..Default::default()
+        ..StackConfig::light()
     };
     let inverse_variance: f64 = SIGMAS
         .iter()
@@ -1686,10 +1816,13 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     let stack = |config: &StackConfig| combine(frames(), config).unwrap();
 
     let explicit = stack(&StackConfig {
-        method: CombineMethod::Median,
+        combine: Combine {
+            method: CombineMethod::Median,
+            small_n: SmallN::median_below(5),
+        },
         weighting: Weighting::Noise,
         normalization: Normalization::None,
-        ..Default::default()
+        ..StackConfig::light()
     });
     assert!(explicit.variance.is_none());
     // The middle frame is the median at every pixel, sample for sample.
@@ -1705,15 +1838,50 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     );
 
     for (name, config) in [
-        ("default", StackConfig::default()),
-        ("sigma", StackConfig::sigma_clipped(2.5)),
-        ("linear fit", StackConfig::linear_fit(3.0)),
-        ("GESD", StackConfig::gesd()),
+        (
+            "default",
+            StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "sigma",
+            StackConfig {
+                combine: Combine::sigma_clipped(2.5),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "linear fit",
+            StackConfig {
+                combine: Combine::linear_fit(3.0),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
+        (
+            "GESD",
+            StackConfig {
+                combine: Combine::gesd(),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        ),
         ("flat", StackConfig::flat()),
         ("light", StackConfig::light()),
         (
             "manual weighting",
-            StackConfig::weighted(vec![1.0, 2.0, 3.0]),
+            StackConfig {
+                weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
         ),
     ] {
         let downgraded = stack(&config);
@@ -1729,12 +1897,16 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     }
 
     let linear_fallback = stack(&StackConfig {
-        method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
-        small_n: SmallN {
-            min_frames: 4,
-            fallback: CombineMethod::Mean(Rejection::None),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            small_n: SmallN {
+                min_frames: 4,
+                fallback: CombineMethod::Mean(Rejection::None),
+            },
         },
-        ..Default::default()
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     });
     assert_eq!(
         linear_fallback.variance.unwrap().channel(0).pixels(),
@@ -1758,17 +1930,19 @@ fn disk_backed_stack_combines_via_mmap() {
     }
 
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ingest: IngestConfig {
-            memory_override: Some(1), // forces disk-backed (mmap) storage
-            ..IngestConfig::with_cache_dir(temp_dir.join("cache"))
-        },
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
+    };
+    let ingest = IngestConfig {
+        memory_override: Some(1), // forces disk-backed (mmap) storage
+        ..IngestConfig::with_cache_dir(temp_dir.join("cache"))
     };
     let result = stack(
         &paths,
         &config,
+        &ingest,
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -1787,9 +1961,10 @@ fn noise_weighting_refuses_a_frame_with_no_noise() {
         Normalization::None,
     );
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         weighting: Weighting::Noise,
-        ..Default::default()
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     assert!(matches!(
         run_stacking(&cache, &config),
@@ -1823,11 +1998,14 @@ fn noise_weights_survive_rejection() {
         frame.source_stats.noise[0] = sigma;
     }
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+            small_n: SmallN::none(),
+        },
         weighting: Weighting::Noise,
-        small_n: SmallN::none(),
         min_survivors: 2,
-        ..Default::default()
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
     assert_close!(
@@ -1869,8 +2047,10 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
         })
         .collect();
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
-        ..StackConfig::default()
+        combine: Combine::mean(),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     let product = combine(frames, &config).unwrap();
     let pixels = product.image.channel(0).pixels();
@@ -1903,9 +2083,10 @@ fn the_variance_plane_carries_the_source_term_above_the_sky() {
         frame
     };
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine::mean(),
         normalization: Normalization::None,
-        ..Default::default()
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
     };
     let known = combine(
         vec![frame(10.0, Some(0.5)), frame(14.0, Some(0.5))],

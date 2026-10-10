@@ -12,7 +12,7 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::detection::{self, FwhmMode};
-use lumos::{RegistrationConfig, SipConfig, StackConfig};
+use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
 
 use crate::astro::config::preset::Preset;
 
@@ -168,7 +168,7 @@ impl From<RegistrationKnobs> for RegistrationConfig {
     }
 }
 
-/// Which combination [`CombineKnobs`] builds. A [`StackConfig`] carries each
+/// Which combination [`CombineKnobs`] builds. A [`Combine`] carries each
 /// method's parameters in its own shape, so the editor picks the method here
 /// and supplies the one shared parameter — `sigma` — as its own field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
@@ -193,8 +193,47 @@ impl Preset for CombineMethodChoice {
     }
 }
 
+/// How the lights are put on one scale before they combine: lumos's
+/// [`Normalization`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "a784ccc5-0139-4a2b-93ec-902d6212539d")]
+pub(crate) enum NormalizationChoice {
+    Global,
+    Multiplicative,
+    None,
+}
+
+impl From<NormalizationChoice> for Normalization {
+    fn from(choice: NormalizationChoice) -> Self {
+        match choice {
+            NormalizationChoice::Global => Self::Global,
+            NormalizationChoice::Multiplicative => Self::Multiplicative,
+            NormalizationChoice::None => Self::None,
+        }
+    }
+}
+
+/// How much each light counts in the combine: lumos's [`Weighting`], less the
+/// manual weights a graph has no frame list to give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "a1f9be81-a6f8-44a6-b9c4-7a558e98d1df")]
+pub(crate) enum WeightingChoice {
+    Noise,
+    Equal,
+}
+
+impl From<WeightingChoice> for Weighting {
+    fn from(choice: WeightingChoice) -> Self {
+        match choice {
+            WeightingChoice::Noise => Self::Noise,
+            WeightingChoice::Equal => Self::Equal,
+        }
+    }
+}
+
 /// The frame-combination knobs the editor offers. `sigma` is read only by the
-/// two rejecting methods.
+/// two rejecting methods; `normalization` and `weighting` are the lights'
+/// policy, whatever the method.
 #[derive(Debug, Clone, Introspect)]
 #[config(
     type_id = "843bff16-61ec-47db-9a86-64bb53c9c1cc",
@@ -203,25 +242,36 @@ impl Preset for CombineMethodChoice {
 pub(crate) struct CombineKnobs {
     method: CombineMethodChoice,
     sigma: f32,
+    normalization: NormalizationChoice,
+    weighting: WeightingChoice,
 }
 
 impl Default for CombineKnobs {
-    /// Sigma-clipped at 3σ, should a rejecting method be picked.
+    /// Sigma-clipped at 3σ, should a rejecting method be picked, with the
+    /// policy of [`StackConfig::light`]: global normalization, noise weights.
     fn default() -> Self {
         Self {
             method: CombineMethodChoice::SigmaClipped,
             sigma: 3.0,
+            normalization: NormalizationChoice::Global,
+            weighting: WeightingChoice::Noise,
         }
     }
 }
 
 impl From<CombineKnobs> for StackConfig {
     fn from(knobs: CombineKnobs) -> Self {
-        match knobs.method {
-            CombineMethodChoice::SigmaClipped => StackConfig::sigma_clipped(knobs.sigma),
-            CombineMethodChoice::Winsorized => StackConfig::winsorized(knobs.sigma),
-            CombineMethodChoice::Median => StackConfig::median(),
-            CombineMethodChoice::Mean => StackConfig::mean(),
+        let combine = match knobs.method {
+            CombineMethodChoice::SigmaClipped => Combine::sigma_clipped(knobs.sigma),
+            CombineMethodChoice::Winsorized => Combine::winsorized(knobs.sigma),
+            CombineMethodChoice::Median => Combine::median(),
+            CombineMethodChoice::Mean => Combine::mean(),
+        };
+        Self {
+            combine,
+            normalization: knobs.normalization.into(),
+            weighting: knobs.weighting.into(),
+            ..Self::light()
         }
     }
 }
@@ -229,10 +279,11 @@ impl From<CombineKnobs> for StackConfig {
 #[cfg(test)]
 mod tests {
     use lumos::detection::{self, FwhmMode};
-    use lumos::{RegistrationConfig, SipConfig, StackConfig};
+    use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
 
     use crate::astro::config::stacking::{
-        CombineKnobs, CombineMethodChoice, DetectionKnobs, RegistrationKnobs,
+        CombineKnobs, CombineMethodChoice, DetectionKnobs, NormalizationChoice, RegistrationKnobs,
+        WeightingChoice,
     };
 
     /// A projection is only safe if every knob writes back to the field it read
@@ -294,32 +345,53 @@ mod tests {
         assert!(on.sip.is_some());
     }
 
-    /// Each choice builds the combination it names, and `sigma` reaches the two
-    /// methods that reject on it.
-    ///
-    /// Compared on `method` alone: the rest of a [`StackConfig`] is cache and
-    /// quality settings the projection never touches, and its default cache
-    /// directory is unique per instance.
+    /// Each choice builds the combination it names, `sigma` reaches the two
+    /// methods that reject on it, and the policy knobs reach the lights'
+    /// normalization and weighting, which default to [`StackConfig::light`]'s.
     #[test]
-    fn each_combine_choice_builds_its_combine_method() {
-        let built = |method| StackConfig::from(CombineKnobs { method, sigma: 2.5 }).method;
-        assert_eq!(
-            built(CombineMethodChoice::SigmaClipped),
-            StackConfig::sigma_clipped(2.5).method
-        );
-        assert_eq!(
-            built(CombineMethodChoice::Winsorized),
-            StackConfig::winsorized(2.5).method
-        );
-        assert_eq!(
-            built(CombineMethodChoice::Median),
-            StackConfig::median().method
-        );
-        assert_eq!(built(CombineMethodChoice::Mean), StackConfig::mean().method);
+    fn each_combine_knob_reaches_its_field() {
+        let knobs = |method| CombineKnobs {
+            method,
+            sigma: 2.5,
+            ..CombineKnobs::default()
+        };
+        for (method, combine) in [
+            (
+                CombineMethodChoice::SigmaClipped,
+                Combine::sigma_clipped(2.5),
+            ),
+            (CombineMethodChoice::Winsorized, Combine::winsorized(2.5)),
+            (CombineMethodChoice::Median, Combine::median()),
+            (CombineMethodChoice::Mean, Combine::mean()),
+        ] {
+            assert_eq!(
+                StackConfig::from(knobs(method)),
+                StackConfig {
+                    combine,
+                    ..StackConfig::light()
+                },
+                "{method:?}"
+            );
+        }
         assert_ne!(
-            built(CombineMethodChoice::SigmaClipped),
-            StackConfig::sigma_clipped(3.5).method,
+            StackConfig::from(knobs(CombineMethodChoice::SigmaClipped)).combine,
+            Combine::sigma_clipped(3.5),
             "sigma has to reach the rejecting methods"
         );
+
+        let unscaled = StackConfig::from(CombineKnobs {
+            normalization: NormalizationChoice::None,
+            weighting: WeightingChoice::Equal,
+            ..CombineKnobs::default()
+        });
+        assert_eq!(
+            (unscaled.normalization, unscaled.weighting),
+            (Normalization::None, Weighting::Equal)
+        );
+        let flat_scaled = StackConfig::from(CombineKnobs {
+            normalization: NormalizationChoice::Multiplicative,
+            ..CombineKnobs::default()
+        });
+        assert_eq!(flat_scaled.normalization, Normalization::Multiplicative);
     }
 }

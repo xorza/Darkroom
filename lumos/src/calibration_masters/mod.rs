@@ -27,6 +27,7 @@ use crate::combine::error::StackError;
 use crate::combine::stack::combine_cached;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::ingest::frame_step::FrameStep;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
@@ -77,7 +78,8 @@ pub struct CalibrationMasters {
 }
 
 /// Stack one calibration role's raw CFA frames into a single master, under `config` — the
-/// role's preset is [`MasterRole::stack_config`]. Returns `None` if `paths` is empty.
+/// role's preset is [`MasterRole::stack_config`] — read as `ingest` says. Returns `None` if `paths`
+/// is empty.
 ///
 /// `subtract`, when given, is taken from every frame before its statistics and the combine, and
 /// each frame's record of what calibration removed takes what the subtractor still held: flats take
@@ -90,7 +92,7 @@ pub struct CalibrationMasters {
 /// The master states the exposure and temperature its frames share. The frames of a dark or a
 /// flat-dark have to share them: its signal is one exposure's at one temperature.
 ///
-/// The preset carries its own small-frame fallback (`StackConfig::small_n`): the combine engine
+/// The preset carries its own small-frame fallback (`Combine::small_n`): the combine engine
 /// downgrades to the median below the preset's `min_frames` (e.g. `flat()` below 8), so no
 /// frame-count special-casing is needed here. Stack each role this way, then assemble the set
 /// with [`CalibrationMasters::from_images`].
@@ -103,6 +105,7 @@ pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     role: MasterRole,
     config: StackConfig,
+    ingest: &IngestConfig,
     subtract: Option<Subtractor<'_>>,
     progress: ProgressCallback,
     cancel: CancelToken,
@@ -115,7 +118,7 @@ pub fn stack_cfa_master(
     let subtraction = subtract
         .map(|subtractor| MasterSubtraction::new(role, subtractor))
         .transpose()?;
-    let run = IngestRun::new(&config.ingest, cancel);
+    let run = IngestRun::new(ingest, cancel);
     // A master is mosaic data for the calibration stage to consume, not a science product: the
     // ancillary planes would be allocated and written per pixel for nothing.
     let config = StackConfig {
@@ -638,6 +641,7 @@ pub(crate) mod internals {
     use crate::calibration_masters::master_role::MasterRole;
     use crate::calibration_masters::master_subtraction::Subtractor;
     use crate::calibration_masters::{CalibrationMasters, stack_cfa_master};
+    use crate::ingest::ingest_config::IngestConfig;
     use crate::progress::progress_callback::ProgressCallback;
 
     /// Every role stacked under its preset, the flats with their flat-dark or bias taken from each
@@ -651,6 +655,7 @@ pub(crate) mod internals {
                 paths,
                 role,
                 role.stack_config(),
+                &IngestConfig::default(),
                 subtract,
                 ProgressCallback::default(),
                 CancelToken::never(),
