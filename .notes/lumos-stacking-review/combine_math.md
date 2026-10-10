@@ -85,10 +85,10 @@ the same consistency table, floors and termination. The scripts are in
 - **Variance propagation**:
   - `Σw²v/(Σw)²` is correct, with `v` taken at the combined value.
   - The noise model maps through normalization correctly: variance × g², sky·g + o, electrons ÷ g.
-  - The warp confidence `q` divides the variance and multiplies the weight, so with noise weighting `wᵢvᵢ = 1` and the variance is `1/Σw`, consistent with the weight plane.
+  - The warp confidence `q` divides the variance only. Combine weights are frame weights, constant over the frame (Batch 6), so a frame's weight does not follow its local resampling.
 - **Dispersion**: `Σwᵢ(xᵢ−x̄)²/((n−1)Σw)` is unbiased when `wᵢ ∝ 1/σᵢ²`. Derivation: `E = Σwᵢσᵢ² − Σw·Var(x̄) = (n−1)c`.
 - **Noise weighting**: `1/(g·σ)²` per slot, matching PixInsight's noise-evaluation weight of the scaled MRS noise. The MRS `LAYER_SIGMA` (0.889, 0.200, 0.086, 0.041) matches Starck & Murtagh's B3 table.
-- **Quantization σ formulas**: the mean `√Σ(wgσ)²/Σw` is correct. The median factor is the variance of the middle uniform order statistic(s) relative to `Δ²/12`: `3/(n+2)` for odd n and `3n/((n+1)(n+2))` for even n.
+- **Quantization σ**: the master's quantization σ is the largest of its sources' normalized σ (`SourceSigmas::largest`, Batch 7). The per-estimator formulas and `MaxSigma` that this review checked were removed.
 - **Sort**: one sort per pixel on u64 keys that order as the floats, with gather positions in the low bits. Later passes only narrow a window. This beats Siril, which runs `quickmedian` per iteration and re-sorts per linear-fit iteration. The standard library's `sort_unstable` already uses small-sort networks for small N.
 - **Survivor rule**:
   - `nearest` keeps the `min_survivors` samples nearest the pass centre.

@@ -24,6 +24,7 @@ DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
   In both, the plain std-dev is inflated by the hot tail itself, which makes them far less
   aggressive than a robust 5σ. The module doc says the defects "pass 1% of a colour" on uncooled
   sensors.
+- **Decided (plan Batch 23):** a pixel is hot when its dark current's shot noise in the light exceeds the light's own noise there. The map is built per run.
 - **Recommended direction:** Decide what a hot pixel *promises*: residual error after scaled dark
   subtraction, or shot noise that dominates the light's noise. Derive the threshold from that, for
   example dark-current shot noise in the light against the light's noise (gain known), plus
@@ -150,6 +151,7 @@ DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
   imbalance, defect, null and CR in-paints on green carry the other phase's level, a small fixed
   pattern at repaired pixels.
 - **Confidence:** likely
+- **Decided (plan Batch 23):** same-phase greens only, the four at distance 2 and the four at 2√2. No Gr/Gb measurement is needed.
 - **Recommended direction:** Either use same-phase greens only (distance 2), or keep the 8 and
   correct by the Gr/Gb ratio measured once. Decide by measuring Gr/Gb on the real-data set.
 
@@ -184,6 +186,7 @@ DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
   hot-pixel-based scaling (`DarkFrame.cpp:1316-1440`). The 1 °C tolerance also accepts up to about
   12% thermal error silently.
 - **Confidence:** speculative (whether this is in scope is a product call)
+- **Decided (plan Batch 27):** in scope. Fit k per light on hot-pixel residuals, for bias-removed darks only, and record k in the outcome.
 - **Recommended direction:** If in scope, fit k per light by least squares on hot-pixel residuals.
   That is exact for a linear model and less sky-biased than noise minimization. Otherwise surface
   the 1 °C acceptance as a recorded scale or uncertainty.
