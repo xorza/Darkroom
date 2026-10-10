@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12 are done and committed. Every finding below was re-checked against the code after
+Batches 1–12 are done and committed, and Batch 13 except its X-Trans part (Q1). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -47,7 +47,7 @@ Batch 7 and still holds.
 14 ── 15
  ├─── 16
  └─── 22
-13, 17, 24, 26   independent
+13 (X-Trans, Q1), 17, 24, 26   independent
 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -60,36 +60,15 @@ Batch 7 and still holds.
 
 ---
 
-## Batch 13: Cosmic-ray quality — medium
+## Batch 13 (rest): X-Trans cosmic-ray statistic — blocked
 
-**Findings:** CAL-6, CAL-7, CAL-9, CAL-17.
-
-**Design:**
-1. **CAL-6, astroscrappy's rule** (`update_mask` in `astroscrappy.pyx`): a pixel joins the star
-   mask when it is flagged `SATURATED` and its 5×5 median is above a tenth of the frame's
-   saturation level (the median of the frame's saturated values stands for the level, since
-   calibration moved the units). The mask is dilated twice with a 5×5 kernel. The mask and
-   `NO_DATA` pixels are excluded from candidates and from the background estimate. An isolated
-   saturated pixel stays a candidate, so a saturating cosmic ray is still found. In-paints read
-   only pixels that are neither in the mask nor `UNMEASURED`.
-2. **CAL-7:** the X-Trans statistic `(v − median₈)/N` is normalized by its own σ on white noise, so
-   `sigclip` keeps astroscrappy's tail probability. Derive the factor (the σ of `v − median₈` for
-   unit Gaussian samples, about 1.1) by numerical integration of the order-statistic density in a
-   test-side helper, and pin it as a constant with the derivation. Calibrate `objlim` the same way
-   against the mono fine-structure statistic.
-3. **CAL-9:** iterations 2..n recompute only the rows within 6 px of a pixel repaired in the last
-   iteration (Laplacian ±1, noise median ±2, `med₅(S)` ±2, `med₃∘med₇` ±4, growth ±2: 6 bounds
-   each chain).
-4. **CAL-17:** `XtransDetector::new(config, noise, pattern: XTransPattern)` and
-   `BayerDetector::new(config, noise, pattern: CfaPattern)`; the panic arm goes away.
-
-**Tests:**
-- A clipped star core (flat top, steep edge) is not flagged; a saturated single-pixel hit beside
-  it is.
-- X-Trans noise-only false positives: exact count 0 at the default seed on a 256² field; a
-  star-preservation test as mono has.
-- CAL-9: the local recompute equals the full recompute bit for bit on a field with several hits
-  (keep the full recompute as a gated test oracle).
+**Blocked on Q1** in `lumos-stacking-review_QUESTIONS.md`. The X-Trans significance `v − median₈` is
+positive on a star's convex wings, so the pass eats well-sampled stars on X-Trans at any `objlim`.
+Left here: the X-Trans contrast calibration and its star-preservation test (CAL-7), and the
+X-Trans local recompute (CAL-9), both of which depend on the statistic Q1 chooses. Done in Batch
+13: the saturated-star mask (CAL-6), the σ normalization of the X-Trans significance with its
+noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer local recompute
+(CAL-9).
 
 ---
 
@@ -447,7 +426,6 @@ Each decision is also written into its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| CAL-6 | astroscrappy's saturated-star mask (5×5 median above a tenth of saturation, dilated twice). | 13 |
 | DRZ-1 | Siril's design: drizzle each frame, then the normal combine. | 14 |
 | DRZ-1 | A drizzled frame's drop weight multiplies its frame weight in the mean (Siril, DrizzlePac). | 14 |
 | DRZ-6 | Only the square kernel divides by the magnification (STScI). | 14 |

@@ -445,6 +445,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         &data,
         &CfaType::Mono,
         DARK_BACKGROUND_TILE_SIZE,
+        None,
         &mut MeshWorkspace::default(),
     );
 
