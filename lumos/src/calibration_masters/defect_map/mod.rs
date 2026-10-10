@@ -316,6 +316,7 @@ fn detect_hot_pixels(
         data,
         &cfa_type,
         DARK_BACKGROUND_TILE_SIZE,
+        None,
         &mut MeshWorkspace::default(),
     );
     if cancel.is_cancelled() {

@@ -129,6 +129,7 @@ mod tests {
             &Buffer2::new(16, 16, vec![0.5; size.pixel_count()]),
             &CfaType::Mono,
             8,
+            None,
             &mut MeshWorkspace::default(),
         );
         let gain = FlatGain::of_divisor(

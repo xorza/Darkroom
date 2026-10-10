@@ -24,6 +24,7 @@
 mod bayer;
 pub(crate) mod config;
 pub(crate) mod error;
+pub(crate) mod kept_out;
 pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
@@ -40,6 +41,7 @@ use crate::math::size2us::Size2us;
 use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
+use crate::calibration_masters::cosmic_ray::kept_out::KeptOut;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 use crate::calibration_masters::cosmic_ray::xtrans::XtransDetector;
@@ -55,7 +57,8 @@ const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
 /// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
-/// [`QualityFlags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the
+/// [`QualityFlags::REPAIRED`]. Saturated star cores and pixels with no measurement are kept out of
+/// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number of CR pixels corrected, or an error when the
 /// parametric noise model needs an ADC step the frame does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
@@ -63,12 +66,14 @@ pub(crate) fn reject_cosmic_rays(
 ) -> Result<usize, UnknownAdcStep> {
     let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
     let size = Size2us::new(image.data.width(), image.data.height());
+    let kept_out = KeptOut::of(&image.data, image.flags.as_ref());
     // Measured once, before any repair: a hit spoils a tile's statistics no more than a star does,
     // and the mesh's clip and median filter are what keep both out.
     let mesh = ColourMesh::measure(
         &image.data,
         &image.cfa_type,
         BACKGROUND_TILE_SIZE,
+        kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
         &mut MeshWorkspace::default(),
     );
     // Through the checked accessor, then shared: the pixels below are borrowed apart from it.
@@ -82,17 +87,26 @@ pub(crate) fn reject_cosmic_rays(
     let mut found = BitBuffer2::new_default(size);
     let count = match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        c @ CfaType::Bayer(_) => {
-            BayerDetector::new(config, noise, c).reject(pixels, size, &backgrounds, &mut found)
-        }
+        CfaType::Bayer(pattern) => BayerDetector::new(config, noise, *pattern).reject(
+            pixels,
+            size,
+            &backgrounds,
+            kept_out.as_ref(),
+            &mut found,
+        ),
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        c @ CfaType::XTrans(_) => {
-            XtransDetector::new(config, noise, c).reject(pixels, size, &backgrounds, &mut found)
-        }
+        CfaType::XTrans(pattern) => XtransDetector::new(config, noise, *pattern).reject(
+            pixels,
+            size,
+            &backgrounds,
+            kept_out.as_ref(),
+            &mut found,
+        ),
         CfaType::Mono => MonoDetector::new(config, noise).reject(
             pixels,
             size,
             &|index| backgrounds.at(0, size.point_of(index)),
+            kept_out.as_ref(),
             &mut found,
         ),
     };
