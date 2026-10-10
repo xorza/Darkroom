@@ -72,7 +72,7 @@ pub(crate) fn register(library: &mut Library) {
                     registration: RegistrationPreset::resolve(&inputs[4], &inputs[5]),
                     stack,
                     reference,
-                    cosmic_ray: None,
+                    ..AlignStackConfig::default()
                 };
 
                 let result = runtime::run_cancellable(cancel, move |cancel| {

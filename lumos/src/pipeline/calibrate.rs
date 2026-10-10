@@ -47,7 +47,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         return Err(AlignStackError::NoFrames);
     }
     config.validate(light_paths.len())?;
-    let run = IngestRun::new(&config.stack.ingest, cancel.clone());
+    let run = IngestRun::new(&config.ingest, cancel.clone());
     let notes = CalibrationNotes::default();
     let lights = RawLights {
         paths: light_paths,

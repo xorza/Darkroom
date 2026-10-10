@@ -49,7 +49,7 @@ pub fn align_and_stack(
         return Err(AlignStackError::NoFrames);
     }
     config.validate(lights.len())?;
-    let run = IngestRun::new(&config.stack.ingest, cancel.clone());
+    let run = IngestRun::new(&config.ingest, cancel.clone());
     let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
     register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
 }

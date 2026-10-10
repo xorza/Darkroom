@@ -55,14 +55,6 @@ the same consistency table, floors and termination. The scripts are in
 - **Evidence**: `SampleNoise` and `FrameWeights` are already per slot (colour), while `FrameNorm.channels` is per channel. For mosaics the two disagree.
 - **Direction**: index `FrameNorm` by slot (colour) as noise and weights already are. Measure each colour's median, and for Global each colour's gain, over that colour's photosites, and stratify the sampled indices per colour.
 
-### CMB-5: `NormalScores` holds an O(N²) table per thread, grows mid-combine, and the memory budget does not count it
-- **Where**: `combine/rejection/normal_scores.rs:334-350`, `combine/rejection/scratch_buffers.rs:79-85` (not reserved)
-- **Category**: performance / memory
-- **Impact**: medium. Wide-field and EAA stacks reach thousands of frames. The table keeps `N(N+1)/2` f64 per scratch lease: 4 MB at N = 1000, 36 MB at 3000 and 100 MB at 5000, times the rayon threads (about 3.2 GB at 32 threads for N = 5000). None of it is in `QualityPlanes::resident_bytes` or the loader budget. It also grows lazily the first time a larger count appears, which is an allocation plus a copy of the whole table on the hot path. For a registered stack with ragged coverage, every count from 1 to N gets filled per thread, which is about N²/2 calls to `inverse_cdf` per thread.
-- **Confidence**: confirmed in code.
-- **Evidence**: Siril's linear fit needs O(N) (`rejection_float.c:278-317`).
-- **Direction**: cache only the counts actually seen. Raster order keeps the count nearly constant along a row, so a one-entry "current count" buffer plus a small keyed cache, reserved for `frame_count`, is enough. The table can be shared read-only across threads if prebuilt for the coverage histogram.
-
 ### CMB-6: The gather loop branches per sample and walks up to 4N plane streams per pixel
 - **Where**: `combine/cache/mod.rs:469-511`
 - **Category**: performance
@@ -124,13 +116,13 @@ the same consistency table, floors and termination. The scripts are in
 - **Confidence**: speculative on how much it matters.
 - **Direction**: if CcdModel becomes a science option, consider per-sample bands for that scale only, keeping the sorted-window structure for the robust scales.
 
-### CMB-14: Tests and benches cannot see CMB-1, CMB-5 or CMB-6
+### CMB-14: Tests and benches cannot see CMB-1 or CMB-6
 - **Where**: `combine/tests/mod.rs:255-286` (`rejection_methods_preserve_clean_frames`, 5% RMS tolerance), `combine/bench.rs` (30 frames; light, median and winsorized only)
 - **Category**: design (test quality)
 - **Impact**: low-medium.
   - The over-rejection of CMB-1 passes the 5% RMS check.
   - No sigma-clip or winsorized clean-data rate test exists to match the exact ones for linear fit (`rejection/tests.rs:488`) and GESD (`:778`).
-  - The bench has no linear fit, no GESD and no large N, so the O(N²) table and the many-stream gather are unmeasured.
+  - The bench has no linear fit, no GESD and no large N, so the normal-score cache and the many-stream gather are unmeasured.
 - **Confidence**: confirmed.
 - **Direction**: add hand-referenced clean-data rate tests for sigma clip and winsorized, with and without the floor. Add a bench row at N ≈ 300 with linear fit, and one with a ragged coverage set.
 
@@ -198,5 +190,5 @@ the same consistency table, floors and termination. The scripts are in
 1. **Rejection scale precision**: CMB-1, CMB-2, CMB-16, plus the rate tests of CMB-14 and the docs of CMB-15. These share the `Spread` and `Pass` machinery, and the tests should land with the fix.
 2. **Science planes**: CMB-3 (flat factor in the noise model; touches calibration → confidence plumbing), CMB-9 (variance and value at zero weight), CMB-10.
 3. **CFA-aware normalization**: CMB-4 (per-slot `FrameNorm`, per-colour medians, gains and stratification).
-4. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-7 (quantization gate), CMB-5 (scores cache), CMB-17. Add the large-N bench rows from CMB-14 first, so the gains are measured.
+4. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-7 (quantization gate), CMB-17. Add the large-N bench rows from CMB-14 first, so the gains are measured.
 5. **Cleanups**: CMB-11, CMB-12, and CMB-13 recorded as a decision.

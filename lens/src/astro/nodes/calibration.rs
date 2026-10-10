@@ -10,8 +10,8 @@ use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext, MasterRole,
-    Subtractor, stack_cfa_master,
+    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
+    LoadContext, MasterRole, Subtractor, stack_cfa_master,
 };
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
@@ -186,6 +186,7 @@ fn build_masters_cached(
             &frames,
             role,
             role.stack_config(),
+            &IngestConfig::default(),
             subtract.map(|(subtractor, _)| subtractor),
             ProgressCallback::default(),
             cancel.clone(),

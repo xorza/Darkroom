@@ -1,7 +1,6 @@
 use crate::combine::cache::FrameCache;
-use crate::combine::config::{CombineMethod, StackConfig};
+use crate::combine::config::{Combine, StackConfig, Weighting};
 use crate::combine::normalization::*;
-use crate::combine::rejection::Rejection;
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
@@ -354,9 +353,10 @@ fn stacked_frames_land_on_the_reference_level() {
         let product = stack_images(
             frames.into_iter().map(StackFrame::from).collect(),
             &StackConfig {
-                method: CombineMethod::Mean(Rejection::None),
+                combine: Combine::mean(),
                 normalization,
-                ..Default::default()
+                weighting: Weighting::Equal,
+                ..StackConfig::light()
             },
             ProgressCallback::default(),
             CancelToken::never(),

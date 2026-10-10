@@ -19,7 +19,6 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::frame_step::FrameStep;
-use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -64,7 +63,12 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 ) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0].as_ref();
-    let IngestRun { memory, context } = run;
+    let IngestRun {
+        memory,
+        context,
+        cache_dir,
+        keep_cache,
+    } = run;
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
@@ -121,7 +125,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     } = if plan.fits_in_ram {
         load.in_memory(early.map(|early| early.image))?
     } else {
-        load.to_disk(&config.ingest, early)?
+        load.to_disk(&cache_dir, keep_cache, early)?
     };
 
     Ok(LoadedCache {
@@ -285,7 +289,8 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
     /// decoding in parallel.
     fn to_disk(
         &self,
-        config: &IngestConfig,
+        cache_dir: &Path,
+        keep_cache: bool,
         early: Option<EarlyDecode<I>>,
     ) -> Result<LoadedTier, StackError> {
         let Self {
@@ -296,10 +301,9 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             context,
             step,
         } = *self;
-        let scratch = RunScratch::create(&config.cache_dir)?;
-        let kept = config
-            .keep_cache
-            .then(|| DecodeCache::open(&config.cache_dir))
+        let scratch = RunScratch::create(cache_dir)?;
+        let kept = keep_cache
+            .then(|| DecodeCache::open(cache_dir))
             .transpose()?;
         let frame_cache = FrameDiskCache {
             scratch: &scratch,
@@ -350,7 +354,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             "Spilled {} frames ({} channels each) to disk under {:?}",
             frames.len(),
             admission.dimensions().channels(),
-            config.cache_dir
+            cache_dir
         );
 
         Ok(LoadedTier {

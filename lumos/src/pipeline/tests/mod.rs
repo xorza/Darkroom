@@ -1,12 +1,14 @@
 mod mem_budget_probe;
 
+use crate::combine::config::{
+    Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
+};
 use crate::internals::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
@@ -227,7 +229,8 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     let weighted = AlignStackConfig {
         stack: StackConfig {
             weighting: Weighting::Manual(vec![1.0, 9.0, 2.0, 9.0, 3.0]),
-            ..Default::default()
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
         ..config
     };
@@ -433,8 +436,13 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     let config = AlignStackConfig {
         reference: Reference::Index(0),
         stack: StackConfig {
-            method: CombineMethod::Mean(Rejection::sigma_clip(f32::NAN)),
-            ..Default::default()
+            combine: Combine {
+                method: CombineMethod::Mean(Rejection::sigma_clip(f32::NAN)),
+                small_n: SmallN::median_below(5),
+            },
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
         ..Default::default()
     };
@@ -560,7 +568,8 @@ fn public_input_errors() {
     let manual = AlignStackConfig {
         stack: StackConfig {
             weighting: Weighting::Manual(vec![1.0]),
-            ..Default::default()
+            normalization: Normalization::None,
+            ..StackConfig::light()
         },
         ..AlignStackConfig::default()
     };
@@ -823,12 +832,12 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     config.registration.ransac.seed = 0x5EED_0F5E;
 
     let mut ram_config = config.clone();
-    ram_config.stack.ingest.memory_override = Some(u64::MAX);
-    ram_config.stack.ingest.cache_dir = scratch.join("ram_cache");
+    ram_config.ingest.memory_override = Some(u64::MAX);
+    ram_config.ingest.cache_dir = scratch.join("ram_cache");
 
     let mut streaming_config = config;
-    streaming_config.stack.ingest.memory_override = Some(1);
-    streaming_config.stack.ingest.cache_dir = scratch.join("streaming_cache");
+    streaming_config.ingest.memory_override = Some(1);
+    streaming_config.ingest.cache_dir = scratch.join("streaming_cache");
 
     let masters = CalibrationMasters::default();
     let run = |config: &AlignStackConfig| {
@@ -861,7 +870,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         "streaming tier did not park every light and read back every registered frame"
     );
     for config in [&ram_config, &streaming_config] {
-        let root = &config.stack.ingest.cache_dir;
+        let root = &config.ingest.cache_dir;
         assert!(
             !root.exists() || std::fs::read_dir(root).unwrap().next().is_none(),
             "{} kept a file",

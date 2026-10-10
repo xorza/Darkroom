@@ -5,18 +5,19 @@ use imaginarium::Buffer2;
 use lumos::detection;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CalibrationComponent, CalibrationError,
-    CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage, DefectSummary,
-    DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
-    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
-    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
-    FlagCounts, FrameRegistration, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
-    IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
-    LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, Normalization, Pedestal, QualityMap,
-    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
-    RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct, StarMatch,
-    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
-    WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    CalibrationMasters, CalibrationSet, CfaPattern, Combine, CombineMethod, Coverage,
+    DefectSummary, DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
+    FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
+    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
+    FitsTransferProvenance, FlagCounts, FrameRegistration, FrameStoreError, GesdConfig,
+    ImageDimensions, ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField,
+    LinearFitClipConfig, LinearImage, LoadContext, MarkesteijnPasses, MasterRole, MatchIndices,
+    Normalization, Pedestal, QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog,
+    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, RunReport,
+    SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError,
+    StackError, StackProduct, StarMatch, TransferProvenance, Transform, TransformModel,
+    TransformType, TriangleConfig, TrimConfig, WarpParams, WarpTransform, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -90,16 +91,21 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     ];
 
     let _: StackConfig = StackConfig {
-        method: CombineMethod::Mean(Rejection::None),
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::None),
+            small_n: SmallN {
+                min_frames: 3,
+                fallback: CombineMethod::Median,
+            },
+        },
         weighting: Weighting::Manual(vec![1.0, 2.0]),
         normalization: Normalization::Global,
-        small_n: SmallN {
-            min_frames: 3,
-            fallback: CombineMethod::Median,
-        },
-        ingest: IngestConfig::default(),
         quality: QualityPlanes::IMAGE_ONLY,
         min_survivors: 4,
+    };
+    let _: IngestConfig = IngestConfig {
+        keep_cache: true,
+        ..IngestConfig::with_cache_dir("cache".into())
     };
     assert_eq!(QualityPlanes::default(), QualityPlanes::STANDARD);
     assert_eq!(
@@ -180,7 +186,14 @@ fn invariant_types_expose_validated_state_from_the_crate_root() {
 
 #[test]
 fn stacking_configuration_errors_are_available_from_the_crate_root() {
-    let stack_error = StackConfig::sigma_clipped(0.0).validate().unwrap_err();
+    let stack_error = StackConfig {
+        combine: Combine::sigma_clipped(0.0),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    }
+    .validate()
+    .unwrap_err();
     assert_eq!(
         stack_error,
         StackConfigError::Field(InvalidConfigField {

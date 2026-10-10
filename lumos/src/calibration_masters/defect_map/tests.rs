@@ -1,6 +1,6 @@
 use crate::calibration_masters::defect_map::*;
 use crate::combine::cache::FrameCache;
-use crate::combine::config::{Normalization, StackConfig};
+use crate::combine::config::{Normalization, StackConfig, Weighting};
 use crate::combine::stack::run_stacking;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
@@ -210,8 +210,15 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         .collect();
     let cache = FrameCache::from_images(images, Normalization::None);
 
-    let product =
-        run_stacking(&cache, &StackConfig::default()).expect("this cache is never cancelled");
+    let product = run_stacking(
+        &cache,
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
+    )
+    .expect("this cache is never cancelled");
     assert!(
         (product.image.metadata.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
         "eight equal surviving frames must propagate σ/√8"

@@ -7,11 +7,10 @@ use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::memory_plan::MemoryPlan;
-use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::stored_image::StoredImage;
 use crate::pipeline::error::AlignStackError;
@@ -27,13 +26,9 @@ pub(crate) struct StagePlan {
 }
 
 impl StagePlan {
-    pub(crate) fn new(
-        plan: &MemoryPlan,
-        ingest: &IngestConfig,
-        memory: RunMemory,
-    ) -> Result<Self, AlignStackError> {
+    pub(crate) fn new(plan: &MemoryPlan, run: &IngestRun) -> Result<Self, AlignStackError> {
         Ok(Self {
-            tier: FrameTier::for_plan(plan, ingest, memory)?,
+            tier: FrameTier::for_plan(plan, run)?,
             warp_concurrency: plan.warp_concurrency,
         })
     }
@@ -64,18 +59,14 @@ pub(crate) enum FrameTier {
 
 impl FrameTier {
     /// Spill when the plan says the frame set plus its scratch will not fit.
-    fn for_plan(
-        plan: &MemoryPlan,
-        ingest: &IngestConfig,
-        memory: RunMemory,
-    ) -> Result<Self, AlignStackError> {
+    fn for_plan(plan: &MemoryPlan, run: &IngestRun) -> Result<Self, AlignStackError> {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }
-        RunScratch::create(&ingest.cache_dir)
+        RunScratch::create(&run.cache_dir)
             .map(|scratch| Self::Spill {
                 scratch,
-                chunk_memory: memory.planning(),
+                chunk_memory: run.memory.planning(),
                 parked: AtomicU64::new(0),
             })
             .map_err(AlignStackError::from)

@@ -51,9 +51,9 @@ use std::time::Instant;
 
 use common::CancelToken;
 
-use crate::combine::config::{CombineMethod, StackConfig};
-use crate::combine::rejection::Rejection;
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::combine::stack::stack;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, parse_budget,
 };
@@ -64,25 +64,19 @@ use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::{StackingProgress, StackingStage};
 use crate::stack_product::quality_planes::QualityPlanes;
 
-fn build_config(
-    method: &str,
-    memory_override: Option<u64>,
-    cache_dir: PathBuf,
-    keep: bool,
-) -> StackConfig {
-    let mut config = match method {
-        "median" => StackConfig::median(),
-        "mean" => StackConfig {
-            method: CombineMethod::Mean(Rejection::None),
-            ..StackConfig::sigma_clipped(3.0)
-        },
-        "sigma" => StackConfig::sigma_clipped(3.0),
+fn build_config(method: &str) -> StackConfig {
+    let combine = match method {
+        "median" => Combine::median(),
+        "mean" => Combine::mean(),
+        "sigma" => Combine::sigma_clipped(3.0),
         other => panic!("LUMOS_METHOD: expected sigma|median|mean, got {other:?}"),
     };
-    config.ingest.memory_override = memory_override;
-    config.ingest.cache_dir = cache_dir;
-    config.ingest.keep_cache = keep;
-    config
+    StackConfig {
+        combine,
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    }
 }
 
 #[test]
@@ -165,7 +159,13 @@ fn master_stack_memory_probe() -> io::Result<()> {
         }
     );
 
-    let config = build_config(&method, budget.memory_override, cache_dir, keep);
+    let config = build_config(&method);
+    let ingest = IngestConfig {
+        memory_override: budget.memory_override,
+        cache_dir,
+        keep_cache: keep,
+        ..IngestConfig::default()
+    };
 
     // Sample peak heap (RssAnon — the OOM-relevant, non-reclaimable metric) and total resident
     // (VmRSS, which includes reclaimable mmap'd spill pages) for the duration of the stack only.
@@ -210,8 +210,14 @@ fn master_stack_memory_probe() -> io::Result<()> {
         })
     };
 
-    let result =
-        stack(&frames.paths, &config, progress, CancelToken::never()).expect("stack failed");
+    let result = stack(
+        &frames.paths,
+        &config,
+        &ingest,
+        progress,
+        CancelToken::never(),
+    )
+    .expect("stack failed");
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();

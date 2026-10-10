@@ -25,86 +25,20 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **Calibration gives silently wrong lights** in three reproduced cases: a double pedestal, a
-   master that keeps frame 0's exposure, and a flat that keeps its bias (Batch 1).
-2. **The `light()` preset can run out of memory.** Normalization builds a full-plane buffer for
-   each thread, and no memory plan counts it (Batch 2). **The editor never uses that preset**,
-   so its light stacks have no normalization and no noise weighting (Batch 2b).
-3. **The exact masked-area black level never applies**, so Canon frames keep LibRaw's truncated
+1. **The exact masked-area black level never applies**, so Canon frames keep LibRaw's truncated
    black (Batch 3). **Corrupt RAW files decode "successfully"** (Batch 4).
-4. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
+2. **Sigma clip and winsorized over-reject clean data** on stars and nebulae, up to about 4× the
    nominal rate at small N (Batch 5).
-5. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
+3. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
    the samples. The confidence weighting gives the reference frame less weight (Batch 6).
-6. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
+4. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
    too little variance (Batch 7).
-7. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
+5. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
 
 Reading guide: batches are sorted by impact. Each batch is one change that should land in one
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 1: Calibration correctness — **high**
-
-Silently wrong calibrated lights. CAL-1, CAL-2 and CAL-3 were reproduced with probes that use
-only the public API, and no existing test catches them.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| CAL-1 | `calibrate` computes the dark's domain map *before* the bias subtraction changes the light's pedestal from `Kept` to `Removed`. The pedestal is then removed twice: the probe gave 0.21875 where 0.25 was expected, a loss of exactly 2048/65536. `from_images` does it correctly because it recomputes the map after each subtraction. | `calibration_masters/mod.rs:391-430` | confirmed |
-| CAL-2 | `stack_cfa_master` takes the master's exposure and temperature from frame 0 and never checks that the set agrees. Darks of 120, 300, 300, 300 and 300 s give a 300 s master labeled 120 s, and that dark is then scaled ×2.5. | `calibration_masters/mod.rs:98-126`, `combine/cache/set_facts.rs` | confirmed |
-| CAL-3 | `MasterSubtraction` accepts a subtractor that is already calibrated and still marks the flat as calibrated. `from_images` then skips the flat's bias, and the light is left 18 % non-uniform. Root cause: `ImageMetadata::calibrated: bool` cannot say *what* was removed. | `calibration_masters/master_subtraction.rs:16-38`, `mod.rs:245-249` | confirmed |
-| CAL-4 | The exposure and temperature of a flat-dark are never matched to the flats, although lights get this check through `dark_scale`. | `calibration_masters/mod.rs:245-271` | confirmed |
-
-**Direction:** Replace `calibrated: bool` with a typed record of what each frame lost (bias,
-thermal, flat). Derive every subtraction map from the domain that the light will have when that
-master is applied, or fold bias and dark into one subtraction. Admit calibration frames only when
-their exposure and temperature agree within the existing tolerances, and use a typed error that
-names the frame. Add exact dyadic tests for each reproduced case.
-
----
-
-## Batch 2: Memory budget correctness — **high**
-
-The memory plan is the reason the spill tier exists. These allocations escape the plan.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| PIP-1 | Global normalization (the `StackConfig::light()` preset) grows a full-plane f32 buffer on each rayon worker (`map_init(Vec::new)` + `reserve_exact(sample_count)`). Example: 61 MP on 32 threads needs about 7.8 GB on top of a plan that already uses 75 % of memory. Siril limits normalization threads by memory per image. | `combine/normalization/mod.rs:289,353,413` | confirmed |
-| CMB-5 | The linear-fit `NormalScores` table is N(N+1)/2 f64 per thread: 100 MB at N = 5000, ×32 threads. It grows lazily on the hot path and is not budgeted. | `combine/rejection/normal_scores.rs:334-350`, `scratch_buffers.rs:79-85` | confirmed |
-| PIP-23 | `.max(MIN_CHUNK_ROWS)` overcommits without a report. The output flags plane is not counted in `resident_bytes`. | `memory/chunk_memory_layout.rs:36-37`, `stack_product/quality_planes.rs:58-62` | confirmed |
-| PIP-25 | The tier-equivalence test is mono with `Normalization::None`, and the memory probes use the default config. Neither test reaches PIP-1 or PIP-2. | `pipeline/tests/mod.rs:784-916`, `pipeline/tests/mem_budget_probe.rs:183` | confirmed |
-
-**Direction:** First extend the tier sweep to {mono, RGB} × {None, Global} and add a
-`light()` memory probe. Then make the common-domain median exact without a copy: a radix or
-histogram select over the f32 bits, masked by the domain, with bounded scratch. The alternative
-is to limit the parallel width to `budget / plane_bytes` and charge that width in the plan. Cache
-the normal scores only for the counts actually seen, and reserve the cache for `frame_count`.
-
----
-
-## Batch 2b: Light stacking policy — **high (do after Batch 2)**
-
-The editor never normalizes or weights lights. The lens method presets
-(`lens/src/astro/config/stacking.rs:219-226`: `sigma_clipped`, `winsorized`, `median`, `mean`)
-take everything except the method from `StackConfig::default()`. That is
-`Normalization::None` + `Weighting::Equal`, and `AlignStackConfig::default()` does the same. Only
-`StackConfig::light()` has Global + Noise, and nothing in the editor uses it. Frames with different
-sky levels are then clipped as if the difference were outliers. Siril, PixInsight and DSS
-normalize and weight lights by default.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| PIP-21 | The method presets carry the run policy (normalization, weighting, ingest). The default lights pipeline is not normalized and not weighted. `IngestConfig` is inside the combine's `StackConfig`. | `combine/config/mod.rs:156,171-245,302-309`, `pipeline/config.rs`, `lens/src/astro/config/stacking.rs:219-226` | confirmed |
-
-**Direction (decided):** The method presets set only the method. The run sets normalization and
-weighting by role: lights get Global + Noise, and calibration masters keep their own presets.
-`AlignStackConfig` defaults to the light policy. Lens adds knobs for normalization and weighting
-with those defaults. Hoist `IngestConfig` to the run level. Batch 2 must land first, because
-this turns on the normalization memory path (PIP-1) for every editor stack.
 
 ---
 
@@ -234,9 +168,10 @@ medians and gains for each colour, and stratify the sample for each colour.
 
 ## Batch 9: Combine I/O passes — **medium-high (performance, bit-identical)**
 
-The combine phase reads an RGB warped spilled light about 15.75 plane-equivalents, against 5.25
-needed (mono: 7.25 against 3.25). Every item gives bit-identical output, and the extended tier
-sweep from Batch 2 guards them.
+The combine phase reads an RGB warped spilled light about 18.75 plane-equivalents, against 5.25
+needed (mono: 8.25 against 3.25). The exact common-domain median reads each plane twice, because it
+no longer copies the plane. Every item gives bit-identical output, and the tier sweep
+in `combine/stack/tests.rs` (`disk_tier_output_is_bit_identical_to_memory_tier`) guards them.
 
 | ID | Finding | Where | Conf. |
 |---|---|---|---|
@@ -290,8 +225,7 @@ plane. The librtprocess digests stay valid.
 
 **Direction:** Use one row-parallel kernel, `(L − B·g_b − o_b − s·(D·g_d + o_d)) / F`, with
 saturation and master flags in the same pass. Precompute `FLAT_FLOOR` into the divisor's flags.
-Update flag counts incrementally. Give null repair one owner. Do this after Batch 1, because it
-rewrites the same function.
+Update flag counts incrementally. Give null repair one owner.
 
 ---
 
@@ -424,7 +358,7 @@ high-pass filter in ring rows, and retune `TILE`. The librtprocess digest stays 
 | PIP-13 | Frame-carrier types overlap: `DetectedFrame`/`FrameToPark`, `StoredImage`/`StoredFrame`, `Lights`/`LightSource`, and nine private loader types. | see report | confirmed |
 | PIP-10 | Lights that are already calibrated on disk have no tiered entry, so RGB FITS lights must be fully resident and can never spill. | `pipeline/align.rs:42-55`, `pipeline/calibrate.rs:37-69` | confirmed |
 | PIP-4 | `keep_cache` works only on the disk tier, and the registered runs never use it, which is not what the doc promises. | `combine/cache/loader/mod.rs:121-125`, `ingest/ingest_config.rs:22-26` | confirmed |
-| CAL-14 | The master-building policy is written twice, in lumos internals and in `lens`. The public `stack_cfa_master` has no role, which is why CAL-3 and CAL-4 are possible. | `calibration_masters/mod.rs:98,572-621`, `lens/src/astro/nodes/calibration.rs:127-240` | confirmed |
+| CAL-14 | The master-building policy is written twice, in lumos internals and in `lens`. | `calibration_masters/mod.rs:98,572-621`, `lens/src/astro/nodes/calibration.rs:127-240` | confirmed |
 
 **Direction:** Use one ingest type in `ingest/`, with the source as a parameter (paths + optional
 `FrameStep`, held images, or RAW + masters) and the sink as a parameter (park or store). Move
@@ -487,7 +421,7 @@ fraction for each colour, and Gr/Gb (CAL-16), on the real-data set.
 
 **Direction (decided):** For each light, fit the dark scale k by least squares on the hot-pixel
 residuals. Do this only for bias-removed darks, because only the thermal part scales. Record k
-in the outcome. Do this after Batch 1 and with Batch 23, because both use the hot-pixel set.
+in the outcome. Do this with Batch 23, because both use the hot-pixel set.
 
 ---
 
@@ -551,7 +485,6 @@ Each decision is also written into the direction of its batch.
 | ID | Decision | Batch |
 |---|---|---|
 | DRZ-3 | Warp confidence `q` stays in the per-sample noise model only (rejection, variance plane). The mean uses frame weights only. | 6 |
-| PIP-21 | Split the method from the policy. Method presets set only the method. The run sets normalization and weighting by role: lights get Global + Noise, and masters keep their presets. `AlignStackConfig` defaults to the light policy, and lens adds knobs with those defaults. | 2b |
 | CMB-9 | Publish an inverse-variance plane in place of the variance plane, so 0 means "no information". Refuse `Manual` weights of 0 at validation. | 7 |
 | CAL-11 / CMB-7 | `quantization_sigma` means the source's ADC step noise before flat division. It stays unchanged through calibration, and that is documented. Remove the master's worst-pixel computation. The 1/f part goes into the flat-aware noise model. | 7 |
 | CMB-13 | Use per-sample bands `|x−c|/σᵢ` for the `CcdModel` rejection scale only. The robust scales keep the sorted window. | 5 |

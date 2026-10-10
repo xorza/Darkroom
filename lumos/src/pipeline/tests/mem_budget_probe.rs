@@ -32,6 +32,7 @@
 //! cargo test -p lumos --release --features real-data raw_lights_memory_probe -- --ignored --nocapture
 //! ```
 
+use crate::ingest::ingest_config::IngestConfig;
 use crate::math::size2us::Size2us;
 use common::internals;
 use std::env;
@@ -47,7 +48,6 @@ use glam::DVec2;
 use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::master_role::MasterRole;
 use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master};
-use crate::combine::config::StackConfig;
 use crate::internals::cfa::make_cfa;
 use crate::internals::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, env_parse, measured, parse_budget,
@@ -150,14 +150,17 @@ fn pipeline_budget_probe() -> io::Result<()> {
     let sampler = RssSampler::start();
     let start = Instant::now();
     let master = |k: usize, role: MasterRole| {
-        let mut config = role.stack_config();
-        config.ingest.memory_override = budget.memory_override;
-        config.ingest.cache_dir = base.join(format!("cache_{k}"));
+        let ingest = IngestConfig {
+            memory_override: budget.memory_override,
+            cache_dir: base.join(format!("cache_{k}")),
+            ..IngestConfig::default()
+        };
         let stage_start = Instant::now();
         let master = stack_cfa_master(
             &calibration,
             role,
-            config,
+            role.stack_config(),
+            &ingest,
             None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -184,12 +187,9 @@ fn pipeline_budget_probe() -> io::Result<()> {
     )
     .expect("assemble the masters");
 
-    let mut config = AlignStackConfig {
-        stack: StackConfig::light(),
-        ..AlignStackConfig::default()
-    };
-    config.stack.ingest.memory_override = budget.memory_override;
-    config.stack.ingest.cache_dir = base.join("cache_2");
+    let mut config = AlignStackConfig::default();
+    config.ingest.memory_override = budget.memory_override;
+    config.ingest.cache_dir = base.join("cache_2");
     let stage_start = Instant::now();
     let result = calibrate_align_stack(
         &lights,
@@ -413,7 +413,7 @@ fn raw_lights_memory_probe() {
 
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = 1;
-    config.stack.ingest.memory_override = budget.memory_override;
+    config.ingest.memory_override = budget.memory_override;
     // The gate opens as the preparing pass reports its last frame, so the peak splits into the
     // decode and detect pass and the register, warp and combine passes after it.
     let sampler = RssSampler::start();

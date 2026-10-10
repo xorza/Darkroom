@@ -11,7 +11,7 @@ mod snapshot;
 
 use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
-use crate::combine::config::StackConfig;
+use crate::combine::config::{Normalization, StackConfig, Weighting};
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::cache_key::DECODE_PINS;
 use crate::frame_store::frame_stats::FrameStats;
@@ -316,7 +316,11 @@ fn combine_snapshot() {
     }
     let product = stack_images(
         frames,
-        &StackConfig::default(),
+        &StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        },
         ProgressCallback::default(),
         CancelToken::never(),
     )

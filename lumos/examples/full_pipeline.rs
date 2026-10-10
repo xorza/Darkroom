@@ -20,8 +20,8 @@ use std::time::Instant;
 
 use common::CancelToken;
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
-    ProgressCallback, calibrate_align_stack, stack_cfa_master,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
+    MasterRole, ProgressCallback, calibrate_align_stack, stack_cfa_master,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -116,6 +116,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
             paths,
             role,
             role.stack_config(),
+            &IngestConfig::default(),
             None,
             ProgressCallback::default(),
             CancelToken::never(),

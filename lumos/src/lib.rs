@@ -143,7 +143,7 @@ pub use registration::transform::{Transform, TransformModel, TransformType, Warp
 pub use registration::triangle::TriangleConfig;
 pub use registration::triangle::voting::MatchIndices;
 
-pub use combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
+pub use combine::config::{Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting};
 pub use combine::error::{StackConfigError, StackError};
 pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;

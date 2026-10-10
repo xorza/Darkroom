@@ -6,94 +6,7 @@ metadata). References: Siril (`src/core/preprocess.c`, `src/core/siril.c`,
 `src/filters/cosmetic_correction.c`, `src/stacking/normalization.c`), ccdproc (`ccdproc/core.py`),
 DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
 
-Three findings (CAL-1, CAL-2, CAL-3) were reproduced with an out-of-tree probe binary
-(scratchpad `probe/`, path-depending on `lumos`, public API only, no repo file touched). The outputs
-are quoted in each finding. `cargo test -p lumos --tests --features ml calibration`: 88 passed, 0 failed, in 1.06 s. None of the existing tests catches CAL-1, CAL-2 or CAL-3.
-
 ---
-
-## CAL-1 — Dark subtracted with a domain map computed before the bias moved the light's pedestal
-
-- **Where:** `lumos/src/calibration_masters/mod.rs:391-430` (`calibrate`)
-- **Category:** correctness
-- **Impact:** high — a light with a known kept pedestal, calibrated with a bias and a bias-removed
-  dark, loses the pedestal twice. Silent in release builds. In debug builds the `debug_assert!` in
-  `CfaImage::subtract_scaled` (`io/image/cfa/mod.rs:456`) fires.
-- **Confidence:** confirmed (reproduced)
-- **Evidence:** `calibrate` builds the dark's map with `master_scale(image, &dark.image, …)` and the
-  bias's map against the untouched light, then subtracts the bias first. That subtraction changes
-  the light's pedestal (`subtract_scaled` → `after_subtracting` → `Removed`), so the dark's map,
-  computed against `Kept(p)`, now carries offset `p/scale` onto a light that no longer holds `p`.
-  `from_images` gets this right: it recomputes `master_scale` inside the loop after each subtraction
-  (`mod.rs:265-268`). In `calibrate` the stale map is used.
-  Probe: every frame is `Kept(2048)` on a declared 65536 span; bias = 0.03125, dark = bias + 0.0625,
-  light = bias + 0.0625 + 0.25. Output: `calibrated = 0.21875 (expected 0.25)`. The missing
-  0.03125 is exactly 2048/65536.
-  No existing test covers the bias + dark + kept-pedestal combination:
-  `a_dark_that_kept_its_pedestal_subtracts_only_its_signal` uses a dark alone.
-- **Recommended direction:** Fold bias and dark into one subtraction whose map is derived once from
-  the final domains, or compute each map from the light's domain as it will be when that master is
-  applied. Add the bias + bias-removed dark + `Kept` light case to the pedestal test (expected 0.25
-  exactly with these dyadic values).
-
-## CAL-2 — Master metadata is frame 0's: mixed-exposure darks get a false exposure
-
-- **Where:** `lumos/src/calibration_masters/mod.rs:98-126` (`stack_cfa_master`). The metadata comes
-  from `combine/cache/loader/mod.rs:272,329`, and the set checks in `combine/cache/set_facts.rs:21`
-  cover only domain, row order and CFA type.
-- **Category:** correctness
-- **Impact:** high — dark matching and dark scaling (`dark_scale`, `mod.rs:444-475`) trust
-  `exposure_time` and `ccd_temp` from the master's metadata. A dark set with mixed exposures (or
-  temperatures) produces a master that states frame 0's values while the combine's rejection keeps
-  the majority's level. A bias-removed dark is then scaled by the wrong ratio. A bias-included dark
-  is refused, or accepted, for the wrong reason.
-- **Confidence:** confirmed (reproduced)
-- **Evidence:** Probe: darks of 120, 300, 300, 300, 300 s give
-  `master exposure Some(120.0), value 0.03`. The value is the 300 s level (Winsorization clipped
-  the odd frame), but the master states 120 s. A 300 s light with a bias then gets the dark scaled
-  ×2.5. DSS groups darks by exposure before it combines them. ccdproc's `subtract_dark` takes the
-  exposures explicitly (`core.py:1459-1540`).
-- **Recommended direction:** When stacking a calibration role, admit frames only when exposure
-  agrees within `EXPOSURE_TOLERANCE` (and temperature within `TEMPERATURE_TOLERANCE` when stated).
-  Use a typed `StackError` variant naming the frame. Alternatively record the set's mean temperature
-  and the exposure the set shares. Bias frames need only the exposure check, or none.
-
-## CAL-3 — A calibrated subtractor is accepted per frame, so the flat keeps its bias
-
-- **Where:** `lumos/src/calibration_masters/master_subtraction.rs:16-38`, with `mod.rs:245-249`
-- **Category:** correctness
-- **Impact:** high — the flat is divided with its offset still in it. The light then carries an
-  inverse-vignetting residual (18% in the probe). This is the exact failure `from_images` refuses
-  for a whole master (`CalibratedSubtractor`).
-- **Confidence:** confirmed (reproduced)
-- **Evidence:** `MasterSubtraction::apply` checks shape and domain but never
-  `master.metadata.calibrated`, and marks the flat `calibrated = true` either way. `from_images`
-  then sees a calibrated flat and skips its own subtraction (`if flat.metadata.calibrated { return
-  Ok(flat) }`), even though the flat-dark it was given holds only the thermal signal and a bias is
-  present. Probe (flat = 0.125 bias + 1/64 thermal + 0.5·v, subtractor = calibrated thermal-only
-  flat-dark, bias present): `flat stack … Ok(Some((0.375, 0.625, true)))`, then
-  `light after calibration (should be uniform): 0.16666667 0.2`.
-  The deeper cause is that `ImageMetadata::calibrated: bool` cannot say *what* was removed. A dark
-  marked calibrated is assumed bias-removed (`mod.rs:292`), and a flat marked calibrated is assumed
-  fully offset-free.
-- **Recommended direction:** Make `MasterSubtraction` refuse a calibrated subtractor with a typed
-  error. Better, replace the `calibrated` bool with a typed record of what a frame lost (bias,
-  thermal, flat), so `from_images` can finish a flat that lost only its thermal part.
-
-## CAL-4 — Flat-dark (and per-frame subtractor) exposure and temperature are never matched to the flats
-
-- **Where:** `lumos/src/calibration_masters/mod.rs:245-271` (`from_images` flat branch),
-  `master_subtraction.rs:16-38`
-- **Category:** correctness
-- **Impact:** medium — a flat-dark of another exposure is subtracted at face value. Its thermal
-  part is wrong by the exposure ratio, and the result is a residual under the flat's vignetting.
-  Lights get exposure and temperature matching (`dark_scale`); flats get none.
-- **Confidence:** confirmed (by reading)
-- **Evidence:** Only `master_scale` (domain conversion) is checked for the flat's subtractors.
-  Siril checks exposure for dark optimization (`preprocess.c:233-247`).
-- **Recommended direction:** Apply the same exposure/temperature check (or the bias-removed scaling)
-  that `dark_scale` applies to lights, both per frame in `MasterSubtraction` and per master in
-  `from_images`.
 
 ## CAL-5 — Hot-pixel threshold is tied to the master dark's own spread, not to what the dark leaves in a light
 
@@ -234,9 +147,7 @@ are quoted in each finding. `cargo test -p lumos --tests --features ml calibrati
   `lens/src/astro/nodes/calibration.rs:127-240`, public `stack_cfa_master` (`mod.rs:98`)
 - **Category:** design
 - **Impact:** low-medium — the rule "stack each role under its preset, flats take flat-dark else bias
-  per frame, then `from_images`" is written twice. The public primitive `stack_cfa_master` takes a
-  raw `StackConfig` and an arbitrary subtractor, with no role. That is why CAL-3 and CAL-4 can
-  happen: nothing at that layer knows it is stacking flats.
+  per frame, then `from_images`" is written twice.
 - **Confidence:** confirmed
 - **Recommended direction:** A lumos-owned
   `CalibrationMasters::build(CalibrationSet<&[P]>, …)` (with an optional per-role cache hook for
@@ -361,18 +272,14 @@ are quoted in each finding. `cargo test -p lumos --tests --features ml calibrati
 
 ## Suggested batches
 
-1. **Calibration correctness (CAL-1, CAL-3, CAL-4, CAL-2):** fix the stale pedestal map, refuse
-   calibrated per-frame subtractors, match flat-dark exposure and temperature, and check master-set
-   exposure and temperature homogeneity. Natural companion: replace `calibrated: bool` with a typed
-   record of what was removed.
-2. **Fused per-light kernel (CAL-8, with CAL-11):** one pass for bias, dark, flat and flags.
+1. **Fused per-light kernel (CAL-8, with CAL-11):** one pass for bias, dark, flat and flags.
    Incremental flag counts. Decide what `quantization_sigma` means after calibration.
-3. **Defect policy (CAL-5, CAL-16):** redefine the hot-pixel threshold from what a defect promises;
+2. **Defect policy (CAL-5, CAL-16):** redefine the hot-pixel threshold from what a defect promises;
    measure the flagged fraction and Gr/Gb on real data.
-4. **Cosmic rays (CAL-6, CAL-7, CAL-9, CAL-12, CAL-17):** saturated-star protection and flag-aware
+3. **Cosmic rays (CAL-6, CAL-7, CAL-9, CAL-12, CAL-17):** saturated-star protection and flag-aware
    in-paint, X-Trans threshold calibration with noise-only and star tests, local re-iteration, a
    flat-aware gain term, and typed detectors.
-5. **API and layout (CAL-14, CAL-15, CAL-13, CAL-10, CAL-18):** a lumos-owned master builder,
+4. **API and layout (CAL-14, CAL-15, CAL-13, CAL-10, CAL-18):** a lumos-owned master builder,
    narrower visibility, path-carrying calibration errors, a typed bundle error with mmap load, and
    the comment trims.
-6. **Optional or product calls (CAL-19, CAL-20).**
+5. **Optional or product calls (CAL-19, CAL-20).**

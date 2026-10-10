@@ -4,6 +4,7 @@ use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
+use crate::pipeline::config::AlignStackConfig;
 
 #[test]
 fn small_n_resolve_downgrades_below_min_frames() {
@@ -23,10 +24,10 @@ fn small_n_resolve_downgrades_below_min_frames() {
     );
     // The flat preset's stricter floor of 8 is honoured.
     assert_eq!(
-        StackConfig::flat().small_n.resolve(sigma, 7),
+        StackConfig::flat().combine.small_n.resolve(sigma, 7),
         CombineMethod::Median
     );
-    assert_eq!(StackConfig::flat().small_n.resolve(sigma, 8), sigma);
+    assert_eq!(StackConfig::flat().combine.small_n.resolve(sigma, 8), sigma);
 }
 
 /// Manual weights follow their frames past a drop: inputs 1 and 3 gone from five leave the
@@ -35,7 +36,8 @@ fn small_n_resolve_downgrades_below_min_frames() {
 fn for_survivors_keeps_the_weights_of_the_frames_left() {
     let config = StackConfig {
         weighting: Weighting::Manual(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
-        ..Default::default()
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     let Weighting::Manual(weights) = config.for_survivors(&[1, 3]).weighting else {
         panic!("manual stays manual")
@@ -46,125 +48,121 @@ fn for_survivors_keeps_the_weights_of_the_frames_left() {
     };
     assert_eq!(all, [1.0, 2.0, 3.0, 4.0, 5.0]);
     assert!(matches!(
-        StackConfig::default().for_survivors(&[0]).weighting,
+        StackConfig {
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        }
+        .for_survivors(&[0])
+        .weighting,
         Weighting::Equal
     ));
 }
 
-/// Every preset's method, weighting, normalization and small-stack fallback.
+/// Every method preset's method and small-stack fallback, and nothing else: the policy around it
+/// is the role's.
 #[test]
-fn presets_configure_as_documented() {
+fn method_presets_set_the_method_alone() {
     let mean = CombineMethod::Mean;
     let floor = SmallN::median_below(MIN_FRAMES_FOR_REJECTION);
-    for (name, config, method, weighting, normalization, small_n) in [
-        (
-            "default",
-            StackConfig::default(),
-            mean(Rejection::default()),
-            Weighting::Equal,
-            Normalization::None,
-            floor,
-        ),
+    for (name, combine, method, small_n) in [
         (
             "sigma clipped",
-            StackConfig::sigma_clipped(2.0),
+            Combine::sigma_clipped(2.0),
             mean(Rejection::sigma_clip(2.0)),
-            Weighting::Equal,
-            Normalization::None,
             floor,
         ),
         (
             "median",
-            StackConfig::median(),
+            Combine::median(),
             CombineMethod::Median,
-            Weighting::Equal,
-            Normalization::None,
             SmallN::none(),
         ),
         (
             "mean",
-            StackConfig::mean(),
+            Combine::mean(),
             mean(Rejection::None),
-            Weighting::Equal,
-            Normalization::None,
             SmallN::none(),
         ),
         (
-            "weighted",
-            StackConfig::weighted(vec![1.0, 2.0, 3.0]),
-            mean(Rejection::default()),
-            Weighting::Manual(vec![1.0, 2.0, 3.0]),
-            Normalization::None,
-            floor,
-        ),
-        (
             "winsorized",
-            StackConfig::winsorized(2.0),
+            Combine::winsorized(2.0),
             mean(Rejection::winsorized(2.0)),
-            Weighting::Equal,
-            Normalization::None,
             SmallN::none(),
         ),
         (
             "linear fit",
-            StackConfig::linear_fit(2.0),
+            Combine::linear_fit(2.0),
             mean(Rejection::linear_fit(2.0)),
-            Weighting::Equal,
-            Normalization::None,
             floor,
         ),
         (
             "trim",
-            StackConfig::trim(15.0),
+            Combine::trim(15.0),
             mean(Rejection::trim(15.0)),
-            Weighting::Equal,
-            Normalization::None,
             SmallN::none(),
         ),
         (
             "gesd",
-            StackConfig::gesd(),
+            Combine::gesd(),
             mean(Rejection::gesd()),
-            Weighting::Equal,
-            Normalization::None,
             SmallN::median_below(MIN_FRAMES_FOR_GESD),
         ),
-        (
-            "bias or dark",
-            StackConfig::bias_or_dark(),
-            mean(Rejection::winsorized(3.0)),
-            Weighting::Equal,
-            Normalization::None,
-            SmallN::none(),
-        ),
-        (
-            "flat",
-            StackConfig::flat(),
-            mean(Rejection::sigma_clip(3.0)),
-            Weighting::Equal,
-            Normalization::Multiplicative,
-            SmallN::median_below(8),
-        ),
-        (
-            "light",
-            StackConfig::light(),
-            mean(Rejection::sigma_clip(2.5)),
-            Weighting::Noise,
-            Normalization::Global,
-            floor,
-        ),
     ] {
-        assert_eq!(config.method, method, "{name}");
-        assert_eq!(config.weighting, weighting, "{name}");
-        assert_eq!(config.normalization, normalization, "{name}");
-        assert_eq!(config.small_n, small_n, "{name}");
+        assert_eq!(combine, Combine { method, small_n }, "{name}");
     }
     assert_eq!((MIN_FRAMES_FOR_REJECTION, MIN_FRAMES_FOR_GESD), (5, 15));
 }
 
+/// Every role preset's combine, weighting and normalization: lights are normalized and weighted
+/// by their noise, masters neither weighted nor normalized but the flats, which are scaled to one
+/// another.
+#[test]
+fn role_presets_set_the_policy_of_their_frames() {
+    for (name, config, combine, weighting, normalization) in [
+        (
+            "light",
+            StackConfig::light(),
+            Combine::sigma_clipped(2.5),
+            Weighting::Noise,
+            Normalization::Global,
+        ),
+        (
+            "bias or dark",
+            StackConfig::bias_or_dark(),
+            Combine::winsorized(3.0),
+            Weighting::Equal,
+            Normalization::None,
+        ),
+        (
+            "flat",
+            StackConfig::flat(),
+            Combine {
+                method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
+                small_n: SmallN::median_below(8),
+            },
+            Weighting::Equal,
+            Normalization::Multiplicative,
+        ),
+    ] {
+        assert_eq!(config.combine, combine, "{name}");
+        assert_eq!(config.weighting, weighting, "{name}");
+        assert_eq!(config.normalization, normalization, "{name}");
+        assert_eq!(config.quality, QualityPlanes::STANDARD, "{name}");
+        assert_eq!(config.min_survivors, DEFAULT_MIN_SURVIVORS, "{name}");
+    }
+    // A registered stack is of lights unless its caller says otherwise.
+    assert_eq!(AlignStackConfig::default().stack, StackConfig::light());
+}
+
 #[test]
 fn validate_valid_config() {
-    let config = StackConfig::sigma_clipped(2.5);
+    let config = StackConfig {
+        combine: Combine::sigma_clipped(2.5),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    };
     assert_eq!(config.validate(), Ok(()));
 }
 
@@ -172,70 +170,130 @@ fn validate_valid_config() {
 fn validate_invalid_config_returns_exact_errors() {
     // Each case: the config, and the field its rejection must name with the value it carries.
     let range_checks = [
-        (StackConfig::sigma_clipped(-1.0), "sigma_low", -1.0),
+        (
+            StackConfig {
+                combine: Combine::sigma_clipped(-1.0),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            "sigma_low",
+            -1.0,
+        ),
         (
             StackConfig {
                 min_survivors: 0,
-                ..Default::default()
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "min_survivors",
             0.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, f32::INFINITY)),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(
+                        2.0,
+                        f32::INFINITY,
+                    )),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "sigma_high",
             f64::INFINITY,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(2.0, 0))),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(2.0, 0))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "max_iterations",
             0.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Winsorized(WinsorizedClipConfig::new(0.0))),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Winsorized(WinsorizedClipConfig::new(
+                        0.0,
+                    ))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "sigma_low",
             0.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::LinearFit(LinearFitClipConfig::new(
-                    2.0, 0.0, 3,
-                ))),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::LinearFit(LinearFitClipConfig::new(
+                        2.0, 0.0, 3,
+                    ))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "sigma_high",
             0.0,
         ),
-        (StackConfig::trim(60.0), "low_percent", 60.0),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(10.0, 60.0))),
-                ..Default::default()
+                combine: Combine::trim(60.0),
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            "low_percent",
+            60.0,
+        ),
+        (
+            StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(10.0, 60.0))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "high_percent",
             60.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(50.0, 50.0))),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(50.0, 50.0))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "low_percent + high_percent",
             100.0,
         ),
         (
             StackConfig {
-                method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(1.0, None))),
-                ..Default::default()
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(1.0, None))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             "GESD alpha",
             1.0,
@@ -251,23 +309,36 @@ fn validate_invalid_config_returns_exact_errors() {
     // The constraints that aren't a range check on one field keep their own variant.
     let structural = [
         (
-            StackConfig::weighted(vec![1.0, -0.5]),
+            StackConfig {
+                weighting: Weighting::Manual(vec![1.0, -0.5]),
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
             StackConfigError::InvalidManualWeight {
                 index: 1,
                 value: -0.5,
             },
         ),
         (
-            StackConfig::weighted(vec![0.0, 0.0]),
+            StackConfig {
+                weighting: Weighting::Manual(vec![0.0, 0.0]),
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
             StackConfigError::InvalidManualWeightSum,
         ),
         (
             StackConfig {
-                small_n: SmallN {
-                    min_frames: 5,
-                    fallback: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+                combine: Combine {
+                    small_n: SmallN {
+                        min_frames: 5,
+                        fallback: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
+                    },
+                    ..Combine::sigma_clipped(2.5)
                 },
-                ..Default::default()
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
             },
             StackConfigError::RejectingSmallNFallback,
         ),

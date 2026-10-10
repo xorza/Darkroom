@@ -6,6 +6,7 @@
 //! exemption from it), and both halves of the null convention. The demosaic path is exercised by
 //! building mosaics from known colours and demosaicing them back.
 
+use crate::combine::config::{Normalization, StackConfig, Weighting};
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::QualityFlags;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -13,7 +14,6 @@ use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::combine::config::StackConfig;
 use crate::combine::error::StackError;
 use crate::combine::stack;
 use crate::drizzle::accumulator::DrizzleFrame;
@@ -21,6 +21,7 @@ use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::error::DrizzleError;
 use crate::drizzle::stack::drizzle_stack;
 use crate::frame_store::frame_peek::FramePeek;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
@@ -353,7 +354,12 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let stack_paths = |paths: &[&Path]| {
         stack::stack(
             paths,
-            &StackConfig::default(),
+            &StackConfig {
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            &IngestConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -410,10 +416,11 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         .build()
         .unwrap();
     for available_memory in [1 << 30, 1] {
+        let ingest = IngestConfig::with_cache_dir(dir.join("cache"));
         let config = StackConfig {
-            ingest: IngestConfig::with_cache_dir(dir.join("cache")),
             normalization: Normalization::None,
-            ..StackConfig::default()
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
         };
         let memory = RunMemory::new(1 << 30, Some(available_memory));
         let linear_set = |second: &Path| {
@@ -421,7 +428,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
                     &config,
-                    IngestRun::planned(memory),
+                    IngestRun::planned(memory, &ingest),
                     ProgressCallback::default(),
                 )
             })
@@ -457,7 +464,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             FrameCache::from_cfa_paths(
                 &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
                 &config,
-                IngestRun::planned(memory),
+                IngestRun::planned(memory, &ingest),
                 None,
                 ProgressCallback::default(),
             )
@@ -620,22 +627,27 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     // Every entry that reads files takes its FITS policy from its config: the strict one refuses
     // the frame in a stack and in a drizzle, and the default one stacks it.
     let paths = [float_path.clone(), float_path.clone()];
-    let stack_config = |fits: &FitsLoadOptions| {
-        let mut config = StackConfig::default();
-        config.ingest.fits = fits.clone();
-        config.ingest.cache_dir = dir.join("cache");
-        config
+    let config = StackConfig {
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    };
+    let ingest = |fits: &FitsLoadOptions| IngestConfig {
+        fits: fits.clone(),
+        ..IngestConfig::with_cache_dir(dir.join("cache"))
     };
     let stacked = stack::stack(
         &paths,
-        &stack_config(&float_context.fits),
+        &config,
+        &ingest(&float_context.fits),
         ProgressCallback::default(),
         CancelToken::never(),
     );
     assert!(stacked.is_ok(), "{stacked:?}");
     let refused = stack::stack(
         &paths,
-        &stack_config(&strict.fits),
+        &config,
+        &ingest(&strict.fits),
         ProgressCallback::default(),
         CancelToken::never(),
     );

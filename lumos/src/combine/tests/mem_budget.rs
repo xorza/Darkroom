@@ -14,8 +14,9 @@ use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::combine::config::StackConfig;
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::combine::stack::stack;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
@@ -62,12 +63,22 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         .collect();
 
     let master = |memory_override: u64, tag: &str| {
-        let mut config = StackConfig::mean(); // Mean, no rejection → exact average.
-        config.ingest.memory_override = Some(memory_override);
-        config.ingest.cache_dir = dir.join(format!("cache_{tag}"));
+        // Mean, no rejection → exact average.
+        let config = StackConfig {
+            combine: Combine::mean(),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            ..StackConfig::light()
+        };
+        let ingest = IngestConfig {
+            memory_override: Some(memory_override),
+            cache_dir: dir.join(format!("cache_{tag}")),
+            ..IngestConfig::default()
+        };
         stack(
             &paths,
             &config,
+            &ingest,
             ProgressCallback::default(),
             CancelToken::never(),
         )

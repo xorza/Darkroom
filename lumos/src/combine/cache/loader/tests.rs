@@ -1,3 +1,5 @@
+use crate::combine::config::{Normalization, Weighting};
+use crate::ingest::ingest_config::IngestConfig;
 use crate::memory::run_memory::RunMemory;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
@@ -217,19 +219,21 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
             path
         })
         .collect();
+    let ingest = IngestConfig {
+        cache_dir: temp_dir.join("cache"),
+        keep_cache: true,
+        ..IngestConfig::default()
+    };
     let config = StackConfig {
-        ingest: IngestConfig {
-            cache_dir: temp_dir.join("cache"),
-            keep_cache: true,
-            ..IngestConfig::default()
-        },
-        ..StackConfig::default()
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
     };
     let run = || {
         load_tiered::<LinearImage, _>(
             &paths,
             &config,
-            IngestRun::planned(RunMemory::new(1 << 30, Some(1))),
+            IngestRun::planned(RunMemory::new(1 << 30, Some(1)), &ingest),
             None,
             ProgressCallback::default(),
         )
@@ -239,7 +243,7 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
     let first = run();
     assert!(first.core.tier.spills(), "a one-byte budget spills");
     drop(first);
-    let directory = kept_directory(&config.ingest.cache_dir);
+    let directory = kept_directory(&ingest.cache_dir);
     let key = |path: &Path| {
         CacheKey::new(
             CachedSource::of(path).unwrap().identity,

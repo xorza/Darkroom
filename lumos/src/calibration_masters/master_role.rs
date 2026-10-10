@@ -81,8 +81,8 @@ impl MasterRole {
     /// The preset this role's frames stack under — the one role → preset table. Darks, biases
     /// and flat-darks (a flat-dark is a dark taken at the flat's exposure time) are a Winsorized
     /// mean at any frame count; flats a σ-clipped mean that falls back to the median below 8
-    /// frames. Each preset carries its own small-frame fallback (`StackConfig::small_n`).
-    pub fn stack_config(self) -> StackConfig {
+    /// frames. Each preset carries its own small-frame fallback (`Combine::small_n`).
+    pub const fn stack_config(self) -> StackConfig {
         match self {
             Self::Dark | Self::FlatDark | Self::Bias => StackConfig::bias_or_dark(),
             Self::Flat => StackConfig::flat(),
