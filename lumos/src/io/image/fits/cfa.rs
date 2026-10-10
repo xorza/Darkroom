@@ -14,9 +14,10 @@ use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata}
 use crate::io::image::pixel_flags::QualityFlags;
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
-/// 3: every flag is kept, in a `LUMFLAGS` extension; a version-2 file kept only `NO_DATA`, so its
-/// other flags are gone, and a master of that version is rebuilt instead.
-pub(crate) const CFA_FITS_VERSION: i64 = 3;
+/// 4: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration
+/// removed (`LUMCALB`, `LUMCALD`, `LUMCALF`). A file of an earlier version is refused, so a master
+/// cached by one, whose record of what it lost is missing, is rebuilt instead.
+pub(crate) const CFA_FITS_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {

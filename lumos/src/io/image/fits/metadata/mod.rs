@@ -3,6 +3,7 @@ pub(crate) mod domain_keywords;
 use fits_well::header::Header;
 use fits_well::image::SampleType;
 
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
@@ -92,14 +93,14 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         instrument: text(MetadataField::Instrument),
         telescope: text(MetadataField::Telescope),
         date_obs: text(MetadataField::DateObs),
-        exposure_time: real(MetadataField::ExposureTime),
+        exposure_time: MetadataField::ExposureTime.read(header, read_exposure),
         iso: MetadataField::Iso.read(header, read_u32),
         sample_type: Some(sample_type),
         camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
         filter: text(MetadataField::Filter),
         gain: real(MetadataField::Gain),
         egain: real(MetadataField::Egain),
-        ccd_temp: real(MetadataField::CcdTemp),
+        ccd_temp: MetadataField::CcdTemp.read(header, read_temperature),
         image_type: text(MetadataField::ImageType),
         xbinning: MetadataField::XBinning.read(header, read_i32),
         ybinning: MetadataField::YBinning.read(header, read_i32),
@@ -118,7 +119,20 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         quantization_sigma: None,
         mosaic_noise: None,
         saturation_flagged: false,
-        calibrated: optional("LUMCAL", header.get_logical("LUMCAL")).unwrap_or(false),
+        calibration: read_calibration(header),
+    }
+}
+
+/// The logical keyword that records each part calibration removed: bias, dark signal, flat.
+const CALIBRATION_KEYWORDS: [&str; 3] = ["LUMCALB", "LUMCALD", "LUMCALF"];
+
+fn read_calibration(header: &Header) -> CalibrationState {
+    let [bias, thermal, flat] = CALIBRATION_KEYWORDS
+        .map(|keyword| optional(keyword, header.get_logical(keyword)).unwrap_or(false));
+    CalibrationState {
+        bias,
+        thermal,
+        flat,
     }
 }
 
@@ -197,8 +211,15 @@ pub(super) fn write_image_metadata(
     set_optional_real(header, Field::PixelSizeX.keyword(), metadata.pixel_size_x)?;
     set_optional_real(header, Field::PixelSizeY.keyword(), metadata.pixel_size_y)?;
     set_optional_real(header, Field::DataMax.keyword(), metadata.data_max)?;
-    if metadata.calibrated {
-        header.set("LUMCAL", true)?;
+    let CalibrationState {
+        bias,
+        thermal,
+        flat,
+    } = metadata.calibration;
+    for (keyword, removed) in CALIBRATION_KEYWORDS.into_iter().zip([bias, thermal, flat]) {
+        if removed {
+            header.set(keyword, true)?;
+        }
     }
     domain_keywords::write(
         header,
@@ -540,6 +561,33 @@ fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>
         .get_integer(key)?
         .map(|value| {
             u32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
+        })
+        .transpose()
+}
+
+/// Seconds, never negative: a bias is exposed for 0 s.
+fn read_exposure(header: &Header, key: &'static str) -> fits_well::Result<Option<f64>> {
+    read_real_where(header, key, |seconds| seconds >= 0.0)
+}
+
+/// Degrees Celsius, above absolute zero.
+fn read_temperature(header: &Header, key: &'static str) -> fits_well::Result<Option<f64>> {
+    read_real_where(header, key, |celsius| celsius > -273.15)
+}
+
+fn read_real_where(
+    header: &Header,
+    key: &'static str,
+    valid: impl Fn(f64) -> bool,
+) -> fits_well::Result<Option<f64>> {
+    header
+        .get_real(key)?
+        .map(|value| {
+            if value.is_finite() && valid(value) {
+                Ok(value)
+            } else {
+                Err(fits_well::FitsError::KeywordOutOfRange { name: key })
+            }
         })
         .transpose()
 }

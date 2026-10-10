@@ -2,6 +2,7 @@
 //! it there, is in `memory`.
 
 pub(crate) mod cache_key;
+pub(crate) mod capture_conditions;
 pub(crate) mod decode_cache;
 pub(crate) mod disk_root;
 pub(crate) mod error;

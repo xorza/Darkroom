@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::combine::config::StackConfig;
+use crate::io::image::calibration_state::CalibrationState;
 
 /// One of the four master frames a bundle can carry.
 ///
@@ -40,6 +41,34 @@ impl MasterRole {
             Self::Flat => "MASTER_FLAT",
             Self::Bias => "MASTER_BIAS",
             Self::FlatDark => "MASTER_FLAT_DARK",
+        }
+    }
+
+    /// The parts a frame of this role records: the bias alone for a bias frame, the bias and the
+    /// dark signal for a dark or a flat-dark, and the flat's response beside both for a flat. A
+    /// master removes from the frame it is taken from what of this it still holds.
+    pub(crate) const fn signal(self) -> CalibrationState {
+        match self {
+            Self::Bias => CalibrationState::BIAS,
+            Self::Dark | Self::FlatDark => CalibrationState::ADDITIVE,
+            Self::Flat => CalibrationState::ADDITIVE.union(CalibrationState::FLAT),
+        }
+    }
+
+    /// Whether a master of this role is dark signal, one exposure's at one temperature: a dark or a
+    /// flat-dark.
+    pub(crate) const fn is_dark(self) -> bool {
+        matches!(self, Self::Dark | Self::FlatDark)
+    }
+
+    /// What a master of this role may have lost before it serves the set: a bias nothing, since
+    /// the bias is what it holds; a dark or flat-dark its bias, leaving the dark signal alone; a
+    /// flat both additive parts, never its own response.
+    pub(crate) const fn may_have_lost(self) -> CalibrationState {
+        match self {
+            Self::Bias => CalibrationState::NONE,
+            Self::Dark | Self::FlatDark => CalibrationState::BIAS,
+            Self::Flat => CalibrationState::ADDITIVE,
         }
     }
 

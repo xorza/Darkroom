@@ -1,12 +1,14 @@
 use fits_well::header::Header;
 
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::CfaType;
 use fits_well::image::SampleType;
 
 use crate::io::image::fits::metadata::{
     SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order, read_metadata,
-    read_row_order,
+    read_row_order, write_image_metadata,
 };
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 
@@ -215,9 +217,10 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
     );
 }
 
-/// An optional keyword of the wrong type is `None`, not a failed load, and the pointing falls
-/// through `RA` → `OBJCTRA` → the right-ascension WCS axis, each only when the one before gives
-/// nothing usable.
+/// An optional keyword of the wrong type, or of a value its field cannot have, is `None`, not a
+/// failed load, and the field falls through to its next alias: the pointing through `RA` →
+/// `OBJCTRA` → the right-ascension WCS axis, a temperature below absolute zero to the next
+/// temperature keyword, a negative exposure to `EXPOSURE`, which may be 0 s as a bias's is.
 #[test]
 fn optional_keywords_of_the_wrong_type_are_absent() {
     let mut header = Header::new();
@@ -226,13 +229,14 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     header.set("DEC", "not a number").unwrap();
     header.set("XBINNING", "2x2").unwrap();
     header.set("EXPTIME", "long").unwrap();
-    header.set("LUMCAL", 1).unwrap();
+    header.set("LUMCALD", 1).unwrap();
     header.set("GAIN", 120.0).unwrap();
+    header.set("CCD-TEMP", -300.0).unwrap();
     header.set("CCDTEMP", -10.0).unwrap();
     let metadata = read_metadata(&header, SampleType::U16);
     assert_eq!(metadata.xbinning, None);
     assert_eq!(metadata.exposure_time, None);
-    assert!(!metadata.calibrated);
+    assert_eq!(metadata.calibration, CalibrationState::NONE);
     assert_eq!(metadata.gain, Some(120.0));
     assert_eq!(metadata.ccd_temp, Some(-10.0));
     assert_eq!(metadata.sample_type, Some(SampleType::U16));
@@ -243,6 +247,14 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
         "{ra}"
     );
     assert_eq!(metadata.dec_deg, None);
+
+    header.set("EXPTIME", -1.0).unwrap();
+    assert_eq!(read_metadata(&header, SampleType::U16).exposure_time, None);
+    header.set("EXPOSURE", 0.0).unwrap();
+    assert_eq!(
+        read_metadata(&header, SampleType::U16).exposure_time,
+        Some(0.0)
+    );
 }
 
 /// The WCS reference value is taken only from an axis whose type is right ascension or
@@ -353,4 +365,42 @@ fn every_alias_reads_into_its_field() {
     assert_eq!(written.get_real("EXPTIME").unwrap(), Some(30.0));
     assert_eq!(written.get_real("CCD-TEMP").unwrap(), Some(-10.0));
     assert_eq!(written.get_real("EXPOSURE").unwrap(), None);
+}
+
+/// Each part calibration removed is written as its own logical keyword and read back as the same
+/// record; a part not removed writes nothing.
+#[test]
+fn the_calibration_record_round_trips() {
+    for calibration in [
+        CalibrationState::NONE,
+        CalibrationState::BIAS,
+        CalibrationState::THERMAL.union(CalibrationState::FLAT),
+        CalibrationState::ADDITIVE.union(CalibrationState::FLAT),
+    ] {
+        let mut header = Header::new();
+        write_image_metadata(
+            &mut header,
+            &ImageMetadata {
+                calibration,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        for (keyword, removed) in [
+            ("LUMCALB", calibration.bias),
+            ("LUMCALD", calibration.thermal),
+            ("LUMCALF", calibration.flat),
+        ] {
+            assert_eq!(
+                header.get_logical(keyword).unwrap(),
+                removed.then_some(true),
+                "{calibration:?}: {keyword}"
+            );
+        }
+        assert_eq!(
+            read_metadata(&header, SampleType::F32).calibration,
+            calibration
+        );
+    }
 }

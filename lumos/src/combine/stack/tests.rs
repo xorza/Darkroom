@@ -1,3 +1,4 @@
+use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::internals::prelude::*;
 use crate::memory::run_memory::RunMemory;
@@ -993,6 +994,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                     row_order: None,
                     cfa_type: None,
                     saturation_flagged: false,
+                    conditions: CaptureConditions::default(),
                 },
             };
             frame

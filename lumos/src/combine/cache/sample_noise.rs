@@ -100,6 +100,7 @@ mod tests {
 
     use super::*;
     use crate::combine::normalization::ChannelNorm;
+    use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::io::image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -123,6 +124,7 @@ mod tests {
                 row_order: None,
                 cfa_type: None,
                 saturation_flagged: false,
+                conditions: CaptureConditions::default(),
             },
         }
     }

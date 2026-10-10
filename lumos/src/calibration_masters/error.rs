@@ -16,8 +16,8 @@ use crate::math::size2us::Size2us;
 /// which have no total equality.
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CalibrationError {
-    /// The light is already calibrated: its file says so (`LUMCAL`), or this set calibrated it.
-    /// A second pass would subtract the dark and divide the flat twice.
+    /// The light already lost a part to calibration: its file says so (`LUMCALB`, `LUMCALD`,
+    /// `LUMCALF`), or this set calibrated it. A second pass would remove that part twice.
     #[error("the light frame is already calibrated")]
     AlreadyCalibrated,
     /// Building the bundle was cancelled before it finished.
@@ -33,26 +33,29 @@ pub enum CalibrationError {
     /// the offset to every light.
     #[error("the flat holds an offset, and the set has no bias or flat-dark to subtract it")]
     FlatWithoutSubtractor,
-    /// A master had another subtracted when it was stacked, so the offset it exists to remove is
-    /// no longer in it: a bias, or a flat-dark in a set with no bias to remove the flat's offset.
-    /// Subtracted, it would leave the offset in the frame.
-    #[error("the {component} master is already calibrated, and holds no offset to subtract")]
-    CalibratedSubtractor { component: MasterRole },
+    /// A master lost more to calibration than its role can have and still serve the set: a bias
+    /// anything, a dark or a flat-dark more than its bias, a flat its own response. Subtracted or
+    /// divided by, it would leave in the frame what it exists to remove.
+    #[error("the {component} master lost more to calibration than a {component} master can")]
+    OverCalibratedMaster { component: MasterRole },
+    /// The flat-dark holds a part the flat already lost when it was stacked, beside one the flat
+    /// still holds, and the set has no bias to separate the two.
+    #[error(
+        "the flat-dark would remove a part the flat already lost, and the set has no bias to separate it"
+    )]
+    UnusableFlatDark,
     /// The light still holds an additive offset and the set has a flat but nothing that removes
     /// the offset — no bias, and no dark that still holds it: `(S + b)/flat` puts the offset `b`
     /// under the flat's vignetting.
     #[error("the light holds an offset, and the set has a flat but no dark or bias to subtract it")]
     LightWithoutSubtractor,
-    /// The dark was exposed for another time than the light, and it still holds the bias, so it
-    /// cannot be scaled to the light: its thermal signal is wrong by the ratio.
-    #[error(
-        "the dark's exposure {dark} s does not match the light's {light} s, and with no bias to separate its thermal signal it cannot be scaled"
-    )]
-    DarkExposureMismatch { light: f64, dark: f64 },
-    /// The dark was taken at another sensor temperature than the light: dark current changes by
-    /// about 12% per degree.
-    #[error("the dark's temperature {dark} °C does not match the light's {light} °C")]
-    DarkTemperatureMismatch { light: f64, dark: f64 },
+    /// A master holding dark signal was taken under other conditions than the frame it calibrates:
+    /// the dark against a light, or the flat-dark against the flat.
+    #[error("the {component} master does not match the frame it calibrates: {source}")]
+    DarkMismatch {
+        component: MasterRole,
+        source: DarkMismatch,
+    },
     /// A calibration master was captured with a different sensor pattern than the rest of the
     /// bundle, when the set is assembled, or than the light, when one is calibrated.
     #[error("{component} master CFA pattern {master:?} does not match {expected:?}")]
@@ -84,4 +87,19 @@ pub enum CalibrationError {
         expected: Size2us,
         master: Size2us,
     },
+}
+
+/// A master holding dark signal does not match the frame it is taken from: dark current depends on
+/// the exposure and, by about 12% per degree, on the sensor temperature.
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq)]
+pub enum DarkMismatch {
+    /// The dark was exposed for another time than the frame, and it cannot be scaled to the
+    /// frame: it still holds the bias, which does not grow with exposure, or it was exposed for 0 s.
+    #[error(
+        "the dark's exposure {dark} s does not match the frame's {frame} s, and the dark cannot be scaled to it"
+    )]
+    Exposure { frame: f64, dark: f64 },
+    /// The dark was taken at another sensor temperature than the frame.
+    #[error("the dark's temperature {dark} °C does not match the frame's {frame} °C")]
+    Temperature { frame: f64, dark: f64 },
 }

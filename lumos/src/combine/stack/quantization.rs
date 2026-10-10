@@ -141,6 +141,7 @@ mod tests {
 
     use crate::combine::normalization::{ChannelNorm, FrameNorm};
     use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
+    use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::frame_store::frame_stats::FrameStats;
     use crate::math::statistics::{MedianMad, mad_to_sigma};
@@ -162,6 +163,7 @@ mod tests {
                 row_order: None,
                 cfa_type: None,
                 saturation_flagged: false,
+                conditions: CaptureConditions::default(),
             },
         }
     }

@@ -3,6 +3,7 @@ use crate::combine::config::{CombineMethod, StackConfig};
 use crate::combine::normalization::*;
 use crate::combine::rejection::Rejection;
 use crate::combine::stack::{StackFrame, stack_images};
+use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
@@ -28,6 +29,7 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
             row_order: None,
             cfa_type: None,
             saturation_flagged: false,
+            conditions: CaptureConditions::default(),
         },
     }
 }

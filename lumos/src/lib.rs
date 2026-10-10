@@ -63,9 +63,10 @@ mod star_detection;
 pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use calibration_masters::defect_map::DefectMap;
-pub use calibration_masters::error::CalibrationError;
+pub use calibration_masters::error::{CalibrationError, DarkMismatch};
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
+pub use io::image::calibration_state::CalibrationState;
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::fits::options::{
@@ -98,6 +99,7 @@ pub use math::vec2us::Vec2us;
 pub use calibration_masters::calibration_component::CalibrationComponent;
 pub use calibration_masters::calibration_set::CalibrationSet;
 pub use calibration_masters::master_role::MasterRole;
+pub use calibration_masters::master_subtraction::Subtractor;
 pub use calibration_masters::{
     CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
@@ -150,7 +152,8 @@ pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use combine::stack::{StackFrame, stack, stack_images};
-pub use frame_store::error::FrameStoreError;
+pub use frame_store::capture_conditions::CaptureCondition;
+pub use frame_store::error::{ConditionMismatch, FrameStoreError};
 pub use frame_store::frame_quality::FramePlane;
 pub use ingest::ingest_config::IngestConfig;
 pub use progress::progress_callback::ProgressCallback;

@@ -31,6 +31,7 @@ use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::StackFrame;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
+use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::ingest::frame_step::FrameStep;
@@ -215,14 +216,21 @@ impl FrameCache {
             .frames
             .iter()
             .all(|frame| frame.source_stats.facts.saturation_flagged);
+        let conditions = CaptureConditions::shared(
+            self.frames
+                .iter()
+                .map(|frame| frame.source_stats.facts.conditions),
+        );
         let image = LinearImage {
-            // The reference frame's metadata, with the combine's own quantization σ and saturation
-            // record, and no mosaic noise: what the reference's decoder and demosaic recorded
-            // describes one frame, not the stack.
+            // The reference frame's metadata, with the combine's own quantization σ, saturation
+            // record and capture conditions, and no mosaic noise: what the reference's decoder and
+            // demosaic recorded describes one frame, not the stack.
             metadata: ImageMetadata {
                 quantization_sigma,
                 mosaic_noise: None,
                 saturation_flagged,
+                exposure_time: conditions.exposure_time,
+                ccd_temp: conditions.ccd_temp,
                 ..self.core.metadata.clone()
             },
             pixels,
