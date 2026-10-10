@@ -8,6 +8,7 @@ pub(crate) mod dark_match;
 pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
+pub(crate) mod light_calibration;
 pub(crate) mod master_role;
 pub(crate) mod master_subtraction;
 pub(crate) mod prepared_flat;
@@ -20,6 +21,7 @@ use common::CancelToken;
 use crate::calibration_masters::dark_match::DarkMatch;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::error::CalibrationError;
+use crate::calibration_masters::light_calibration::{LightCalibration, Subtracted};
 use crate::calibration_masters::master_subtraction::{MasterSubtraction, Subtractor};
 use crate::combine::cache::FrameCache;
 use crate::combine::config::StackConfig;
@@ -31,6 +33,7 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::size2us::Size2us;
@@ -75,6 +78,12 @@ pub struct CalibrationMasters {
     dark: Option<CfaImage>,
     flat: Option<PreparedFlat>,
     defect_map: Option<DefectMap>,
+    /// What calibrating a light by these masters leaves it flagged, gathered once:
+    /// [`QualityFlags::NO_DATA`] where a master the light is calibrated by holds no measurement — a
+    /// fill or a saturated bound leave none in the difference or the quotient — and
+    /// [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor, so the light is corrected
+    /// by less than its vignetting asks.
+    imposed: Option<PixelFlags>,
 }
 
 /// Stack one calibration role's raw CFA frames into a single master, under `config` — the
@@ -196,14 +205,85 @@ impl CalibrationMasters {
         self.flat.as_ref().map_or(0, PreparedFlat::floored)
     }
 
-    /// Resident RAM held by this bundle: the present master frames' pixel bytes
-    /// plus the defect map's index lists.
+    /// Resident RAM held by this bundle: the present master frames' pixel bytes, the defect map's
+    /// index lists, and the flags the masters impose on a light.
     pub fn ram_bytes(&self) -> usize {
         let frame_bytes = self
             .masters()
             .map(|(_, master)| master.ram_bytes())
             .sum::<usize>();
-        frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
+        frame_bytes
+            + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
+            + self.imposed.as_ref().map_or(0, |flags| flags.bytes().len())
+    }
+
+    /// The masters as one coherent bundle, checked as [`Self::from_images`] checks its inputs, with
+    /// the flags they impose on a light gathered.
+    ///
+    /// # Errors
+    /// [`CalibrationError`] when the masters or the map do not describe one sensor, or a master
+    /// lost more to calibration than its role can.
+    fn assemble(
+        bias: Option<CfaImage>,
+        dark: Option<CfaImage>,
+        flat: Option<PreparedFlat>,
+        defect_map: Option<DefectMap>,
+    ) -> Result<Self, CalibrationError> {
+        let mut masters = Self {
+            bias,
+            dark,
+            flat,
+            defect_map,
+            imposed: None,
+        };
+        masters.validate_dimensions()?;
+        masters.validate_records()?;
+        masters.imposed = masters.imposed_flags();
+        Ok(masters)
+    }
+
+    /// Whether the dark still holds the bias, which the bias is then not subtracted beside.
+    fn dark_holds_bias(&self) -> bool {
+        self.dark
+            .as_ref()
+            .is_some_and(|dark| !dark.metadata.calibration.bias)
+    }
+
+    /// The bias a light is calibrated by: none when the dark still holds it.
+    fn used_bias(&self) -> Option<&CfaImage> {
+        self.bias.as_ref().filter(|_| !self.dark_holds_bias())
+    }
+
+    /// See [`Self::imposed`](CalibrationMasters#structfield.imposed); `None` when they impose none.
+    fn imposed_flags(&self) -> Option<PixelFlags> {
+        let unmeasured: Vec<&PixelFlags> = [
+            self.used_bias(),
+            self.dark.as_ref(),
+            self.flat.as_ref().map(PreparedFlat::divisor),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|master| master.flags.as_ref())
+        .filter(|flags| flags.contains(QualityFlags::UNMEASURED))
+        .collect();
+        let floored = self.flat.as_ref().filter(|flat| flat.floored() > 0);
+        if unmeasured.is_empty() && floored.is_none() {
+            return None;
+        }
+        let (_, first) = self.masters().next()?;
+        PixelFlags::from_fn(first.size(), |index| {
+            let mut flags = QualityFlags::default();
+            if unmeasured
+                .iter()
+                .any(|master| master.at(index).intersects(QualityFlags::UNMEASURED))
+            {
+                flags = flags.union(QualityFlags::NO_DATA);
+            }
+            if floored.is_some_and(|flat| flat.is_floored(index)) {
+                flags = flags.union(QualityFlags::FLAT_FLOOR);
+            }
+            flags
+        })
     }
 
     /// Save this coherent master bundle as a versioned, checksummed multi-extension FITS file.
@@ -335,12 +415,7 @@ impl CalibrationMasters {
             return Err(CalibrationError::Cancelled);
         }
 
-        Ok(Self {
-            bias,
-            dark,
-            flat,
-            defect_map,
-        })
+        Self::assemble(bias, dark, flat, defect_map)
     }
 
     /// Every present master lost no more to calibration than its role can: the check `from_images`
@@ -419,12 +494,8 @@ impl CalibrationMasters {
         }
         self.validate_against_light(image)?;
         let mut outcome = CalibrationOutcome::default();
-        let dark_holds_bias = self
-            .dark
-            .as_ref()
-            .is_some_and(|dark| !dark.metadata.calibration.bias);
-        // The bias is subtracted on its own unless the dark still holds it.
-        let bias = self.bias.as_ref().filter(|_| !dark_holds_bias);
+        let dark_holds_bias = self.dark_holds_bias();
+        let bias = self.used_bias();
         if self.flat.is_some() && bias.is_none() && !dark_holds_bias && holds_offset(image) {
             return Err(CalibrationError::LightWithoutSubtractor);
         }
@@ -461,16 +532,30 @@ impl CalibrationMasters {
             })
             .transpose()?;
 
-        image.record_saturation();
-        if let Some((bias, map)) = bias {
-            remove_master(image, bias, MasterRole::Bias, map, None);
+        LightCalibration {
+            bias: bias.map(|(bias, map)| Subtracted {
+                samples: bias.data.pixels(),
+                map,
+                scale: 1.0,
+            }),
+            dark: dark.map(|(dark, map, matched)| Subtracted {
+                samples: dark.data.pixels(),
+                map,
+                scale: matched.factor(),
+            }),
+            flat: self.flat.as_ref().map(|flat| flat.divisor().data.pixels()),
+            imposed: self.imposed.as_ref(),
         }
-        if let Some((dark, map, matched)) = dark {
-            remove_master(image, dark, MasterRole::Dark, map, Some(matched));
+        .apply(image);
+        if let Some((bias, _)) = bias {
+            record_removal(image, bias, MasterRole::Bias, None);
         }
-        debug_assert_eq!(image.metadata.domain, domain);
+        if let Some((dark, _, matched)) = dark {
+            record_removal(image, dark, MasterRole::Dark, Some(matched));
+        }
+        image.metadata.domain = domain;
         if let Some(flat) = &self.flat {
-            flat.apply(image);
+            flat.record(image);
         }
         if let Some(defect_map) = &self.defect_map {
             defect_map.correct(image);
@@ -603,13 +688,25 @@ fn subtract_master(
 }
 
 /// Subtract `master`, in `role`, from `frame` through `map`, its dark signal scaled as `matched`
-/// says, and record in `frame` what it held and what the match did not compare. Every removal of
-/// a master goes through here, so neither record can be left behind.
+/// says, and [record](record_removal) it.
 fn remove_master(
     frame: &mut CfaImage,
     master: &CfaImage,
     role: MasterRole,
     map: DomainMap,
+    matched: Option<DarkMatch>,
+) {
+    frame.subtract_scaled(master, map, matched.map_or(1.0, DarkMatch::factor));
+    record_removal(frame, master, role, matched);
+}
+
+/// Record in `frame` what `master`, in `role`, held and what its match did not compare, once its
+/// samples are subtracted. Every removal of a master records through here, so neither record can be
+/// left behind.
+fn record_removal(
+    frame: &mut CfaImage,
+    master: &CfaImage,
+    role: MasterRole,
     matched: Option<DarkMatch>,
 ) {
     let removes = role.signal().without(master.metadata.calibration);
@@ -623,7 +720,6 @@ fn remove_master(
         removes.thermal,
         "{role}: a master is matched to the frame exactly when it holds dark signal"
     );
-    frame.subtract_scaled(master, map, matched.map_or(1.0, DarkMatch::factor));
     frame.metadata.calibration = frame.metadata.calibration.union(removes);
     if let Some(matched) = matched {
         frame.metadata.unverified_dark = frame.metadata.unverified_dark.union(matched.unverified);

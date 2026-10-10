@@ -4,6 +4,7 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::rewrite_fits;
 use crate::internals::test_rng::TestRng;
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::*;
 use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
@@ -26,6 +27,25 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     nulls[5] = f32::NAN;
     let mut cfa = make_cfa(size, pixels, CfaType::Mono);
     cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
+
+    // A repaired null is flagged so, and a second repair leaves it as it is, though a neighbour
+    // moved: the repair has one owner, and a frame calibration touched is not repaired again.
+    let mut repaired = cfa.clone();
+    repaired.repair_nulls();
+    assert_eq!(repaired.data[5], 0.5);
+    assert_eq!(
+        repaired.flags.as_ref().unwrap().at(5),
+        QualityFlags::NO_DATA.union(QualityFlags::REPAIRED)
+    );
+    repaired.data[4] = 0.25;
+    repaired.repair_nulls();
+    assert_eq!(repaired.data[5], 0.5);
+    repaired.data[5] = 0.75;
+    repaired.metadata.calibration = CalibrationState::FLAT;
+    let calibrated = repaired
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert_eq!(calibrated.channel(0).pixels()[5], 0.75);
 
     let demosaiced = cfa
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())

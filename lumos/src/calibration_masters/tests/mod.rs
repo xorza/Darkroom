@@ -715,10 +715,13 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
     });
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
+    // Where a master held no measurement the light holds none either, and calibration repairs it.
     let flags = light.flags.as_ref().unwrap();
     assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
-    assert_eq!(flags.at(5), QualityFlags::NO_DATA);
-    assert_eq!(flags.at(9), QualityFlags::NO_DATA);
+    assert_eq!(flags.count(QualityFlags::REPAIRED), 2);
+    let null = QualityFlags::NO_DATA.union(QualityFlags::REPAIRED);
+    assert_eq!(flags.at(5), null);
+    assert_eq!(flags.at(9), null);
 
     let mut bias = flagged(0.0625, 9, QualityFlags::NO_DATA);
     bias.data[9] = 0.5;
@@ -1246,6 +1249,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
             CfaType::Mono,
         ))),
         defect_map: Some(defects),
+        imposed: None,
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 24 + 128.
     assert_eq!(
@@ -1977,4 +1981,65 @@ fn dark_frames_share_one_exposure_and_temperature() {
             temperature: true,
         }
     );
+}
+
+/// Every flag a calibration sets is counted as it is set, and the counts are what a recount of the
+/// plane finds: a light saturated at one pixel and holding a null at another, against a bias with
+/// no measurement at a third, a dark with a hot pixel, and a flat at its floor at a fourth, is
+/// left with `SATURATED`, `NO_DATA`, `REPAIRED`, `DEFECT` and `FLAT_FLOOR`, each where its cause
+/// is, and the counts agree with the bytes.
+#[test]
+fn calibration_counts_its_flags_as_it_sets_them() {
+    let size = Size2us::new(16, 16);
+    let at = |x: usize, y: usize| y * size.width + x;
+    let mut bias = constant_cfa(size, 0.0625, CfaType::Mono);
+    bias.flags = PixelFlags::from_fn(size, |index| {
+        if index == at(4, 4) {
+            QualityFlags::NO_DATA
+        } else {
+            QualityFlags::default()
+        }
+    });
+    let mut dark = constant_cfa(size, 0.125, CfaType::Mono);
+    dark.data[at(8, 8)] = 0.9;
+    let mut flat = constant_cfa(size, 0.5, CfaType::Mono);
+    flat.data[at(12, 3)] = 0.01;
+    let masters = bundle(CalibrationSet {
+        dark: Some(dark),
+        flat: Some(flat),
+        bias: Some(bias),
+        flat_dark: None,
+    });
+    let mut light = constant_cfa(size, 0.5, CfaType::Mono);
+    light.data[at(2, 10)] = 0.99;
+    light.flags = PixelFlags::from_fn(size, |index| {
+        if index == at(10, 12) {
+            QualityFlags::NO_DATA
+        } else {
+            QualityFlags::default()
+        }
+    });
+    masters.calibrate(&mut light).unwrap();
+
+    let flags = light.flags.as_ref().unwrap();
+    let bytes = flags.bytes();
+    for flag in [
+        QualityFlags::NO_DATA,
+        QualityFlags::SATURATED,
+        QualityFlags::DEFECT,
+        QualityFlags::REPAIRED,
+        QualityFlags::FLAT_FLOOR,
+    ] {
+        let recount = bytes
+            .iter()
+            .filter(|&&byte| QualityFlags::from_byte(byte).intersects(flag))
+            .count();
+        assert!(recount > 0, "{flag:?} was set somewhere");
+        assert_eq!(flags.count(flag), recount, "{flag:?}");
+    }
+    assert!(flags.at(at(2, 10)).intersects(QualityFlags::SATURATED));
+    assert!(flags.at(at(4, 4)).intersects(QualityFlags::NO_DATA));
+    assert!(flags.at(at(10, 12)).intersects(QualityFlags::REPAIRED));
+    assert!(flags.at(at(8, 8)).intersects(QualityFlags::DEFECT));
+    assert!(flags.at(at(12, 3)).intersects(QualityFlags::FLAT_FLOOR));
 }
