@@ -23,7 +23,7 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
-use crate::memory::memory_plan::{MemoryPlan, RunShape};
+use crate::memory::memory_plan::MemoryPlan;
 
 use crate::frame_store::stackable_image::StackableImage;
 
@@ -91,12 +91,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
     // for.
     let plan = MemoryPlan::plan(
-        RunShape::decoded_stack(
-            paths.len(),
-            peek.resident_bytes(),
-            dimensions.frame_bytes(),
-            config.quality.resident_bytes(dimensions),
-        ),
+        peek.run_shape(paths.len(), config.quality.resident_bytes(dimensions)),
         rayon::current_num_threads(),
         memory.planning(),
     );

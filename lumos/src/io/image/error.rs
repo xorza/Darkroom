@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::io::raw::error::{LibrawCode, RawError};
+
 /// Errors that can occur when loading an astronomical image from disk.
 #[derive(Debug, Error)]
 pub enum ImageError {
@@ -24,8 +26,8 @@ pub enum ImageError {
         source: imaginarium::Error,
     },
 
-    #[error("Failed to load raw file '{path}': {reason}")]
-    Raw { path: PathBuf, reason: String },
+    #[error("Failed to load raw file '{path}': {source}")]
+    Raw { path: PathBuf, source: RawError },
 
     #[error("Failed to read file '{path}': {source}")]
     Io { path: PathBuf, source: io::Error },
@@ -41,6 +43,20 @@ pub enum ImageError {
 }
 
 impl ImageError {
+    /// LibRaw's or the decoder's `source` failure reading `path`: [`Self::Cancelled`] where LibRaw
+    /// stopped because the load's cancel token asked it to.
+    pub(crate) fn raw(path: &Path, source: RawError) -> Self {
+        match source {
+            RawError::Open(LibrawCode::Cancelled)
+            | RawError::Unpack(LibrawCode::Cancelled)
+            | RawError::Process(LibrawCode::Cancelled) => Self::cancelled(path),
+            source => Self::Raw {
+                path: path.to_path_buf(),
+                source,
+            },
+        }
+    }
+
     /// The load of `path` stopped by its cancel token.
     pub(crate) fn cancelled(path: &Path) -> Self {
         Self::Cancelled {

@@ -847,6 +847,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         Some(FramePeek {
             dimensions: ImageDimensions::new((size.width, size.height), 1),
             may_carry_nulls: true,
+            decoder_bytes: 0,
         })
     );
 

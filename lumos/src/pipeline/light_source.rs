@@ -227,8 +227,9 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
         let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
         let dimensions = ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
-        // One frame's pass peaks at the largest of: the demosaic, the cosmic-ray pass over the
-        // mosaic, and the statistics, a copy of every channel beside the demosaiced frame.
+        // One frame's pass peaks at the largest of: the decoder's own bytes beside the mosaic it
+        // makes, the demosaic, the cosmic-ray pass over the mosaic, and the statistics, a copy of
+        // every channel beside the demosaiced frame.
         let cosmic_ray = self.cosmic_ray.map_or(0, |_| {
             plane_bytes + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size())
         });
@@ -237,6 +238,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             run: RunShape {
                 frame_count: self.paths.len(),
                 decode: demosaic
+                    .with_peak_at_least(plane_bytes.saturating_add(info.decoder_bytes))
                     .with_peak_at_least(cosmic_ray)
                     .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
                 held_bytes: 0,

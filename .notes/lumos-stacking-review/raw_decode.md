@@ -14,22 +14,6 @@ Paths below: `lumos/…` and `libraw-sys/…` are relative to `/home/xxorza/Proj
 
 ## Findings
 
-### RAW-2 — Corrupt RAW data decodes "successfully", and LibRaw writes to stderr
-- **Where:** `lumos/src/io/raw/mod.rs:68` (`libraw_init(0)`), `mod.rs:522-529` (only the return code of `unpack` is checked)
-- **Category:** correctness
-- **Impact:** high. A partly corrupt file (card error, interrupted copy) produces garbage pixels that enter calibration and the stack with nothing flagged. This is the "quietly wrong" case.
-- **Confidence:** confirmed (code reading)
-- **Evidence:** `LibRaw::derror()` (`LibRaw/src/utils/utils_libraw.cpp:165-188`) throws only at EOF. On any other
-  decode error it bumps an internal counter, calls `data_cb`, and the decode carries on (`// throw
-  LIBRAW_EXCEPTION_IO_CORRUPT;` is commented out). With `libraw_init(0)` the callback is
-  `default_data_callback`, which `fprintf(stderr, "data corrupted at …")`
-  (`LibRaw/src/utils/init_close_utils.cpp:51-53`, `utils_libraw.cpp:24-31`), so the GUI app's stderr gets
-  polluted too. The C API offers `libraw_set_dataerror_handler(lr, cb, datap)` (in the bindings), and lumos does
-  not install it.
-- **Direction:** Install a data-error handler whose `datap` points at a counter owned by the LibRaw wrapper. This
-  needs no static, because LibRaw passes the user data in. Fail the load with a typed "corrupt data" error when the
-  count is non-zero after `unpack`.
-
 ### RAW-3 — Four-colour sensors (RGBE, CMYG) are classified as Bayer RGB
 - **Where:** `lumos/src/io/image/cfa/mod.rs:87-101`; `lumos/src/io/raw/demosaic/bayer/mod.rs:57-88`
 - **Category:** correctness
@@ -110,50 +94,6 @@ Paths below: `lumos/…` and `libraw-sys/…` are relative to `/home/xxorza/Proj
   the stated white point.
 - **Direction:** Decision for the user. One option is a stated-clip path: `linear_max` minus a small stated ADU
   margin, keeping 95 % only for `maximum`. The other is to keep 95 % everywhere and correct the doc comment.
-
-### RAW-9 — The FFI safety boundary is spread out, and some private APIs are unsound
-- **Where:** `lumos/src/io/raw/mod.rs` (~25 `unsafe` blocks). In particular:
-  - `extract_iso(inner: *mut …)` at `:804-812` and `open_libraw_input(inner: *mut …)` at `:705-735` are safe fns that dereference a caller-supplied raw pointer.
-  - The `as_ptr` doc at `:79-82` says no caller can outlive the borrow. That is false, because raw pointers are not borrow-checked.
-  - `(*processed_ptr).data.as_ptr()` at `:448, :480` makes a `&[u8; 1]` and then reads `data_size` bytes through it.
-- **Category:** design
-- **Impact:** medium. Soundness: the flexible-array read is UB under Stacked/Tree Borrows (Miri would flag it), and the safe-raw-pointer fns let safe code cause UB. Maintainability: every field read repeats its own SAFETY argument.
-- **Confidence:** confirmed
-- **Evidence:** `libraw_processed_image_t.data: [c_uchar; 1]` (bindgen). Siril and DSS use LibRaw's C++/C API
-  directly in C. In Rust, one owner type is the idiom.
-- **Direction:** Give the wrapper its own file (for example `libraw.rs`, `struct Libraw`). Expose
-  `fn data(&self) -> &sys::libraw_data_t` (one `unsafe`), plus `unpack()`, `raw_image() -> Option<&[u16]>`, and
-  `process() -> ProcessedImage`, an RAII type built on `&raw const (*p).data` that hands out a typed `&[u16]`.
-  All field reads then become safe. This also satisfies the one-major-struct-per-file rule: `mod.rs` currently
-  holds `LibrawState`, `ProcessedImageGuard`, `UnpackedRaw`, and `LibrawDemosaiced`.
-
-### RAW-10 — Platform `#[cfg]` sits in `mod.rs`, with two different LibRaw input paths
-- **Where:** `lumos/src/io/raw/mod.rs:10-14, 51-61, 705-735`; `lumos/src/io/raw/tests.rs:38-47`
-- **Category:** design (user rule: platform differences live behind one entity)
-- **Impact:** medium. Unix uses `libraw_open_file` (FILE*/`getc_unlocked`, `LibRaw_bigfile_datastream`), while other OSes use `fs::read` plus `libraw_open_buffer`. Two datastreams with different behaviour exist, and the Windows path is not exercised on the Linux test host. `LibrawState.buf: Option<Vec<u8>>` exists only for the second path.
-- **Confidence:** confirmed
-- **Evidence:** The doc's premise ("paths cannot go through libraw's narrow file API") is outdated. LibRaw has
-  `libraw_open_wfile` on Windows (`LibRaw/libraw/libraw.h:96-102`). Siril
-  (`siril/src/io/image_formats_libraries.c:2223-2243`) and darktable
-  (`darktable/src/imageio/imageio_libraw.c:399-402`) both use it.
-- **Direction:** Use one path everywhere: `fs::read` plus `libraw_open_buffer`. That is LibRaw's simplest
-  datastream (`get_char` is an array index, `libraw_datastream.h:282-286`). It removes every `cfg` and the
-  `Option`, and the cost is the compressed file held in RAM until close. If that RAM matters, put a `platform/`
-  module with a `wfile` Windows implementation behind one API instead. Measure open_file against open_buffer
-  unpack time on CR2, CR3, NEF and RAF before choosing.
-
-### RAW-11 — Errors are messages, not cases
-- **Where:**
-  - `lumos/src/io/raw/mod.rs:154-159` (`raw_err`, and it is `pub(crate)` with only in-file callers)
-  - `:396-411, :523-529, :540-577, :610, :678`
-  - `lumos/src/io/image/error.rs:28` (`Raw { reason: String }`)
-- **Category:** design (user rule: errors are enums of cases)
-- **Impact:** medium. A caller cannot tell an unsupported camera from a corrupt file, an I/O error, `LIBRAW_TOO_BIG`, a SuperCCD refusal, or a bad black level. The typed `BlackLevelError` and `XTransPatternError` are flattened with `to_string()`, and LibRaw codes print as bare integers.
-- **Confidence:** confirmed
-- **Direction:** Add a `RawError` enum: `Init`, `Open(LibrawCode)`, `Unpack(LibrawCode)`, `Geometry{…}`,
-  `UnsupportedLayout(SuperCcd)`, `BlackLevel(BlackLevelError)`, `XTrans(XTransPatternError)`, `CorruptData`,
-  `Process(LibrawCode)`, where `LibrawCode` maps `LibRaw_errors`. `ImageError::Raw` then carries
-  `{ path, source: RawError }`.
 
 ### RAW-12 — The decode hot path makes two passes over the raw buffer, and the second divides per pixel
 - **Where:** `lumos/src/io/raw/mod.rs:212-233` (`decode_flags`) and `:274-305`;
@@ -242,31 +182,6 @@ Paths below: `lumos/…` and `libraw-sys/…` are relative to `/home/xxorza/Proj
 - **Direction:** Test the extension first and use `entry.file_type()`, following a link only for RAW-named
   entries. Return a typed error that names the entry.
 
-### RAW-20 — A load cannot be cancelled while LibRaw runs
-- **Where:** `lumos/src/io/raw/mod.rs:743-788` (checks only between stages)
-- **Category:** design
-- **Impact:** low. `unpack` takes well under a second, but the fallback `dcraw_process` (AHD on 50 MP+) takes seconds and cannot be interrupted.
-- **Confidence:** confirmed
-- **Evidence:** LibRaw polls `checkCancel()` at 63 decoder sites (`LibRaw/src/utils/utils_libraw.cpp:310-335`). It
-  is set through C++ `setCancelFlag()`, which the C API does not expose.
-- **Direction:** Add a shim `libraw_lumos_cancel(lr)`. Call it from a watcher on the `CancelToken`, or poll
-  through `libraw_set_progress_handler`, with the token as user data.
-
-### RAW-21 — Small items: baked-in constants, duplication, visibility, dead branches
-- **Where and evidence:**
-  - Constants copied from LibRaw: `CBLACK_LEN = 4104` (`black_level/mod.rs:11-13`) and the X-Trans marker `9` (`cfa/mod.rs:98`) duplicate `sys::LIBRAW_CBLACK_SIZE` and `sys::LIBRAW_XTRANS`, which the bindings export (derived beats baked-in).
-  - Visibility: `raw_err` is `pub(crate)` but only `mod.rs` uses it.
-  - Duplicated metadata and provenance construction: `mod.rs:279-297` and `338-355`.
-  - `raw_image_slice()` is fetched twice per load (`:277`, `:213`).
-  - Dead branch: `ProcessedImageGuard` checks for null, but it is only ever built from a non-null pointer (`:98-104`).
-  - `#[derive(Debug)]` on `LibrawState` would print the whole file buffer.
-  - Shim not needed after unpack: `fuji_width` (and `zero_is_bad`) are public in `rawdata.ioparams`, which `unpack` copies (`unpack.cpp:508-510`; Siril reads `rawdata.ioparams.fuji_width`, `image_formats_libraries.c:2331`). The shim is needed only for peek's pre-unpack `zero_is_bad`.
-  - Fallback path: it collects interleaved `Vec<f32>` and then deinterleaves with a second copy (`mod.rs:481`, `linear_pixels.rs:15-34`). It also declares `black_level.span()` as its domain while LibRaw scaled by its own integer black.
-  - Cheap `const fn` candidates: `BlackLevel::span` and `of_channel`.
-- **Category:** style / simplification
-- **Impact:** low
-- **Confidence:** confirmed
-
 ---
 
 ## Checked and found OK
@@ -291,9 +206,8 @@ Paths below: `lumos/…` and `libraw-sys/…` are relative to `/home/xxorza/Proj
 
 ## Suggested change batches
 
-1. **LibRaw boundary rewrite:** RAW-9, RAW-10, RAW-11, RAW-2, RAW-20, plus RAW-21's struct/file, visibility, guard and shim items. These all land in one new `Libraw` wrapper file: the data-error counter and the cancel hook need its user-data pointer, and the typed errors come out of its methods.
-2. **Trusting what LibRaw reports (classification and refusals):** RAW-3, RAW-6, RAW-4, RAW-15, RAW-7, RAW-17. Each needs either a small shim accessor (`fuji_lossless`, CRX header, `is_phaseone_compressed`) or a `colors`/`cdesc` check. Do it after batch 1.
-3. **Hot-path fusion:** RAW-12 and the fallback deinterleave from RAW-21. Measure RAW-13 here before deciding on OpenMP.
-4. **Build and coverage:** RAW-14, plus the OpenMP decision from RAW-13. Both need user approval for new system or crate dependencies.
-5. **Metadata and policy decisions (user calls):** RAW-5, RAW-8, RAW-16.
-6. **Standalone:** RAW-18.
+1. **Trusting what LibRaw reports (classification and refusals):** RAW-3, RAW-6, RAW-4, RAW-15, RAW-7, RAW-17. Each needs either a small shim accessor (`fuji_lossless`, CRX header, `is_phaseone_compressed`) or a `colors`/`cdesc` check, behind the `Libraw` wrapper.
+2. **Hot-path fusion:** RAW-12. Measure RAW-13 here before deciding on OpenMP.
+3. **Build and coverage:** RAW-14, plus the OpenMP decision from RAW-13. Both need user approval for new system or crate dependencies.
+4. **Metadata and policy decisions (user calls):** RAW-5, RAW-8, RAW-16.
+5. **Standalone:** RAW-18.

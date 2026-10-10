@@ -58,6 +58,7 @@ fn generate_bindings(root: &Path) {
         .ctypes_prefix("core::ffi")
         .allowlist_function("libraw_.*")
         .allowlist_type("libraw_.*")
+        .allowlist_type("LibRaw_errors")
         .allowlist_var("LIBRAW_.*")
         .derive_debug(true)
         .derive_default(true)

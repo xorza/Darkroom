@@ -10,7 +10,7 @@ use crate::math::size2us::Size2us;
 
 /// The length of LibRaw's `cblack` table: four channel values, the spatial pattern's height and
 /// width, and the pattern.
-const CBLACK_LEN: usize = 4104;
+const CBLACK_LEN: usize = libraw_sys::LIBRAW_CBLACK_SIZE as usize;
 /// Where the spatial pattern starts in `cblack`.
 const PATTERN: usize = 6;
 
@@ -201,12 +201,12 @@ impl BlackLevel {
     /// `maximum − black`, in ADU: what one normalized unit is worth for this file. It differs
     /// between frames — LibRaw reads `maximum` per camera and per ISO, and `black` per frame — so
     /// two frames convert by the ratio of their spans (`SampleDomain::conversion_to`).
-    pub(crate) fn span(&self) -> f64 {
+    pub(crate) const fn span(&self) -> f64 {
         self.maximum - self.common
     }
 
     /// The black level of LibRaw colour channel `channel`, without the spatial pattern.
-    pub(crate) fn of_channel(&self, channel: usize) -> f64 {
+    pub(crate) const fn of_channel(&self, channel: usize) -> f64 {
         self.common + self.channel[channel]
     }
 

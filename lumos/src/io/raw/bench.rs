@@ -1,3 +1,7 @@
+use std::ffi::CString;
+
+use common::CancelToken;
+use libraw_sys as sys;
 use quickbench::quick_bench;
 
 use crate::internals::init_tracing;
@@ -34,5 +38,35 @@ fn bench_demosaic_vs_libraw(b: quickbench::Bencher) {
         (11, "libraw DHT / Markesteijn 3-pass"),
     ] {
         b.bench_labeled(label, || load_raw_libraw_demosaic(&path, qual).unwrap());
+    }
+}
+
+/// LibRaw's file datastream against the memory one every load uses: the open and unpack of the
+/// first light of each set, read from disk each time either way. The memory path reads the file
+/// whole first; the file path reads it as LibRaw's decoder asks.
+#[quick_bench(warmup_iters = 1, iters = 5)]
+fn bench_unpack_file_vs_buffer(b: quickbench::Bencher) {
+    init_tracing();
+
+    for set in ["Lights", "raw_samples"] {
+        for path in raw_frames(set).into_iter().take(1) {
+            println!("Unpacking {}", path.display());
+            b.bench_labeled(&format!("{set}: open_buffer"), || {
+                let mut libraw =
+                    Libraw::open(fs::read(&path).unwrap(), &CancelToken::never()).unwrap();
+                libraw.unpack().unwrap();
+            });
+            let path_c = CString::new(path.to_str().expect("a UTF-8 dataset path")).unwrap();
+            b.bench_labeled(&format!("{set}: open_file"), || {
+                // SAFETY: the handle is checked, opened from a live C string, and closed once.
+                unsafe {
+                    let handle = sys::libraw_init(0);
+                    assert!(!handle.is_null());
+                    assert_eq!(sys::libraw_open_file(handle, path_c.as_ptr()), 0);
+                    assert_eq!(sys::libraw_unpack(handle), 0);
+                    sys::libraw_close(handle);
+                }
+            });
+        }
     }
 }
