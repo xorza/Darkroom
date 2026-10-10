@@ -186,6 +186,16 @@ impl F32x8 for NeonF32 {
     }
 
     #[inline(always)]
+    fn abs(self) -> Self {
+        unsafe {
+            Self {
+                low: vabsq_f32(self.low),
+                high: vabsq_f32(self.high),
+            }
+        }
+    }
+
+    #[inline(always)]
     fn floor(self) -> Self {
         unsafe {
             Self {

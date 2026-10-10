@@ -20,6 +20,7 @@ use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
 use crate::io::raw::demosaic::tiled;
 use crate::io::raw::demosaic::tiled::Tiling;
 use crate::math::size2us::Size2us;
+use crate::simd::{F32x8, Isa, Mask8};
 
 /// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
 const EPS: f32 = 1e-5;
@@ -36,10 +37,10 @@ const BORDER: usize = 4;
 /// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
 pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
-/// The side of a tile, where its seven planes stay in a core's cache, and even, so that every tile
-/// starts on the frame's phase. On a Ryzen 7 6800U (512 KiB of L2 per core) a 24 MP frame
-/// demosaics in 125 ms with tiles of 128, against 129 ms at 96, 127 ms at 160, 182 ms at 256 and
-/// 227 ms untiled.
+/// The side of a tile, where its phase planes stay in a core's cache, and even, so that every
+/// tile starts on the frame's phase. On a Ryzen 7 6800U (512 KiB of L2 per core), built for plain
+/// x86-64, a 24 MP frame demosaics in 66 ms with tiles of 128, against 66 ms at 96, 65 ms at 112,
+/// 67 ms at 144, 69 ms at 160, 77 ms at 192 and 105 ms at 256.
 const TILE: usize = 128;
 
 /// The memory a demosaic of a frame of `size` holds — see [`tiled::demosaic_memory`].
@@ -49,58 +50,81 @@ pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
 
 /// Linear interpolation: `(1 - a) * b + a * c`.
 #[inline(always)]
-fn intp(a: f32, b: f32, c: f32) -> f32 {
+fn intp<V: F32x8>(a: V, b: V, c: V) -> V {
     b + a * (c - b)
 }
 
-/// The green at a red or blue site from a neighbouring green `g`, as RCD's ratio
-/// `g·2c/(c + s)` of the site's low-pass value `c` and its same-colour neighbour's `s`.
+/// The green at red or blue sites from a neighbouring green `g`, as RCD's ratio `g·2c/(c + s)`
+/// of each site's low-pass value `c` and its same-colour neighbour's `s`.
 ///
 /// The ratio is level-free: librtprocess's `eps` in the denominator would bias faint signal by
 /// `eps/(c + s)`, a colour cast in a dark-subtracted background. Where `c + s` nears cancellation
 /// against `|c| + |s|`, only possible on signed data, it blends into the additive midpoint
 /// estimate, which it equals at `c = s = 0`.
+///
+/// Every lane computes each case and keeps its own, so a lane another case divides by zero in
+/// never reaches the output.
 #[inline(always)]
-fn estimate_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
+fn estimate_green<S: Isa>(
+    isa: S,
+    neighbor_green: S::F32,
+    center_lpf: S::F32,
+    same_color_lpf: S::F32,
+) -> S::F32 {
+    let one = isa.splat_f32(1.0);
     let scale = center_lpf.abs() + same_color_lpf.abs();
-    if scale == 0.0 {
-        return neighbor_green;
-    }
     let numerator = neighbor_green * (center_lpf + center_lpf);
     let denominator = center_lpf + same_color_lpf;
-    let transition = MIN_SIGNED_DENOMINATOR_RATIO * scale;
-    if denominator.abs() >= transition {
-        return numerator / denominator;
-    }
+    let transition = isa.splat_f32(MIN_SIGNED_DENOMINATOR_RATIO) * scale;
+    let ratio = numerator / denominator;
 
     // Same-color LPFs are two pixels apart; midpoint correction halves their 4× gain.
-    let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
+    let additive = neighbor_green + (center_lpf - same_color_lpf) * isa.splat_f32(0.125);
     let t = denominator.abs() / transition;
-    let curve = t * (3.0 - 2.0 * t);
+    let curve = t * (isa.splat_f32(3.0) - isa.splat_f32(2.0) * t);
     let ratio_weight = t * curve;
+    // `f32::signum`, whose −0 is −1: 1/x has the sign of x, a zero's included.
+    let signum = (one / denominator)
+        .lanes_lt(isa.splat_f32(0.0))
+        .select(isa.splat_f32(-1.0), one);
     // Fold the reciprocal into smoothstep so exact cancellation cannot form 0/0.
-    let weighted_ratio = numerator * denominator.signum() * curve / transition;
-    additive * (1.0 - ratio_weight) + weighted_ratio
+    let weighted_ratio = numerator * signum * curve / transition;
+    let blended = additive * (one - ratio_weight) + weighted_ratio;
+
+    let estimate = denominator
+        .abs()
+        .lanes_lt(transition)
+        .select(blended, ratio);
+    scale
+        .lanes_eq(isa.splat_f32(0.0))
+        .select(neighbor_green, estimate)
 }
 
-/// Mean of the four diagonal neighbours of `idx` (stride `w1`) in the V/H direction map: the
-/// discriminator's local average, which pulls a pixel's estimate toward its neighbourhood.
+/// A direction map at a site whose own value is `central` and whose diagonal neighbours' mean is
+/// `neighbourhood`: the neighbourhood where it is the further from ½, which pulls the site's
+/// estimate toward its neighbours'.
+#[inline(always)]
+fn discriminate<S: Isa>(isa: S, central: S::F32, neighbourhood: S::F32) -> S::F32 {
+    let half = isa.splat_f32(0.5);
+    (half - central)
+        .abs()
+        .lanes_lt((half - neighbourhood).abs())
+        .select(neighbourhood, central)
+}
+
+/// Mean of a site's four diagonal neighbours `[nw, ne, sw, se]` in the V/H direction map.
 ///
 /// Summed in pairs, and the P/Q map's in order, as librtprocess sums them: the cross-check holds
 /// the output to librtprocess's bits.
 #[inline(always)]
-fn vh_neighbourhood(vh_dir: &[f32], idx: usize, w1: usize) -> f32 {
-    0.25 * ((vh_dir[idx - w1 - 1] + vh_dir[idx - w1 + 1])
-        + (vh_dir[idx + w1 - 1] + vh_dir[idx + w1 + 1]))
+fn vh_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
+    isa.splat_f32(0.25) * ((nw + ne) + (sw + se))
 }
 
 /// [`vh_neighbourhood`] in the P/Q direction map.
 #[inline(always)]
-fn pq_neighbourhood(pq_dir: &[f32], idx: usize, w1: usize) -> f32 {
-    0.25 * (pq_dir[idx - w1 - 1]
-        + pq_dir[idx - w1 + 1]
-        + pq_dir[idx + w1 - 1]
-        + pq_dir[idx + w1 + 1])
+fn pq_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
+    isa.splat_f32(0.25) * (nw + ne + sw + se)
 }
 
 /// RCD demosaic implementation.
@@ -127,7 +151,7 @@ pub(crate) fn demosaic(
         bayer.size,
         |position| bayer.pattern.color_at(position),
         tiling,
-        Tile::new,
+        || Tile::new(bayer.pattern),
         // SAFETY: the driver hands each place's own part to this tile alone, which writes no
         // other.
         |tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
