@@ -4,13 +4,15 @@
 //! Each output pixel's window is built once — its taps, their weights and the weight sums — and
 //! every channel samples through it, so the coefficients a channel uses are the ones its quality
 //! describes. Coverage is the share of the kernel's magnitude `Σ |L|` the window's taps with data
-//! hold: 1 where the whole kernel lands on data, falling across the source edge and around nulls.
-//! Confidence is the Kish effective sample size of the coefficients the sample was taken with.
+//! hold: 1 where the whole kernel lands on data, falling across the source edge and around flagged
+//! pixels. Confidence is the Kish effective sample size of the coefficients the sample was taken
+//! with. The flags are the carried flags of the source pixels the sample gave weight; see
+//! `FlaggedSources`.
 //!
 //! The two agree on where there is data: both are zero exactly where the sample is the border. The
-//! combine gates on coverage alone and weights by confidence, so a covered pixel at zero confidence
-//! would enter its statistics weightless; see `PixelCoverage`, and `FrameCheck::quality_pair`,
-//! which holds caller-supplied planes to the same pairing.
+//! combine gates on coverage alone and divides the noise by confidence, so a covered pixel at zero
+//! confidence would enter its statistics with no finite noise; see `PixelCoverage`, and
+//! `FrameCheck::quality_pair`, which holds caller-supplied planes to the same pairing.
 //!
 //! **Where the clamp acts, confidence describes the unclamped coefficients.** The clamp scales the
 //! negative lobes down per channel, which raises the true effective sample size (a kernel's
@@ -19,13 +21,14 @@
 
 use arrayvec::ArrayVec;
 
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::io::image::pixel_flags::Reach;
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::WarpParams;
+use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};
-use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
@@ -82,9 +85,10 @@ impl SampleMethod {
 #[derive(Debug)]
 pub(crate) struct FrameSampler<'a> {
     method: SampleMethod,
-    /// The channels as the windows read them: with nulls at zero for a masked frame.
+    /// The channels as the windows read them: with excluded pixels at zero for a frame that has
+    /// any.
     sources: ArrayVec<SourcePlane<'a>, 3>,
-    masked: Option<&'a MaskedSources>,
+    flagged: Option<&'a FlaggedSources<'a>>,
     border: f32,
     size: Size2us,
 }
@@ -102,6 +106,8 @@ pub(crate) struct RowOutput<'o, 'r> {
     pub(crate) channels: &'o mut [&'r mut [f32]],
     pub(crate) coverage: &'o mut [f32],
     pub(crate) confidence: &'o mut [f32],
+    /// For a frame that carries flags.
+    pub(crate) flags: Option<&'o mut [u8]>,
 }
 
 /// The quality of one output pixel.
@@ -109,24 +115,25 @@ pub(crate) struct RowOutput<'o, 'r> {
 struct PixelQuality {
     coverage: f32,
     confidence: f32,
+    flags: QualityFlags,
 }
 
 impl<'a> FrameSampler<'a> {
-    /// `image` sampled by `method`; `masked` holds its sources when it declares nulls.
+    /// `image` sampled by `method`; `flagged` holds its sources when it flags pixels.
     pub(crate) fn new(
         method: SampleMethod,
         image: &SourceImage<'a>,
-        masked: Option<&'a MaskedSources>,
+        flagged: Option<&'a FlaggedSources<'a>>,
         border: f32,
     ) -> Self {
-        let sources = match masked {
-            Some(masked) => masked.planes().collect(),
+        let sources = match flagged.and_then(FlaggedSources::zeroed_planes) {
+            Some(zeroed) => zeroed.collect(),
             None => image.planes.clone(),
         };
         Self {
             method,
             sources,
-            masked,
+            flagged,
             border,
             size: image.size(),
         }
@@ -180,8 +187,9 @@ impl<'a> FrameSampler<'a> {
     ) -> PixelQuality {
         let index = kernel::nearest_index(self.size, position);
         if self
-            .masked
-            .is_some_and(|masked| masked.validity().pixels[index] == 0.0)
+            .flagged
+            .and_then(FlaggedSources::validity)
+            .is_some_and(|validity| validity.pixels[index] == 0.0)
         {
             return self.no_data(x, channels);
         }
@@ -191,13 +199,16 @@ impl<'a> FrameSampler<'a> {
         PixelQuality {
             coverage: 1.0,
             confidence: 1.0,
+            flags: self
+                .flagged
+                .map_or(QualityFlags::default(), |flagged| flagged.carried_at(index)),
         }
     }
 
     /// The filter's kernel over the window at `position`: the whole kernel where it lands on data;
-    /// its taps with data, normalized, where the source edge or a null cut it and what is left is
-    /// [well conditioned](WindowWeights::well_conditioned); otherwise Bilinear at the same stretch
-    /// over its own taps with data, whose weights are never negative and so always average.
+    /// its taps with data, normalized, where the source edge or a flagged pixel cut it and what is
+    /// left is [well conditioned](WindowWeights::well_conditioned); otherwise Bilinear at the same
+    /// stretch over its own taps with data, whose weights are never negative and so always average.
     #[inline(always)]
     fn filtered<S: Isa>(
         &self,
@@ -208,10 +219,12 @@ impl<'a> FrameSampler<'a> {
         x: usize,
         channels: &mut [&mut [f32]],
     ) -> PixelQuality {
-        let null_near = self.masked.is_some_and(|masked| masked.null_near(position));
+        let near = self
+            .flagged
+            .map_or(QualityFlags::default(), |flagged| flagged.near(position));
         let x_taps = kernel.taps(position.fx);
         let y_taps = kernel.taps(position.fy);
-        if !null_near
+        if near == QualityFlags::default()
             && x_taps.count <= F32_LANES
             && y_taps.count <= F32_LANES
             && let Some(window) =
@@ -229,6 +242,7 @@ impl<'a> FrameSampler<'a> {
             return PixelQuality {
                 coverage: 1.0,
                 confidence: window.confidence(),
+                flags: QualityFlags::default(),
             };
         }
 
@@ -238,9 +252,15 @@ impl<'a> FrameSampler<'a> {
             return self.no_data(x, channels);
         };
         let validity = self
-            .masked
-            .filter(|_| null_near)
-            .map(MaskedSources::validity);
+            .flagged
+            .filter(|_| near.intersects(QualityFlags::RESAMPLE_EXCLUDED))
+            .and_then(FlaggedSources::validity);
+        let carried = |axes: &WindowAxes| match self.flagged {
+            Some(flagged) if near.intersects(QualityFlags::RESAMPLE_CARRIED) => {
+                flagged.carried_in(&axes.x, &axes.y)
+            }
+            _ => QualityFlags::default(),
+        };
         let weights = match validity {
             Some(validity) => window.masked_weights(isa, validity),
             None => window.weights(),
@@ -250,6 +270,7 @@ impl<'a> FrameSampler<'a> {
             return PixelQuality {
                 coverage: 1.0,
                 confidence: weights.confidence(),
+                flags: carried(axes),
             };
         }
         let coverage = (weights.magnitude() / window.whole_magnitude()).min(1.0);
@@ -258,6 +279,7 @@ impl<'a> FrameSampler<'a> {
             return PixelQuality {
                 coverage,
                 confidence: weights.confidence(),
+                flags: carried(axes),
             };
         }
 
@@ -280,6 +302,7 @@ impl<'a> FrameSampler<'a> {
         PixelQuality {
             coverage,
             confidence: weights.confidence(),
+            flags: carried(axes),
         }
     }
 
@@ -332,6 +355,7 @@ impl Kernel for SampleRow<'_, '_, '_, '_> {
             channels,
             coverage,
             confidence,
+            mut flags,
         } = self.output;
         for (x, position) in self.positions.iter().enumerate() {
             let quality = match *position {
@@ -340,6 +364,9 @@ impl Kernel for SampleRow<'_, '_, '_, '_> {
             };
             coverage[x] = quality.coverage;
             confidence[x] = quality.confidence;
+            if let Some(flags) = flags.as_deref_mut() {
+                flags[x] = quality.flags.byte();
+            }
         }
     }
 }

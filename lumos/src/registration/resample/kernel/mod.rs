@@ -11,7 +11,8 @@ use crate::math::lanczos;
 use crate::math::size2us::Size2us;
 use crate::registration::resample::source_position::SourcePosition;
 
-/// Entries per unit of distance: a table read is the kernel at the distance rounded to 1/8192,
+/// Entries per unit of distance. A read interpolates linearly between the two entries around the
+/// distance, which is off the kernel by at most `max|L″|·h²/8`, under 4.5e-8 (see the table test),
 /// and Lanczos4's table, `4·4096 + 1` entries, is 64 KiB.
 pub(super) const LANCZOS_LUT_RESOLUTION: usize = 4096;
 
@@ -80,17 +81,21 @@ pub(crate) mod internals {
     use crate::registration::resample::kernel::LanczosLut;
 
     impl LanczosLut {
-        /// The entry nearest `scaled`, a non-negative distance already multiplied by the
-        /// resolution; the kernel's zero at `a` past the table's end. The scalar read the vector
-        /// gather is held to.
+        /// The table at `scaled`, a non-negative distance already multiplied by the resolution:
+        /// the line between the entries either side, and the kernel's zero at `a` past the
+        /// table's end. The scalar read the vector gathers are held to.
         #[expect(
             clippy::cast_sign_loss,
             reason = "the caller passes a non-negative distance, as the debug assertion checks"
         )]
         pub(crate) fn at(&self, scaled: f32) -> f32 {
             debug_assert!(scaled >= 0.0, "a table read at {scaled}");
-            let index = ((scaled + 0.5) as usize).min(self.values.len() - 1);
-            self.values[index]
+            let last = self.values.len() - 1;
+            let below = scaled.floor();
+            let index = (below as usize).min(last);
+            let low = self.values[index];
+            let high = self.values[(index + 1).min(last)];
+            (high - low).mul_add(scaled - below, low)
         }
     }
 

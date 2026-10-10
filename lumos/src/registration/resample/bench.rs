@@ -94,6 +94,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
                     channels: &mut [output_row],
                     coverage: &mut coverage,
                     confidence: &mut confidence,
+                    flags: None,
                 },
             );
         }

@@ -77,8 +77,8 @@ impl From<LinearImage> for StackFrame {
 
 /// Stack multiple images from disk into a single result.
 ///
-/// This is the main entry point for stacking frames stored as files. To stack
-/// frames already held in memory, use [`stack_images`].
+/// This is the main entry point for stacking frames stored as files. To stack frames already held
+/// in memory, use [`stack_images`].
 ///
 /// # Arguments
 ///
@@ -89,8 +89,8 @@ impl From<LinearImage> for StackFrame {
 /// # Returns
 ///
 /// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its per-channel weight map describes the surviving samples; `variance` is
-/// available for mean output and absent for median output.
+/// pixel. Its per-channel weight map describes the surviving samples; `variance` is available for
+/// mean output and absent for median output.
 ///
 /// # Errors
 ///
@@ -142,7 +142,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
 ///
 /// Each [`StackFrame`] may carry per-pixel `coverage` and `confidence`. Coverage gates inclusion;
-/// confidence scales inverse-variance weight. Frames without either plane use full support and unit
+/// confidence divides the sample's noise variance, for rejection and the variance plane, and does
+/// not weight the mean. Frames without either plane use full support and unit
 /// confidence. Plain `LinearImage`s convert via `.into()` and [`StackFrame::registered`] converts a
 /// source image plus its [`WarpResult`] without remeasuring noise after interpolation.
 ///
@@ -264,17 +265,16 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
 
 /// Combine the cached frames into one stacked product.
 ///
-/// Coverage gates a frame's contribution at a pixel while confidence scales its statistical
-/// weight independently; a frame with neither plane contributes everywhere at unit confidence,
-/// which is what makes this the single engine for calibration masters and registered light
-/// stacks alike.
+/// Coverage gates a frame's contribution at a pixel while confidence divides its noise model; a
+/// frame with neither plane contributes everywhere at unit confidence, which is what makes this the
+/// single engine for calibration masters and registered light stacks alike.
 ///
 /// # Errors
 ///
-/// [`StackError::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
-/// chunks rather than unwinding, so a cancelled run still produces a `StackProduct` — one holding
-/// zeros wherever it stopped. Returning that as an error is what keeps the partial image from
-/// being mistaken for a stack; the alternative, handing it back and trusting each caller to
+/// [`StackError::Cancelled`] if the cache's token was set. The chunk walk abandons the output
+/// between chunks rather than unwinding, so a cancelled run still produces a `StackProduct` — one
+/// holding zeros wherever it stopped. Returning that as an error is what keeps the partial image
+/// from being mistaken for a stack; the alternative, handing it back and trusting each caller to
 /// consult the token, was missed by every caller but two.
 pub(crate) fn run_stacking(
     cache: &FrameCache,

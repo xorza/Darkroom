@@ -33,15 +33,17 @@ pub struct StackProduct {
     pub coverage: Option<Coverage>,
     /// WHT map: `Σwᵢ` over whatever formed the pixel.
     ///
-    /// - A statistical combine sums, per channel, each surviving frame's weight times its
-    ///   confidence at that pixel. `Equal` weighting gives unit frame weights, so the sum is the
-    ///   survivor count scaled by confidence. `Noise` weighting gives each frame its inverse noise
-    ///   variance, not normalized, so with unit confidence the sum is the inverse variance of the
-    ///   mean. `Manual` weights are relative, and so is the sum.
+    /// - A statistical combine sums, per channel, each surviving frame's weight. `Equal` weighting
+    ///   gives unit frame weights, so the sum is the survivor count. `Noise` weighting gives each
+    ///   frame its inverse noise variance, not normalized, so where no warp averaged the samples
+    ///   the sum is the inverse variance of the mean. `Manual` weights are relative, and so is the
+    ///   sum. A warp's confidence enters the variance, not the weight — see
+    ///   [`WarpResult`](crate::WarpResult).
     /// - Drizzle sums one shared plane of geometric drop weights: how much of each input pixel's
     ///   flux landed here, times the frame weight.
     ///
-    /// It is the denominator the image was divided by, under the same weights as [`Self::variance`].
+    /// It is the denominator the image was divided by, under the same weights as
+    /// [`Self::variance`].
     pub weight: Option<QualityMap>,
     /// The variance of each pixel's value, in the image's units squared: `Σwᵢ²·vᵢ / (Σwᵢ)²` over
     /// the samples that formed it.
@@ -60,13 +62,13 @@ pub struct StackProduct {
     /// image's units squared: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model.
     ///
     /// Unbiased where each sample's variance is inversely proportional to its weight — as `Noise`
-    /// weighting makes it at the sky — and with equal weights the squared standard error of the
-    /// mean. It checks [`Self::variance`]: where the two disagree beyond the scatter of a
-    /// scatter, the noise model or the frames are off. A clip in a band of σ — sigma clip,
-    /// winsorized, linear fit — leaves survivors that scatter as a Gaussian truncated to the band,
-    /// so their sum of squares is divided by that variance, 0.911 at ±2.5σ; trim and GESD cut by
-    /// rank and by test, and read below the frames' full scatter. NaN where fewer than two samples
-    /// survive.
+    /// weighting makes it at the sky where no warp averaged the samples — and with equal weights
+    /// the squared standard error of the mean. It checks [`Self::variance`]: where the two disagree
+    /// beyond the scatter of a scatter, the noise model or the frames are off. A clip in a band of
+    /// σ — sigma clip, winsorized, linear fit — leaves survivors that scatter as a Gaussian
+    /// truncated to the band, so their sum of squares is divided by that variance, 0.911 at ±2.5σ;
+    /// trim and GESD cut by rank and by test, and read below the frames' full scatter. NaN where
+    /// fewer than two samples survive.
     ///
     /// Absent for median output and for drizzle, and unless asked for.
     pub dispersion: Option<QualityMap>,

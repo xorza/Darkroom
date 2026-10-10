@@ -13,9 +13,9 @@
 /// and agreeing on where the frame has data — the invariant
 /// [`FrameQuality`](crate::frame_store::frame_quality::FrameQuality) documents and
 /// [`FrameCheck::quality_pair`](crate::combine::cache::frame_check::FrameCheck::quality_pair)
-/// enforces — so a pixel over the floor below is guaranteed a positive confidence to weight it by,
-/// and gating on that as well would only restate it. Confidence scales a contribution; coverage
-/// decides whether there is one.
+/// enforces — so a pixel over the floor below is guaranteed a positive confidence to divide its
+/// noise by, and gating on that as well would only restate it. Confidence scales a sample's noise;
+/// coverage decides whether there is a sample.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PixelCoverage(f32);
 

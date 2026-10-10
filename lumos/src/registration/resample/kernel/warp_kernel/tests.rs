@@ -37,9 +37,16 @@ impl Kernel for Axis<'_> {
 }
 
 /// The scalar definition of one tap's weight: the distance `|t − frac|` as f32 rounds it, then the
-/// table read, the Catmull-Rom polynomial or the tent at the stretched distance.
-fn scalar_weight(filter: Filter, stretch: f32, t: i32, frac: f32) -> f32 {
+/// table read, the Catmull-Rom polynomial or the tent at the stretched distance, and zero at or
+/// past the reach.
+fn scalar_weight(kernel: WarpKernel, t: i32, frac: f32) -> f32 {
+    let WarpKernel {
+        filter, stretch, ..
+    } = kernel;
     let distance = (t as f32 - frac).abs();
+    if distance >= kernel.reach {
+        return 0.0;
+    }
     match filter {
         Filter::Lanczos(order) => order
             .lut()
@@ -50,8 +57,8 @@ fn scalar_weight(filter: Filter, stretch: f32, t: i32, frac: f32) -> f32 {
 }
 
 /// The vector weights are the scalar definitions bit for bit, on every tier, for every filter at
-/// three stretches and at every 1/256 of a pixel, the fraction just below 1, and 1 itself; and the
-/// slots of a vector past the window weigh nothing.
+/// five stretches — two inside the edge tolerance of 1 — and at every 1/256 of a pixel, the
+/// fraction just below 1, and 1 itself; and the slots of a vector past the window weigh nothing.
 #[test]
 fn vector_weights_are_the_scalar_definitions() {
     let fracs: Vec<f32> = (0..256)
@@ -60,7 +67,7 @@ fn vector_weights_are_the_scalar_definitions() {
         .collect();
     let mut axis = TapAxis::default();
     for filter in FILTERS {
-        for stretch in [1.0, 1.37, 2.5] {
+        for stretch in [1.0, 1.0f32.next_up(), 1.000_05, 1.37, 2.5] {
             let kernel = WarpKernel::new(filter, stretch);
             for tier in Tier::supported() {
                 for &frac in &fracs {
@@ -75,7 +82,7 @@ fn vector_weights_are_the_scalar_definitions() {
                     for (t, &weight) in (first..).zip(axis.weights()) {
                         assert_eq!(
                             weight.to_bits(),
-                            scalar_weight(filter, stretch, t, frac).to_bits(),
+                            scalar_weight(kernel, t, frac).to_bits(),
                             "{tier} {filter:?} ×{stretch} at {frac}, tap {t}"
                         );
                     }
@@ -93,11 +100,23 @@ fn vector_weights_are_the_scalar_definitions() {
 }
 
 /// Unstretched, a window is the kernel's `2·radius` taps from `cell − (radius − 1)` at any
-/// fraction. Stretched, it is the taps strictly within `radius · stretch`: Lanczos3 at 1.5
-/// reaches 4.5, so at fraction 0.25 the taps run from −4 (distance 4.25) to 4 (distance 3.75),
-/// nine of them, since −5 and 5 sit at 5.25 and 4.75; at fraction 0.5 the taps −4 and 5 sit at
-/// exactly 4.5 and drop out, leaving −3 to 4. The window reach covers both: `⌈4.5⌉ = 5` after the
+/// fraction. Stretched, it is the taps strictly within the reach: Lanczos3 at 1.5 reaches
+/// `(3 − ε)·1.5` = 4.4996, so at fraction 0.25 the taps run from −4 (distance 4.25) to 4 (distance
+/// 3.75), nine of them, since −5 and 5 sit at 5.25 and 4.75; at fraction 0.5 the taps −4 and 5 sit
+/// at 4.5 and drop out, leaving −3 to 4. The window reach covers both: `⌈4.4996⌉ = 5` after the
 /// cell and 4 before it.
+///
+/// The reach stops short of the radius by the filter's edge tolerance, where the kernel falls
+/// under `2⁻²⁷`: for Lanczos3 `ε = 3·2⁻¹³·⁵/(1 + 2⁻¹³·⁵)` = 2.5892e-4, for Catmull-Rom
+/// `2⁻¹³` = 1.2207e-4, for Bilinear `2⁻²⁷`.
+/// - One f32 step above 1, `1 + 2⁻²³`, Lanczos3 reaches 2.99974 and Catmull-Rom 1.99988, so each
+///   keeps its window reach at 1. Bilinear reaches `1 + 2⁻²³` itself: its tent rises linearly
+///   from its edge, so the tap at distance 1 weighs `1 − 1/(1 + 2⁻²³)` ≈ 1.2e-7, over `2⁻²⁷`, and
+///   the window grows to (1, 2).
+/// - Lanczos3 at 1.0002 reaches `2.99974·1.0002` = 3.00034, past 3: (3, 4).
+/// - Lanczos3 at 1.00005 reaches `2.99974·1.00005` = 2.99989. At fraction 5e-5 the taps run from
+///   −2 to 2: tap 3, at 2.99995, lies past the reach although the kernel there,
+///   `L(2.99995/1.00005)` = `L(2.9998)` ≈ `(2e-4/3)²` = 4.4e-9, is not zero, so its slot weighs 0.
 #[test]
 fn a_window_holds_the_taps_within_the_stretched_radius() {
     let range = |kernel: WarpKernel, frac| {
@@ -119,6 +138,29 @@ fn a_window_holds_the_taps_within_the_stretched_radius() {
     assert_eq!(reach(WarpKernel::new(lanczos3, 1.0)), (2, 3));
     assert_eq!(reach(stretched), (4, 5));
     assert_eq!(reach(WarpKernel::new(Filter::Bilinear, 1.0)), (0, 1));
+
+    let step_above = 1.0f32.next_up();
+    assert_eq!(reach(WarpKernel::new(lanczos3, step_above)), (2, 3));
+    assert_eq!(reach(WarpKernel::new(Filter::Bicubic, step_above)), (1, 2));
+    assert_eq!(reach(WarpKernel::new(Filter::Bilinear, step_above)), (1, 2));
+    assert_eq!(reach(WarpKernel::new(lanczos3, 1.0002)), (3, 4));
+
+    let banded = WarpKernel::new(lanczos3, 1.000_05);
+    let frac = 5e-5;
+    assert_eq!(range(banded, frac), (-2, 5));
+    let unmasked = LanczosOrder::Three
+        .lut()
+        .at((3.0 - frac) * (LANCZOS_LUT_RESOLUTION as f32 / 1.000_05));
+    assert!(unmasked > 0.0, "premise: the kernel at tap 3 is {unmasked}");
+    for tier in Tier::supported() {
+        let mut axis = TapAxis::default();
+        tier.run(Axis {
+            kernel: banded,
+            frac,
+            axis: &mut axis,
+        });
+        assert_eq!(axis.padded_from(5)[0], 0.0, "{tier}");
+    }
 }
 
 /// The stretch is the output-to-source Jacobian's largest singular value, held to 1.

@@ -145,6 +145,11 @@ impl F32x8 for PortableF32 {
     }
 
     #[inline(always)]
+    fn floor(self) -> Self {
+        Self(self.0.map(f32::floor))
+    }
+
+    #[inline(always)]
     fn lanes_gt(self, other: Self) -> PortableMask {
         self.compare(other, |a, b| a > b)
     }

@@ -1252,13 +1252,11 @@ fn only_normalization_requires_common_coverage() {
 }
 
 #[test]
-fn confidence_scales_a_contribution_rather_than_gating_it() {
-    // px0: A (q 1, val 10) + B (q .5, val 20) → 20/1.5 = 40/3, so B's half confidence halves its
-    // pull without excluding it — both frames still count as covering the pixel, with weight 1.5.
-    // Both have unit noise, so B's sample has variance 1/q = 2 and the variance is
-    // (1²·1 + 0.5²·2)/1.5² = 2/3, the inverse-variance mean's 1/(1 + 1/2). At px1 B has no support
-    // at all, which is what does exclude a frame: A alone, variance 1, coverage 1/2. Every sum is
-    // exact; each figure rounds once.
+fn confidence_scales_a_samples_noise_rather_than_its_weight() {
+    // px0: A (q 1, val 10) + B (q .5, val 20) → 30/2 = 15: B's half confidence leaves its weight
+    // alone and doubles its sample's variance, 1/q = 2, so the variance is (1²·1 + 1²·2)/2² = 3/4.
+    // At px1 B has no support at all, which is what does exclude a frame: A alone, variance 1,
+    // coverage 1/2. Every sum is exact; each figure rounds once.
     let dims = ImageDimensions::new((2, 1), 1);
     let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
     let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
@@ -1291,18 +1289,18 @@ fn confidence_scales_a_contribution_rather_than_gating_it() {
         ),
     ];
     let product = combine(frames, &config).unwrap();
-    assert_eq!(product.image.channel(0).pixels(), &[40.0 / 3.0, 10.0]);
+    assert_eq!(product.image.channel(0).pixels(), &[15.0, 10.0]);
     assert_eq!(
         product.coverage.as_ref().unwrap().to_plane().pixels(),
         &[1.0, 0.5]
     );
     assert_eq!(
         product.weight.as_ref().unwrap().channel(0).pixels(),
-        &[1.5, 1.0]
+        &[2.0, 1.0]
     );
     assert_eq!(
         product.variance.as_ref().unwrap().channel(0).pixels(),
-        &[2.0 / 3.0, 1.0]
+        &[0.75, 1.0]
     );
 }
 
@@ -1417,12 +1415,12 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     );
 }
 
-/// A half-pixel bilinear warp averages four source pixels equally, so its confidence `1/Σw²` is 4.
-/// The two frames share one source and so one noise level and one weight `w`, and the warped
-/// frame's effective weight is 4 times the unwarped one's — the confidence applied once, where
-/// twice would give 16. The product's weight is `Σ w·c` = w + 4w = 5w.
+/// A half-pixel bilinear warp averages four source pixels equally, so its confidence `1/Σw²` is 4,
+/// and an identity warp's is 1. The two frames share one source and so one noise level `σ²` and one
+/// weight `w`. The confidence divides each sample's variance and leaves the weights alone: the
+/// product's weight is `2w`, and its variance `(w²·σ² + w²·σ²/4)/(2w)² = 0.3125·σ²`.
 #[test]
-fn registered_noise_weight_applies_half_pixel_confidence_once() {
+fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let dims = ImageDimensions::new((64, 48), 1);
     let mut rng = TestRng::new(0x1234_5678);
     let pixels = (0..dims.pixel_count())
@@ -1473,9 +1471,13 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
         .confidence()
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
-    let effective_ratio =
-        base_weights[1] * half_pixel_confidence / (base_weights[0] * identity_confidence);
-    assert_eq!(effective_ratio, 4.0);
+    assert_eq!(identity_confidence, 1.0);
+    assert_eq!(half_pixel_confidence, 4.0);
+    let sigma_squared = source_stats(&cache)
+        .next()
+        .unwrap()
+        .ccd_noise(0)
+        .background_variance;
 
     let product = run_stacking(
         &cache,
@@ -1492,7 +1494,12 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
     .expect("this cache is never cancelled");
     assert_eq!(
         product.weight.as_ref().unwrap().channel(0)[pixel],
-        5.0 * base_weights[0]
+        2.0 * base_weights[0]
+    );
+    assert_close!(
+        product.variance.as_ref().unwrap().channel(0)[pixel],
+        0.3125 * sigma_squared,
+        2.0 * f32::EPSILON * sigma_squared
     );
 }
 
@@ -1774,12 +1781,12 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
     assert_ne!(linear_variance.channel(1)[0], linear_variance.channel(2)[0]);
 }
 
-/// On frames whose noise is what their model says, the dispersion and the variance estimate the same
-/// figure, `1 / Σwᵢ` for inverse-variance weights. Eight frames of a flat 0.5 with Gaussian noise of
-/// σ from 0.01 to 0.03, weighted by `1/σ²`: each pixel's dispersion is that figure times a χ² of 7
-/// degrees of freedom over 7, so the mean of 4096 independent pixels is within `√(2 / (7·4096))`
-/// = 0.84% of it at one σ, and 4.2% at five. A model that halves every σ quarters the variance and
-/// leaves the dispersion alone, so the two then differ by 4.
+/// On frames whose noise is what their model says, the dispersion and the variance estimate the
+/// same figure, `1 / Σwᵢ` for inverse-variance weights. Eight frames of a flat 0.5 with Gaussian
+/// noise of σ from 0.01 to 0.03, weighted by `1/σ²`: each pixel's dispersion is that figure times a
+/// χ² of 7 degrees of freedom over 7, so the mean of 4096 independent pixels is within
+/// `√(2 / (7·4096))` = 0.84% of it at one σ, and 4.2% at five. A model that halves every σ quarters
+/// the variance and leaves the dispersion alone, so the two then differ by 4.
 #[test]
 fn dispersion_agrees_with_the_variance_where_the_model_holds() {
     const SIDE: usize = 64;
@@ -2056,8 +2063,8 @@ fn noise_weights_survive_rejection() {
 /// and kept otherwise. Ten frames, no rejection, three pixels:
 /// - pixel 0: frames 0..3 saturated at 1.0, the rest 0.25 — the mean of the seven is 0.25;
 /// - pixel 1: every frame saturated at 1.0 — all are kept, and the stack's pixel is flagged;
-/// - pixel 2: frames 0..8 saturated at 0.5, two clean at 0.25 — two is below three, so all ten stay:
-///   (8 × 0.5 + 2 × 0.25) / 10 = 0.45, flagged.
+/// - pixel 2: frames 0..8 saturated at 0.5, two clean at 0.25 — two is below three, so all ten
+///   stay: (8 × 0.5 + 2 × 0.25) / 10 = 0.45, flagged.
 ///
 /// The report counts the 3 left out, and the 10 + 8 kept.
 #[test]
@@ -2104,6 +2111,79 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert_eq!(product.report.excluded_samples.saturated, 3);
     assert_eq!(product.report.kept_flagged_samples.saturated, 18);
     assert_eq!(product.report.excluded_samples.cosmic_ray, 0);
+}
+
+/// A star core that saturates in every frame of a registered stack keeps its clipped value: the
+/// warp carries the bound and its flag rather than leaving the pixel out, the reference keeps its
+/// own, and with no clean sample at the core the combine keeps all three. An 8×8 field of 0.25 with
+/// a 2×2 core of 1.0 at (3..5, 3..5): the reference as it is, a frame warped by the identity, and
+/// one whose source sits a column to the left of the field, warped back by a whole pixel. At whole
+/// shifts every tap but the centre weighs exactly zero, so each sample is its source pixel:
+/// the core reads (1 + 1 + 1)/3 = 1, flagged, and the pixel beside it 0.25, unflagged.
+#[test]
+fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
+    let dims = ImageDimensions::new((8, 8), 1);
+    let core = |x: usize, y: usize| (3..5).contains(&x) && (3..5).contains(&y);
+    let field = |offset: usize| {
+        let at = |index: usize| (index % 8 + offset, index / 8);
+        let mut image = LinearImage::from_pixels(
+            dims,
+            (0..64)
+                .map(|index| {
+                    let (x, y) = at(index);
+                    if core(x, y) { 1.0 } else { 0.25 }
+                })
+                .collect(),
+        );
+        image.metadata.saturation_flagged = true;
+        image.flags = PixelFlags::from_fn(dims.size(), |index| {
+            let (x, y) = at(index);
+            if core(x, y) {
+                QualityFlags::SATURATED
+            } else {
+                QualityFlags::default()
+            }
+        });
+        image
+    };
+    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let reference = field(0);
+    let shifted = field(1);
+    let frames = vec![
+        stack_frame(
+            reference.clone(),
+            FrameQuality::for_reference(reference.flags.as_ref()),
+        ),
+        StackFrame::registered(
+            &reference,
+            resample::warp(
+                &reference,
+                &WarpTransform::new(Transform::identity()),
+                params,
+            ),
+        ),
+        StackFrame::registered(
+            &shifted,
+            resample::warp(
+                &shifted,
+                &WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))),
+                params,
+            ),
+        ),
+    ];
+    let config = StackConfig {
+        combine: Combine::mean(),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    };
+    let product = combine(frames, &config).unwrap();
+    let pixels = product.image.channel(0).pixels();
+    let flags = product.image.flags.as_ref().unwrap();
+    assert_eq!(pixels[3 * 8 + 3], 1.0);
+    assert_eq!(flags.at(3 * 8 + 3), QualityFlags::SATURATED);
+    assert_eq!(pixels[3 * 8 + 5], 0.25);
+    assert_eq!(flags.at(3 * 8 + 5), QualityFlags::default());
 }
 
 /// The variance plane takes each frame's CCD model at the combined value. Frames of 10 and 14,

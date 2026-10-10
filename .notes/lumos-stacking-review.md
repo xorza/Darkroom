@@ -25,40 +25,14 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **The warp-to-combine handoff costs samples and weight.** Flag dilation drops about 3.6 % of
-   the samples. The confidence weighting gives the reference frame less weight (Batch 6).
-2. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
+1. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
    too little variance (Batch 7).
-3. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
+2. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
 
 Reading guide: batches are sorted by impact. Each batch is one change that should land in one
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 6: Warp → combine weights and flags — **medium-high**
-
-These items affect every registered stack.
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| DRZ-4 | Warp flags grow over the whole kernel window, whatever the weight of each tap. With Lanczos3, one CR, defect, repaired or saturated pixel removes 36 output samples (64 when the stretch is a little above 1). This happens even at integer shift. A frame with 0.1 % flagged pixels loses about 3.6 % of its samples. The reference frame keeps its flags without dilation, so it is treated differently from the warped frames. | `registration/resample/mod.rs:178-211` | confirmed |
-| DRZ-3 | The combine multiplies the frame weight by the warp confidence `q` (Kish ESS: 1–1.62 for Lanczos3, 1–4 for bilinear). The unwarped reference (the sharpest frame, chosen by `Auto`) always has `q = 1`, so it enters at about 0.79× the weight of an average warped frame with Lanczos3, or 0.41× with bilinear. Weights also change with the sub-pixel phase, which makes a moiré pattern on rotated fields. | `combine/cache/mod.rs:481-496` | confirmed |
-| DRZ-10 | The kernel stretch has no tolerance band. A stretch of 1 + 1e-12 changes the Lanczos3 reach from 3 to 4, which makes DRZ-4 worse. | `registration/resample/kernel/warp_kernel/mod.rs:160-191` | confirmed |
-| DRZ-9 | The Lanczos LUT is read at the nearest entry, so each tap weight is off by up to 1.7e-4. Linear interpolation between entries gives about 1e-8. | `registration/resample/kernel/warp_kernel/mod.rs:233-237` | confirmed |
-
-**DRZ-3 (decided):** keep `q` in the per-sample noise model (rejection and the variance plane),
-and weight the mean with frame weights only, as Siril, PixInsight and DSS do. The combine review
-had accepted the `q` weight because `wᵢvᵢ = 1` holds with noise weights. That consistency is
-given up deliberately: the smaller variance comes from smoothing, the noise is correlated, and it
-discounts the reference frame. State the trade-off on `WarpResult::confidence`.
-
-**Direction:** Send the fill-type flags (`COSMIC_RAY`, `REPAIRED`, `DEFECT`) through the existing
-masked `NO_DATA` interpolation path. Propagate the bound-type flags (`SATURATED`, `FLAT_FLOOR`)
-only where the flagged taps carry a non-negligible share of `Σ|L|`. Snap the stretch to 1 within
-a stated tolerance. Interpolate the LUT.
 
 ---
 
@@ -188,7 +162,9 @@ Update flag counts incrementally. Give null repair one owner.
 **Direction (decided, Siril's design):** Drizzle each frame onto the output grid as its own frame.
 Its drop weight becomes the coverage/confidence planes. Then run the normal combine, so
 rejection, normalization, weights, flags and quality planes come from one engine. The spill tier
-holds the s²× larger frames. Define the exclusion policy once in `pixel_flags`. For DRZ-6, follow
+holds the s²× larger frames. Split the flags as the warp does: leave
+`QualityFlags::RESAMPLE_EXCLUDED` out, and deposit `QualityFlags::RESAMPLE_CARRIED` with its flag
+carried to the output. For DRZ-6, follow
 STScI: divide by the magnification only in the square kernel, and extend
 `a_magnified_frame_weighs_less_per_output_pixel` to the mean weight over one lattice period.
 
@@ -420,7 +396,6 @@ Each decision is also written into the direction of its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| DRZ-3 | Warp confidence `q` stays in the per-sample noise model only (rejection, variance plane). The mean uses frame weights only. | 6 |
 | CMB-9 | Publish an inverse-variance plane in place of the variance plane, so 0 means "no information". Refuse `Manual` weights of 0 at validation. | 7 |
 | CAL-11 / CMB-7 | `quantization_sigma` means the source's ADC step noise before flat division. It stays unchanged through calibration, and that is documented. Remove the master's worst-pixel computation. The 1/f part goes into the flat-aware noise model. | 7 |
 | RAW-5 | Add a separate `camera_temperature` field. Calibration uses it only to match darks when no sensor temperature exists, and reports which one it used. | 17 |

@@ -11,8 +11,9 @@ use crate::frame_store::frame_stats::FrameStats;
 /// Each frame's weight per slot, not normalized.
 ///
 /// `Weighting::Noise` gives `1 / (gain·σ)²`, σ the frame's measured background noise in that slot
-/// and `gain` its normalization: the inverse variance of the frame as combined. So with unit
-/// confidence the weight plane, `Σwᵢ` over the survivors, is the inverse variance of their mean.
+/// and `gain` its normalization: the inverse variance of the frame as combined. So where no warp
+/// averaged the samples the weight plane, `Σwᵢ` over the survivors, is the inverse variance of
+/// their mean.
 /// Per slot, because a frame with a bad blue channel is noisier in blue only. Manual weights are
 /// relative and the same in every slot.
 #[derive(Debug)]

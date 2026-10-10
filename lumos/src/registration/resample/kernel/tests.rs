@@ -13,17 +13,20 @@ fn lanczos_f64(x: f64, a: f64) -> f64 {
     sinc(PI * x) * sinc(PI * x / a)
 }
 
-/// A table read lands on the nearest entry, so it is the kernel within half a step of the probe.
+/// A table read is the line between the entries either side, so it is the kernel within the linear
+/// interpolation's error and two roundings.
 ///
-/// The probes sit halfway between entries and one ulp either side, where the rounding of the
-/// index is decided and the quantization error is largest: there the read is off the kernel by at
-/// most `max|L′|·(½·step + ulp)`. `sinc′(t)` peaks at 0.4362 (t ≈ 2.08), so `½` bounds it and
-/// `|L′| ≤ π·½·(1 + 1/a)` by the product rule. Each entry is the f32 kernel, which is off the true
-/// one by 1e-6 at most (see `math::lanczos`'s tests). On the grid itself the read is that entry.
-/// The worst error seen has to reach a quarter of the bound, or the probes missed the midpoints.
+/// The interpolation is off by at most `max|L″|·h²/8`, `h` the step. With `|sinc| ≤ 1`,
+/// `|sinc′| ≤ 0.4362` and `|sinc″| ≤ ⅓` (its peak, at 0), the product rule bounds
+/// `|L″| ≤ π²·(⅓ + 2·0.4362²/a + 1/(3a²))`: 5.99 for a = 2. Each entry is the kernel rounded once
+/// to f32, off by at most half a step at 1, `2⁻²⁵`, and the read's fused multiply-add rounds once
+/// more. The probes sit halfway between entries, where the interpolation error peaks, and one ulp
+/// either side. On the grid itself the read is that entry. The worst error seen has to reach a
+/// quarter of the bound, or the probes missed the curvature.
 #[test]
-fn a_lanczos_table_read_is_within_half_a_step_of_the_kernel() {
+fn a_lanczos_table_read_is_the_kernel_within_the_interpolation_error() {
     let step = 1.0 / LANCZOS_LUT_RESOLUTION as f64;
+    let rounding = 2.0f64.powi(-25);
     for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
         let lut = order.lut();
         let a = order.a() as f64;
@@ -36,9 +39,8 @@ fn a_lanczos_table_read_is_within_half_a_step_of_the_kernel() {
             );
         }
 
-        let slope = PI * 0.5 * (1.0 + 1.0 / a);
-        let ulp = f64::from(f32::EPSILON) * a;
-        let bound = slope * (0.5 * step + ulp) + 1e-6;
+        let curvature = PI * PI * (1.0 / 3.0 + 2.0 * 0.4362 * 0.4362 / a + 1.0 / (3.0 * a * a));
+        let bound = curvature * step * step / 8.0 + 2.0 * rounding;
         let mut worst = 0.0f64;
         for k in (0..order.a() * LANCZOS_LUT_RESOLUTION).step_by(7) {
             let midpoint = ((k as f64 + 0.5) * step) as f32;

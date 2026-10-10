@@ -57,6 +57,7 @@ impl Kernel for Battery {
         for (i, a) in ROWS.iter().enumerate() {
             let va = isa.load_f32(a);
             f32s(format!("sqrt {i}"), va.sqrt());
+            f32s(format!("floor {i}"), va.floor());
             let split = va.frexp();
             f32s(format!("frexp mantissa {i}"), split.mantissa);
             f32s(format!("frexp exponent {i}"), split.exponent);
@@ -204,8 +205,9 @@ fn max_and_min_are_a_compare_swap() {
 /// The folds pair lanes in their stated order, which these witnesses tell apart from any other.
 ///
 /// f32: lanes `i` and `i + 4` first, `(1e8 − 1e8) + (1 + 1)` and twice `1 + 1`, so 6 exactly; a
-/// left-to-right sum loses each 1 against 1e8 (whose ULP is 8) and ends at 3. f64: `(1e17 − 1e17)
-/// + (1 + 1)` is 2; pairing lanes 0 and 2 instead loses the 1 against 1e17 (ULP 16) and gives 0.
+/// left-to-right sum loses each 1 against 1e8 (whose ULP is 8) and ends at 3. f64:
+/// `(1e17 − 1e17) + (1 + 1)` is 2; pairing lanes 0 and 2 instead loses the 1 against 1e17 (ULP 16)
+/// and gives 0.
 #[test]
 fn reductions_fold_in_their_stated_order() {
     let isa = Portable::new();

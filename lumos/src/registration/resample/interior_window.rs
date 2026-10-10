@@ -10,7 +10,7 @@ use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::resample::tap_window::RowLanes;
-use crate::simd::{F32_LANES, F32x8, Isa};
+use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// A window of at most [`F32_LANES`] taps per axis, wholly inside the source.
 #[derive(Debug, Clone, Copy)]
@@ -18,7 +18,7 @@ pub(crate) struct InteriorWindow<V: F32x8> {
     x: usize,
     y: usize,
     rows: usize,
-    /// The x weights, zero past the window's taps.
+    /// The x weights, cleared past the window's taps: a sum over the vector is a sum over them.
     wx: V,
     lanes: RowLanes<V>,
     wy: [f32; F32_LANES],
@@ -51,14 +51,19 @@ impl<V: F32x8> InteriorWindow<V> {
         if first_x + x.count > size.width || first_y + y.count > size.height {
             return None;
         }
-        let wx = kernel.weight_lanes(isa, x.first, position.fx);
-        let wy_lanes = kernel.weight_lanes(isa, y.first, position.fy);
+        let lanes = RowLanes::first(isa, x.count);
+        let wx = lanes
+            .keep()
+            .keep(kernel.weight_lanes(isa, x.first, position.fx));
+        let wy_lanes = RowLanes::first(isa, y.count)
+            .keep()
+            .keep(kernel.weight_lanes(isa, y.first, position.fy));
         Some(Self {
             x: first_x,
             y: first_y,
             rows: y.count,
             wx,
-            lanes: RowLanes::first(isa, x.count),
+            lanes,
             wy: wy_lanes.to_array(),
             x_sums: AxisMoments {
                 total: wx.reduce_sum(),

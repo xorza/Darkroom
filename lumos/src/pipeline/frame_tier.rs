@@ -2,6 +2,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use imaginarium::Buffer2;
+
 use crate::combine::cache::core::CacheTier;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
@@ -10,6 +12,7 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_flags::QualityFlags;
 use crate::memory::memory_plan::MemoryPlan;
 
 use crate::frame_store::stored_image::StoredImage;
@@ -125,8 +128,6 @@ impl FrameTier {
         let image = LinearImage {
             metadata,
             pixels,
-            // The source's flags at each output pixel; its nulls are in `coverage` (see
-            // `WarpBuffers::flags`).
             flags,
         };
         match self {
@@ -158,30 +159,41 @@ impl FrameTier {
     }
 
     /// Park a reference frame, which is stored unwarped: it carries quality planes only if its
-    /// source declared pixels with no measurement. One already parked on disk keeps its planes
-    /// there.
+    /// source flagged pixels the warp leaves out of every other frame, and flags only if it holds
+    /// one the warp carries — see [`FrameQuality::for_reference`]. One already parked on disk keeps
+    /// its planes there.
     pub(crate) fn store_reference(
         &self,
         frame: PipelineFrame,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, AlignStackError> {
         match (self, frame) {
-            (Self::Ram, PipelineFrame::Resident(image)) => {
-                let quality = FrameQuality::for_unwarped(&image);
+            (Self::Ram, PipelineFrame::Resident(mut image)) => {
+                let quality = Self::reference_quality(&mut image);
                 Ok(StoredFrame::from_memory(image, quality, source_stats))
             }
-            (Self::Spill { scratch, .. }, PipelineFrame::Resident(image)) => {
-                let quality = FrameQuality::for_unwarped(&image);
+            (Self::Spill { scratch, .. }, PipelineFrame::Resident(mut image)) => {
+                let quality = Self::reference_quality(&mut image);
                 StoredFrame::spill(scratch, &image, &quality, source_stats)
                     .map_err(AlignStackError::from)
             }
             (Self::Spill { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
-                .into_frame(scratch, source_stats)
+                .into_reference_frame(scratch, source_stats)
                 .map_err(AlignStackError::from),
             (Self::Ram, PipelineFrame::Spilled(_)) => {
                 unreachable!("the RAM tier parks no frame on disk")
             }
         }
+    }
+
+    /// A resident reference's quality, its flags dropped unless it holds one the warp carries.
+    fn reference_quality(image: &mut LinearImage) -> FrameQuality<Buffer2<f32>> {
+        let quality = FrameQuality::for_reference(image.flags.as_ref());
+        image.flags = image
+            .flags
+            .take()
+            .filter(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED));
+        quality
     }
 
     /// The tier the combine reads the stored frames through.
@@ -191,6 +203,64 @@ impl FrameTier {
             Self::Spill { chunk_memory, .. } => CacheTier::Spilled {
                 chunk_memory: *chunk_memory,
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU64;
+
+    use common::TempDir;
+
+    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame_store::run_scratch::RunScratch;
+    use crate::internals::prelude::*;
+    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+    use crate::pipeline::frame_tier::FrameTier;
+    use crate::pipeline::pipeline_frame::PipelineFrame;
+
+    /// A reference leaves out what the warp leaves out of every other frame and keeps the flags it
+    /// carries, on either tier and whether or not it was parked on disk. Four pixels, the second a
+    /// cosmic ray: its coverage is 0 and the rest 1. With the first saturated the flags stay, with
+    /// the hit alone they are dropped.
+    #[test]
+    fn a_reference_leaves_out_the_excluded_and_keeps_the_carried() {
+        let directory = TempDir::new("frame_tier_reference");
+        let spill = || FrameTier::Spill {
+            scratch: RunScratch::create(directory.path()).unwrap(),
+            chunk_memory: 1 << 20,
+            parked: AtomicU64::new(0),
+        };
+        let dims = ImageDimensions::new((4, 1), 1);
+        for saturated in [false, true] {
+            let mut image = LinearImage::from_pixels(dims, vec![0.5, 0.25, 0.75, 1.0]);
+            image.flags = PixelFlags::from_fn(dims.size(), |index| match index {
+                0 if saturated => QualityFlags::SATURATED,
+                1 => QualityFlags::COSMIC_RAY,
+                _ => QualityFlags::default(),
+            });
+            for (label, tier, parked) in [
+                ("ram", FrameTier::Ram, false),
+                ("spill", spill(), false),
+                ("parked", spill(), true),
+            ] {
+                let frame = if parked {
+                    tier.hold(image.clone()).unwrap()
+                } else {
+                    PipelineFrame::Resident(image.clone())
+                };
+                let stored = tier
+                    .store_reference(frame, FrameStats::measure(&image))
+                    .unwrap();
+                let coverage = stored.quality.coverage().unwrap().chunk(0, 4);
+                assert_eq!(coverage, [1.0, 0.0, 1.0, 1.0], "{label} {saturated}");
+                assert_eq!(
+                    stored.flags.as_ref().map(|flags| flags.chunk(0, 4)[0]),
+                    saturated.then_some(QualityFlags::SATURATED.byte()),
+                    "{label} {saturated}"
+                );
+            }
         }
     }
 }

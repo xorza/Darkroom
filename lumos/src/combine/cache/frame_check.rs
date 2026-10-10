@@ -86,7 +86,7 @@ impl FrameCheck<'_> {
     ///
     /// That agreement — `coverage == 0` exactly where `confidence == 0`, the invariant
     /// [`FrameQuality`] documents — is what lets the combine gate a sample on coverage and be sure
-    /// of a positive confidence to weight it by, and what keeps `source_noise_variance`'s
+    /// of a positive confidence to divide its noise by, and what keeps `source_noise_variance`'s
     /// reciprocal finite. The warp produces planes that satisfy it; this is where caller-supplied
     /// and spilled ones are held to it.
     ///

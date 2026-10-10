@@ -17,9 +17,9 @@ const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
 /// packed to the front, with their weights, flags, frames and noise in the same order, and the
 /// rejection methods' own working buffers.
 ///
-/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) rather than built in a
-/// `for_each_init` init closure, because the row loop runs once per chunk per channel — a fresh
-/// init would rebuild every vector on each of those.
+/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) rather
+/// than built in a `for_each_init` init closure, because the row loop runs once per chunk per
+/// channel — a fresh init would rebuild every vector on each of those.
 #[derive(Debug, Default)]
 pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
@@ -142,9 +142,9 @@ impl CombinedSample {
     /// The dispersion is the variance of the same mean as the samples' scatter shows it, with no
     /// noise model: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`. Where each sample's variance is `c / wᵢ`, the
     /// weighted sum of squares has expectation `(n − 1)·c` and the mean's variance is `c / Σwᵢ`, so
-    /// the figure is unbiased; noise weighting makes the weights so at the sky, and equal weights
-    /// make it the squared standard error of the mean. NaN for fewer than two survivors, whose
-    /// scatter says nothing.
+    /// the figure is unbiased; noise weighting makes the weights so at the sky where no warp
+    /// averaged the samples, and equal weights make it the squared standard error of the mean. NaN
+    /// for fewer than two survivors, whose scatter says nothing.
     pub(crate) fn from_survivors(
         value: f32,
         values: &[f32],
