@@ -10,6 +10,7 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::statistics::mad_to_sigma;
 use crate::progress::progress_callback::ProgressCallback;
 
@@ -30,6 +31,7 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
             cfa_type: None,
             saturation_flagged: false,
             conditions: CaptureConditions::default(),
+            unverified_dark: UnverifiedConditions::NONE,
         },
     }
 }

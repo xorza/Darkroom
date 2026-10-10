@@ -144,6 +144,7 @@ mod tests {
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::frame_store::frame_stats::FrameStats;
+    use crate::io::image::unverified_conditions::UnverifiedConditions;
     use crate::math::statistics::{MedianMad, mad_to_sigma};
 
     fn stats(quantization_sigma: Option<f32>) -> FrameStats {
@@ -164,6 +165,7 @@ mod tests {
                 cfa_type: None,
                 saturation_flagged: false,
                 conditions: CaptureConditions::default(),
+                unverified_dark: UnverifiedConditions::NONE,
             },
         }
     }

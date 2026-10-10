@@ -28,6 +28,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::progress::progress_callback::ProgressCallback;
@@ -1005,6 +1006,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         cfa_type,
         metadata: ImageMetadata {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            unverified_dark: UnverifiedConditions {
+                exposure: false,
+                temperature: true,
+            },
             ..Default::default()
         },
         flags: None,
@@ -1083,6 +1088,14 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         assert_eq!(report.checksum, ChecksumStatus::Valid);
     }
     let loaded = CalibrationMasters::load(&path, &LoadContext::default()).unwrap();
+    // The flat's stack left its flat-dark's temperature uncompared, and the bundle keeps saying so.
+    assert_eq!(
+        loaded.unverified_flat_dark(),
+        UnverifiedConditions {
+            exposure: false,
+            temperature: true,
+        }
+    );
     assert_eq!(
         loaded.dark.as_ref().unwrap().flags().unwrap().bytes(),
         dark_flags.as_ref().unwrap().bytes()
@@ -1555,13 +1568,6 @@ fn a_dark_is_matched_to_the_light() {
         assert_eq!(matched.data.pixels(), &[0.3125; 16], "{exposure} s");
     }
     assert_eq!(
-        separated.calibrate(&mut light(None, Some(-10.0))),
-        Ok(CalibrationOutcome {
-            unverified_exposure: true,
-            ..CalibrationOutcome::default()
-        })
-    );
-    assert_eq!(
         separated.calibrate(&mut light(Some(120.0), Some(-8.5))),
         Err(CalibrationError::DarkMismatch {
             component: MasterRole::Dark,
@@ -1571,13 +1577,35 @@ fn a_dark_is_matched_to_the_light() {
             }
         })
     );
-    assert_eq!(
-        separated.calibrate(&mut light(Some(120.0), None)),
-        Ok(CalibrationOutcome {
-            unverified_temperature: true,
-            ..CalibrationOutcome::default()
-        })
-    );
+    // A condition one side does not state is reported, and recorded on the light.
+    for (exposure, temperature, unverified) in [
+        (
+            None,
+            Some(-10.0),
+            UnverifiedConditions {
+                exposure: true,
+                temperature: false,
+            },
+        ),
+        (
+            Some(120.0),
+            None,
+            UnverifiedConditions {
+                exposure: false,
+                temperature: true,
+            },
+        ),
+    ] {
+        let mut silent = light(exposure, temperature);
+        assert_eq!(
+            separated.calibrate(&mut silent),
+            Ok(CalibrationOutcome {
+                unverified,
+                ..CalibrationOutcome::default()
+            })
+        );
+        assert_eq!(silent.metadata.unverified_dark, unverified);
+    }
 
     let thermal = || {
         let mut dark = constant_cfa(size, 0.0625, CfaType::Mono);
@@ -1612,6 +1640,8 @@ fn a_dark_is_matched_to_the_light() {
 /// - A flat-dark of the flat's own 2 s is not scaled, so the flat keeps 1/64 of the thermal
 ///   signal: its first pixel is 0.375 + 1/64 = 0.390625 against a mean of 0.453125, and the light
 ///   there reads 0.1875 · 0.453125 / 0.390625 = 0.2175 rather than 0.21875.
+/// - A condition the flat does not state, or one its frames' flat-dark match left uncompared, is
+///   reported by the bundle.
 /// - With the bias still in it and no bias to separate it, the flat-dark cannot be scaled, and is
 ///   refused; temperatures 1.5 °C apart are refused before the exposures are compared.
 #[test]
@@ -1679,6 +1709,43 @@ fn a_flat_dark_is_matched_to_the_flat() {
     );
     unscaled.calibrate(&mut light).unwrap();
     assert_close!(light.data[0], 0.2175, 2.0 * f32::EPSILON * 0.2175);
+
+    // What the match did not compare is kept on the prepared flat: a flat that states no
+    // temperature leaves it unverified here, and one whose frames each took a flat-dark of no
+    // stated exposure keeps that beside it.
+    assert_eq!(masters.unverified_flat_dark(), UnverifiedConditions::NONE);
+    let mut silent = flat();
+    silent.metadata.ccd_temp = None;
+    let mut stacked = flat();
+    stacked.metadata.calibration = CalibrationState::THERMAL;
+    stacked.metadata.unverified_dark = UnverifiedConditions {
+        exposure: true,
+        temperature: false,
+    };
+    for (flat, unverified) in [
+        (
+            silent,
+            UnverifiedConditions {
+                exposure: false,
+                temperature: true,
+            },
+        ),
+        (
+            stacked,
+            UnverifiedConditions {
+                exposure: true,
+                temperature: false,
+            },
+        ),
+    ] {
+        let masters = bundle(CalibrationSet {
+            flat: Some(flat),
+            bias: Some(constant_cfa(size, bias, CfaType::Mono)),
+            flat_dark: Some(flat_dark(-10.0)),
+            ..Default::default()
+        });
+        assert_eq!(masters.unverified_flat_dark(), unverified);
+    }
 
     for (temperature, source) in [
         (
@@ -1805,37 +1872,47 @@ fn flats_are_calibrated_before_they_are_combined() {
 /// - darks of 120, 300 and 300 s are refused at frame 1, the first outside 1% of frame 0's 120 s;
 /// - darks of 300 and 301 s at −10 and −10.5 °C agree, and the master states their means, 300.5 s
 ///   and −10.25 °C;
-/// - flats of 1 and 2 s are a flat's business: they stack, and the master states no exposure.
+/// - flats of 1 and 2 s are a flat's business: they stack, and the master states no exposure;
+/// - the same flats, the second with no stated temperature, each take a bias-free flat-dark of 1 s
+///   at −10 °C: the master records the temperature as unverified, though frame 0, whose metadata
+///   it keeps, compared it.
 #[test]
 fn dark_frames_share_one_exposure_and_temperature() {
     let directory = TempDir::new("lumos-master-conditions");
-    let write = |name: &str, frames: &[(f64, f64)]| -> Vec<PathBuf> {
+    let write = |name: &str, frames: &[(f64, Option<f64>)]| -> Vec<PathBuf> {
         frames
             .iter()
             .enumerate()
             .map(|(index, &(exposure, temperature))| {
                 let mut frame = constant_cfa(Size2us::new(4, 4), 0.25, CfaType::Mono);
                 frame.metadata.exposure_time = Some(exposure);
-                frame.metadata.ccd_temp = Some(temperature);
+                frame.metadata.ccd_temp = temperature;
                 let path = directory.join(format!("{name}_{index}.fits"));
                 frame.save_fits(&path).unwrap();
                 path
             })
             .collect()
     };
-    let stack = |paths: &[PathBuf], role: MasterRole| {
+    let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
         stack_cfa_master(
             paths,
             role,
             role.stack_config(),
-            None,
+            subtract,
             ProgressCallback::default(),
             CancelToken::never(),
         )
     };
 
-    let mixed = write("mixed", &[(120.0, -10.0), (300.0, -10.0), (300.0, -10.0)]);
-    let error = stack(&mixed, MasterRole::Dark).unwrap_err();
+    let mixed = write(
+        "mixed",
+        &[
+            (120.0, Some(-10.0)),
+            (300.0, Some(-10.0)),
+            (300.0, Some(-10.0)),
+        ],
+    );
+    let error = stack(&mixed, MasterRole::Dark, None).unwrap_err();
     assert!(
         matches!(
             error,
@@ -1853,13 +1930,38 @@ fn dark_frames_share_one_exposure_and_temperature() {
         "{error:?}"
     );
 
-    let agreeing = write("agreeing", &[(300.0, -10.0), (301.0, -10.5)]);
-    let master = stack(&agreeing, MasterRole::Dark).unwrap().unwrap();
+    let agreeing = write("agreeing", &[(300.0, Some(-10.0)), (301.0, Some(-10.5))]);
+    let master = stack(&agreeing, MasterRole::Dark, None).unwrap().unwrap();
     assert_eq!(master.metadata.exposure_time, Some(300.5));
     assert_eq!(master.metadata.ccd_temp, Some(-10.25));
 
-    let flats = write("flats", &[(1.0, -10.0), (2.0, -10.0)]);
-    let master = stack(&flats, MasterRole::Flat).unwrap().unwrap();
+    let flats = write("flats", &[(1.0, Some(-10.0)), (2.0, Some(-10.0))]);
+    let master = stack(&flats, MasterRole::Flat, None).unwrap().unwrap();
     assert_eq!(master.metadata.exposure_time, None);
     assert_eq!(master.metadata.ccd_temp, Some(-10.0));
+    assert_eq!(master.metadata.unverified_dark, UnverifiedConditions::NONE);
+
+    let mut flat_dark = constant_cfa(Size2us::new(4, 4), 0.031_25, CfaType::Mono);
+    flat_dark.metadata.exposure_time = Some(1.0);
+    flat_dark.metadata.ccd_temp = Some(-10.0);
+    flat_dark.metadata.calibration = CalibrationState::BIAS;
+    let silent = write("silent", &[(1.0, Some(-10.0)), (2.0, None)]);
+    let master = stack(
+        &silent,
+        MasterRole::Flat,
+        Some(Subtractor {
+            role: MasterRole::FlatDark,
+            master: &flat_dark,
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(master.metadata.calibration, CalibrationState::THERMAL);
+    assert_eq!(
+        master.metadata.unverified_dark,
+        UnverifiedConditions {
+            exposure: false,
+            temperature: true,
+        }
+    );
 }

@@ -7,6 +7,7 @@ use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
@@ -120,20 +121,38 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         mosaic_noise: None,
         saturation_flagged: false,
         calibration: read_calibration(header),
+        unverified_dark: read_unverified_dark(header),
     }
 }
 
 /// The logical keyword that records each part calibration removed: bias, dark signal, flat.
 const CALIBRATION_KEYWORDS: [&str; 3] = ["LUMCALB", "LUMCALD", "LUMCALF"];
 
+/// The logical keyword that records each capture condition a dark match did not compare:
+/// exposure, temperature.
+const UNVERIFIED_DARK_KEYWORDS: [&str; 2] = ["LUMUVEXP", "LUMUVTMP"];
+
 fn read_calibration(header: &Header) -> CalibrationState {
-    let [bias, thermal, flat] = CALIBRATION_KEYWORDS
-        .map(|keyword| optional(keyword, header.get_logical(keyword)).unwrap_or(false));
+    let [bias, thermal, flat] = read_flags(header, CALIBRATION_KEYWORDS);
     CalibrationState {
         bias,
         thermal,
         flat,
     }
+}
+
+fn read_unverified_dark(header: &Header) -> UnverifiedConditions {
+    let [exposure, temperature] = read_flags(header, UNVERIFIED_DARK_KEYWORDS);
+    UnverifiedConditions {
+        exposure,
+        temperature,
+    }
+}
+
+/// Each logical keyword's value, `false` when it is absent: a record keyword is written only when
+/// it is set.
+fn read_flags<const N: usize>(header: &Header, keywords: [&str; N]) -> [bool; N] {
+    keywords.map(|keyword| optional(keyword, header.get_logical(keyword)).unwrap_or(false))
 }
 
 /// The header's `DATAMAX`, in the file's sample units; `None`, with the reason logged, when it is
@@ -216,8 +235,20 @@ pub(super) fn write_image_metadata(
         thermal,
         flat,
     } = metadata.calibration;
-    for (keyword, removed) in CALIBRATION_KEYWORDS.into_iter().zip([bias, thermal, flat]) {
-        if removed {
+    let UnverifiedConditions {
+        exposure,
+        temperature,
+    } = metadata.unverified_dark;
+    for (keyword, set) in CALIBRATION_KEYWORDS
+        .into_iter()
+        .zip([bias, thermal, flat])
+        .chain(
+            UNVERIFIED_DARK_KEYWORDS
+                .into_iter()
+                .zip([exposure, temperature]),
+        )
+    {
+        if set {
             header.set(keyword, true)?;
         }
     }

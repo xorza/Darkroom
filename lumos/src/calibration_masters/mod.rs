@@ -28,10 +28,10 @@ use crate::combine::stack::combine_cached;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain};
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -177,6 +177,16 @@ impl CalibrationMasters {
         })
     }
 
+    /// The conditions not compared when the flat-dark was taken from the flat, or from any frame
+    /// the flat was stacked from: the flat is corrected for a dark signal nothing checked.
+    pub fn unverified_flat_dark(&self) -> UnverifiedConditions {
+        self.flat
+            .as_ref()
+            .map_or(UnverifiedConditions::NONE, |flat| {
+                flat.divisor().metadata.unverified_dark
+            })
+    }
+
     /// Photosites the flat's floor raised: every light is corrected by less than its vignetting
     /// asks there.
     pub fn floored_flat_pixels(&self) -> usize {
@@ -216,7 +226,9 @@ impl CalibrationMasters {
     /// parts, matched to its exposure and temperature: the dark signal by the flat-dark, and the
     /// bias by the bias, or by a flat-dark that still holds it. A flat stacked with its subtractor
     /// taken from each frame ([`stack_cfa_master`]) already lost those parts, and does not lose
-    /// them again. Cold pixels are detected on that flat, hot pixels on the dark as given.
+    /// them again, and what its stack's match did not compare stays on it beside what this one did
+    /// not ([`Self::unverified_flat_dark`]). Cold pixels are detected on that flat, hot pixels on the
+    /// dark as given.
     /// `sigma_threshold` controls defect detection sensitivity (see [`DEFAULT_SIGMA_THRESHOLD`]).
     ///
     /// # Errors
@@ -255,7 +267,7 @@ impl CalibrationMasters {
                     if let Some(bias) = &bias
                         && !master.metadata.calibration.bias
                     {
-                        subtract_master(&mut master, bias, MasterRole::Bias, 1.0)?;
+                        subtract_master(&mut master, bias, MasterRole::Bias, None)?;
                     }
                     Ok(master)
                 })
@@ -284,17 +296,12 @@ impl CalibrationMasters {
                                 source,
                             }
                         })?;
-                        subtract_master(
-                            &mut flat,
-                            flat_dark,
-                            MasterRole::FlatDark,
-                            matched.factor(),
-                        )?;
+                        subtract_master(&mut flat, flat_dark, MasterRole::FlatDark, Some(matched))?;
                     }
                 }
                 if !flat.metadata.calibration.bias {
                     if let Some(bias) = &bias {
-                        subtract_master(&mut flat, bias, MasterRole::Bias, 1.0)?;
+                        subtract_master(&mut flat, bias, MasterRole::Bias, None)?;
                     } else if holds_offset(&flat) {
                         return Err(CalibrationError::FlatWithoutSubtractor);
                     }
@@ -443,31 +450,25 @@ impl CalibrationMasters {
                     component: MasterRole::Dark,
                     source,
                 })?;
-                outcome.unverified_exposure = matched.unverified_exposure;
-                outcome.unverified_temperature = matched.unverified_temperature;
+                outcome.unverified = matched.unverified;
                 outcome.dark_scale = matched.scale;
                 let map = master_map(domain.as_ref(), dark, MasterRole::Dark)?;
                 after_subtracting(&mut domain, dark);
-                Ok((dark, map, matched.factor()))
+                Ok((dark, map, matched))
             })
             .transpose()?;
 
         image.record_saturation();
-        let mut removed = CalibrationState::NONE;
         if let Some((bias, map)) = bias {
-            image.subtract(bias, map);
-            removed = removed.union(MasterRole::Bias.signal());
+            remove_master(image, bias, MasterRole::Bias, map, None);
         }
-        if let Some((dark, map, scale)) = dark {
-            image.subtract_scaled(dark, map, scale);
-            removed = removed.union(MasterRole::Dark.signal().without(dark.metadata.calibration));
+        if let Some((dark, map, matched)) = dark {
+            remove_master(image, dark, MasterRole::Dark, map, Some(matched));
         }
         debug_assert_eq!(image.metadata.domain, domain);
         if let Some(flat) = &self.flat {
             flat.apply(image);
-            removed = removed.union(CalibrationState::FLAT);
         }
-        image.metadata.calibration = removed;
         if let Some(defect_map) = &self.defect_map {
             defect_map.correct(image);
         }
@@ -586,24 +587,44 @@ const fn after_subtracting(domain: &mut Option<SampleDomain>, master: &CfaImage)
     }
 }
 
-/// Subtract `master`, in `role`, from `frame`, its signal scaled by `scale`, and record in `frame`
-/// what it held.
+/// [`remove_master`] through the map from `master`'s domain to `frame`'s current one.
 fn subtract_master(
     frame: &mut CfaImage,
     master: &CfaImage,
     role: MasterRole,
-    scale: f64,
+    matched: Option<DarkMatch>,
 ) -> Result<(), CalibrationError> {
+    let map = master_map(frame.metadata.domain.as_ref(), master, role)?;
+    remove_master(frame, master, role, map, matched);
+    Ok(())
+}
+
+/// Subtract `master`, in `role`, from `frame` through `map`, its dark signal scaled as `matched`
+/// says, and record in `frame` what it held and what the match did not compare. Every removal of
+/// a master goes through here, so neither record can be left behind.
+fn remove_master(
+    frame: &mut CfaImage,
+    master: &CfaImage,
+    role: MasterRole,
+    map: DomainMap,
+    matched: Option<DarkMatch>,
+) {
     let removes = role.signal().without(master.metadata.calibration);
     debug_assert!(
         !frame.metadata.calibration.overlaps(removes),
         "{role} would remove {removes:?} from a frame that lost {:?}",
         frame.metadata.calibration
     );
-    let map = master_map(frame.metadata.domain.as_ref(), master, role)?;
-    frame.subtract_scaled(master, map, scale);
+    debug_assert_eq!(
+        matched.is_some(),
+        removes.thermal,
+        "{role}: a master is matched to the frame exactly when it holds dark signal"
+    );
+    frame.subtract_scaled(master, map, matched.map_or(1.0, DarkMatch::factor));
     frame.metadata.calibration = frame.metadata.calibration.union(removes);
-    Ok(())
+    if let Some(matched) = matched {
+        frame.metadata.unverified_dark = frame.metadata.unverified_dark.union(matched.unverified);
+    }
 }
 
 #[cfg(all(test, feature = "real-data"))]

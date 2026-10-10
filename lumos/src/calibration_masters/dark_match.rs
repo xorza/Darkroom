@@ -1,8 +1,8 @@
 //! [`DarkMatch`]: how a master holding dark signal is taken from a frame.
 
 use crate::calibration_masters::error::DarkMismatch;
-use crate::frame_store::capture_conditions::CaptureCondition;
-use crate::frame_store::capture_conditions::CaptureConditions;
+use crate::frame_store::capture_conditions::{CaptureCondition, CaptureConditions};
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 
 /// How a master holding dark signal is taken from a frame — a dark from a light, a flat-dark from
 /// a flat: the factor on its signal, and what could not be compared.
@@ -14,8 +14,7 @@ use crate::frame_store::capture_conditions::CaptureConditions;
 pub(crate) struct DarkMatch {
     /// The frame's exposure over the dark's, when the two differ and the dark could be scaled.
     pub(crate) scale: Option<f64>,
-    pub(crate) unverified_exposure: bool,
-    pub(crate) unverified_temperature: bool,
+    pub(crate) unverified: UnverifiedConditions,
 }
 
 impl DarkMatch {
@@ -31,7 +30,7 @@ impl DarkMatch {
         dark: CaptureConditions,
         holds_bias: bool,
     ) -> Result<Self, DarkMismatch> {
-        let unverified_temperature = match (frame.ccd_temp, dark.ccd_temp) {
+        let temperature = match (frame.ccd_temp, dark.ccd_temp) {
             (Some(frame), Some(dark)) => {
                 if !CaptureCondition::Temperature.agree(frame.min(dark), frame.max(dark)) {
                     return Err(DarkMismatch::Temperature { frame, dark });
@@ -43,8 +42,10 @@ impl DarkMatch {
         let (Some(frame), Some(dark)) = (frame.exposure_time, dark.exposure_time) else {
             return Ok(Self {
                 scale: None,
-                unverified_exposure: true,
-                unverified_temperature,
+                unverified: UnverifiedConditions {
+                    exposure: true,
+                    temperature,
+                },
             });
         };
         let scale = if CaptureCondition::Exposure.agree(frame.min(dark), frame.max(dark)) {
@@ -57,8 +58,10 @@ impl DarkMatch {
         };
         Ok(Self {
             scale,
-            unverified_exposure: false,
-            unverified_temperature,
+            unverified: UnverifiedConditions {
+                exposure: false,
+                temperature,
+            },
         })
     }
 
@@ -95,8 +98,7 @@ mod tests {
             matched,
             DarkMatch {
                 scale: Some(2.5),
-                unverified_exposure: false,
-                unverified_temperature: false,
+                unverified: UnverifiedConditions::NONE,
             }
         );
         assert_eq!(matched.factor(), 2.5);
@@ -127,8 +129,10 @@ mod tests {
             agreeing,
             DarkMatch {
                 scale: None,
-                unverified_exposure: false,
-                unverified_temperature: true,
+                unverified: UnverifiedConditions {
+                    exposure: false,
+                    temperature: true,
+                },
             }
         );
         assert_eq!(agreeing.factor(), 1.0);
@@ -142,8 +146,10 @@ mod tests {
             silent,
             DarkMatch {
                 scale: None,
-                unverified_exposure: true,
-                unverified_temperature: false,
+                unverified: UnverifiedConditions {
+                    exposure: true,
+                    temperature: false,
+                },
             }
         );
     }

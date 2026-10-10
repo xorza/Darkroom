@@ -10,6 +10,7 @@ use crate::io::image::fits::metadata::{
 };
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
@@ -367,40 +368,54 @@ fn every_alias_reads_into_its_field() {
     assert_eq!(written.get_real("EXPOSURE").unwrap(), None);
 }
 
-/// Each part calibration removed is written as its own logical keyword and read back as the same
-/// record; a part not removed writes nothing.
+/// Each part calibration removed, and each condition a dark match left uncompared, is written as
+/// its own logical keyword and read back as the same record; a part not set writes nothing.
 #[test]
 fn the_calibration_record_round_trips() {
-    for calibration in [
-        CalibrationState::NONE,
-        CalibrationState::BIAS,
-        CalibrationState::THERMAL.union(CalibrationState::FLAT),
-        CalibrationState::ADDITIVE.union(CalibrationState::FLAT),
+    let temperature = UnverifiedConditions {
+        exposure: false,
+        temperature: true,
+    };
+    let both = UnverifiedConditions {
+        exposure: true,
+        temperature: true,
+    };
+    for (calibration, unverified_dark) in [
+        (CalibrationState::NONE, UnverifiedConditions::NONE),
+        (CalibrationState::BIAS, temperature),
+        (
+            CalibrationState::THERMAL.union(CalibrationState::FLAT),
+            both,
+        ),
+        (
+            CalibrationState::ADDITIVE.union(CalibrationState::FLAT),
+            UnverifiedConditions::NONE,
+        ),
     ] {
         let mut header = Header::new();
-        write_image_metadata(
-            &mut header,
-            &ImageMetadata {
-                calibration,
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap();
-        for (keyword, removed) in [
+        let metadata = ImageMetadata {
+            calibration,
+            unverified_dark,
+            ..Default::default()
+        };
+        write_image_metadata(&mut header, &metadata, None).unwrap();
+        for (keyword, set) in [
             ("LUMCALB", calibration.bias),
             ("LUMCALD", calibration.thermal),
             ("LUMCALF", calibration.flat),
+            ("LUMUVEXP", unverified_dark.exposure),
+            ("LUMUVTMP", unverified_dark.temperature),
         ] {
             assert_eq!(
                 header.get_logical(keyword).unwrap(),
-                removed.then_some(true),
-                "{calibration:?}: {keyword}"
+                set.then_some(true),
+                "{calibration:?}, {unverified_dark:?}: {keyword}"
             );
         }
+        let read = read_metadata(&header, SampleType::F32);
         assert_eq!(
-            read_metadata(&header, SampleType::F32).calibration,
-            calibration
+            (read.calibration, read.unverified_dark),
+            (calibration, unverified_dark)
         );
     }
 }

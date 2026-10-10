@@ -42,6 +42,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::vec2us::Vec2us;
 use crate::memory::chunk_memory_layout::ChunkMemoryLayout;
 use crate::progress::progress_callback::ProgressCallback;
@@ -221,16 +222,22 @@ impl FrameCache {
                 .iter()
                 .map(|frame| frame.source_stats.facts.conditions),
         );
+        let unverified_dark = self
+            .frames
+            .iter()
+            .map(|frame| frame.source_stats.facts.unverified_dark)
+            .fold(UnverifiedConditions::NONE, UnverifiedConditions::union);
         let image = LinearImage {
             // The reference frame's metadata, with the combine's own quantization σ, saturation
-            // record and capture conditions, and no mosaic noise: what the reference's decoder and
-            // demosaic recorded describes one frame, not the stack.
+            // record, capture conditions and unverified dark match, and no mosaic noise: what the
+            // reference's decoder and demosaic recorded describes one frame, not the stack.
             metadata: ImageMetadata {
                 quantization_sigma,
                 mosaic_noise: None,
                 saturation_flagged,
                 exposure_time: conditions.exposure_time,
                 ccd_temp: conditions.ccd_temp,
+                unverified_dark,
                 ..self.core.metadata.clone()
             },
             pixels,

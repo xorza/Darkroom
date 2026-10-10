@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 
 /// The decisions a run took on its own and did not fail over, returned with its result.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -23,6 +24,9 @@ pub struct RunReport {
     pub unverified_dark_temperatures: u64,
     /// Lights whose bias-removed dark was scaled to their exposure.
     pub scaled_darks: u64,
+    /// The conditions not compared when the flat-dark was taken from the flat, or from any frame
+    /// the flat was stacked from.
+    pub unverified_flat_dark: UnverifiedConditions,
     /// Photosites the flat's floor raised, corrected by less than their vignetting asks in every
     /// light.
     pub floored_flat_pixels: u64,

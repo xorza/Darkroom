@@ -7,6 +7,7 @@ use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, Ro
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default)]
@@ -90,6 +91,9 @@ pub struct ImageMetadata {
     /// light, and by a calibration stack that subtracts a master from each frame. It guards
     /// against removing a part twice, and travels with the frame through demosaic.
     pub calibration: CalibrationState,
+    /// The conditions not compared when a master holding dark signal was taken from this frame,
+    /// or from any frame of the stack it is: a light's dark, a flat's flat-dark.
+    pub unverified_dark: UnverifiedConditions,
 }
 
 impl ImageMetadata {
