@@ -74,6 +74,7 @@ mod tests {
     use crate::combine::normalization::ChannelNorm;
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
+    use crate::io::image::unverified_conditions::UnverifiedConditions;
     use crate::math::statistics::MedianMad;
 
     fn stats(noise: &[f32]) -> FrameStats {
@@ -95,6 +96,7 @@ mod tests {
                 cfa_type: None,
                 saturation_flagged: false,
                 conditions: CaptureConditions::default(),
+                unverified_dark: UnverifiedConditions::NONE,
             },
         }
     }

@@ -88,6 +88,7 @@ pub use io::image::mosaic_noise::MosaicNoise;
 pub use io::image::pixel_flags::{PixelFlags, QualityFlags};
 pub use io::image::preview_image::{PreviewImage, PreviewPixels};
 pub use io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+pub use io::image::unverified_conditions::UnverifiedConditions;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
 pub use io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;

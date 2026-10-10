@@ -6,6 +6,7 @@
 use rayon::prelude::*;
 
 use crate::calibration_masters::error::CalibrationError;
+use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::vec2us::Vec2us;
@@ -54,9 +55,13 @@ impl PreparedFlat {
         self.floored
     }
 
-    /// Divide `image` by the flat; flag [`QualityFlags::NO_DATA`] where the flat holds no
-    /// measurement, and [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor.
+    /// Divide `image` by the flat and record it; flag [`QualityFlags::NO_DATA`] where the flat
+    /// holds no measurement, and [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor.
     pub(crate) fn apply(&self, image: &mut CfaImage) {
+        debug_assert!(
+            !image.metadata.calibration.flat,
+            "the flat is divided out twice"
+        );
         let flat = &self.divisor;
         assert!(
             image.data.width() == flat.data.width() && image.data.height() == flat.data.height(),
@@ -73,6 +78,7 @@ impl PreparedFlat {
             .zip(flat.data.par_iter())
             .for_each(|(pixel, divisor)| *pixel /= divisor);
         image.take_master_flags(flat);
+        image.metadata.calibration = image.metadata.calibration.union(CalibrationState::FLAT);
         if self.floored > 0 {
             let divisors = flat.data.pixels();
             let size = image.size();

@@ -81,10 +81,10 @@ impl CalibrationNotes {
         let count = |counter: &AtomicU64, happened: bool| {
             counter.fetch_add(u64::from(happened), Ordering::Relaxed);
         };
-        count(&self.unverified_exposures, outcome.unverified_exposure);
+        count(&self.unverified_exposures, outcome.unverified.exposure);
         count(
             &self.unverified_temperatures,
-            outcome.unverified_temperature,
+            outcome.unverified.temperature,
         );
         count(&self.scaled_darks, outcome.dark_scale.is_some());
     }
@@ -93,6 +93,7 @@ impl CalibrationNotes {
         report.unverified_dark_exposures = self.unverified_exposures.load(Ordering::Relaxed);
         report.unverified_dark_temperatures = self.unverified_temperatures.load(Ordering::Relaxed);
         report.scaled_darks = self.scaled_darks.load(Ordering::Relaxed);
+        report.unverified_flat_dark = masters.unverified_flat_dark();
         report.floored_flat_pixels = masters.floored_flat_pixels() as u64;
     }
 }
@@ -100,21 +101,27 @@ impl CalibrationNotes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::image::unverified_conditions::UnverifiedConditions;
 
     /// Three lights: one unverified in exposure, one in temperature and scaled, one clean. The
     /// report counts each fact once per light that met it, and carries the bundle's floored flat
-    /// pixels, here none.
+    /// pixels and unverified flat-dark, here none.
     #[test]
     fn the_notes_count_what_calibration_could_not_check() {
         let notes = CalibrationNotes::default();
         notes.record(CalibrationOutcome {
-            unverified_exposure: true,
+            unverified: UnverifiedConditions {
+                exposure: true,
+                temperature: false,
+            },
             ..CalibrationOutcome::default()
         });
         notes.record(CalibrationOutcome {
-            unverified_temperature: true,
+            unverified: UnverifiedConditions {
+                exposure: false,
+                temperature: true,
+            },
             dark_scale: Some(2.5),
-            ..CalibrationOutcome::default()
         });
         notes.record(CalibrationOutcome::default());
         let mut report = RunReport::default();
@@ -124,9 +131,10 @@ mod tests {
                 report.unverified_dark_exposures,
                 report.unverified_dark_temperatures,
                 report.scaled_darks,
-                report.floored_flat_pixels
+                report.floored_flat_pixels,
+                report.unverified_flat_dark
             ),
-            (1, 1, 1, 0)
+            (1, 1, 1, 0, UnverifiedConditions::NONE)
         );
     }
 }

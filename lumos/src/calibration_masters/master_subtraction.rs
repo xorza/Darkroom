@@ -1,5 +1,6 @@
 //! [`MasterSubtraction`]: a master taken from every frame of a calibration stack.
 
+use crate::calibration_masters;
 use crate::calibration_masters::dark_match::DarkMatch;
 use crate::calibration_masters::master_role::MasterRole;
 use crate::combine::error::StackError;
@@ -72,17 +73,18 @@ impl FrameStep<CfaImage> for MasterSubtraction<'_> {
                 subtractor: role,
             });
         }
-        let scale = if self.removes.thermal {
-            DarkMatch::new(
-                CaptureConditions::of(&frame.metadata),
-                CaptureConditions::of(&master.metadata),
-                self.removes.bias,
-            )
-            .map_err(|source| StackError::SubtractorConditions { index, source })?
-            .factor()
-        } else {
-            1.0
-        };
+        let matched = self
+            .removes
+            .thermal
+            .then(|| {
+                DarkMatch::new(
+                    CaptureConditions::of(&frame.metadata),
+                    CaptureConditions::of(&master.metadata),
+                    self.removes.bias,
+                )
+            })
+            .transpose()
+            .map_err(|source| StackError::SubtractorConditions { index, source })?;
         let map = match (&frame.metadata.domain, &master.metadata.domain) {
             (Some(frame_domain), Some(master_domain)) => master_domain
                 .conversion_to(frame_domain)
@@ -93,8 +95,7 @@ impl FrameStep<CfaImage> for MasterSubtraction<'_> {
                 })?,
             _ => DomainMap::IDENTITY,
         };
-        frame.subtract_scaled(master, map, scale);
-        frame.metadata.calibration = frame.metadata.calibration.union(self.removes);
+        calibration_masters::remove_master(frame, master, role, map, matched);
         Ok(())
     }
 }
@@ -105,6 +106,7 @@ mod tests {
     use crate::calibration_masters::error::DarkMismatch;
     use crate::internals::cfa::constant_cfa;
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::unverified_conditions::UnverifiedConditions;
     use crate::math::size2us::Size2us;
 
     fn frame(value: f32, exposure: f64) -> CfaImage {
@@ -120,21 +122,23 @@ mod tests {
 
     /// A flat of 2 s at 0.5 loses what each subtractor still holds. A bias of 1/32 leaves 0.46875
     /// and the bias recorded. A flat-dark of 1 s that lost its bias holds 1/64 of dark signal,
-    /// scaled by 2/1 to 1/32: the same 0.46875, and the dark signal recorded. A flat-dark of 1 s
-    /// that still holds its bias cannot be scaled, and a flat that lost its bias already cannot
-    /// lose it again.
+    /// scaled by 2/1 to 1/32: the same 0.46875, and the dark signal recorded, with the temperature
+    /// neither states as unverified; the bias is matched to nothing. A flat-dark of 1 s that still
+    /// holds its bias cannot be scaled, and a flat that lost its bias already cannot lose it
+    /// again.
     #[test]
     fn each_frame_loses_what_the_subtractor_holds() {
         let bias = frame(0.031_25, 0.0);
         let thermal = lost(frame(0.015_625, 1.0), CalibrationState::BIAS);
         let raw = frame(0.031_25 + 0.015_625, 1.0);
-        for (subtractor, removed) in [
+        for (subtractor, removed, unverified) in [
             (
                 Subtractor {
                     role: MasterRole::Bias,
                     master: &bias,
                 },
                 CalibrationState::BIAS,
+                UnverifiedConditions::NONE,
             ),
             (
                 Subtractor {
@@ -142,6 +146,10 @@ mod tests {
                     master: &thermal,
                 },
                 CalibrationState::THERMAL,
+                UnverifiedConditions {
+                    exposure: false,
+                    temperature: true,
+                },
             ),
         ] {
             let mut flat = frame(0.5, 2.0);
@@ -151,6 +159,7 @@ mod tests {
                 .unwrap();
             assert_eq!(flat.data.pixels(), &[0.468_75; 4], "{:?}", subtractor.role);
             assert_eq!(flat.metadata.calibration, removed);
+            assert_eq!(flat.metadata.unverified_dark, unverified);
         }
 
         let unscalable = MasterSubtraction::new(

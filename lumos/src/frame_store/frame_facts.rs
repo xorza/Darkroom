@@ -7,10 +7,12 @@ use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 
 /// What a frame's source said about it. The domain, row order and pattern every frame of a set has
 /// to state alike — see [`SetFacts`](crate::combine::cache::set_facts::SetFacts); the capture
-/// conditions the set's product states only where every frame shares them. Carried with the frame's
+/// conditions the set's product states only where every frame shares them, and the conditions a
+/// dark match left uncompared wherever any frame did. Carried with the frame's
 /// statistics because the metadata they come from is dropped for every frame but the first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FrameFacts {
@@ -25,6 +27,9 @@ pub(crate) struct FrameFacts {
     pub(crate) saturation_flagged: bool,
     /// The exposure and temperature the frame was taken under.
     pub(crate) conditions: CaptureConditions,
+    /// The conditions not compared when a dark was taken from the frame — see
+    /// [`ImageMetadata::unverified_dark`](crate::ImageMetadata::unverified_dark).
+    pub(crate) unverified_dark: UnverifiedConditions,
 }
 
 impl FrameFacts {
@@ -35,6 +40,7 @@ impl FrameFacts {
             cfa_type: image.cfa_type(),
             saturation_flagged: image.metadata().saturation_flagged,
             conditions: CaptureConditions::of(image.metadata()),
+            unverified_dark: image.metadata().unverified_dark,
         }
     }
 }

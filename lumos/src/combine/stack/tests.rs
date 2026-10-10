@@ -1,6 +1,7 @@
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::internals::prelude::*;
+use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::frame_quality::FramePlane;
@@ -995,6 +996,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                     cfa_type: None,
                     saturation_flagged: false,
                     conditions: CaptureConditions::default(),
+                    unverified_dark: UnverifiedConditions::NONE,
                 },
             };
             frame
