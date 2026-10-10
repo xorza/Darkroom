@@ -9,6 +9,26 @@ use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::simd::portable::Portable;
+use crate::simd::{F32_LANES, F32x8, Isa};
+
+/// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
+fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
+    let isa = Portable::new();
+    let lanes = estimate_green(
+        isa,
+        isa.splat_f32(neighbor_green),
+        isa.splat_f32(center_lpf),
+        isa.splat_f32(same_color_lpf),
+    )
+    .to_array();
+    assert!(
+        lanes
+            .iter()
+            .all(|lane| lane.to_bits() == lanes[0].to_bits())
+    );
+    lanes[0]
+}
 
 fn canonical_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
     neighbor_green * (center_lpf + center_lpf) / (center_lpf + same_color_lpf)
@@ -23,26 +43,50 @@ fn well_conditioned_green_estimate_matches_canonical_ratio() {
         for center_lpf in [1e-9, 5e-6, 1e-5, 4.0] {
             for same_color_lpf in [0.0, 1e-9, 5e-6, 8.0] {
                 assert_eq!(
-                    estimate_green(neighbor_green, center_lpf, same_color_lpf),
+                    estimate(neighbor_green, center_lpf, same_color_lpf),
                     canonical_green(neighbor_green, center_lpf, same_color_lpf)
                 );
             }
         }
-        assert_eq!(estimate_green(neighbor_green, 0.0, 0.0), neighbor_green);
+        assert_eq!(estimate(neighbor_green, 0.0, 0.0), neighbor_green);
     }
 
     for (neighbor_green, center_lpf, same_color_lpf) in [(0.25, 1.0, -0.5), (-0.75, -4.0, -2.0)] {
         assert_eq!(
-            estimate_green(neighbor_green, center_lpf, same_color_lpf),
+            estimate(neighbor_green, center_lpf, same_color_lpf),
             canonical_green(neighbor_green, center_lpf, same_color_lpf)
         );
     }
 }
 
-/// Where `c + s` cancels exactly the estimate is the additive one: `0.25 + (1 − (−1))/8`.
+/// Where `c + s` cancels exactly the estimate is the additive one: `0.25 + (1 − (−1))/8`. Each
+/// lane keeps its own case beside lanes in the others — the plain ratio, the blend, exact
+/// cancellation, and nothing in the low-pass values — and computes what it computes alone.
 #[test]
 fn cancelling_green_estimate_has_the_additive_limit() {
-    assert_eq!(estimate_green(0.25, 1.0, -1.0), 0.25 + 2.0 / 8.0);
+    assert_eq!(estimate(0.25, 1.0, -1.0), 0.25 + 2.0 / 8.0);
+
+    let cases: [[f32; 3]; F32_LANES] = [
+        [0.25, 1.0, -1.0],
+        [0.25, 1.0, -0.5],
+        [0.5, 0.0, 0.0],
+        [0.25, 1.0, -0.9],
+        [-0.75, -4.0, -2.0],
+        [1.5, 0.0, -0.0],
+        [0.25, -1.0, 1.0],
+        [0.1, 2.0, 0.5],
+    ];
+    let isa = Portable::new();
+    let lanes = |input: usize| isa.load_f32(&cases.map(|case| case[input]));
+    let mixed = estimate_green(isa, lanes(0), lanes(1), lanes(2)).to_array();
+    for (case, lane) in cases.into_iter().zip(mixed) {
+        let [green, center, same] = case;
+        assert_eq!(
+            lane.to_bits(),
+            estimate(green, center, same).to_bits(),
+            "{case:?}"
+        );
+    }
 }
 
 /// At `s = −c·(1 − ρ/2)/(1 + ρ/2)` the denominator is `c·ρ/(1 + ρ/2)` and `|c| + |s|` is
@@ -57,7 +101,7 @@ fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
     let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
     let canonical = canonical_green(neighbor_green, center_lpf, same_color_lpf);
     let expected = f32::midpoint(additive, canonical);
-    let actual = estimate_green(neighbor_green, center_lpf, same_color_lpf);
+    let actual = estimate(neighbor_green, center_lpf, same_color_lpf);
 
     assert!((actual - expected).abs() < 1e-6);
 }
@@ -75,7 +119,7 @@ fn the_green_estimate_is_continuous_across_the_switch() {
         // The negative same-colour LPF that puts the denominator at `t` times the transition:
         // c + s = t·R·(c − s), solved for s.
         let same_color_at = |t: f64| (t * condition * center - center) / (1.0 + t * condition);
-        let at = |t: f64| estimate_green(green as f32, center as f32, same_color_at(t) as f32);
+        let at = |t: f64| estimate(green as f32, center as f32, same_color_at(t) as f32);
         let (outside, inside) = (at(1.0 + 1e-5), at(1.0 - 1e-5));
         let additive = green + (center - same_color_at(1.0)) * 0.125;
         let bound = 2e-5 * (8.0 * green.abs() + additive.abs());
@@ -220,7 +264,7 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
             let run = |poison: f32| {
                 let mut planes = [(); 3].map(|()| vec![f32::NAN; size.pixel_count()]);
                 let out = OutputPlanes::of(&mut planes);
-                let mut tile = Tile::new();
+                let mut tile = Tile::new(pattern);
                 tile.poison(poison);
                 // SAFETY: the planes cover the frame, and this is the only tile.
                 unsafe { tile.demosaic(&BayerImage::new(&data, size, pattern), place, out) };
@@ -239,6 +283,52 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
             let written = high[0].iter().filter(|value| !value.is_nan()).count();
             let side = |extent: usize| extent - 2 * INTERPOLATED_BORDER;
             assert_eq!(written, side(place.size.width) * side(place.size.height));
+        }
+    }
+}
+
+/// Under a white balance, the interior is the demosaic of the balanced samples brought back: each
+/// native sample the input's own, and each interpolated one the balanced run's divided by its
+/// colour's gain. Green's unit gain leaves its values as they are. On a frame of several tiles, in
+/// each Bayer phase.
+#[test]
+fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
+    let size = Size2us::new(TILE + 40, TILE + 30);
+    let gains = [2.13, 1.0, 1.71];
+    let mut rng = TestRng::new(5);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|_| 0.1 + 0.8 * rng.next_f32())
+        .collect();
+    for pattern in CfaPattern::ALL {
+        let colour = |index: usize| pattern.color_at(size.point_of(index));
+        let balanced: Vec<f32> = data
+            .iter()
+            .enumerate()
+            .map(|(index, &sample)| sample * gains[colour(index)])
+            .collect();
+        let never = CancelToken::never();
+        let planes = demosaic(
+            &BayerImage::new(&data, size, pattern).with_gains(gains),
+            &never,
+        )
+        .unwrap();
+        let reference = demosaic(&BayerImage::new(&balanced, size, pattern), &never).unwrap();
+        let border = INTERPOLATED_BORDER;
+        for row in border..size.height - border {
+            for index in row * size.width + border..(row + 1) * size.width - border {
+                for (channel, (plane, reference)) in planes.iter().zip(&reference).enumerate() {
+                    let expected = if channel == colour(index) {
+                        data[index]
+                    } else {
+                        reference[index] / gains[channel]
+                    };
+                    assert_eq!(
+                        plane[index].to_bits(),
+                        expected.to_bits(),
+                        "{pattern:?} channel {channel} at {index}"
+                    );
+                }
+            }
         }
     }
 }

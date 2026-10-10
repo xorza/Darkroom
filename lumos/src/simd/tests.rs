@@ -58,6 +58,7 @@ impl Kernel for Battery {
             let va = isa.load_f32(a);
             f32s(format!("sqrt {i}"), va.sqrt());
             f32s(format!("floor {i}"), va.floor());
+            f32s(format!("abs {i}"), va.abs());
             let split = va.frexp();
             f32s(format!("frexp mantissa {i}"), split.mantissa);
             f32s(format!("frexp exponent {i}"), split.exponent);

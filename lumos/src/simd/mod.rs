@@ -138,6 +138,9 @@ pub(crate) trait F32x8:
 
     fn sqrt(self) -> Self;
 
+    /// Each lane with its sign bit cleared, as `f32::abs`: `−0` to `+0`, a NaN's payload kept.
+    fn abs(self) -> Self;
+
     /// The largest integer at or below each lane, exact.
     fn floor(self) -> Self;
 

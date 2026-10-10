@@ -145,6 +145,11 @@ impl F32x8 for PortableF32 {
     }
 
     #[inline(always)]
+    fn abs(self) -> Self {
+        Self(self.0.map(f32::abs))
+    }
+
+    #[inline(always)]
     fn floor(self) -> Self {
         Self(self.0.map(f32::floor))
     }

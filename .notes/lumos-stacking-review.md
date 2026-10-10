@@ -29,7 +29,7 @@ Batch 7 and still holds.
   RUSTDOCFLAGS="-D warnings" cargo doc -p lumos --no-deps --document-private-items
   --all-features && cargo test -p lumos --tests --features ml`. Add `-p lens` / `-p darkroom`
   when a public lumos API changes. A batch that touches `libraw-sys` also runs its chain.
-- **SIMD kernels** (Batches 18, 19, 22): after the change,
+- **SIMD kernels** (Batches 19, 22): after the change,
   `cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)"
   $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter` must print 0.
 - **Snapshots.** `internals/characterization` pins outputs. A batch that changes an output on
@@ -47,7 +47,7 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-13 (X-Trans, Q1), 15 (rest, Q2), 19, 22, 24, 26   independent
+13 (X-Trans, Q1), 15 (rest, Q2), 19 (rest), 22, 24, 26   independent
 23 ── 27
 21 ── 20 ── 25
 ```
@@ -78,17 +78,15 @@ here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale
 
 ---
 
-## Batch 19: RCD vectorization — medium (measure first)
+## Batch 19 (rest): Markesteijn tile tuning — small (measure first, optional)
 
-**Findings:** DMS-7, DMS-9.
+**Finding:** DMS-9. The RCD part (DMS-7) is done.
 
-**Steps:** split the frame into per-phase half-resolution planes at copy-in; write the RCD loops as
-`simd::Isa` kernels over them; compute the low-pass filter only at R/B sites; keep the high-pass
-filter in ring rows; retune `TILE`. Optionally (DMS-9) compute Markesteijn's YPbPr and derivatives
-row by row and retune its tile per pass count.
+**Steps:** compute Markesteijn's YPbPr and derivatives row by row and retune its tile per pass
+count.
 
-**Acceptance:** `bench_rcd_demosaic_core` 6000×4000 at least 1.5× faster without
-`target-cpu=x86-64-v3`, and the librtprocess digests unchanged.
+**Acceptance:** `bench_cfa_demosaic_balanced` X-Trans 6240×4160 at least 10% faster, and the
+librtprocess digests unchanged.
 
 ---
 
