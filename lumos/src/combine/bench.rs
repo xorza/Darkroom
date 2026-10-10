@@ -10,8 +10,10 @@ use crate::internals::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
+use crate::combine::config::{Combine, CombineMethod, Normalization, StackConfig, Weighting};
+use crate::combine::rejection::Rejection;
 use crate::combine::stack::{StackFrame, stack_images};
+use crate::frame_store::frame_quality::FrameQuality;
 use crate::progress::progress_callback::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
@@ -70,5 +72,66 @@ fn bench_stack_30(b: ::quickbench::Bencher) {
                 .unwrap(),
             )
         });
+    }
+}
+
+const LARGE_SIZE: Size2us = Size2us::new(256, 256);
+const LARGE_FRAMES: u32 = 300;
+
+/// The rejections whose per-pixel cost grows with the count, at 300 frames: linear fit, which reads
+/// the normal scores of every count a pixel has, and GESD. Each once on a set every frame covers
+/// whole, and once on a ragged set, each frame missing a band of columns of its own width, so the
+/// count changes along every row the way a registered stack's edges change it.
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 2000)]
+fn bench_stack_300(b: ::quickbench::Bencher) {
+    let whole: Vec<StackFrame> = (0..LARGE_FRAMES)
+        .map(|f| synth_frame(LARGE_SIZE, f).into())
+        .collect();
+    let ragged: Vec<StackFrame> = whole
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(f, mut frame)| {
+            let missing = f % 97;
+            frame.quality = FrameQuality::from_coverage(Buffer2::new(
+                LARGE_SIZE.width,
+                LARGE_SIZE.height,
+                (0..LARGE_SIZE.pixel_count())
+                    .map(|i| {
+                        if i % LARGE_SIZE.width < missing {
+                            0.0
+                        } else {
+                            1.0
+                        }
+                    })
+                    .collect(),
+            ));
+            frame
+        })
+        .collect();
+    for (set, frames) in [("whole", &whole), ("ragged", &ragged)] {
+        for (label, rejection) in [
+            ("linear fit", Rejection::linear_fit(3.0)),
+            ("gesd", Rejection::gesd()),
+        ] {
+            let config = StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(rejection),
+                    ..Combine::mean()
+                },
+                ..StackConfig::light()
+            };
+            b.bench_labeled(&format!("{set} {label}"), || {
+                black_box(
+                    stack_images(
+                        frames.clone(),
+                        &config,
+                        ProgressCallback::default(),
+                        CancelToken::never(),
+                    )
+                    .unwrap(),
+                )
+            });
+        }
     }
 }

@@ -27,7 +27,7 @@ fn kept_with(
         inverse_electrons: &zeros,
     };
     let window = rejection.surviving_window(
-        &scratch.sorted,
+        &mut scratch.sorted,
         Some(noise),
         min_survivors,
         &mut scratch.methods,
@@ -468,10 +468,9 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
         noise: None,
         window: 0..9,
         index: 1,
-        background: 0.0,
         min_survivors: DEFAULT_MIN_SURVIVORS,
     };
-    let fit = LinearFitClipConfig::fit(&pass, &mut scores);
+    let fit = pass.rank_fit(&mut scores);
     assert!((fit.centre - 2.0).abs() <= 2.4e-7, "{fit:?}");
     assert!((fit.sigma - 0.5).abs() <= 1.5e-7, "{fit:?}");
 }
@@ -502,7 +501,7 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
             }
             scratch.sorted.fill(&values);
             let window = Rejection::linear_fit(3.0).surviving_window(
-                &scratch.sorted,
+                &mut scratch.sorted,
                 None,
                 DEFAULT_MIN_SURVIVORS,
                 &mut scratch.methods,
@@ -522,6 +521,177 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
             "{count} samples: {share} after {previous}"
         );
         previous = share;
+    }
+}
+
+/// On clean Gaussian samples the rejected share matches the reference implementation of each method
+/// in `internals/reference/clip_rates.py`, with no floor and with the noise model's σ of 1 as the
+/// floor: sigma clip at 2.5σ, three passes, and winsorized at 3σ, one clip. Their later passes no
+/// longer rescale the window the earlier ones cut as a complete sample, which rejected 5.5% at ten
+/// samples for sigma clip and 2.3% for winsorized; the reference now gives 3.69% and 1.48%. The
+/// floor brings both near or below the Gaussian tail shares, 1.24% and 0.27%.
+///
+/// The reference shares come from 2·10⁵, 10⁵ and 4·10⁴ trials, each with the per-trial standard
+/// deviation of the rejected count. The tolerance is four standard errors of the difference between
+/// that reference and this run.
+#[test]
+fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
+    let mut rng = ChaCha8Rng::seed_from_u64(0xc11d_ea7a);
+    let mut scratch = ScratchBuffers::default();
+    let unit = [1.0f32; 50];
+    let zeros = [0.0f32; 50];
+    let sigma_clip = Rejection::sigma_clip(2.5);
+    let winsorized = Rejection::winsorized(3.0);
+    for (label, rejection, floor, count, trials, reference, per_trial_sd, reference_trials) in [
+        (
+            "sigma clip",
+            sigma_clip,
+            false,
+            10usize,
+            4000usize,
+            0.036_911,
+            0.7231,
+            200_000.0,
+        ),
+        (
+            "sigma clip",
+            sigma_clip,
+            false,
+            20,
+            2000,
+            0.026_521,
+            0.9432,
+            100_000.0,
+        ),
+        (
+            "sigma clip",
+            sigma_clip,
+            false,
+            50,
+            1000,
+            0.018_450,
+            1.2530,
+            40_000.0,
+        ),
+        (
+            "sigma clip",
+            sigma_clip,
+            true,
+            10,
+            4000,
+            0.007_669,
+            0.2776,
+            200_000.0,
+        ),
+        (
+            "sigma clip",
+            sigma_clip,
+            true,
+            20,
+            2000,
+            0.008_323,
+            0.4151,
+            100_000.0,
+        ),
+        (
+            "sigma clip",
+            sigma_clip,
+            true,
+            50,
+            1000,
+            0.009_201,
+            0.7061,
+            40_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            false,
+            10,
+            4000,
+            0.014_808,
+            0.4492,
+            200_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            false,
+            20,
+            2000,
+            0.008_373,
+            0.4785,
+            100_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            false,
+            50,
+            1000,
+            0.004_744,
+            0.5419,
+            40_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            true,
+            10,
+            4000,
+            0.001_183,
+            0.1086,
+            200_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            true,
+            20,
+            2000,
+            0.001_528,
+            0.1743,
+            100_000.0,
+        ),
+        (
+            "winsorized",
+            winsorized,
+            true,
+            50,
+            1000,
+            0.001_861,
+            0.3058,
+            40_000.0,
+        ),
+    ] {
+        let noise = floor.then(|| NoiseColumns {
+            background: &unit[..count],
+            sky: &zeros[..count],
+            inverse_electrons: &zeros[..count],
+        });
+        let mut rejected = 0usize;
+        let mut values = vec![0.0f32; count];
+        for _ in 0..trials {
+            for value in &mut values {
+                *value = standard_normal(&mut rng);
+            }
+            scratch.sorted.fill(&values);
+            let window = rejection.surviving_window(
+                &mut scratch.sorted,
+                noise,
+                DEFAULT_MIN_SURVIVORS,
+                &mut scratch.methods,
+            );
+            rejected += count - window.len();
+        }
+        let share = rejected as f64 / (count * trials) as f64;
+        let standard_error =
+            (per_trial_sd / count as f64) * (1.0 / trials as f64 + 1.0 / reference_trials).sqrt();
+        assert!(
+            (share - reference).abs() <= 4.0 * standard_error,
+            "{label}, floor {floor}, {count} samples: rejected {share}, reference {reference} ± \
+             {standard_error}"
+        );
     }
 }
 
@@ -601,7 +771,7 @@ fn winsorized_keeps_exactly_the_samples_its_band_holds() {
 #[test]
 fn the_winsorized_estimate_converges_on_its_clamped_copy() {
     let sorted = [9.8, 9.9, 10.0, 10.0, 10.1, 10.1, 10.2, 10.3, 50.0];
-    let estimate = WinsorizedClipConfig::estimate(&sorted, 0.0, &mut Vec::new());
+    let estimate = WinsorizedClipConfig::estimate(&sorted, |_| 0.0, &mut Vec::new());
     assert!((estimate.centre - 90.8 / 9.0).abs() < 1e-5, "{estimate:?}");
     let clamped = [
         9.855_126, 9.9, 10.0, 10.0, 10.1, 10.1, 10.2, 10.3, 10.344_874,
@@ -727,7 +897,7 @@ fn gesd_matches_nist_reference_example() {
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(&values);
     let window = Rejection::Gesd(GesdConfig::new(0.05, Some(10))).surviving_window(
-        &scratch.sorted,
+        &mut scratch.sorted,
         None,
         DEFAULT_MIN_SURVIVORS,
         &mut scratch.methods,
@@ -793,7 +963,7 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
             }
             scratch.sorted.fill(&values);
             let window = rejection.surviving_window(
-                &scratch.sorted,
+                &mut scratch.sorted,
                 None,
                 DEFAULT_MIN_SURVIVORS,
                 &mut scratch.methods,
@@ -1058,12 +1228,12 @@ fn the_gathered_noise_floors_the_spread() {
     assert_eq!(survivors(Some(&[1.0; 8])), 8);
 }
 
-/// On [99, 100, 100, 101, 100, 115] at 2.5σ the two scales disagree. The MAD about the median 100
-/// is 0.5, so σ = 0.5 · 1.4826 · 1.1895 = 0.882 and the band ±2.2 drops the 115. The five left
-/// have a MAD of 0, and the measured background, √0.01 = 0.1, makes the band ±0.25: the 99 and the
-/// 101 go too, and three samples stay. The CCD model with background variance 0.01, sky 0 and one
-/// electron per unit gives 0.01 + 100 = 100.01 at the median, σ 10.0, band ±25: the 115 is 1.5σ of
-/// photon noise above 100 electrons, and all six stay.
+/// Both scales floor at the noise model, which holds the photon noise a MAD cannot see. On
+/// [99, 100, 100, 101, 100, 115] at 2.5σ the MAD about the median 100 is 0.5, σ = 0.882, a band of
+/// ±2.2 that would drop the 115, and the five left have a MAD of 0. The CCD model with background
+/// variance 0.01, sky 0 and one electron per unit gives 0.01 + 100 = 100.01 at the median, σ 10.0,
+/// band ±25: the 115 is 1.5σ of photon noise above 100 electrons, and all six stay, whichever
+/// scale measures it.
 #[test]
 fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
     let values = [99.0, 100.0, 100.0, 101.0, 100.0, 115.0];
@@ -1081,13 +1251,53 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
         let rejection = Rejection::SigmaClip(SigmaClipConfig::new(2.5, 3).with_scale(scale));
         rejection
             .surviving_window(
-                &scratch.sorted,
+                &mut scratch.sorted,
                 Some(noise),
                 DEFAULT_MIN_SURVIVORS,
                 &mut scratch.methods,
             )
             .len()
     };
-    assert_eq!(kept_under(RejectionScale::Robust), 3);
+    assert_eq!(kept_under(RejectionScale::Robust), 6);
     assert_eq!(kept_under(RejectionScale::CcdModel), 6);
+}
+
+/// The CCD model's band is each sample's own. Five precise frames (variance 0.01, σ 0.1) and four
+/// noisy ones (variance 4, σ 2) at a pixel whose median is 100: the precise 100.4 is 4σ of its own
+/// noise out and goes at 2.5σ, while the noisy 103 is 1.5σ of its own and stays. The 100.4 sits
+/// between kept samples, so the survivors are not a run of the sorted values; the pass moves it
+/// out, and the eight survivors are a run again, ascending. One band for all, the root mean square
+/// √((5 · 0.01 + 4 · 4)/9) = 1.335, keeps every sample.
+#[test]
+fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
+    let values = [100.0, 98.5, 100.0, 99.0, 100.05, 101.0, 99.95, 103.0, 100.4];
+    let background = [0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01];
+    let zeros = [0.0; 9];
+    let noise = NoiseColumns {
+        background: &background,
+        sky: &zeros,
+        inverse_electrons: &zeros,
+    };
+    let survivors = |scale| {
+        let mut scratch = ScratchBuffers::default();
+        scratch.sorted.fill(&values);
+        let window = Rejection::SigmaClip(SigmaClipConfig::new(2.5, 3).with_scale(scale))
+            .surviving_window(
+                &mut scratch.sorted,
+                Some(noise),
+                DEFAULT_MIN_SURVIVORS,
+                &mut scratch.methods,
+            );
+        let kept = scratch.sorted.values()[window.clone()].to_vec();
+        assert!(kept.is_sorted(), "{scale:?}: {kept:?}");
+        for (&value, &position) in kept.iter().zip(&scratch.sorted.positions()[window]) {
+            assert_eq!(values[position as usize], value);
+        }
+        kept
+    };
+    assert_eq!(
+        survivors(RejectionScale::CcdModel),
+        [98.5, 99.0, 99.95, 100.0, 100.0, 100.05, 101.0, 103.0]
+    );
+    assert_eq!(survivors(RejectionScale::Robust).len(), 9);
 }

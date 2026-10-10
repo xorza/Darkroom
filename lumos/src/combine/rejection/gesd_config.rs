@@ -81,6 +81,9 @@ impl GesdConfig {
         }
         let centre = mean as f32;
 
+        // The model σ at the first mean: the removals move the mean by a few σ at most, and the
+        // floor is a level the model sets, not a fit to the samples.
+        let floor = pass.model_sigma(centre);
         let mut window = pass.window.clone();
         let mut kept = pass.window.clone();
         for removed in 0..tests {
@@ -89,7 +92,7 @@ impl GesdConfig {
                 centre: mean as f32,
                 sigma: (squared_deviations / (live - 1) as f64).sqrt() as f32,
             }
-            .floored(pass.background);
+            .floored(floor);
             let low = mean - f64::from(pass.sorted[window.start]);
             let high = f64::from(pass.sorted[window.end - 1]) - mean;
             // A tie removes the higher sample, so the lower position is the one kept.

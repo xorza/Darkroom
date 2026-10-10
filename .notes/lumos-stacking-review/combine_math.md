@@ -13,31 +13,6 @@ the same consistency table, floors and termination. The scripts are in
 
 ## Findings
 
-### CMB-1: Iterated sigma clip and winsorized rescale a truncated window with full-sample constants and over-reject clean data
-- **Where**: `combine/rejection/pass.rs:58` (`clip_about_median` → `Spread::of_sorted(self.samples())`), `math/statistics/spread.rs:28-39` (`b_n` for the window's own count), `combine/rejection/winsorized_clip_config.rs:137-171` (1.134 applied to the surviving window).
-- **Category**: precision
-- **Impact**: medium. Each pass measures the MAD (or the winsorized SD) of a window whose tails the previous pass cut, then scales it as if the window were a complete Gaussian sample. σ shrinks pass after pass, and clean samples are dropped at several times the nominal tail rate. The SNR cost is largest at small N.
-- **Confidence**: confirmed in code; magnitude from simulation.
-- **Evidence**: false-rejection share on clean N(0,1) data at 2.5σ with no floor. The nominal Gaussian share is 1.24%.
-
-  | N | 1 pass | 3 passes (default) | to convergence |
-  |---|---|---|---|
-  | 10 | 3.5% | 5.5% | 5.8% |
-  | 20 | 2.7% | 3.9% | 4.2% |
-  | 50 | 1.8% | 2.4% | 2.5% |
-  | 200 | 1.44% | 1.70% | 1.71% |
-
-  Winsorized without a floor rejects 4.2% at k = 2.5 and 2.3% at k = 3 for N = 10; the nominal shares are 1.24% and 0.27%, so the k = 3 case is 8.5 times too many. `LinearFitClipConfig` already avoids this: it regresses the window on the **full-count** normal scores, so censoring does not bias its σ. Its test `linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count` shows the rate falling toward 0.27%. Siril recomputes the SD or MAD on the survivors each loop (`.tmp/siril/src/stacking/rejection_float.c:192-227` SIGMA/MAD, `:241-277` WINSORIZED), so lumos inherits the reference's bias rather than fixing it.
-- **Direction**: give the robust scale the same censoring awareness the linear fit has. After pass 0, measure σ at the window's ranks within the full count. One way is a rank-based spread using Blom scores of `sorted.len()`, which `NormalScores` already provides. Another is a truncation correction for the known band. Add an exact clean-data rate test for sigma clip and winsorized, as linear fit and GESD have.
-
-### CMB-2: The σ floor is the background noise only, so the rejection rate depends on signal level
-- **Where**: `combine/rejection/mod.rs:161-164` (`background_rms`), `combine/cache/sample_noise.rs:101-103`, `math/statistics/spread.rs:82-86`
-- **Category**: precision
-- **Impact**: medium. On the sky the floor equals the expected σ, which hides CMB-1: with the floor, the false-rejection share at 2.5σ is 0.77%, 0.84% and 0.93% at N = 10, 20 and 50. Where the true σ is above the background, the floor drops out and the rates of CMB-1 return. That happens on stars, nebulae, bright flats, and vignetted corners after flat-fielding. So clean samples are dropped about 6 times as often on signal as on sky at N = 10, which costs SNR exactly where photometry is done.
-- **Confidence**: confirmed in code; magnitude from the CMB-1 simulation.
-- **Evidence**: `variance_at` already holds the photon term (`sample_noise.rs:96-98`), and `Pass::clip_by_model` evaluates it at the centre. The Robust path floors at `background` only, and `Spread::floored` takes `max(σ̂, background)`.
-- **Direction**: for `RejectionScale::Robust`, floor at the model σ at the pass centre, `√mean(variance_at(i, centre))`, rather than at the background RMS. That is the same computation `clip_by_model` does, and it reduces to today's floor when the gain is unknown. Together with CMB-1 this makes `sigma` mean the same thing across the field.
-
 ### CMB-3: The variance plane ignores flat-field noise amplification
 - **Where**: `math/noise/ccd_noise.rs:6-27`, `combine/cache/sample_noise.rs:229-266`, `combine/cache/sample.rs:148-185`. No flat term exists anywhere in the noise model; `rg` finds no flat or vignetting factor reaching `CcdNoise` or the confidence planes.
 - **Category**: precision (science product)
@@ -59,7 +34,7 @@ the same consistency table, floors and termination. The scripts are in
 - **Where**: `combine/cache/mod.rs:469-511`
 - **Category**: performance
 - **Impact**: medium. This loop sets the worst-case row time. Per sample it tests six loop-invariant `Option`s (`coverage`, `confidence`, `frame_norms`, `weights`, `flags`, `noise`). It also calls `noise.model(frame, slot)` and computes `background/q` and `1/(electrons·q)`, a division, for every sample. The pixel-outer, frame-inner order touches one cache line in each of N image planes, plus N coverage, N confidence and N flag planes, per 16 pixels. Beyond about 32 streams the L2 prefetcher stops tracking them, so with spilled (mmap) frames each new line is a demand miss. Nothing in the hot loop is vectorized except the f64 weighted sum.
-- **Confidence**: likely. Read from the code, not benchmarked: the bench covers only 30 frames, see CMB-14.
+- **Confidence**: likely. Read from the code; `bench_stack_300` now measures large N and a ragged count.
 - **Evidence**: Siril has the same per-pixel strided gather (`stacking/stacking.c` / `median_and_mean.c`: per-frame row blocks, then `stack[frame] = pix[frame][x]`), so lumos is no worse than the reference. Still, this loop dominates for large N.
 - **Direction**: for each row tile of 64–256 px, loop frames on the outside. Apply gain and offset with the `simd::Isa` kernels into a `[tile][frame]` transposed buffer, together with coverage mask bits, effective weights and per-sample noise terms. Then reduce each pixel from contiguous memory. Hoist the invariant `Option`s by monomorphizing, and precompute per frame and slot `1/electrons` so only one multiply by `1/q` remains.
 
@@ -109,46 +84,12 @@ the same consistency table, floors and termination. The scripts are in
 - **Confidence**: confirmed in code.
 - **Direction**: one constructor shape, `new(SigmaBounds, max_passes)`, with one meaning of passes. Validate `alpha ∈ (0, 1)` and `max_outliers ≥ 1`.
 
-### CMB-13: Every rejection method uses one band for samples of different variance
-- **Where**: `combine/rejection/pass.rs:68-90` (`clip_by_model` takes the RMS of per-sample model variance), `pass.rs:44-55`
-- **Category**: precision
-- **Impact**: low. In a registered stack the warp confidence `q` varies per frame at a pixel, as can the gain-scaled noise, so the samples are heteroscedastic. A common RMS band is too loose for the precise samples and too tight for the noisy ones. The exact statistic would be the per-sample standardized residual `|x−c|/σᵢ`. That would break the "one contiguous window of sorted values" structure, so this is a trade-off to record rather than a bug. Siril and PixInsight also use one band.
-- **Confidence**: speculative on how much it matters.
-- **Direction**: if CcdModel becomes a science option, consider per-sample bands for that scale only, keeping the sorted-window structure for the robust scales.
-
-### CMB-14: Tests and benches cannot see CMB-1 or CMB-6
-- **Where**: `combine/tests/mod.rs:255-286` (`rejection_methods_preserve_clean_frames`, 5% RMS tolerance), `combine/bench.rs` (30 frames; light, median and winsorized only)
-- **Category**: design (test quality)
-- **Impact**: low-medium.
-  - The over-rejection of CMB-1 passes the 5% RMS check.
-  - No sigma-clip or winsorized clean-data rate test exists to match the exact ones for linear fit (`rejection/tests.rs:488`) and GESD (`:778`).
-  - The bench has no linear fit, no GESD and no large N, so the normal-score cache and the many-stream gather are unmeasured.
-- **Confidence**: confirmed.
-- **Direction**: add hand-referenced clean-data rate tests for sigma clip and winsorized, with and without the floor. Add a bench row at N ≈ 300 with linear fit, and one with a ragged coverage set.
-
-### CMB-15: Docs are stale or wrong about `min_survivors` and small-N stability
-- **Where**: `combine/config/mod.rs:161-165` (`min_survivors`: "flagged ones today"), `combine/config/mod.rs:23-27` ("Winsorized and Trim are stable at smaller N"), `combine/config/mod.rs:237-245`
-- **Category**: style (docs)
-- **Impact**: low.
-  - `min_survivors` is also the rejection floor in `Rejection::combine_mean` / `surviving_window`, which the doc does not say.
-  - The winsorized stability claim holds only where the background floor binds. Without it, N = 10 at k = 3 rejects 2.3% against 0.27% (CMB-1).
-- **Confidence**: confirmed.
-- **Direction**: correct both docs once CMB-1 and CMB-2 settle what "stable" means.
-
-### CMB-16: The dispersion of a clipped pixel is biased low by a known factor
-- **Where**: `combine/cache/sample.rs:142-147,179-183`, documented in `stack_product/mod.rs:59-66`
-- **Category**: precision
-- **Impact**: low. A symmetric clip at ±kσ keeps a truncated normal with variance `1 − 2kφ(k)/(2Φ(k)−1)`: 0.911 at k = 2.5 and 0.973 at k = 3. So clipped pixels' dispersion reads 3–9% low against `variance`. That is exactly the comparison the plane exists for.
-- **Confidence**: confirmed analytically.
-- **Direction**: where the method's band in σ units is known (sigma clip, winsorized, linear fit), divide by the truncated-normal factor. Otherwise document the factor numerically.
-
-### CMB-17: Winsorized costs up to O(50·N²) per pixel and does two passes per clamp step
-- **Where**: `combine/rejection/winsorized_clip_config.rs:144-169`, `combine/rejection/mod.rs:123`
+### CMB-17: Winsorized does two passes per clamp step
+- **Where**: `combine/rejection/winsorized_clip_config.rs` (`estimate`)
 - **Category**: performance
-- **Impact**: low. Each clamp step walks the copy twice: once for the mean, once for the squared deviations. The number of passes is bounded only by N, so the worst case is about N passes × 50 steps × N. At N = 500 that is about 10⁷ flops for one pathological pixel, a frame-time spike in the "worst case per chunk" sense. Typical pixels converge in 1–2 passes of fewer than 6 steps.
+- **Impact**: low. Each clamp step walks the copy twice: once for the mean, once for the squared deviations, up to 50 steps × N per pixel. Winsorized now clips once, so the earlier N-pass worst case is gone.
 - **Confidence**: confirmed in code.
-- **Direction**: fuse each step into one f64 pass (shifted sum and sum of squares about the previous centre). Consider whether a pass needs a full re-estimate after rejecting only from the ends.
-
+- **Direction**: fuse each step into one f64 pass (shifted sum and sum of squares about the previous centre).
 ---
 
 ## Checked and found OK
@@ -187,8 +128,7 @@ the same consistency table, floors and termination. The scripts are in
 - **`MaxSigma`**: an atomic max on f32 bits is correct for non-negative values.
 
 ## Suggested batches
-1. **Rejection scale precision**: CMB-1, CMB-2, CMB-16, plus the rate tests of CMB-14 and the docs of CMB-15. These share the `Spread` and `Pass` machinery, and the tests should land with the fix.
-2. **Science planes**: CMB-3 (flat factor in the noise model; touches calibration → confidence plumbing), CMB-9 (variance and value at zero weight), CMB-10.
-3. **CFA-aware normalization**: CMB-4 (per-slot `FrameNorm`, per-colour medians, gains and stratification).
-4. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-7 (quantization gate), CMB-17. Add the large-N bench rows from CMB-14 first, so the gains are measured.
-5. **Cleanups**: CMB-11, CMB-12, and CMB-13 recorded as a decision.
+1. **Science planes**: CMB-3 (flat factor in the noise model; touches calibration → confidence plumbing), CMB-9 (variance and value at zero weight), CMB-10.
+2. **CFA-aware normalization**: CMB-4 (per-slot `FrameNorm`, per-colour medians, gains and stratification).
+3. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-7 (quantization gate), CMB-17. Measure with `bench_stack_300`.
+4. **Cleanups**: CMB-11, CMB-12.

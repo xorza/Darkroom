@@ -1,6 +1,7 @@
 //! Iterative kappa-sigma clipping: reject beyond `k` sigma of the median, repeat.
 
-use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::normal_scores::NormalScores;
+use crate::combine::rejection::pass::{Narrowing, Pass};
 use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::validate_max_iterations;
@@ -10,6 +11,12 @@ use crate::error::InvalidConfigField;
 ///
 /// Each pass keeps the samples within `sigma` of the median, in the unit `scale` names.
 /// Asymmetric bounds reject one side harder, for example bright satellite trails and cosmic rays.
+///
+/// A later pass measures the robust scale with the rejected samples in their places: the window
+/// is fitted against the normal scores of every sample, as linear fit does, so the tails the
+/// earlier passes cut do not shrink σ. Siril measures the survivors' MAD as a complete sample,
+/// which on ten clean samples at 2.5σ rejects 5.5% over three passes; this rejects 3.7%, and 0.8%
+/// under the frames' noise floor, against the Gaussian tail share of 1.24%.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SigmaClipConfig {
     /// How far either side of the median a value may sit, in sigma.
@@ -52,9 +59,9 @@ impl SigmaClipConfig {
         validate_max_iterations(self.max_iterations)
     }
 
-    pub(crate) fn narrow(&self, pass: &Pass<'_>) -> Proposal {
+    pub(crate) fn narrow(&self, pass: &Pass<'_>, scores: &mut NormalScores) -> Narrowing {
         match self.scale {
-            RejectionScale::Robust => pass.clip_about_median(self.sigma),
+            RejectionScale::Robust => Narrowing::Window(pass.clip_about_median(self.sigma, scores)),
             RejectionScale::CcdModel => pass.clip_by_model(self.sigma),
         }
     }

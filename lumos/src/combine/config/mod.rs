@@ -18,8 +18,8 @@ pub enum CombineMethod {
 }
 
 /// Default frames below which sigma-clip and linear-fit rejection are too unreliable to trust and
-/// the combine falls back to the median. GESD has its own stricter floor; Winsorized and Trim are
-/// stable at smaller N.
+/// the combine falls back to the median. GESD has its own stricter floor. Winsorized clips once,
+/// about an estimate of every sample, and trim measures no spread, so neither has one.
 const MIN_FRAMES_FOR_REJECTION: usize = 5;
 const MIN_FRAMES_FOR_GESD: usize = 15;
 
@@ -139,7 +139,9 @@ impl Combine {
         }
     }
 
-    /// Winsorized sigma clipping, stable at small N, so with no median fallback.
+    /// Winsorized sigma clipping, with no median fallback: it clips once, about a Huber estimate of
+    /// every sample. On ten clean samples at k = 3 it rejects 0.12% under the frames' noise floor and
+    /// 1.5% with none, against the Gaussian tail share of 0.27%.
     pub const fn winsorized(sigma: f32) -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(sigma)),
@@ -219,10 +221,12 @@ pub struct StackConfig {
     /// and variance — they are what makes the stacked master measurable — but each is a full
     /// image-sized allocation, so a caller that discards them should say so.
     pub quality: QualityPlanes,
-    /// The fewest samples a pixel keeps when the combine leaves samples out: flagged ones today
-    /// (saturated, repaired, cosmic ray, defect, flat floor). A flagged sample is left out only
-    /// while this many unflagged samples remain at its pixel; otherwise every sample stays.
-    /// PixInsight keeps 3, Siril 4. At least 1.
+    /// The fewest samples a pixel keeps when the combine leaves samples out. A flagged sample
+    /// (saturated, repaired, cosmic ray, defect, flat floor) is left out only while this many
+    /// unflagged samples remain at its pixel; otherwise every sample stays. Rejection never leaves
+    /// fewer: a pixel with no more samples than this is not rejected from, and a pass that would
+    /// keep fewer keeps this many nearest its centre instead. PixInsight keeps 3, Siril 4. At
+    /// least 1.
     pub min_survivors: usize,
 }
 

@@ -1496,6 +1496,43 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
     );
 }
 
+/// A clipped pixel's dispersion reads the frames' full scatter: its survivors scatter as a Gaussian
+/// truncated to the band, so the sum of squares is divided by that variance, 0.9733369 at ±3σ.
+/// Six frames at 0, 1, …, 5 lie within ±3 of the MAD σ, 2.645, about 2.5, so nothing is clipped:
+/// the uncorrected dispersion is Σ(x − x̄)² / ((n − 1)·n) = 17.5 / 30, and the clip's is that
+/// times 1.0273935. A plain mean cuts nothing, and three frames, as many as `min_survivors`, are
+/// never clipped: both keep the uncorrected figure, 1/3 for 0, 1, 2.
+#[test]
+fn a_clipped_pixels_dispersion_reads_the_full_scatter() {
+    let dims = ImageDimensions::new((1, 1), 1);
+    let dispersion = |count: usize, rejection: Rejection| {
+        let frames = (0..count)
+            .map(|i| StackFrame::from(LinearImage::from_pixels(dims, vec![i as f32])))
+            .collect();
+        let stacked = combine(
+            frames,
+            &StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(rejection),
+                    small_n: SmallN::none(),
+                },
+                quality: QualityPlanes::ALL,
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+        )
+        .unwrap();
+        f64::from(stacked.dispersion.unwrap().channel(0)[0])
+    };
+    let full = 17.5 / 30.0;
+    let clipped = dispersion(6, Rejection::sigma_clip(3.0));
+    let expected = full * 1.027_393_469_477_902;
+    assert!((clipped - expected).abs() <= 1e-6 * expected, "{clipped}");
+    assert!((dispersion(6, Rejection::None) - full).abs() <= 1e-6 * full);
+    assert!((dispersion(3, Rejection::sigma_clip(3.0)) - 1.0 / 3.0).abs() <= 1e-6);
+}
+
 #[test]
 fn requested_planes_decide_what_the_combine_allocates() {
     // Every ancillary plane is a full image-sized allocation the reducer writes per pixel, so

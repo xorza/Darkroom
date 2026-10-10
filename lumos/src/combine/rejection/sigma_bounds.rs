@@ -1,5 +1,7 @@
 //! The clip band the sigma-based rejectors share.
 
+use statrs::distribution::{Continuous, ContinuousCDF, Normal};
+
 use crate::error::InvalidConfigField;
 
 /// How far either side of the reference a value may sit before it is rejected, in units of the
@@ -32,6 +34,18 @@ impl SigmaBounds {
         Self { low, high }
     }
 
+    /// The variance of a unit normal truncated to `[−low, high]`: how a Gaussian sample's
+    /// survivors of this band scatter, in units of its σ.
+    /// `1 + (αφ(α) − βφ(β))/Z − ((φ(α) − φ(β))/Z)²` with `α = −low`, `β = high` and
+    /// `Z = Φ(β) − Φ(α)`.
+    pub(crate) fn truncated_variance(self) -> f64 {
+        let normal = Normal::standard();
+        let (alpha, beta) = (-f64::from(self.low), f64::from(self.high));
+        let mass = normal.cdf(beta) - normal.cdf(alpha);
+        let (at_alpha, at_beta) = (normal.pdf(alpha), normal.pdf(beta));
+        1.0 + (alpha * at_alpha - beta * at_beta) / mass - ((at_alpha - at_beta) / mass).powi(2)
+    }
+
     /// Both thresholds must be finite and positive: they scale a spread estimate, so a non-positive
     /// one inverts the keep-band and a non-finite one empties it.
     ///
@@ -44,5 +58,27 @@ impl SigmaBounds {
         InvalidConfigField::finite("sigma_high", "finite and positive", self.high, |value| {
             value > 0.0
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The truncated variances by the formula, from Python's `statistics.NormalDist`: 0.91125636 at
+    /// ±2.5σ, 0.97333692 at ±3σ, and 0.87314864 for the asymmetric band from −2σ to 3σ.
+    #[test]
+    fn the_truncated_variance_is_the_formulas() {
+        for (bounds, expected) in [
+            (SigmaBounds::symmetric(2.5), 0.911_256_360_935_391_9),
+            (SigmaBounds::symmetric(3.0), 0.973_336_924_662_541_5),
+            (SigmaBounds::asymmetric(2.0, 3.0), 0.873_148_639_975_405_6),
+        ] {
+            let variance = bounds.truncated_variance();
+            assert!(
+                (variance - expected).abs() < 1e-12,
+                "{bounds:?}: {variance}"
+            );
+        }
     }
 }

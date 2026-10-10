@@ -6,7 +6,6 @@ use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::validate_max_iterations;
 use crate::error::InvalidConfigField;
-use crate::math::statistics::spread::Spread;
 
 /// Configuration for linear fit clipping.
 ///
@@ -60,32 +59,9 @@ impl LinearFitClipConfig {
 
     pub(crate) fn narrow(&self, pass: &Pass<'_>, scores: &mut NormalScores) -> Proposal {
         if pass.index == 0 {
-            return pass.clip_about_median(self.sigma);
+            return pass.clip_about_median(self.sigma, scores);
         }
-        let fit = Self::fit(pass, scores);
-        pass.keep(self.sigma, fit.centre, fit.floored(pass.background))
-    }
-
-    /// The least-squares line through the kept samples against their normal scores: the intercept
-    /// is the centre and the slope the σ. Sums run in f64 about the means, so neither cancels.
-    pub(crate) fn fit(pass: &Pass<'_>, scores: &mut NormalScores) -> Spread {
-        let scores = &scores.of_count(pass.sorted.len())[pass.window.clone()];
-        let samples = pass.samples();
-        debug_assert!(samples.len() >= 2);
-        let count = samples.len() as f64;
-        let score_mean = scores.iter().sum::<f64>() / count;
-        let sample_mean = samples.iter().map(|&v| f64::from(v)).sum::<f64>() / count;
-        let mut score_squares = 0.0f64;
-        let mut products = 0.0f64;
-        for (&score, &sample) in scores.iter().zip(samples) {
-            let score = score - score_mean;
-            score_squares += score * score;
-            products += score * (f64::from(sample) - sample_mean);
-        }
-        let slope = products / score_squares;
-        Spread {
-            centre: (sample_mean - slope * score_mean) as f32,
-            sigma: slope as f32,
-        }
+        let fit = pass.rank_fit(scores);
+        pass.keep(self.sigma, fit.centre, pass.floored(fit))
     }
 }

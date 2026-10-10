@@ -1,6 +1,8 @@
 //! [`SortedSamples`]: one pixel's samples in ascending order, each with the gather position it came
 //! from.
 
+use std::ops::Range;
+
 /// A pixel's samples sorted once, for every rejection method to narrow a window of.
 ///
 /// The sort runs on `u64` keys: the sample's bits mapped to an unsigned integer of the same order in
@@ -50,6 +52,59 @@ impl SortedSamples {
     /// Each sorted sample's position in the gather it came from.
     pub(crate) fn positions(&self) -> &[u32] {
         &self.positions
+    }
+
+    /// How many samples of `window` `keep` keeps, given each one's value and gather position.
+    pub(crate) fn count_kept(
+        &self,
+        window: Range<usize>,
+        keep: impl Fn(f32, u32) -> bool,
+    ) -> usize {
+        window
+            .filter(|&index| keep(self.values[index], self.positions[index]))
+            .count()
+    }
+
+    /// Move the samples of `window` that `keep` rejects to its ends — those below `centre` to its
+    /// start, the rest to its end — and return the run of kept ones between them, still
+    /// ascending, so a later pass reads them as a sorted window. The rejected ones keep no order:
+    /// nothing reads them again. The sort keys serve as the scratch, so nothing allocates.
+    pub(crate) fn partition(
+        &mut self,
+        window: Range<usize>,
+        centre: f32,
+        keep: impl Fn(f32, u32) -> bool,
+    ) -> Range<usize> {
+        let pack =
+            |value: f32, position: u32| u64::from(value.to_bits()) << 32 | u64::from(position);
+        self.keys.clear();
+        let mut low = 0;
+        for index in window.clone() {
+            let (value, position) = (self.values[index], self.positions[index]);
+            if !keep(value, position) && value < centre {
+                self.keys.push(pack(value, position));
+                low += 1;
+            }
+        }
+        for index in window.clone() {
+            let (value, position) = (self.values[index], self.positions[index]);
+            if keep(value, position) {
+                self.keys.push(pack(value, position));
+            }
+        }
+        let kept = self.keys.len() - low;
+        for index in window.clone() {
+            let (value, position) = (self.values[index], self.positions[index]);
+            if !keep(value, position) && value >= centre {
+                self.keys.push(pack(value, position));
+            }
+        }
+        debug_assert_eq!(self.keys.len(), window.len());
+        for (offset, &key) in self.keys.iter().enumerate() {
+            self.values[window.start + offset] = f32::from_bits((key >> 32) as u32);
+            self.positions[window.start + offset] = key as u32;
+        }
+        window.start + low..window.start + low + kept
     }
 }
 
@@ -110,6 +165,20 @@ mod tests {
         samples.fill(&[2.0, 1.0, 2.0, 1.0]);
         assert_eq!(samples.values(), [1.0, 1.0, 2.0, 2.0]);
         assert_eq!(samples.positions(), [1, 3, 0, 2]);
+    }
+
+    /// A partition moves each rejected sample to the end on its side of the centre and keeps the
+    /// rest ascending between them: of 1 … 6 about 3.5, rejecting 2 and 5, the 2 goes first and
+    /// the 5 last, and 1, 3, 4, 6 are the kept run, each still with its position.
+    #[test]
+    fn a_partition_keeps_the_survivors_one_ascending_run() {
+        let mut samples = SortedSamples::default();
+        samples.fill(&[6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
+        let keep = |value: f32, _: u32| value != 2.0 && value != 5.0;
+        assert_eq!(samples.count_kept(0..6, keep), 4);
+        assert_eq!(samples.partition(0..6, 3.5, keep), 1..5);
+        assert_eq!(samples.values(), [2.0, 1.0, 3.0, 4.0, 6.0, 5.0]);
+        assert_eq!(samples.positions(), [3, 1, 5, 2, 0, 4]);
     }
 
     /// Call `visit` once for every ordering of `values[start..]`, each remaining value swapped to

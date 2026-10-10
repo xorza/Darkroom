@@ -344,8 +344,16 @@ pub(crate) fn run_stacking(
                 noise: noise.as_ref(),
                 slots,
             };
+            let dispersion_correction = rejection.dispersion_correction();
             let reduce = move |samples: PixelSamples<'_>, scratch: &mut ScratchBuffers| {
-                rejection.combine_mean(samples, min_survivors, scratch, measure_quality)
+                let mut sample =
+                    rejection.combine_mean(samples, min_survivors, scratch, measure_quality);
+                // Survivors of a band scatter as a Gaussian truncated to it; a pixel too small to
+                // reject from kept every sample, with nothing cut.
+                if scratch.survivors.is_some() {
+                    sample.dispersion *= dispersion_correction;
+                }
+                sample
             };
             match sigmas {
                 Some(sigmas) => {

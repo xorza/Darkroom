@@ -24,7 +24,7 @@ use crate::combine::cache::sample::{CombinedSample, PixelSamples};
 use crate::combine::cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
-use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::sorted_samples::SortedSamples;
@@ -109,20 +109,31 @@ impl Rejection {
         }
     }
 
+    /// What a clipped pixel's dispersion is multiplied by to read the frames' full scatter: the
+    /// reciprocal of a unit normal's variance truncated to the method's band, for the methods that
+    /// clip in a band of σ, and 1 for the others, whose cut is not one in σ.
+    pub(crate) fn dispersion_correction(&self) -> f32 {
+        let bounds = match self {
+            Self::SigmaClip(config) => config.sigma,
+            Self::Winsorized(config) => config.sigma,
+            Self::LinearFit(config) => config.sigma,
+            Self::None | Self::Trim(_) | Self::Gesd(_) => return 1.0,
+        };
+        (1.0 / bounds.truncated_variance()) as f32
+    }
+
     /// Whether the method measures a spread, and so needs the frames' noise as its floor.
     pub(crate) const fn measures_spread(&self) -> bool {
         !matches!(self, Self::None | Self::Trim(_))
     }
 
-    /// The most passes the method runs. Winsorized runs until a pass rejects nothing, which takes
-    /// fewer passes than there are samples.
+    /// The most passes the method runs.
     const fn passes(&self) -> usize {
         match self {
             Self::None => 0,
             Self::SigmaClip(config) => config.max_iterations as usize,
-            Self::Winsorized(_) => usize::MAX,
             Self::LinearFit(config) => config.passes(),
-            Self::Trim(_) | Self::Gesd(_) => 1,
+            Self::Winsorized(_) | Self::Trim(_) | Self::Gesd(_) => 1,
         }
     }
 
@@ -132,54 +143,66 @@ impl Rejection {
         !matches!(self, Self::LinearFit(_)) || index > 0
     }
 
-    fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Option<Proposal> {
-        match self {
-            Self::None => None,
-            Self::SigmaClip(config) => Some(config.narrow(pass)),
-            Self::Winsorized(config) => Some(config.narrow(pass, &mut scratch.clamped)),
-            Self::LinearFit(config) => Some(config.narrow(pass, &mut scratch.scores)),
-            Self::Trim(config) => Some(config.narrow(pass)),
-            Self::Gesd(config) => config.narrow(pass, &mut scratch.gesd),
-        }
+    fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Option<Narrowing> {
+        Some(match self {
+            Self::None => return None,
+            Self::SigmaClip(config) => config.narrow(pass, &mut scratch.scores),
+            Self::Winsorized(config) => {
+                Narrowing::Window(config.narrow(pass, &mut scratch.clamped))
+            }
+            Self::LinearFit(config) => Narrowing::Window(config.narrow(pass, &mut scratch.scores)),
+            Self::Trim(config) => Narrowing::Window(config.narrow(pass)),
+            Self::Gesd(config) => Narrowing::Window(config.narrow(pass, &mut scratch.gesd)?),
+        })
     }
 
-    /// The window of `sorted` that survives. The floor under every measured σ is the root mean
-    /// square of the samples' background noise, from `noise`.
+    /// The window of `sorted` that survives. The floor under every measured σ is the noise
+    /// models' σ at the pass's centre, from `noise`.
     ///
     /// Passes run until one rejects nothing, or until the method's cap. When a pass proposes fewer
     /// than `min_survivors` samples, the driver keeps the `min_survivors` samples of the window
     /// before it that sit nearest the pass's centre, and stops: a pixel never loses every sample,
-    /// and the samples it keeps are the ones the method trusted most.
+    /// and the samples it keeps are the ones the method trusted most. A pass with a band for each
+    /// sample reorders the window so its survivors stay one ascending run.
     pub(crate) fn surviving_window(
         &self,
-        sorted: &SortedSamples,
+        sorted: &mut SortedSamples,
         noise: Option<NoiseColumns<'_>>,
         min_survivors: usize,
         scratch: &mut MethodScratch,
     ) -> Range<usize> {
         debug_assert!(min_survivors >= 1);
-        let background = match noise {
-            Some(noise) if self.measures_spread() => noise.background_rms(),
-            _ => 0.0,
-        };
-        let positions = sorted.positions();
-        let sorted = sorted.values();
-        let mut window = 0..sorted.len();
+        let noise = noise.filter(|_| self.measures_spread());
+        let mut window = 0..sorted.values().len();
         for index in 0..self.passes() {
             if window.len() <= min_survivors {
                 break;
             }
             let pass = Pass {
-                sorted,
-                positions,
+                sorted: sorted.values(),
+                positions: sorted.positions(),
                 window: window.clone(),
                 index,
-                background,
                 min_survivors,
                 noise,
             };
-            let Some(proposal) = self.narrow(&pass, scratch) else {
-                break;
+            let proposal = match self.narrow(&pass, scratch) {
+                None => break,
+                Some(Narrowing::Window(proposal)) => proposal,
+                Some(Narrowing::PerSample { centre, bounds }) => {
+                    let noise = noise.expect("a per-sample band reads the noise models");
+                    let keep = |value: f32, position: u32| {
+                        noise.within(position as usize, value, centre, bounds)
+                    };
+                    if sorted.count_kept(window.clone(), keep) < min_survivors {
+                        window = nearest(sorted.values(), window, centre, min_survivors);
+                        break;
+                    }
+                    Proposal {
+                        window: sorted.partition(window.clone(), centre, keep),
+                        centre,
+                    }
+                }
             };
             debug_assert!(
                 window.start <= proposal.window.start && proposal.window.end <= window.end,
@@ -190,7 +213,7 @@ impl Rejection {
                 break;
             }
             if proposal.window.len() < min_survivors {
-                window = nearest(sorted, window, proposal.centre, min_survivors);
+                window = nearest(sorted.values(), window, proposal.centre, min_survivors);
                 break;
             }
             window = proposal.window;
@@ -234,8 +257,12 @@ impl Rejection {
         }
 
         scratch.sorted.fill(values);
-        let window =
-            self.surviving_window(&scratch.sorted, noise, min_survivors, &mut scratch.methods);
+        let window = self.surviving_window(
+            &mut scratch.sorted,
+            noise,
+            min_survivors,
+            &mut scratch.methods,
+        );
         let positions = &scratch.sorted.positions()[window.clone()];
         scratch.weights.clear();
         scratch
