@@ -232,14 +232,15 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
             // With no memory at all the floor holds the whole 30-row image past the budget: its
-            // resident image, weight and inverse variance planes and the coverage plane the gather
-            // writes, 40 × 30 × (12c + 4) B, beside the rows of every channel of the 12 frames, the
-            // six coverage-and-confidence pairs and the four flat gain grids at a byte a pixel,
-            // 40 × 30 × (48c + 52) B. The stack is the same.
+            // resident image, weight and inverse variance planes, the coverage plane the gather
+            // writes and the flag byte a pixel no frame reached is flagged in, 40 × 30 × (12c + 5)
+            // B, beside the rows of every channel of the 12 frames, the six coverage-and-confidence
+            // pairs and the four flat gain grids at a byte a pixel, 40 × 30 × (48c + 52) B. The
+            // stack is the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.chunk_overcommit_bytes,
-                72_000 * channels as u64 + 67_200,
+                72_000 * channels as u64 + 68_400,
                 "{label}"
             );
             for channel in 0..channels {
@@ -1221,18 +1222,21 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
 }
 
+/// Two warped frames that share no pixel cannot be normalized, but combine without it: each
+/// pixel is the one frame that reached it, and the third, which neither reached, is 0 and flagged
+/// `NO_DATA` although neither frame carries a flag.
 #[test]
 fn only_normalization_requires_common_coverage() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((3, 1), 1);
     let frames = || {
         vec![
             stack_frame(
-                LinearImage::from_pixels(dims, vec![1.0, 2.0]),
-                FrameQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
+                LinearImage::from_pixels(dims, vec![1.0, 2.0, 5.0]),
+                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![1.0, 0.0, 0.0])),
             ),
             stack_frame(
-                LinearImage::from_pixels(dims, vec![3.0, 4.0]),
-                FrameQuality::from_coverage(Buffer2::new(2, 1, vec![0.0, 1.0])),
+                LinearImage::from_pixels(dims, vec![3.0, 4.0, 6.0]),
+                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![0.0, 1.0, 0.0])),
             ),
         ]
     };
@@ -1256,7 +1260,16 @@ fn only_normalization_requires_common_coverage() {
         },
     )
     .unwrap();
-    assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0]);
+    assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0, 0.0]);
+    let flags = product.image.flags.as_ref().unwrap();
+    assert_eq!(
+        (0..3).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        [
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::NO_DATA
+        ]
+    );
 }
 
 #[test]

@@ -68,8 +68,9 @@ pub(crate) struct CombineOutput {
     weight: Option<LinearPixels>,
     inverse_variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
-    /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`]
-    /// where no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
+    /// The stack's flags, for a frame set where a frame carries flags or is not gathered at every
+    /// pixel — see [`FrameCache::flag_plane`]: [`QualityFlags::NO_DATA`] where no frame reached a
+    /// pixel, [`QualityFlags::SATURATED`] where a kept sample was.
     flags: Option<Buffer2<u8>>,
     report: RunReport,
 }
@@ -321,8 +322,9 @@ impl FrameCache {
         });
         let inverse_frame_count = 1.0 / self.frames.len() as f32;
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
-        let mut output_flags =
-            any_flags.then(|| Buffer2::<u8>::new_default(dimensions.width(), dimensions.height()));
+        let mut output_flags = self
+            .flag_plane()
+            .then(|| Buffer2::<u8>::new_default(dimensions.width(), dimensions.height()));
         let excluded = AtomicFlagCounts::default();
         let kept_flagged = AtomicFlagCounts::default();
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
@@ -610,10 +612,18 @@ impl FrameCache {
         }
     }
 
+    /// Whether the combine writes a flag plane: when a frame carries flags, whose saturation the
+    /// stack keeps, or carries frame quality, which can leave a pixel no frame reached.
+    fn flag_plane(&self) -> bool {
+        self.frames
+            .iter()
+            .any(|frame| frame.flags.is_some() || !frame.quality.is_none())
+    }
+
     /// What the combine pass holds: a chunk of every channel of every frame, as the chunk-outer walk
     /// reads them, plus one more plane for each of that frame's quality planes and a byte for its
     /// flags, against the resident output planes: the coverage planes when any are gathered, and
-    /// the flag plane when any frame carries flags.
+    /// the flag plane when the combine writes one.
     fn weighted_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
         ChunkMemoryLayout {
             input_bytes: self
@@ -638,7 +648,7 @@ impl FrameCache {
                 * planes.resident_planes_per_channel()
                 * size_of::<f32>()
                 + self.coverage_channels(planes) * size_of::<f32>()
-                + usize::from(self.frames.iter().any(|frame| frame.flags.is_some())),
+                + usize::from(self.flag_plane()),
         }
     }
 

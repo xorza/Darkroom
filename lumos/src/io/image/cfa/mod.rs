@@ -351,22 +351,10 @@ impl CfaImage {
         passes: MarkesteijnPasses,
         cancel: &CancelToken,
     ) -> Result<LinearImage, Cancelled> {
-        // Calibration repairs a light's nulls; a frame no calibration touched has them repaired
-        // here.
-        if self.metadata.calibration.is_none() {
-            self.repair_nulls();
-        } else {
-            debug_assert!(
-                self.flags
-                    .as_ref()
-                    .is_none_or(|flags| flags.bytes().iter().all(|&byte| {
-                        let flags = QualityFlags::from_byte(byte);
-                        !flags.intersects(QualityFlags::NO_DATA)
-                            || flags.intersects(QualityFlags::REPAIRED)
-                    })),
-                "a calibrated frame holds a null calibration did not repair"
-            );
-        }
+        // Calibration repairs a light's nulls, and this leaves those alone; it repairs the rest: a
+        // frame no calibration touched, or one read back from a file, which holds the decoder's
+        // fill under each null.
+        self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
         // Through the checked accessor, then shared: the grid is the flat's, not this frame's.

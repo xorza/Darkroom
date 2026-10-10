@@ -6,6 +6,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
+use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::vec2us::Vec2us;
 
 /// The 5×5 window, as astroscrappy's `medfilt5`, whose median tells a saturated star's core from a
@@ -95,12 +96,17 @@ fn grown(cores: &BitBuffer2) -> BitBuffer2 {
 fn star_cores(data: &Buffer2<f32>, saturated: &BitBuffer2) -> BitBuffer2 {
     let size = saturated.size;
     let mut cores = BitBuffer2::new_default(size);
-    let mut levels = Vec::new();
-    saturated.for_each_set(|position| levels.push(data[size.index_of(position)]));
-    if levels.is_empty() {
+    // Ranked in place rather than gathered: a frame can be saturated anywhere, and a copy of its
+    // saturated samples would be a plane no budget charges.
+    let mut level = RadixMedian::default();
+    let mut high = level.high_pass();
+    saturated.for_each_set(|position| high.add(data[size.index_of(position)]));
+    if high.len() == 0 {
         return cores;
     }
-    let threshold = CORE_SHARE * median_mut(&mut levels);
+    let mut low = high.finish();
+    saturated.for_each_set(|position| low.add(data[size.index_of(position)]));
+    let threshold = CORE_SHARE * low.median();
     let mut window = Vec::with_capacity((2 * CORE_RADIUS + 1).pow(2));
     saturated.for_each_set(|position| {
         window.clear();

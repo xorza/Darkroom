@@ -477,6 +477,7 @@ pub(crate) mod internals {
         pub(crate) fn finalize(self) -> StackProduct {
             let fill_value = self.config.fill_value;
             let gate = self.config.min_weight_fraction;
+            let deposit = self.deposit;
             let mut data = self.data;
             let mut weight = self.weight;
             let thresholds: ArrayVec<f32, MAX_CHANNELS> = weight
@@ -486,9 +487,8 @@ pub(crate) mod internals {
                     (gate * deepest).max(f32::MIN_POSITIVE)
                 })
                 .collect();
-            let planes = weight.len();
             for (channel, plane) in data.iter_mut().enumerate() {
-                let weights = channel.min(planes - 1);
+                let weights = deposit.weight_plane(channel);
                 for (value, &weight) in plane.pixels_mut().iter_mut().zip(weight[weights].pixels())
                 {
                     *value = if weight >= thresholds[weights] {
@@ -506,9 +506,15 @@ pub(crate) mod internals {
                 }
             }
             let dimensions = ImageDimensions::new(self.output, data.len());
-            let weight = match weight.into_inner() {
-                Ok(planes) => QualityMap::PerChannel(planes),
-                Err(shared) => QualityMap::Shared(shared.into_iter().next().expect("one plane")),
+            let weight = match deposit {
+                Deposit::Mosaic(_) => QualityMap::PerChannel(
+                    weight
+                        .into_inner()
+                        .expect("a mosaic's three colours each keep a weight plane"),
+                ),
+                Deposit::Channels(_) => {
+                    QualityMap::Shared(weight.into_iter().next().expect("one shared plane"))
+                }
             };
             StackProduct {
                 image: LinearImage::from_planar_channels(

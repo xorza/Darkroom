@@ -156,13 +156,15 @@ impl ImageMetadata {
     /// monochrome sensor's frame is copied straight through, a CFA drizzle interpolates no colour
     /// from another, and a green proxy fills its other photosites from green alone.
     pub(crate) fn is_demosaiced(&self) -> bool {
-        self.provenance.as_ref().is_some_and(|provenance| {
-            matches!(
-                provenance.demosaic,
+        self.provenance
+            .as_ref()
+            .is_some_and(|provenance| match provenance.demosaic {
                 DemosaicProvenance::LumosRcd
-                    | DemosaicProvenance::LumosMarkesteijn { .. }
-                    | DemosaicProvenance::LibRaw
-            )
-        })
+                | DemosaicProvenance::LumosMarkesteijn { .. }
+                | DemosaicProvenance::LibRaw => true,
+                DemosaicProvenance::None
+                | DemosaicProvenance::CfaDrizzle
+                | DemosaicProvenance::GreenProxy => false,
+            })
     }
 }

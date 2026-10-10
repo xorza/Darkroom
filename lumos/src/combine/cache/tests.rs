@@ -420,19 +420,20 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
 
     // Inputs: 3 frames × 3 channels, a chunk of each read for every channel, plus the coverage +
     // confidence pair frames 1 and 2 each carry. Residents: 3 channels × (pixels + weight +
-    // variance), the coverage plane the gather writes, and the dispersion when asked for.
+    // variance), the coverage plane the gather writes, the dispersion when asked for, and the flag
+    // byte a pixel no frame reached would be flagged in.
     assert_eq!(
         cache.weighted_layout(QualityPlanes::STANDARD),
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
-            resident_bytes: 10 * 4,
+            resident_bytes: 10 * 4 + 1,
         }
     );
     assert_eq!(
         cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
-            resident_bytes: 13 * 4,
+            resident_bytes: 13 * 4 + 1,
         }
     );
 
@@ -441,12 +442,11 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
-            resident_bytes: 3 * 4,
+            resident_bytes: 3 * 4 + 1,
         }
     );
 
-    // A frame with flags is read a byte a pixel, and the output flag plane it gives the stack is
-    // held a byte a pixel.
+    // A frame with flags is read a byte a pixel, and the stack's flag plane is the same one byte.
     let flagged = frames(true);
     assert_eq!(
         flagged.weighted_layout(QualityPlanes::STANDARD),
