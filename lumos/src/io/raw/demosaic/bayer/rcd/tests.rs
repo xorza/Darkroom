@@ -4,27 +4,31 @@ use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::internals::test_rng::TestRng;
 use crate::io::raw::demosaic::bayer::rcd::tile::{OutputPlanes, Tile, TilePlace};
 use crate::io::raw::demosaic::bayer::rcd::{
-    EPS, INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
+    INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
 };
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 fn canonical_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
-    neighbor_green * (center_lpf + center_lpf) / (EPS + center_lpf + same_color_lpf)
+    neighbor_green * (center_lpf + center_lpf) / (center_lpf + same_color_lpf)
 }
 
+/// Away from cancellation the estimate is the plain ratio `g·2c/(c + s)` at any level, the faint
+/// ones a level-dependent `eps` would bias among them; with nothing in the low-pass values it is
+/// the neighbour's green, the additive estimate there.
 #[test]
 fn well_conditioned_green_estimate_matches_canonical_ratio() {
     for neighbor_green in [-0.75, 0.0, 1.5] {
-        for center_lpf in [0.0, EPS * 0.5, EPS, 4.0] {
-            for same_color_lpf in [0.0, EPS * 0.5, EPS, 8.0] {
+        for center_lpf in [1e-9, 5e-6, 1e-5, 4.0] {
+            for same_color_lpf in [0.0, 1e-9, 5e-6, 8.0] {
                 assert_eq!(
                     estimate_green(neighbor_green, center_lpf, same_color_lpf),
                     canonical_green(neighbor_green, center_lpf, same_color_lpf)
                 );
             }
         }
+        assert_eq!(estimate_green(neighbor_green, 0.0, 0.0), neighbor_green);
     }
 
     for (neighbor_green, center_lpf, same_color_lpf) in [(0.25, 1.0, -0.5), (-0.75, -4.0, -2.0)] {
@@ -35,21 +39,21 @@ fn well_conditioned_green_estimate_matches_canonical_ratio() {
     }
 }
 
+/// Where `c + s` cancels exactly the estimate is the additive one: `0.25 + (1 − (−1))/8`.
 #[test]
 fn cancelling_green_estimate_has_the_additive_limit() {
-    let center_lpf = 1.0;
-    let same_color_lpf = -(EPS + center_lpf);
-    let actual = estimate_green(0.25, center_lpf, same_color_lpf);
-    let expected = 0.25 + (1.0 - same_color_lpf) / 8.0;
-    assert_eq!(actual, expected);
+    assert_eq!(estimate_green(0.25, 1.0, -1.0), 0.25 + 2.0 / 8.0);
 }
 
+/// At `s = −c·(1 − ρ/2)/(1 + ρ/2)` the denominator is `c·ρ/(1 + ρ/2)` and `|c| + |s|` is
+/// `2c/(1 + ρ/2)`, so `t` is a half: the smoothstep weight `t²(3 − 2t)` is a half too, and the
+/// estimate the midpoint of the additive one and the ratio.
 #[test]
 fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
     let neighbor_green = 0.25;
     let center_lpf = 1.0;
     let condition = 0.5 * MIN_SIGNED_DENOMINATOR_RATIO;
-    let same_color_lpf = -(EPS + center_lpf) * (1.0 - condition) / (1.0 + condition);
+    let same_color_lpf = -center_lpf * (1.0 - condition) / (1.0 + condition);
     let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
     let canonical = canonical_green(neighbor_green, center_lpf, same_color_lpf);
     let expected = f32::midpoint(additive, canonical);
@@ -67,13 +71,10 @@ fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
 #[test]
 fn the_green_estimate_is_continuous_across_the_switch() {
     let condition = f64::from(MIN_SIGNED_DENOMINATOR_RATIO);
-    let epsilon = f64::from(EPS);
     for (green, center) in [(0.25f64, 1.0f64), (-0.5, 2.0), (1.5, 0.3)] {
         // The negative same-colour LPF that puts the denominator at `t` times the transition:
-        // EPS + c + s = t·R·(EPS + c − s), solved for s.
-        let same_color_at = |t: f64| {
-            (t * condition * (epsilon + center) - (epsilon + center)) / (1.0 + t * condition)
-        };
+        // c + s = t·R·(c − s), solved for s.
+        let same_color_at = |t: f64| (t * condition * center - center) / (1.0 + t * condition);
         let at = |t: f64| estimate_green(green as f32, center as f32, same_color_at(t) as f32);
         let (outside, inside) = (at(1.0 + 1e-5), at(1.0 - 1e-5));
         let additive = green + (center - same_color_at(1.0)) * 0.125;
@@ -89,10 +90,11 @@ fn the_green_estimate_is_continuous_across_the_switch() {
 ///
 /// `internals/reference/rcd_librtprocess.py` builds librtprocess's `rcd.cc` at a pinned commit and
 /// prints each case's FNV-1a 64 digest of the output inside [`INTERPOLATED_BORDER`]: the planes in
-/// order, then rows, then columns, each f32's little-endian bytes. The script changes one step, to
-/// RCD 2.3's definition: the diagonal statistics of a red or blue site sum the squared high-pass
+/// order, then rows, then columns, each f32's little-endian bytes. The script changes two steps. One
+/// is RCD 2.3's definition: the diagonal statistics of a red or blue site sum the squared high-pass
 /// filter over the site and its two diagonal neighbours, which librtprocess reads partly from the
-/// pixels beside them. The 160×120 frame fits in one of librtprocess's 194-pixel tiles: its tiles
+/// pixels beside them. The other drops the `eps` from the green ratio's denominator, which lumos
+/// takes level-free; the scenes are positive, so the denominator never cancels. The 160×120 frame fits in one of librtprocess's 194-pixel tiles: its tiles
 /// overlap by 9 pixels where RCD reaches 10, so the two columns at a seam differ from an untiled
 /// run (by up to 2e-5 on the grating). The scenes use only correctly rounded operations, so their
 /// samples are the same bits on every platform.
@@ -104,28 +106,28 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     const HEIGHT: usize = 120;
     const DIGESTS: [[u64; 4]; 4] = [
         [
-            0xf14078aaa3c6e9e5,
-            0x4f104cd33116b4dd,
-            0xf3cbc1ac0c453ebd,
-            0x5704fd0e5d293435,
+            0xa82fc7548fe993cd,
+            0xc06614bb3200a17d,
+            0x1441d1a8ac7075ed,
+            0xd240e1743b3f3fbd,
         ],
         [
-            0xe8cf0df219edb161,
-            0x69ecfc47410bf262,
-            0x57bb4d1c6d876e6b,
-            0x9aefe44a56f558e3,
+            0x147d2ffce8691499,
+            0x61d922d96215fa61,
+            0x33893da62abad5f7,
+            0x908c75f897002fd7,
         ],
         [
-            0x7e0441325eff5d06,
-            0x541d9bc3195adc63,
-            0x46db350ff0d57f84,
-            0x2d8a4d4c3aed8b95,
+            0x6f7b901afa20e846,
+            0xa82fb56e9572dc68,
+            0x4cae9efbfe6383c5,
+            0x6cb3b650f30d34ab,
         ],
         [
-            0x393e7ca60ee00a24,
-            0x6189158b963eece6,
-            0xce5f6f859635119f,
-            0x9b961d4d52b177af,
+            0xc64c4a23621fd5ab,
+            0xb8b884d4819b0d49,
+            0x999ebacc4497dd71,
+            0xc1b07c80e88121db,
         ],
     ];
     let scenes: [(&str, Scene); 4] = [

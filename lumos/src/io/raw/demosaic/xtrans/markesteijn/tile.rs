@@ -156,8 +156,8 @@ impl Tile {
         let width = xtrans.size.width;
         let bounds = |row: usize, col: usize, offsets: &[isize; 8]| {
             let pix = row * width + col;
-            let mut minval = f32::MAX;
-            let mut maxval = 0.0f32;
+            let mut minval = f32::INFINITY;
+            let mut maxval = f32::NEG_INFINITY;
             for &offset in &offsets[..6] {
                 let val = xtrans.data[pix.wrapping_add_signed(offset)];
                 minval = if minval < val { minval } else { val };

@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–10 are done and committed. Every finding below was re-checked against the code after
+Batches 1–11 are done and committed. Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -28,7 +28,7 @@ Batch 7 and still holds.
   RUSTDOCFLAGS="-D warnings" cargo doc -p lumos --no-deps --document-private-items
   --all-features && cargo test -p lumos --tests --features ml`. Add `-p lens` / `-p darkroom`
   when a public lumos API changes. A batch that touches `libraw-sys` also runs its chain.
-- **SIMD kernels** (Batches 11, 18, 19, 22): after the change,
+- **SIMD kernels** (Batches 18, 19, 22): after the change,
   `cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)"
   $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter` must print 0.
 - **Snapshots.** `internals/characterization` pins outputs. A batch that changes an output on
@@ -47,7 +47,7 @@ Batch 7 and still holds.
 14 ── 15
  ├─── 16
  └─── 22
-11, 13, 17, 24, 26   independent
+13, 17, 24, 26   independent
 12 ── 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -57,40 +57,6 @@ Batch 7 and still holds.
 - 14 before 22: the hot-loop rework is done on the final gather, which reads the drizzle weight.
 - 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
-
----
-
-## Batch 11: Demosaic on signed, faint data — medium
-
-**Findings:** DMS-1, DMS-3, DMS-12.
-
-**Design:**
-1. **DMS-1:** `markesteijn/tile.rs` green bounds start `maxval` at `f32::NEG_INFINITY` (and
-   `minval` at `f32::INFINITY`).
-2. **DMS-3:** `estimate_green` (`bayer/rcd/mod.rs`) drops `EPS`:
-   - `scale = |c| + |s|`; if `scale == 0`, return `neighbor_green` (the additive branch's value
-     there).
-   - `transition = MIN_SIGNED_DENOMINATOR_RATIO · scale`; when `|c + s| ≥ transition`, return
-     `neighbor_green · 2c / (c + s)`; otherwise the existing smoothstep blend with the additive
-     estimate.
-   - The ratio is then exact at any level; its relative condition number stays at most 4.
-   - Remove `EPS` (keep `EPSSQ` where the direction weights use it).
-3. **The librtprocess oracle:** `rcd_matches_librtprocess_bit_for_bit` pins librtprocess digests
-   built with its `eps = 1e-5`, so it moves. Regenerate the digests with
-   `internals/reference/rcd_librtprocess.py`, building librtprocess at the pinned commit with
-   `eps` patched to `0.0f` (add an `--eps` option to the script and document it in the test doc).
-   The test scenes are positive, so librtprocess never meets `c + s = 0`. This needs a C++
-   compiler; if none is present, stop and report.
-
-**Tests (DMS-12):**
-- Table-driven flat field over levels {−1e-4, 0, 1e-5, 1e-4, 1e-2} with symmetric ±noise
-  (antithetic pairs, so the exact mean is the level): for both kernels, each output plane's mean
-  equals the level within a stated f32 rounding bound.
-- Replace the threshold assertions in `bayer/tests.rs` (`rcd_gradient_image_green_smoothness`,
-  `rcd_sharp_edge_no_excessive_artifacts`) with exact expectations: a linear ramp is reproduced
-  exactly inside the border.
-- Markesteijn: a zero-mean signed field gives a symmetric clamp (negate the input, the output
-  negates bit for bit).
 
 ---
 
@@ -311,7 +277,7 @@ filter in ring rows; retune `TILE`. Optionally (DMS-9) compute Markesteijn's YPb
 row by row and retune its tile per pass count.
 
 **Acceptance:** `bench_rcd_demosaic_core` 6000×4000 at least 1.5× faster without
-`target-cpu=x86-64-v3`, and the librtprocess digests (regenerated in Batch 11) unchanged.
+`target-cpu=x86-64-v3`, and the librtprocess digests unchanged.
 
 ---
 
@@ -509,7 +475,6 @@ Each decision is also written into its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| DMS-3 | Drop `EPS` from RCD's ratio; regenerate the librtprocess digests with `eps = 0`. | 11 |
 | CAL-6 | astroscrappy's saturated-star mask (5×5 median above a tenth of saturation, dilated twice). | 13 |
 | DRZ-1 | Siril's design: drizzle each frame, then the normal combine. | 14 |
 | DRZ-1 | A drizzled frame's drop weight multiplies its frame weight in the mean (Siril, DrizzlePac). | 14 |

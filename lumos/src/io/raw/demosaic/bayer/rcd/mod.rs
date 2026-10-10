@@ -24,9 +24,11 @@ use crate::io::raw::demosaic::bayer::rcd::tile::{OutputPlanes, Tile, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
+/// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;
-// Limit the ratio's relative condition number to four before blending.
+/// The share of `|c| + |s|` below which the ratio's denominator `c + s` hands over to the additive
+/// estimate: the ratio's relative condition number stays at most `1/0.25 = 4`.
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
@@ -79,15 +81,21 @@ fn intp(a: f32, b: f32, c: f32) -> f32 {
     b + a * (c - b)
 }
 
+/// The green at a red or blue site from a neighbouring green `g`, as RCD's ratio
+/// `g·2c/(c + s)` of the site's low-pass value `c` and its same-colour neighbour's `s`.
+///
+/// The ratio is level-free: librtprocess's `eps` in the denominator would bias faint signal by
+/// `eps/(c + s)`, a colour cast in a dark-subtracted background. Where `c + s` nears cancellation
+/// against `|c| + |s|`, only possible on signed data, it blends into the additive midpoint
+/// estimate, which it equals at `c = s = 0`.
 #[inline(always)]
 fn estimate_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
-    let numerator = neighbor_green * (center_lpf + center_lpf);
-    let denominator = EPS + center_lpf + same_color_lpf;
-    if center_lpf >= 0.0 && same_color_lpf >= 0.0 {
-        return numerator / denominator;
+    let scale = center_lpf.abs() + same_color_lpf.abs();
+    if scale == 0.0 {
+        return neighbor_green;
     }
-
-    let scale = EPS + center_lpf.abs() + same_color_lpf.abs();
+    let numerator = neighbor_green * (center_lpf + center_lpf);
+    let denominator = center_lpf + same_color_lpf;
     let transition = MIN_SIGNED_DENOMINATOR_RATIO * scale;
     if denominator.abs() >= transition {
         return numerator / denominator;

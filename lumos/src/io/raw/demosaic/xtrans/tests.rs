@@ -1,4 +1,5 @@
 use crate::internals::assertions::assert_close;
+use crate::internals::test_rng::TestRng;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
@@ -167,19 +168,70 @@ fn an_xtrans_image_holds_its_size_in_samples() {
     }
 }
 
-/// A uniform frame demosaics to itself, three planes of its size: every candidate averages equal
-/// values, which round at most a few times.
+/// A uniform frame demosaics to itself, three planes of its size, at any level and either pass
+/// count, the faint and the signed among them: every candidate averages equal values, which round
+/// a few times, 2⁻²¹ of the level at most. The frame is large enough for the tiles.
 #[test]
 fn a_uniform_frame_demosaics_to_itself() {
-    let rgb = markesteijn::demosaic(
-        &XTransImage::new(&[0.5; 144], Size2us::new(12, 12), test_pattern()),
-        MarkesteijnPasses::One,
-        &CancelToken::never(),
-    )
-    .unwrap();
-    assert!(rgb.iter().all(|plane| plane.len() == 144));
-    for &val in rgb.iter().flatten() {
-        assert_close!(val, 0.5, 2e-7, "Expected 0.5, got {val}");
+    let size = Size2us::new(96, 96);
+    for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
+        for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2, 0.5] {
+            let rgb = markesteijn::demosaic(
+                &XTransImage::new(&vec![level; size.pixel_count()], size, test_pattern()),
+                passes,
+                &CancelToken::never(),
+            )
+            .unwrap();
+            assert!(rgb.iter().all(|plane| plane.len() == size.pixel_count()));
+            for &value in rgb.iter().flatten() {
+                assert_close!(
+                    value,
+                    level,
+                    level.abs() / (1 << 21) as f32,
+                    "{passes:?} level {level}: {value}"
+                );
+            }
+        }
+    }
+}
+
+/// Markesteijn is odd: its colour differences, gradients and homogeneity are odd or even in the
+/// samples, and its green bounds, each the least and the greatest of a hexagon, swap under a
+/// negation. So the negated mosaic demosaics to the negated output, bit for bit. The field lies
+/// below zero throughout, as a dark-subtracted background can, in diagonal stripes whose edges
+/// make interpolated greens overshoot their hexagon's bounds, so the clamp decides them; the frame
+/// is large enough for the tiles, which the border fill would otherwise replace.
+#[test]
+fn markesteijn_is_odd() {
+    let size = Size2us::new(96, 96);
+    let mut rng = TestRng::new(13);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|index| {
+            let stripe = (index % size.width + index / size.width) % 7 < 3;
+            (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
+        })
+        .collect();
+    let negated: Vec<f32> = data.iter().map(|&value| -value).collect();
+    for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
+        let demosaic = |data: &[f32]| {
+            markesteijn::demosaic(
+                &XTransImage::new(data, size, test_pattern()),
+                passes,
+                &CancelToken::never(),
+            )
+            .unwrap()
+        };
+        let planes = demosaic(&data);
+        let mirrored = demosaic(&negated);
+        for (channel, (plane, mirror)) in planes.iter().zip(&mirrored).enumerate() {
+            for (index, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
+                assert_eq!(
+                    (-value).to_bits(),
+                    negative.to_bits(),
+                    "{passes:?} channel {channel} at {index}"
+                );
+            }
+        }
     }
 }
 
