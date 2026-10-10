@@ -2,9 +2,12 @@
 
 use std::ops::Range;
 
+use crate::math::vec2us::Vec2us;
+
+use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
-use crate::io::raw::demosaic::xtrans::markesteijn::{OutputPlanes, TILE};
+use crate::io::raw::demosaic::xtrans::markesteijn::{CROP, READ_REACH, TILE};
 
 /// Half the tile, the width of the green bounds, which hold one entry per pair of columns.
 const HALF_TILE: usize = TILE / 2;
@@ -23,6 +26,9 @@ const THIRD: f32 = 0.333_333_34;
 #[derive(Debug)]
 pub(super) struct Tile {
     directions: usize,
+    /// The tile's region of the frame and [`READ_REACH`] around it, balanced: every sample the
+    /// stages read of the frame, in the crop's stride.
+    input: Vec<f32>,
     rgb: Vec<[f32; 3]>,
     yuv: Vec<f32>,
     drv: Vec<f32>,
@@ -36,13 +42,6 @@ pub(super) struct Tile {
     dcolor: [[f32; 6]; 3],
 }
 
-/// Where a tile lies in the frame.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct TilePlace {
-    pub(super) top: usize,
-    pub(super) left: usize,
-}
-
 /// The rows and columns of a tile, in its own coordinates, that it computes in full and writes.
 #[derive(Debug)]
 struct OwnedPart {
@@ -54,6 +53,7 @@ impl Tile {
     pub(super) fn new(directions: usize) -> Self {
         Self {
             directions,
+            input: vec![0.0; CROP * CROP],
             rgb: vec![[0.0; 3]; directions * TILE * TILE],
             yuv: vec![0.0; 3 * YUV_SIDE * YUV_SIDE],
             drv: vec![0.0; directions * DRV_SIDE * DRV_SIDE],
@@ -68,7 +68,8 @@ impl Tile {
 
     /// The bytes one tile's buffers hold at `directions`.
     pub(super) const fn bytes(directions: usize) -> usize {
-        directions * TILE * TILE * size_of::<[f32; 3]>()
+        CROP * CROP * size_of::<f32>()
+            + directions * TILE * TILE * size_of::<[f32; 3]>()
             + 3 * YUV_SIDE * YUV_SIDE * size_of::<f32>()
             + directions * DRV_SIDE * DRV_SIDE * size_of::<f32>()
             + 2 * directions * TILE * TILE
@@ -76,8 +77,8 @@ impl Tile {
             + TILE * HALF_TILE * size_of::<[f32; 2]>()
     }
 
-    /// Demosaic the tile at `place` of `xtrans` with `passes` passes, and write the part of it
-    /// that is its own into `out`.
+    /// Demosaic the tile at `place` of `xtrans` with `passes` passes, balanced by its gains, and
+    /// write the part of it that is its own into `out` in the frame's own balance.
     ///
     /// # Safety
     ///
@@ -93,13 +94,12 @@ impl Tile {
         margin: usize,
         out: OutputPlanes,
     ) {
-        let TilePlace { top, left } = place;
-        let width = xtrans.size.width;
-        let height = xtrans.size.height;
-        let mrow = (top + TILE).min(height - 3);
-        let mcol = (left + TILE).min(width - 3);
-        self.seed(xtrans, hex, place, mrow, mcol);
-        self.interpolate(xtrans, hex, place, passes, mrow, mcol);
+        let TilePlace { top, left, size } = place;
+        let mrow = top + size.height;
+        let mcol = left + size.width;
+        self.read_input(xtrans, place);
+        self.seed(hex, place, mrow, mcol);
+        self.interpolate(hex, place, passes, mrow, mcol);
         let own = OwnedPart {
             rows: margin..mrow - top - margin,
             cols: margin..mcol - left - margin,
@@ -108,22 +108,51 @@ impl Tile {
         self.homogeneity(mrow - top, mcol - left);
         self.homogeneity_sums(&own);
         // SAFETY: the caller hands over the frame's planes and the region this tile alone owns.
-        unsafe { self.blend(place, &own, width, out) };
+        unsafe { self.blend(xtrans, place, &own, out) };
+    }
+
+    /// Copy the tile's region and [`READ_REACH`] around it out of `xtrans`, each sample balanced
+    /// by its colour's gain. The frame holds all of it: a tile ends [`READ_REACH`] short of the
+    /// frame's edges.
+    fn read_input(&mut self, xtrans: &XTransImage<'_>, TilePlace { top, left, size }: TilePlace) {
+        let (first_row, first_col) = (top - READ_REACH, left - READ_REACH);
+        let rows = size.height + 2 * READ_REACH;
+        let cols = size.width + 2 * READ_REACH;
+        for (row, line) in self
+            .input
+            .as_chunks_mut::<CROP>()
+            .0
+            .iter_mut()
+            .take(rows)
+            .enumerate()
+        {
+            let y = first_row + row;
+            for (col, balanced) in line[..cols].iter_mut().enumerate() {
+                let x = first_col + col;
+                let colour = usize::from(xtrans.pattern.color_at(Vec2us::new(x, y)));
+                *balanced = xtrans.read(y, x) * xtrans.gains[colour];
+            }
+        }
+    }
+
+    /// The index in [`Self::input`] of frame pixel `(row, col)` of the tile at `top`, `left`.
+    #[inline(always)]
+    const fn input_at(top: usize, left: usize, row: usize, col: usize) -> usize {
+        (row + READ_REACH - top) * CROP + col + READ_REACH - left
     }
 
     /// Each direction's colours from the seeded samples: green, then `passes` passes of red and
     /// blue.
     fn interpolate(
         &mut self,
-        xtrans: &XTransImage<'_>,
         hex: &HexTable,
         place: TilePlace,
         passes: usize,
         mrow: usize,
         mcol: usize,
     ) {
-        self.green_bounds(xtrans, hex, place, mrow, mcol);
-        self.interpolate_green(xtrans, hex, place, mrow, mcol);
+        self.green_bounds(hex, place, mrow, mcol);
+        self.interpolate_green(hex, place, mrow, mcol);
         for pass in 0..passes {
             let base = if pass == 0 { 0 } else { 4 };
             if pass == 1 {
@@ -147,19 +176,18 @@ impl Tile {
     /// interpolated green.
     fn green_bounds(
         &mut self,
-        xtrans: &XTransImage<'_>,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
     ) {
-        let width = xtrans.size.width;
+        let input = &self.input;
         let bounds = |row: usize, col: usize, offsets: &[isize; 8]| {
-            let pix = row * width + col;
+            let pix = Self::input_at(top, left, row, col);
             let mut minval = f32::INFINITY;
             let mut maxval = f32::NEG_INFINITY;
             for &offset in &offsets[..6] {
-                let val = xtrans.data[pix.wrapping_add_signed(offset)];
+                let val = input[pix.wrapping_add_signed(offset)];
                 minval = if minval < val { minval } else { val };
                 maxval = if maxval > val { maxval } else { val };
             }
@@ -176,7 +204,7 @@ impl Tile {
             };
             let entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
-                let offsets = hex.image(row, leftstart);
+                let offsets = hex.input(row, leftstart);
                 let mut col = leftstart;
                 while col < mcol {
                     self.green_bounds[entry(col)] = bounds(row, col, offsets);
@@ -185,10 +213,10 @@ impl Tile {
             } else {
                 let mut col = leftstart;
                 if coloffset == 2 {
-                    self.green_bounds[entry(col)] = bounds(row, col, hex.image(row, col));
+                    self.green_bounds[entry(col)] = bounds(row, col, hex.input(row, col));
                     col += 2;
                 }
-                let offsets = hex.image(row, col);
+                let offsets = hex.input(row, col);
                 while col + 1 < mcol {
                     let value = bounds(row, col, offsets);
                     self.green_bounds[entry(col)] = value;
@@ -205,9 +233,8 @@ impl Tile {
     /// The tile's samples, each in its own colour, in the first four directions.
     fn seed(
         &mut self,
-        xtrans: &XTransImage<'_>,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
     ) {
@@ -216,7 +243,8 @@ impl Tile {
         for row in top..mrow {
             for col in left..mcol {
                 let colour = usize::from(hex.colour(row, col));
-                self.rgb[Self::at(0, row - top, col - left)][colour] = xtrans.read(row, col);
+                self.rgb[Self::at(0, row - top, col - left)][colour] =
+                    self.input[Self::input_at(top, left, row, col)];
             }
         }
         for d in 1..4 {
@@ -228,16 +256,15 @@ impl Tile {
     /// its hexagon's bounds.
     fn interpolate_green(
         &mut self,
-        xtrans: &XTransImage<'_>,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
     ) {
-        let width = xtrans.size.width;
+        let input = &self.input;
         let colours = |row: usize, col: usize, h: &[isize; 8]| {
-            let pix = row * width + col;
-            let p = |offset: isize| xtrans.data[pix.wrapping_add_signed(offset)];
+            let pix = Self::input_at(top, left, row, col);
+            let p = |offset: isize| input[pix.wrapping_add_signed(offset)];
             let mut color = [0.0f32; 4];
             color[0] =
                 0.679_687_5 * (p(h[1]) + p(h[0])) - 0.179_687_5 * (p(2 * h[1]) + p(2 * h[0]));
@@ -261,7 +288,7 @@ impl Tile {
             };
             let bounds_entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
-                let h = hex.image(row, leftstart);
+                let h = hex.input(row, leftstart);
                 let mut col = leftstart;
                 while col < mcol {
                     let color = colours(row, col, h);
@@ -273,8 +300,8 @@ impl Tile {
                 }
             } else {
                 let hexmod = [
-                    hex.image(row, leftstart),
-                    hex.image(row, leftstart + coloffset),
+                    hex.input(row, leftstart),
+                    hex.input(row, leftstart + coloffset),
                 ];
                 let (mut col, mut hexindex) = (leftstart, 0);
                 while col < mcol {
@@ -295,7 +322,7 @@ impl Tile {
     fn refine_green(
         &mut self,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
         base: usize,
@@ -355,7 +382,7 @@ impl Tile {
     fn solitary_green_colours(
         &mut self,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
         base: usize,
@@ -409,7 +436,7 @@ impl Tile {
     fn opposite_colours(
         &mut self,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
         base: usize,
@@ -477,7 +504,7 @@ impl Tile {
     fn green_block_colours(
         &mut self,
         hex: &HexTable,
-        TilePlace { top, left }: TilePlace,
+        TilePlace { top, left, .. }: TilePlace,
         mrow: usize,
         mcol: usize,
         base: usize,
@@ -671,18 +698,20 @@ impl Tile {
         }
     }
 
-    /// The mean of the directions within an eighth of the most homogeneous, into `out`.
+    /// The mean of the directions within an eighth of the most homogeneous, into `out` in the
+    /// frame's own balance, each native sample as `xtrans` holds it.
     ///
     /// # Safety
     ///
     /// As [`Self::demosaic`].
     unsafe fn blend(
         &self,
-        TilePlace { top, left }: TilePlace,
+        xtrans: &XTransImage<'_>,
+        TilePlace { top, left, .. }: TilePlace,
         own: &OwnedPart,
-        width: usize,
         out: OutputPlanes,
     ) {
+        let width = xtrans.size.width;
         for row in own.rows.clone() {
             for col in own.cols.clone() {
                 let mut hm = [0u8; 8];
@@ -707,12 +736,20 @@ impl Tile {
                         avg[3] += 1.0;
                     }
                 }
-                let index = (row + top) * width + col + left;
-                // SAFETY: as this function's contract.
-                unsafe {
-                    out.r.get().add(index).write(avg[0] / avg[3]);
-                    out.g.get().add(index).write(avg[1] / avg[3]);
-                    out.b.get().add(index).write(avg[2] / avg[3]);
+                let (y, x) = (row + top, col + left);
+                let native = usize::from(xtrans.pattern.color_at(Vec2us::new(x, y)));
+                for (channel, &gain) in xtrans.gains.iter().enumerate() {
+                    // SAFETY: as this function's contract.
+                    unsafe {
+                        out.write(
+                            channel,
+                            y * width + x,
+                            native,
+                            xtrans.read(y, x),
+                            avg[channel] / avg[3],
+                            gain,
+                        );
+                    }
                 }
             }
         }
@@ -742,9 +779,10 @@ pub(crate) mod internals {
             passes: usize,
             poison: f32,
         ) -> &[[f32; 3]] {
-            let mrow = (place.top + TILE).min(xtrans.size.height - 3);
-            let mcol = (place.left + TILE).min(xtrans.size.width - 3);
-            self.seed(xtrans, hex, place, mrow, mcol);
+            let mrow = place.top + place.size.height;
+            let mcol = place.left + place.size.width;
+            self.read_input(xtrans, place);
+            self.seed(hex, place, mrow, mcol);
             for d in 0..4 {
                 for row in 0..TILE {
                     for col in 0..TILE {
@@ -759,7 +797,7 @@ pub(crate) mod internals {
                     }
                 }
             }
-            self.interpolate(xtrans, hex, place, passes, mrow, mcol);
+            self.interpolate(hex, place, passes, mrow, mcol);
             &self.rgb
         }
     }

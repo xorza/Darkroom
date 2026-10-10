@@ -1,12 +1,12 @@
 use common::CancelToken;
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::internals::test_rng::TestRng;
-use crate::io::raw::demosaic::bayer::rcd::tile::{OutputPlanes, Tile, TilePlace};
+use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
 use crate::io::raw::demosaic::bayer::rcd::{
     INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
 };
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
+use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -219,16 +219,11 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
         ] {
             let run = |poison: f32| {
                 let mut planes = [(); 3].map(|()| vec![f32::NAN; size.pixel_count()]);
-                let [r, g, b] = &mut planes;
-                let out = OutputPlanes {
-                    r: UnsafeSendPtr::new(r.as_mut_ptr()),
-                    g: UnsafeSendPtr::new(g.as_mut_ptr()),
-                    b: UnsafeSendPtr::new(b.as_mut_ptr()),
-                };
+                let out = OutputPlanes::of(&mut planes);
                 let mut tile = Tile::new();
                 tile.poison(poison);
                 // SAFETY: the planes cover the frame, and this is the only tile.
-                unsafe { tile.demosaic(&data, size.width, pattern, place, out) };
+                unsafe { tile.demosaic(&BayerImage::new(&data, size, pattern), place, out) };
                 planes
             };
             let (high, low) = (run(1000.0), run(-1000.0));

@@ -302,10 +302,10 @@ fn demosaic_costs_in_planes() {
     assert_eq!(memory.output_bytes, plane_bytes);
     assert_eq!(memory.peak_bytes, plane_bytes);
     for (memory, workspace) in [
-        (bayer(plane_bytes), rcd::workspace_bytes()),
+        (bayer(plane_bytes), rcd::internals::workspace_bytes()),
         (
             demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes),
-            markesteijn::workspace_bytes(),
+            markesteijn::internals::workspace_bytes(),
         ),
     ] {
         assert_eq!(memory.output_bytes, 3 * plane_bytes);

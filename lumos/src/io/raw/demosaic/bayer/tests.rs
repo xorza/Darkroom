@@ -1,8 +1,11 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::prelude::*;
+use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
@@ -255,30 +258,72 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
     }
 }
 
+/// Every native sample comes out as it went in, bit for bit, and every output is finite: through
+/// RCD in each Bayer phase, and through `CfaImage::demosaic` — RCD and Markesteijn at each pass
+/// count — under a camera white balance of red 2.13 and blue 1.71 over green, on a frame of 130
+/// that both kernels tile as well as fill at its border. The kernels read the samples balanced and
+/// write each native one from the input, so no `(x·g)/g` round trip rounds it, and an
+/// interpolated sample is balanced back by its own colour's gain.
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
-    let size = Size2us::new(20, 20);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|i| i as f32 / size.pixel_count() as f32)
-        .collect();
-
-    for pattern in CfaPattern::ALL {
-        let planes = demosaic(&data, size, pattern);
+    let ramp = |size: Size2us| -> Vec<f32> {
+        (0..size.pixel_count())
+            .map(|i| i as f32 / size.pixel_count() as f32)
+            .collect()
+    };
+    let assert_native = |planes: &[Vec<f32>; 3],
+                         data: &[f32],
+                         colour: &dyn Fn(Vec2us) -> usize,
+                         size: Size2us,
+                         case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
             for (index, &value) in plane.iter().enumerate() {
                 assert!(
                     value.is_finite(),
-                    "{pattern:?} channel {channel} at {index} = {value}"
+                    "{case} channel {channel} at {index} = {value}"
                 );
             }
         }
-        for index in 0..size.pixel_count() {
-            let channel = pattern.color_at(size.point_of(index));
+        for (index, &sample) in data.iter().enumerate() {
+            let channel = colour(size.point_of(index));
             assert_eq!(
-                planes[channel][index], data[index],
-                "{pattern:?}: native sample changed at {index}"
+                planes[channel][index].to_bits(),
+                sample.to_bits(),
+                "{case}: native sample changed at {index}"
             );
         }
+    };
+    let size = Size2us::new(20, 20);
+    let data = ramp(size);
+    for pattern in CfaPattern::ALL {
+        assert_native(
+            &demosaic(&data, size, pattern),
+            &data,
+            &|pos| pattern.color_at(pos),
+            size,
+            &format!("{pattern:?}"),
+        );
+    }
+
+    let size = Size2us::new(130, 130);
+    let data = ramp(size);
+    for (cfa_type, passes) in [
+        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
+        (CfaType::Bayer(CfaPattern::Gbrg), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
+    ] {
+        let mut cfa = make_cfa(size, data.clone(), cfa_type);
+        cfa.metadata.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);
+        let image = cfa.demosaic(passes, &CancelToken::never()).unwrap();
+        let planes = [0, 1, 2].map(|channel| image.channel(channel).pixels().to_vec());
+        assert_native(
+            &planes,
+            &data,
+            &|pos| usize::from(cfa_type.color_at(pos)),
+            size,
+            &format!("{cfa_type:?} {passes:?}, balanced"),
+        );
     }
 }
 
