@@ -32,6 +32,7 @@ pub(crate) mod xtrans;
 use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
+use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
@@ -40,7 +41,7 @@ use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
-use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 use crate::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
@@ -54,8 +55,8 @@ const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
 /// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
-/// [`QualityFlags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the parametric
-/// noise model needs an ADC step the frame does not record.
+/// [`QualityFlags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the
+/// parametric noise model needs an ADC step the frame does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
@@ -70,22 +71,28 @@ pub(crate) fn reject_cosmic_rays(
         BACKGROUND_TILE_SIZE,
         &mut MeshWorkspace::default(),
     );
+    // Through the checked accessor, then shared: the pixels below are borrowed apart from it.
+    let flat_gain = image.flat_gain().and(image.metadata.flat_gain.clone());
+    let backgrounds = PixelBackgrounds {
+        mesh: &mesh,
+        flat_gain: flat_gain.as_deref(),
+    };
     // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();
     let mut found = BitBuffer2::new_default(size);
     let count = match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
         c @ CfaType::Bayer(_) => {
-            BayerDetector::new(config, noise, c).reject(pixels, size, &mesh, &mut found)
+            BayerDetector::new(config, noise, c).reject(pixels, size, &backgrounds, &mut found)
         }
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
         c @ CfaType::XTrans(_) => {
-            XtransDetector::new(config, noise, c).reject(pixels, size, &mesh, &mut found)
+            XtransDetector::new(config, noise, c).reject(pixels, size, &backgrounds, &mut found)
         }
         CfaType::Mono => MonoDetector::new(config, noise).reject(
             pixels,
             size,
-            &|index| mesh.at(0, size.point_of(index)),
+            &|index| backgrounds.at(0, size.point_of(index)),
             &mut found,
         ),
     };

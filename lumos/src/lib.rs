@@ -76,6 +76,7 @@ pub use io::image::fits::options::{
 pub use io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
+pub use io::image::flat_gain::FlatGain;
 pub use io::image::image_dimensions::ImageDimensions;
 pub use io::image::image_metadata::ImageMetadata;
 pub use io::image::image_provenance::{

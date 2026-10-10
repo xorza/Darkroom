@@ -63,7 +63,7 @@ fn unrequested_quality_planes_are_never_allocated() {
 
     let weight_only = cache.process_chunked(
         request(QualityPlanes {
-            variance: false,
+            inverse_variance: false,
             dispersion: false,
             ..QualityPlanes::ALL
         }),
@@ -71,13 +71,13 @@ fn unrequested_quality_planes_are_never_allocated() {
     );
     assert!(weight_only.weight.is_some());
     assert!(
-        weight_only.variance.is_none() && weight_only.dispersion.is_none(),
+        weight_only.inverse_variance.is_none() && weight_only.dispersion.is_none(),
         "a variance or dispersion plane was allocated for a combine that did not ask for one"
     );
 
     let bare = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), reduce);
     assert!(bare.weight.is_none());
-    assert!(bare.variance.is_none() && bare.dispersion.is_none());
+    assert!(bare.inverse_variance.is_none() && bare.dispersion.is_none());
 
     // Skipping the planes must not disturb the combined pixels. Two equal-weight samples, 1 and 3,
     // about their mean 2: (1 + 1) / ((2 − 1)·2) = 1.
@@ -107,7 +107,7 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     assert_eq!(
         QualityPlanes::ALL.resolve(false),
         QualityPlanes {
-            variance: false,
+            inverse_variance: false,
             dispersion: false,
             ..QualityPlanes::ALL
         },
@@ -433,7 +433,8 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
 #[test]
 fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights and unit noise: every pixel sees all 4
-    // frames at weight 1, so weight = Σw = 4, variance = Σw²/(Σw)² = 4/16 = 0.25, coverage = 1.
+    // frames at weight 1, so weight = Σw = 4, inverse variance = (Σw)²/Σw² = 16/4 = 4,
+    // coverage = 1.
     let dims = ImageDimensions::new((3, 2), 1);
     let images: Vec<LinearImage> = (0..4)
         .map(|i| LinearImage::from_pixels(dims, vec![i as f32; 6]))
@@ -442,12 +443,12 @@ fn finish_product_uniform_equal_weights() {
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
         None,
     );
-    let linear_variance = product.variance.as_ref().unwrap();
+    let inverse_variance = product.inverse_variance.as_ref().unwrap();
     assert!(matches!(
         product.weight.as_ref().unwrap(),
         QualityMap::Shared(_)
     ));
-    assert!(matches!(linear_variance, QualityMap::Shared(_)));
+    assert!(matches!(inverse_variance, QualityMap::Shared(_)));
     assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
     // No frame carried a coverage map, so coverage is the constant 1.0 and no plane is built —
     // at a full-frame master that is the difference between one number and 240 MB.
@@ -464,17 +465,17 @@ fn finish_product_uniform_equal_weights() {
     let Some(QualityMap::Shared(weight)) = product.weight.as_ref() else {
         panic!("a mono stack has one weight plane");
     };
-    let QualityMap::Shared(variance) = linear_variance else {
-        panic!("a mono stack has one variance plane");
+    let QualityMap::Shared(inverse_variance) = inverse_variance else {
+        panic!("a mono stack has one inverse variance plane");
     };
     assert_eq!(weight.pixels(), &[4.0; 6]);
-    assert_eq!(variance.pixels(), &[0.25; 6]);
+    assert_eq!(inverse_variance.pixels(), &[4.0; 6]);
 }
 
 #[test]
 fn finish_product_uniform_manual_weights() {
-    // Weights [1,2,3,4] and unit noise, full coverage: weight = 10, Σw² = 1+4+9+16 = 30, variance =
-    // 30/100 = 0.30.
+    // Weights [1,2,3,4] and unit noise, full coverage: weight = 10, Σw² = 1+4+9+16 = 30, inverse
+    // variance = 100/30, rounded once.
     let dims = ImageDimensions::new((2, 1), 1);
     let images: Vec<LinearImage> = (0..4)
         .map(|_| LinearImage::from_pixels(dims, vec![0.5; 2]))
@@ -483,11 +484,11 @@ fn finish_product_uniform_manual_weights() {
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
         Some(&[1.0, 2.0, 3.0, 4.0]),
     );
-    let linear_variance = product.variance.as_ref().unwrap();
+    let inverse_variance = product.inverse_variance.as_ref().unwrap();
     for p in 0..2 {
         assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
-        assert_eq!(linear_variance.channel(0)[p], 0.3);
+        assert_eq!(inverse_variance.channel(0)[p], 100.0 / 30.0);
     }
 }
 
@@ -497,8 +498,8 @@ fn finish_product_partial_coverage() {
     // f1 the other way: coverage exactly at the floor, which is border fill rather than data — the
     // two exclusions have to produce the same counts, since one rule decides both.
     // Coverage gates inclusion but does not scale statistical weight. Unit noise:
-    //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, variance 0.25
-    //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, variance 1/3
+    //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, inverse variance 4
+    //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, inverse variance 3
     //   px2: count 3, as px1
     let dims = ImageDimensions::new((3, 1), 1);
     let cov = [
@@ -525,11 +526,11 @@ fn finish_product_partial_coverage() {
         .expect("frames are valid"),
     );
     let product = mean_product(&cache, None);
-    let linear_variance = product.variance.as_ref().unwrap();
+    let inverse_variance = product.inverse_variance.as_ref().unwrap();
 
     assert_eq!(product.coverage.as_ref().unwrap()[0], 1.0);
     assert_eq!(product.weight.as_ref().unwrap().channel(0)[0], 4.0);
-    assert_eq!(linear_variance.channel(0)[0], 0.25);
+    assert_eq!(inverse_variance.channel(0)[0], 4.0);
 
     for pixel in [1, 2] {
         assert_eq!(product.coverage.as_ref().unwrap()[pixel], 0.75, "px{pixel}");
@@ -538,7 +539,7 @@ fn finish_product_partial_coverage() {
             3.0,
             "px{pixel}"
         );
-        assert_eq!(linear_variance.channel(0)[pixel], 1.0 / 3.0, "px{pixel}");
+        assert_eq!(inverse_variance.channel(0)[pixel], 3.0, "px{pixel}");
     }
 }
 
@@ -569,8 +570,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
     for cache in caches(&[1.0, 3.0, 2.0]) {
         assert_eq!(cache.core.tier.chunk_memory(), None);
         let median = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, _| {
-            let count = samples.values.len();
-            CombinedSample::value_only(statistics::median_mut(samples.values), count)
+            CombinedSample::value_only(statistics::median_mut(samples.values))
         });
         assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
     }

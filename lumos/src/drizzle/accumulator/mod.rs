@@ -89,13 +89,13 @@ pub struct DrizzleAccumulator {
     /// Accumulated drizzle weight `Σ wᵢ` per output pixel. Channel-independent (the per-pixel
     /// `wᵢ` is purely geometric × frame weight), so a single map serves all channels.
     weight: Buffer2<f32>,
-    /// `Σwᵢ²·vᵢ` per channel, `vᵢ` each input pixel's model variance at its own value: divided by
-    /// `(Σwᵢ)²` it is the output's variance, which the correlation-suppressed image RMS
-    /// understates.
+    /// `Σwᵢ²·vᵢ` per channel, `vᵢ` each input pixel's model variance at its own value: `(Σwᵢ)²`
+    /// over it is the output's inverse variance, which the correlation-suppressed image RMS
+    /// overstates.
     ///
-    /// Empty when the config declines the variance plane, which is the one quality output with a
-    /// cost beyond its own allocation: these are output-grid planes resident for the whole run, a
-    /// noise measurement per frame, and more arithmetic at every deposit.
+    /// Empty when the config declines the inverse variance plane, which is the one quality output
+    /// with a cost beyond its own allocation: these are output-grid planes resident for the whole
+    /// run, a noise measurement per frame, and more arithmetic at every deposit.
     variance: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     /// How many frames deposited any flux at each output pixel, when the config asks for coverage.
     frame_counts: Option<Buffer2<f32>>,
@@ -145,7 +145,7 @@ impl DrizzleAccumulator {
             frames_added: 0,
             data,
             weight: Buffer2::new_default(output.width, output.height),
-            variance: if config.quality.variance {
+            variance: if config.quality.inverse_variance {
                 (0..input_dims.channels())
                     .map(|_| Buffer2::new_default(output.width, output.height))
                     .collect()
@@ -273,8 +273,8 @@ impl DrizzleAccumulator {
     ///
     /// The weight map is built whatever the request — the image is `Σfluxᵢwᵢ / Σwᵢ`, and
     /// `min_weight_fraction` gates fill against its maximum — so declining `weight` only declines
-    /// handing it out, while declining `coverage` or `variance` skips an output-grid allocation
-    /// each.
+    /// handing it out, while declining `coverage` or `inverse_variance` skips an output-grid
+    /// allocation each.
     ///
     /// The Lanczos kernel's negative lobes can leave a pixel below zero, and it stays there: on
     /// background-subtracted data a sample near zero is as likely negative as positive, and
@@ -320,7 +320,8 @@ impl DrizzleAccumulator {
             for index in 0..span.weight.len() {
                 let weight = span.weight[index];
                 // A pixel below the gate holds the fill value, which no frame measured: it carries
-                // no weight, no variance and no coverage, so no plane claims a measurement there.
+                // no weight, no inverse variance and no coverage, so no plane claims a measurement
+                // there.
                 let covered = weight >= threshold;
                 for plane in &mut span.data {
                     plane[index] = if covered {
@@ -331,7 +332,7 @@ impl DrizzleAccumulator {
                 }
                 for plane in &mut span.variance {
                     plane[index] = if covered {
-                        plane[index] / (weight * weight)
+                        weight * weight / plane[index]
                     } else {
                         0.0
                     };
@@ -362,7 +363,8 @@ impl DrizzleAccumulator {
                 .quality
                 .weight
                 .then_some(QualityMap::Shared(self.weight)),
-            variance: (!self.variance.is_empty()).then(|| QualityMap::from_planes(self.variance)),
+            inverse_variance: (!self.variance.is_empty())
+                .then(|| QualityMap::from_planes(self.variance)),
             dispersion: None,
             // Drizzle takes demosaiced frames, which carry no mosaic.
             cfa_type: None,

@@ -53,14 +53,11 @@ fn all_but(count: usize, dropped: &[usize]) -> Vec<usize> {
 /// `combine_mean` over `values` with `weights`, every sample its own frame, and no noise.
 fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSample {
     let mut values = values.to_vec();
-    let frame_ids: Vec<u32> = (0..values.len() as u32).collect();
     rejection.combine_mean(
         PixelSamples {
             values: &mut values,
             weights,
-            frame_ids: &frame_ids,
             noise: None,
-            channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
         &mut ScratchBuffers::default(),
@@ -1139,15 +1136,14 @@ fn combine_mean_weighs_each_survivor_by_its_own_weight() {
 /// ascending order, and a pixel that sorted nothing reports none. The sample counts them, and its
 /// weight is that of the seven unit weights, 7.
 ///
-/// The variance is `Σw²·v/(Σw)²` with each sample's model taken at the combined value 17.5/7 =
-/// 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 7·(3/4)/49 = 3/28, exact up
-/// to its one rounding. The survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to 7, so
-/// the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding.
+/// The inverse variance is `(Σw)²/Σw²·v` with each sample's model taken at the combined value
+/// 17.5/7 = 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 49/(7·3/4) = 28/3,
+/// exact up to its one rounding. The survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to
+/// 7, so the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding.
 #[test]
 fn the_survivors_are_named_after_the_combine() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
     let mut values = ramp;
-    let frame_ids: Vec<u32> = (0..8).collect();
     let noise = NoiseColumns {
         background: &[0.25; 8],
         sky: &[0.5; 8],
@@ -1158,31 +1154,26 @@ fn the_survivors_are_named_after_the_combine() {
         PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
-            frame_ids: &frame_ids,
             noise: Some(noise),
-            channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
         &mut scratch,
         true,
     );
-    assert_eq!(sample.survivor_count, 7);
     assert_eq!(
         scratch.survivor_positions(),
         Some(&[1, 4, 5, 7, 6, 3, 0][..])
     );
     assert_eq!(sample.value, 2.5);
     assert_eq!(sample.weight, 7.0);
-    assert_eq!(sample.variance, 3.0 / 28.0);
+    assert_eq!(sample.inverse_variance, 28.0 / 3.0);
     assert_eq!(sample.dispersion, 1.0 / 6.0);
 
     Rejection::None.combine_mean(
         PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
-            frame_ids: &frame_ids,
             noise: None,
-            channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
         &mut scratch,
@@ -1199,28 +1190,25 @@ fn the_survivors_are_named_after_the_combine() {
 #[test]
 fn the_gathered_noise_floors_the_spread() {
     let values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5];
-    let frame_ids: Vec<u32> = (0..8).collect();
     let zeros = [0.0; 8];
     let survivors = |background: Option<&[f32]>| {
         let mut values = values;
-        Rejection::sigma_clip(2.0)
-            .combine_mean(
-                PixelSamples {
-                    values: &mut values,
-                    weights: &[1.0; 8],
-                    frame_ids: &frame_ids,
-                    noise: background.map(|background| NoiseColumns {
-                        background,
-                        sky: &zeros,
-                        inverse_electrons: &zeros,
-                    }),
-                    channel: 0,
-                },
-                DEFAULT_MIN_SURVIVORS,
-                &mut ScratchBuffers::default(),
-                false,
-            )
-            .survivor_count
+        let mut scratch = ScratchBuffers::default();
+        Rejection::sigma_clip(2.0).combine_mean(
+            PixelSamples {
+                values: &mut values,
+                weights: &[1.0; 8],
+                noise: background.map(|background| NoiseColumns {
+                    background,
+                    sky: &zeros,
+                    inverse_electrons: &zeros,
+                }),
+            },
+            DEFAULT_MIN_SURVIVORS,
+            &mut scratch,
+            false,
+        );
+        scratch.survivor_positions().map_or(8, <[u32]>::len)
     };
     let mixed = [0.25, 0.25, 0.25, 0.25, 0.75, 0.75, 0.75, 0.75];
     assert_eq!(survivors(Some(&mixed)), 7);

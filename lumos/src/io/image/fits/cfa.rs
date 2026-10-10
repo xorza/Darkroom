@@ -10,6 +10,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::fits_to_io;
 use crate::io::image::fits::flags_extension::FlagsExtension;
+use crate::io::image::fits::gain_extension::GainExtension;
 use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata};
 use crate::io::image::pixel_flags::QualityFlags;
 
@@ -81,6 +82,7 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> io::Result<()> {
         },
     )?;
     let flags = FlagsExtension::encode(image.flags.as_ref(), None, 1)?;
+    let gain = GainExtension::encode(image.metadata.flat_gain.as_deref(), None)?;
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer
@@ -89,6 +91,11 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> io::Result<()> {
         if let Some(flags) = &flags {
             writer
                 .write_image(&flags.image, Some(&flags.header))
+                .map_err(fits_to_io)?;
+        }
+        if let Some(gain) = &gain {
+            writer
+                .write_image(&gain.image, Some(&gain.header))
                 .map_err(fits_to_io)?;
         }
         Ok(())

@@ -43,7 +43,7 @@ Paths below are relative to `/home/xxorza/Projects/darkroom/lumos/src/`.
 ### DRZ-5 — No CFA (Bayer/X-Trans) drizzle
 - **Where:** `drizzle/accumulator/mod.rs:40` (`DrizzleFrame<T>` is only ever `LinearImage`), `drizzle/accumulator/mod.rs:368` (`cfa_type: None`, "Drizzle takes demosaiced frames")
 - **Category:** precision (missing capability)
-- **Impact:** medium-high for one-shot-colour data, the main use of drizzle in amateur astrophotography. Demosaic interpolation leaves correlated noise and colour artifacts that drizzle cannot undo, and the variance plane then treats demosaic-interpolated samples as independent measurements, so it understates the variance there.
+- **Impact:** medium-high for one-shot-colour data, the main use of drizzle in amateur astrophotography. Demosaic interpolation leaves correlated noise and colour artifacts that drizzle cannot undo, and the inverse variance plane then treats demosaic-interpolated samples as independent measurements, so it overstates the inverse variance there.
 - **Confidence:** confirmed
 - **Evidence:** Siril's cdrizzle deposits each photosite only into its own channel (`cdrizzlebox.c:448` `chan = FC_array(j, i, cfa, cfadim)`, in every kernel). PixInsight's DrizzleIntegration has a CFA mode, and DSS has Bayer drizzle. Lumos has a `CfaImage` type, but drizzle cannot take it.
 - **Direction:**

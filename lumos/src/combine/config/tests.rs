@@ -321,7 +321,18 @@ fn validate_invalid_config_returns_exact_errors() {
         ),
         (
             StackConfig {
-                weighting: Weighting::Manual(vec![0.0, 0.0]),
+                weighting: Weighting::Manual(vec![1.0, 0.0]),
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            StackConfigError::InvalidManualWeight {
+                index: 1,
+                value: 0.0,
+            },
+        ),
+        (
+            StackConfig {
+                weighting: Weighting::Manual(vec![]),
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },

@@ -5,6 +5,7 @@ use crate::combine::cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::math::noise::background_split::BackgroundSplit;
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::statistics::spread::Spread;
 
@@ -48,12 +49,16 @@ impl SampleNoise {
         }
     }
 
-    /// The model of `gain·x + offset`: the background variance scales by `gain²`, the sky maps as
-    /// a sample does, and a unit of the result holds `electrons/gain` electrons.
+    /// The model of `gain·x + offset`: the background and step variances scale by `gain²`, the sky
+    /// maps as a sample does, and a unit of the result holds `electrons/gain` electrons.
     fn normalized(model: CcdNoise, gain: f32, offset: f32) -> CcdNoise {
         debug_assert!(gain > 0.0, "a normalization gain is positive, not {gain}");
         CcdNoise {
-            background_variance: model.background_variance * gain * gain,
+            background: BackgroundSplit {
+                variance: model.background.variance * gain * gain,
+                ..model.background
+            },
+            quantization_variance: model.quantization_variance * gain * gain,
             sky: model.sky * gain + offset,
             electrons_per_unit: model.electrons_per_unit.map(|electrons| electrons / gain),
         }
@@ -73,8 +78,9 @@ impl SampleNoise {
     }
 }
 
-/// The gathered samples' noise models, one column per term, over a warp's confidence `q`: the
-/// variances divide by `q` and the electrons per unit multiply by it, since an interpolated sample
+/// The gathered samples' noise models, one column per term, at each sample's flat gain `g` and over
+/// a warp's confidence `q`: the background is the model's at `g` over `q`, and a unit above the sky
+/// carries `g/(electrons·q)`, since the flat multiplied the sample and an interpolated sample
 /// averaged `q` source pixels' worth of white noise.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct NoiseColumns<'a> {
@@ -131,6 +137,7 @@ mod tests {
             .into_iter()
             .collect(),
             noise: noise.iter().copied().collect(),
+            read_share: [0.0; 3].into_iter().collect(),
             sky: noise.iter().map(|_| 0.5).collect(),
             quantization_sigma,
             electrons_per_unit: electrons,
@@ -180,14 +187,15 @@ mod tests {
             assert_eq!(
                 noise.model(0, slot),
                 CcdNoise {
-                    background_variance: 0.25,
+                    background: BackgroundSplit::unflattened(0.25),
+                    quantization_variance: 0.0,
                     sky,
                     electrons_per_unit: Some(electrons)
                 }
             );
         }
-        assert_eq!(noise.model(1, 0).background_variance, 0.25);
-        assert_eq!(noise.model(1, 2).background_variance, 1.0);
+        assert_eq!(noise.model(1, 0).background_at(1.0), 0.25);
+        assert_eq!(noise.model(1, 2).background_at(1.0), 1.0);
         assert!(!noise.every_gain_known());
 
         let mosaic_slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
@@ -205,7 +213,7 @@ mod tests {
             let slot = mosaic_slots.slot(0, Vec2us::new(x, y));
             assert_eq!(slot, colour, "({x}, {y})");
             assert_eq!(
-                mosaic.model(0, slot).background_variance,
+                mosaic.model(0, slot).background_at(1.0),
                 variance,
                 "({x}, {y})"
             );

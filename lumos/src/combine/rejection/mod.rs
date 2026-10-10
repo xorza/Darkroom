@@ -138,7 +138,8 @@ impl Rejection {
     }
 
     /// Whether a pass that rejects nothing ends the method. Linear fit's first pass is only the
-    /// robust start for the fits: an outlier the median clip keeps can still be off the fitted line.
+    /// robust start for the fits: an outlier the median clip keeps can still be off the fitted
+    /// line.
     const fn settles(&self, index: usize) -> bool {
         !matches!(self, Self::LinearFit(_)) || index > 0
     }
@@ -223,9 +224,8 @@ impl Rejection {
 
     /// Reject outliers, then reduce the survivors to their weighted mean.
     ///
-    /// The one reduction entry point. The returned sample always carries its survivor count, and
-    /// [`ScratchBuffers::survivor_positions`] names the survivors after it. `measure_quality` asks
-    /// for the survivors' effective weight as well, which is a second pass over the samples.
+    /// The one reduction entry point. `measure_quality` asks for the survivors' effective weight as
+    /// well, which is a second pass over the samples.
     ///
     /// Only the mean is weighted; the rejection decides survivors from the values alone. That
     /// matches what `ImageIntegration`, Siril and DSS do: rejection asks which samples disagree
@@ -252,7 +252,7 @@ impl Rejection {
             return if measure_quality {
                 CombinedSample::from_survivors(value, values, weights, 0..values.len(), noise)
             } else {
-                CombinedSample::value_only(value, values.len())
+                CombinedSample::value_only(value)
             };
         }
 
@@ -279,7 +279,7 @@ impl Rejection {
                 noise,
             )
         } else {
-            CombinedSample::value_only(value, window.len())
+            CombinedSample::value_only(value)
         };
         scratch.survivors = Some(window);
         sample

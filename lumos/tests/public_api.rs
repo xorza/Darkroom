@@ -324,7 +324,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
         coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
-        variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
+        inverse_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,
         report: RunReport {

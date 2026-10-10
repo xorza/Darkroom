@@ -23,10 +23,12 @@ pub enum StackConfigError {
     #[error(transparent)]
     Field(#[from] InvalidConfigField),
 
-    #[error("manual weight {index} must be finite and non-negative, got {value}")]
+    #[error(
+        "manual weight {index} must be finite and positive, got {value}: drop a frame from the set rather than weigh it 0"
+    )]
     InvalidManualWeight { index: usize, value: f32 },
 
-    #[error("manual weights must contain at least one positive value with a finite sum")]
+    #[error("manual weights must contain at least one value, with a finite sum")]
     InvalidManualWeightSum,
 
     #[error("manual weight count {actual} does not match frame count {expected}")]

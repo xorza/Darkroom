@@ -30,6 +30,7 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
         image.metadata.quantization_sigma = Some(1.0 / 65_536.0);
         image.metadata.mosaic_noise = Some(MosaicNoise {
             sigma: [0.01; 3],
+            read_share: [0.0; 3],
             sky: [0.1, 0.15, 0.2],
             quantization_sigma: Some(1.0 / 65_536.0),
         });

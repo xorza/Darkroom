@@ -12,19 +12,21 @@ use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
+use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
 /// if a warp produced one or its source declared pixels with no measurement, its flags when it
-/// carries any but `NO_DATA` (which the quality planes already hold), and the statistics measured
-/// on the source before any interpolation.
+/// carries any but `NO_DATA` (which the quality planes already hold), the gain a flat applied to
+/// its pixels, and the statistics measured on the source before any interpolation.
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     pub(crate) quality: FrameQuality<StoredPlane>,
     pub(crate) flags: Option<StoredPlane<u8>>,
+    pub(crate) flat_gain: Option<StoredGain>,
     pub(crate) source_stats: FrameStats,
 }
 
@@ -39,6 +41,7 @@ impl StoredFrame {
         quality: FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Self {
+        let flat_gain = image.flat_gain().map(StoredGain::from_memory);
         let ImageParts { planes, flags } = image.into_parts();
         let flags = flags
             .filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA))
@@ -47,6 +50,7 @@ impl StoredFrame {
             channels: planes.into_iter().map(StoredPlane::Memory).collect(),
             quality: quality.map(StoredPlane::Memory),
             flags,
+            flat_gain,
             source_stats,
         }
     }
@@ -70,10 +74,15 @@ impl StoredFrame {
         let flags = kept_flags(image.flags())
             .map(|flags| store.store_flags(flags.bytes()))
             .transpose()?;
+        let flat_gain = image
+            .flat_gain()
+            .map(|gain| StoredGain::spill(store, gain))
+            .transpose()?;
         Ok(Self {
             channels,
             quality,
             flags,
+            flat_gain,
             source_stats,
         })
     }
@@ -86,6 +95,10 @@ impl StoredFrame {
         quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
+        debug_assert!(
+            image.metadata().flat_gain.is_none(),
+            "a kept frame is as its source decodes, and no flat divided that"
+        );
         let frame = Self::spill(spill, image, quality, source_stats)?;
         let carries = Carries {
             quality: !quality.is_none(),
@@ -132,6 +145,7 @@ impl StoredFrame {
             channels,
             quality,
             flags,
+            flat_gain: None,
             source_stats,
         }))
     }

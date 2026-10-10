@@ -92,7 +92,10 @@ pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpPar
     buffers.warp_into(&SourceImage::of(image), warp_transform, config);
     WarpResult {
         image: LinearImage {
-            metadata: image.metadata.clone(),
+            metadata: image
+                .metadata
+                .clone()
+                .warped(warp_transform, image.dimensions().size()),
             pixels: buffers.pixels,
             flags: buffers.flags,
         },

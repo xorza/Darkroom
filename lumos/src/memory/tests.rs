@@ -172,11 +172,11 @@ fn held_frames_are_charged_only_what_the_run_adds() {
         },
         held_bytes,
         detection_bytes: DETECTOR_PLANES * plane_bytes,
-        warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
+        warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes, 0)),
         output_bytes: 0,
     };
     assert_eq!(
-        PerFrameBytes::new(plane_bytes, frame_bytes).warped,
+        PerFrameBytes::new(plane_bytes, frame_bytes, 0).warped,
         504 * MB
     );
     let peak = 8_784 * MB as u64;
@@ -354,7 +354,7 @@ fn pipeline_shape(
         decode: demosaic.with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
         held_bytes: 0,
         detection_bytes: DETECTOR_PLANES * plane_bytes,
-        warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
+        warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes, 0)),
         output_bytes,
     }
 }
@@ -377,19 +377,22 @@ fn plan(
 
 /// The per-frame figures every plan below is derived from, in planes. A warped frame is its output,
 /// two quality planes and a quarter-plane of flags: 3¼P mono, 5¼P colour. A warp holds the source
-/// beside it: 4¼P and 8¼P. In quarter planes: 13 and 17, 21 and 33.
+/// beside it: 4¼P and 8¼P. In quarter planes: 13 and 17, 21 and 33. A flat gain grid adds its own
+/// bytes to both.
 #[test]
 fn a_warp_holds_its_source_beside_the_warped_frame() {
     let plane_bytes = plane(10);
     let quarter = plane_bytes / 4;
     for (output, warped, working) in [(1, 13, 17), (3, 21, 33)] {
-        assert_eq!(
-            PerFrameBytes::new(plane_bytes, output * plane_bytes),
-            PerFrameBytes {
-                warped: warped * quarter,
-                working: working * quarter,
-            }
-        );
+        for gain_bytes in [0, 7] {
+            assert_eq!(
+                PerFrameBytes::new(plane_bytes, output * plane_bytes, gain_bytes),
+                PerFrameBytes {
+                    warped: warped * quarter + gain_bytes,
+                    working: working * quarter + gain_bytes,
+                }
+            );
+        }
     }
 }
 
@@ -402,7 +405,7 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
     let (frames, threads, available) = (10, 8, 8 * GB);
     let demosaic = three_channel(plane_bytes, 22);
 
-    let warped = PerFrameBytes::new(plane_bytes, demosaic.output_bytes).warped;
+    let warped = PerFrameBytes::new(plane_bytes, demosaic.output_bytes, 0).warped;
     assert!((warped * frames) as u64 <= memory_budget(available));
     assert!(!plan(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
 }

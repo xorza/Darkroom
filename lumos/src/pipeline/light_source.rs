@@ -187,7 +187,11 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                         },
                         held_bytes: frame_bytes,
                         detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                        warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
+                        warp: Some(PerFrameBytes::new(
+                            plane_bytes,
+                            frame_bytes,
+                            dimensions.flat_gain_bytes(),
+                        )),
                         output_bytes: quality.resident_bytes(dimensions),
                     },
                 })
@@ -243,7 +247,11 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
                     .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
                 held_bytes: 0,
                 detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
+                warp: Some(PerFrameBytes::new(
+                    plane_bytes,
+                    demosaic.output_bytes,
+                    dimensions.flat_gain_bytes(),
+                )),
                 output_bytes: config.stack.quality.resident_bytes(dimensions),
             },
         })

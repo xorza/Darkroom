@@ -2,28 +2,40 @@
 
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::sample_domain::ScaleOrigin;
+use crate::math::noise::background_split::BackgroundSplit;
 
-/// The noise variance of a sample at value `x`, in the frame's own units (Merline & Howell 1995):
+/// The noise variance of a sample at value `x` where a flat multiplied it by `g`, in the frame's
+/// own units (Merline & Howell 1995, carried through the flat):
 ///
-/// `variance(x) = background_variance + max(x − sky, 0) / electrons_per_unit`
+/// `variance(x, g) = max(background(g), q²·g²) + max(x − sky, 0)·g / electrons_per_unit`
 ///
-/// `background_variance` is the white noise measured at the sky level, raised to the quantization
-/// floor: it already holds the read noise, the dark current, the quantization noise and the sky's
-/// own photon noise, so no consumer adds them again. The source term counts the photons above the
-/// sky, and only when the gain is known.
+/// The background is the white noise measured at the sky level, split by how the flat amplified it
+/// ([`BackgroundSplit`]): it already holds the read noise, the dark current, the quantization noise
+/// and the sky's own photon noise, so no consumer adds them again. `q` is the source's ADC step σ,
+/// which the flat scaled like the read noise. The source term counts the photons above the sky,
+/// which arrived through the flat as the sky's did, and only when the gain is known.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct CcdNoise {
-    pub(crate) background_variance: f32,
+    pub(crate) background: BackgroundSplit,
+    /// `q²`, 0 where the source states no step.
+    pub(crate) quantization_variance: f32,
     pub(crate) sky: f32,
     pub(crate) electrons_per_unit: Option<f32>,
 }
 
 impl CcdNoise {
-    pub(crate) fn variance_at(self, x: f32) -> f32 {
-        self.background_variance
+    /// The variance of the background where a flat multiplied the sample by `gain`.
+    pub(crate) fn background_at(self, gain: f32) -> f32 {
+        self.background
+            .at(gain)
+            .max(self.quantization_variance * gain * gain)
+    }
+
+    pub(crate) fn variance_at(self, x: f32, gain: f32) -> f32 {
+        self.background_at(gain)
             + self
                 .electrons_per_unit
-                .map_or(0.0, |electrons| (x - self.sky).max(0.0) / electrons)
+                .map_or(0.0, |electrons| (x - self.sky).max(0.0) * gain / electrons)
     }
 
     /// Electrons per unit of an image's samples: the camera's electrons per ADU times the ADU one
@@ -43,24 +55,51 @@ mod tests {
     use super::*;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain};
 
-    /// Below the sky only the background counts; above it, each unit carries `1/electrons` more
-    /// variance. Background 0.25, sky 1, 4 electrons per unit: 0.25 at 0.5 and at 1, 0.25 + 2/4
-    /// at 3. Without a gain the source term is absent.
+    /// Below the sky only the background counts; above it, each unit carries `g/electrons` more
+    /// variance. Background 1/4 at gain 1, half of it read noise, sky 1, 4 electrons per unit, all
+    /// dyadic so exact:
+    /// - gain 1: 1/4 at 0.5 and at 1, 1/4 + 2/4 = 3/4 at 3, and without a gain the source term is
+    ///   absent;
+    /// - gain 2: the background is `1/4·2·(½·2 + ½)` = 3/4, the source term at 3 is `2·2/4` = 1;
+    /// - the split matters: all read noise gives `1/4·4` = 1 at gain 2, all sky `1/4·2` = 1/2;
+    /// - a step of σ 1/4 floors a silent background at `(1/4·2)²` = 1/4 at gain 2.
     #[test]
     fn the_source_term_counts_photons_above_the_sky() {
         let noise = CcdNoise {
-            background_variance: 0.25,
+            background: BackgroundSplit {
+                variance: 0.25,
+                read_share: 0.5,
+            },
+            quantization_variance: 0.0,
             sky: 1.0,
             electrons_per_unit: Some(4.0),
         };
-        assert_eq!(noise.variance_at(0.5), 0.25);
-        assert_eq!(noise.variance_at(1.0), 0.25);
-        assert_eq!(noise.variance_at(3.0), 0.75);
+        assert_eq!(noise.variance_at(0.5, 1.0), 0.25);
+        assert_eq!(noise.variance_at(1.0, 1.0), 0.25);
+        assert_eq!(noise.variance_at(3.0, 1.0), 0.75);
         let no_gain = CcdNoise {
             electrons_per_unit: None,
             ..noise
         };
-        assert_eq!(no_gain.variance_at(3.0), 0.25);
+        assert_eq!(no_gain.variance_at(3.0, 1.0), 0.25);
+        assert_eq!(noise.variance_at(1.0, 2.0), 0.75);
+        assert_eq!(noise.variance_at(3.0, 2.0), 1.75);
+        for (read_share, expected) in [(1.0, 1.0), (0.0, 0.5)] {
+            let split = CcdNoise {
+                background: BackgroundSplit {
+                    variance: 0.25,
+                    read_share,
+                },
+                ..no_gain
+            };
+            assert_eq!(split.background_at(2.0), expected, "ρ {read_share}");
+        }
+        let silent = CcdNoise {
+            background: BackgroundSplit::unflattened(0.0),
+            quantization_variance: 1.0 / 16.0,
+            ..no_gain
+        };
+        assert_eq!(silent.background_at(2.0), 0.25);
     }
 
     /// 1.5 e⁻/ADU over a declared scale of 65535 ADU per unit is 98302.5 electrons per unit. An

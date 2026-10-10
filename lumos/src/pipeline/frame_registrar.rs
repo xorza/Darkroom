@@ -143,7 +143,10 @@ impl<'a> FrameRegistrar<'a> {
             .take()
             .unwrap_or_else(|| WarpBuffers::new(image.dimensions()));
         warped.warp_into(&image.source(), &warp, self.config.registration.warp);
-        let metadata = image.metadata().clone();
+        let metadata = image
+            .metadata()
+            .clone()
+            .warped(&warp, image.dimensions().size());
         drop(image);
         self.resolved.complete_one();
         let stored = self.tier.store(metadata, warped, stats)?;

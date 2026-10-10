@@ -13,14 +13,6 @@ the same consistency table, floors and termination. The scripts are in
 
 ## Findings
 
-### CMB-3: The variance plane ignores flat-field noise amplification
-- **Where**: `math/noise/ccd_noise.rs:6-27`, `combine/cache/sample_noise.rs:229-266`, `combine/cache/sample.rs:148-185`. No flat term exists anywhere in the noise model; `rg` finds no flat or vignetting factor reaching `CcdNoise` or the confidence planes.
-- **Category**: precision (science product)
-- **Impact**: medium-high for the "measurable master" goal. After division by a normalized flat `f(p)`, a calibrated pixel has a read and dark variance of `σ_r²/f²` and a source and sky term of `x/(e·f)`. The model uses one global MRS σ and one global electrons per unit. In corners at `f = 0.5`, the variance plane under-reports by a factor of 2 (sky-limited) to 4 (read-limited); near the centre it over-reports slightly. The `dispersion` cross-check will flag this as model error, but the variance plane is the published error bar.
-- **Confidence**: likely. The absence is confirmed; the magnitude is analytical.
-- **Evidence**: ccdproc propagates uncertainty through flat division (`.tmp/ccdproc/ccdproc/core.py` `flat_correct`, which calls `CCDData.divide` with NDData uncertainty arithmetic).
-- **Direction**: carry the master flat's per-pixel gain into the per-sample noise model at calibration time. One option is a per-pixel variance factor that rides with the frame as confidence does, warped with it. The background term then becomes `σ_bg²/f²`, measured on the uncalibrated scale, and the photon term `1/(e·f)`. The floor (CMB-2) and the CcdModel clip become field-correct too.
-
 ### CMB-4: CFA mosaics are normalized with one affine for all colours, while noise and weights are per colour
 - **Where**: `combine/normalization/mod.rs:222-277` (`source_medians` / `multiplicative_norms` on the mosaic's single channel), `:312-397` (`global_norms`), `combine/cache/slots.rs:36-38` (`Slots::channel` maps every colour to channel 0 for norms), `combine/cache/mod.rs:486-489`
 - **Category**: correctness
@@ -38,33 +30,12 @@ the same consistency table, floors and termination. The scripts are in
 - **Evidence**: Siril has the same per-pixel strided gather (`stacking/stacking.c` / `median_and_mean.c`: per-frame row blocks, then `stack[frame] = pix[frame][x]`), so lumos is no worse than the reference. Still, this loop dominates for large N.
 - **Direction**: for each row tile of 64–256 px, loop frames on the outside. Apply gain and offset with the `simd::Isa` kernels into a `[tile][frame]` transposed buffer, together with coverage mask bits, effective weights and per-sample noise terms. Then reduce each pixel from contiguous memory. Hoist the invariant `Option`s by monomorphizing, and precompute per frame and slot `1/electrons` so only one multiply by `1/q` remains.
 
-### CMB-7: The master quantization σ costs an O(survivors) pass per pixel to produce one worst-pixel scalar
-- **Where**: `combine/stack/mod.rs:341-392`, `combine/stack/quantization.rs:42-56,101-135`
-- **Category**: performance / design
-- **Impact**: low-medium. Whenever every frame declares a quantization σ (all RAW input, and calibration masters even with `IMAGE_ONLY`), every pixel with any rejection or partial coverage pays a second loop over its survivors: a `norms[i].channels[c].gain` lookup, a `powi`, and a guarded atomic. The figure kept is the maximum over pixels. On any registered stack that is the edge pixel with 1 to `min_survivors` frames, which is close to a single frame's σ whatever the rest of the field did.
-- **Confidence**: confirmed in code.
-- **Direction**: decide whether a worst-pixel scalar is the product wanted. If it is, gate the per-pixel work on `survivor_count ≤` a running minimum (an atomic min). For equal-weight, equal-σ sets the figure is `σ/√m_min` exactly, so the loop can be dropped there.
-
 ### CMB-8: The coverage plane is a second full pass that re-reads every frame's coverage plane
 - **Where**: `combine/cache/mod.rs:254-300` (`finish_product`) against `:470-511`, where the gather already counts `covered` with the same `PixelCoverage` rule
 - **Category**: performance / simplification
 - **Impact**: medium for spilled tiers. N more plane reads through mmap after the combine, plus a filter and count over N per pixel, for a number the gather already computed.
 - **Confidence**: confirmed in code.
 - **Direction**: write `covered / frame_count` from the gather on the first channel's pass (coverage is shared across channels), and drop the second walk and `coverage_layout`.
-
-### CMB-9: Pixels with no weight report variance 0, and zero-weight survivors give a value of 0
-- **Where**: `combine/cache/sample.rs:174-178,188-196`, `math/sum/mod.rs:93-97`, `combine/config/mod.rs:330-341`
-- **Category**: correctness (science product)
-- **Impact**: medium. Variance 0 claims an exact pixel, so an inverse-variance consumer gives it infinite weight. That is what an uncovered pixel gets, and also a pixel whose survivors all carry zero weight. Zero weights are reachable: validation allows individual `Manual` weights of 0. At a registered edge covered only by zero-weight frames, or where rejection removed every positive-weight sample, `weighted_mean_f32` returns 0.0 while coverage reports the pixel as covered. That is silently wrong.
-- **Confidence**: confirmed in code.
-- **Direction**: write `+∞` or NaN to the variance plane where `Σw = 0`, or publish inverse variance, where 0 is the natural "no information". For the value, either reject `Manual` weights of 0 at validation (dropping the frame is the honest form) or fall back to the unweighted mean of the survivors and flag the pixel.
-
-### CMB-10: The median path computes a dispersion on value/weight pairs it has permuted apart
-- **Where**: `combine/stack/mod.rs:311-325`
-- **Category**: design (latent bug) / performance
-- **Impact**: low. `median_mut(samples.values)` reorders `values` in place, then `from_survivors(value, samples.values, samples.weights, 0..count, None)` pairs `values[i]` with an unrelated `weights[i]`. The dispersion is computed and then discarded, because `QualityPlanes::resolve` drops it for a median. The extra O(N) pass is wasted, and any later use of the pairs is wrong.
-- **Confidence**: confirmed in code.
-- **Direction**: for a median, write only `Σw` (order-independent) and do not call `from_survivors`.
 
 ### CMB-11: GESD records statistics on the hot path that only a test reads
 - **Where**: `combine/rejection/gesd_config.rs:104`, `combine/rejection/scratch_buffers.rs:17`. The only reader is `rejection/tests.rs:737`.
@@ -125,10 +96,8 @@ the same consistency table, floors and termination. The scripts are in
   - `values.len() ≤ min_survivors` skips rejection.
 - **Trim counts**: exact `⌊p·n/100⌋` in f64.
 - **Normalization reference choice**: the lowest noise in a shared domain. **Common domain**: uses the same `PixelCoverage` rule as the gather.
-- **`MaxSigma`**: an atomic max on f32 bits is correct for non-negative values.
 
 ## Suggested batches
-1. **Science planes**: CMB-3 (flat factor in the noise model; touches calibration → confidence plumbing), CMB-9 (variance and value at zero weight), CMB-10.
-2. **CFA-aware normalization**: CMB-4 (per-slot `FrameNorm`, per-colour medians, gains and stratification).
-3. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-7 (quantization gate), CMB-17. Measure with `bench_stack_300`.
-4. **Cleanups**: CMB-11, CMB-12.
+1. **CFA-aware normalization**: CMB-4 (per-slot `FrameNorm`, per-colour medians, gains and stratification).
+2. **Hot-loop performance**: CMB-6 (tile-transposed SIMD gather), CMB-8 (coverage from the gather), CMB-17. Measure with `bench_stack_300`.
+3. **Cleanups**: CMB-11, CMB-12.

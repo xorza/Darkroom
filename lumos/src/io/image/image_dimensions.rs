@@ -3,6 +3,7 @@
 use crate::memory;
 use std::fmt;
 
+use crate::io::image::flat_gain::GainGrid;
 use crate::math::size2us::Size2us;
 
 /// Image dimensions: pixel size and number of channels.
@@ -108,6 +109,13 @@ impl ImageDimensions {
     pub(crate) const fn flag_plane_bytes(&self) -> usize {
         self.pixel_count()
     }
+
+    /// Bytes a warped frame's flat gain grid adds: a node grid per channel, about a sixteenth of
+    /// a plane each. Charged to every warped frame, since lights are divided by a flat as a rule.
+    pub(crate) const fn flat_gain_bytes(&self) -> usize {
+        let grid = GainGrid::of(self.size());
+        self.channels() * grid.columns * grid.rows * size_of::<f32>()
+    }
 }
 
 /// `width×height×channels` — the form error messages quote geometry in, where the derived `Debug`
@@ -136,6 +144,12 @@ mod tests {
             assert_eq!(dimensions.is_grayscale(), channels == 1);
             assert_eq!(dimensions.is_rgb(), channels == 3);
         }
+
+        // A flat gain grid has a node every 4 pixels from the first, the last at or past the last
+        // pixel, 4 bytes each per channel: 9×9 takes 3×3 nodes, 3·9·4 = 108 bytes in colour; 13×5
+        // takes 4×2, 32 bytes in mono.
+        assert_eq!(ImageDimensions::new((9, 9), 3).flat_gain_bytes(), 108);
+        assert_eq!(ImageDimensions::new((13, 5), 1).flat_gain_bytes(), 32);
 
         for (width, height, channels, expected) in [
             (0, 3, 1, "Width must be positive"),

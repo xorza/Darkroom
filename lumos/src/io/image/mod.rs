@@ -2,6 +2,7 @@ pub(crate) mod calibration_state;
 pub(crate) mod cfa;
 pub(crate) mod error;
 pub(crate) mod fits;
+pub(crate) mod flat_gain;
 pub(crate) mod image_dimensions;
 pub(crate) mod image_metadata;
 pub(crate) mod image_provenance;

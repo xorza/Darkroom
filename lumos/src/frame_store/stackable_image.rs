@@ -10,6 +10,7 @@ use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
@@ -42,6 +43,26 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
 
     /// The image's channel planes and its flags, moved out.
     fn into_parts(self) -> ImageParts;
+
+    /// The gain a flat applied to the image's pixels, for an image a flat divided.
+    ///
+    /// # Panics
+    ///
+    /// If the gain covers another image: another size, or another count of colours or channels.
+    /// Calibration sets it on the frame it divides and a warp replaces it with its own, so a
+    /// mismatch is metadata moved between images by the caller.
+    fn flat_gain(&self) -> Option<&FlatGain> {
+        let gain = self.metadata().flat_gain.as_deref()?;
+        let dimensions = self.dimensions();
+        let channels = self
+            .cfa_type()
+            .map_or(dimensions.channels(), |cfa| cfa.num_colors());
+        assert!(
+            gain.size() == dimensions.size() && gain.channels() == channels,
+            "an image's flat gain covers another image's pixels"
+        );
+        Some(gain)
+    }
 }
 
 /// What [`StackableImage::into_parts`] moves out of an image.

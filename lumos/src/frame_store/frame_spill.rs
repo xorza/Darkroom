@@ -1,4 +1,5 @@
-//! [`FrameSpill`]: where a spilled frame's planes and sidecars live on disk, and what they are called.
+//! [`FrameSpill`]: where a spilled frame's planes and sidecars live on disk, and what they are
+//! called.
 //!
 //! Every name the decode cache writes comes from [`FrameSpill`], so the writer that produced a file
 //! and a later run looking for it cannot disagree about where it is. What one run alone needs has
@@ -26,7 +27,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "a517cb2d6548c820";
+pub(crate) const SIDECAR_PIN: &str = "4b7a5eea41bb5410";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -170,6 +171,10 @@ impl PlaneStore for FrameSpill<'_> {
         StoredPlane::write(&path, bytes)?;
         StoredPlane::map(&path)
     }
+
+    fn store_gain(&self, _channel: usize, _nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
+        unreachable!("a kept frame is as its source decodes, and no flat divided that")
+    }
 }
 
 /// The record that commits a kept frame: the key its planes were decoded under, and which planes
@@ -303,6 +308,7 @@ mod tests {
                 .map(|&(median, mad)| MedianMad { median, mad })
                 .collect(),
             noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
+            read_share: [0.0; 3].into_iter().collect(),
             sky: channels.iter().map(|&(median, _)| median).collect(),
             quantization_sigma,
             electrons_per_unit: Some(2.5),
@@ -328,8 +334,8 @@ mod tests {
         }
     }
 
-    /// A key spelled out field by field, so the pin below does not move with `DECODE_VERSION` or the
-    /// default options.
+    /// A key spelled out field by field, so the pin below does not move with `DECODE_VERSION` or
+    /// the default options.
     const fn key(decode_version: u64) -> CacheKey {
         CacheKey {
             source: FileIdentity {

@@ -113,4 +113,8 @@ impl PlaneStore for RunScratch {
     fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError> {
         self.store(bytes)
     }
+
+    fn store_gain(&self, _channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
+        self.store(nodes)
+    }
 }
