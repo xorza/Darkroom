@@ -1,8 +1,8 @@
 //! The pixels every registered frame actually covers.
 //!
 //! Normalization compares frames against each other, so it can only measure where all of them have
-//! real data: the intersection of the pixels each frame contributes at, by the same
-//! [`PixelCoverage`] rule the combine gathers by. Held as one bit per pixel — a `Vec<bool>` costs
+//! real data: the intersection of the pixels each frame contributes at, by the same [`FrameGate`]
+//! the combine gathers by. Held as one bit per pixel — a `Vec<bool>` costs
 //! 37.7 MB on a 6K frame against 4.7 MB packed — and accumulated 64 predicate results at a time, so
 //! intersecting is one read-modify-write per word rather than per pixel.
 //!
@@ -11,17 +11,20 @@
 //! also what lets `source_noise_variance` divide by the confidence at these pixels.
 
 use common::CancelToken;
+use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::combine::CANCEL_POLL_CHUNK;
+use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::error::StackError;
-use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+
+/// Pixels per word of the mask, which is one row: word `w` covers pixels `64w..64w + 64`.
+pub(super) const WORD_BITS: usize = u64::BITS as usize;
 
 #[derive(Debug)]
 pub(crate) struct CommonDomain {
@@ -40,25 +43,35 @@ impl CommonDomain {
     }
 
     /// Intersect every frame's coverage into the pixels all of them contribute at.
+    ///
+    /// In parallel over spans of the mask, each reading its span of every frame: AND is
+    /// order-independent, so the mask is the serial one, and only one mask is ever held.
     pub(super) fn build(
         frames: &[StoredFrame],
         pixel_count: usize,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         let mut common_domain = Self::full_mask(pixel_count);
-        for frame in frames {
-            Cancelled::check(cancel)?;
-            if let Some(coverage) = frame.quality.coverage() {
-                intersect_domain(
-                    &mut common_domain,
-                    coverage,
-                    pixel_count,
-                    |value| PixelCoverage::new(value).contributes(),
-                    cancel,
-                )?;
-            }
-        }
-        Cancelled::check(cancel)?;
+        common_domain
+            .words
+            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+            .enumerate()
+            .try_for_each(|(span, words)| {
+                Cancelled::check(cancel)?;
+                let base = span * CANCEL_POLL_CHUNK;
+                if base < pixel_count {
+                    let end = (base + words.len() * WORD_BITS).min(pixel_count);
+                    for frame in frames {
+                        let gate = FrameGate::of(frame, base, end);
+                        if !gate.everywhere() {
+                            intersect_span(words, end - base, |index| {
+                                gate.confidence(index).is_some()
+                            });
+                        }
+                    }
+                }
+                Ok::<_, StackError>(())
+            })?;
         let sample_count = common_domain.count_ones();
         if sample_count == 0 {
             return Err(StackError::NoCommonCoverage);
@@ -69,27 +82,23 @@ impl CommonDomain {
         })
     }
 
-    /// The photosites of `colour` of a `cfa_type` mosaic over an image of `size`, among those
-    /// `domain` holds, or among every pixel without one.
+    /// The photosites of `colour` of a `cfa_type` mosaic over an image of `size` among those
+    /// `domain` holds.
     ///
     /// # Errors
     /// [`StackError::NoCommonCoverage`] when the frames share none of them.
     pub(super) fn of_colour(
-        domain: Option<&Self>,
+        domain: &Self,
         size: Size2us,
         cfa_type: &CfaType,
         colour: u8,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
-        const BITS: usize = 64;
         let pixel_count = size.pixel_count();
-        let mut valid = match domain {
-            Some(domain) => domain.valid.clone(),
-            None => Self::full_mask(pixel_count),
-        };
-        let words_per_check = CANCEL_POLL_CHUNK.div_ceil(BITS);
+        let mut valid = domain.valid.clone();
+        let words_per_check = CANCEL_POLL_CHUNK / WORD_BITS;
         for (w, word) in valid.words.iter_mut().enumerate() {
-            let base = w * BITS;
+            let base = w * WORD_BITS;
             if base >= pixel_count {
                 break;
             }
@@ -98,7 +107,7 @@ impl CommonDomain {
             }
             let mut position = Vec2us::new(base % size.width, base / size.width);
             let mut incoming = 0u64;
-            for bit in 0..BITS.min(pixel_count - base) {
+            for bit in 0..WORD_BITS.min(pixel_count - base) {
                 if cfa_type.color_at(position) == colour {
                     incoming |= 1u64 << bit;
                 }
@@ -120,38 +129,25 @@ impl CommonDomain {
     }
 }
 
-/// Intersect `common_domain` with the pixels of `plane` that satisfy `is_valid`.
+/// Intersect `words`, the mask over `pixels` pixels from a word's start, with the pixels `is_valid`
+/// names by their index from that start; past the last pixel a word's bits are cleared.
 ///
 /// Accumulates 64 predicate results into a word before touching the mask, so this is one
 /// read-modify-write per 64 pixels rather than per pixel.
-fn intersect_domain(
-    common_domain: &mut BitBuffer2,
-    plane: &StoredPlane,
-    pixel_count: usize,
-    is_valid: impl Fn(f32) -> bool,
-    cancel: &CancelToken,
-) -> Result<(), StackError> {
-    const BITS: usize = 64;
-    let values = plane.chunk(0, pixel_count);
-    // The mask is one row, so word `w` covers pixels `64w..64w+64`.
-    let words_per_check = CANCEL_POLL_CHUNK.div_ceil(BITS);
-    for (w, word) in common_domain.words.iter_mut().enumerate() {
-        let base = w * BITS;
-        if base >= pixel_count {
+fn intersect_span(words: &mut [u64], pixels: usize, is_valid: impl Fn(usize) -> bool) {
+    for (w, word) in words.iter_mut().enumerate() {
+        let base = w * WORD_BITS;
+        if base >= pixels {
             break;
         }
-        if w % words_per_check == 0 {
-            Cancelled::check(cancel)?;
-        }
         let mut incoming = 0u64;
-        for bit in 0..BITS.min(pixel_count - base) {
-            if is_valid(values[base + bit]) {
+        for bit in 0..WORD_BITS.min(pixels - base) {
+            if is_valid(base + bit) {
                 incoming |= 1u64 << bit;
             }
         }
         *word &= incoming;
     }
-    Ok(())
 }
 
 #[cfg(test)]

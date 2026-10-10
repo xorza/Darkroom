@@ -5,6 +5,7 @@
 //! flats, bias) and hot pixel correction on raw data.
 
 pub(crate) mod cfa_lattice;
+pub(crate) mod colour_raster;
 
 use std::io;
 use std::path::Path;
@@ -66,6 +67,20 @@ impl CfaType {
             CfaType::Mono => 0,
             CfaType::Bayer(p) => p.color_at(pos) as u8,
             CfaType::XTrans(pattern) => pattern.color_at(pos),
+        }
+    }
+
+    /// Whether the pattern is a mosaic of colours: Bayer or X-Trans, not mono.
+    pub(crate) const fn is_mosaic(&self) -> bool {
+        matches!(self, CfaType::Bayer(_) | CfaType::XTrans(_))
+    }
+
+    /// The pattern's period on each axis: `color_at` repeats every `period` pixels.
+    pub(crate) const fn period(&self) -> usize {
+        match self {
+            CfaType::Mono => 1,
+            CfaType::Bayer(_) => 2,
+            CfaType::XTrans(_) => 6,
         }
     }
 
@@ -153,10 +168,6 @@ impl CfaType {
 pub(crate) struct CfaFrameInfo {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) cfa_type: CfaType,
-    /// Whether decoding could produce pixels with no measurement, which a frame pays two quality
-    /// planes for beside its own. Answered from the header alone, so it is conservative where the
-    /// header cannot settle it — see `FitsDecodePlan::may_carry_nulls`.
-    pub(crate) may_carry_nulls: bool,
     /// What the decoder holds beside the frame while it makes it: a camera RAW's whole file, which
     /// LibRaw parses in place, and the raw buffer it unpacks into; nothing for a FITS file, which
     /// is streamed.

@@ -59,9 +59,7 @@ impl FrameStats {
         let flags = image.flags();
         let excluded =
             |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
-        let mosaic = image
-            .cfa_type()
-            .filter(|cfa| matches!(cfa, CfaType::Bayer(_) | CfaType::XTrans(_)));
+        let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
         let mosaic_noise = match mosaic {
             Some(cfa_type) => Some(MosaicNoise::measure(
                 image.channel(0),

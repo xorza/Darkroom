@@ -1,13 +1,11 @@
 //! The rule for whether one frame contributes at one pixel.
 
-/// How much of one output pixel had real source data behind it, for one frame — a fraction in
-/// `[0, 1]`, or [`Self::FULL`] for a frame that carries no frame quality at all.
+/// How much of one output pixel had real source data behind it, for one frame: a fraction in
+/// `[0, 1]`.
 ///
-/// The one place the "does this frame contribute here?" rule lives. Three passes ask it: the
-/// combine gathering the samples at a pixel, the coverage plane counting that pixel's
-/// contributors, and normalization intersecting the pixels every frame reached. They have to agree
-/// frame for frame, or the stacked value, the coverage reported beside it, and the scale it was
-/// measured on describe three different sets of frames.
+/// The one place the "does this frame contribute here?" rule for a coverage plane lives, which
+/// [`FrameGate`](crate::combine::cache::frame_gate::FrameGate) reads for the combine, its coverage
+/// plane and normalization's common domain alike.
 ///
 /// Confidence is not part of the rule. A warp emits support and interpolation confidence together
 /// and agreeing on where the frame has data — the invariant
@@ -23,10 +21,6 @@ impl PixelCoverage {
     /// Coverage at or below this is dominated by warp border fill rather than source data, so it is
     /// kept out of the statistics.
     pub(crate) const MIN_CONTRIBUTING: f32 = 1e-3;
-
-    /// The support a frame with no coverage plane has everywhere: a calibration frame, or a light
-    /// read straight from disk.
-    pub(crate) const FULL: Self = Self(1.0);
 
     #[inline]
     pub(crate) const fn new(fraction: f32) -> Self {
@@ -63,6 +57,5 @@ mod tests {
                 "coverage {fraction}"
             );
         }
-        assert!(PixelCoverage::FULL.contributes());
     }
 }

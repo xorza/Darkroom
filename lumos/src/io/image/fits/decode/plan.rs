@@ -69,20 +69,6 @@ pub(super) struct FitsDecodePlan {
 }
 
 impl FitsDecodePlan {
-    /// Whether decoding this HDU could produce pixels with no measurement.
-    ///
-    /// Settled from the header alone, which is what lets a memory estimate charge for the quality
-    /// planes a masked frame carries without reading a byte of data.
-    ///
-    /// An integer `BITPIX` produces a null only where a stored sample equals `BLANK`, so a header
-    /// carrying no such keyword *proves* there are none — and that is every frame a camera writes.
-    /// A floating-point one carries its nulls in-band as IEEE NaN, with nothing in the header to
-    /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
-    /// direction that over-reserves.
-    pub(super) const fn may_carry_nulls(&self) -> bool {
-        may_carry_nulls(self.sample_type, &self.scaling)
-    }
-
     /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
     /// as read, and the flag plane the decode may hold until the two are joined.
     pub(super) fn admit_flags_extension(
@@ -113,7 +99,13 @@ impl FitsDecodePlan {
 }
 
 /// Whether a decode of samples stored as `sample_type` under `scaling` could produce pixels with no
-/// measurement; see [`FitsDecodePlan::may_carry_nulls`].
+/// measurement, settled from the header alone.
+///
+/// An integer `BITPIX` produces a null only where a stored sample equals `BLANK`, so a header
+/// carrying no such keyword *proves* there are none — and that is every frame a camera writes. A
+/// floating-point one carries its nulls in-band as IEEE NaN, with nothing in the header to announce
+/// them, so it answers `true` whether or not any are actually there. Wrong only in the direction
+/// that over-reserves.
 const fn may_carry_nulls(sample_type: SampleType, scaling: &Scaling) -> bool {
     !sample_type.is_integer() || scaling.blank.is_some()
 }

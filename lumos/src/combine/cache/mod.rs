@@ -2,6 +2,7 @@
 
 pub(crate) mod core;
 pub(crate) mod frame_check;
+pub(crate) mod frame_gate;
 pub(crate) mod frame_weights;
 pub(crate) mod loader;
 pub(crate) mod sample;
@@ -15,6 +16,7 @@ use rayon::prelude::*;
 
 use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
+use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::loader::LoadedCache;
 use crate::combine::cache::sample::{
@@ -26,14 +28,12 @@ use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Normalization, StackConfig};
 use crate::combine::error::StackError;
 use crate::combine::normalization::FrameNorm;
-use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::StackFrame;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::frame_store::stored_plane::StoredPlane;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -60,6 +60,9 @@ use std::path::Path;
 #[derive(Debug)]
 pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
+    /// The share of frames gathered at each pixel, when coverage was asked for and some frame
+    /// carries frame quality; every pixel is wholly covered otherwise.
+    coverage: Option<Buffer2<f32>>,
     weight: Option<LinearPixels>,
     inverse_variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
@@ -74,6 +77,7 @@ pub(crate) struct CombineOutput {
 #[derive(Debug)]
 struct QualityRows<'a> {
     value: &'a mut [f32],
+    coverage: Option<&'a mut [f32]>,
     weight: Option<&'a mut [f32]>,
     inverse_variance: Option<&'a mut [f32]>,
     dispersion: Option<&'a mut [f32]>,
@@ -211,11 +215,12 @@ impl FrameCache {
     ) -> StackProduct {
         let CombineOutput {
             pixels,
+            coverage,
             weight: weight_pixels,
             inverse_variance: inverse_variance_pixels,
             dispersion: dispersion_pixels,
             flags,
-            mut report,
+            report,
         } = combined;
         let dimensions = self.core.dimensions;
         // Every frame carries the first one's pattern: `SetFacts` held them to it.
@@ -253,83 +258,18 @@ impl FrameCache {
             pixels,
             flags: flags.and_then(PixelFlags::from_buffer),
         };
-        let weight = weight_pixels.map(QualityMap::from_pixels);
-        let inverse_variance = inverse_variance_pixels.map(QualityMap::from_pixels);
-        let dispersion = dispersion_pixels.map(QualityMap::from_pixels);
-        let frame_count = self.frames.len();
-        let width = dimensions.width();
-        let height = dimensions.height();
-
-        // No frame carries support, so every pixel is fully covered — and saying so costs one
-        // number rather than an image-sized plane of `1.0`.
-        if !planes.coverage || self.frames.iter().all(|frame| frame.quality.is_none()) {
-            return StackProduct {
-                image,
-                coverage: planes.coverage.then(|| Coverage::Uniform {
-                    value: 1.0,
-                    size: dimensions.size(),
-                }),
-                weight,
-                inverse_variance,
-                dispersion,
-                cfa_type,
-                report,
-            };
-        }
-
-        let mut coverage = Buffer2::new_default(width, height);
-        let inv_frames = 1.0 / frame_count as f32;
-
-        // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
-        // same row-aligned chunks the combine uses, against the figure the combine sized against.
-        let chunking = self
-            .core
-            .chunk_rows(self.coverage_layout(planes, image.flags.is_some()));
-        report.chunk_overcommit_bytes =
-            report.chunk_overcommit_bytes.max(chunking.overcommit_bytes);
-        let chunk_rows = chunking.rows;
-
-        let mut start_row = 0;
-        while start_row < height {
-            let end_row = (start_row + chunk_rows).min(height);
-            let base = start_row * width;
-            let span = (end_row - start_row) * width;
-
-            let cov_chunks =
-                self.quality_chunks(|frame| frame.quality.coverage(), base, base + span);
-
-            let cov_out = &mut coverage.pixels_mut()[base..base + span];
-            cov_out
-                .par_chunks_mut(width)
-                .enumerate()
-                .for_each(|(row_in_chunk, cov_row)| {
-                    let row_base = row_in_chunk * width;
-                    for (px, output) in cov_row.iter_mut().enumerate() {
-                        let local = row_base + px;
-                        // The combine's own gate, so the fraction reported here is exactly the
-                        // fraction of frames whose sample entered the statistics.
-                        let count = cov_chunks
-                            .iter()
-                            .filter(|cov| {
-                                cov.map_or(PixelCoverage::FULL, |map| {
-                                    PixelCoverage::new(map[local])
-                                })
-                                .contributes()
-                            })
-                            .count();
-                        *output = count as f32 * inv_frames;
-                    }
-                });
-
-            start_row = end_row;
-        }
-
         StackProduct {
             image,
-            coverage: Some(Coverage::PerPixel(coverage)),
-            weight,
-            inverse_variance,
-            dispersion,
+            coverage: planes.coverage.then(|| match coverage {
+                Some(coverage) => Coverage::PerPixel(coverage),
+                None => Coverage::Uniform {
+                    value: 1.0,
+                    size: dimensions.size(),
+                },
+            }),
+            weight: weight_pixels.map(QualityMap::from_pixels),
+            inverse_variance: inverse_variance_pixels.map(QualityMap::from_pixels),
+            dispersion: dispersion_pixels.map(QualityMap::from_pixels),
             cfa_type,
             report,
         }
@@ -338,9 +278,9 @@ impl FrameCache {
     /// The combine: for each output pixel, gather the frames that cover it, hand them to
     /// `combine`, and write the reduced value plus whichever [`QualityPlanes`] were requested.
     ///
-    /// [`PixelCoverage`] alone decides whether a frame is gathered at a pixel; the sample carries
-    /// its frame's weight into the reduction, and its confidence, guaranteed positive wherever the
-    /// frame was gathered, divides its noise model. A frame carrying neither plane contributes
+    /// [`FrameGate`] alone decides whether a frame is gathered at a pixel; the sample carries its
+    /// frame's weight into the reduction, and its confidence, guaranteed positive wherever the
+    /// frame was gathered, divides its noise model. A frame carrying no frame quality contributes
     /// everywhere at unit confidence, which is what lets calibration masters and registered light
     /// stacks share this loop. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked<Combine>(
@@ -372,6 +312,10 @@ impl FrameCache {
         let mut output_dispersion = planes
             .dispersion
             .then(|| LinearPixels::new_zeroed(dimensions));
+        let mut output_coverage = self
+            .gathers_coverage(planes)
+            .then(|| Buffer2::<f32>::new_default(dimensions.width(), dimensions.height()));
+        let inverse_frame_count = 1.0 / self.frames.len() as f32;
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags =
             any_flags.then(|| Buffer2::<u8>::new_default(dimensions.width(), dimensions.height()));
@@ -392,16 +336,12 @@ impl FrameCache {
                 let frame_count = frames.len();
                 let chunk_pixels = output_slice.len();
                 debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
-                // Per-frame support and confidence slices; `None` means full support/unit
-                // confidence.
                 let chunk_end = pixel_offset + chunk_pixels;
-                let coverage =
-                    self.quality_chunks(|frame| frame.quality.coverage(), pixel_offset, chunk_end);
-                let confidence = self.quality_chunks(
-                    |frame| frame.quality.confidence(),
-                    pixel_offset,
-                    chunk_end,
-                );
+                let gates: Vec<FrameGate<'_>> = self
+                    .frames
+                    .iter()
+                    .map(|frame| FrameGate::of(frame, pixel_offset, chunk_end))
+                    .collect();
                 let flags: Vec<Option<&[u8]>> = self
                     .frames
                     .iter()
@@ -436,12 +376,20 @@ impl FrameCache {
                     .chunks_mut(width)
                     .map(|value| QualityRows {
                         value,
+                        coverage: None,
                         weight: None,
                         inverse_variance: None,
                         dispersion: None,
                         flags: None,
                     })
                     .collect();
+                // Coverage is the channels' one gate, so the first channel's gather writes it.
+                if let Some(plane) = output_coverage.as_mut().filter(|_| channel == 0) {
+                    let slice = &mut plane.pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
+                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
+                        row.coverage = Some(chunk);
+                    }
+                }
                 if let Some(plane) = output_weight.as_mut() {
                     let slice = &mut plane.channel_mut(channel).pixels_mut()
                         [pixel_offset..pixel_offset + chunk_pixels];
@@ -511,15 +459,7 @@ impl FrameCache {
                             let gain_point = gain_grid.point(pixel_in_row as f32, y as f32);
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
-                                let support = match coverage[frame_idx] {
-                                    Some(map) => PixelCoverage::new(map[pixel_idx]),
-                                    None => PixelCoverage::FULL,
-                                };
-                                let q = match confidence[frame_idx] {
-                                    Some(map) => map[pixel_idx],
-                                    None => 1.0,
-                                };
-                                if support.contributes() {
+                                if let Some(q) = gates[frame_idx].confidence(pixel_idx) {
                                     let v = match frame_norms {
                                         Some(fnm) => {
                                             let norm = fnm[frame_idx].slots[slot];
@@ -602,6 +542,9 @@ impl FrameCache {
                                 row_flags[pixel_in_row] |= pixel_flags.byte();
                             }
                             row.value[pixel_in_row] = sample.value;
+                            if let Some(coverage) = row.coverage.as_deref_mut() {
+                                coverage[pixel_in_row] = covered as f32 * inverse_frame_count;
+                            }
                             if let Some(weight) = row.weight.as_deref_mut() {
                                 weight[pixel_in_row] = sample.weight;
                             }
@@ -619,6 +562,7 @@ impl FrameCache {
             });
         CombineOutput {
             pixels,
+            coverage: output_coverage,
             weight: output_weight,
             inverse_variance: output_inverse_variance,
             dispersion: output_dispersion,
@@ -639,26 +583,17 @@ impl FrameCache {
         }
     }
 
-    /// Each frame's slice of one frame-quality plane over `[start, end)`, `None` where the frame
-    /// carries no such plane.
-    ///
-    /// `plane` picks which of the two a frame's slot is — the combine and the coverage pass both
-    /// gather them the same way and differ only in that choice.
-    fn quality_chunks(
-        &self,
-        plane: fn(&StoredFrame) -> Option<&StoredPlane>,
-        start: usize,
-        end: usize,
-    ) -> Vec<Option<&[f32]>> {
-        self.frames
-            .iter()
-            .map(|frame| plane(frame).map(|plane| plane.chunk(start, end)))
-            .collect()
+    /// Whether the combine writes a coverage plane: one was asked for, and some frame carries
+    /// quality planes, without which every pixel is wholly covered — and saying so costs one
+    /// number rather than an image-sized plane of `1.0`.
+    fn gathers_coverage(&self, planes: QualityPlanes) -> bool {
+        planes.coverage && self.frames.iter().any(|frame| !frame.quality.is_none())
     }
 
-    /// What the combine pass holds: one input plane per frame channel, plus one more for each of
-    /// that frame's coverage and confidence planes and a byte for its flags, against the resident
-    /// output planes and, when any frame carries flags, the output flag plane.
+    /// What the combine pass holds: a chunk of every channel of every frame, as the chunk-outer walk
+    /// reads them, plus one more plane for each of that frame's coverage and confidence planes and
+    /// a byte for its flags, against the resident output planes: the coverage plane when one is
+    /// gathered, and the flag plane when any frame carries flags.
     fn weighted_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
         ChunkMemoryLayout {
             input_bytes: self
@@ -674,38 +609,17 @@ impl FrameCache {
                         (gain.channels() * size_of::<f32>())
                             .div_ceil(flat_gain::STEP * flat_gain::STEP)
                     });
-                    (1 + frame.quality.count()) * size_of::<f32>()
+                    (frame.channels.len() + frame.quality.count()) * size_of::<f32>()
                         + usize::from(frame.flags.is_some())
                         + gain
                 })
                 .sum(),
-            resident_bytes: self.output_bytes(
-                planes,
-                self.frames.iter().any(|frame| frame.flags.is_some()),
-            ),
+            resident_bytes: self.core.dimensions.channels()
+                * planes.resident_planes_per_channel()
+                * size_of::<f32>()
+                + usize::from(self.gathers_coverage(planes)) * size_of::<f32>()
+                + usize::from(self.frames.iter().any(|frame| frame.flags.is_some())),
         }
-    }
-
-    /// What the coverage pass holds: one input plane per frame that carries frame quality, against
-    /// the combine's residents — which are all still alive at that point, the flag plane among
-    /// them when `flagged` — plus the single coverage plane being accumulated.
-    fn coverage_layout(&self, planes: QualityPlanes, flagged: bool) -> ChunkMemoryLayout {
-        ChunkMemoryLayout {
-            input_bytes: self
-                .frames
-                .iter()
-                .filter(|frame| !frame.quality.is_none())
-                .count()
-                * size_of::<f32>(),
-            resident_bytes: self.output_bytes(planes, flagged) + size_of::<f32>(),
-        }
-    }
-
-    /// Bytes per pixel of the combine's output planes: the f32 planes of every channel, and the
-    /// one flag byte when `flagged`.
-    fn output_bytes(&self, planes: QualityPlanes, flagged: bool) -> usize {
-        self.core.dimensions.channels() * planes.resident_planes_per_channel() * size_of::<f32>()
-            + usize::from(flagged)
     }
 
     /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.

@@ -1,6 +1,5 @@
 //! Pixel extent plus channel count, validated once at construction.
 
-use crate::memory;
 use std::fmt;
 
 use crate::io::image::flat_gain::GainGrid;
@@ -93,14 +92,6 @@ impl ImageDimensions {
     /// Bytes the image's pixels occupy, planar f32.
     pub(crate) const fn frame_bytes(&self) -> usize {
         self.sample_count() * size_of::<f32>()
-    }
-
-    /// Bytes the quality planes add to a frame that carries them.
-    ///
-    /// One plane per pixel rather than per sample: coverage and confidence are channel-independent,
-    /// so an RGB frame pays for two planes here, not six.
-    pub(crate) const fn quality_plane_bytes(&self) -> usize {
-        memory::FRAME_QUALITY_PLANES * self.pixel_count() * size_of::<f32>()
     }
 
     /// Bytes a frame's flag plane adds: one per pixel, whatever its channel count. Charged to every

@@ -1,8 +1,8 @@
+use crate::combine::cache::frame_gate::FrameGate;
 use crate::frame_store::cache_key::{CacheKey, DecoderKind};
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
@@ -233,22 +233,26 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     // keeps this free for every RAW frame and almost every camera FITS.
     assert!(FrameQuality::for_unwarped(&image).is_none());
 
-    // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
-    // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
-    // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
+    // Declaring pixel 2 null makes the frame a mask of its nulls, which the stored frame keeps its
+    // flags for: the combine gathers every pixel but 2, each at unit confidence, as nothing was
+    // interpolated.
     image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let quality = FrameQuality::for_unwarped(&image);
-    assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
+    assert_eq!(quality.mask(), Some(QualityFlags::NO_DATA));
+    let frame = StoredFrame::from_memory(image.clone(), quality, FrameStats::measure(&image));
+    let gate = FrameGate::of(&frame, 0, 4);
     assert_eq!(
-        quality.confidence().unwrap().pixels(),
-        quality.coverage().unwrap().pixels()
+        (0..4)
+            .map(|index| gate.confidence(index))
+            .collect::<Vec<_>>(),
+        [Some(1.0), Some(1.0), None, Some(1.0)]
     );
 }
 
-/// A cached frame comes back whole or not at all. Its quality planes return with its channels —
-/// reusing the channels without them would put the fill under its nulls into the stack as data on
-/// every run after the first — and a frame committed with them is rebuilt when one or both are
-/// gone, rather than read as a frame with no nulls. Another key finds nothing: another decode
+/// A cached frame comes back whole or not at all. Its mask returns with its channels — reusing the
+/// channels without it would put the fill under its nulls into the stack as data on every run after
+/// the first — and a frame committed with one is rebuilt when its flags are gone, rather than read
+/// as a frame with no nulls. Another key finds nothing: another decode
 /// version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
@@ -273,13 +277,10 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         .unwrap()
         .unwrap();
     assert_eq!(reused.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(reused.quality.mask(), Some(QualityFlags::NO_DATA));
     assert_eq!(
-        reused.quality.coverage().unwrap().chunk(0, 4),
-        &[1.0, 1.0, 0.0, 1.0]
-    );
-    assert_eq!(
-        reused.quality.confidence().unwrap().chunk(0, 4),
-        &[1.0, 1.0, 0.0, 1.0]
+        reused.flags.as_ref().unwrap().chunk(0, 4),
+        &[0, 0, QualityFlags::NO_DATA.byte(), 0]
     );
     drop(reused);
 
@@ -327,17 +328,12 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         "planes of another size"
     );
 
-    fs::remove_file(spill.quality_path(FramePlane::Confidence)).unwrap();
+    fs::remove_file(spill.flags_path()).unwrap();
     assert!(
         StoredFrame::reuse(&spill, key, dimensions)
             .unwrap()
-            .is_none()
-    );
-    fs::remove_file(spill.quality_path(FramePlane::Coverage)).unwrap();
-    assert!(
-        StoredFrame::reuse(&spill, key, dimensions)
-            .unwrap()
-            .is_none()
+            .is_none(),
+        "a mask without its flags"
     );
 
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
@@ -404,16 +400,12 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         assert_ne!(other.channel_path(0), channel);
     }
     assert_eq!(
-        hashed.quality_path(FramePlane::Coverage),
-        cache_dir.join(format!("{stem}_coverage.bin"))
+        hashed.flags_path(),
+        cache_dir.join(format!("{stem}_flags.bin"))
     );
 
     let plain = FrameSpill::named(cache_dir, "frame");
     assert_eq!(plain.channel_path(2), cache_dir.join("frame_c2.bin"));
-    assert_eq!(
-        plain.quality_path(FramePlane::Confidence),
-        cache_dir.join("frame_confidence.bin")
-    );
     assert_eq!(plain.flags_path(), cache_dir.join("frame_flags.bin"));
 }
 

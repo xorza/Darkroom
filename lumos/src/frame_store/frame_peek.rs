@@ -5,46 +5,32 @@ use std::fmt::Debug;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaFrameInfo;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::pixel_flags::QualityFlags;
 use crate::memory::memory_plan::RunShape;
 
-/// What one frame is worth to a memory estimate, before the rest of the set is read.
-///
-/// Sizing a run needs the geometry and whether the frame carries the two quality planes a masked
-/// one does. A header answers the first exactly and the second only sometimes, so the second is
-/// deliberately allowed to over-report: reserving planes a frame turns out not to carry costs a run
-/// some concurrency, while missing planes it does carry overcommits the machine.
+/// What one frame is worth to a memory estimate, before the rest of the set is read: its geometry,
+/// and what its decoder holds while it makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FramePeek {
     pub(crate) dimensions: ImageDimensions,
-    pub(crate) may_carry_nulls: bool,
     /// What the decoder holds beside the frame while it makes it — see
     /// [`CfaFrameInfo::decoder_bytes`].
     pub(crate) decoder_bytes: usize,
 }
 
 impl FramePeek {
-    /// What a frame already in hand settles — exactly, since its mask is right there. Its decode
-    /// is over, so what its decoder held is not known.
+    /// What a frame already in hand settles. Its decode is over, so what its decoder held is not
+    /// known.
     pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
         Self {
             dimensions: image.dimensions(),
-            may_carry_nulls: image
-                .flags()
-                .is_some_and(|flags| flags.contains(QualityFlags::NO_DATA)),
             decoder_bytes: 0,
         }
     }
 
-    /// Bytes one such frame occupies once resident: its own pixels and its flag plane, plus the
-    /// quality planes if it may carry them.
+    /// Bytes one such frame occupies once resident: its own pixels and its flag plane, which also
+    /// holds the mask of a frame with pixels it has no measurement for.
     pub(crate) const fn resident_bytes(self) -> usize {
-        let quality = if self.may_carry_nulls {
-            self.dimensions.quality_plane_bytes()
-        } else {
-            0
-        };
-        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes() + quality
+        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes()
     }
 }
 
@@ -72,7 +58,6 @@ impl From<CfaFrameInfo> for FramePeek {
     fn from(info: CfaFrameInfo) -> Self {
         Self {
             dimensions: info.dimensions,
-            may_carry_nulls: info.may_carry_nulls,
             decoder_bytes: info.decoder_bytes,
         }
     }
@@ -89,7 +74,6 @@ mod tests {
     fn the_decoders_bytes_raise_the_decode_peak() {
         let peek = |decoder_bytes| FramePeek {
             dimensions: ImageDimensions::new((100, 100), 1),
-            may_carry_nulls: false,
             decoder_bytes,
         };
         for (decoder_bytes, peak) in [(0, 90_000), (50_000, 100_000)] {

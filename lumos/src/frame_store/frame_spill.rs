@@ -27,7 +27,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "bee3f191dd077474";
+pub(crate) const SIDECAR_PIN: &str = "4683be04c31bae7b";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -63,16 +63,6 @@ impl<'a> FrameSpill<'a> {
         self.file(format_args!("_c{channel}.bin"))
     }
 
-    /// Path of a frame-quality plane: [`FramePlane::Coverage`] or [`FramePlane::Confidence`].
-    pub(crate) fn quality_path(&self, plane: FramePlane) -> PathBuf {
-        debug_assert_ne!(
-            plane,
-            FramePlane::Channel,
-            "a channel is not a quality plane"
-        );
-        self.file(format_args!("_{plane}.bin"))
-    }
-
     /// Path of the null mask's bit plane.
     pub(crate) fn flags_path(&self) -> PathBuf {
         self.file("_flags.bin")
@@ -101,13 +91,6 @@ impl<'a> FrameSpill<'a> {
     pub(crate) fn flags_on_disk(&self, dimensions: ImageDimensions) -> bool {
         let expected = dimensions.pixel_count() as u64;
         fs::metadata(self.flags_path()).is_ok_and(|metadata| metadata.len() == expected)
-    }
-
-    /// Whether both quality planes are on disk at the size `dimensions` implies.
-    pub(crate) fn quality_on_disk(&self, dimensions: ImageDimensions) -> bool {
-        [FramePlane::Coverage, FramePlane::Confidence]
-            .into_iter()
-            .all(|plane| plane_on_disk(&self.quality_path(plane), dimensions))
     }
 
     /// Record a kept frame whose planes are all written, decoded under `key`. The commit record
@@ -158,17 +141,21 @@ impl PlaneStore for FrameSpill<'_> {
 
     fn store_quality(
         &self,
-        plane: FramePlane,
-        pixels: &[f32],
+        _plane: FramePlane,
+        _pixels: &[f32],
     ) -> Result<StoredPlane, FrameStoreError> {
-        let path = self.quality_path(plane);
-        StoredPlane::write(&path, pixels)?;
-        StoredPlane::map(&path)
+        unreachable!("a kept frame is unwarped, and so carries no quality planes")
     }
 
     fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError> {
         let path = self.flags_path();
         StoredPlane::write(&path, bytes)?;
+        StoredPlane::map(&path)
+    }
+
+    fn store_samples(&self, slot: usize, samples: &[f32]) -> Result<StoredPlane, FrameStoreError> {
+        let path = self.file(format_args!("_s{slot}.bin"));
+        StoredPlane::write(&path, samples)?;
         StoredPlane::map(&path)
     }
 
@@ -180,20 +167,31 @@ impl PlaneStore for FrameSpill<'_> {
 /// The record that commits a kept frame: the key its planes were decoded under, and which planes
 /// it wrote beside its channels.
 ///
-/// The second half is what makes a frame whose quality planes or flags are gone a cache to rebuild
-/// rather than a frame with no nulls: reusing its channels without them would put the fill under
-/// every null, or a saturated value, into the stack as data.
+/// The second half is what makes a frame whose flags are gone a cache to rebuild rather than a
+/// frame with no nulls: reusing its channels without them would put the fill under every null, or
+/// a saturated value, into the stack as data.
 #[derive(Debug, Serialize, Deserialize)]
 struct Commit {
     key: CacheKey,
     carries: Carries,
 }
 
-/// Which planes a kept frame wrote beside its channels.
+/// What a kept frame wrote beside its channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Carries {
-    pub(crate) quality: bool,
-    pub(crate) flags: bool,
+pub(crate) enum Carries {
+    /// Nothing: a frame with no flag set.
+    Channels,
+    /// Its flags plane, holding no `NO_DATA`.
+    Flags,
+    /// Its flags plane, whose `NO_DATA` flags are the frame's quality mask.
+    NullMask,
+}
+
+impl Carries {
+    /// Whether a flags plane is among the files.
+    pub(crate) const fn flags(self) -> bool {
+        matches!(self, Self::Flags | Self::NullMask)
+    }
 }
 
 /// What [`FrameSpill::committed`] read back.
@@ -353,10 +351,7 @@ mod tests {
         let mut bytes = Vec::new();
         let commit = Commit {
             key: key(7),
-            carries: Carries {
-                quality: true,
-                flags: true,
-            },
+            carries: Carries::NullMask,
         };
         common::serialize_into(&commit, SerdeFormat::Bitcode, &mut bytes).unwrap();
         let stats = stats(&[(0.5, 0.25), (0.75, 0.125)], Some(2e-5));
@@ -377,12 +372,11 @@ mod tests {
         let directory = TempDir::new("frame_spill_commit");
         let spill = FrameSpill::named(directory.path(), "frame");
         let key = key(7);
-        let carries = |quality, flags| Carries { quality, flags };
         for (stats, carries) in [
-            (stats(&[(42.5, 3.25)], Some(2e-5)), carries(true, false)),
+            (stats(&[(42.5, 3.25)], Some(2e-5)), Carries::NullMask),
             (
                 stats(&[(100.0, 1.5), (200.0, 2.5), (300.0, 3.5)], None),
-                carries(false, true),
+                Carries::Flags,
             ),
         ] {
             spill.commit(key, carries, &stats).unwrap();
@@ -397,16 +391,12 @@ mod tests {
         let valid = stats(&[(42.5, 3.25)], None);
         for sigma in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
             spill
-                .commit(
-                    key,
-                    carries(false, false),
-                    &stats(&[(42.5, 3.25)], Some(sigma)),
-                )
+                .commit(key, Carries::Channels, &stats(&[(42.5, 3.25)], Some(sigma)))
                 .unwrap();
             assert!(spill.committed(key).is_none(), "a sigma of {sigma}");
         }
 
-        spill.commit(key, carries(false, false), &valid).unwrap();
+        spill.commit(key, Carries::Channels, &valid).unwrap();
         fs::write(spill.stats_path(), b"bad").unwrap();
         assert!(spill.committed(key).is_none(), "corrupt statistics");
 
@@ -421,14 +411,14 @@ mod tests {
         fs::write(spill.stats_path(), stale).unwrap();
         assert!(spill.committed(key).is_none(), "another layout tag");
 
-        spill.commit(key, carries(false, false), &valid).unwrap();
+        spill.commit(key, Carries::Channels, &valid).unwrap();
         fs::remove_file(spill.commit_path()).unwrap();
         assert!(spill.committed(key).is_none(), "no commit record");
 
         let blocker = directory.join("not_a_directory");
         fs::write(&blocker, b"file").unwrap();
         let error = FrameSpill::named(&blocker, "frame")
-            .commit(key, carries(false, false), &valid)
+            .commit(key, Carries::Channels, &valid)
             .unwrap_err();
         let expected = blocker.join("frame.stats");
         assert!(matches!(

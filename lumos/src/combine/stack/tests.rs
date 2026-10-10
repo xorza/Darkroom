@@ -232,14 +232,14 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
             // With no memory at all the floor holds the whole 30-row image past the budget: its
-            // resident image, weight and inverse variance planes, 40 × 30 × 12c B, beside the rows
-            // of 12 frame planes, the six coverage-and-confidence pairs and the four flat gain
-            // grids at a byte a pixel, 40 × 30 × 100 B. The coverage pass holds less. The stack is
-            // the same.
+            // resident image, weight and inverse variance planes and the coverage plane the gather
+            // writes, 40 × 30 × (12c + 4) B, beside the rows of every channel of the 12 frames, the
+            // six coverage-and-confidence pairs and the four flat gain grids at a byte a pixel,
+            // 40 × 30 × (48c + 52) B. The stack is the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.chunk_overcommit_bytes,
-                14_400 * channels as u64 + 120_000,
+                72_000 * channels as u64 + 67_200,
                 "{label}"
             );
             for channel in 0..channels {
@@ -432,6 +432,32 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     // declaring nulls is a frame that carries support, which is what makes the plane exist at all.
     let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
     assert_eq!(coverage.pixels(), &[1.0, 2.0 / 3.0, 1.0, 1.0]);
+    // Some frame reached every pixel, so the stack flags none.
+    assert!(stacked.image.flags.is_none());
+
+    // A pixel every frame declares null is reached by none: 0, with no coverage, and flagged.
+    let stacked = combine(
+        vec![
+            frame(1.0, Some(3)),
+            frame(2.0, Some(3)),
+            frame(3.0, Some(3)),
+        ],
+        &config.clone(),
+    )
+    .unwrap();
+    assert_eq!(stacked.image.channel(0).pixels(), &[2.0, 2.0, 2.0, 0.0]);
+    let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
+    assert_eq!(coverage.pixels(), &[1.0, 1.0, 1.0, 0.0]);
+    let flags = stacked.image.flags.as_ref().unwrap();
+    assert_eq!(
+        (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        [
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::default(),
+            QualityFlags::NO_DATA
+        ]
+    );
 
     // A frame null everywhere contributes nowhere, so the stack is the other two throughout —
     // (2 + 3) / 2 = 2.5 — rather than a division by a zero contributor count.
