@@ -1,17 +1,17 @@
-//! [`HexTable`]: the pattern facts the Markesteijn tiles read, in the frame's and the tile's
+//! [`HexTable`]: the pattern facts the Markesteijn tiles read, in their input's and their own
 //! strides.
 
-use crate::io::raw::demosaic::xtrans::markesteijn::TILE;
+use crate::io::raw::demosaic::xtrans::markesteijn::{CROP, TILE};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::vec2us::Vec2us;
 
-/// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the frame's stride, which the raw
+/// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the input crop's stride, which the
 /// samples are read in, and in the tile's, which its buffers are — beside the pattern's colours and
 /// where its solitary green and its rows of two greens lie: librtprocess's `allhex`, `fc`,
 /// `isgreen`, `sgrow`/`sgcol` and `RightShift`.
 #[derive(Debug)]
 pub(super) struct HexTable {
-    image: [[[isize; 8]; 3]; 3],
+    input: [[[isize; 8]; 3]; 3],
     tile: [[[isize; 8]; 3]; 3],
     pattern: XTransPattern,
     right_shift: [bool; 3],
@@ -20,7 +20,7 @@ pub(super) struct HexTable {
 }
 
 impl HexTable {
-    pub(super) fn new(pattern: XTransPattern, width: usize) -> Self {
+    pub(super) fn new(pattern: XTransPattern) -> Self {
         let hexagons = pattern.hexagons();
         let flat = |stride: isize| {
             let mut table = [[[0isize; 8]; 3]; 3];
@@ -33,7 +33,6 @@ impl HexTable {
             }
             table
         };
-        let width = isize::try_from(width).expect("a frame narrower than isize::MAX");
         let mut right_shift = [false; 3];
         for (row, shift) in right_shift.iter_mut().enumerate() {
             let greens = (0..3)
@@ -42,7 +41,7 @@ impl HexTable {
             *shift = greens == 2;
         }
         Self {
-            image: flat(width),
+            input: flat(CROP as isize),
             tile: flat(TILE as isize),
             pattern,
             right_shift,
@@ -51,10 +50,10 @@ impl HexTable {
         }
     }
 
-    /// The hexagon at `(row, col)` in the frame's stride.
+    /// The hexagon at `(row, col)` in the input crop's stride.
     #[inline(always)]
-    pub(super) const fn image(&self, row: usize, col: usize) -> &[isize; 8] {
-        &self.image[row % 3][col % 3]
+    pub(super) const fn input(&self, row: usize, col: usize) -> &[isize; 8] {
+        &self.input[row % 3][col % 3]
     }
 
     /// The hexagon at `(row, col)` in the tile's stride.

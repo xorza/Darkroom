@@ -19,9 +19,12 @@ use crate::math::size2us::Size2us;
 /// anchored at its first pixel.
 #[derive(Debug)]
 pub(crate) struct XTransImage<'a> {
-    data: &'a [f32],
+    pub(crate) data: &'a [f32],
     pub(crate) size: Size2us,
     pub(crate) pattern: XTransPattern,
+    /// The gains, red, green and blue, that balance the colours for the direction decisions —
+    /// see [`tiled`](crate::io::raw::demosaic::tiled); one each for samples already balanced.
+    pub(crate) gains: [f32; 3],
 }
 
 impl<'a> XTransImage<'a> {
@@ -43,7 +46,13 @@ impl<'a> XTransImage<'a> {
             data,
             size,
             pattern,
+            gains: [1.0; 3],
         }
+    }
+
+    /// This frame, its colours balanced by `gains` for the direction decisions.
+    pub(crate) const fn with_gains(self, gains: [f32; 3]) -> Self {
+        Self { gains, ..self }
     }
 
     /// The sample at `(x, y)`.

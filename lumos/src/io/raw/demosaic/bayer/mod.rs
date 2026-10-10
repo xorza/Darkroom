@@ -137,6 +137,9 @@ pub(crate) struct BayerImage<'a> {
     pub(crate) data: &'a [f32],
     pub(crate) size: Size2us,
     pub(crate) pattern: CfaPattern,
+    /// The gains, red, green and blue, that balance the colours for the direction decisions —
+    /// see [`tiled`](crate::io::raw::demosaic::tiled); one each for samples already balanced.
+    pub(crate) gains: [f32; 3],
 }
 
 impl<'a> BayerImage<'a> {
@@ -158,7 +161,13 @@ impl<'a> BayerImage<'a> {
             data,
             size,
             pattern,
+            gains: [1.0; 3],
         }
+    }
+
+    /// This frame, its colours balanced by `gains` for the direction decisions.
+    pub(crate) const fn with_gains(self, gains: [f32; 3]) -> Self {
+        Self { gains, ..self }
     }
 }
 

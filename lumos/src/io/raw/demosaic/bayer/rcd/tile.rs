@@ -1,11 +1,11 @@
 //! [`Tile`]: one tile of the RCD demosaic and the buffers it works in.
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd::{
     BORDER, EPS, EPSSQ, INTERPOLATED_BORDER, TILE, estimate_green, intp, pq_neighbourhood,
     vh_neighbourhood,
 };
+use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
+use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -24,22 +24,6 @@ pub(super) struct Tile {
     p_hpf: Vec<f32>,
     q_hpf: Vec<f32>,
     rgb: [Vec<f32>; 3],
-}
-
-/// Where a tile lies in the frame, and how much of it the frame holds.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct TilePlace {
-    pub(super) top: usize,
-    pub(super) left: usize,
-    pub(super) size: Size2us,
-}
-
-/// The frame's output planes, which every tile writes at the pixels it alone owns.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct OutputPlanes {
-    pub(super) r: UnsafeSendPtr<f32>,
-    pub(super) g: UnsafeSendPtr<f32>,
-    pub(super) b: UnsafeSendPtr<f32>,
 }
 
 impl Tile {
@@ -61,8 +45,9 @@ impl Tile {
         (7 * TILE * TILE + 2 * TILE.div_ceil(2) * TILE) * size_of::<f32>()
     }
 
-    /// Demosaic the crop of `cfa` (a frame `frame_width` wide, of `pattern`) at `place`, and write
-    /// the part [`INTERPOLATED_BORDER`] or more inside the crop's edges into `out`.
+    /// Demosaic the crop of `bayer` at `place`, balanced by its gains, and write the part
+    /// [`INTERPOLATED_BORDER`] or more inside the crop's edges into `out` in the frame's own
+    /// balance.
     ///
     /// # Safety
     ///
@@ -70,14 +55,13 @@ impl Tile {
     /// the frame without overlap at the stride of `TILE − 2·INTERPOLATED_BORDER`.
     pub(super) unsafe fn demosaic(
         &mut self,
-        cfa: &[f32],
-        frame_width: usize,
-        pattern: CfaPattern,
+        bayer: &BayerImage<'_>,
         place: TilePlace,
         out: OutputPlanes,
     ) {
         let TilePlace { top, left, size } = place;
         let Size2us { width, height } = size;
+        let (frame_width, pattern, gains) = (bayer.size.width, bayer.pattern, bayer.gains);
         debug_assert!(
             top % 2 == 0 && left % 2 == 0,
             "a tile keeps the frame's phase"
@@ -88,7 +72,19 @@ impl Tile {
             .enumerate()
         {
             let start = (top + row) * frame_width + left;
-            line.copy_from_slice(&cfa[start..start + width]);
+            let input = &bayer.data[start..start + width];
+            // A tile starts on the frame's phase, so a row's colours alternate from its own first.
+            let row_gains = [
+                gains[pattern.color_at(Vec2us::new(0, row))],
+                gains[pattern.color_at(Vec2us::new(1, row))],
+            ];
+            if row_gains == [1.0; 2] {
+                line.copy_from_slice(input);
+            } else {
+                for (col, (balanced, &sample)) in line.iter_mut().zip(input).enumerate() {
+                    *balanced = sample * row_gains[col & 1];
+                }
+            }
         }
         self.seed(size, pattern);
         self.directions(size);
@@ -100,15 +96,33 @@ impl Tile {
         for row in border..height - border {
             let at = row * width;
             let index = (top + row) * frame_width + left;
-            for (plane, target) in self.rgb.iter().zip([out.r, out.g, out.b]) {
-                let line = &plane[at + border..at + width - border];
-                // SAFETY: the caller hands over the frame's planes and the region this tile alone
-                // owns, which this row's part lies in.
-                unsafe {
-                    target
-                        .get()
-                        .add(index + border)
-                        .copy_from_nonoverlapping(line.as_ptr(), line.len());
+            for (channel, (plane, &gain)) in self.rgb.iter().zip(&gains).enumerate() {
+                // A channel at unit gain holds its native samples as seeded from the input, exact,
+                // and its interpolated ones in the frame's own balance: the row goes out whole.
+                if gain == 1.0 {
+                    // SAFETY: the caller hands over the frame's planes and the region this tile
+                    // alone owns, which this row's part lies in.
+                    unsafe {
+                        out.write_row(
+                            channel,
+                            index + border,
+                            &plane[at + border..at + width - border],
+                        );
+                    }
+                    continue;
+                }
+                for col in border..width - border {
+                    // SAFETY: as above, for this pixel.
+                    unsafe {
+                        out.write(
+                            channel,
+                            index + col,
+                            pattern.color_at(Vec2us::new(col, row)),
+                            bayer.data[index + col],
+                            plane[at + col],
+                            gain,
+                        );
+                    }
                 }
             }
         }

@@ -61,7 +61,7 @@ pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     // pin them on. A placeholder still moves `DECODE_VERSION`, so no cache of the old flags is
     // reused, and the `real-data` snapshot prints the digest to pin here.
     raw_cfa: "repin-on-real-data",
-    demosaic: "6428e33eabc73bfa",
+    demosaic: "eddb02407b953469",
     frame_stats: "caaddb6878657b08",
 };
 

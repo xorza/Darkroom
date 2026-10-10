@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12 and 14–17 are done and committed, Batch 13 except its X-Trans part (Q1), and
+Batches 1–12 and 14–18 are done and committed, Batch 13 except its X-Trans part (Q1), and
 Batch 15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
@@ -47,9 +47,8 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-13 (X-Trans, Q1), 15 (rest, Q2), 22, 24, 26   independent
+13 (X-Trans, Q1), 15 (rest, Q2), 19, 22, 24, 26   independent
 23 ── 27
-18 ── 19
 21 ── 20 ── 25
 ```
 
@@ -76,25 +75,6 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 frames pair by pair, each against the reference over the pixels both reached in a colour. Above
 scale 1 a pair can share none, and a normalized combine then fails with `NoCommonCoverage`. Left
 here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale 2.
-
----
-
-## Batch 18: Shared demosaic driver, gains inside the kernel — medium
-
-**Findings:** DMS-11, DMS-8, DMS-4.
-
-**Design:** one generic tiled driver (a kernel-tile trait with `bytes()`, `margin`, `border`,
-`demosaic(place, out)`, plus a shared `OutputPlanes`, tile scheduling and memory accounting) and
-one CFA-generic border fill over `CfaType::color_at` (the weighted 3×3 form with the radius
-fallback). The white-balance gains are applied as each tile reads its input; native samples are
-written from the unbalanced input, so they are exact (DMS-4); interpolated samples are unbalanced
-by the reciprocal at the tile's write.
-
-**Tests:** `rcd_all_patterns_preserve_native_samples…` extended to the production path through
-`CfaImage::demosaic` with non-unit gains: native samples bit exact. Digests unchanged where gains
-are 1.
-
-**Acceptance:** `demosaic` wall time on a 24 MP bench frame falls by the removed passes; report it.
 
 ---
 
