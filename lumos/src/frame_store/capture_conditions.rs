@@ -25,6 +25,8 @@ pub(crate) struct CaptureConditions {
     pub(crate) exposure_time: Option<f64>,
     /// Degrees Celsius — see [`ImageMetadata::ccd_temp`].
     pub(crate) ccd_temp: Option<f64>,
+    /// Degrees Celsius — see [`ImageMetadata::camera_temp`].
+    pub(crate) camera_temp: Option<f64>,
 }
 
 impl CaptureConditions {
@@ -32,6 +34,7 @@ impl CaptureConditions {
         Self {
             exposure_time: metadata.exposure_time,
             ccd_temp: metadata.ccd_temp,
+            camera_temp: metadata.camera_temp,
         }
     }
 
@@ -41,11 +44,14 @@ impl CaptureConditions {
     pub(crate) fn shared(set: impl IntoIterator<Item = Self> + Clone) -> Self {
         Self {
             exposure_time: CaptureCondition::Exposure.shared(set.clone()),
-            ccd_temp: CaptureCondition::Temperature.shared(set),
+            ccd_temp: CaptureCondition::Temperature.shared(set.clone()),
+            camera_temp: CaptureCondition::CameraTemperature.shared(set),
         }
     }
 
-    /// Whether every frame of `set` that states a condition agrees with every other one on it.
+    /// Whether every frame of `set` that states a condition agrees with every other one on it. The
+    /// camera body's temperature is not held to it: a body warms through a session of darks while
+    /// the sensor they measure is what matters, so a set whose bodies drifted only states none.
     ///
     /// # Errors
     ///
@@ -66,6 +72,8 @@ pub enum CaptureCondition {
     Exposure,
     /// The sensor temperature, in degrees Celsius.
     Temperature,
+    /// The camera body's temperature, in degrees Celsius.
+    CameraTemperature,
 }
 
 impl fmt::Display for CaptureCondition {
@@ -73,6 +81,7 @@ impl fmt::Display for CaptureCondition {
         f.write_str(match self {
             Self::Exposure => "exposure (s)",
             Self::Temperature => "sensor temperature (°C)",
+            Self::CameraTemperature => "camera temperature (°C)",
         })
     }
 }
@@ -83,6 +92,7 @@ impl CaptureCondition {
         match self {
             Self::Exposure => conditions.exposure_time,
             Self::Temperature => conditions.ccd_temp,
+            Self::CameraTemperature => conditions.camera_temp,
         }
     }
 
@@ -91,7 +101,7 @@ impl CaptureCondition {
         debug_assert!(low <= high);
         match self {
             Self::Exposure => high - low <= EXPOSURE_TOLERANCE * high,
-            Self::Temperature => high - low <= TEMPERATURE_TOLERANCE,
+            Self::Temperature | Self::CameraTemperature => high - low <= TEMPERATURE_TOLERANCE,
         }
     }
 
@@ -179,6 +189,7 @@ mod tests {
         CaptureConditions {
             exposure_time,
             ccd_temp,
+            camera_temp: None,
         }
     }
 
@@ -214,6 +225,19 @@ mod tests {
         let none = [conditions(None, None), conditions(None, None)];
         assert_eq!(CaptureConditions::check_agreement(none), Ok(()));
         assert_eq!(CaptureConditions::shared(none), conditions(None, None));
+        // Camera bodies at 20.5 and 21 °C share 20.75; at 20.5 and 24 °C — a body warming through a
+        // session of darks — they share none, and the set is not refused for it.
+        let body = |camera_temp| CaptureConditions {
+            camera_temp: Some(camera_temp),
+            ..conditions(Some(120.0), None)
+        };
+        assert_eq!(
+            CaptureConditions::shared([body(20.5), body(21.0)]).camera_temp,
+            Some(20.75)
+        );
+        let warming = [body(20.5), body(24.0)];
+        assert_eq!(CaptureConditions::check_agreement(warming), Ok(()));
+        assert_eq!(CaptureConditions::shared(warming).camera_temp, None);
     }
 
     #[test]

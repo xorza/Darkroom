@@ -35,6 +35,7 @@ impl IngestRun {
                 memory_limit_bytes: memory.decode_ceiling(),
                 fits: config.fits.clone(),
                 xtrans_passes: config.xtrans_passes,
+                decode_threads: rayon::current_num_threads(),
             },
             cache_dir: config.cache_dir.clone(),
             keep_cache: config.keep_cache,

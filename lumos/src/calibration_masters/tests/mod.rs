@@ -10,6 +10,7 @@ use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
 use crate::calibration_masters::master_subtraction::Subtractor;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
+use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::combine::config::{Combine, CombineMethod, SmallN, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
@@ -222,6 +223,42 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         );
         assert_eq!(light.data.pixels(), original_data);
         assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+    }
+
+    // A master of another camera is refused when both name theirs, and calibrates when they name
+    // the same one or either names none.
+    let named = |instrument: Option<&str>| {
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.1, CfaType::Mono);
+        master.metadata.instrument = instrument.map(str::to_owned);
+        bundle(CalibrationSet {
+            bias: Some(master),
+            ..CalibrationSet::default()
+        })
+    };
+    let light = |instrument: Option<&str>| {
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.instrument = instrument.map(str::to_owned);
+        light
+    };
+    let mut other = light(Some("Canon EOS 600D"));
+    assert_eq!(
+        named(Some("Canon EOS 6D")).calibrate(&mut other),
+        Err(CalibrationError::InstrumentMismatch {
+            component: MasterRole::Bias,
+            light: "Canon EOS 600D".to_owned(),
+            master: "Canon EOS 6D".to_owned(),
+        })
+    );
+    assert_eq!(other.metadata.calibration, CalibrationState::NONE);
+    for (master, frame) in [
+        (Some("Canon EOS 6D"), Some("Canon EOS 6D")),
+        (None, Some("Canon EOS 6D")),
+        (Some("Canon EOS 6D"), None),
+    ] {
+        assert!(
+            named(master).calibrate(&mut light(frame)).is_ok(),
+            "master {master:?}, light {frame:?}"
+        );
     }
 
     // A master on another declared span converts by the exact ratio of the spans. The light
@@ -1565,6 +1602,7 @@ fn a_dark_is_matched_to_the_light() {
         separated.calibrate(&mut scaled),
         Ok(CalibrationOutcome {
             dark_scale: Some(2.5),
+            dark_temperature: Some(TemperatureSource::Sensor),
             ..CalibrationOutcome::default()
         })
     );
@@ -1574,7 +1612,10 @@ fn a_dark_is_matched_to_the_light() {
         let mut matched = light(Some(exposure), Some(-10.0));
         assert_eq!(
             separated.calibrate(&mut matched),
-            Ok(CalibrationOutcome::default())
+            Ok(CalibrationOutcome {
+                dark_temperature: Some(TemperatureSource::Sensor),
+                ..CalibrationOutcome::default()
+            })
         );
         assert_eq!(matched.data.pixels(), &[0.3125; 16], "{exposure} s");
     }
@@ -1583,13 +1624,14 @@ fn a_dark_is_matched_to_the_light() {
         Err(CalibrationError::DarkMismatch {
             component: MasterRole::Dark,
             source: DarkMismatch::Temperature {
+                reading: TemperatureSource::Sensor,
                 frame: -8.5,
                 dark: -10.0
             }
         })
     );
     // A condition one side does not state is reported, and recorded on the light.
-    for (exposure, temperature, unverified) in [
+    for (exposure, temperature, unverified, dark_temperature) in [
         (
             None,
             Some(-10.0),
@@ -1597,6 +1639,7 @@ fn a_dark_is_matched_to_the_light() {
                 exposure: true,
                 temperature: false,
             },
+            Some(TemperatureSource::Sensor),
         ),
         (
             Some(120.0),
@@ -1605,6 +1648,7 @@ fn a_dark_is_matched_to_the_light() {
                 exposure: false,
                 temperature: true,
             },
+            None,
         ),
     ] {
         let mut silent = light(exposure, temperature);
@@ -1612,6 +1656,7 @@ fn a_dark_is_matched_to_the_light() {
             separated.calibrate(&mut silent),
             Ok(CalibrationOutcome {
                 unverified,
+                dark_temperature,
                 ..CalibrationOutcome::default()
             })
         );
@@ -1636,6 +1681,7 @@ fn a_dark_is_matched_to_the_light() {
             stacked_calibrated.calibrate(&mut scaled),
             Ok(CalibrationOutcome {
                 dark_scale: Some(2.5),
+                dark_temperature: Some(TemperatureSource::Sensor),
                 ..CalibrationOutcome::default()
             })
         );
@@ -1769,6 +1815,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
         (
             -8.5,
             DarkMismatch::Temperature {
+                reading: TemperatureSource::Sensor,
                 frame: -10.0,
                 dark: -8.5,
             },

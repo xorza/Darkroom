@@ -18,9 +18,16 @@ use crate::math::size2us::Size2us;
 #[derive(Debug, Clone, Default)]
 pub struct ImageMetadata {
     pub object: Option<String>,
+    /// The camera: a FITS `INSTRUME`, or a camera RAW's make and model.
     pub instrument: Option<String>,
     pub telescope: Option<String>,
+    /// When the frame was taken, as ISO 8601 text in UTC unless the source says otherwise: a FITS
+    /// `DATE-OBS`.
     pub date_obs: Option<String>,
+    /// When the frame was taken by a clock whose zone the source does not state, as ISO 8601 text:
+    /// a FITS `DATE-LOC`, or a camera RAW's own clock, set to whatever zone its owner chose. Not
+    /// [`Self::date_obs`], which a reader takes for UTC.
+    pub date_local: Option<String>,
     pub exposure_time: Option<f64>,
     pub iso: Option<u32>,
     /// The type a FITS source stored its samples as, after its unsigned-offset convention;
@@ -43,6 +50,10 @@ pub struct ImageMetadata {
     pub egain: Option<f64>,
     /// CCD/sensor temperature in degrees Celsius during exposure.
     pub ccd_temp: Option<f64>,
+    /// The camera body's temperature in degrees Celsius, from a camera RAW's maker notes: warmer
+    /// than the sensor and lagging it, so a dark is matched on it only where no sensor temperature
+    /// is stated.
+    pub camera_temp: Option<f64>,
     /// Frame type: "Light", "Dark", "Flat", "Bias", etc.
     pub image_type: Option<String>,
     /// Horizontal binning factor.

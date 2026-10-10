@@ -20,12 +20,14 @@ pub(super) enum MetadataField {
     Instrument,
     Telescope,
     DateObs,
+    DateLocal,
     ExposureTime,
     Iso,
     Filter,
     Gain,
     Egain,
     CcdTemp,
+    CameraTemp,
     ImageType,
     XBinning,
     YBinning,
@@ -46,12 +48,16 @@ impl MetadataField {
             Self::Instrument => &["INSTRUME"],
             Self::Telescope => &["TELESCOP"],
             Self::DateObs => &["DATE-OBS"],
+            // N.I.N.A., MaxIm DL and SGP write the capture time by the local clock here.
+            Self::DateLocal => &["DATE-LOC"],
             Self::ExposureTime => &["EXPTIME", "EXPOSURE"],
             Self::Iso => &["ISOSPEED"],
             Self::Filter => &["FILTER", "FILT-1"],
             Self::Gain => &["GAIN"],
             Self::Egain => &["EGAIN", "CVF"],
             Self::CcdTemp => &["CCD-TEMP", "CCD_TEMP", "CCDTEMP", "TEMPERAT", "CAMTCCD"],
+            // lumos's own, as `LUMWB*` is: no convention names a camera body's temperature.
+            Self::CameraTemp => &["LUMCTEMP"],
             Self::ImageType => &["IMAGETYP", "FRAMETYP", "FRAME"],
             Self::XBinning => &["XBINNING", "BINX"],
             Self::YBinning => &["YBINNING", "BINY"],
@@ -94,6 +100,7 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         instrument: text(MetadataField::Instrument),
         telescope: text(MetadataField::Telescope),
         date_obs: text(MetadataField::DateObs),
+        date_local: text(MetadataField::DateLocal),
         exposure_time: MetadataField::ExposureTime.read(header, read_exposure),
         iso: MetadataField::Iso.read(header, read_u32),
         sample_type: Some(sample_type),
@@ -102,6 +109,7 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         gain: real(MetadataField::Gain),
         egain: real(MetadataField::Egain),
         ccd_temp: MetadataField::CcdTemp.read(header, read_temperature),
+        camera_temp: MetadataField::CameraTemp.read(header, read_temperature),
         image_type: text(MetadataField::ImageType),
         xbinning: MetadataField::XBinning.read(header, read_i32),
         ybinning: MetadataField::YBinning.read(header, read_i32),
@@ -193,6 +201,11 @@ pub(super) fn write_image_metadata(
         Field::DateObs.keyword(),
         metadata.date_obs.as_deref(),
     )?;
+    set_optional_text(
+        header,
+        Field::DateLocal.keyword(),
+        metadata.date_local.as_deref(),
+    )?;
     set_optional_real(
         header,
         Field::ExposureTime.keyword(),
@@ -203,6 +216,7 @@ pub(super) fn write_image_metadata(
     set_optional_real(header, Field::Gain.keyword(), metadata.gain)?;
     set_optional_real(header, Field::Egain.keyword(), metadata.egain)?;
     set_optional_real(header, Field::CcdTemp.keyword(), metadata.ccd_temp)?;
+    set_optional_real(header, Field::CameraTemp.keyword(), metadata.camera_temp)?;
     set_optional_text(
         header,
         Field::ImageType.keyword(),
@@ -638,17 +652,19 @@ mod internals {
     use crate::io::image::fits::metadata::MetadataField;
 
     impl MetadataField {
-        pub(crate) const ALL: [Self; 20] = [
+        pub(crate) const ALL: [Self; 22] = [
             Self::Object,
             Self::Instrument,
             Self::Telescope,
             Self::DateObs,
+            Self::DateLocal,
             Self::ExposureTime,
             Self::Iso,
             Self::Filter,
             Self::Gain,
             Self::Egain,
             Self::CcdTemp,
+            Self::CameraTemp,
             Self::ImageType,
             Self::XBinning,
             Self::YBinning,

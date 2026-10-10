@@ -1,6 +1,7 @@
 //! [`DarkMatch`]: how a master holding dark signal is taken from a frame.
 
 use crate::calibration_masters::error::DarkMismatch;
+use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::frame_store::capture_conditions::{CaptureCondition, CaptureConditions};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 
@@ -9,12 +10,15 @@ use crate::io::image::unverified_conditions::UnverifiedConditions;
 ///
 /// Exposures within tolerance count as one and leave the dark unscaled. A dark of another exposure
 /// is scaled by the frame's exposure over its own only once its bias is gone, since the bias does
-/// not grow with exposure. A condition one side does not state is not compared.
+/// not grow with exposure. The temperatures compared are the sensor's where both state it, else the
+/// camera body's where both state that. A condition one side does not state is not compared.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DarkMatch {
     /// The frame's exposure over the dark's, when the two differ and the dark could be scaled.
     pub(crate) scale: Option<f64>,
     pub(crate) unverified: UnverifiedConditions,
+    /// The temperature the two were compared on; `None` when they share none.
+    pub(crate) temperature: Option<TemperatureSource>,
 }
 
 impl DarkMatch {
@@ -30,22 +34,38 @@ impl DarkMatch {
         dark: CaptureConditions,
         holds_bias: bool,
     ) -> Result<Self, DarkMismatch> {
-        let temperature = match (frame.ccd_temp, dark.ccd_temp) {
-            (Some(frame), Some(dark)) => {
-                if !CaptureCondition::Temperature.agree(frame.min(dark), frame.max(dark)) {
-                    return Err(DarkMismatch::Temperature { frame, dark });
-                }
-                false
-            }
-            _ => true,
-        };
+        let compared = [
+            (
+                TemperatureSource::Sensor,
+                CaptureCondition::Temperature,
+                frame.ccd_temp.zip(dark.ccd_temp),
+            ),
+            (
+                TemperatureSource::Camera,
+                CaptureCondition::CameraTemperature,
+                frame.camera_temp.zip(dark.camera_temp),
+            ),
+        ]
+        .into_iter()
+        .find_map(|(reading, condition, pair)| pair.map(|pair| (reading, condition, pair)));
+        if let Some((reading, condition, (frame, dark))) = compared
+            && !condition.agree(frame.min(dark), frame.max(dark))
+        {
+            return Err(DarkMismatch::Temperature {
+                reading,
+                frame,
+                dark,
+            });
+        }
+        let temperature = compared.map(|(reading, ..)| reading);
         let (Some(frame), Some(dark)) = (frame.exposure_time, dark.exposure_time) else {
             return Ok(Self {
                 scale: None,
                 unverified: UnverifiedConditions {
                     exposure: true,
-                    temperature,
+                    temperature: temperature.is_none(),
                 },
+                temperature,
             });
         };
         let scale = if CaptureCondition::Exposure.agree(frame.min(dark), frame.max(dark)) {
@@ -60,8 +80,9 @@ impl DarkMatch {
             scale,
             unverified: UnverifiedConditions {
                 exposure: false,
-                temperature,
+                temperature: temperature.is_none(),
             },
+            temperature,
         })
     }
 
@@ -82,6 +103,7 @@ mod tests {
         CaptureConditions {
             exposure_time,
             ccd_temp,
+            camera_temp: None,
         }
     }
 
@@ -99,6 +121,7 @@ mod tests {
             DarkMatch {
                 scale: Some(2.5),
                 unverified: UnverifiedConditions::NONE,
+                temperature: Some(TemperatureSource::Sensor),
             }
         );
         assert_eq!(matched.factor(), 2.5);
@@ -133,6 +156,7 @@ mod tests {
                     exposure: false,
                     temperature: true,
                 },
+                temperature: None,
             }
         );
         assert_eq!(agreeing.factor(), 1.0);
@@ -150,6 +174,7 @@ mod tests {
                     exposure: true,
                     temperature: false,
                 },
+                temperature: Some(TemperatureSource::Sensor),
             }
         );
     }
@@ -165,9 +190,50 @@ mod tests {
                 true,
             ),
             Err(DarkMismatch::Temperature {
+                reading: TemperatureSource::Sensor,
                 frame: -8.5,
                 dark: -10.0,
             })
         );
+    }
+
+    /// The camera body's temperature stands in only where the two do not both state the sensor's:
+    /// two bodies at 21 and 21.5 °C match on it, at 21 and 23 °C are refused on it, and two sensors
+    /// that agree decide alone though their bodies are 5 °C apart. A sensor reading on one side
+    /// only is no pair, so the bodies are compared.
+    #[test]
+    fn the_camera_temperature_matches_only_where_the_sensors_do_not() {
+        let with_body = |ccd_temp, camera_temp| CaptureConditions {
+            camera_temp,
+            ..conditions(Some(300.0), ccd_temp)
+        };
+        let matched = |frame, dark| DarkMatch::new(frame, dark, true);
+        assert_eq!(
+            matched(with_body(None, Some(21.0)), with_body(None, Some(21.5)))
+                .unwrap()
+                .temperature,
+            Some(TemperatureSource::Camera)
+        );
+        assert_eq!(
+            matched(with_body(None, Some(21.0)), with_body(None, Some(23.0))),
+            Err(DarkMismatch::Temperature {
+                reading: TemperatureSource::Camera,
+                frame: 21.0,
+                dark: 23.0,
+            })
+        );
+        let sensors = matched(
+            with_body(Some(-10.0), Some(20.0)),
+            with_body(Some(-10.5), Some(25.0)),
+        )
+        .unwrap();
+        assert_eq!(sensors.temperature, Some(TemperatureSource::Sensor));
+        assert!(!sensors.unverified.temperature);
+        let one_sensor = matched(
+            with_body(Some(-10.0), Some(21.0)),
+            with_body(None, Some(21.5)),
+        )
+        .unwrap();
+        assert_eq!(one_sensor.temperature, Some(TemperatureSource::Camera));
     }
 }

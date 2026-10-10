@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12 and 14–16 are done and committed, Batch 13 except its X-Trans part (Q1), and
+Batches 1–12 and 14–17 are done and committed, Batch 13 except its X-Trans part (Q1), and
 Batch 15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
@@ -39,13 +39,15 @@ Batch 7 and still holds.
   identical (or the batch states the precision change).
 - **Real data.** `lumos/test_data/lumos_data` is not present. Items marked *needs real data* are
   implemented and tested on synthetic data; their real-data check is left for the user, and the
-  report says so.
+  report says so. Batch 17 left `DECODE_PINS.raw_cfa` a placeholder, since its digest now covers
+  the RAW decode's flags and quantization σ: run `raw_decode_snapshot` with `real-data` and pin
+  the digest it prints.
 - **New dependencies** are only the approved ones listed in "Decisions".
 
 ## Dependency graph
 
 ```
-13 (X-Trans, Q1), 15 (rest, Q2), 17, 22, 24, 26   independent
+13 (X-Trans, Q1), 15 (rest, Q2), 22, 24, 26   independent
 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -74,50 +76,6 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 frames pair by pair, each against the reference over the pixels both reached in a colour. Above
 scale 1 a pair can share none, and a normalized combine then fails with `NoCommonCoverage`. Left
 here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale 2.
-
----
-
-## Batch 17: RAW sensor classification and refusals — medium
-
-**Findings:** RAW-3, RAW-4, RAW-5, RAW-6, RAW-7, RAW-8, RAW-13, RAW-14, RAW-15, RAW-16, RAW-17.
-
-**Design:**
-1. **RAW-3:** accept Bayer only for `colors == 3` and `cdesc == "RGBG"` (read `idata.cdesc`);
-   everything else goes to `None`, and the fallback refuses `colors == 4` with a typed error.
-2. **RAW-4:** shim accessors for `unpacker_data.fuji_lossless` and the CRX header
-   `encType`/`imageLevels`. Canon C-RAW (lossy CRX) and Fuji lossy RAF get no quantization σ
-   (`None`), since their step is not one ADU. Fix the doc comment.
-3. **RAW-5 (decided):** a separate `camera_temperature` field. Calibration uses it only to match
-   darks when no sensor temperature exists, and the outcome says which it used.
-4. **RAW-6 and RAW-15 (decided):** refuse Phase One compressed IIQ (shim
-   `is_phaseone_compressed`) and float DNG (LibRaw's float-image flag) with typed `RawError`
-   variants that name the format.
-5. **RAW-7 + RAW-8 (decided):** use `linear_max[c]` only when `black_c < linear_max[c] ≤ maximum`.
-   Then the saturation level is `linear_max[c]` less 0.5% of the stated span
-   `linear_max[c] − black_c`: RawTherapee's conservative white level, 50–100 units below the clip
-   at 14 bits and 10–20 at 12 bits (`rtengine/camconst.json`, "How to Measure White Levels").
-   Keep `SATURATION_FRACTION = 0.95` only for `maximum`. Correct the `pixel_flags.rs` doc claim.
-6. **RAW-13 (decided, approved system dependency):** `libraw-sys/build.rs` compiles with OpenMP
-   when the compiler supports it (`-fopenmp` with gcc/clang and libgomp/libomp; `/openmp` with
-   MSVC). On macOS it looks for libomp (Homebrew prefix); when OpenMP is not available it builds
-   without and emits a `cargo:warning`. The shim exposes `omp_set_num_threads`; each decode sets
-   its thread's OpenMP count to `max(1, cores / decode_slots)` before `unpack`, so rayon slots ×
-   OpenMP threads stay within the cores.
-7. **RAW-14 (decided, approved dependency):** add `libz-sys` and define `USE_ZLIB` so deflate DNG
-   decodes. Remove `x3f` and `gpr` from `RAW_EXTENSIONS` and the Foveon claim. Lossy DNG stays
-   refused.
-8. **RAW-16 (decided):** fill `instrument` (normalized make and model), `date_obs`
-   (`other.timestamp`, ISO 8601 UTC) and `focal_length`; leave the pixel size empty. Calibration
-   refuses a master whose `instrument` differs from the light's when both state one.
-9. **RAW-17:** one identify-stage validator shared by peek and load, including the SuperCCD
-   refusal; peek refuses the decoders that change `filters` inside `load_raw` (OmniVision/RPi,
-   Pentax 4-shot).
-
-**Tests:** table tests for RAW-7/8 (the bounds and the margin, per channel); RAW-3 with the F828
-(`0x9c9c9c9c`, colors 4, "RGBE") and a CMYG filter word refused; RAW-16 fields read from a
-synthetic metadata struct; the OpenMP thread bound as a pure function of `cores` and `slots`; the
-decode pins (`DECODE_PINS`) move where RAW-8 moves a flag (state it). Formats without test files
-(C-RAW, IIQ, float DNG) are covered by unit tests on the classification functions.
 
 ---
 

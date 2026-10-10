@@ -64,6 +64,7 @@ pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimati
 pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use calibration_masters::defect_map::DefectMap;
 pub use calibration_masters::error::{CalibrationError, DarkMismatch};
+pub use calibration_masters::temperature_source::TemperatureSource;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::calibration_state::CalibrationState;

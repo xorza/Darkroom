@@ -54,7 +54,7 @@ fn bench_unpack_file_vs_buffer(b: quickbench::Bencher) {
             b.bench_labeled(&format!("{set}: open_buffer"), || {
                 let mut libraw =
                     Libraw::open(fs::read(&path).unwrap(), &CancelToken::never()).unwrap();
-                libraw.unpack().unwrap();
+                libraw.unpack(rayon::current_num_threads()).unwrap();
             });
             let path_c = CString::new(path.to_str().expect("a UTF-8 dataset path")).unwrap();
             b.bench_labeled(&format!("{set}: open_file"), || {

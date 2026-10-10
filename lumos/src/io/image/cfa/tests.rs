@@ -591,14 +591,18 @@ fn data_len() {
     assert_eq!(img.metadata.quantization_sigma, None);
 }
 
-/// LibRaw's `filters` and `colors` classify a sensor: one colour is mono whatever the word says,
-/// `filters == 0` with three colours is a linear DNG, sRAW or Foveon that LibRaw processes itself,
+/// LibRaw's `filters`, `colors` and `cdesc` classify a sensor: one colour is mono whatever the word
+/// says, `filters == 0` with three colours is a linear DNG or sRAW that LibRaw processes itself,
 /// `9` is X-Trans with the pattern LibRaw keeps apart, a 2-row-periodic word is Bayer, and any
-/// other word is an exotic CFA that LibRaw processes too.
+/// other word is an exotic CFA that LibRaw processes too. Four colours are no RGB mosaic whatever
+/// the word: the Sony DSC-F828's `0x9c9c9c9c` reads R, E / G, B (emerald where a Bayer phase has
+/// green) and the Nikon E950's CMYG `0x1e1e1e1e` reads as BGGR's phases; LibRaw describes them
+/// `RGBE` and `CMYG`, with four colours.
 #[test]
 fn from_libraw_classifies_the_sensor() {
     let xtrans = *XTRANS_PATTERN.rows();
-    let classify = |filters, colors| CfaType::from_libraw(filters, colors, xtrans).unwrap();
+    let classify =
+        |filters, colors| CfaType::from_libraw(filters, colors, *b"RGBG", xtrans).unwrap();
     assert_eq!(classify(0, 1), Some(CfaType::Mono));
     assert_eq!(classify(0x9494_9494, 1), Some(CfaType::Mono));
     assert_eq!(classify(0, 3), None);
@@ -612,11 +616,27 @@ fn from_libraw_classifies_the_sensor() {
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
     assert_eq!(classify(0x1234_5678, 3), None);
+    for (filters, cdesc) in [(0x9c9c_9c9c, *b"RGBE"), (0x1e1e_1e1e, *b"CMYG")] {
+        assert!(
+            CfaPattern::from_filters(filters).is_some(),
+            "{cdesc:?}: the word alone passes for Bayer"
+        );
+        assert_eq!(
+            CfaType::from_libraw(filters, 4, cdesc, xtrans).unwrap(),
+            None,
+            "{cdesc:?}"
+        );
+        assert_eq!(
+            CfaType::from_libraw(filters, 3, cdesc, xtrans).unwrap(),
+            None,
+            "{cdesc:?} described as three colours"
+        );
+    }
     // An X-Trans sensor whose layout is not one is a corrupt file, refused with the reason.
     let mut corrupt = xtrans;
     corrupt[0][0] = 3;
     assert!(matches!(
-        CfaType::from_libraw(9, 3, corrupt),
+        CfaType::from_libraw(9, 3, *b"RGBG", corrupt),
         Err(XTransPatternError::Value {
             row: 0,
             column: 0,

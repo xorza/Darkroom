@@ -6,9 +6,10 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// A sample at or past this fraction of its channel's span above black is flagged
-/// [`QualityFlags::SATURATED`]. Many sensors clip a little below their nominal white level, which
-/// LibRaw's own `adjust_maximum` allows for down to 75% of it; 95% catches those clips and stays
-/// above any unsaturated star core.
+/// [`QualityFlags::SATURATED`] where the source states no clip of its own, only a nominal white
+/// level. Many sensors clip a little below it, which LibRaw's own `adjust_maximum` allows for down
+/// to 75% of it; 95% catches those clips. The price is the samples between 95% and the true clip,
+/// which are measurements and are flagged as lower bounds all the same.
 pub(crate) const SATURATION_FRACTION: f32 = 0.95;
 
 /// One pixel's data-quality bits.

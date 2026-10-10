@@ -12,6 +12,7 @@ pub(crate) mod light_calibration;
 pub(crate) mod master_role;
 pub(crate) mod master_subtraction;
 pub(crate) mod prepared_flat;
+pub(crate) mod temperature_source;
 
 use std::io;
 use std::path::Path;
@@ -526,6 +527,7 @@ impl CalibrationMasters {
                 })?;
                 outcome.unverified = matched.unverified;
                 outcome.dark_scale = matched.scale;
+                outcome.dark_temperature = matched.temperature;
                 let map = master_map(domain.as_ref(), dark, MasterRole::Dark)?;
                 after_subtracting(&mut domain, dark);
                 Ok((dark, map, matched))
@@ -574,8 +576,21 @@ impl CalibrationMasters {
         let light = image.cfa_type;
         let light_size = Size2us::new(image.data.width(), image.data.height());
         let light_domain = image.metadata.domain.as_ref();
+        let light_instrument = image.metadata.instrument.as_deref().map(str::trim);
 
         for (role, master) in self.masters() {
+            // Only when both state one: a synthesized master states none, and a FITS file may not.
+            if let (Some(light), Some(master)) = (
+                light_instrument,
+                master.metadata.instrument.as_deref().map(str::trim),
+            ) && light != master
+            {
+                return Err(CalibrationError::InstrumentMismatch {
+                    component: role,
+                    light: light.to_owned(),
+                    master: master.to_owned(),
+                });
+            }
             if master.cfa_type != light {
                 return Err(CalibrationError::CfaPatternMismatch {
                     component: role,

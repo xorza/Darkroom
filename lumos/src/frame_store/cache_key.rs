@@ -38,10 +38,11 @@ pub(crate) struct DecodePins {
     pub(crate) fits_linear: &'static str,
     /// [`LinearImage::from_file`](crate::LinearImage::from_file) on a floating-point TIFF.
     pub(crate) float_tiff: &'static str,
-    /// [`CfaImage::from_file`](crate::CfaImage::from_file) on a mosaic FITS.
+    /// [`CfaImage::from_file`](crate::CfaImage::from_file) on a mosaic FITS — its plane, flags
+    /// and quantization σ.
     pub(crate) fits_cfa: &'static str,
-    /// [`CfaImage::from_file`](crate::CfaImage::from_file) on a camera RAW, pinned on the
-    /// `real-data` dataset and checked only with that feature.
+    /// [`CfaImage::from_file`](crate::CfaImage::from_file) on a camera RAW — its plane, flags
+    /// and quantization σ — pinned on the `real-data` dataset and checked only with that feature.
     pub(crate) raw_cfa: &'static str,
     /// [`CfaImage::demosaic`](crate::CfaImage), which
     /// [`LinearImage::from_file`](crate::LinearImage::from_file) runs on a camera RAW and on a
@@ -55,8 +56,11 @@ pub(crate) struct DecodePins {
 pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     fits_linear: "eef15741e2043c92",
     float_tiff: "029c2cc11944e24e",
-    fits_cfa: "ab330c08a5153ba9",
-    raw_cfa: "b6144af28244502b",
+    fits_cfa: "5fa56a9f2b1e6153",
+    // Not a digest: the RAW decode's flags and quantization σ changed with no dataset at hand to
+    // pin them on. A placeholder still moves `DECODE_VERSION`, so no cache of the old flags is
+    // reused, and the `real-data` snapshot prints the digest to pin here.
+    raw_cfa: "repin-on-real-data",
     demosaic: "6428e33eabc73bfa",
     frame_stats: "caaddb6878657b08",
 };

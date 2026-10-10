@@ -4,10 +4,11 @@ use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use common::CancelToken;
 
 use crate::internals::cfa::XTRANS_PATTERN;
-use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::image::pixel_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::error::LibrawCode;
 use crate::io::raw::libraw::internals::BayerDump;
+use crate::io::raw::unpacked_raw::{instrument, saturation_level};
 use crate::io::raw::*;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -97,7 +98,7 @@ fn load_raw_rejects_invalid_files() {
 /// square under one-pixel margins, RGGB, as `dump` describes it.
 fn bayer_dump(samples: &[u16], side: usize, dump: BayerDump) -> Result<UnpackedRaw, RawError> {
     let libraw = Libraw::open_bayer(samples, side as u16, dump, &CancelToken::never())?;
-    UnpackedRaw::unpack(libraw, Path::new("bayer-dump"))
+    UnpackedRaw::unpack(libraw, Path::new("bayer-dump"), 1)
 }
 
 /// The preview is the science frame demosaicked and clamped, bit for bit, and what lies in the
@@ -298,6 +299,33 @@ fn invalid_camera_white_balance_is_absent() {
     }
 }
 
+/// A channel saturates `LINEAR_MAX_MARGIN` of its span below a stated linear limit that lies above its black
+/// and within `maximum`, and 95% of the way from black to `maximum` otherwise. At black 1000,
+/// maximum 16383:
+/// - linear limit 15000 is one: 15000 − 0.005 × 14000 = 14930;
+/// - 16383, at `maximum` itself: 16383 − 0.005 × 15383 = 16306.085;
+/// - 0, none stated: 1000 + 0.95 × 15383 = 15613.85;
+/// - 900, below black, and 1000, at it: read at the wrong scale, so `maximum`'s 15613.85;
+/// - 65535, above `maximum`: the same.
+#[test]
+fn a_stated_linear_limit_sets_the_saturation_level_within_its_bounds() {
+    let fallback = 1000.0 + f64::from(SATURATION_FRACTION) * 15383.0;
+    for (linear_max, expected) in [
+        (15_000, 14_930.0),
+        (16_383, 16_383.0 - 0.005 * 15_383.0),
+        (0, fallback),
+        (900, fallback),
+        (1000, fallback),
+        (65_535, fallback),
+    ] {
+        assert_eq!(
+            saturation_level(1000.0, linear_max, 16_383),
+            expected,
+            "linear_max {linear_max}"
+        );
+    }
+}
+
 /// The raw values settle two flags at decode. LibRaw's `open_bayer`
 /// stands in for a camera file: it sets `zero_is_bad` from `procflags & 2`, `maximum` to
 /// 65536 − 2⁰ = 65535 and black to its argument, here 1000. The saturation level is then
@@ -421,7 +449,7 @@ fn a_cancelled_token_stops_libraw() {
     let libraw = Libraw::open_bayer(&samples, 24, BayerDump::default(), &cancel).unwrap();
     cancel.cancel();
     let path = Path::new("bayer-dump");
-    let error = UnpackedRaw::unpack(libraw, path).unwrap_err();
+    let error = UnpackedRaw::unpack(libraw, path, 1).unwrap_err();
     assert!(
         matches!(error, RawError::Unpack(LibrawCode::Cancelled)),
         "{error:?}"
@@ -466,5 +494,31 @@ fn libraws_processing_declares_its_own_span() {
                 "channel {channel}: {value}"
             );
         }
+    }
+}
+
+/// The camera is LibRaw's normalized make and model, each read to its terminator and trimmed,
+/// joined by a space; either alone when the other is empty, and `None` when both are.
+#[test]
+fn the_instrument_joins_the_normalized_make_and_model() {
+    let field = |text: &str| {
+        let mut field: [ffi::c_char; 64] = [0; 64];
+        for (slot, byte) in field.iter_mut().zip(text.bytes()) {
+            *slot = ffi::c_char::from_ne_bytes([byte]);
+        }
+        field
+    };
+    for (make, model, expected) in [
+        ("Canon", "EOS 6D", Some("Canon EOS 6D")),
+        ("Canon ", " EOS 6D", Some("Canon EOS 6D")),
+        ("ZWO", "", Some("ZWO")),
+        ("", "ASI2600MC", Some("ASI2600MC")),
+        ("", "", None),
+    ] {
+        assert_eq!(
+            instrument(&field(make), &field(model)).as_deref(),
+            expected,
+            "{make:?} {model:?}"
+        );
     }
 }

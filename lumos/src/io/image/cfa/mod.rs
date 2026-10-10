@@ -93,20 +93,27 @@ impl CfaType {
         }
     }
 
-    /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters` and `colors` and its
-    /// visible-origin X-Trans pattern, or `None` when LibRaw has to produce the image itself.
+    /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters`, `colors` and `cdesc` and
+    /// its visible-origin X-Trans pattern, or `None` when LibRaw has to produce the image itself.
     ///
-    /// `None` covers `filters == 0` with three colours — a linear DNG, sRAW or Foveon, whose
-    /// samples LibRaw unpacks already per pixel and so never as a mosaic — and a filter word that
-    /// is neither X-Trans nor a 2×2 Bayer phase. An X-Trans sensor whose layout is not one is an
-    /// error: the file is corrupt, not exotic.
+    /// `None` covers `filters == 0` with three colours — a linear DNG or sRAW, whose samples LibRaw
+    /// unpacks already per pixel and so never as a mosaic — a filter word that is neither X-Trans
+    /// nor a 2×2 Bayer phase, and any sensor whose colours are not LibRaw's red, green and blue: a
+    /// word reads colour 3 as a second green only where `cdesc` says so, and Sony's RGBE or Nikon's
+    /// CMYG laid out in a Bayer word's phases would otherwise demosaic as RGB with the wrong
+    /// filters. An X-Trans sensor whose layout is not one is an error: the file is corrupt, not
+    /// exotic.
     pub(crate) fn from_libraw(
         filters: u32,
         colors: i32,
+        cdesc: [u8; 4],
         xtrans: [[u8; 6]; 6],
     ) -> Result<Option<Self>, XTransPatternError> {
         if colors == 1 {
             return Ok(Some(Self::Mono));
+        }
+        if colors != 3 || &cdesc != b"RGBG" {
+            return Ok(None);
         }
         Ok(match filters {
             0 => None,
