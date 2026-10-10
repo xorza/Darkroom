@@ -64,9 +64,7 @@ impl CommonDomain {
                     for frame in frames {
                         let gate = FrameGate::of(frame, base, end);
                         if !gate.everywhere() {
-                            intersect_span(words, end - base, |index| {
-                                gate.confidence(index).is_some()
-                            });
+                            intersect_span(words, end - base, |index| gate.sample(index).is_some());
                         }
                     }
                 }

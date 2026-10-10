@@ -271,50 +271,88 @@ fn stored_frames_must_share_one_cfa_pattern() {
 
 /// Stored frames are held to the same pairing as caller-supplied ones
 /// (`stack_images_rejects_warp_quality_planes_that_disagree_about_support`): support and confidence
-/// must agree on which pixels a frame reaches.
+/// must agree on which pixels a frame reaches, for a warp's coverage and a drizzle's drop weight
+/// alike, and a drop weight is never negative.
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
     let core = || CacheCore::plain(CacheTier::Resident, dimensions);
-    let frame = |coverage: Vec<f32>, confidence: Vec<f32>| {
+    let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
+        |support, confidence| FrameQuality::Planes {
+            coverage: Buffer2::new(4, 1, support),
+            confidence: Buffer2::new(4, 1, confidence),
+        };
+    let drizzled: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
+        |support, confidence| FrameQuality::Drizzled {
+            weight: Buffer2::new(4, 1, support),
+            confidence: Buffer2::new(4, 1, confidence),
+        };
+    let frame = |quality: FrameQuality<Buffer2<f32>>| {
         let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
         let stats = FrameStats::measure(&image);
-        StoredFrame::from_memory(
-            image,
-            FrameQuality::Planes {
-                coverage: Buffer2::new(4, 1, coverage),
-                confidence: Buffer2::new(4, 1, confidence),
-            },
-            stats,
-        )
+        StoredFrame::from_memory(image, quality, stats)
     };
 
+    for (kind, quality) in [
+        (FramePlane::Coverage, warped),
+        (FramePlane::DropWeight, drizzled),
+    ] {
+        let error = validate_frames(
+            &[frame(quality(
+                vec![1.0, 1.0, 1.0, 1.0],
+                vec![1.0, 1.0, 0.0, 1.0],
+            ))],
+            dimensions,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StackError::FrameQualityPairMismatch {
+                    index: 0,
+                    pixel: 2,
+                    plane,
+                    support: 1.0,
+                    confidence: 0.0,
+                } if plane == kind
+            ),
+            "{kind}: expected a pair mismatch at pixel 2, got {error:?}"
+        );
+
+        // The pair the warp or the drizzle would have produced there builds.
+        assert!(
+            FrameCache::from_stored_frames(
+                vec![frame(quality(
+                    vec![1.0, 1.0, 0.0, 1.0],
+                    vec![1.0, 1.0, 0.0, 1.0]
+                ))],
+                core(),
+                Normalization::None,
+            )
+            .is_ok(),
+            "{kind}"
+        );
+    }
+
     let error = validate_frames(
-        &[frame(vec![1.0, 1.0, 1.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
+        &[frame(drizzled(
+            vec![1.0, -0.5, 1.0, 1.0],
+            vec![1.0, 1.0, 1.0, 1.0],
+        ))],
         dimensions,
     )
     .unwrap_err();
     assert!(
         matches!(
             error,
-            StackError::FrameQualityPairMismatch {
+            StackError::InvalidWarpPlaneValue {
                 index: 0,
-                pixel: 2,
-                coverage: 1.0,
-                confidence: 0.0,
+                plane: FramePlane::DropWeight,
+                pixel: 1,
+                value: -0.5,
             }
         ),
-        "expected a pair mismatch at pixel 2, got {error:?}"
-    );
-
-    // The pair the warp would have produced there builds.
-    assert!(
-        FrameCache::from_stored_frames(
-            vec![frame(vec![1.0, 1.0, 0.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
-            core(),
-            Normalization::None,
-        )
-        .is_ok()
+        "expected a negative drop weight at pixel 1, got {error:?}"
     );
 }
 

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use fits_well::image::SampleType;
+use glam::DVec2;
 
 use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::flat_gain::FlatGain;
@@ -12,7 +13,6 @@ use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::size2us::Size2us;
-use crate::registration::transform::WarpTransform;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default)]
@@ -110,10 +110,16 @@ pub struct ImageMetadata {
 }
 
 impl ImageMetadata {
-    /// The metadata of this image's pixels moved by `warp`, an output-to-source map onto an output
-    /// of `size`: its flat gain moves with them.
-    pub(crate) fn warped(mut self, warp: &WarpTransform, size: Size2us) -> Self {
-        self.flat_gain = self.flat_gain.map(|gain| Arc::new(gain.warped(warp, size)));
+    /// The metadata of this image's pixels moved by `to_source`, an output-to-source map onto an
+    /// output of `size`: its flat gain moves with them.
+    pub(crate) fn warped(
+        mut self,
+        to_source: impl Fn(DVec2) -> DVec2 + Sync,
+        size: Size2us,
+    ) -> Self {
+        self.flat_gain = self
+            .flat_gain
+            .map(|gain| Arc::new(gain.warped(to_source, size)));
         self
     }
 

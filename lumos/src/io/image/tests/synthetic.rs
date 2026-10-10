@@ -666,6 +666,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             WarpTransform::new(Transform::identity()),
         )],
         &drizzle,
+        &StackConfig::light(),
         ProgressCallback::default(),
         CancelToken::never(),
     );

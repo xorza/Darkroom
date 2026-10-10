@@ -162,9 +162,8 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     };
     detection.validate().unwrap();
 
-    // A drizzle frame weighs one by default and has no per-pixel weights.
+    // A drizzle frame has no per-pixel weights by default; its weight is the combine's.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
-    assert_eq!(frame.weight, 1.0);
     assert!(frame.pixel_weight_map.is_none());
 }
 

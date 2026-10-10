@@ -6,10 +6,10 @@ use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::pixel_flags::QualityFlags;
 
-/// One frame's quality over a chunk of pixels: whether its sample at each is gathered, and the
-/// confidence that divides the sample's noise there. The one reading of a frame's quality, which
-/// the combine, its coverage plane and normalization's common domain all gather by, so the three
-/// describe one set of frames at every pixel.
+/// One frame's quality over a chunk of pixels: whether its sample at each is gathered, the
+/// confidence that divides the sample's noise there, and the weight that multiplies its frame's.
+/// The one reading of a frame's quality, which the combine, its coverage plane and normalization's
+/// common domain all gather by, so the three describe one set of frames at every pixel.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FrameGate<'a> {
     /// Every pixel, at unit confidence: a frame that carries no frame quality.
@@ -24,6 +24,21 @@ pub(crate) enum FrameGate<'a> {
         flags: &'a [u8],
         excluded: QualityFlags,
     },
+    /// Where drops landed, a positive `weight`, at the drops' Kish size, weighted by their sum.
+    Drizzled {
+        weight: &'a [f32],
+        confidence: &'a [f32],
+    },
+}
+
+/// What a frame's gathered sample carries beside its value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GateSample {
+    /// The factor that divides the sample's noise.
+    pub(crate) confidence: f32,
+    /// The factor that multiplies the frame's weight in the mean: 1 but for a drizzled frame,
+    /// whose drops weigh what they deposited there.
+    pub(crate) weight: f32,
 }
 
 impl<'a> FrameGate<'a> {
@@ -46,27 +61,38 @@ impl<'a> FrameGate<'a> {
                     .chunk(start, end),
                 excluded: *excluded,
             },
+            FrameQuality::Drizzled { weight, confidence } => Self::Drizzled {
+                weight: weight.chunk(start, end),
+                confidence: confidence.chunk(start, end),
+            },
         }
     }
 
-    /// The confidence of the sample at `index` of the chunk when it is gathered; `None` when it
-    /// is not.
+    /// The sample at `index` of the chunk when it is gathered; `None` when it is not.
     ///
     /// A pair that agrees on where the frame has data — the invariant
     /// [`FrameQuality`] documents — gives every gathered sample a positive confidence.
     #[inline]
-    pub(crate) fn confidence(&self, index: usize) -> Option<f32> {
+    pub(crate) fn sample(&self, index: usize) -> Option<GateSample> {
+        let whole = |confidence| GateSample {
+            confidence,
+            weight: 1.0,
+        };
         match self {
-            Self::Everywhere => Some(1.0),
+            Self::Everywhere => Some(whole(1.0)),
             Self::Planes {
                 coverage,
                 confidence,
             } => PixelCoverage::new(coverage[index])
                 .contributes()
-                .then(|| confidence[index]),
+                .then(|| whole(confidence[index])),
             Self::Mask { flags, excluded } => {
-                (!QualityFlags::from_byte(flags[index]).intersects(*excluded)).then_some(1.0)
+                (!QualityFlags::from_byte(flags[index]).intersects(*excluded)).then(|| whole(1.0))
             }
+            Self::Drizzled { weight, confidence } => (weight[index] > 0.0).then(|| GateSample {
+                confidence: confidence[index],
+                weight: weight[index],
+            }),
         }
     }
 

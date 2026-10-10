@@ -28,6 +28,7 @@ use crate::internals::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::DrizzleFrame;
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::stack::drizzle_images;
@@ -90,7 +91,6 @@ fn kernel_config(kernel: DrizzleKernel) -> DrizzleConfig {
         scale,
         pixfrac,
         kernel,
-        quality: QualityPlanes::STANDARD,
         ..DrizzleConfig::default()
     }
 }
@@ -103,10 +103,21 @@ fn kernel_config(kernel: DrizzleKernel) -> DrizzleConfig {
 ///
 /// The result is unwrapped rather than black-boxed as a `Result`: a rejected config returns in
 /// nanoseconds, and a bench that reports that as a fast drizzle is worse than no bench.
-fn drizzle(frames: &[DrizzleFrame<LinearImage>], config: &DrizzleConfig) -> StackProduct {
+fn drizzle(
+    frames: &[DrizzleFrame<LinearImage>],
+    config: &DrizzleConfig,
+    quality: QualityPlanes,
+) -> StackProduct {
     drizzle_images(
         frames.to_vec(),
         config,
+        &StackConfig {
+            combine: Combine::mean(),
+            weighting: Weighting::Equal,
+            normalization: Normalization::None,
+            quality,
+            ..StackConfig::light()
+        },
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -131,29 +142,23 @@ fn bench_drizzle_kernels(b: ::quickbench::Bencher) {
         for (geometry, degrees) in GEOMETRIES {
             let frames = dithered_set(&base, degrees.to_radians());
             b.bench_labeled(&format!("{kernel:?}/{geometry}"), || {
-                black_box(drizzle(&frames, &config))
+                black_box(drizzle(&frames, &config, QualityPlanes::STANDARD))
             });
         }
     }
 }
 
-/// What `DrizzleConfig::quality` costs, on the default kernel.
-///
-/// Declining every plane drops the `Σwᵢ²` accumulator resident over the run, two arithmetic
-/// operations and a bitmap test at every deposit, and two output-grid planes never built.
+/// What the combine's quality planes cost a drizzle, on the default kernel.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_drizzle_quality_planes(b: ::quickbench::Bencher) {
     let frames = dithered_set(&star_field(FIELD, 250, 5).image, 0.0);
+    let config = kernel_config(DrizzleKernel::Turbo);
     for quality in [QualityPlanes::STANDARD, QualityPlanes::IMAGE_ONLY] {
-        let config = DrizzleConfig {
-            quality,
-            ..kernel_config(DrizzleKernel::Turbo)
-        };
         let label = if quality == QualityPlanes::STANDARD {
             "all-planes"
         } else {
             "image-only"
         };
-        b.bench_labeled(label, || black_box(drizzle(&frames, &config)));
+        b.bench_labeled(label, || black_box(drizzle(&frames, &config, quality)));
     }
 }

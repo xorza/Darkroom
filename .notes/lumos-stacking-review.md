@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12 are done and committed, and Batch 13 except its X-Trans part (Q1). Every finding below was re-checked against the code after
+Batches 1–12 and 14 are done and committed, and Batch 13 except its X-Trans part (Q1). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -44,17 +44,12 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-14 ── 15
- ├─── 16
- └─── 22
-13 (X-Trans, Q1), 17, 24, 26   independent
+13 (X-Trans, Q1), 15, 16, 17, 22, 24, 26   independent
 23 ── 27
 18 ── 19
 21 ── 20 ── 25
 ```
 
-- 14 before 15 and 16: CFA drizzle and the scatter rework build on the per-frame drizzle.
-- 14 before 22: the hot-loop rework is done on the final gather, which reads the drizzle weight.
 - 23 before 27: the dark scale is fitted on the hot candidates 23 builds.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
 
@@ -72,48 +67,6 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 
 ---
 
-## Batch 14: Drizzle as a science producer — medium
-
-**Findings:** DRZ-1, DRZ-6, DRZ-7, DRZ-8, DRZ-13.
-
-**Design (decided: Siril's design, drop weight in the mean):**
-1. Each frame is drizzled onto the output grid on its own (the scatter code stays). The result is
-   a drizzled frame: its pixels `Σw·x / Σw`, its per-channel drop weight plane `Σw`, and its noise
-   factor `q = (Σw)² / Σw²` (the Kish size of its drops).
-2. The drizzled frames enter the normal combine as stored frames with a new quality form
-   `FrameQuality::Drizzled { weight, confidence }`, one weight plane per channel:
-   - the sample is gathered where `weight > 0`;
-   - the mean's weight is `frame_weight · weight` (Siril `median_and_mean.c`:
-     `n *= dstack[frame]`; DrizzlePac weights the same way);
-   - the noise model divides by `confidence = q`, as for a warped frame;
-   - rejection stays unweighted, over the gathered samples.
-   With `Rejection::None` and equal frame weights this is the single-pass drizzle.
-3. Normalization, noise weights, flags and the quality planes come from the combine as for any
-   stack. Flags follow the warp's split: `RESAMPLE_EXCLUDED` pixels deposit nothing;
-   `RESAMPLE_CARRIED` pixels deposit and carry their flag to every output pixel they reach.
-4. **DRZ-6:** only the square kernel divides by the local magnification (STScI).
-5. **DRZ-7:** `validate` refuses non-finite samples with a new `DrizzleError` variant; the
-   accumulator stays unchanged on error.
-6. **DRZ-13:** state the output unit on `DrizzleConfig::scale` and the result: surface brightness
-   in input-pixel units; total flux is `s²` × the input's; divide by `s²` for flux per output
-   pixel.
-7. **Memory:** a drizzled frame is `s²` times a warped one plus its weight planes; the memory plan
-   charges it, and the spill tier holds it.
-8. The multi-frame accumulator's direct output becomes a gated test oracle, not a public path.
-   The public entries (`drizzle_stack`, `drizzle_images`) take a `StackConfig` beside their
-   `DrizzleConfig`.
-
-**Tests:**
-- With no rejection and equal weights, the combine of drizzled frames equals the old accumulator
-  to f32 rounding (state the bound), for each kernel.
-- A sliver frame gets its drop-weight share: a hand-computed two-frame case.
-- A satellite trail in one frame of ten is rejected.
-- DRZ-6: extend `a_magnified_frame_weighs_less_per_output_pixel` to the mean weight over one
-  lattice period, equal across the fixed-footprint kernels.
-- DRZ-7: a NaN sample is refused, the accumulator unchanged.
-
----
-
 ## Batch 15: CFA (Bayer / X-Trans) drizzle — medium (feature)
 
 **Finding:** DMS-5 / DRZ-5. Every OSC frame is interpolated twice (demosaic, then warp).
@@ -121,7 +74,10 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 **Design:**
 1. The drizzle takes a calibrated `CfaImage`. Each photosite deposits only into the plane of its
    own colour, with a per-channel weight and `q` plane (Siril `cdrizzlebox.c`: `chan =
-   FC_array(...)`); Batch 14's `FrameQuality::Drizzled` holds one weight plane per channel.
+   FC_array(...)`). Batch 14's `FrameQuality::Drizzled` holds one drop-weight plane and one
+   Kish-size plane that every channel shares; this batch gives each channel its own pair, read
+   per slot by `FrameGate`, `FrameCheck::stored_quality`, the frame stores and the fill gate's
+   depth.
 2. Registration runs on a green proxy, as Siril does (`registration/global.c`: "a copy of the orig
    image … to interpolate non green pixels"): green interpolated at the R and B sites (Bayer: mean
    of the four green neighbours; X-Trans: mean of the hex greens), never a full demosaic.

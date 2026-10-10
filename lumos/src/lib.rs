@@ -174,7 +174,7 @@ pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;
 pub use pipeline::result::{AlignStackResult, AlignmentSummary};
 
-pub use drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+pub use drizzle::accumulator::DrizzleFrame;
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use drizzle::drizzle_result::DrizzleResult;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};

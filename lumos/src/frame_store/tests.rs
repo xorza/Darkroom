@@ -243,7 +243,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     let gate = FrameGate::of(&frame, 0, 4);
     assert_eq!(
         (0..4)
-            .map(|index| gate.confidence(index))
+            .map(|index| gate.sample(index).map(|sample| sample.confidence))
             .collect::<Vec<_>>(),
         [Some(1.0), Some(1.0), None, Some(1.0)]
     );

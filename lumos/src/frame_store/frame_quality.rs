@@ -28,6 +28,8 @@ pub enum FramePlane {
     Coverage,
     /// Per-pixel interpolation confidence, non-negative.
     Confidence,
+    /// A drizzled frame's per-pixel drop weight `Σw`, non-negative.
+    DropWeight,
 }
 
 impl FramePlane {
@@ -39,7 +41,7 @@ impl FramePlane {
                 // dark subtraction takes a calibrated channel below zero legitimately.
                 Self::Channel => true,
                 Self::Coverage => (0.0..=1.0).contains(&value),
-                Self::Confidence => value >= 0.0,
+                Self::Confidence | Self::DropWeight => value >= 0.0,
             }
     }
 }
@@ -50,6 +52,7 @@ impl Display for FramePlane {
             Self::Channel => "a channel",
             Self::Coverage => "coverage",
             Self::Confidence => "confidence",
+            Self::DropWeight => "drop weight",
         })
     }
 }
@@ -82,6 +85,11 @@ pub(crate) enum FrameQuality<P> {
     /// elsewhere: the pair of a frame nothing interpolated, read from the flags it stores beside
     /// its channels instead of two planes of the same bit.
     Mask { excluded: QualityFlags },
+    /// A frame drizzled on its own: where its drops landed, `weight` is their summed weight `Σw`,
+    /// which the combine multiplies the frame's weight by, and `confidence` their Kish size
+    /// `(Σw)²/Σw²`, the factor the frame's noise is divided by. Zero for both where none landed,
+    /// which is where the frame is not gathered.
+    Drizzled { weight: P, confidence: P },
 }
 
 impl FrameQuality<Buffer2<f32>> {
@@ -123,16 +131,17 @@ impl<P> FrameQuality<P> {
     /// The frame's per-pixel warp support, or `None` for a frame that carries no such plane.
     pub(crate) const fn coverage(&self) -> Option<&P> {
         match self {
-            Self::None | Self::Mask { .. } => None,
+            Self::None | Self::Mask { .. } | Self::Drizzled { .. } => None,
             Self::Planes { coverage, .. } => Some(coverage),
         }
     }
 
-    /// The frame's per-pixel interpolation confidence, or `None` as in [`Self::coverage`].
+    /// The factor the frame's noise is divided by at each pixel — a warp's interpolation
+    /// confidence, a drizzle's Kish size — or `None` for a frame that carries no such plane.
     pub(crate) const fn confidence(&self) -> Option<&P> {
         match self {
             Self::None | Self::Mask { .. } => None,
-            Self::Planes { confidence, .. } => Some(confidence),
+            Self::Planes { confidence, .. } | Self::Drizzled { confidence, .. } => Some(confidence),
         }
     }
 
@@ -140,7 +149,7 @@ impl<P> FrameQuality<P> {
     pub(crate) const fn mask(&self) -> Option<QualityFlags> {
         match self {
             Self::Mask { excluded } => Some(*excluded),
-            Self::None | Self::Planes { .. } => None,
+            Self::None | Self::Planes { .. } | Self::Drizzled { .. } => None,
         }
     }
 
@@ -148,6 +157,10 @@ impl<P> FrameQuality<P> {
         match self {
             Self::None => FrameQuality::None,
             Self::Mask { excluded } => FrameQuality::Mask { excluded },
+            Self::Drizzled { weight, confidence } => FrameQuality::Drizzled {
+                weight: convert(weight),
+                confidence: convert(confidence),
+            },
             Self::Planes {
                 coverage,
                 confidence,
@@ -165,8 +178,13 @@ impl<P> FrameQuality<P> {
     /// Reads the variant rather than going through [`FramePlane`], which also names the image
     /// channels and so has a variant this type could only ever answer `None` for.
     pub(crate) fn present(&self) -> impl Iterator<Item = (FramePlane, &P)> {
+        let weight = match self {
+            Self::Drizzled { weight, .. } => Some((FramePlane::DropWeight, weight)),
+            Self::None | Self::Mask { .. } | Self::Planes { .. } => None,
+        };
         [
             self.coverage().map(|plane| (FramePlane::Coverage, plane)),
+            weight,
             self.confidence()
                 .map(|plane| (FramePlane::Confidence, plane)),
         ]
@@ -198,6 +216,10 @@ impl<P> FrameQuality<P> {
             Self::None => Ok(FrameQuality::None),
             Self::Mask { excluded } => Ok(FrameQuality::Mask {
                 excluded: *excluded,
+            }),
+            Self::Drizzled { weight, confidence } => Ok(FrameQuality::Drizzled {
+                weight: convert(FramePlane::DropWeight, weight)?,
+                confidence: convert(FramePlane::Confidence, confidence)?,
             }),
             Self::Planes {
                 coverage,

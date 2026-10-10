@@ -236,17 +236,18 @@ pub enum StackError {
     },
 
     /// The two frame-quality planes disagree about whether the frame has support at a pixel. A warp
-    /// produces support and confidence together or neither, and the combine gates on coverage while
-    /// dividing the noise by confidence, so a pixel covered at zero confidence would enter the
-    /// statistics with no finite noise and one confident at zero coverage would be dropped despite
-    /// having data.
+    /// or a drizzle produces support and confidence together or neither, and the combine gates on
+    /// support — `plane`, the coverage or the drop weight — while dividing the noise by
+    /// confidence, so a pixel supported at zero confidence would enter the statistics with no
+    /// finite noise and one confident at zero support would be dropped despite having data.
     #[error(
-        "frame {index} has coverage {coverage} with confidence {confidence} at pixel {pixel}: a warped pixel has support and confidence together or neither"
+        "frame {index} has {plane} {support} with confidence {confidence} at pixel {pixel}: a pixel has support and confidence together or neither"
     )]
     FrameQualityPairMismatch {
         index: usize,
         pixel: usize,
-        coverage: f32,
+        plane: FramePlane,
+        support: f32,
         confidence: f32,
     },
 }

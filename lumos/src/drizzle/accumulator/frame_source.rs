@@ -7,11 +7,8 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
-use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::flat_gain::{FlatGain, GainGrid};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::inverse_warp::InverseWarp;
@@ -28,12 +25,13 @@ const JACOBIAN_MIN: f64 = 1e-30;
 /// under 0.1 input row — inside the extra row [`FrameSource::input_rows`] adds for it.
 const SIP_BOUNDARY_STRIDE: usize = 8;
 
-/// One input pixel's samples, one per channel, and each one's model variance when the drizzle
-/// measures a variance.
+/// One input pixel's samples, one per channel, and the flags it carries to every output pixel its
+/// drop reaches.
 #[derive(Debug)]
 pub(super) struct Fluxes {
     pub(super) values: ArrayVec<f32, MAX_CHANNELS>,
-    pub(super) variances: ArrayVec<f32, MAX_CHANNELS>,
+    /// The pixel's [`QualityFlags::RESAMPLE_CARRIED`] flags, as a byte.
+    pub(super) carried: u8,
 }
 
 /// One input pixel, as both the coordinate the transform takes and the flat index its samples live
@@ -54,9 +52,11 @@ pub(super) struct InputPixel {
 pub(super) struct Droplet {
     /// Where the input pixel's centre lands on the output grid.
     pub(super) centre: DVec2,
-    /// Frame weight × pixel weight ÷ the area the warp magnifies by — the output grid's own `s²`
-    /// excluded, so an unmagnified drop deposits the frame weight in total, as the square kernel's
-    /// clipped quadrilateral does, and a magnified one deposits less per output pixel it covers.
+    /// The pixel weight, whatever the warp magnifies by, as STScI's fixed-footprint kernels
+    /// deposit: a drop's footprint does not follow the magnification, so a magnified frame's drops
+    /// lie further apart and give each output pixel less already. Dividing by the magnification as
+    /// well would count it twice, and weigh a frame of another plate scale unlike the square kernel
+    /// does.
     pub(super) weight: f64,
 }
 
@@ -65,7 +65,8 @@ pub(super) struct Droplet {
 pub(super) struct DropQuad {
     /// The shrunken drop's corners in output coordinates, wound counterclockwise: BL, BR, TR, TL.
     pub(super) corners: [DVec2; 4],
-    /// Frame weight × pixel weight ÷ |signed area of `corners`|.
+    /// The pixel weight ÷ |signed area of `corners`|: the square kernel spreads it over the area
+    /// the drop maps to, so it deposits the pixel weight in total.
     pub(super) weight: f64,
 }
 
@@ -199,25 +200,12 @@ pub(super) struct FrameSource<'a> {
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
     size: Size2us,
     map: InputMap,
-    /// The output grid's area per reference pixel, `s²`: the magnification of a drop the warp
-    /// leaves unscaled.
-    grid_area: f64,
-    weight: f32,
     pixel_weights: Option<&'a [f32]>,
-    /// The frame's flags, when it carries one that excludes a pixel from deposit.
+    /// The frame's flags, when it carries any: those of
+    /// [`QualityFlags::RESAMPLE_EXCLUDED`] keep a pixel's drop out, as the warp leaves such a pixel
+    /// out of every sample, and those of [`QualityFlags::RESAMPLE_CARRIED`] travel with its drop.
     flags: Option<&'a PixelFlags>,
-    /// Each channel's noise model, or none when the drizzle measures no variance.
-    noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
-    /// The gain a flat multiplied the frame's pixels by, which the noise model reads.
-    flat_gain: Option<&'a FlatGain>,
 }
-
-/// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
-/// neighbours, not a measurement. Another frame's drop measures it. A saturated sample still
-/// deposits: it is a lower bound, and the only value some cores have.
-const EXCLUDED: QualityFlags = QualityFlags::NO_DATA
-    .union(QualityFlags::COSMIC_RAY)
-    .union(QualityFlags::REPAIRED);
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
@@ -226,23 +214,16 @@ impl<'a> FrameSource<'a> {
         image: &'a LinearImage,
         warp: &WarpTransform,
         scale: f64,
-        weight: f32,
         pixel_weights: Option<&'a Buffer2<f32>>,
-        noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
     ) -> Self {
-        debug_assert!(noise.is_empty() || noise.len() == image.channels());
         Self {
             planes: (0..image.channels())
                 .map(|channel| image.channel(channel).pixels())
                 .collect(),
             size: Size2us::new(image.width(), image.height()),
             map: InputMap::new(warp, output_grid(scale)),
-            grid_area: scale * scale,
-            weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
             flags: image.flags.as_ref(),
-            noise,
-            flat_gain: image.flat_gain(),
         }
     }
 
@@ -252,28 +233,12 @@ impl<'a> FrameSource<'a> {
 
     #[inline]
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
-        let values: ArrayVec<f32, MAX_CHANNELS> =
-            self.planes.iter().map(|plane| plane[pixel.index]).collect();
-        let point = self.flat_gain.filter(|_| !self.noise.is_empty()).map(|_| {
-            GainGrid::of(self.size).point(
-                (pixel.index % self.size.width) as f32,
-                (pixel.index / self.size.width) as f32,
-            )
-        });
-        let variances = self
-            .noise
-            .iter()
-            .zip(&values)
-            .enumerate()
-            .map(|(channel, (model, &value))| {
-                let gain = self
-                    .flat_gain
-                    .zip(point)
-                    .map_or(1.0, |(gain, point)| gain.at_point(channel, point));
-                model.variance_at(value, gain)
-            })
-            .collect();
-        Fluxes { values, variances }
+        Fluxes {
+            values: self.planes.iter().map(|plane| plane[pixel.index]).collect(),
+            carried: self.flags.map_or(0, |flags| {
+                flags.at(pixel.index).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
+            }),
+        }
     }
 
     /// The drop at `pixel`.
@@ -291,7 +256,7 @@ impl<'a> FrameSource<'a> {
         }
         Drop::Landed(Droplet {
             centre: landing.position,
-            weight: weight * self.grid_area / landing.magnification,
+            weight,
         })
     }
 
@@ -426,25 +391,24 @@ impl<'a> FrameSource<'a> {
         }
     }
 
-    /// Frame weight × pixel weight at `pixel`, or `None` when the product is zero or the pixel's
-    /// flags exclude it.
+    /// The pixel weight at `pixel`, or `None` when it is zero or the pixel's flags exclude it.
     ///
     /// Zero is the one value worth testing for: it deposits nothing anywhere, and letting it
-    /// through would have a frame that carries no weight still counted as covering every pixel it
-    /// reached. An excluded pixel is the same case: the decoder's fill under a null would otherwise
-    /// pull every output pixel it reaches toward the frame's median.
+    /// through would have the frame counted as covering every pixel it reached. An excluded pixel is
+    /// the same case: the decoder's fill under a null would otherwise pull every output pixel it
+    /// reaches toward the frame's median.
     #[inline]
     fn deposit_weight(&self, pixel: InputPixel) -> Option<f64> {
-        if self
-            .flags
-            .is_some_and(|flags| flags.at(pixel.index).intersects(EXCLUDED))
-        {
+        if self.flags.is_some_and(|flags| {
+            flags
+                .at(pixel.index)
+                .intersects(QualityFlags::RESAMPLE_EXCLUDED)
+        }) {
             return None;
         }
-        let pixel_weight = self
+        let weight = self
             .pixel_weights
             .map_or(1.0, |weights| weights[pixel.index]);
-        let weight = self.weight * pixel_weight;
         (weight > 0.0).then_some(f64::from(weight))
     }
 }
@@ -465,8 +429,6 @@ fn output_grid(scale: f64) -> Transform {
 pub(crate) mod internals {
     use std::ops::Range;
 
-    use arrayvec::ArrayVec;
-
     use crate::drizzle::accumulator::frame_source::FrameSource;
     use crate::io::image::linear::LinearImage;
     use crate::registration::transform::WarpTransform;
@@ -481,7 +443,7 @@ pub(crate) mod internals {
         output_margin: f64,
         input_margin: f64,
     ) -> Range<usize> {
-        FrameSource::new(image, warp, scale, 1.0, None, ArrayVec::new()).input_rows(
+        FrameSource::new(image, warp, scale, None).input_rows(
             &rows,
             output_width,
             output_margin,
