@@ -9,13 +9,12 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use std::ops::Range;
 use std::slice::ChunksMut;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
-use crate::drizzle::accumulator::frame_source::FrameSource;
+use crate::drizzle::accumulator::frame_source::{BandScan, FrameSource};
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
-use crate::drizzle::accumulator::output_band::{OutputBand, RadialScratch};
+use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, RadialScratch};
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
@@ -97,9 +96,10 @@ pub(crate) struct DrizzleAccumulator {
     plan: KernelPlan,
     /// Input pixels whose position the warp's SIP correction could not invert, over every frame.
     unconverged_points: usize,
-    /// The input rows each band scans, recomputed per frame.
-    scans: Vec<Range<usize>>,
+    /// The input pixels each band scans, recomputed per frame.
+    scans: Vec<BandScan>,
     radial: JobScratchPool<RadialScratch>,
+    lattice: JobScratchPool<CornerLattice>,
     /// Band height forced by the band-invariance test, which needs to compare one band against many
     /// on the same input. Production always derives it from the thread count.
     #[cfg(test)]
@@ -152,6 +152,7 @@ impl DrizzleAccumulator {
             unconverged_points: 0,
             scans: Vec::new(),
             radial: JobScratchPool::default(),
+            lattice: JobScratchPool::default(),
             #[cfg(test)]
             band_rows_override: None,
         })
@@ -206,11 +207,11 @@ impl DrizzleAccumulator {
         self.scans.clear();
         self.scans
             .extend((0..height).step_by(band_rows).map(|start| {
-                source.input_rows(
+                source.band_scan(
                     &(start..(start + band_rows).min(height)),
                     width,
-                    reach.output_rows,
-                    reach.input_rows,
+                    reach.output,
+                    reach.input,
                 )
             }));
 
@@ -221,6 +222,7 @@ impl DrizzleAccumulator {
             flags,
             scans,
             radial,
+            lattice,
             unconverged_points,
             ..
         } = &mut *self;
@@ -253,7 +255,7 @@ impl DrizzleAccumulator {
             .collect();
         *unconverged_points += bands
             .into_par_iter()
-            .map(|mut band| band.distribute(&source, plan, radial))
+            .map(|mut band| band.distribute(&source, plan, radial, lattice))
             .sum::<usize>();
         Ok(())
     }
@@ -380,7 +382,7 @@ impl DrizzleAccumulator {
     ///
     /// Several per worker so rayon can steal: a band's cost varies with how much of the input
     /// actually reaches it, which is not uniform once the transform rotates. Not tuned against the
-    /// margin — over-scanning at a band boundary is nearly free (see `FrameSource::input_rows`), so
+    /// margin — over-scanning at a band boundary is nearly free (see `FrameSource::band_scan`), so
     /// there is nothing to trade off against balance.
     fn balanced_band_rows(output_height: usize) -> usize {
         let target = rayon::current_num_threads() * BANDS_PER_WORKER;
@@ -436,20 +438,8 @@ pub(crate) mod internals {
             .expect("test frame must be coherent with the accumulator");
         }
 
-        /// [`DrizzleAccumulator::add_image`] with the output band height pinned, so a test can
+        /// [`DrizzleAccumulator::add_frame`] with the output band height pinned, so a test can
         /// compare band counts.
-        pub(crate) fn add_image_with_band_rows(
-            &mut self,
-            image: LinearImage,
-            transform: &Transform,
-            band_rows: usize,
-        ) {
-            self.band_rows_override = Some(band_rows);
-            self.add_image(image, transform, None);
-            self.band_rows_override = None;
-        }
-
-        /// [`DrizzleAccumulator::add_frame`] with the output band height pinned.
         pub(crate) fn add_frame_with_band_rows(
             &mut self,
             frame: &DrizzleFrame<LinearImage>,

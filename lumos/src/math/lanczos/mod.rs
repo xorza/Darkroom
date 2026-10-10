@@ -1,4 +1,6 @@
-//! The Lanczos windowed-sinc kernel, shared by everything that resamples.
+//! The Lanczos windowed-sinc kernel, shared by everything that resamples, and its table.
+
+pub(crate) mod lanczos_lut;
 
 use std::f64::consts::PI;
 
@@ -7,9 +9,9 @@ use std::f64::consts::PI;
 /// kernel's zeros at the integers are exact zeros; an f32 `sin(π·x)` reads the rounded product,
 /// which near those zeros, where the slope is largest, is off by up to 1e-6.
 ///
-/// One definition for both resamplers: `registration::resample` builds its lookup table from this,
-/// and `drizzle` evaluates it per drop for the Lanczos kernel. They are peer subsystems, so it
-/// lives here rather than in either of them.
+/// One definition for both resamplers: [`lanczos_lut`] tabulates it, and `registration::resample`
+/// and `drizzle` read that table per tap. They are peer subsystems, so it lives here rather than
+/// in either of them.
 #[inline]
 pub(crate) fn kernel(x: f32, a: f32) -> f32 {
     let x = f64::from(x.abs());

@@ -13,8 +13,8 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–12, 14 and 15 are done and committed, Batch 13 except its X-Trans part (Q1), and Batch
-15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
+Batches 1–12 and 14–16 are done and committed, Batch 13 except its X-Trans part (Q1), and
+Batch 15 except its normalization above scale 1 (Q2). Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -45,7 +45,7 @@ Batch 7 and still holds.
 ## Dependency graph
 
 ```
-13 (X-Trans, Q1), 15 (rest, Q2), 16, 17, 22, 24, 26   independent
+13 (X-Trans, Q1), 15 (rest, Q2), 17, 22, 24, 26   independent
 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -74,25 +74,6 @@ noise-only test (CAL-7), the detector types (CAL-17), and the mono and Bayer loc
 frames pair by pair, each against the reference over the pixels both reached in a colour. Above
 scale 1 a pair can share none, and a normalized combine then fails with `NoCommonCoverage`. Left
 here: the estimator Q2 chooses, with a test of a normalized CFA drizzle at scale 2.
-
----
-
-## Batch 16: Drizzle scatter performance — medium (measure first)
-
-**Findings:** DRZ-2, DRZ-11.
-
-**Steps:**
-1. Add bench legs to `bench_drizzle_kernels`: 45°, 90°, and a SIP map. Record the baseline.
-2. Limit each scanned input row to the column interval whose drops can reach the band: closed
-   form for affine and homography maps; for SIP the sampled outline plus one column of margin.
-3. Return the landing position first and reject on row and column before computing magnification
-   or the other corners.
-4. Square kernel: compute the corner lattice once per input row (shared by neighbours); for affine
-   maps use `centre ± J·h`.
-5. Drizzle Lanczos reads `LanczosOrder::Three.lut()`, which interpolates between entries.
-
-**Acceptance:** the 90° leg at least 2× faster; output bit identical to before (the band-invariance
-and closed-form tests pin it), except Lanczos, which moves within the table's stated 1.1e-7.
 
 ---
 
