@@ -1,7 +1,6 @@
 //! [`HexTable`]: the pattern facts the Markesteijn tiles read, in the frame's and the tile's
 //! strides.
 
-use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn::TILE;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::vec2us::Vec2us;
@@ -22,13 +21,13 @@ pub(super) struct HexTable {
 
 impl HexTable {
     pub(super) fn new(pattern: XTransPattern, width: usize) -> Self {
-        let lookup = HexLookup::new(&pattern);
+        let hexagons = pattern.hexagons();
         let flat = |stride: isize| {
             let mut table = [[[0isize; 8]; 3]; 3];
             for (row, cells) in table.iter_mut().enumerate() {
                 for (col, cell) in cells.iter_mut().enumerate() {
-                    for (entry, offset) in cell.iter_mut().zip(lookup.get(row, col)) {
-                        *entry = offset.dy * stride + offset.dx;
+                    for (entry, offset) in cell.iter_mut().zip(hexagons.at(row, col)) {
+                        *entry = isize::from(offset.dy) * stride + isize::from(offset.dx);
                     }
                 }
             }
@@ -47,8 +46,8 @@ impl HexTable {
             tile: flat(TILE as isize),
             pattern,
             right_shift,
-            sgrow: lookup.sgrow,
-            sgcol: lookup.sgcol,
+            sgrow: hexagons.solitary().y,
+            sgcol: hexagons.solitary().x,
         }
     }
 

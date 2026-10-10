@@ -9,39 +9,11 @@
 //! Uses the Markesteijn algorithm, one pass or three: directional interpolation with
 //! homogeneity-based selection.
 
-mod hex_lookup;
 pub(crate) mod markesteijn;
 pub(crate) mod xtrans_pattern;
 
-use std::time::Instant;
-
-use common::CancelToken;
-
-use crate::io::cancelled::Cancelled;
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
-
-/// Demosaic a calibrated X-Trans frame — samples may lie outside `[0, 1]` — into planar
-/// `[R, G, B]` channels of its size.
-pub(crate) fn demosaic(
-    data: &[f32],
-    size: Size2us,
-    pattern: XTransPattern,
-    passes: MarkesteijnPasses,
-    cancel: &CancelToken,
-) -> Result<[Vec<f32>; 3], Cancelled> {
-    let xtrans = XTransImage::new(data, size, pattern);
-    let demosaic_start = Instant::now();
-    let rgb_pixels = markesteijn::demosaic(&xtrans, passes, cancel)?;
-    tracing::info!(
-        "X-Trans Markesteijn demosaicing {}x{} took {:.2}ms",
-        size.width,
-        size.height,
-        demosaic_start.elapsed().as_secs_f64() * 1000.0
-    );
-    Ok(rgb_pixels)
-}
 
 /// An X-Trans frame the demosaic reads: its samples row by row, its size, and its pattern
 /// anchored at its first pixel.
@@ -62,6 +34,10 @@ impl<'a> XTransImage<'a> {
             size.width,
             size.height,
             data.len()
+        );
+        debug_assert!(
+            data.iter().all(|v| v.is_finite()),
+            "XTransImage data contains NaN or Infinity values"
         );
         Self {
             data,

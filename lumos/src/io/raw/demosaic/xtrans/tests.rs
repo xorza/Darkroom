@@ -1,8 +1,10 @@
 use crate::internals::assertions::assert_close;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
+use crate::io::raw::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;
 use crate::math::vec2us::Vec2us;
+use common::CancelToken;
 
 #[test]
 fn xtrans_pattern_color_at() {
@@ -72,6 +74,37 @@ fn xtrans_pattern_invalid_metadata() {
         }
     );
 
+    // Greens that do not repeat every three: the demosaic reads them over a 3×3 cell, and the
+    // hexagons of this layout leave entries unset. Row 0 has a green at column 4, where column 1
+    // holds blue.
+    assert_eq!(
+        XTransPattern::new([
+            [0, 2, 1, 0, 1, 0],
+            [1, 2, 1, 0, 2, 1],
+            [1, 0, 1, 1, 1, 1],
+            [2, 1, 2, 2, 0, 1],
+            [1, 0, 1, 1, 0, 1],
+            [1, 1, 1, 1, 2, 2],
+        ])
+        .unwrap_err(),
+        XTransPatternError::GreenPeriod { row: 0, column: 4 }
+    );
+
+    // Greens every three rows and columns, and every other check met, but every green has a green
+    // neighbour: no solitary green, and hexagons with entries no direction sets.
+    assert_eq!(
+        XTransPattern::new([
+            [1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 1, 2, 2],
+            [1, 0, 0, 1, 2, 2],
+            [1, 1, 1, 1, 1, 1],
+            [1, 2, 2, 1, 0, 0],
+            [1, 2, 2, 1, 0, 0],
+        ])
+        .unwrap_err(),
+        XTransPatternError::Hexagons
+    );
+
     // Deserializing checks the layout too, so a stored pattern cannot come back invalid.
     let stored = common::serialize(&test_pattern(), common::SerdeFormat::Ron).unwrap();
     let restored: XTransPattern = common::deserialize(&stored, common::SerdeFormat::Ron).unwrap();
@@ -80,6 +113,43 @@ fn xtrans_pattern_invalid_metadata() {
     corrupted[1][2] = 3;
     let stored = common::serialize(&corrupted, common::SerdeFormat::Ron).unwrap();
     assert!(common::deserialize::<XTransPattern>(&stored, common::SerdeFormat::Ron).is_err());
+}
+
+/// The hexagons of the Fujifilm layout are dcraw's `allhex` for it, entry for entry, as
+/// `(dy, dx)`: computed by a transcription of `xtrans_interpolate`'s loop independent of this
+/// crate's. Its solitary green is at row 2, column 2.
+#[test]
+fn the_hexagons_are_dcraws() {
+    #[rustfmt::skip]
+    let expected: [[[(i8, i8); 8]; 3]; 3] = [
+        [
+            [(0, -1), (0, 2), (-1, 0), (2, 0), (-1, -1), (2, 2), (-1, 1), (1, -1)],
+            [(0, 1), (0, -2), (-1, 0), (2, 0), (1, 1), (-1, -1), (-1, 1), (2, -2)],
+            [(0, 1), (0, -1), (2, 0), (-1, 0), (1, 1), (1, -1), (0, 0), (0, 0)],
+        ],
+        [
+            [(0, -1), (0, 2), (1, 0), (-2, 0), (-1, -1), (1, 1), (1, -1), (-2, 2)],
+            [(0, 1), (0, -2), (1, 0), (-2, 0), (1, 1), (-2, -2), (1, -1), (-1, 1)],
+            [(0, -1), (0, 1), (-2, 0), (1, 0), (-1, -1), (-1, 1), (0, 0), (0, 0)],
+        ],
+        [
+            [(-1, 0), (1, 0), (0, 2), (0, -1), (-1, 1), (1, 1), (0, 0), (0, 0)],
+            [(1, 0), (-1, 0), (0, -2), (0, 1), (1, -1), (-1, -1), (0, 0), (0, 0)],
+            [(0, -1), (0, 2), (1, 0), (-2, 0), (-1, -1), (1, 1), (1, -1), (-2, 2)],
+        ],
+    ];
+    let hexagons = test_pattern().hexagons();
+    for (row, cells) in expected.iter().enumerate() {
+        for (column, cell) in cells.iter().enumerate() {
+            let actual: Vec<(i8, i8)> = hexagons
+                .at(row + 3, column + 6)
+                .iter()
+                .map(|offset| (offset.dy, offset.dx))
+                .collect();
+            assert_eq!(actual, cell, "row {row}, column {column}");
+        }
+    }
+    assert_eq!(hexagons.solitary(), Vec2us::new(2, 2));
 }
 
 /// A frame must hold one sample per pixel of a size that is not empty.
@@ -101,10 +171,8 @@ fn an_xtrans_image_holds_its_size_in_samples() {
 /// values, which round at most a few times.
 #[test]
 fn a_uniform_frame_demosaics_to_itself() {
-    let rgb = demosaic(
-        &[0.5; 144],
-        Size2us::new(12, 12),
-        test_pattern(),
+    let rgb = markesteijn::demosaic(
+        &XTransImage::new(&[0.5; 144], Size2us::new(12, 12), test_pattern()),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )
@@ -122,10 +190,8 @@ fn f32_demosaic_preserves_signed_native_samples() {
     let data: Vec<f32> = (0..size.pixel_count())
         .map(|index| (index % 17) as f32 * 0.25 - 2.0)
         .collect();
-    let rgb = demosaic(
-        &data,
-        size,
-        pattern,
+    let rgb = markesteijn::demosaic(
+        &XTransImage::new(&data, size, pattern),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )
@@ -157,10 +223,8 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
         .collect();
     let shifted: Vec<f32> = base.iter().map(|value| value + pedestal).collect();
     let run = |data: &[f32]| {
-        demosaic(
-            data,
-            size,
-            test_pattern(),
+        markesteijn::demosaic(
+            &XTransImage::new(data, size, test_pattern()),
             MarkesteijnPasses::One,
             &CancelToken::never(),
         )
@@ -192,10 +256,8 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
             }
         })
         .collect();
-    let rgb = demosaic(
-        &blocks,
-        contrast,
-        test_pattern(),
+    let rgb = markesteijn::demosaic(
+        &XTransImage::new(&blocks, contrast, test_pattern()),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )
