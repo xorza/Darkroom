@@ -13,7 +13,7 @@ report disagree, this plan wins: it holds the decisions taken since the review. 
 to `lumos/src/` unless stated otherwise; line numbers in the reports drift, so search for the
 named item.
 
-Batches 1–9 are done and committed. Every finding below was re-checked against the code after
+Batches 1–10 are done and committed. Every finding below was re-checked against the code after
 Batch 7 and still holds.
 
 ---
@@ -47,7 +47,7 @@ Batch 7 and still holds.
 14 ── 15
  ├─── 16
  └─── 22
-10, 11, 13, 17, 24, 26   independent
+11, 13, 17, 24, 26   independent
 12 ── 23 ── 27
 18 ── 19
 21 ── 20 ── 25
@@ -57,28 +57,6 @@ Batch 7 and still holds.
 - 14 before 22: the hot-loop rework is done on the final gather, which reads the drizzle weight.
 - 12 before 23 and 27: the hot-pixel map and the dark scale feed the fused kernel.
 - 21 before 20 and 25: the unified ingest and the cache integrity use the platform entity.
-
----
-
-## Batch 10: X-Trans pattern contract — medium
-
-**Findings:** DMS-2, DMS-14. `XTransPattern::new` accepts layouts that the hex table cannot
-handle; an untrusted FITS header can panic `HexLookup` (an `assert!`) or demosaic wrongly.
-
-**Design:**
-1. `XTransPattern::new` checks, each with its own `XTransPatternError` variant: greens repeat with
-   period 3 (`rows[r][c] == 1 ⇔ rows[r%3][c%3] == 1`); exactly one solitary green per 3×3 cell, as
-   dcraw's hex construction requires; every hex entry fills.
-2. The hex table is built once inside `XTransPattern::new` and stored on it, so the check and the
-   table cannot drift. Delete `HexLookup`/`HexOffset`; `HexTable` reads the pattern's table.
-3. DMS-14: call `markesteijn::demosaic` from `CfaImage::demosaic` as RCD is called (drop the
-   timing wrapper); give `XTransImage::new` the finite-data `debug_assert` `BayerImage::new` has;
-   trim the narrating comments.
-
-**Tests:** the 257-panic example from the report is refused with its variant; a period-3 violation
-and an unfilled table each give their variant; the standard X-Trans pattern's full hex table is
-asserted against dcraw's values (replacing the `|offset| ≤ 3` checks). Markesteijn digests
-unchanged.
 
 ---
 

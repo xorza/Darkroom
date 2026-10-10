@@ -32,7 +32,7 @@ use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
-use crate::io::raw::demosaic::xtrans;
+use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
@@ -420,13 +420,8 @@ impl CfaImage {
                 image
             }
             CfaType::XTrans(pattern) => {
-                let mut planes = xtrans::demosaic(
-                    &pixels,
-                    Size2us::new(width, height),
-                    pattern,
-                    passes,
-                    cancel,
-                )?;
+                let xtrans = XTransImage::new(&pixels, Size2us::new(width, height), pattern);
+                let mut planes = markesteijn::demosaic(&xtrans, passes, cancel)?;
                 unbalance(&mut planes);
 
                 let dims = ImageDimensions::new((width, height), 3);
