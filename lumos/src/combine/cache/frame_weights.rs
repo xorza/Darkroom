@@ -44,8 +44,7 @@ impl FrameWeights {
                 let mut values = Vec::new();
                 for (index, stats) in stats.into_iter().enumerate() {
                     for slot in 0..slots.count() {
-                        let gain = frame_norms
-                            .map_or(1.0, |norms| norms[index].channels[slots.channel(slot)].gain);
+                        let gain = frame_norms.map_or(1.0, |norms| norms[index].slots[slot].gain);
                         // The frame's noise where no flat amplified it, as normalization scaled
                         // it: the flat's gain changes across the frame, not between frames.
                         let variance = stats.ccd_noise(slot).background_at(1.0) * gain * gain;
@@ -73,21 +72,14 @@ mod tests {
     use arrayvec::ArrayVec;
 
     use super::*;
-    use crate::combine::normalization::ChannelNorm;
+    use crate::combine::normalization::SlotNorm;
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
-    use crate::math::statistics::MedianMad;
 
     fn stats(noise: &[f32]) -> FrameStats {
         FrameStats {
-            channels: noise
-                .iter()
-                .map(|_| MedianMad {
-                    median: 0.5,
-                    mad: 0.1,
-                })
-                .collect(),
+            medians: noise.iter().map(|_| 0.5).collect(),
             noise: noise.iter().copied().collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: noise.iter().map(|_| 0.5).collect(),
@@ -106,7 +98,7 @@ mod tests {
 
     fn norm(gain: f32) -> FrameNorm {
         FrameNorm {
-            channels: [ChannelNorm { gain, offset: 0.0 }]
+            slots: [SlotNorm { gain, offset: 0.0 }]
                 .into_iter()
                 .collect::<ArrayVec<_, 3>>(),
         }

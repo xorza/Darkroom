@@ -76,8 +76,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     let first = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(first.channels[0].chunk(0, 12), pixels);
-    assert_eq!(first.source_stats.channels[0].median, 5.5);
-    assert_eq!(first.source_stats.channels[0].mad, 3.0);
+    assert_eq!(first.source_stats.medians[0], 5.5);
     drop(first);
 
     // A sample and the statistics changed on disk come back as they are: the frame was mapped and
@@ -91,7 +90,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
         &LoadContext::default(),
     );
     let mut sentinel = spill.committed(key).unwrap().stats;
-    sentinel.channels[0].median = 99.0;
+    sentinel.medians[0] = 99.0;
     spill
         .commit(
             key,
@@ -104,8 +103,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
         .unwrap();
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
-    assert_eq!(reused.source_stats.channels[0].median, 99.0);
-    assert_eq!(reused.source_stats.channels[0].mad, 3.0);
+    assert_eq!(reused.source_stats.medians[0], 99.0);
     drop(reused);
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();

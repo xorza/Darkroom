@@ -1,3 +1,4 @@
+use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Combine, Normalization, SmallN};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
@@ -1099,7 +1100,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                 FrameQuality::from_coverage(coverage.clone()),
             );
             frame.source_stats = FrameStats {
-                channels: [MedianMad { median, mad }].into_iter().collect(),
+                medians: [median].into_iter().collect(),
                 noise: [mad_to_sigma(mad)].into_iter().collect(),
                 read_share: [0.0; 3].into_iter().collect(),
                 sky: [median].into_iter().collect(),
@@ -1132,10 +1133,10 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     ];
     for cache in &caches {
         let norms = cache.frame_norms.as_ref().unwrap();
-        assert_eq!(norms[0].channels[0].gain, 31.0 / 12.0);
-        assert_eq!(norms[1].channels[0].gain, 31.0 / 24.0);
-        assert_eq!(norms[2].channels[0].gain, 1.0);
-        assert!(norms.iter().all(|norm| norm.channels[0].offset == 0.0));
+        assert_eq!(norms[0].slots[0].gain, 31.0 / 12.0);
+        assert_eq!(norms[1].slots[0].gain, 31.0 / 24.0);
+        assert_eq!(norms[2].slots[0].gain, 1.0);
+        assert!(norms.iter().all(|norm| norm.slots[0].offset == 0.0));
 
         // σ, its gain, square, inverse, the sum and the quotient: 7 f32 roundings, 4ε relative.
         let weights = FrameWeights::resolve(
@@ -1353,6 +1354,8 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     };
     let a = field(0.0, 1.0, 0.002, 1);
     let b = field(1.0, 0.8, 0.006, 2);
+    let mads = [&a, &b]
+        .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
     let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
     let warped_b = resample::warp(
         &b,
@@ -1367,7 +1370,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     )
     .unwrap();
     let norms = cache.frame_norms.as_ref().unwrap();
-    let gain = f64::from(norms[1].channels[0].gain);
+    let gain = f64::from(norms[1].slots[0].gain);
 
     let truth = SkyField::render(size, sky, 1.5, &stars, 0).pixels;
     let mean = truth.pixels().iter().map(|&t| f64::from(t)).sum::<f64>() / truth.len() as f64;
@@ -1377,11 +1380,8 @@ fn registered_global_normalization_uses_paired_signal_samples() {
         .map(|&t| (0.8 * (f64::from(t) - mean)).powi(2))
         .sum();
     let standard_error = ((0.002f64.powi(2) + 1.25f64.powi(2) * 0.006f64.powi(2)) / spread).sqrt();
-    assert_eq!(norms[0].channels[0].gain, 1.0, "frame A is the reference");
+    assert_eq!(norms[0].slots[0].gain, 1.0, "frame A is the reference");
     assert_close!(gain, 1.25, 5.0 * standard_error);
-    let mads = source_stats(&cache)
-        .map(|stats| f64::from(stats.channels[0].mad))
-        .collect::<Vec<_>>();
     assert!(
         (mads[0] / mads[1] - 1.25).abs() > 100.0 * standard_error,
         "premise: the sky spreads alone must miss the gain"

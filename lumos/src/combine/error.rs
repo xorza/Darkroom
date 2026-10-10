@@ -58,11 +58,12 @@ pub enum StackError {
 
     /// Multiplicative normalization divides by each frame's median, and this one is not positive.
     #[error(
-        "frame {index} has median {median} in channel {channel}; a multiplicative normalization needs a positive one"
+        "frame {index} has median {median} in slot {slot}; a multiplicative normalization needs a positive one"
     )]
     NonPositiveMedian {
         index: usize,
-        channel: usize,
+        /// A channel, or a colour of a mosaic.
+        slot: usize,
         median: f32,
     },
 

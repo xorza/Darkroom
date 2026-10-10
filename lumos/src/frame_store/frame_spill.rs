@@ -27,7 +27,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "4b7a5eea41bb5410";
+pub(crate) const SIDECAR_PIN: &str = "bee3f191dd077474";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -299,14 +299,11 @@ mod tests {
     use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::io::image::unverified_conditions::UnverifiedConditions;
     use crate::io::raw::demosaic::bayer::CfaPattern;
-    use crate::math::statistics::{MedianMad, mad_to_sigma};
+    use crate::math::statistics::mad_to_sigma;
 
     fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {
         FrameStats {
-            channels: channels
-                .iter()
-                .map(|&(median, mad)| MedianMad { median, mad })
-                .collect(),
+            medians: channels.iter().map(|&(median, _)| median).collect(),
             noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: channels.iter().map(|&(median, _)| median).collect(),
@@ -391,7 +388,7 @@ mod tests {
             spill.commit(key, carries, &stats).unwrap();
             let committed = spill.committed(key).unwrap();
             assert_eq!(committed.carries, carries);
-            assert_eq!(committed.stats.channels, stats.channels);
+            assert_eq!(committed.stats.medians, stats.medians);
             assert_eq!(committed.stats.quantization_sigma, stats.quantization_sigma);
             assert_eq!(committed.stats.facts, stats.facts);
         }

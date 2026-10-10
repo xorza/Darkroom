@@ -58,7 +58,7 @@ pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     fits_cfa: "ab330c08a5153ba9",
     raw_cfa: "b6144af28244502b",
     demosaic: "355d39076b12df81",
-    frame_stats: "612f3781e4aad045",
+    frame_stats: "f471a140f5ab6076",
 };
 
 /// The decode version every cache key carries: derived from [`DECODE_PINS`], not bumped by hand.

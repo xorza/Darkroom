@@ -1,6 +1,8 @@
 //! [`Slots`]: how the combine indexes a frame's per-channel figures.
 
+use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::vec2us::Vec2us;
 
 /// The slots of a frame's noise and weights: one per channel, or one per colour of a mosaic, whose
@@ -20,6 +22,11 @@ impl Slots {
         }
     }
 
+    /// The slots of `frames`, whose sources the set's facts agreed on, at `dimensions`.
+    pub(crate) fn of_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Self {
+        Self::new(frames[0].source_stats.facts.cfa_type, dimensions.channels())
+    }
+
     pub(crate) const fn count(self) -> usize {
         self.count
     }
@@ -30,6 +37,11 @@ impl Slots {
             Some(cfa) => cfa.color_at(position) as usize,
             None => channel,
         }
+    }
+
+    /// The mosaic whose colours the slots are, `None` when each is a channel.
+    pub(crate) const fn mosaic(self) -> Option<CfaType> {
+        self.mosaic
     }
 
     /// The channel a slot's pixels are in.

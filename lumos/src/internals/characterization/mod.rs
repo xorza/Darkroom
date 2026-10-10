@@ -236,10 +236,8 @@ fn frame_stats_snapshot() {
         FrameStats::measure(&mosaic),
         FrameStats::measure(&demosaiced),
     ] {
-        for channel in &stats.channels {
-            snapshot.f32s(&[channel.median, channel.mad]);
-        }
         snapshot
+            .f32s(&stats.medians)
             .f32s(&stats.noise)
             .f32s(&stats.sky)
             .f32s(&[stats.quantization_sigma.unwrap_or(-1.0)]);

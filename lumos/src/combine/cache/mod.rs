@@ -100,6 +100,8 @@ pub(crate) struct CombineRequest<'a> {
 #[derive(Debug)]
 pub(crate) struct FrameCache {
     pub(crate) frames: Vec<StoredFrame>,
+    /// How the frames' per-slot figures index a pixel: by channel, or by colour of a mosaic.
+    pub(crate) slots: Slots,
     /// Each frame's affine onto the reference, measured once at construction for the
     /// normalization the cache was built with; `None` when every frame is combined as it stands.
     pub(crate) frame_norms: Option<Vec<FrameNorm>>,
@@ -131,10 +133,12 @@ impl FrameCache {
                 "stored frame {index} breaks the pipeline's own frame contract"
             );
         }
+        let slots = Slots::of_frames(&frames, core.dimensions);
         let frame_norms =
-            FrameNorm::measure(&frames, core.dimensions, normalization, &core.cancel)?;
+            FrameNorm::measure(&frames, core.dimensions, slots, normalization, &core.cancel)?;
         Ok(Self {
             frames,
+            slots,
             frame_norms,
             core,
         })
@@ -181,10 +185,12 @@ impl FrameCache {
             }
             .stored(frame, dimensions, &mut facts)?;
         }
-        let frame_norms = FrameNorm::measure(&stored, dimensions, normalization, &cancel)?;
+        let slots = Slots::of_frames(&stored, dimensions);
+        let frame_norms = FrameNorm::measure(&stored, dimensions, slots, normalization, &cancel)?;
 
         Ok(Self {
             frames: stored,
+            slots,
             frame_norms,
             core: CacheCore {
                 tier: CacheTier::Resident,
@@ -516,8 +522,8 @@ impl FrameCache {
                                 if support.contributes() {
                                     let v = match frame_norms {
                                         Some(fnm) => {
-                                            let cn = fnm[frame_idx].channels[channel];
-                                            chunk[pixel_idx] * cn.gain + cn.offset
+                                            let norm = fnm[frame_idx].slots[slot];
+                                            chunk[pixel_idx] * norm.gain + norm.offset
                                         }
                                         None => chunk[pixel_idx],
                                     };
@@ -742,10 +748,12 @@ impl FrameCache {
         for (index, frame) in frames.iter().enumerate() {
             facts.admit(index, &frame.source_stats.facts)?;
         }
+        let slots = Slots::of_frames(&frames, core.dimensions);
         let frame_norms =
-            FrameNorm::measure(&frames, core.dimensions, normalization, &core.cancel)?;
+            FrameNorm::measure(&frames, core.dimensions, slots, normalization, &core.cancel)?;
         Ok(Self {
             frames,
+            slots,
             frame_norms,
             core,
         })
