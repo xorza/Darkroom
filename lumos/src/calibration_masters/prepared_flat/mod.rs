@@ -3,19 +3,22 @@
 //! Cold-pixel detection runs on the flat with its additive part removed, before the normalization
 //! here clamps near-zero photosites away.
 
+use std::sync::Arc;
+
 use rayon::prelude::*;
 
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::vec2us::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
 pub(crate) const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
-/// A flat ready to divide a light by: its additive part removed, normalized to a mean of one per CFA
-/// colour, and floored at [`MIN_NORMALIZED_FLAT`].
+/// A flat ready to divide a light by: its additive part removed, normalized to a mean of one per
+/// CFA colour, and floored at [`MIN_NORMALIZED_FLAT`].
 ///
 /// A type rather than a `CfaImage` in the flat's slot, so a raw flat cannot be divided by, and a
 /// prepared one cannot be prepared twice.
@@ -24,14 +27,16 @@ pub(crate) struct PreparedFlat {
     divisor: CfaImage,
     /// Photosites the floor raised: they are corrected by less than their vignetting asks.
     floored: usize,
+    /// The gain the divisor applies, which every light it divides carries for its noise model.
+    gain: Arc<FlatGain>,
 }
 
 impl PreparedFlat {
     /// Normalize a flat whose additive part is already removed, per CFA colour, and floor it.
     ///
     /// # Errors
-    /// [`CalibrationError::NonPositiveFlat`] when a colour (or the whole mono frame) has no positive
-    /// mean: a property of the user's flats, not of this code.
+    /// [`CalibrationError::NonPositiveFlat`] when a colour (or the whole mono frame) has no
+    /// positive mean: a property of the user's flats, not of this code.
     pub(crate) fn new(mut flat: CfaImage) -> Result<Self, CalibrationError> {
         normalize(&mut flat)?;
         Ok(Self::from_divisor(flat))
@@ -44,7 +49,21 @@ impl PreparedFlat {
             .par_iter()
             .filter(|&&value| value <= MIN_NORMALIZED_FLAT)
             .count();
-        Self { divisor, floored }
+        let flags = divisor.flags.as_ref();
+        let values = divisor.data.pixels();
+        let gain = Arc::new(FlatGain::of_divisor(
+            &divisor.data,
+            &divisor.cfa_type,
+            |index| {
+                values[index] <= MIN_NORMALIZED_FLAT
+                    || flags.is_some_and(|flags| flags.at(index) != QualityFlags::default())
+            },
+        ));
+        Self {
+            divisor,
+            floored,
+            gain,
+        }
     }
 
     pub(crate) const fn divisor(&self) -> &CfaImage {
@@ -55,8 +74,9 @@ impl PreparedFlat {
         self.floored
     }
 
-    /// Divide `image` by the flat and record it; flag [`QualityFlags::NO_DATA`] where the flat
-    /// holds no measurement, and [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor.
+    /// Divide `image` by the flat and record it, with the gain that scaled its noise; flag
+    /// [`QualityFlags::NO_DATA`] where the flat holds no measurement, and
+    /// [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor.
     pub(crate) fn apply(&self, image: &mut CfaImage) {
         debug_assert!(
             !image.metadata.calibration.flat,
@@ -79,6 +99,7 @@ impl PreparedFlat {
             .for_each(|(pixel, divisor)| *pixel /= divisor);
         image.take_master_flags(flat);
         image.metadata.calibration = image.metadata.calibration.union(CalibrationState::FLAT);
+        image.metadata.flat_gain = Some(Arc::clone(&self.gain));
         if self.floored > 0 {
             let divisors = flat.data.pixels();
             let size = image.size();

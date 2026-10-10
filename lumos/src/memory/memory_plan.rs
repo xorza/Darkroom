@@ -9,7 +9,8 @@ use crate::memory::{DECODE_TRANSIENT_FACTOR, FRAME_QUALITY_PLANES};
 /// three-channel one is charged for all of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PerFrameBytes {
-    /// Resident once warped: the frame's own pixels plus its two quality planes.
+    /// Resident once warped: the frame's own pixels plus its two quality planes, its flags and its
+    /// flat gain grid.
     pub(crate) warped: usize,
     /// What one in-flight warp holds: the source and the warped output together, until it drops
     /// the source. All of it is transient for a spilled frame; a resident frame's warped output is
@@ -18,12 +19,13 @@ pub(crate) struct PerFrameBytes {
 }
 
 impl PerFrameBytes {
-    /// For a frame of `output_bytes` whose planes are `plane_bytes` each, and its flag plane of one
-    /// byte per pixel.
-    pub(crate) const fn new(plane_bytes: usize, output_bytes: usize) -> Self {
+    /// For a frame of `output_bytes` whose planes are `plane_bytes` each, its flag plane of one
+    /// byte per pixel, and its flat gain grid of `gain_bytes`.
+    pub(crate) const fn new(plane_bytes: usize, output_bytes: usize, gain_bytes: usize) -> Self {
         let warped = output_bytes
             .saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes))
-            .saturating_add(plane_bytes / size_of::<f32>());
+            .saturating_add(plane_bytes / size_of::<f32>())
+            .saturating_add(gain_bytes);
         Self {
             warped,
             working: output_bytes.saturating_add(warped),
@@ -171,10 +173,10 @@ impl MemoryPlan {
     /// reference is known.
     ///
     /// No decoded set is ever resident, only the warped one. A worker holds its detector's scratch
-    /// throughout, and the larger of its decode's peak and the source it warps. On the spill tier it
-    /// also keeps its warp buffers from one frame to the next. As in [`Self::plan`]'s decode pass,
-    /// the run is resident when the warped set fits beside one worker, and the workers fan out as
-    /// far as the rest allows. Both stages fan out alike, since every worker does both.
+    /// throughout, and the larger of its decode's peak and the source it warps. On the spill tier
+    /// it also keeps its warp buffers from one frame to the next. As in [`Self::plan`]'s decode
+    /// pass, the run is resident when the warped set fits beside one worker, and the workers fan
+    /// out as far as the rest allows. Both stages fan out alike, since every worker does both.
     pub(crate) fn single_pass(shape: RunShape, threads: usize, available: u64) -> Self {
         let RunShape {
             frame_count,

@@ -1,4 +1,8 @@
 use crate::internals::prelude::*;
+use std::sync::Arc;
+
+use crate::io::image::cfa::CfaType;
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
@@ -506,4 +510,35 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         assert_eq!(flags.at_pos(Vec2us::new(9, 10)), flag, "{name}");
     }
     assert_eq!(carried, 2);
+}
+
+/// A warp moves the flat gain with the pixels: a frame whose gain rises as `1 + x/8` across 9
+/// columns, shifted by 4, reads at output x the source's gain at x + 4, the node averages 1.5 and
+/// 1.875 of `flat_gain`'s own test, each within 1e-6 of the line.
+#[test]
+fn a_warp_moves_the_flat_gain_with_the_pixels() {
+    let size = Size2us::new(9, 9);
+    let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
+    let divisor = Buffer2::new(
+        9,
+        9,
+        (0..size.pixel_count())
+            .map(|index| 1.0 / (1.0 + (index % 9) as f32 / 8.0))
+            .collect(),
+    );
+    image.metadata.flat_gain = Some(Arc::new(FlatGain::of_divisor(
+        &divisor,
+        &CfaType::Mono,
+        |_| false,
+    )));
+    let warped = resample::warp(
+        &image,
+        &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
+        WarpParams::default(),
+    );
+    let gain = warped.image.metadata.flat_gain.as_ref().unwrap();
+    for (x, expected) in [(0.0, 1.5), (4.0, 1.875)] {
+        let at = gain.at(0, x, 4.0);
+        assert!((at - expected).abs() <= 1e-6, "x = {x}: {at}");
+    }
 }

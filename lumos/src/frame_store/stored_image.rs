@@ -9,6 +9,7 @@ use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -82,10 +83,17 @@ impl StoredImage {
         let carries = flags
             .as_ref()
             .is_some_and(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED));
+        let flat_gain = self
+            .metadata
+            .flat_gain
+            .as_deref()
+            .map(|gain| StoredGain::spill(store, gain))
+            .transpose()?;
         Ok(StoredFrame {
             channels: self.channels,
             quality,
             flags: self.flags.filter(|_| carries),
+            flat_gain,
             source_stats,
         })
     }

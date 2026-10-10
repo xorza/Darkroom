@@ -348,27 +348,30 @@ fn drizzle_rgb_shares_the_weight_and_not_the_variance() {
     let result = acc.finalize().product;
 
     assert!(matches!(result.weight, Some(QualityMap::Shared(_))));
-    assert!(matches!(result.variance, Some(QualityMap::PerChannel(_))));
+    assert!(matches!(
+        result.inverse_variance,
+        Some(QualityMap::PerChannel(_))
+    ));
     assert!(ptr::eq(
         result.weight.as_ref().unwrap().channel(0),
         result.weight.as_ref().unwrap().channel(2)
     ));
 }
 
-/// The weight and variance planes at scale 1 and pixfrac 1, where every input pixel is its own
-/// output pixel at weight equal to its frame weight. The frames are constant, so their measured
+/// The weight and inverse variance planes at scale 1 and pixfrac 1, where every input pixel is its
+/// own output pixel at weight equal to its frame weight. The frames are constant, so their measured
 /// noise is 0, and a quantization σ of 1 gives each sample unit variance. Three frames of weight 1
-/// give `Σw` = 3 and `Σw²·1/(Σw)²` = 3/9 — an average of three, the noise reduction the identical
-/// frames' zero RMS cannot show. Frames of weight 1 and 3 give `Σw` = 4 and (1 + 9)/16 = 0.625,
-/// above the 1/2 of an equal pair: concentrating weight on fewer frames costs. Every value is a
-/// correctly rounded quotient of small integers.
+/// give `Σw` = 3 and an inverse variance `(Σw)²/Σw²·1` = 9/3 = 3 — an average of three, the noise
+/// reduction the identical frames' zero RMS cannot show. Frames of weight 1 and 3 give `Σw` = 4 and
+/// 16/(1 + 9) = 1.6, below the 2 of an equal pair: concentrating weight on fewer frames costs.
+/// Every value is a correctly rounded quotient of small integers.
 #[test]
-fn weight_and_variance_maps() {
+fn weight_and_inverse_variance_maps() {
     let size = Size2us::new(4, 4);
     let at = (2, 2);
-    for (frames, weight, variance) in [
-        (&[1.0, 1.0, 1.0][..], 3.0, 3.0f32 / 9.0),
-        (&[1.0, 3.0][..], 4.0, 0.625),
+    for (frames, weight, inverse_variance) in [
+        (&[1.0, 1.0, 1.0][..], 3.0, 3.0f32),
+        (&[1.0, 3.0][..], 4.0, 1.6),
     ] {
         let mut acc = accumulator(
             ImageDimensions::new(size, 1),
@@ -382,8 +385,8 @@ fn weight_and_variance_maps() {
         let product = acc.finalize().product;
         assert_eq!(weight_plane(&product)[at], weight, "{frames:?}");
         assert_eq!(
-            product.variance.as_ref().unwrap().channel(0)[at],
-            variance,
+            product.inverse_variance.as_ref().unwrap().channel(0)[at],
+            inverse_variance,
             "{frames:?}"
         );
         assert_eq!(product.image.channel(0)[at], 5.0);
@@ -413,21 +416,21 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
 
     // Drizzle has no survivors to scatter, so even a request for every plane gets no dispersion.
     let all = product(QualityPlanes::ALL);
-    assert!(all.coverage.is_some() && all.weight.is_some() && all.variance.is_some());
+    assert!(all.coverage.is_some() && all.weight.is_some() && all.inverse_variance.is_some());
     assert!(all.dispersion.is_none());
 
     let bare = product(QualityPlanes::IMAGE_ONLY);
-    assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.variance.is_none());
+    assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.inverse_variance.is_none());
 
     // Each is independent of the others, and `variance` is the one that also drops an accumulator.
     let coverage_only = product(QualityPlanes {
         coverage: true,
         weight: false,
-        variance: false,
+        inverse_variance: false,
         dispersion: false,
     });
     assert!(coverage_only.coverage.is_some());
-    assert!(coverage_only.weight.is_none() && coverage_only.variance.is_none());
+    assert!(coverage_only.weight.is_none() && coverage_only.inverse_variance.is_none());
 
     // The fill gate has to have fired, or the min_weight_fraction path is untested here.
     let filled = all
@@ -582,7 +585,7 @@ fn band_count_does_not_change_the_result() {
             );
             for (label, single, many) in [
                 ("weight", &single.weight, &many.weight),
-                ("variance", &single.variance, &many.variance),
+                ("variance", &single.inverse_variance, &many.inverse_variance),
             ] {
                 for channel in 0..dimensions.channels() {
                     let plane = |map: &Option<QualityMap>| {

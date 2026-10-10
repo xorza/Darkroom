@@ -7,7 +7,6 @@
 
 use rayon::prelude::*;
 
-use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
@@ -17,7 +16,7 @@ use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
-use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 
 /// Radius (px) scanned for same-color neighbors — one X-Trans period (6×6) contains every color.
 /// Nearest same-color neighbors for the "fine" median; the coarse median uses all gathered.
@@ -98,7 +97,7 @@ impl<'a> XtransDetector<'a> {
         &mut self,
         data: &mut [f32],
         size: Size2us,
-        mesh: &ColourMesh,
+        backgrounds: &PixelBackgrounds<'_>,
         found: &mut BitBuffer2,
     ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
@@ -118,7 +117,7 @@ impl<'a> XtransDetector<'a> {
                 mask: &masks.accumulated,
             };
             scratch.fill_structure(&scene, &self.lattice);
-            scratch.fill_noise(&scene, mesh, self.noise);
+            scratch.fill_noise(&scene, backgrounds, self.noise);
             // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
             for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
                 *l /= nz;
@@ -200,7 +199,12 @@ impl XtransScratch {
     /// Per-pixel noise for the CFA path, from the signal estimate [`Self::fill_structure`] left and
     /// the local background of the pixel's own colour: R, G and B sit at different sky levels after
     /// flat-fielding, so one background for the mosaic would inflate σ.
-    fn fill_noise(&mut self, scene: &CfaScene<'_>, mesh: &ColourMesh, noise: NoiseModel) {
+    fn fill_noise(
+        &mut self,
+        scene: &CfaScene<'_>,
+        backgrounds: &PixelBackgrounds<'_>,
+        noise: NoiseModel,
+    ) {
         let Self {
             signal, noise: out, ..
         } = self;
@@ -212,7 +216,7 @@ impl XtransScratch {
             .for_each(|(index, (out, &signal))| {
                 let position = size.point_of(index);
                 let colour = usize::from(scene.cfa.color_at(position));
-                *out = noise.noise(signal, mesh.at(colour, position));
+                *out = noise.noise(signal, backgrounds.at(colour, position));
             });
     }
 }
@@ -268,7 +272,7 @@ pub(crate) mod internals {
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-    use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+    use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
     use crate::calibration_masters::cosmic_ray::xtrans::{XtransDetector, XtransScratch};
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_metadata::ImageMetadata;
@@ -287,7 +291,11 @@ pub(crate) mod internals {
             &mut MeshWorkspace::default(),
         );
         let mut detector = XtransDetector::new(&config, noise, cfa);
-        detector.reject(data, size, &mesh, &mut BitBuffer2::new_default(size));
+        let backgrounds = PixelBackgrounds {
+            mesh: &mesh,
+            flat_gain: None,
+        };
+        detector.reject(data, size, &backgrounds, &mut BitBuffer2::new_default(size));
         let XtransScratch {
             lplus,
             f,

@@ -186,11 +186,14 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
     }
 }
 
+/// A stacked master states its inputs' step, and hot detection floors its residuals there: eight
+/// noiseless frames, each holding the same rounding of every sample, average to that rounding, so
+/// the stack is no finer than one of them.
 #[test]
 fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
     let (width, height, frame_count) = (128usize, 64usize, 8usize);
     let source_sigma = QUANTIZATION_SIGMA_PER_STEP / 4095.0;
-    let master_sigma = source_sigma / (frame_count as f32).sqrt();
+    let master_sigma = source_sigma;
     let expected = [10 * width + 10, 20 * width + 80];
     let below_threshold = [30 * width + 20, 40 * width + 90];
 
@@ -219,9 +222,10 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         },
     )
     .expect("this cache is never cancelled");
-    assert!(
-        (product.image.metadata.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
-        "eight equal surviving frames must propagate σ/√8"
+    assert_eq!(
+        product.image.metadata.quantization_sigma,
+        Some(master_sigma),
+        "a master states its inputs' step"
     );
     // Defect detection consumes the mosaic master, the same projection `stack_cfa_master` makes.
     let master = product.into_cfa_master();

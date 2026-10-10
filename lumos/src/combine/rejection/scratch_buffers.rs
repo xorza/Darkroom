@@ -67,8 +67,8 @@ pub(crate) struct MethodScratch {
 
 /// Per-thread scratch buffers for the combine.
 ///
-/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) per job and reused across
-/// all of its pixels, so after the first pixel nothing here allocates.
+/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) per job
+/// and reused across all of its pixels, so after the first pixel nothing here allocates.
 #[derive(Debug, Default)]
 pub(crate) struct ScratchBuffers {
     pub(crate) sorted: SortedSamples,
@@ -89,12 +89,19 @@ impl ScratchBuffers {
         self.methods.scores.reserve(frame_count);
         self.methods.gesd.reserve(frame_count);
     }
+}
 
-    /// The gather positions of the last pixel's survivors, or `None` when all of its samples
-    /// survived.
-    pub(crate) fn survivor_positions(&self) -> Option<&[u32]> {
-        self.survivors
-            .clone()
-            .map(|window| &self.sorted.positions()[window])
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::combine::rejection::scratch_buffers::ScratchBuffers;
+
+    impl ScratchBuffers {
+        /// The gather positions of the last pixel's survivors, or `None` when all of its samples
+        /// survived.
+        pub(crate) fn survivor_positions(&self) -> Option<&[u32]> {
+            self.survivors
+                .clone()
+                .map(|window| &self.sorted.positions()[window])
+        }
     }
 }

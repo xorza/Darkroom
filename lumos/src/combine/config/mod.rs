@@ -140,8 +140,8 @@ impl Combine {
     }
 
     /// Winsorized sigma clipping, with no median fallback: it clips once, about a Huber estimate of
-    /// every sample. On ten clean samples at k = 3 it rejects 0.12% under the frames' noise floor and
-    /// 1.5% with none, against the Gaussian tail share of 0.27%.
+    /// every sample. On ten clean samples at k = 3 it rejects 0.12% under the frames' noise floor
+    /// and 1.5% with none, against the Gaussian tail share of 0.27%.
     pub const fn winsorized(sigma: f32) -> Self {
         Self {
             method: CombineMethod::Mean(Rejection::winsorized(sigma)),
@@ -278,9 +278,9 @@ impl StackConfig {
 
     /// Preset for flat frames: σ-clip σ=3.0, multiplicative normalization, equal weights.
     pub const fn flat() -> Self {
-        // σ=3.0 matches the bias-or-dark preset and ccdproc's `combine` default (3σ low/high); flats
-        // are smooth, so a permissive cut just trims clear outliers (dust shadows move between
-        // flats).
+        // σ=3.0 matches the bias-or-dark preset and ccdproc's `combine` default (3σ low/high);
+        // flats are smooth, so a permissive cut just trims clear outliers (dust shadows move
+        // between flats).
         Self {
             combine: Combine {
                 method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
@@ -314,11 +314,14 @@ impl StackConfig {
             return Err(StackConfigError::RejectingSmallNFallback);
         }
 
+        // A weight of 0 would keep a frame in the gather that adds nothing to the mean: a pixel
+        // only such frames cover would read 0 as if measured. Dropping the frame is the honest
+        // form.
         if let Weighting::Manual(weights) = &self.weighting {
             if let Some((index, &value)) = weights
                 .iter()
                 .enumerate()
-                .find(|(_, value)| !value.is_finite() || **value < 0.0)
+                .find(|(_, value)| !value.is_finite() || **value <= 0.0)
             {
                 return Err(StackConfigError::InvalidManualWeight { index, value });
             }

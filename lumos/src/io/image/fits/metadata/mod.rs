@@ -119,6 +119,7 @@ pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMe
         domain: None,
         quantization_sigma: None,
         mosaic_noise: None,
+        flat_gain: None,
         saturation_flagged: false,
         calibration: read_calibration(header),
         unverified_dark: read_unverified_dark(header),

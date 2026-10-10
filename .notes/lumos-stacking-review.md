@@ -25,42 +25,12 @@ The basics are strong. These parts match or beat the reference tools:
 
 The defects that matter most are:
 
-1. **The variance plane ignores flat-field amplification.** In vignetted corners it reports 2–4×
-   too little variance (Batch 7).
-2. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
+1. **The combine on the spill tier reads about 3× the bytes it needs** (Batch 9).
 
 Reading guide: batches are sorted by impact. Each batch is one change that should land in one
 go: it touches one area, and its parts depend on each other or share tests. "Confidence" is
 *confirmed* (reproduced, or proved from the code), *likely* (argued from the code but not
 measured), or *speculative*.
-
----
-
-## Batch 7: Noise model and science planes — **medium-high (science product)**
-
-| ID | Finding | Where | Conf. |
-|---|---|---|---|
-| CMB-3 | The variance plane does not include flat-field amplification. After division by `f`, the read variance is `σ²/f²` and the photon variance is `x/(e·f)`. The model uses one global σ and one global e⁻/unit, so corners at `f = 0.5` report 2–4× too little variance. ccdproc propagates uncertainty through `flat_correct`. | `math/noise/ccd_noise.rs`, `combine/cache/sample_noise.rs:229-266` | likely (absence confirmed) |
-| CAL-12 | The `NoiseEstimation::Gain` cosmic-ray model has the same gap. Cosmic-ray detection runs after the flat, so the source term is low by `1/f` in the corners, and the corners get too many flags. | `calibration_masters/cosmic_ray/noise_model.rs:43-51` | likely |
-| CAL-11 | `quantization_sigma` is not updated after the dark and flat steps, but it is used as a noise floor downstream. | `calibration_masters/mod.rs:423-438` | speculative |
-| CMB-9 | A pixel with no weight reports variance 0, which reads as "exact". Manual weights of 0 are accepted, so a covered pixel whose survivors all have zero weight gets the value 0 without a flag. | `combine/cache/sample.rs:174-196`, `combine/config/mod.rs:330-341` | confirmed |
-| CMB-10 | The median path computes a dispersion on value/weight pairs that `median_mut` permuted apart, and then discards it. This is a latent bug and an extra pass. | `combine/stack/mod.rs:311-325` | confirmed |
-| CMB-7 | The master quantization σ costs an extra loop over the survivors for each pixel to give one worst-pixel scalar. | `combine/stack/mod.rs:341-392` | confirmed |
-
-**Direction:** Carry a per-pixel flat variance factor with the frame, as confidence is carried,
-and warp it with the frame. Use it in `CcdNoise`, in the rejection floor (`Pass::model_sigma`) and in the
-cosmic-ray model. For a median, write only `Σw`.
-
-Decided:
-- **CMB-9:** publish an inverse-variance plane in place of the variance plane, so 0 means "no
-  information". Refuse `Manual` weights of 0 at validation. A caller drops a frame by removing
-  it from the set.
-- **CAL-11 / CMB-7:** `quantization_sigma` means the source's ADC step noise before flat
-  division. It stays unchanged through calibration, and its doc says so. Gain-mode cosmic rays
-  (`cosmic_ray/noise_model.rs:31`), the `FrameStats` noise floor (`frame_stats.rs:148,164`) and
-  the defect residual floor (`defect_map/mod.rs:360`) keep working. Remove the master's
-  worst-pixel computation: a master states the step of its inputs. The 1/f part comes from the
-  flat variance factor above.
 
 ---
 
@@ -174,7 +144,7 @@ STScI: divide by the magnification only in the square kernel, and extend
 
 | ID | Finding | Where | Conf. |
 |---|---|---|---|
-| DMS-5 / DRZ-5 | No CFA drizzle path exists: every OSC frame is interpolated twice (demosaic, then warp). The variance plane also treats demosaic-interpolated samples as independent. PixInsight, Siril and DSS all offer CFA drizzle as the best path for dithered OSC data. | `pipeline/light_source.rs:381-406`, `drizzle/accumulator/mod.rs:40,368` | confirmed |
+| DMS-5 / DRZ-5 | No CFA drizzle path exists: every OSC frame is interpolated twice (demosaic, then warp). The inverse variance plane also treats demosaic-interpolated samples as independent. PixInsight, Siril and DSS all offer CFA drizzle as the best path for dithered OSC data. | `pipeline/light_source.rs:381-406`, `drizzle/accumulator/mod.rs:40,368` | confirmed |
 
 **Direction:** Accept a calibrated `CfaImage`. Deposit each photosite only into the plane of its
 own colour, with weight and coverage planes for each channel (Siril `cdrizzlebox.c:448`). With
@@ -396,8 +366,6 @@ Each decision is also written into the direction of its batch.
 
 | ID | Decision | Batch |
 |---|---|---|
-| CMB-9 | Publish an inverse-variance plane in place of the variance plane, so 0 means "no information". Refuse `Manual` weights of 0 at validation. | 7 |
-| CAL-11 / CMB-7 | `quantization_sigma` means the source's ADC step noise before flat division. It stays unchanged through calibration, and that is documented. Remove the master's worst-pixel computation. The 1/f part goes into the flat-aware noise model. | 7 |
 | RAW-5 | Add a separate `camera_temperature` field. Calibration uses it only to match darks when no sensor temperature exists, and reports which one it used. | 17 |
 | RAW-8 | Use the bounds-checked `linear_max` (RAW-7), minus a small stated ADU margin, as the saturation level when present. Keep 95 % only for `maximum`. | 17 |
 | RAW-16 | Fill `instrument`, `date_obs` and `focal_length` from LibRaw. Leave the pixel size empty. Calibration refuses masters from another camera model. | 17 |

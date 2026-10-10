@@ -10,7 +10,10 @@ use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::internals::panic_message;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::options::{FitsHduSelector, FitsLoadOptions};
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
@@ -21,7 +24,9 @@ use crate::mount_table::MountTable;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
 use std::fs;
+use std::panic::catch_unwind;
 use std::path::Path;
+use std::sync::Arc;
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
 /// back with none. Its files have no name while it lives, on Unix, and none outlive it anywhere.
@@ -454,4 +459,36 @@ fn channels_on_disk_requires_every_plane_at_the_expected_size() {
 
     // Same files, geometry that implies 8×3 = 24 pixels = 96 bytes: stale, not reusable.
     assert!(!spill.channels_on_disk(ImageDimensions::new((8, 3), 3)));
+}
+
+/// A flat gain covers the image whose metadata holds it; one moved onto an image of another size,
+/// or onto one of another channel count, is refused where the frame is stored, rather than read
+/// past its grid in the combine. A grid over the right pixels and channels is taken.
+#[test]
+fn a_flat_gain_of_another_image_is_refused() {
+    let store = |size: (usize, usize), channels: usize| {
+        let gain = Arc::new(FlatGain::of_divisor(
+            &Buffer2::new(size.0, size.1, vec![0.5; size.0 * size.1]),
+            &CfaType::Mono,
+            |_| false,
+        ));
+        catch_unwind(move || {
+            let mut image = LinearImage::from_pixels(
+                ImageDimensions::new((8, 8), channels),
+                vec![0.5; 64 * channels],
+            );
+            image.metadata.flat_gain = Some(gain);
+            let stats = FrameStats::measure(&image);
+            StoredFrame::from_memory(image, FrameQuality::None, stats);
+        })
+        .map_err(|payload| panic_message(payload.as_ref()))
+    };
+    assert!(store((8, 8), 1).is_ok());
+    for (size, channels) in [((4, 4), 1), ((8, 8), 3)] {
+        let message = store(size, channels).unwrap_err();
+        assert!(
+            message.contains("an image's flat gain covers another image's pixels"),
+            "{size:?} × {channels}: {message}"
+        );
+    }
 }

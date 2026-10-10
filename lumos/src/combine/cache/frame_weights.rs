@@ -12,10 +12,9 @@ use crate::frame_store::frame_stats::FrameStats;
 ///
 /// `Weighting::Noise` gives `1 / (gain·σ)²`, σ the frame's measured background noise in that slot
 /// and `gain` its normalization: the inverse variance of the frame as combined. So where no warp
-/// averaged the samples the weight plane, `Σwᵢ` over the survivors, is the inverse variance of
-/// their mean.
-/// Per slot, because a frame with a bad blue channel is noisier in blue only. Manual weights are
-/// relative and the same in every slot.
+/// averaged and no flat amplified the samples the weight plane, `Σwᵢ` over the survivors, is the
+/// inverse variance of their mean. Per slot, because a frame with a bad blue channel is noisier in
+/// blue only. Manual weights are relative and the same in every slot.
 #[derive(Debug)]
 pub(crate) struct FrameWeights {
     slots: Slots,
@@ -27,8 +26,8 @@ impl FrameWeights {
     /// The weights `weighting` asks for, or `None` for equal ones.
     ///
     /// # Errors
-    /// [`StackError::NoNoiseToWeigh`] when noise weighting meets a frame with no measured noise in a
-    /// slot.
+    /// [`StackError::NoNoiseToWeigh`] when noise weighting meets a frame with no measured noise in
+    /// a slot.
     pub(crate) fn resolve<'a>(
         weighting: &Weighting,
         stats: impl IntoIterator<Item = &'a FrameStats>,
@@ -47,7 +46,9 @@ impl FrameWeights {
                     for slot in 0..slots.count() {
                         let gain = frame_norms
                             .map_or(1.0, |norms| norms[index].channels[slots.channel(slot)].gain);
-                        let variance = stats.ccd_noise(slot).background_variance * gain * gain;
+                        // The frame's noise where no flat amplified it, as normalization scaled
+                        // it: the flat's gain changes across the frame, not between frames.
+                        let variance = stats.ccd_noise(slot).background_at(1.0) * gain * gain;
                         let weight = 1.0 / variance;
                         if !weight.is_finite() {
                             return Err(StackError::NoNoiseToWeigh { index });
@@ -88,6 +89,7 @@ mod tests {
                 })
                 .collect(),
             noise: noise.iter().copied().collect(),
+            read_share: [0.0; 3].into_iter().collect(),
             sky: noise.iter().map(|_| 0.5).collect(),
             quantization_sigma: None,
             electrons_per_unit: None,

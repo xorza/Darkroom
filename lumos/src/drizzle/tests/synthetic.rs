@@ -188,9 +188,9 @@ fn drizzle_dithering_recovers_resolution() {
 /// The quality maps' closed form for the half-pixel dithers at scale 1 and pixfrac 1, where a drop
 /// is one output pixel. The undithered frame puts one whole drop on a pixel, weight 1; a frame
 /// dithered half a pixel along one axis puts two half drops, `½ + ½`; along both, four quarters.
-/// So `Σw` = 4, `Σw²` = 1 + 2·(¼ + ¼) + 4·1/16 = 2.25, and with unit sample variance the variance
-/// is 2.25/16 = 9/64 — below the 1/4 of four whole drops, the pooling of neighbouring pixels that
-/// is the point of the variance plane. The frames are noiseless, and a quantization σ of 1 is what
+/// So `Σw` = 4, `Σw²` = 1 + 2·(¼ + ¼) + 4·1/16 = 2.25, and with unit sample variance the inverse
+/// variance is 16/2.25 = 64/9 — above the 4 of four whole drops, the pooling of neighbouring pixels
+/// that is the point of the plane. The frames are noiseless, and a quantization σ of 1 is what
 /// gives each sample unit variance. Every frame reaches every pixel. All exact. The last row and
 /// column are left out: the half-dithered frames reach them with half a drop.
 #[test]
@@ -209,13 +209,13 @@ fn drizzle_quality_maps_have_their_closed_form() {
     let product = drizzle(&frames, &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0));
     let coverage = product.coverage.as_ref().unwrap();
     let weight = weight_plane(&product);
-    let variance = product.variance.as_ref().unwrap().channel(0);
+    let inverse_variance = product.inverse_variance.as_ref().unwrap().channel(0);
     for y in 0..63 {
         for x in 0..63 {
             assert_eq!(
-                (coverage[(x, y)], weight[(x, y)], variance[(x, y)]),
-                (1.0, 4.0, 9.0 / 64.0),
-                "({x}, {y}): coverage, weight, variance"
+                (coverage[(x, y)], weight[(x, y)], inverse_variance[(x, y)]),
+                (1.0, 4.0, 64.0 / 9.0),
+                "({x}, {y}): coverage, weight, inverse variance"
             );
         }
     }

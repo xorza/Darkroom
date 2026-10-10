@@ -7,6 +7,8 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
+use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::flat_gain::{FlatGain, GainGrid};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::noise::ccd_noise::CcdNoise;
@@ -206,6 +208,8 @@ pub(super) struct FrameSource<'a> {
     flags: Option<&'a PixelFlags>,
     /// Each channel's noise model, or none when the drizzle measures no variance.
     noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
+    /// The gain a flat multiplied the frame's pixels by, which the noise model reads.
+    flat_gain: Option<&'a FlatGain>,
 }
 
 /// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
@@ -238,6 +242,7 @@ impl<'a> FrameSource<'a> {
             pixel_weights: pixel_weights.map(Buffer2::pixels),
             flags: image.flags.as_ref(),
             noise,
+            flat_gain: image.flat_gain(),
         }
     }
 
@@ -249,11 +254,24 @@ impl<'a> FrameSource<'a> {
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
         let values: ArrayVec<f32, MAX_CHANNELS> =
             self.planes.iter().map(|plane| plane[pixel.index]).collect();
+        let point = self.flat_gain.filter(|_| !self.noise.is_empty()).map(|_| {
+            GainGrid::of(self.size).point(
+                (pixel.index % self.size.width) as f32,
+                (pixel.index / self.size.width) as f32,
+            )
+        });
         let variances = self
             .noise
             .iter()
             .zip(&values)
-            .map(|(model, &value)| model.variance_at(value))
+            .enumerate()
+            .map(|(channel, (model, &value))| {
+                let gain = self
+                    .flat_gain
+                    .zip(point)
+                    .map_or(1.0, |(gain, point)| gain.at_point(channel, point));
+                model.variance_at(value, gain)
+            })
             .collect();
         Fluxes { values, variances }
     }
@@ -313,12 +331,13 @@ impl<'a> FrameSource<'a> {
     /// rows, or `input_margin` input rows, from its pixel's centre.
     ///
     /// The output rows widened by `output_margin` — and the columns too, since a rotated drop
-    /// reaches the band from beside the grid as well as from above and below it — taken back to
-    /// the input, and the input rows they span widened by `input_margin`. Exact rather than estimated: a drop that reaches the
-    /// band has a point inside it, and that point's input row lies within `input_margin` of its
-    /// pixel's, or its output row within `output_margin` of the band. Deliberately generous at the
-    /// row level — over-scanning costs one transform and a rejected row test per pixel, measured at
-    /// ~0.9 ns against ~100 ns for a deposit, while under-scanning would drop flux.
+    /// reaches the band from beside the grid as well as from above and below it — taken back to the
+    /// input, and the input rows they span widened by `input_margin`. Exact rather than estimated:
+    /// a drop that reaches the band has a point inside it, and that point's input row lies within
+    /// `input_margin` of its pixel's, or its output row within `output_margin` of the band.
+    /// Deliberately generous at the row level — over-scanning costs one transform and a rejected
+    /// row test per pixel, measured at ~0.9 ns against ~100 ns for a deposit, while under-scanning
+    /// would drop flux.
     #[expect(
         clippy::cast_sign_loss,
         reason = "each bound is held at 0 or above first, and the cast saturates at the top"

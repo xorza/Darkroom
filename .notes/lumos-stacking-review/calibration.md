@@ -108,30 +108,6 @@ DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
   loading a typed error enum (`BundleError::{NotABundle, Version{found}, Checksum{hdu},
   DuplicateExtension, …}`).
 
-## CAL-11 — `quantization_sigma` survives calibration unchanged
-
-- **Where:** `lumos/src/calibration_masters/mod.rs:423-438`
-- **Category:** precision
-- **Impact:** low — after the dark (which adds its own quantization variance) and the flat (which
-  scales the step by `1/f`, up to 10× at the floor), the light's recorded `quantization_sigma` no
-  longer describes its samples. It is used as a noise floor downstream
-  (`frame_store/frame_stats.rs:148,164`, `MosaicNoise::measure` via `io/image/cfa/mod.rs:340-347`).
-- **Confidence:** speculative (impact depends on how often the floor binds)
-- **Recommended direction:** Either propagate it (√(q_L² + s²·q_D² + q_B²)/f_min, documented as a
-  bound) or drop it after flat division, as demosaic already drops it.
-
-## CAL-12 — `Gain` noise model is a constant after flat division
-
-- **Where:** `lumos/src/calibration_masters/cosmic_ray/noise_model.rs:43-51`
-- **Category:** precision
-- **Impact:** low — CR detection runs after the flat (`pipeline/light_source.rs:393-401`), so
-  Poisson variance per unit is `1/(g·f)`, not `1/g`. With `NoiseEstimation::Gain` the source term is
-  under-estimated by `1/f` in vignetted corners, which over-flags there. `Measured` mode adapts
-  through the local mesh, but only for the sky term.
-- **Confidence:** likely
-- **Recommended direction:** Pass the prepared flat divisor (or `1/f` per pixel) into the noise model
-  for the source term. Alternatively, document that the stated gain is per flat-normalized unit.
-
 ## CAL-13 — Calibration errors lose which light failed
 
 - **Where:** `lumos/src/pipeline/light_source.rs:393`, `pipeline/error.rs:39-40`
@@ -272,13 +248,13 @@ DSS (`DeepSkyStackerKernel/DarkFrame.cpp`, `FlatFrame.cpp`).
 
 ## Suggested batches
 
-1. **Fused per-light kernel (CAL-8, with CAL-11):** one pass for bias, dark, flat and flags.
-   Incremental flag counts. Decide what `quantization_sigma` means after calibration.
+1. **Fused per-light kernel (CAL-8):** one pass for bias, dark, flat and flags. Incremental flag
+   counts.
 2. **Defect policy (CAL-5, CAL-16):** redefine the hot-pixel threshold from what a defect promises;
    measure the flagged fraction and Gr/Gb on real data.
-3. **Cosmic rays (CAL-6, CAL-7, CAL-9, CAL-12, CAL-17):** saturated-star protection and flag-aware
-   in-paint, X-Trans threshold calibration with noise-only and star tests, local re-iteration, a
-   flat-aware gain term, and typed detectors.
+3. **Cosmic rays (CAL-6, CAL-7, CAL-9, CAL-17):** saturated-star protection and flag-aware
+   in-paint, X-Trans threshold calibration with noise-only and star tests, local re-iteration, and
+   typed detectors.
 4. **API and layout (CAL-14, CAL-15, CAL-13, CAL-10, CAL-18):** a lumos-owned master builder,
    narrower visibility, path-carrying calibration errors, a typed bundle error with mmap load, and
    the comment trims.

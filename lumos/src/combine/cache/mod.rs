@@ -38,6 +38,8 @@ use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::flat_gain;
+use crate::io::image::flat_gain::{GainGrid, GainRows};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
@@ -59,7 +61,7 @@ use std::path::Path;
 pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
-    variance: Option<LinearPixels>,
+    inverse_variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
     /// The stack's flags, for a frame set where any frame carries flags: [`QualityFlags::NO_DATA`]
     /// where no frame reached a pixel, [`QualityFlags::SATURATED`] where a kept sample was.
@@ -73,7 +75,7 @@ pub(crate) struct CombineOutput {
 struct QualityRows<'a> {
     value: &'a mut [f32],
     weight: Option<&'a mut [f32]>,
-    variance: Option<&'a mut [f32]>,
+    inverse_variance: Option<&'a mut [f32]>,
     dispersion: Option<&'a mut [f32]>,
     flags: Option<&'a mut [u8]>,
 }
@@ -204,7 +206,7 @@ impl FrameCache {
         let CombineOutput {
             pixels,
             weight: weight_pixels,
-            variance: variance_pixels,
+            inverse_variance: inverse_variance_pixels,
             dispersion: dispersion_pixels,
             flags,
             mut report,
@@ -229,11 +231,13 @@ impl FrameCache {
             .fold(UnverifiedConditions::NONE, UnverifiedConditions::union);
         let image = LinearImage {
             // The reference frame's metadata, with the combine's own quantization σ, saturation
-            // record, capture conditions and unverified dark match, and no mosaic noise: what the
-            // reference's decoder and demosaic recorded describes one frame, not the stack.
+            // record, capture conditions and unverified dark match, and no mosaic noise or flat
+            // gain: what the reference's decoder, demosaic and flat recorded describes one frame,
+            // not the stack.
             metadata: ImageMetadata {
                 quantization_sigma,
                 mosaic_noise: None,
+                flat_gain: None,
                 saturation_flagged,
                 exposure_time: conditions.exposure_time,
                 ccd_temp: conditions.ccd_temp,
@@ -244,7 +248,7 @@ impl FrameCache {
             flags: flags.and_then(PixelFlags::from_buffer),
         };
         let weight = weight_pixels.map(QualityMap::from_pixels);
-        let variance = variance_pixels.map(QualityMap::from_pixels);
+        let inverse_variance = inverse_variance_pixels.map(QualityMap::from_pixels);
         let dispersion = dispersion_pixels.map(QualityMap::from_pixels);
         let frame_count = self.frames.len();
         let width = dimensions.width();
@@ -260,7 +264,7 @@ impl FrameCache {
                     size: dimensions.size(),
                 }),
                 weight,
-                variance,
+                inverse_variance,
                 dispersion,
                 cfa_type,
                 report,
@@ -318,7 +322,7 @@ impl FrameCache {
             image,
             coverage: Some(Coverage::PerPixel(coverage)),
             weight,
-            variance,
+            inverse_variance,
             dispersion,
             cfa_type,
             report,
@@ -356,8 +360,8 @@ impl FrameCache {
         let dimensions = self.core.dimensions;
         let chunking = self.core.chunk_rows(self.weighted_layout(planes));
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
-        let mut output_variance = planes
-            .variance
+        let mut output_inverse_variance = planes
+            .inverse_variance
             .then(|| LinearPixels::new_zeroed(dimensions));
         let mut output_dispersion = planes
             .dispersion
@@ -402,6 +406,24 @@ impl FrameCache {
                             .map(|plane| plane.chunk(pixel_offset, chunk_end))
                     })
                     .collect();
+                // The node rows of each frame's flat gain the chunk reads, for the noise model, and
+                // the grid they share: every frame has the stack's size.
+                let gain_grid = GainGrid::of(dimensions.size());
+                let gains: Vec<Option<GainRows<'_>>> = self
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .flat_gain
+                            .as_ref()
+                            .filter(|_| noise.is_some())
+                            .map(|gain| {
+                                debug_assert_eq!(gain.grid(), gain_grid);
+                                debug_assert_eq!(gain.channels(), slots.count());
+                                gain.rows(pixel_offset / width..chunk_end / width)
+                            })
+                    })
+                    .collect();
                 // One row bundle per output row, so an unrequested plane simply has no slice
                 // to write instead of needing its own copy of the gather loop below.
                 let mut rows: Vec<QualityRows<'_>> = output_slice
@@ -409,7 +431,7 @@ impl FrameCache {
                     .map(|value| QualityRows {
                         value,
                         weight: None,
-                        variance: None,
+                        inverse_variance: None,
                         dispersion: None,
                         flags: None,
                     })
@@ -421,11 +443,11 @@ impl FrameCache {
                         row.weight = Some(chunk);
                     }
                 }
-                if let Some(plane) = output_variance.as_mut() {
+                if let Some(plane) = output_inverse_variance.as_mut() {
                     let slice = &mut plane.channel_mut(channel).pixels_mut()
                         [pixel_offset..pixel_offset + chunk_pixels];
                     for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.variance = Some(chunk);
+                        row.inverse_variance = Some(chunk);
                     }
                 }
                 if let Some(plane) = output_dispersion.as_mut() {
@@ -462,7 +484,6 @@ impl FrameCache {
                             values,
                             eff_weights,
                             sample_flags,
-                            frame_ids,
                             noise_background,
                             noise_sky,
                             noise_inverse_electrons,
@@ -471,7 +492,6 @@ impl FrameCache {
                         let values = values.as_mut_slice();
                         let eff_weights = eff_weights.as_mut_slice();
                         let sample_flags = sample_flags.as_mut_slice();
-                        let frame_ids = frame_ids.as_mut_slice();
                         let noise_background = noise_background.as_mut_slice();
                         let noise_sky = noise_sky.as_mut_slice();
                         let noise_inverse_electrons = noise_inverse_electrons.as_mut_slice();
@@ -482,6 +502,7 @@ impl FrameCache {
                         for pixel_in_row in 0..width {
                             let pixel_idx = row_offset + pixel_in_row;
                             let slot = slots.slot(channel, Vec2us::new(pixel_in_row, y));
+                            let gain_point = gain_grid.point(pixel_in_row as f32, y as f32);
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
                                 let support = match coverage[frame_idx] {
@@ -507,15 +528,18 @@ impl FrameCache {
                                         .map_or(1.0, |weights| weights.weight(frame_idx, slot));
                                     sample_flags[covered] =
                                         flags[frame_idx].map_or(0, |plane| plane[pixel_idx]);
-                                    frame_ids[covered] = frame_idx as u32;
                                     if let Some(noise) = noise {
-                                        // Confidence is the warp's inverse variance factor.
+                                        // Confidence is the warp's inverse variance factor, the
+                                        // flat's gain the factor it multiplied the sample by.
                                         let model = noise.model(frame_idx, slot);
-                                        noise_background[covered] = model.background_variance / q;
+                                        let gain = gains[frame_idx]
+                                            .as_ref()
+                                            .map_or(1.0, |rows| rows.at(slot, gain_point));
+                                        noise_background[covered] = model.background_at(gain) / q;
                                         noise_sky[covered] = model.sky;
                                         noise_inverse_electrons[covered] = model
                                             .electrons_per_unit
-                                            .map_or(0.0, |electrons| 1.0 / (electrons * q));
+                                            .map_or(0.0, |electrons| gain / (electrons * q));
                                     }
                                     covered += 1;
                                 }
@@ -525,7 +549,6 @@ impl FrameCache {
                                     values: &mut *values,
                                     eff_weights: &mut *eff_weights,
                                     sample_flags: &mut *sample_flags,
-                                    frame_ids: &mut *frame_ids,
                                     noise_background: &mut *noise_background,
                                     noise_sky: &mut *noise_sky,
                                     noise_inverse_electrons: &mut *noise_inverse_electrons,
@@ -550,13 +573,11 @@ impl FrameCache {
                                     PixelSamples {
                                         values: &mut values[..kept],
                                         weights: &eff_weights[..kept],
-                                        frame_ids: &frame_ids[..kept],
                                         noise: noise.map(|_| NoiseColumns {
                                             background: &noise_background[..kept],
                                             sky: &noise_sky[..kept],
                                             inverse_electrons: &noise_inverse_electrons[..kept],
                                         }),
-                                        channel,
                                     },
                                     buffers,
                                 )
@@ -578,8 +599,8 @@ impl FrameCache {
                             if let Some(weight) = row.weight.as_deref_mut() {
                                 weight[pixel_in_row] = sample.weight;
                             }
-                            if let Some(variance) = row.variance.as_deref_mut() {
-                                variance[pixel_in_row] = sample.variance;
+                            if let Some(plane) = row.inverse_variance.as_deref_mut() {
+                                plane[pixel_in_row] = sample.inverse_variance;
                             }
                             if let Some(dispersion) = row.dispersion.as_deref_mut() {
                                 dispersion[pixel_in_row] = sample.dispersion;
@@ -593,13 +614,13 @@ impl FrameCache {
         CombineOutput {
             pixels,
             weight: output_weight,
-            variance: output_variance,
+            inverse_variance: output_inverse_variance,
             dispersion: output_dispersion,
             flags: output_flags,
             report: RunReport {
                 excluded_samples: excluded.totals(),
                 kept_flagged_samples: kept_flagged.totals(),
-                variance_background_only: planes.variance
+                variance_background_only: planes.inverse_variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
                 chunk_overcommit_bytes: chunking.overcommit_bytes,
                 spilled_frames: if self.core.tier.spills() {
@@ -638,8 +659,18 @@ impl FrameCache {
                 .frames
                 .iter()
                 .map(|frame| {
+                    // A flat gain grid holds a node per `STEP²` pixels of each channel, 3/4 of a
+                    // byte a pixel at most. Rounded up to a byte it also covers the two node rows
+                    // a planned chunk reads past its own: 64 rows read at most 18 node rows of
+                    // `W/4 + 1.75` nodes, `54W + 378` bytes in colour, under `64W` from 38
+                    // columns. A frame under 64 rows, read whole, is too small to matter.
+                    let gain = frame.flat_gain.as_ref().map_or(0, |gain| {
+                        (gain.channels() * size_of::<f32>())
+                            .div_ceil(flat_gain::STEP * flat_gain::STEP)
+                    });
                     (1 + frame.quality.count()) * size_of::<f32>()
                         + usize::from(frame.flags.is_some())
+                        + gain
                 })
                 .sum(),
             resident_bytes: self.output_bytes(

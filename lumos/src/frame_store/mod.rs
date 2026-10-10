@@ -15,6 +15,7 @@ pub(crate) mod plane_store;
 pub(crate) mod run_scratch;
 pub(crate) mod stackable_image;
 pub(crate) mod stored_frame;
+pub(crate) mod stored_gain;
 pub(crate) mod stored_image;
 pub(crate) mod stored_plane;
 

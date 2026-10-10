@@ -14,25 +14,26 @@ pub struct QualityPlanes {
     pub coverage: bool,
     /// Per-channel sum of surviving frame weights.
     pub weight: bool,
-    /// Per-channel linear-combine variance factor. A median has none whatever this says — it is
-    /// not a linear combination — so requesting it is an upper bound, not a guarantee.
-    pub variance: bool,
+    /// Per-channel inverse variance of the linear combine. A median has none whatever this says —
+    /// it is not a linear combination — so requesting it is an upper bound, not a guarantee.
+    pub inverse_variance: bool,
     /// Per-channel scatter of the surviving samples, the variance of their weighted mean as the
     /// frames show it. A statistical mean combine produces it; a median or a drizzle does not.
     pub dispersion: bool,
 }
 
 impl QualityPlanes {
-    /// Coverage, weight and variance: the science default, and what makes the stacked master
-    /// measurable.
+    /// Coverage, weight and inverse variance: the science default, and what makes the stacked
+    /// master measurable.
     pub const STANDARD: Self = Self {
         coverage: true,
         weight: true,
-        variance: true,
+        inverse_variance: true,
         dispersion: false,
     };
 
-    /// Every ancillary plane: the standard ones, and the dispersion that checks the variance.
+    /// Every ancillary plane: the standard ones, and the dispersion that checks the inverse
+    /// variance.
     pub const ALL: Self = Self {
         dispersion: true,
         ..Self::STANDARD
@@ -42,14 +43,15 @@ impl QualityPlanes {
     pub const IMAGE_ONLY: Self = Self {
         coverage: false,
         weight: false,
-        variance: false,
+        inverse_variance: false,
         dispersion: false,
     };
 
     /// Image-sized planes a combine keeps resident per output channel: the combined pixels, plus
-    /// whichever of weight, variance and dispersion were asked for and so are allocated up front.
+    /// whichever of weight, inverse variance and dispersion were asked for and so are allocated up
+    /// front.
     pub(crate) const fn resident_planes_per_channel(self) -> usize {
-        1 + self.weight as usize + self.variance as usize + self.dispersion as usize
+        1 + self.weight as usize + self.inverse_variance as usize + self.dispersion as usize
     }
 
     /// Bytes a resident combine holds beside its frames for an output of `dimensions`: the
@@ -63,10 +65,10 @@ impl QualityPlanes {
     }
 
     /// Drop the planes this combine method cannot produce, so the request reaching the reducer
-    /// is exactly what it will write: variance and dispersion belong to a weighted mean.
+    /// is exactly what it will write: inverse variance and dispersion belong to a weighted mean.
     pub(crate) const fn resolve(self, weighted_mean: bool) -> Self {
         Self {
-            variance: self.variance && weighted_mean,
+            inverse_variance: self.inverse_variance && weighted_mean,
             dispersion: self.dispersion && weighted_mean,
             ..self
         }

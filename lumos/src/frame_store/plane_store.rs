@@ -20,4 +20,7 @@ pub(crate) trait PlaneStore {
     ) -> Result<StoredPlane, FrameStoreError>;
 
     fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError>;
+
+    /// One channel's nodes of a frame's flat gain grid.
+    fn store_gain(&self, channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError>;
 }

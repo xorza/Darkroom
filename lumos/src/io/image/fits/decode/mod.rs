@@ -30,6 +30,7 @@ use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::decode::selected_fits::SelectedFits;
 
 use crate::io::image::fits::flags_extension::FlagsExtension;
+use crate::io::image::fits::gain_extension::GAIN_EXTNAME;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::FitsChecksumProvenance;
@@ -72,6 +73,7 @@ impl DecodedFitsImage {
             ));
         }
 
+        check_gain_channels(path, &self.metadata, self.pixels.dimensions().channels())?;
         Ok(LinearImage {
             metadata: self.metadata,
             pixels: self.pixels,
@@ -93,6 +95,7 @@ impl DecodedFitsImage {
             ));
         };
 
+        check_gain_channels(path, &self.metadata, cfa_type.num_colors())?;
         let Self {
             mut metadata,
             pixels,
@@ -108,6 +111,25 @@ impl DecodedFitsImage {
             metadata,
             flags,
         })
+    }
+}
+
+/// Refuse a stored flat gain whose grids are not one per colour of the mosaic, or per channel of
+/// the image, that `metadata` describes: `channels` of them.
+fn check_gain_channels(
+    path: &Path,
+    metadata: &ImageMetadata,
+    channels: usize,
+) -> Result<(), ImageError> {
+    match metadata.flat_gain.as_deref() {
+        Some(gain) if gain.channels() != channels => Err(ImageError::fits_unsupported(
+            path,
+            format!(
+                "{GAIN_EXTNAME} holds {} grids for an image of {channels} colours or channels",
+                gain.channels()
+            ),
+        )),
+        _ => Ok(()),
     }
 }
 

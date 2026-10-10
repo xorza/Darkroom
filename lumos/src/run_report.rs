@@ -14,8 +14,9 @@ pub struct RunReport {
     /// Channel samples the combine kept although their pixel carried the flag, because leaving
     /// them out would have dropped the pixel below the minimum survivor count.
     pub kept_flagged_samples: FlagCounts,
-    /// The variance plane holds the background noise only: some frame did not state its gain, so
-    /// the photon noise of the signal above the sky is missing from it.
+    /// The inverse variance plane holds the background noise only: some frame did not state its
+    /// gain, so the photon noise of the signal above the sky is missing from the variance it
+    /// inverts.
     pub variance_background_only: bool,
     /// Lights calibrated with a dark whose exposure, or their own, was not declared, so the two
     /// were not compared.

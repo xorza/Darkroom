@@ -34,6 +34,11 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
     prepared.apply(&mut light);
     assert_eq!(light.data.pixels(), &[10.0, 1.0, 1.0, 0.5]);
+    // The light carries the flat's gain for its noise: the one node over the 2×2 frame is the mean
+    // gain of the photosites the floor left alone, (1 + 1 + ½)/3 = 5/6; the floored photosite's
+    // 10 would raise it to 3.125.
+    let gain = light.metadata.flat_gain.as_ref().unwrap();
+    assert_eq!(gain.at(0, 0.0, 0.0), (5.0f64 / 6.0) as f32);
     // The floored divisor is flagged, and only it: that pixel is corrected by less than its flat
     // asked for.
     let flags = light.flags.as_ref().unwrap();

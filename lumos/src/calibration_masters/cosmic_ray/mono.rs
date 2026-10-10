@@ -8,7 +8,6 @@ use std::array;
 
 use rayon::prelude::*;
 
-use crate::background_mesh::colour_mesh::LocalBackground;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
@@ -16,7 +15,7 @@ use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::masks::CrMasks;
-use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
 pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
@@ -30,8 +29,9 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 /// each producer keeps the largest allocation.
 ///
 /// Five planes, not the eight the stages name: `significance` and `fine` are rewritten in place by
-/// the elementwise step that consumes them, and `median` is handed from one stage to the next. On a 6144² mono frame that is 720 MB of working set instead of 1.1 GB —
-/// and, the point of the struct, no allocation at all after the first iteration.
+/// the elementwise step that consumes them, and `median` is handed from one stage to the next. On a
+/// 6144² mono frame that is 720 MB of working set instead of 1.1 GB — and, the point of the struct,
+/// no allocation at all after the first iteration.
 #[derive(Debug, Default)]
 struct MonoScratch {
     /// `L⁺`, then the significance `S = L⁺/(2N)`, then `S' = S − median₅(S)`, each in place.
@@ -83,12 +83,13 @@ impl<'a> MonoDetector<'a> {
     /// Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` →
     /// `S' = S − median₅(S)` → fine structure `F` → flag → grow → in-paint → iterate.
     ///
-    /// `local` gives each pixel's background sky and σ, by flat index into the plane.
+    /// `local` gives each pixel's background sky and σ and its flat gain, by flat index into the
+    /// plane.
     pub(super) fn reject(
         &mut self,
         data: &mut [f32],
         size: Size2us,
-        local: &(dyn Fn(usize) -> LocalBackground + Sync),
+        local: &(dyn Fn(usize) -> PixelBackground + Sync),
         found: &mut BitBuffer2,
     ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
@@ -321,7 +322,7 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
 /// local background, into `out`.
 fn noise_map_into(
     m5: &[f32],
-    local: &(dyn Fn(usize) -> LocalBackground + Sync),
+    local: &(dyn Fn(usize) -> PixelBackground + Sync),
     noise: NoiseModel,
     out: &mut Vec<f32>,
 ) {
@@ -387,7 +388,7 @@ pub(crate) mod internals {
     use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
     use crate::calibration_masters::cosmic_ray::mono::median_window_into;
     use crate::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
-    use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+    use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
     use crate::io::image::image_metadata::ImageMetadata;
     use crate::math::size2us::Size2us;
 
@@ -411,9 +412,12 @@ pub(crate) mod internals {
     ) -> usize {
         let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
             .expect("the measured model needs nothing from the frame");
-        let local = |_| LocalBackground {
-            sky: 0.1,
-            noise: 0.01,
+        let local = |_| PixelBackground {
+            local: LocalBackground {
+                sky: 0.1,
+                noise: 0.01,
+            },
+            flat_gain: 1.0,
         };
         let mut detector = MonoDetector::new(config, noise);
         detector.reject(data, size, &local, &mut BitBuffer2::new_default(size));

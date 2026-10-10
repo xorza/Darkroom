@@ -8,14 +8,15 @@
 //!   synthetic FITS under one budget: the dark and flat masters through [`stack_cfa_master`], then
 //!   the lights through [`calibrate_align_stack`] — calibrate, detect, register, warp, combine
 //!   under [`StackConfig::light`], whose global normalization measures every warped plane over the
-//!   frames' common domain. The probe asserts peak heap stays under the budget **across every stage**, plus the masters the
-//!   caller holds, proving each stage's frames free before the next loads.
+//!   frames' common domain. The probe asserts peak heap stays under the budget **across every
+//!   stage**, plus the masters the caller holds, proving each stage's frames free before the next
+//!   loads.
 //!
-//! - [`align_stack_memory_probe`] — the **bounded-working-set** regime. Runs the real
-//!   detect → register → warp → combine flow ([`align_and_stack`]) over a large synthetic star-field
-//!   set and asserts peak heap stays within the working set the RAM path inherently needs (resident
-//!   warped frames + concurrent detection scratch), with headroom — so a per-frame leak in any stage
-//!   would blow the ceiling.
+//! - [`align_stack_memory_probe`] — the **bounded-working-set** regime. Runs the real detect →
+//!   register → warp → combine flow ([`align_and_stack`]) over a large synthetic star-field set and
+//!   asserts peak heap stays within the working set the RAM path inherently needs (resident warped
+//!   frames + concurrent detection scratch), with headroom — so a per-frame leak in any stage would
+//!   blow the ceiling.
 //!
 //! - [`raw_lights_memory_probe`] (feature `real-data`) — the libraw RAW decode and demosaic that
 //!   synthetic FITS skip: the dataset's lights through [`calibrate_align_stack`] with empty
@@ -369,7 +370,11 @@ fn align_stack_memory_probe() {
     let threads = rayon::current_num_threads();
     let dimensions = ImageDimensions::new(size, channels);
     let output_bytes = dimensions.frame_bytes();
-    let per_frame = PerFrameBytes::new(frame_bytes as usize, output_bytes);
+    let per_frame = PerFrameBytes::new(
+        frame_bytes as usize,
+        output_bytes,
+        dimensions.flat_gain_bytes(),
+    );
     let detection = DETECTION_WORKING_PLANES * frame_bytes as usize + output_bytes;
     let resident =
         (n * per_frame.warped + QualityPlanes::STANDARD.resident_bytes(dimensions)) as u64;

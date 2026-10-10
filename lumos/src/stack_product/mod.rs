@@ -35,40 +35,44 @@ pub struct StackProduct {
     ///
     /// - A statistical combine sums, per channel, each surviving frame's weight. `Equal` weighting
     ///   gives unit frame weights, so the sum is the survivor count. `Noise` weighting gives each
-    ///   frame its inverse noise variance, not normalized, so where no warp averaged the samples
-    ///   the sum is the inverse variance of the mean. `Manual` weights are relative, and so is the
-    ///   sum. A warp's confidence enters the variance, not the weight — see
+    ///   frame its inverse noise variance, not normalized, so where no warp averaged and no flat
+    ///   amplified the samples the sum is the inverse variance of the mean. `Manual` weights are
+    ///   relative, and so is the sum. A warp's confidence enters the variance, not the weight — see
     ///   [`WarpResult`](crate::WarpResult).
     /// - Drizzle sums one shared plane of geometric drop weights: how much of each input pixel's
     ///   flux landed here, times the frame weight.
     ///
     /// It is the denominator the image was divided by, under the same weights as
-    /// [`Self::variance`].
+    /// [`Self::inverse_variance`].
     pub weight: Option<QualityMap>,
-    /// The variance of each pixel's value, in the image's units squared: `Σwᵢ²·vᵢ / (Σwᵢ)²` over
-    /// the samples that formed it.
+    /// The inverse variance of each pixel's value, in the image's units to the power −2:
+    /// `(Σwᵢ)² / Σwᵢ²·vᵢ` over the samples that formed it. A pixel nothing formed reads 0, no
+    /// information, which is what an inverse-variance consumer gives it; a variance plane would
+    /// read 0 there too and claim the pixel exact. A pixel whose noise model is 0 reads `+∞`.
     ///
     /// `vᵢ` is the sample's CCD noise model: the frame's measured background noise, plus the photon
     /// noise of the signal above the sky when the frame states its gain
-    /// ([`RunReport::variance_background_only`] says when one did not), carried through
-    /// normalization and divided by the warp's confidence. A statistical combine takes it at the
-    /// combined value; drizzle takes it at each input pixel's value. Drizzle spreads one input
-    /// pixel over several output pixels, so its noise correlates between neighbours (Fruchter &
-    /// Hook 2002): this plane is each pixel's own variance, not their covariance.
+    /// ([`RunReport::variance_background_only`] says when one did not), both scaled by the gain the
+    /// frame's flat applied at the sample — the read noise and dark current by its square — carried
+    /// through normalization and divided by the warp's confidence. A statistical combine takes it
+    /// at the combined value; drizzle takes it at each input pixel's value. Drizzle spreads one
+    /// input pixel over several output pixels, so its noise correlates between neighbours (Fruchter
+    /// & Hook 2002): this plane is each pixel's own variance, not their covariance.
     ///
     /// Absent for median output, which has no exact variance.
-    pub variance: Option<QualityMap>,
+    pub inverse_variance: Option<QualityMap>,
     /// The variance of each pixel's value as its surviving samples' scatter shows it, in the
     /// image's units squared: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model.
     ///
     /// Unbiased where each sample's variance is inversely proportional to its weight — as `Noise`
-    /// weighting makes it at the sky where no warp averaged the samples — and with equal weights
-    /// the squared standard error of the mean. It checks [`Self::variance`]: where the two disagree
-    /// beyond the scatter of a scatter, the noise model or the frames are off. A clip in a band of
-    /// σ — sigma clip, winsorized, linear fit — leaves survivors that scatter as a Gaussian
-    /// truncated to the band, so their sum of squares is divided by that variance, 0.911 at ±2.5σ;
-    /// trim and GESD cut by rank and by test, and read below the frames' full scatter. NaN where
-    /// fewer than two samples survive.
+    /// weighting makes it at the sky where no warp averaged and no flat amplified the samples — and
+    /// with equal weights the squared standard error of the mean. It checks
+    /// [`Self::inverse_variance`], whose reciprocal it estimates: where the two disagree beyond the
+    /// scatter of a scatter, the noise model or the frames are off. A clip in a band of σ — sigma
+    /// clip, winsorized, linear fit — leaves survivors that scatter as a Gaussian truncated to the
+    /// band, so their sum of squares is divided by that variance, 0.911 at ±2.5σ; trim and GESD cut
+    /// by rank and by test, and read below the frames' full scatter. NaN where fewer than two
+    /// samples survive.
     ///
     /// Absent for median output and for drizzle, and unless asked for.
     pub dispersion: Option<QualityMap>,
@@ -127,7 +131,7 @@ mod tests {
             image,
             coverage: None,
             weight: None,
-            variance: None,
+            inverse_variance: None,
             dispersion: None,
             cfa_type,
             report: RunReport::default(),

@@ -1,13 +1,18 @@
 //! Observation metadata carried by every image product.
 
+use std::sync::Arc;
+
 use fits_well::image::SampleType;
 
 use crate::io::image::calibration_state::CalibrationState;
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
+use crate::math::size2us::Size2us;
+use crate::registration::transform::WarpTransform;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default)]
@@ -73,18 +78,26 @@ pub struct ImageMetadata {
     /// subtracts a master.
     pub domain: Option<SampleDomain>,
     /// The uncertainty one quantization step adds to a sample, `step / √12`, in the samples' own
-    /// units: a lower bound on any sample's noise.
+    /// units: the source's ADC step, a lower bound on any sample's noise before a flat divided it.
     ///
     /// Set by a decoder that knows the step — a RAW with a linear curve, an integer FITS — and by
-    /// the combine for a master. A demosaic clears it: interpolation mixes samples, so the bound no
-    /// longer describes one of them.
+    /// the combine for a master, which states the largest step of its inputs. Calibration leaves it
+    /// as it is: subtracting a master adds no step to the light's own, and the flat's division
+    /// scales it per pixel, which the noise model applies where it reads the flat. A demosaic
+    /// clears it: interpolation mixes samples, so the bound no longer describes one of them.
     pub quantization_sigma: Option<f32>,
     /// The white noise of the mosaic a demosaic made this frame from, which a measurement of the
     /// frame would understate. Set by the demosaic; `None` for any frame not demosaiced, and for a
     /// master, which the combine made.
     pub mosaic_noise: Option<MosaicNoise>,
-    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS with a
-    /// `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
+    /// The gain a flat applied to each pixel's value and noise, in this image's own pixels: set
+    /// when calibration divides by a flat — shared by every light it divides — kept through a
+    /// demosaic and through a FITS file of the mosaic (its `LUMGAIN` extension), and replaced by
+    /// its warped grid when a warp moves the pixels. `None` for a frame no flat divided, and for a
+    /// master, which the combine made.
+    pub flat_gain: Option<Arc<FlatGain>>,
+    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS with
+    /// a `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
     /// leaves a consumer to test the samples itself.
     pub saturation_flagged: bool,
     /// The parts of the signal calibration removed: set by `CalibrationMasters::calibrate` on a
@@ -97,6 +110,13 @@ pub struct ImageMetadata {
 }
 
 impl ImageMetadata {
+    /// The metadata of this image's pixels moved by `warp`, an output-to-source map onto an output
+    /// of `size`: its flat gain moves with them.
+    pub(crate) fn warped(mut self, warp: &WarpTransform, size: Size2us) -> Self {
+        self.flat_gain = self.flat_gain.map(|gain| Arc::new(gain.warped(warp, size)));
+        self
+    }
+
     /// Which end of the image the first stored row belongs to, or `None` for an image this crate
     /// synthesized rather than decoded.
     ///

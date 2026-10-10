@@ -25,7 +25,6 @@ pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
     pub(super) eff_weights: Vec<f32>,
     pub(super) sample_flags: Vec<u8>,
-    pub(super) frame_ids: Vec<u32>,
     /// The columns of [`NoiseColumns`], filled only when the combine asked for noise.
     pub(super) noise_background: Vec<f32>,
     pub(super) noise_sky: Vec<f32>,
@@ -38,11 +37,8 @@ pub(crate) struct CombineScratch {
 pub(crate) struct PixelSamples<'a> {
     pub(crate) values: &'a mut [f32],
     pub(crate) weights: &'a [f32],
-    /// The frame each sample came from.
-    pub(crate) frame_ids: &'a [u32],
     /// Each sample's noise model, when the combine measures a spread or a variance.
     pub(crate) noise: Option<NoiseColumns<'a>>,
-    pub(crate) channel: usize,
 }
 
 impl CombineScratch {
@@ -52,7 +48,6 @@ impl CombineScratch {
         self.values.resize(frame_count, 0.0);
         self.eff_weights.resize(frame_count, 0.0);
         self.sample_flags.resize(frame_count, 0);
-        self.frame_ids.resize(frame_count, 0);
         self.noise_background.resize(frame_count, 0.0);
         self.noise_sky.resize(frame_count, 0.0);
         self.noise_inverse_electrons.resize(frame_count, 0.0);
@@ -67,7 +62,6 @@ pub(super) struct GatheredSamples<'a> {
     pub(super) values: &'a mut [f32],
     pub(super) eff_weights: &'a mut [f32],
     pub(super) sample_flags: &'a mut [u8],
-    pub(super) frame_ids: &'a mut [u32],
     pub(super) noise_background: &'a mut [f32],
     pub(super) noise_sky: &'a mut [f32],
     pub(super) noise_inverse_electrons: &'a mut [f32],
@@ -107,7 +101,6 @@ impl GatheredSamples<'_> {
                 self.values[write] = self.values[read];
                 self.eff_weights[write] = self.eff_weights[read];
                 self.sample_flags[write] = self.sample_flags[read];
-                self.frame_ids[write] = self.frame_ids[read];
                 self.noise_background[write] = self.noise_background[read];
                 self.noise_sky[write] = self.noise_sky[read];
                 self.noise_inverse_electrons[write] = self.noise_inverse_electrons[read];
@@ -119,32 +112,30 @@ impl GatheredSamples<'_> {
 }
 
 /// One reduced channel sample: the combined value, how many samples reached it, and — when the
-/// caller asked for the quality planes — the survivors' weight, the variance of the value and the
-/// survivors' dispersion.
+/// caller asked for the quality planes — the survivors' weight, the inverse variance of the value
+/// and the survivors' dispersion.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CombinedSample {
     pub(crate) value: f32,
-    /// Samples that survived rejection. Always tracked: it is a count the reducer already knows,
-    /// and quantization-noise propagation keys on it.
-    pub(crate) survivor_count: usize,
     pub(crate) weight: f32,
-    pub(crate) variance: f32,
+    pub(crate) inverse_variance: f32,
     pub(crate) dispersion: f32,
 }
 
 impl CombinedSample {
     /// A weighted mean `value` over the samples at `survivors`: the weight is `Σwᵢ`, and the
-    /// variance is `Σwᵢ²·vᵢ / (Σwᵢ)²` with each sample's model variance `vᵢ` taken at the combined
-    /// value, the estimate of the true signal. Taken at each sample's own value instead, an upward
-    /// fluctuation would carry a larger variance and pull the figure up. Without noise columns the
-    /// variance reads 0, for a reducer whose request has no variance plane.
+    /// inverse variance is `(Σwᵢ)² / Σwᵢ²·vᵢ` with each sample's model variance `vᵢ` taken at the
+    /// combined value, the estimate of the true signal. Taken at each sample's own value instead,
+    /// an upward fluctuation would carry a larger variance and pull the figure down. Without noise
+    /// columns, for a reducer whose request has no inverse variance plane, it reads `+∞`, which
+    /// nothing reads.
     ///
     /// The dispersion is the variance of the same mean as the samples' scatter shows it, with no
     /// noise model: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`. Where each sample's variance is `c / wᵢ`, the
     /// weighted sum of squares has expectation `(n − 1)·c` and the mean's variance is `c / Σwᵢ`, so
     /// the figure is unbiased; noise weighting makes the weights so at the sky where no warp
-    /// averaged the samples, and equal weights make it the squared standard error of the mean. NaN
-    /// for fewer than two survivors, whose scatter says nothing.
+    /// averaged and no flat amplified the samples, and equal weights make it the squared standard
+    /// error of the mean. NaN for fewer than two survivors, whose scatter says nothing.
     pub(crate) fn from_survivors(
         value: f32,
         values: &[f32],
@@ -169,10 +160,10 @@ impl CombinedSample {
         }
         Self {
             value,
-            survivor_count: count,
             weight,
-            variance: if weight > 0.0 {
-                weighted_variance / (weight * weight)
+            // `+∞` where the model says the samples hold no noise: an exact pixel, honestly.
+            inverse_variance: if weight > 0.0 {
+                weight * weight / weighted_variance
             } else {
                 0.0
             },
@@ -184,25 +175,34 @@ impl CombinedSample {
         }
     }
 
+    /// The median of `weights.len()` samples, which keeps them all: its weight is their `Σwᵢ`. It
+    /// is no linear combination, so it has no inverse variance or dispersion to report.
+    pub(crate) fn median(value: f32, weights: &[f32]) -> Self {
+        Self {
+            value,
+            weight: weights.iter().sum(),
+            inverse_variance: 0.0,
+            dispersion: f32::NAN,
+        }
+    }
+
     /// A pixel no sample reached: nothing combined, nothing weighed, and no scatter to read.
     pub(crate) const fn uncovered() -> Self {
         Self {
             value: 0.0,
-            survivor_count: 0,
             weight: 0.0,
-            variance: 0.0,
+            inverse_variance: 0.0,
             dispersion: f32::NAN,
         }
     }
 
     /// A reduction for a combine that asked for no quality planes: the walk over survivor weights
     /// would produce two numbers nothing reads, and it costs one pass over the frames per pixel.
-    pub(crate) const fn value_only(value: f32, survivor_count: usize) -> Self {
+    pub(crate) const fn value_only(value: f32) -> Self {
         Self {
             value,
-            survivor_count,
             weight: 0.0,
-            variance: 0.0,
+            inverse_variance: 0.0,
             dispersion: 0.0,
         }
     }

@@ -15,14 +15,13 @@ use imaginarium::Buffer2;
 
 use crate::combine::cache::core::{CacheCore, CacheTier};
 use crate::combine::cache::frame_weights::FrameWeights;
-use crate::combine::cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::cache::sample::CombinedSample;
 use crate::combine::cache::sample_noise::SampleNoise;
 use crate::combine::cache::slots::Slots;
 use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
-use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
+use crate::combine::stack::quantization::SourceSigmas;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
@@ -302,14 +301,16 @@ pub(crate) fn run_stacking(
     // A median is not a linear combination, so it has no variance to report whatever the caller
     // asked for. Resolving here means the reducer never allocates a plane it would drop.
     let planes = config.quality.resolve(weighted_combine);
-    let measure_quality = planes.weight || planes.variance || planes.dispersion;
+    let measure_quality = planes.weight || planes.inverse_variance || planes.dispersion;
 
-    let sigmas = SourceSigmas::measure(stats());
+    // A master states the step of its inputs: the largest any frame contributes once its
+    // normalization scaled it, whatever each pixel's survivors were.
+    let quantization_sigma =
+        SourceSigmas::measure(stats()).and_then(|sigmas| sigmas.largest(norms));
     let min_survivors = config.min_survivors;
 
-    let (combined, quantization_sigma) = match method {
+    let combined = match method {
         CombineMethod::Median => {
-            let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
             let request = CombineRequest {
                 weights: None,
                 planes,
@@ -317,25 +318,19 @@ pub(crate) fn run_stacking(
                 noise: None,
                 slots,
             };
-            let combined = cache.process_chunked(request, |samples, _| {
-                let count = samples.values.len();
+            cache.process_chunked(request, |samples, _| {
+                // Reorders the values in place, away from their weights: only the weights' sum,
+                // which no order changes, is read after it.
                 let value = math::statistics::median_mut(samples.values);
                 if measure_quality {
-                    CombinedSample::from_survivors(
-                        value,
-                        samples.values,
-                        samples.weights,
-                        0..count,
-                        None,
-                    )
+                    CombinedSample::median(value, samples.weights)
                 } else {
-                    CombinedSample::value_only(value, count)
+                    CombinedSample::value_only(value)
                 }
-            });
-            (combined, sigma)
+            })
         }
         CombineMethod::Mean(rejection) => {
-            let noise = (rejection.measures_spread() || planes.variance)
+            let noise = (rejection.measures_spread() || planes.inverse_variance)
                 .then(|| SampleNoise::new(stats(), norms, slots));
             let request = CombineRequest {
                 weights: weights.as_ref(),
@@ -345,7 +340,7 @@ pub(crate) fn run_stacking(
                 slots,
             };
             let dispersion_correction = rejection.dispersion_correction();
-            let reduce = move |samples: PixelSamples<'_>, scratch: &mut ScratchBuffers| {
+            cache.process_chunked(request, move |samples, scratch| {
                 let mut sample =
                     rejection.combine_mean(samples, min_survivors, scratch, measure_quality);
                 // Survivors of a band scatter as a Gaussian truncated to it; a pixel too small to
@@ -354,61 +349,7 @@ pub(crate) fn run_stacking(
                     sample.dispersion *= dispersion_correction;
                 }
                 sample
-            };
-            match sigmas {
-                Some(sigmas) => {
-                    // Rejection and coverage keep a different set of frames at every pixel, so the
-                    // master's figure is the least-reduced pixel's: seed with every frame and raise
-                    // it wherever a pixel had fewer.
-                    let all_frames = (0..slots.count())
-                        .map(|slot| {
-                            sigmas
-                                .combined_mean(
-                                    norms,
-                                    slots.channel(slot),
-                                    (0..frame_count).map(|frame| {
-                                        let weight = weights
-                                            .as_ref()
-                                            .map_or(1.0, |weights| weights.weight(frame, slot));
-                                        (frame, weight)
-                                    }),
-                                )
-                                .expect("a validated stack has positive total weight")
-                        })
-                        .fold(0.0, f32::max);
-                    let max_sigma = MaxSigma::seeded(all_frames);
-                    let combined = cache.process_chunked(request, |samples, scratch| {
-                        let PixelSamples {
-                            frame_ids,
-                            weights,
-                            channel,
-                            ..
-                        } = samples;
-                        let sample = reduce(samples, scratch);
-                        if sample.survivor_count != frame_count {
-                            let survivor =
-                                |position: usize| (frame_ids[position] as usize, weights[position]);
-                            max_sigma.record(match scratch.survivor_positions() {
-                                Some(positions) => sigmas.combined_mean(
-                                    norms,
-                                    channel,
-                                    positions
-                                        .iter()
-                                        .map(|&position| survivor(position as usize)),
-                                ),
-                                None => sigmas.combined_mean(
-                                    norms,
-                                    channel,
-                                    (0..frame_ids.len()).map(survivor),
-                                ),
-                            });
-                        }
-                        sample
-                    });
-                    (combined, max_sigma.get())
-                }
-                None => (cache.process_chunked(request, reduce), None),
-            }
+            })
         }
     };
 

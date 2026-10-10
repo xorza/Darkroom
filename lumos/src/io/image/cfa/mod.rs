@@ -330,6 +330,8 @@ impl CfaImage {
         self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
+        // Through the checked accessor, then shared: the grid is the flat's, not this frame's.
+        let flat_gain = self.flat_gain().and(self.metadata.flat_gain.clone());
         let mut metadata = self.metadata;
         let cfa_type = self.cfa_type;
         if let Some(provenance) = &mut metadata.provenance {
@@ -347,6 +349,7 @@ impl CfaImage {
                 &cfa_type,
                 |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
                 metadata.quantization_sigma,
+                flat_gain.as_deref(),
             ));
             metadata.quantization_sigma = None;
         }

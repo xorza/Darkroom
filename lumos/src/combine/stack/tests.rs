@@ -17,6 +17,7 @@ use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
@@ -24,6 +25,7 @@ use crate::io::image::image_provenance::{
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
@@ -31,6 +33,7 @@ use crate::registration::transform::{Transform, WarpTransform};
 use crate::stack_product::quality_map::QualityMap;
 use common::TempDir;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
@@ -80,127 +83,62 @@ fn make_cfa_stack_cache(
     FrameCache::from_images(images, normalization)
 }
 
+/// A master states the largest step of its inputs once normalization scaled it, whatever the
+/// reduction and its survivors: every figure is one of the inputs' σ times its gain, so exact.
+/// - Multiplicative normalization of flat frames at 0.4 and 0.2 gives frame 1 a gain of 2: its σ
+///   0.02 becomes 0.04, over frame 0's 0.01.
+/// - A median of three frames of σ 0.01 states 0.01.
+/// - A winsorized clip of σ 0.01 and 0.02 states 0.02.
+/// - A σ-clip that rejects the 100 among eight frames of σ 0.01 still states 0.01.
 #[test]
-fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
+fn a_master_states_the_largest_step_of_its_inputs() {
     let dimensions = ImageDimensions::new((2, 1), 1);
-    // Flat frames, so each frame's measured median *is* its pixel value and its MAD is zero.
-    // Multiplicative normalization keys on the medians (0.4 / 0.2 → frame 1 gains 2.0) and the
-    // manual weights bypass MAD entirely, so the measured statistics are exactly what this
-    // assertion needs.
-    let normalized_cache = make_cfa_stack_cache(
+    let stated = |pixels: Vec<Vec<f32>>, sigmas: &[f32], config: StackConfig| {
+        let cache = make_cfa_stack_cache(pixels, sigmas, dimensions, config.normalization);
+        let product = run_stacking(&cache, &config).expect("this cache is never cancelled");
+        product.image.metadata.quantization_sigma
+    };
+    let mean = |rejection| Combine {
+        method: CombineMethod::Mean(rejection),
+        small_n: SmallN::none(),
+    };
+    let normalized = stated(
         vec![vec![0.4; 2], vec![0.2; 2]],
         &[0.01, 0.02],
-        dimensions,
-        Normalization::Multiplicative,
-    );
-    let normalized = run_stacking(
-        &normalized_cache,
-        &StackConfig {
-            combine: Combine {
-                method: CombineMethod::Mean(Rejection::None),
-                small_n: SmallN::none(),
-            },
+        StackConfig {
+            combine: mean(Rejection::None),
             weighting: Weighting::Manual(vec![0.25, 0.75]),
             normalization: Normalization::Multiplicative,
             ..StackConfig::light()
         },
-    )
-    .expect("this cache is never cancelled");
-    #[expect(
-        clippy::imprecise_flops,
-        reason = "the expected value repeats the N-term sum of squares `quantization` computes, so the comparison stays exact"
-    )]
-    let expected_normalized_sigma =
-        ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
-    assert_eq!(normalized.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
-    assert_eq!(
-        normalized.image.metadata.quantization_sigma,
-        Some(expected_normalized_sigma),
-        "weighted normalized σ must use each frame's own source σ and gain"
     );
-
-    let median_cache = make_cfa_stack_cache(
+    assert_eq!(normalized, Some(0.04));
+    let equal = |combine| StackConfig {
+        combine,
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    };
+    let median = stated(
         vec![vec![0.3; 2], vec![0.4; 2], vec![0.5; 2]],
         &[0.01; 3],
-        dimensions,
-        Normalization::None,
+        equal(Combine::median()),
     );
-    let median = run_stacking(
-        &median_cache,
-        &StackConfig {
-            combine: Combine::median(),
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
-    )
-    .expect("this cache is never cancelled");
-    let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
-    assert_eq!(median.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
-    assert_eq!(
-        median.image.metadata.quantization_sigma,
-        Some(expected_median_sigma),
-        "an equal-source three-frame median must use the exact uniform order statistic"
-    );
-
-    let winsorized_cache = make_cfa_stack_cache(
+    assert_eq!(median, Some(0.01));
+    let winsorized = stated(
         vec![vec![0.3; 2], vec![0.5; 2]],
         &[0.01, 0.02],
-        dimensions,
-        Normalization::None,
+        equal(Combine::winsorized(2.5)),
     );
-    let winsorized = run_stacking(
-        &winsorized_cache,
-        &StackConfig {
-            combine: Combine::winsorized(2.5),
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
-    )
-    .expect("this cache is never cancelled");
-    #[expect(
-        clippy::imprecise_flops,
-        reason = "the expected value repeats the sum of squares `quantization` computes, so the comparison stays exact"
-    )]
-    let expected_winsorized_sigma = (0.01f32.powi(2) + 0.02f32.powi(2)).sqrt() / 2.0;
-    assert_eq!(
-        winsorized.image.metadata.quantization_sigma,
-        Some(expected_winsorized_sigma),
-        "winsorized clipping only rejects, so its survivors combine in quadrature like any mean's"
-    );
-
-    let rejection_cache = make_cfa_stack_cache(
+    assert_eq!(winsorized, Some(0.02));
+    let rejected = stated(
         (0..8)
             .map(|frame| vec![[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0][frame], 1.0])
             .collect(),
         &[0.01; 8],
-        dimensions,
-        Normalization::None,
+        equal(mean(Rejection::sigma_clip(2.0))),
     );
-    let rejected = run_stacking(
-        &rejection_cache,
-        &StackConfig {
-            combine: Combine {
-                method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
-                small_n: SmallN::none(),
-            },
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
-    )
-    .expect("this cache is never cancelled");
-    assert_eq!(rejected.image.channel(0).pixels().to_vec(), vec![4.0, 1.0]);
-    // √(7σ²)/7 is σ/√7: the square, the sum, the root and the quotient round once each, 2ε
-    // relative.
-    let expected_rejected_sigma = f64::from(0.01f32) / 7.0f64.sqrt();
-    assert_close!(
-        rejected.image.metadata.quantization_sigma.unwrap(),
-        expected_rejected_sigma,
-        2.0 * f64::from(f32::EPSILON) * expected_rejected_sigma,
-        "the global CFA floor must use the least-reduced pixel's seven survivors"
-    );
+    assert_eq!(rejected, Some(0.01));
 }
 
 /// The load-bearing guarantee for memory-aware stacking: spilling frames to disk (mmap) and
@@ -228,7 +166,25 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     px[(f * 7 + channel) % (w * h)] = 0.95; // an outlier so rejection fires
                     px
                 });
-                let image = LinearImage::from_planar_channels(dims, planes.collect::<Vec<_>>());
+                let mut image = LinearImage::from_planar_channels(dims, planes.collect::<Vec<_>>());
+                // Every third frame was divided by a vignetted flat, whose gain the noise model
+                // reads per sample: a mono flat for a mono frame, a mosaic's for a colour one.
+                if f.is_multiple_of(3) {
+                    let divisor = Buffer2::new(
+                        w,
+                        h,
+                        (0..w * h)
+                            .map(|index| 1.0 - 0.4 * (index % w) as f32 / w as f32)
+                            .collect(),
+                    );
+                    let cfa = if channels == 1 {
+                        CfaType::Mono
+                    } else {
+                        CfaType::Bayer(CfaPattern::Rggb)
+                    };
+                    image.metadata.flat_gain =
+                        Some(Arc::new(FlatGain::of_divisor(&divisor, &cfa, |_| false)));
+                }
                 // Every other frame gets a partial coverage map (warped-border emulation).
                 let quality = if f.is_multiple_of(2) {
                     let mut coverage = Buffer2::new_filled(w, h, 1.0f32);
@@ -275,13 +231,14 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
             // With no memory at all the floor holds the whole 30-row image past the budget: its
-            // resident image, weight and variance planes, 40 × 30 × 12c B, beside the rows of 12
-            // frame planes and the six coverage-and-confidence pairs, 40 × 30 × 96 B. The coverage
-            // pass holds less. The stack is the same.
+            // resident image, weight and inverse variance planes, 40 × 30 × 12c B, beside the rows
+            // of 12 frame planes, the six coverage-and-confidence pairs and the four flat gain
+            // grids at a byte a pixel, 40 × 30 × 100 B. The coverage pass holds less. The stack is
+            // the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.chunk_overcommit_bytes,
-                14_400 * channels as u64 + 115_200,
+                14_400 * channels as u64 + 120_000,
                 "{label}"
             );
             for channel in 0..channels {
@@ -298,8 +255,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 bits(&disk.coverage.as_ref().unwrap().to_plane()),
                 "{label}: coverage differs"
             );
-            let ram_variance = ram.variance.as_ref().unwrap();
-            let disk_variance = disk.variance.as_ref().unwrap();
+            let ram_variance = ram.inverse_variance.as_ref().unwrap();
+            let disk_variance = disk.inverse_variance.as_ref().unwrap();
             for channel in 0..channels {
                 assert_eq!(
                     bits(ram.image.channel(channel)),
@@ -1053,8 +1010,8 @@ fn cancelled_stack_returns_cancelled_error() {
 /// Coverage decides which frames reach each pixel, and the product's planes count them. Frame A
 /// holds 10 and covers both pixels, frame B holds 40 and covers pixel 0 alone, and frame C holds
 /// 10 with no quality planes, which is full support. Unit weights and unit noise, mean combine:
-///   px0: A, B, C → 60/3 = 20, coverage 3/3, weight 3, variance 3·1/3² = 1/3
-///   px1: A, C    → 20/2 = 10, coverage 2/3, weight 2, variance 2·1/2² = 1/2
+///   px0: A, B, C → 60/3 = 20, coverage 3/3, weight 3, inverse variance 3²/(3·1) = 3
+///   px1: A, C    → 20/2 = 10, coverage 2/3, weight 2, inverse variance 2²/(2·1) = 2
 /// B taken in at px1 would read 20 there. A pixel no frame covers is the warp border's 0.
 #[test]
 fn coverage_decides_which_frames_reach_each_pixel() {
@@ -1096,14 +1053,24 @@ fn coverage_decides_which_frames_reach_each_pixel() {
         &[3.0, 2.0]
     );
     assert_eq!(
-        product.variance.as_ref().unwrap().channel(0).pixels(),
-        &[1.0 / 3.0, 0.5]
+        product
+            .inverse_variance
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels(),
+        &[3.0, 2.0]
     );
 
     let alone = combine(vec![covered(10.0, [1.0, 0.0])], &config).unwrap();
     assert_eq!(alone.image.channel(0).pixels(), &[10.0, 0.0]);
     assert_eq!(
         alone.coverage.as_ref().unwrap().to_plane().pixels(),
+        &[1.0, 0.0]
+    );
+    // The uncovered pixel holds no information, not an exact value.
+    assert_eq!(
+        alone.inverse_variance.as_ref().unwrap().channel(0).pixels(),
         &[1.0, 0.0]
     );
 }
@@ -1134,6 +1101,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
             frame.source_stats = FrameStats {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
                 noise: [mad_to_sigma(mad)].into_iter().collect(),
+                read_share: [0.0; 3].into_iter().collect(),
                 sky: [median].into_iter().collect(),
                 quantization_sigma: None,
                 electrons_per_unit: None,
@@ -1254,9 +1222,9 @@ fn only_normalization_requires_common_coverage() {
 #[test]
 fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     // px0: A (q 1, val 10) + B (q .5, val 20) → 30/2 = 15: B's half confidence leaves its weight
-    // alone and doubles its sample's variance, 1/q = 2, so the variance is (1²·1 + 1²·2)/2² = 3/4.
-    // At px1 B has no support at all, which is what does exclude a frame: A alone, variance 1,
-    // coverage 1/2. Every sum is exact; each figure rounds once.
+    // alone and doubles its sample's variance, 1/q = 2, so the inverse variance is
+    // 2²/(1²·1 + 1²·2) = 4/3. At px1 B has no support at all, which is what does exclude a frame:
+    // A alone, inverse variance 1, coverage 1/2. Every sum is exact; each figure rounds once.
     let dims = ImageDimensions::new((2, 1), 1);
     let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
     let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
@@ -1299,8 +1267,13 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
         &[2.0, 1.0]
     );
     assert_eq!(
-        product.variance.as_ref().unwrap().channel(0).pixels(),
-        &[0.75, 1.0]
+        product
+            .inverse_variance
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels(),
+        &[4.0 / 3.0, 1.0]
     );
 }
 
@@ -1418,7 +1391,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
 /// A half-pixel bilinear warp averages four source pixels equally, so its confidence `1/Σw²` is 4,
 /// and an identity warp's is 1. The two frames share one source and so one noise level `σ²` and one
 /// weight `w`. The confidence divides each sample's variance and leaves the weights alone: the
-/// product's weight is `2w`, and its variance `(w²·σ² + w²·σ²/4)/(2w)² = 0.3125·σ²`.
+/// product's weight is `2w`, and its inverse variance `(2w)²/(w²·σ² + w²·σ²/4) = 1/(0.3125·σ²)`.
 #[test]
 fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let dims = ImageDimensions::new((64, 48), 1);
@@ -1477,7 +1450,7 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .next()
         .unwrap()
         .ccd_noise(0)
-        .background_variance;
+        .background_at(1.0);
 
     let product = run_stacking(
         &cache,
@@ -1496,10 +1469,11 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         product.weight.as_ref().unwrap().channel(0)[pixel],
         2.0 * base_weights[0]
     );
+    let expected = 1.0 / (0.3125 * sigma_squared);
     assert_close!(
-        product.variance.as_ref().unwrap().channel(0)[pixel],
-        0.3125 * sigma_squared,
-        2.0 * f32::EPSILON * sigma_squared
+        product.inverse_variance.as_ref().unwrap().channel(0)[pixel],
+        expected,
+        2.0 * f32::EPSILON * expected
     );
 }
 
@@ -1562,7 +1536,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
     });
     assert!(all.coverage.is_some());
     assert!(all.weight.is_some());
-    assert!(all.variance.is_some());
+    assert!(all.inverse_variance.is_some());
     assert!(all.dispersion.is_some());
 
     // The default asks for the standard planes, which leave out the dispersion.
@@ -1572,7 +1546,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
         normalization: Normalization::None,
         ..StackConfig::light()
     });
-    assert!(standard.variance.is_some() && standard.dispersion.is_none());
+    assert!(standard.inverse_variance.is_some() && standard.dispersion.is_none());
 
     // A median is not a linear combination, so its variance plane is absent even though the
     // request asked for it — and is never allocated, not allocated and cleared.
@@ -1589,7 +1563,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
     assert!(median.coverage.is_some());
     assert!(median.weight.is_some(), "a median still reports weight");
     assert!(
-        median.variance.is_none() && median.dispersion.is_none(),
+        median.inverse_variance.is_none() && median.dispersion.is_none(),
         "a median has no linear-combine variance factor and no dispersion"
     );
 
@@ -1603,7 +1577,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
     });
     assert!(bare.coverage.is_none());
     assert!(bare.weight.is_none());
-    assert!(bare.variance.is_none() && bare.dispersion.is_none());
+    assert!(bare.inverse_variance.is_none() && bare.dispersion.is_none());
     // The combined pixels are unaffected by which planes were asked for.
     assert_eq!(
         bare.image.channel(0).pixels(),
@@ -1666,6 +1640,7 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
         let mut image = LinearImage::from_pixels(dims, vec![value; 3]);
         image.metadata.mosaic_noise = sigma.map(|sigma| MosaicNoise {
             sigma,
+            read_share: [0.0; 3],
             sky: [value; 3],
             quantization_sigma: None,
         });
@@ -1704,13 +1679,14 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
 }
 
 #[test]
-fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
-    // Trimming removes each channel's high value, hence a different source frame: R keeps f0/f1,
-    // G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] stay as given, and every frame has unit
-    // noise, so the variance is Σw²/(Σw)². Three frames leave two survivors, so the minimum comes
-    // down to 2. The dispersion is Σw(x − x̄)² / ((n − 1)·Σw): R's 1 and 2 lie −2/3 and 1/3 about
-    // 5/3, so (4/9 + 2/9) / 3 = 2/9; G's 2 and 3 lie −0.6 and 0.4 about 2.6, so (0.72 + 0.48) / 5
-    // = 6/25; B's 1 and 3 lie −1.5 and 0.5 about 2.5, so (2.25 + 0.75) / 4 = 3/4.
+fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
+    // Trimming removes each channel's high value, hence a different source frame: R keeps f0/f1, G
+    // keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] stay as given, and every frame has unit
+    // noise, so the inverse variance is (Σw)²/Σw²: R 9/5, G 25/13, B 16/10. Three frames leave two
+    // survivors, so the minimum comes down to 2. The dispersion is Σw(x − x̄)² / ((n − 1)·Σw): R's
+    // 1 and 2 lie −2/3 and 1/3 about 5/3, so (4/9 + 2/9) / 3 = 2/9; G's 2 and 3 lie −0.6 and 0.4
+    // about 2.6, so (0.72 + 0.48) / 5 = 6/25; B's 1 and 3 lie −1.5 and 0.5 about 2.5, so (2.25 +
+    // 0.75) / 4 = 3/4.
     let dims = ImageDimensions::new((1, 1), 3);
     let frame = |pixels: Vec<f32>| with_noise(LinearImage::from_pixels(dims, pixels).into(), 1.0);
     let frames = vec![
@@ -1735,10 +1711,10 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
     let expected_values: [f64; 3] = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
     let expected_dispersions: [f64; 3] = [2.0 / 9.0, 6.0 / 25.0, 3.0 / 4.0];
     let expected_weights: [f64; 3] = [3.0, 5.0, 4.0];
-    let expected_linear_variances: [f64; 3] = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
-    let linear_variance = result.variance.as_ref().unwrap();
+    let expected_inverse_variances: [f64; 3] = [9.0 / 5.0, 25.0 / 13.0, 16.0 / 10.0];
+    let inverse_variance = result.inverse_variance.as_ref().unwrap();
     assert!(matches!(&result.weight, Some(QualityMap::PerChannel(_))));
-    assert!(matches!(linear_variance, QualityMap::PerChannel(_)));
+    assert!(matches!(inverse_variance, QualityMap::PerChannel(_)));
     // Each figure is an exact quotient of exact sums, rounded once: within half an ulp, ε relative.
     for channel in 0..3 {
         let close = |actual: f32, expected: f64, what: &str| {
@@ -1760,9 +1736,9 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
             "weight",
         );
         close(
-            linear_variance.channel(channel)[0],
-            expected_linear_variances[channel],
-            "variance",
+            inverse_variance.channel(channel)[0],
+            expected_inverse_variances[channel],
+            "inverse variance",
         );
         // Five roundings, each within half an ulp: two products, a sum, a product and the
         // quotient. The mean's own rounding moves the sum only to second order, since a weighted
@@ -1778,15 +1754,19 @@ fn rejection_emits_channel_shaped_survivor_weight_and_variance() {
         result.weight.as_ref().unwrap().channel(0)[0],
         result.weight.as_ref().unwrap().channel(1)[0]
     );
-    assert_ne!(linear_variance.channel(1)[0], linear_variance.channel(2)[0]);
+    assert_ne!(
+        inverse_variance.channel(1)[0],
+        inverse_variance.channel(2)[0]
+    );
 }
 
-/// On frames whose noise is what their model says, the dispersion and the variance estimate the
-/// same figure, `1 / Σwᵢ` for inverse-variance weights. Eight frames of a flat 0.5 with Gaussian
-/// noise of σ from 0.01 to 0.03, weighted by `1/σ²`: each pixel's dispersion is that figure times a
-/// χ² of 7 degrees of freedom over 7, so the mean of 4096 independent pixels is within
-/// `√(2 / (7·4096))` = 0.84% of it at one σ, and 4.2% at five. A model that halves every σ quarters
-/// the variance and leaves the dispersion alone, so the two then differ by 4.
+/// On frames whose noise is what their model says, the dispersion and the reciprocal of the inverse
+/// variance estimate the same figure, `1 / Σwᵢ` for inverse-variance weights. Eight frames of a
+/// flat 0.5 with Gaussian noise of σ from 0.01 to 0.03, weighted by `1/σ²`: each pixel's dispersion
+/// is that figure times a χ² of 7 degrees of freedom over 7, so the mean of 4096 independent pixels
+/// is within `√(2 / (7·4096))` = 0.84% of it at one σ, and 4.2% at five. A model that halves every
+/// σ quarters the variance — so quadruples the inverse variance — and leaves the dispersion alone,
+/// so the two then differ by 4.
 #[test]
 fn dispersion_agrees_with_the_variance_where_the_model_holds() {
     const SIDE: usize = 64;
@@ -1834,10 +1814,10 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
                 / (SIDE * SIDE) as f64
         };
         let dispersion = mean(product.dispersion.as_ref().unwrap());
-        let variance = mean(product.variance.as_ref().unwrap());
+        let model_inverse = mean(product.inverse_variance.as_ref().unwrap());
         assert_close!(dispersion * inverse_variance, 1.0, 0.042, "dispersion");
         assert_close!(
-            dispersion / variance,
+            dispersion * model_inverse,
             expected_ratio,
             0.042 * expected_ratio,
             "model σ × {model_scale}"
@@ -1868,7 +1848,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
         normalization: Normalization::None,
         ..StackConfig::light()
     });
-    assert!(explicit.variance.is_none());
+    assert!(explicit.inverse_variance.is_none());
     // The middle frame is the median at every pixel, sample for sample.
     assert_eq!(explicit.image.channel(0).pixels(), mk(100.0, 2.0));
     assert_eq!(
@@ -1930,7 +1910,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     ] {
         let downgraded = stack(&config);
         assert!(
-            downgraded.variance.is_none(),
+            downgraded.inverse_variance.is_none(),
             "{name} must expose no variance after its small-N median downgrade"
         );
         assert_eq!(
@@ -1953,8 +1933,12 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
         ..StackConfig::light()
     });
     assert_eq!(
-        linear_fallback.variance.unwrap().channel(0).pixels(),
-        &[1.0 / 3.0; 8]
+        linear_fallback
+            .inverse_variance
+            .unwrap()
+            .channel(0)
+            .pixels(),
+        &[3.0; 8]
     );
 }
 
@@ -2186,13 +2170,72 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
     assert_eq!(flags.at(3 * 8 + 5), QualityFlags::default());
 }
 
-/// The variance plane takes each frame's CCD model at the combined value. Frames of 10 and 14,
-/// each its own sky, with unit background noise and 0.5 electrons per unit, combine to 12: the
-/// first frame's model adds (12 − 10)/0.5 = 4 of photon noise above its sky, the second's adds none
-/// below its own, so the variance is (5 + 1)/2² = 1.5. With the second frame's gain unknown the
-/// figure is the same here, but the report says the plane lacks a source term.
+/// Each sample's noise is its frame's model at the gain its flat multiplied it by. Two frames of 10
+/// and 14, each its own sky and unit noise where no flat amplified it, were divided by a flat of
+/// 0.5, gain 2. Half of their background is read noise, which the flat amplified twice, half sky,
+/// amplified once: `1·2·(½·2 + ½)` = 3 each, so the inverse variance is 2²/(3 + 3) = 2/3, against 2
+/// with no flat. All read noise gives 2²/(4 + 4) = 1/2, all sky 2²/(2 + 2) = 1. With 0.5
+/// electrons per unit, the first frame's photons above its sky at the combined 12 add
+/// `(12 − 10)·2/0.5` = 8, the flat's gain on the source term: 2²/(11 + 3) = 2/7.
 #[test]
-fn the_variance_plane_carries_the_source_term_above_the_sky() {
+fn each_samples_noise_reads_the_gain_its_flat_applied() {
+    let dims = ImageDimensions::new((2, 1), 1);
+    let gain = Arc::new(FlatGain::of_divisor(
+        &Buffer2::new(2, 1, vec![0.5; 2]),
+        &CfaType::Mono,
+        |_| false,
+    ));
+    let frame = |value: f32, read_share: f32, flat: bool, electrons: Option<f32>| {
+        let mut image = LinearImage::from_pixels(dims, vec![value; 2]);
+        if flat {
+            image.metadata.flat_gain = Some(Arc::clone(&gain));
+        }
+        let mut frame = with_noise(image.into(), 1.0);
+        frame.source_stats.read_share = [read_share].into_iter().collect();
+        frame.source_stats.electrons_per_unit = electrons;
+        frame
+    };
+    let config = StackConfig {
+        combine: Combine::mean(),
+        normalization: Normalization::None,
+        weighting: Weighting::Equal,
+        ..StackConfig::light()
+    };
+    for (read_share, flat, electrons, expected) in [
+        (0.5, true, None, 2.0 / 3.0),
+        (0.5, false, None, 2.0),
+        (1.0, true, None, 0.5),
+        (0.0, true, None, 1.0),
+        (0.5, true, Some(0.5), 2.0 / 7.0),
+    ] {
+        let product = combine(
+            vec![
+                frame(10.0, read_share, flat, electrons),
+                frame(14.0, read_share, flat, electrons),
+            ],
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            product
+                .inverse_variance
+                .as_ref()
+                .unwrap()
+                .channel(0)
+                .pixels(),
+            &[expected; 2],
+            "ρ {read_share}, flat {flat}, electrons {electrons:?}"
+        );
+    }
+}
+
+/// The inverse variance plane takes each frame's CCD model at the combined value. Frames of 10 and
+/// 14, each its own sky, with unit background noise and 0.5 electrons per unit, combine to 12: the
+/// first frame's model adds (12 − 10)/0.5 = 4 of photon noise above its sky, the second's adds none
+/// below its own, so the inverse variance is 2²/(5 + 1) = 2/3. With the second frame's gain unknown
+/// the figure is the same here, but the report says the plane lacks a source term.
+#[test]
+fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
     let dims = ImageDimensions::new((2, 1), 1);
     let frame = |value: f32, electrons: Option<f32>| {
         let mut frame = with_noise(LinearImage::from_pixels(dims, vec![value; 2]).into(), 1.0);
@@ -2212,15 +2255,20 @@ fn the_variance_plane_carries_the_source_term_above_the_sky() {
     .unwrap();
     assert_eq!(known.image.channel(0).pixels(), &[12.0; 2]);
     assert_eq!(
-        known.variance.as_ref().unwrap().channel(0).pixels(),
-        &[1.5; 2]
+        known.inverse_variance.as_ref().unwrap().channel(0).pixels(),
+        &[2.0 / 3.0; 2]
     );
     assert!(!known.report.variance_background_only);
 
     let unknown = combine(vec![frame(10.0, Some(0.5)), frame(14.0, None)], &config).unwrap();
     assert_eq!(
-        unknown.variance.as_ref().unwrap().channel(0).pixels(),
-        &[1.5; 2]
+        unknown
+            .inverse_variance
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels(),
+        &[2.0 / 3.0; 2]
     );
     assert!(unknown.report.variance_background_only);
 }

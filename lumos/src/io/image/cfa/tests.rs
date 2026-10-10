@@ -5,10 +5,12 @@ use crate::internals::cfa::make_cfa;
 use crate::internals::fits::rewrite_fits;
 use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::*;
+use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::TempDir;
 use fits_well::header::Header;
 use std::fs;
+use std::sync::Arc;
 
 #[test]
 fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
@@ -94,6 +96,115 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
     let loaded = CfaImage::from_file(&nulls_path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.flags().unwrap().bytes(), &nulls_only);
+}
+
+/// A flat gain survives the trip in its `LUMGAIN` extension, node for node, so a light saved after
+/// calibration reloads with the gain its noise model reads. A 12×6 RGGB mosaic has 4×3 nodes per
+/// colour. An extension Lumos did not write is refused, each behind a valid checksum: a node that
+/// is no gain, another step, another version, another grid, grids for another count of colours, and
+/// one that names no image of the file.
+#[test]
+fn a_flat_gain_survives_the_fits_round_trip() {
+    type Edit = fn(&mut Header, &mut Vec<u8>);
+    let size = Size2us::new(12, 6);
+    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let gain = Arc::new(FlatGain::of_divisor(
+        &Buffer2::new(
+            12,
+            6,
+            (0..size.pixel_count())
+                .map(|index| 1.0 - 0.3 * (index % 12) as f32 / 12.0)
+                .collect(),
+        ),
+        &bayer,
+        |_| false,
+    ));
+    let dir = TempDir::new("lumos-cfa-gain");
+    let path = dir.join("light.fits");
+    let write = |cfa_type: CfaType| {
+        CfaImage {
+            data: Buffer2::new(12, 6, vec![0.25; size.pixel_count()]),
+            cfa_type,
+            metadata: ImageMetadata {
+                flat_gain: Some(Arc::clone(&gain)),
+                ..ImageMetadata::default()
+            },
+            flags: None,
+        }
+        .save_fits(&path)
+        .unwrap();
+    };
+
+    write(bayer);
+    let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+    let reloaded = loaded.metadata.flat_gain.as_ref().unwrap();
+    assert_eq!(reloaded.size(), size);
+    assert!(reloaded.planes().eq(gain.planes()));
+    assert!(loaded.flat_gain().is_some());
+
+    let cases: [(&str, Edit, &str); 5] = [
+        (
+            "no gain",
+            |_, data| data[..4].copy_from_slice(&(-1.0f32).to_be_bytes()),
+            "node 0 holds -1, not a gain",
+        ),
+        (
+            "another step",
+            |header, _| {
+                header.set("LUMGSTEP", 8).unwrap();
+            },
+            "a node every Some(8) pixels",
+        ),
+        (
+            "another version",
+            |header, _| {
+                header.set("LUMOSVER", 2).unwrap();
+            },
+            "expected FLATGAIN version 1",
+        ),
+        (
+            "another grid",
+            |header, _| {
+                header.set("NAXIS1", 3).unwrap();
+                header.set("NAXIS2", 4).unwrap();
+            },
+            "shape [3, 4, 3] is not one or three 4x3 grids",
+        ),
+        (
+            "no image named",
+            |header, _| {
+                header.set("LUMFOR", "SCI").unwrap();
+            },
+            "is for \"SCI\", which is no image of the file",
+        ),
+    ];
+    for (name, edit, expected) in cases {
+        write(bayer);
+        rewrite_fits(&path, |index, header, data| {
+            if index == 1 {
+                edit(header, data);
+            }
+            true
+        });
+        let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+        assert!(
+            matches!(&error, ImageError::FitsUnsupported { reason, .. } if reason.contains(expected)),
+            "{name}: {error:?}"
+        );
+    }
+
+    // A mono frame's one plane under three colours' grids, through either loader.
+    write(CfaType::Mono);
+    for error in [
+        CfaImage::from_file(&path, &LoadContext::default()).unwrap_err(),
+        LinearImage::from_file(&path, &LoadContext::default()).unwrap_err(),
+    ] {
+        assert!(
+            matches!(&error, ImageError::FitsUnsupported { reason, .. }
+                if reason.contains("holds 3 grids for an image of 1 colours or channels")),
+            "{error:?}"
+        );
+    }
 }
 
 /// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
@@ -191,7 +302,8 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
 /// and quantization σ are the mosaic's own, bit for bit, though the demosaic cleared the frame's
 /// quantization σ. Measured on the frame's own correlated pixels instead, every channel reads less
 /// than its colour's σ. A 64 × 64 RGGB mosaic: red 0.125 ± 0.02, green 0.25 ± 0.01, blue
-/// 0.375 ± 0.03, with a step of 1/4096.
+/// 0.375 ± 0.03, with a step of 1/4096. Divided by a flat, the frame keeps the flat's gain through
+/// the demosaic, and its noise's split by that gain is the mosaic's too.
 #[test]
 fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let size = Size2us::new(64, 64);
@@ -206,8 +318,32 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
         .collect();
     let mut cfa = make_cfa(size, pixels, cfa_type);
     cfa.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0);
-    let mosaic = FrameStats::measure(&cfa);
+    let gain = Arc::new(FlatGain::of_divisor(
+        &Buffer2::new(
+            64,
+            64,
+            (0..size.pixel_count())
+                .map(|index| 1.0 - 0.5 * (index % 64) as f32 / 64.0)
+                .collect(),
+        ),
+        &cfa_type,
+        |_| false,
+    ));
+    let mut flattened = cfa.clone();
+    flattened.metadata.flat_gain = Some(Arc::clone(&gain));
+    let flattened_mosaic = FrameStats::measure(&flattened);
+    let flattened = flattened
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    assert!(Arc::ptr_eq(
+        flattened.metadata.flat_gain.as_ref().unwrap(),
+        &gain
+    ));
+    let flattened_frame = FrameStats::measure(&flattened);
+    assert_eq!(flattened_frame.noise, flattened_mosaic.noise);
+    assert_eq!(flattened_frame.read_share, flattened_mosaic.read_share);
 
+    let mosaic = FrameStats::measure(&cfa);
     let mut demosaiced = cfa
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
@@ -216,6 +352,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     assert_eq!(frame.noise, mosaic.noise);
     assert_eq!(frame.sky, mosaic.sky);
     assert_eq!(frame.quantization_sigma, mosaic.quantization_sigma);
+    assert_eq!(frame.read_share.as_slice(), [0.0; 3]);
 
     demosaiced.metadata.mosaic_noise = None;
     let correlated = FrameStats::measure(&demosaiced);

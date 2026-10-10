@@ -986,11 +986,11 @@ fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, lab
         );
         assert_eq!(
             expected
-                .variance
+                .inverse_variance
                 .as_ref()
                 .map(|variance| bits(variance.channel(channel).pixels())),
             actual
-                .variance
+                .inverse_variance
                 .as_ref()
                 .map(|variance| bits(variance.channel(channel).pixels())),
             "{label}: variance channel {channel}"

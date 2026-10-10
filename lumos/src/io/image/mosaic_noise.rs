@@ -1,6 +1,9 @@
 //! [`MosaicNoise`]: the white noise of each colour of the mosaic a frame was demosaiced from.
 
+use std::array;
+
 use crate::io::image::cfa::CfaType;
+use crate::io::image::flat_gain::FlatGain;
 use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
@@ -15,8 +18,12 @@ use crate::math::vec2us::Vec2us;
 /// are in the samples' own units and in the sensor's balance, which the demosaic keeps.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MosaicNoise {
-    /// Each colour's white-noise standard deviation, over the photosites no flag names.
+    /// Each colour's white-noise standard deviation where no flat amplified it, over the photosites
+    /// no flag names.
     pub sigma: [f32; 3],
+    /// Each colour's share of `sigma²` that a flat amplified twice, against the share it amplified
+    /// once: `σ²·(ρ·g² + (1 − ρ)·g)` at flat gain `g`. 0 for a mosaic no flat divided.
+    pub read_share: [f32; 3],
     /// Each colour's median, the level `sigma` was measured at.
     pub sky: [f32; 3],
     /// The mosaic's quantization σ, the floor of `sigma`. The demosaic clears the frame's own.
@@ -25,24 +32,39 @@ pub struct MosaicNoise {
 
 impl MosaicNoise {
     /// Measured on `mosaic`, a row-major `size` image of a three-colour `cfa_type`, over the
-    /// photosites `excluded` does not name.
+    /// photosites `excluded` does not name, under the flat `gain` divided it by when one did.
     pub(crate) fn measure(
         mosaic: &[f32],
         size: Size2us,
         cfa_type: &CfaType,
         excluded: impl Fn(usize) -> bool,
         quantization_sigma: Option<f32>,
+        gain: Option<&FlatGain>,
     ) -> Self {
         assert_eq!(
             cfa_type.num_colors(),
             3,
             "a mosaic of three colours, not {cfa_type:?}"
         );
-        let sigma = DifferenceNoise::estimate(mosaic, size, cfa_type, &excluded)
-            .into_inner()
-            .expect("one σ per colour");
+        let (sigma, read_share) = match gain {
+            Some(gain) => {
+                let splits =
+                    DifferenceNoise::estimate_split(mosaic, size, cfa_type, &excluded, gain);
+                (
+                    array::from_fn(|colour| splits[colour].variance.sqrt()),
+                    array::from_fn(|colour| splits[colour].read_share),
+                )
+            }
+            None => (
+                DifferenceNoise::estimate(mosaic, size, cfa_type, &excluded)
+                    .into_inner()
+                    .expect("one σ per colour"),
+                [0.0; 3],
+            ),
+        };
         Self {
             sigma,
+            read_share,
             sky: colour_medians(mosaic, size, cfa_type, excluded),
             quantization_sigma,
         }

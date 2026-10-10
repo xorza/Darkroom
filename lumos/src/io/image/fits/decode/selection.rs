@@ -4,7 +4,7 @@ use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu};
 
 use crate::io::image::error::ImageError;
 
-use crate::io::image::fits::flags_extension::FlagsExtension;
+use crate::io::image::fits::extension_claims::ExtensionClaims;
 use crate::io::image::fits::metadata::read_text;
 use crate::io::image::fits::options::{FitsChecksumPolicy, FitsHduSelector};
 use crate::io::image::fits::provenance::{
@@ -48,10 +48,10 @@ pub(super) fn select_image_hdu(
 ) -> Result<FitsHduProvenance, ImageError> {
     let selected = match selector {
         FitsHduSelector::Auto => {
-            // A flags extension describes another image, so it is no candidate of its own.
+            // A flags or gain extension describes another image, so it is no candidate of its own.
             let mut images = Vec::new();
             for (index, hdu) in hdus.iter().enumerate() {
-                if hdu.is_image() && !FlagsExtension::describes_another(path, hdu)? {
+                if hdu.is_image() && !ExtensionClaims::describes_another(path, hdu)? {
                     images.push(index);
                 }
             }

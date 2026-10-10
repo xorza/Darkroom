@@ -24,13 +24,13 @@ const STACK_LIGHTS_FUNC_ID: FuncId = FuncId::literal("b02f5c42-7bda-48f6-81dd-81
 const REFERENCE: usize = 8;
 
 /// The ancillary planes a run computes: coverage and weight for a reader of
-/// their outputs, and never the variance or the dispersion, which the node
+/// their outputs, and never the inverse variance or the dispersion, which the node
 /// does not output.
 const fn quality(demand: &[OutputDemand]) -> QualityPlanes {
     QualityPlanes {
         coverage: !demand[1].is_skip(),
         weight: !demand[2].is_skip(),
-        variance: false,
+        inverse_variance: false,
         dispersion: false,
     }
 }
@@ -156,10 +156,10 @@ mod tests {
             let QualityPlanes {
                 coverage,
                 weight,
-                variance,
+                inverse_variance,
                 dispersion,
             } = quality(&demand);
-            [coverage, weight, variance || dispersion]
+            [coverage, weight, inverse_variance || dispersion]
         };
         assert_eq!(planes([Produce, Skip, Skip]), [false, false, false]);
         assert_eq!(planes([Produce, Produce, Skip]), [true, false, false]);

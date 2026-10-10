@@ -12,17 +12,13 @@ use rayon::prelude::*;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::fits_to_io;
-use crate::io::image::fits::metadata::read_text;
+use crate::io::image::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 
 pub(crate) const FLAGS_EXTNAME: &str = "LUMFLAGS";
 const FLAGS_FORMAT: &str = "PIXFLAGS";
 const FLAGS_VERSION: i64 = 1;
-/// The keyword that names the image HDU the flags are for: its `EXTNAME`, or [`PRIMARY`].
-const IMAGE_KEYWORD: &str = "LUMFOR";
-/// The name of a primary HDU without an `EXTNAME`, as astropy and fitsio name it.
-const PRIMARY: &str = "PRIMARY";
 
 /// The flags of one image as a `BITPIX = 8` image extension: one byte per pixel, bit `i` the flag
 /// `1 << i`, after the HST and JWST `DQ` arrays.
@@ -35,13 +31,6 @@ const PRIMARY: &str = "PRIMARY";
 pub(crate) struct FlagsExtension {
     pub(crate) image: Image,
     pub(crate) header: Header,
-}
-
-/// A flags extension, and the name of the image it says it is for.
-#[derive(Debug)]
-pub(crate) struct Claim {
-    hdu: usize,
-    image: String,
 }
 
 impl FlagsExtension {
@@ -73,13 +62,6 @@ impl FlagsExtension {
         Ok(Some(Self { image, header }))
     }
 
-    /// Whether `hdu` is a flags extension, which describes another image rather than being one.
-    pub(crate) fn describes_another(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
-        Ok(read_text(&hdu.header, "EXTNAME")
-            .map_err(|source| ImageError::fits(path, source))?
-            .is_some_and(|extname| extname.eq_ignore_ascii_case(FLAGS_EXTNAME)))
-    }
-
     /// The flags extension of the image at HDU `image`, checked to fit a `size` image; `None`
     /// when it has none. Refused when the file's claims do not pass [`Self::check_claims`], or
     /// the extension is not this version's.
@@ -89,14 +71,7 @@ impl FlagsExtension {
         image: usize,
         size: Size2us,
     ) -> Result<Option<usize>, ImageError> {
-        let claims = Self::check_claims(path, hdus)?;
-        let Some(name) = image_name(path, hdus, image)? else {
-            return Ok(None);
-        };
-        let found = claims
-            .iter()
-            .find(|claim| claim.image.eq_ignore_ascii_case(&name))
-            .map(|claim| claim.hdu);
+        let found = Self::check_claims(path, hdus)?.for_image(path, hdus, image)?;
         if let Some(index) = found {
             Self::check(path, &hdus[index], size)?;
         }
@@ -105,49 +80,8 @@ impl FlagsExtension {
 
     /// Each flags extension of the file and the image it is for, refused unless each names an
     /// image of the file that no other names: one that names none would be dropped unseen.
-    pub(crate) fn check_claims(path: &Path, hdus: &[Hdu]) -> Result<Vec<Claim>, ImageError> {
-        let mut images = Vec::new();
-        let mut claims = Vec::new();
-        for (index, hdu) in hdus.iter().enumerate() {
-            if Self::describes_another(path, hdu)? {
-                let image = read_text(&hdu.header, IMAGE_KEYWORD)
-                    .map_err(|source| ImageError::fits(path, source))?
-                    .ok_or_else(|| {
-                        ImageError::fits_unsupported(
-                            path,
-                            format!("{FLAGS_EXTNAME} HDU {index} names no image"),
-                        )
-                    })?;
-                claims.push(Claim { hdu: index, image });
-            } else if hdu.is_image()
-                && hdu.data_bytes > 0
-                && let Some(name) = image_name(path, hdus, index)?
-            {
-                images.push(name);
-            }
-        }
-        for (position, claim) in claims.iter().enumerate() {
-            let same = |name: &String| name.eq_ignore_ascii_case(&claim.image);
-            if !images.iter().any(same) {
-                return Err(ImageError::fits_unsupported(
-                    path,
-                    format!(
-                        "{FLAGS_EXTNAME} HDU {} is for {:?}, which is no image of the file",
-                        claim.hdu, claim.image
-                    ),
-                ));
-            }
-            if claims[..position]
-                .iter()
-                .any(|earlier| same(&earlier.image))
-            {
-                return Err(ImageError::fits_unsupported(
-                    path,
-                    format!("two {FLAGS_EXTNAME} HDUs claim image {:?}", claim.image),
-                ));
-            }
-        }
-        Ok(claims)
+    pub(crate) fn check_claims(path: &Path, hdus: &[Hdu]) -> Result<ExtensionClaims, ImageError> {
+        ExtensionClaims::of(path, hdus, FLAGS_EXTNAME)
     }
 
     /// Refuse a flags HDU that is not this format's: another version, another type or scaling, or
@@ -234,17 +168,6 @@ impl FlagsExtension {
     }
 }
 
-/// The name a flags extension refers to the image at HDU `index` by: its `EXTNAME`, or
-/// [`PRIMARY`] for an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(path: &Path, hdus: &[Hdu], index: usize) -> Result<Option<String>, ImageError> {
-    let extname = read_text(&hdus[index].header, "EXTNAME")
-        .map_err(|source| ImageError::fits(path, source))?;
-    Ok(match extname {
-        Some(extname) => Some(extname),
-        None => (index == 0).then(|| PRIMARY.to_owned()),
-    })
-}
-
 /// The keyword that names the flag at its bit `i`: `LUMFBi`.
 fn bit_keyword(flag: QualityFlags) -> String {
     format!("LUMFB{}", flag.byte().trailing_zeros())
@@ -264,8 +187,8 @@ mod tests {
     /// The stored flags join those the decode found, bit by bit. Stored, row-major over 3×2:
     /// nothing, `NO_DATA`, `SATURATED | DEFECT` (6), nothing, `COSMIC_RAY | REPAIRED` (24),
     /// `FLAT_FLOOR` (32). Decoded: `NO_DATA` at 1 from the NaN, `SATURATED` (2) at 3 from
-    /// `DATAMAX`. Joined: 0, 1, 6, 2, 24, 32. With no decoded flags, a plane of zeros is no flags at
-    /// all, and a byte past the known bits — 0x80 here — is refused.
+    /// `DATAMAX`. Joined: 0, 1, 6, 2, 24, 32. With no decoded flags, a plane of zeros is no flags
+    /// at all, and a byte past the known bits — 0x80 here — is refused.
     #[test]
     fn stored_flags_join_the_decoded_ones() {
         let size = Size2us::new(3, 2);
