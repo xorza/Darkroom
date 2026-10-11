@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| Q6 | Cold-read eviction for the spill benches | Do (prerequisite) | B5 |
 | I4, PIP-19, PIP-5 | Spilled reads fault maps the budget never counts | Do | B6 |
 | PIP-4 | Kept cache for the registered pipeline and the drizzle | Do | B7 |
 | PIP-6 | Park the mosaic instead of the demosaiced frame | Measure | B8 |
@@ -41,7 +40,7 @@ gives PIP-19 its overlap.
   updates the pin and states why. An unexplained move is a regression.
 - **Measure-first items** adopt a change only when the bench shows the stated gain and the output
   is bit identical.
-- **New dependencies** are only `libc` as a `lumos` dev-dependency (Q6, approved).
+- **New dependencies**: none. `libc` is already a Linux dev-dependency of `lumos` (Q6).
 - **Other platforms.** Only Linux builds here. Code for macOS and Windows is reported as not
   compiled unless the user runs it on the macOS test host or gives a Windows check.
 
@@ -49,30 +48,10 @@ gives PIP-19 its overlap.
 
 ```
 B9                          independent
-B5 → B6 → B8                eviction helper → explicit spill reads → mosaic parking measured
+B6 → B8                     explicit spill reads → mosaic parking measured; both measure cold
+                            reads with `StoredPlane::evict` (Linux; `libc` dev-dependency)
 B7                          independent
 ```
-
----
-
-## B5. Cold reads for the spill benches (Q6, prerequisite of B6 and B8)
-
-**Decision (Q6, option B):** `libc` as a `lumos` dev-dependency, for the benches alone.
-
-**Solution.** A bench helper, Linux-only behind the platform module, evicts a stored plane's pages
-so the next pass reads the disk:
-- a scratch plane has no name and, on Unix, no descriptor once mapped: `msync(MS_SYNC)` then
-  `madvise(MADV_PAGEOUT)` (Linux 5.4+) on its map;
-- a named plane (a kept frame): open it, `fdatasync`, `posix_fadvise(POSIX_FADV_DONTNEED)`.
-
-`posix_fadvise` needs a descriptor the scratch plane no longer has, and keeping one per plane
-would spend one descriptor per plane against the 1024 soft limit; `MADV_PAGEOUT` reaches the same
-pages through the map.
-
-**Test.** After an eviction, `mincore` reports no resident page of the plane; after a read, every
-page.
-
-**Crates:** lumos (dev-dependency, `bench` feature code).
 
 ---
 
@@ -103,7 +82,7 @@ page.
    read), then warps from RAM.
 5. `MappedFile` keeps `Sequential`: every remaining map read is front to back.
 
-**Measure (cold, B5).** Combine bench, spilled, 40 frames: map + faults against copy + overlap.
+**Measure (cold reads, `StoredPlane::evict` between passes).** Combine bench, spilled, 40 frames: map + faults against copy + overlap.
 Adopt when the copy is no slower; report the overlap's gain (PIP-19 expected ≥ 10%). Warp bench,
 parked, at 0°, 90° and 180°: owned read against the map.
 
@@ -152,7 +131,7 @@ runs decodes again; a metadata round trip with every field set compares equal.
 **Evidence.** Auto reference + spill parks each demosaiced light, three planes and flags, where
 the calibrated mosaic, one plane and flags, would do, at the cost of a second demosaic.
 
-**Measure (cold, B5, after B6).** Pipeline bench, Auto + spill, both ways on SSD. Adopt the
+**Measure (cold reads, `StoredPlane::evict` between passes, after B6).** Pipeline bench, Auto + spill, both ways on SSD. Adopt the
 faster. The output is bit identical either way, since the demosaic is deterministic; a test holds
 that.
 

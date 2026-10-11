@@ -41,6 +41,53 @@ fn memory_backed_in(mounts: &MountTable, path: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use std::ffi::c_void;
+
+    use memmap2::Mmap;
+
+    /// The page size, in bytes.
+    fn page_size() -> usize {
+        // SAFETY: `sysconf` reads a constant of the system.
+        let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        usize::try_from(size).expect("the page size is positive")
+    }
+
+    /// Drop `map`'s pages from the page cache: each page is faulted in first, since
+    /// `MADV_PAGEOUT` (Linux 5.4) reclaims only the pages this mapping holds, and a file written
+    /// through `write` keeps its pages in the cache unmapped; `msync` cleans them, so the reclaim
+    /// writes nothing. Whether the kernel took both calls.
+    pub(crate) fn evict(map: &Mmap) -> bool {
+        if map.is_empty() {
+            return true;
+        }
+        for offset in (0..map.len()).step_by(page_size()) {
+            std::hint::black_box(map[offset]);
+        }
+        let start = map.as_ptr().cast::<c_void>().cast_mut();
+        // SAFETY: the range is the map's own, and neither call changes what it reads.
+        unsafe {
+            libc::msync(start, map.len(), libc::MS_SYNC) == 0
+                && libc::madvise(start, map.len(), libc::MADV_PAGEOUT) == 0
+        }
+    }
+
+    /// The share of `map`'s pages in memory, by `mincore`; `None` when the call fails.
+    pub(crate) fn resident_share(map: &Mmap) -> Option<f64> {
+        let pages = map.len().div_ceil(page_size());
+        if pages == 0 {
+            return Some(1.0);
+        }
+        let mut residency = vec![0u8; pages];
+        let start = map.as_ptr().cast::<c_void>().cast_mut();
+        // SAFETY: the range is the map's own, and the vector holds one byte per page of it.
+        let answered = unsafe { libc::mincore(start, map.len(), residency.as_mut_ptr()) } == 0;
+        answered
+            .then(|| residency.iter().filter(|&&page| page & 1 == 1).count() as f64 / pages as f64)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
