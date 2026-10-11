@@ -29,7 +29,7 @@ named item.
   of `--all-features` in `cargo test` for `lumos`. A batch that changes a public `lumos` API also
   runs `lens` and `darkroom`. A batch that changes `common` runs `--workspace`, since every member
   uses it.
-- **SIMD kernels** (Batches 19, 22): after the change,
+- **SIMD kernels** (Batch 22): after the change,
   `cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)"
   $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter` must print 0.
 - **Snapshots.** `internals/characterization` pins outputs. A batch that changes an output on
@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-19r, 22, 24, 26, 28                       independent
+22, 24, 26, 28                            independent
 20 ── 21 ── PIP-5, PIP-19
 20 ── 25
 23 ── 27
@@ -57,24 +57,6 @@ named item.
 - 20 before 25: the kept cache moves into the ingest.
 - 21 before PIP-5 and PIP-19: both change memory-map advice through `ScratchFile`.
 - 23 before 27: the dark scale is fitted on the hot pixels 23 stores with their excess.
-
----
-
-## Batch 19 (rest): Markesteijn tile tuning — small (measure first, optional)
-
-**Finding DMS-9.** `io/raw/demosaic/xtrans/markesteijn/mod.rs`: `TILE = 96` with a margin of 15
-at three passes computes `(96/66)² ≈ 2.12×` its output (`(96/78)² ≈ 1.51×` at one pass). Its
-`rgb` buffer holds all 8 directions at once, `8 · 96² · 12 B ≈ 884 KB` as `[f32; 3]`, more than
-L2. The tile size is a measured optimum of that layout (703 ms against 866 ms at librtprocess's
-114); the lever left is the footprint. The RCD part (DMS-7) is done.
-
-**Steps:** compute YPbPr and the derivatives row by row from `rgb` instead of storing full
-planes, keep only the RGB the final blend reads, and retune `TILE` per pass count.
-
-**Acceptance:** `bench_cfa_demosaic_balanced` X-Trans 6240×4160 at least 10% faster, and the
-librtprocess digests unchanged.
-
-**Crates:** lumos.
 
 ---
 
