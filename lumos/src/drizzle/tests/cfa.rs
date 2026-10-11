@@ -7,14 +7,15 @@ use std::f32::consts::SQRT_2;
 
 use super::*;
 use crate::drizzle::stack::drizzle_cfa_images;
+use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
@@ -71,8 +72,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
     .into_iter()
     .flat_map(|set| tiers.iter().map(move |ingest| (set.clone(), ingest)))
     {
-        let colour =
-            |x: i64, y: i64| usize::from(cfa_type.color_at(Vec2us::new(x as usize, y as usize)));
+        let colour = |x: i64, y: i64| cfa_type.color_at(Vec2us::new(x as usize, y as usize));
         let frames = dithers
             .iter()
             .map(|&(dx, dy)| {
@@ -181,7 +181,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
             let pixels = (0..size.pixel_count())
                 .map(|index| {
                     let position = Vec2us::new(index % size.width, index / size.width);
-                    let colour = usize::from(rggb.color_at(position));
+                    let colour = rggb.color_at(position);
                     sky(colour, position.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
                 })
                 .collect();
@@ -232,6 +232,97 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     );
 }
 
+/// Above scale 1 a normalized CFA drizzle needs no pixel shared between frames: eight RGGB frames
+/// dithered by whole pixels along x, drizzled at scale 2 and pixfrac 0.8, so a frame shifted by an
+/// odd pixel puts its red where the reference's green fell and shares no red pixel with it. The
+/// frames are normalized one by one from their source statistics instead of pair by pair.
+///
+/// The scene varies along y alone, `f(y) = 1/4 + (y mod 8)/32`, with no noise, and frame `k` reads
+/// `g_k·f + o_k` at gains that are powers of 2 and dyadic offsets. A whole-pixel shift along x
+/// leaves every colour's samples the same multiset, so each frame's median and spread are exactly
+/// `g_k` times the reference's, and its white noise is 0: every norm is exact. Red and blue
+/// photosites sit on a product lattice, so a drop's x-weights factor out of every red and blue
+/// output pixel, which then reads the same mean over source rows in every frame. Normalized, each
+/// frame there reads what frame 0 (the reference: all frames tie at no noise, and the first wins)
+/// reads alone. Green photosites alternate their columns by row, which ties their mix of rows to
+/// the shift's parity, so green is not compared.
+///
+/// The bound is rounding: a drizzled pixel sums a few drops in f32, the normalization scales by a
+/// power of 2 and adds a dyadic offset, and the combine averages in f64; a few ulps at a level
+/// under 4, so 16 ulps of 4.
+#[test]
+fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
+    let size = Size2us::new(32, 32);
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let scene = |y: usize| 0.25 + (y % 8) as f32 / 32.0;
+    let affine = [
+        (1.0f32, 0.0f32),
+        (2.0, 0.125),
+        (0.5, -0.0625),
+        (4.0, 0.25),
+        (1.0, 0.5),
+        (2.0, -0.125),
+        (0.5, 0.375),
+        (4.0, -0.25),
+    ];
+    let frame = |k: usize| {
+        let (gain, offset) = affine[k];
+        let pixels = (0..size.pixel_count())
+            .map(|index| gain * scene(index / size.width) + offset)
+            .collect();
+        DrizzleFrame::new(
+            make_cfa(size, pixels, rggb),
+            warp_of(Transform::translation(DVec2::new(k as f64, 0.0))),
+        )
+    };
+    let config = DrizzleConfig {
+        fill_value: -1.0,
+        ..kernel_config(DrizzleKernel::Square, 2.0, 0.8)
+    };
+    let drizzle = |frames: Vec<DrizzleFrame<CfaImage>>, normalization| {
+        drizzle_cfa_images(
+            frames,
+            &config,
+            &StackConfig {
+                normalization,
+                weighting: Weighting::Equal,
+                ..StackConfig::light()
+            },
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product
+    };
+    let all = drizzle(
+        (0..affine.len()).map(frame).collect(),
+        Normalization::Global,
+    );
+    let alone = drizzle(vec![frame(0)], Normalization::None);
+    let bound = 16.0 * f32::EPSILON * 4.0;
+    let mut compared = 0;
+    for c in [0, 2] {
+        for (index, (&value, &expected)) in all
+            .image
+            .channel(c)
+            .pixels()
+            .iter()
+            .zip(alone.image.channel(c).pixels())
+            .enumerate()
+        {
+            if value == -1.0 || expected == -1.0 {
+                continue;
+            }
+            compared += 1;
+            assert!(
+                (value - expected).abs() <= bound,
+                "channel {c} pixel {index}: {value} against {expected}"
+            );
+        }
+    }
+    assert!(compared > 0, "no red or blue pixel was compared");
+}
+
 /// A frame of another mosaic pattern is refused before it deposits anything: its photosites
 /// would reach other channels at the same positions.
 #[test]
@@ -254,11 +345,12 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     assert!(
         matches!(
             error,
-            DrizzleError::PatternMismatch {
+            DrizzleError::Admission(AdmissionError::CfaPatternMismatch {
                 index: 1,
                 expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
-            }
+                reference_index: 0,
+            })
         ),
         "{error:?}"
     );
@@ -305,7 +397,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .enumerate()
             .map(|(index, &value)| {
                 let position = Vec2us::new(index % size.width, index / size.width);
-                value * gains[usize::from(rggb.color_at(position))]
+                value * gains[rggb.color_at(position)]
             })
             .collect();
         make_cfa(size, pixels, rggb)

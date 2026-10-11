@@ -4,58 +4,16 @@
 //! a time ([`ChunkMemoryLayout`](chunk_memory_layout::ChunkMemoryLayout)), how many frames may
 //! decode or warp concurrently, and the resident-vs-spilled tier decision
 //! ([`MemoryPlan`](memory_plan::MemoryPlan)). Every caller sizes its work against this file rather than
-//! against `available_memory` directly, through the one [`RunMemory`](run_memory::RunMemory) its
+//! against the system's reading directly, through the one [`RunMemory`](run_memory::RunMemory) its
 //! run read at the entry.
 
-pub(crate) mod cgroup_memory;
 pub(crate) mod chunk_memory_layout;
 pub(crate) mod memory_plan;
 pub(crate) mod run_memory;
 
-use std::sync::LazyLock;
-
-use crate::memory::cgroup_memory::CgroupMemory;
-use crate::mount_table::MountTable;
-use std::sync::PoisonError;
-
 /// Share of available RAM the pipeline will commit, leaving the rest as headroom for allocator
 /// slack, the OS page cache, and whatever else the machine is doing.
 const MEMORY_PERCENT: u64 = 75;
-
-/// What the process can allocate: the host's available memory, or less where its control groups
-/// leave less ([`CgroupMemory`]).
-pub(crate) fn available_memory() -> u64 {
-    use std::sync::Mutex;
-    use sysinfo::System;
-
-    // Where the groups are is read once; what they hold, on every call.
-    static GROUPS: LazyLock<Option<CgroupMemory>> =
-        LazyLock::new(|| CgroupMemory::of_process(&MountTable::read()));
-
-    // Reused rather than built per call. Constructing a `System` costs ~20 µs against ~5 µs to
-    // refresh one that already exists, and asking for memory alone
-    // (`new_with_specifics(RefreshKind::nothing().with_memory(..))`) measured no cheaper — the cost
-    // is the construction itself, so reuse is the only thing that helps. Every planning decision
-    // in the pipeline goes through here.
-    static SYSTEM: LazyLock<Mutex<System>> = LazyLock::new(|| Mutex::new(System::new()));
-
-    // Recover rather than propagate: a poisoned lock means some earlier caller panicked, but the
-    // `System` behind it is a cache of OS counters with no invariant to corrupt.
-    let mut system = SYSTEM.lock().unwrap_or_else(PoisonError::into_inner);
-    system.refresh_memory();
-    let available = system.available_memory();
-
-    // macOS can report zero when compressed pages exceed free, inactive, and purgeable pages.
-    let host = if available == 0 {
-        system.total_memory().saturating_sub(system.used_memory())
-    } else {
-        available
-    };
-    GROUPS
-        .as_ref()
-        .and_then(CgroupMemory::available)
-        .map_or(host, |groups| host.min(groups))
-}
 
 pub(crate) fn memory_budget(available_memory: u64) -> u64 {
     (u128::from(available_memory) * u128::from(MEMORY_PERCENT) / 100) as u64

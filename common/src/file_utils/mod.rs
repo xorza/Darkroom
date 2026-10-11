@@ -1,6 +1,7 @@
 //! Atomic same-directory publication, and the identity a cache keyed on a file compares.
 
 pub(crate) mod file_identity;
+mod platform;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -33,14 +34,14 @@ impl Publication {
         // `seal` closes the handle on every path, before a failure drops `self` and removes the
         // temporary: Windows refuses to remove an open file.
         Self::seal(file, &self.destination, self.mode)?;
-        replace(&self.temporary, &self.destination, self.mode)?;
+        platform::replace(&self.temporary, &self.destination, self.mode)?;
         if self.mode == PublicationMode::Durable {
             let parent = self
                 .destination
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
                 .unwrap_or_else(|| Path::new("."));
-            sync_parent(parent)?;
+            platform::sync_parent(parent)?;
         }
         self.temporary.clear();
         Ok(())
@@ -224,59 +225,6 @@ fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-#[cfg(unix)]
-fn replace(source: &Path, destination: &Path, _mode: PublicationMode) -> io::Result<()> {
-    fs::rename(source, destination)
-}
-
-#[cfg(windows)]
-#[expect(
-    unsafe_code,
-    reason = "`MoveFileExW` is the Win32 call that replaces a file in one step"
-)]
-fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt as _;
-
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let mut flags = MOVEFILE_REPLACE_EXISTING;
-    if mode == PublicationMode::Durable {
-        flags |= MOVEFILE_WRITE_THROUGH;
-    }
-    let succeeded = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) };
-    if succeeded == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn replace(source: &Path, destination: &Path, _mode: PublicationMode) -> io::Result<()> {
-    fs::rename(source, destination)
-}
-
-#[cfg(unix)]
-fn sync_parent(parent: &Path) -> io::Result<()> {
-    File::open(parent)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_parent(_parent: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 #[cfg(any(test, feature = "internals"))]

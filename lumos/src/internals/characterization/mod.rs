@@ -20,10 +20,10 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::register;
@@ -200,7 +200,7 @@ fn calibrate_snapshot() {
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "1ba75e73554431eb");
+    assert_snapshot("calibration", &snapshot, "c76adc4ec4532692");
 
     let mut snapshot = Snapshot::default();
     let xtrans = make_cfa(

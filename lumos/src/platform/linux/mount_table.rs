@@ -112,7 +112,7 @@ fn unescape(field: &str) -> String {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use crate::mount_table::MountTable;
+    use crate::platform::linux::mount_table::MountTable;
 
     /// Lines in the shape `proc(5)` documents: optional fields of any count before the `-`, an
     /// escaped space in a mount point, a bind mount with its own root, and `/tmp` mounted twice,

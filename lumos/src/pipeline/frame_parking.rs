@@ -1,20 +1,16 @@
-//! [`FrameTier`]: where the pipeline parks a frame between stages.
+//! [`FrameParking`]: where the pipeline parks a frame between stages.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use imaginarium::Buffer2;
-
-use crate::combine::cache::core::CacheTier;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_image::StoredImage;
+use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::memory_plan::MemoryPlan;
-
-use crate::frame_store::stored_image::StoredImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;
@@ -23,14 +19,24 @@ use crate::registration::resample::WarpBuffers;
 /// frame parks, and how many frames are warped at once.
 #[derive(Debug)]
 pub(crate) struct StagePlan {
-    pub(crate) tier: FrameTier,
+    pub(crate) parking: FrameParking,
     pub(crate) warp_concurrency: usize,
 }
 
 impl StagePlan {
-    pub(crate) fn new(plan: &MemoryPlan, run: &IngestRun) -> Result<Self, AlignStackError> {
+    /// The stage of a run `plan` decided, whose spill writes `spill_bytes` when it spills.
+    pub(crate) fn new(
+        plan: &MemoryPlan,
+        spill_bytes: u64,
+        run: &IngestRun,
+    ) -> Result<Self, AlignStackError> {
         Ok(Self {
-            tier: FrameTier::for_plan(plan, run)?,
+            parking: FrameParking::new(Tier::for_plan(
+                plan,
+                spill_bytes,
+                run.memory,
+                &run.cache_dir,
+            )?),
             warp_concurrency: plan.warp_concurrency,
         })
     }
@@ -43,50 +49,34 @@ pub(crate) struct StoredWarp {
     pub(crate) reusable: Option<WarpBuffers>,
 }
 
-/// The storage tier the whole run uses: everything resident, or everything through the frame
-/// store's memory maps. Chosen once from the [`MemoryPlan`] and then threaded through the
-/// pipeline body, which is otherwise identical either way.
+/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the [`MemoryPlan`] and
+/// threaded through the pipeline body, which is otherwise identical either way, and how many
+/// calibrated lights it parked on disk before their registration, for the run's report.
 #[derive(Debug)]
-pub(crate) enum FrameTier {
-    Ram,
-    /// Spilled to `scratch`; the combine reads it in row chunks sized against `chunk_memory`, the
-    /// run's planning figure. `parked` counts the calibrated lights written there before their
-    /// registration, for the run's report.
-    Spill {
-        scratch: RunScratch,
-        chunk_memory: u64,
-        parked: AtomicU64,
-    },
+pub(crate) struct FrameParking {
+    tier: Tier,
+    parked: AtomicU64,
 }
 
-impl FrameTier {
-    /// Spill when the plan says the frame set plus its scratch will not fit.
-    fn for_plan(plan: &MemoryPlan, run: &IngestRun) -> Result<Self, AlignStackError> {
-        if plan.fits_in_ram {
-            return Ok(Self::Ram);
+impl FrameParking {
+    pub(crate) const fn new(tier: Tier) -> Self {
+        Self {
+            tier,
+            parked: AtomicU64::new(0),
         }
-        RunScratch::create(&run.cache_dir)
-            .map(|scratch| Self::Spill {
-                scratch,
-                chunk_memory: run.memory.planning(),
-                parked: AtomicU64::new(0),
-            })
-            .map_err(AlignStackError::from)
     }
 
     pub(crate) const fn spills(&self) -> bool {
-        matches!(self, Self::Spill { .. })
+        self.tier.spills()
     }
 
     /// Park a calibrated frame between detection and registration.
     pub(crate) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
-        match self {
-            Self::Ram => Ok(PipelineFrame::Resident(image)),
-            Self::Spill {
-                scratch, parked, ..
-            } => {
+        match &self.tier {
+            Tier::Resident => Ok(PipelineFrame::Resident(image)),
+            Tier::Spilled { scratch, .. } => {
                 let stored = StoredImage::spill(scratch, &image)?;
-                parked.fetch_add(1, Ordering::Relaxed);
+                self.parked.fetch_add(1, Ordering::Relaxed);
                 Ok(PipelineFrame::Spilled(stored))
             }
         }
@@ -94,10 +84,7 @@ impl FrameTier {
 
     /// The calibrated lights [`Self::hold`] wrote to disk.
     pub(crate) fn parked_lights(&self) -> u64 {
-        match self {
-            Self::Ram => 0,
-            Self::Spill { parked, .. } => parked.load(Ordering::Relaxed),
-        }
+        self.parked.load(Ordering::Relaxed)
     }
 
     /// Hand a warped frame to the combine's frame store, giving its buffers back if this tier did
@@ -129,12 +116,12 @@ impl FrameTier {
             pixels,
             flags,
         };
-        match self {
-            Self::Ram => Ok(StoredWarp {
+        match &self.tier {
+            Tier::Resident => Ok(StoredWarp {
                 frame: StoredFrame::from_memory(image, quality, source_stats),
                 reusable: None,
             }),
-            Self::Spill { scratch, .. } => {
+            Tier::Spilled { scratch, .. } => {
                 let frame = StoredFrame::spill(scratch, &image, &quality, source_stats)?;
                 let FrameQuality::Planes {
                     coverage,
@@ -166,54 +153,39 @@ impl FrameTier {
         frame: PipelineFrame,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, AlignStackError> {
-        match (self, frame) {
-            (Self::Ram, PipelineFrame::Resident(image)) => {
-                let quality = Self::reference_quality(&image);
-                Ok(StoredFrame::from_memory(image, quality, source_stats))
-            }
-            (Self::Spill { scratch, .. }, PipelineFrame::Resident(image)) => {
-                let quality = Self::reference_quality(&image);
-                StoredFrame::spill(scratch, &image, &quality, source_stats)
+        match (&self.tier, frame) {
+            (_, PipelineFrame::Resident(image)) => {
+                let quality = FrameQuality::for_reference(image.flags.as_ref());
+                self.tier
+                    .store(image, quality, source_stats)
                     .map_err(AlignStackError::from)
             }
-            (Self::Spill { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
+            (Tier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
                 .into_reference_frame(scratch, source_stats)
                 .map_err(AlignStackError::from),
-            (Self::Ram, PipelineFrame::Spilled(_)) => {
-                unreachable!("the RAM tier parks no frame on disk")
+            (Tier::Resident, PipelineFrame::Spilled(_)) => {
+                unreachable!("the resident tier parks no frame on disk")
             }
         }
-    }
-
-    /// A resident reference's quality: the stored frame keeps its flags for a mask or a flag the
-    /// warp carries.
-    fn reference_quality(image: &LinearImage) -> FrameQuality<Buffer2<f32>> {
-        FrameQuality::for_reference(image.flags.as_ref())
     }
 
     /// The tier the combine reads the stored frames through.
-    pub(crate) const fn cache_tier(&self) -> CacheTier {
-        match self {
-            Self::Ram => CacheTier::Resident,
-            Self::Spill { chunk_memory, .. } => CacheTier::Spilled {
-                chunk_memory: *chunk_memory,
-            },
-        }
+    pub(crate) fn into_tier(self) -> Tier {
+        self.tier
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
-
     use common::TempDir;
 
     use crate::combine::cache::frame_gate::FrameGate;
     use crate::frame_store::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::tier::Tier;
     use crate::internals::prelude::*;
     use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-    use crate::pipeline::frame_tier::FrameTier;
+    use crate::pipeline::frame_parking::FrameParking;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 
     /// A reference leaves out what the warp leaves out of every other frame and keeps the flags it
@@ -223,10 +195,11 @@ mod tests {
     #[test]
     fn a_reference_leaves_out_the_excluded_and_keeps_the_carried() {
         let directory = TempDir::new("frame_tier_reference");
-        let spill = || FrameTier::Spill {
-            scratch: RunScratch::create(directory.path()).unwrap(),
-            chunk_memory: 1 << 20,
-            parked: AtomicU64::new(0),
+        let spill = || {
+            FrameParking::new(Tier::Spilled {
+                scratch: RunScratch::create(directory.path()).unwrap(),
+                chunk_memory: 1 << 20,
+            })
         };
         let dims = ImageDimensions::new((4, 1), 1);
         for saturated in [false, true] {
@@ -237,7 +210,7 @@ mod tests {
                 _ => QualityFlags::default(),
             });
             for (label, tier, parked) in [
-                ("ram", FrameTier::Ram, false),
+                ("ram", FrameParking::new(Tier::Resident), false),
                 ("spill", spill(), false),
                 ("parked", spill(), true),
             ] {

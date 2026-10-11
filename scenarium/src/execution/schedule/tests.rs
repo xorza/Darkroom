@@ -7,7 +7,7 @@ mod planning {
     use crate::execution::error::Error;
     use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
-    use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
+    use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
     use crate::execution::seeds::RunSeeds;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::{EventPort, NodeId};
@@ -17,6 +17,8 @@ mod planning {
     #[cfg(debug_assertions)]
     fn reader_overflow_trips_the_debug_invariant() {
         use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::execution::schedule::ResolvedOutputs;
 
         let mut outputs = ResolvedOutputs::default();
         outputs.reset(1);

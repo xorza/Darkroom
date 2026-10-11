@@ -13,7 +13,7 @@ use crate::io::image::linear::LinearImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::combine::cache::core::{CacheCore, CacheTier};
+use crate::combine::cache::core::CacheCore;
 use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::sample::CombinedSample;
 use crate::combine::cache::sample_noise::SampleNoise;
@@ -24,6 +24,7 @@ use crate::combine::stack::quantization::SourceSigmas;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::math;
@@ -163,7 +164,7 @@ pub fn stack_images(
 /// Combine frames produced by the shared frame store.
 pub(crate) fn stack_stored_frames(
     frames: Vec<StoredFrame>,
-    tier: CacheTier,
+    tier: Tier,
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
     config: &StackConfig,

@@ -2,7 +2,7 @@
 
 use crate::background_mesh::colour_mesh::{ColourMesh, LocalBackground};
 use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
-use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -22,7 +22,7 @@ impl NoiseModel {
     pub(crate) fn resolve(
         estimation: &NoiseEstimation,
         metadata: &ImageMetadata,
-    ) -> Result<Self, UnknownAdcStep> {
+    ) -> Result<Self, CosmicRayError> {
         let electrons_per_unit = match *estimation {
             NoiseEstimation::Measured => CcdNoise::electrons_per_unit(metadata),
             NoiseEstimation::Gain { electrons_per_adu } => {
@@ -30,7 +30,9 @@ impl NoiseModel {
                     Some(domain) if domain.origin == ScaleOrigin::Declared => domain.scale as f32,
                     _ => {
                         QUANTIZATION_SIGMA_PER_STEP
-                            / metadata.quantization_sigma.ok_or(UnknownAdcStep)?
+                            / metadata
+                                .quantization_sigma
+                                .ok_or(CosmicRayError::UnknownAdcStep)?
                     }
                 };
                 Some(electrons_per_adu * adu_per_unit)
@@ -184,7 +186,7 @@ mod tests {
         );
         assert_eq!(
             NoiseModel::resolve(&estimation, &ImageMetadata::default()),
-            Err(UnknownAdcStep)
+            Err(CosmicRayError::UnknownAdcStep)
         );
         let egain = ImageMetadata {
             egain: Some(2.0),

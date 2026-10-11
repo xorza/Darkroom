@@ -2,8 +2,8 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::flat_gain::FlatGain;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::{Transform, WarpTransform};

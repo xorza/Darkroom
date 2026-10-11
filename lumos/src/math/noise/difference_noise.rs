@@ -39,7 +39,7 @@ impl DifferenceNoise {
         let mut differences: ArrayVec<Vec<f32>, 3> =
             (0..cfa_type.num_colors()).map(|_| Vec::new()).collect();
         for_each_pair(mosaic, size, cfa_type, &excluded, |pair| {
-            differences[usize::from(pair.colour)].push(pair.difference);
+            differences[pair.colour].push(pair.difference);
         });
         differences.iter_mut().map(|colour| sigma(colour)).collect()
     }
@@ -58,7 +58,7 @@ impl DifferenceNoise {
             .map(|_| BinnedSamples::new())
             .collect();
         for_each_pair(mosaic, size, cfa_type, &excluded, |pair| {
-            let colour = usize::from(pair.colour);
+            let colour = pair.colour;
             let y = pair.y as f32;
             let at = f32::midpoint(
                 gain.at(colour, pair.x as f32, y),
@@ -83,7 +83,7 @@ struct Pair {
     x: usize,
     neighbour: usize,
     y: usize,
-    colour: u8,
+    colour: usize,
     difference: f32,
 }
 

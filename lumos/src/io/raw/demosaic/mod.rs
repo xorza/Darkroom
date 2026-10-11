@@ -34,8 +34,9 @@ impl DemosaicMemory {
 mod memory_tests {
     use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
+    use crate::io::raw::demosaic::bayer::rcd;
     use crate::io::raw::demosaic::xtrans::markesteijn;
 
     /// Mono holds its one plane. Both demosaics hold the input, the three output planes and the

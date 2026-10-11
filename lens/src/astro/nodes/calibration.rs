@@ -10,8 +10,8 @@ use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    LoadContext, MasterRole, Subtractor, stack_cfa_master,
+    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
+    IngestConfig, LoadContext, MasterBuildError, MasterCache, MasterInputs, MasterRole,
 };
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
@@ -32,25 +32,22 @@ enum FrameSetKeyError {
     },
 }
 
+/// Why a master kept next to its frames could not be read or written.
 #[derive(Debug, thiserror::Error)]
-enum BuildMastersError {
-    #[error("cancelled")]
-    Cancelled,
+enum CacheError {
     #[error(transparent)]
     FrameSet(#[from] FrameSetKeyError),
-    #[error(transparent)]
-    Stack(#[from] lumos::StackError),
-    #[error(transparent)]
-    Calibration(#[from] lumos::CalibrationError),
     #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
-    Cache {
+    Write {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
     #[error("calibration cache requires one source directory, but '{first}' and '{other}' differ")]
-    CacheSourceDirectories { first: PathBuf, other: PathBuf },
+    SourceDirectories { first: PathBuf, other: PathBuf },
 }
+
+type BuildMastersError = MasterBuildError<CacheError>;
 
 #[derive(Debug)]
 struct RoleCachePaths {
@@ -131,130 +128,113 @@ fn build_masters_cached(
     cancel: &CancelToken,
 ) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = frame_sets;
-    // A master stacked with a subtractor taken from each frame is keyed by the subtractor's
-    // frames too, so a flat cached before its bias changed, or before flats were calibrated per
-    // frame, is stacked again.
-    let role = |frames: Option<Vec<PathBuf>>,
-                role: MasterRole,
-                file: &str,
-                subtract: Option<(Subtractor<'_>, &[PathBuf])>|
-     -> Result<Option<CfaImage>, BuildMastersError> {
-        if cancel.is_cancelled() {
-            return Err(BuildMastersError::Cancelled);
-        }
-        let Some(frames) = frames else {
-            return Ok(None);
-        };
-        if frames.is_empty() {
-            return Ok(None);
-        }
-        // Keyed only with the cache on: the key is a `stat` per frame, and one that fails would
-        // fail a node that never reads the cache.
-        let cached = cache
-            .then(|| -> Result<_, BuildMastersError> {
-                let paths = role_cache_paths(&frames, file)?;
-                let mut key = frame_set_key(&frames)?;
-                if let Some((_, subtractor_frames)) = subtract {
-                    key.push_str("\nsubtract ");
-                    key.push_str(&frame_set_key(subtractor_frames)?);
-                }
-                Ok((paths, key))
-            })
-            .transpose()?;
-
-        if let Some((cache_paths, expected_marker)) = &cached {
-            match fs::read_to_string(&cache_paths.marker).ok().as_deref() {
-                Some(marker) if marker == expected_marker && cache_paths.master.is_file() => {
-                    let context = LoadContext {
-                        cancel: cancel.clone(),
-                        ..Default::default()
-                    };
-                    match CfaImage::from_file(&cache_paths.master, &context) {
-                        Ok(master) => return Ok(Some(master)),
-                        Err(error) => tracing::warn!(
-                            path = %cache_paths.master.display(),
-                            %error,
-                            "failed to load calibration master cache; rebuilding from source frames"
-                        ),
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let master = stack_cfa_master(
-            &frames,
-            role,
-            role.stack_config(),
-            &IngestConfig::default(),
-            subtract.map(|(subtractor, _)| subtractor),
-            ProgressCallback::default(),
-            cancel.clone(),
-        )?
-        .expect("a non-empty calibration frame set produces a master");
-        if let Some((cache_paths, marker)) = cached {
-            master
-                .save_fits(&cache_paths.master)
-                .map_err(|source| BuildMastersError::Cache {
-                    path: cache_paths.master.clone(),
-                    source,
-                })?;
-            file_utils::publish_bytes(
-                &cache_paths.marker,
-                marker.as_bytes(),
-                PublicationMode::Cache,
-            )
-            .map_err(|source| BuildMastersError::Cache {
-                path: cache_paths.marker,
-                source,
-            })?;
-        }
-        Ok(Some(master))
-    };
-
-    let bias_master = role(bias.clone(), MasterRole::Bias, "master_bias.fits", None)?;
-    let flat_dark_master = role(
-        flat_darks.clone(),
-        MasterRole::FlatDark,
-        "master_flat_dark.fits",
-        None,
-    )?;
-    // Each flat takes its flat-dark, else the bias, before the flats are normalized and combined.
-    let flat_subtractor = match (&flat_dark_master, &flat_darks, &bias_master, &bias) {
-        (Some(master), Some(frames), _, _) => Some((
-            Subtractor {
-                role: MasterRole::FlatDark,
-                master,
-            },
-            frames.as_slice(),
-        )),
-        (None, _, Some(master), Some(frames)) => Some((
-            Subtractor {
-                role: MasterRole::Bias,
-                master,
-            },
-            frames.as_slice(),
-        )),
-        _ => None,
-    };
-    let flat_master = role(flats, MasterRole::Flat, "master_flat.fits", flat_subtractor)?;
-    CalibrationMasters::from_images(
+    CalibrationMasters::build(
         CalibrationSet {
-            dark: role(darks, MasterRole::Dark, "master_dark.fits", None)?,
-            flat: flat_master,
-            bias: bias_master,
-            flat_dark: flat_dark_master,
+            dark: darks.as_deref().unwrap_or_default(),
+            flat: flats.as_deref().unwrap_or_default(),
+            bias: bias.as_deref().unwrap_or_default(),
+            flat_dark: flat_darks.as_deref().unwrap_or_default(),
         },
         sigma,
+        &IngestConfig::default(),
+        &SourceDirectoryCache {
+            enabled: cache,
+            cancel,
+        },
+        &ProgressCallback::default(),
         cancel,
     )
-    .map_err(BuildMastersError::from)
 }
 
-fn role_cache_paths(
-    frames: &[PathBuf],
-    master_file: &str,
-) -> Result<RoleCachePaths, BuildMastersError> {
+/// Each master kept next to its frames, which must share one directory, beside a marker that
+/// keys it by them and by the frames of the master subtracted from each, so a flat cached before
+/// its bias changed is stacked again. Off, it keeps nothing and keys nothing: a key is a `stat` per
+/// frame, and one that fails would fail a build that never reads the cache.
+#[derive(Debug)]
+struct SourceDirectoryCache<'a> {
+    enabled: bool,
+    cancel: &'a CancelToken,
+}
+
+/// Where a role's master is kept, and the marker its frames key it by as they were read before
+/// the stack.
+#[derive(Debug)]
+struct CachePlace {
+    paths: RoleCachePaths,
+    key: String,
+}
+
+impl CachePlace {
+    /// The place of `inputs`' master, keyed by its frames as they are now.
+    fn of(inputs: &MasterInputs<'_, PathBuf>) -> Result<Self, CacheError> {
+        let file = match inputs.role {
+            MasterRole::Dark => "master_dark.fits",
+            MasterRole::Flat => "master_flat.fits",
+            MasterRole::Bias => "master_bias.fits",
+            MasterRole::FlatDark => "master_flat_dark.fits",
+        };
+        let paths = role_cache_paths(inputs.frames, file)?;
+        let mut key = frame_set_key(inputs.frames)?;
+        if let Some(subtracted) = &inputs.subtracted {
+            key.push_str("\nsubtract ");
+            key.push_str(&frame_set_key(subtracted.frames)?);
+        }
+        Ok(Self { paths, key })
+    }
+}
+
+impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
+    type Error = CacheError;
+    /// `None` with the cache off.
+    type Key = Option<CachePlace>;
+
+    fn load(
+        &self,
+        inputs: &MasterInputs<'_, PathBuf>,
+    ) -> Result<CachedMaster<Option<CachePlace>>, CacheError> {
+        if !self.enabled {
+            return Ok(CachedMaster::Missing(None));
+        }
+        let place = CachePlace::of(inputs)?;
+        let marked =
+            fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
+        if marked && place.paths.master.is_file() {
+            let context = LoadContext {
+                cancel: self.cancel.clone(),
+                ..Default::default()
+            };
+            match CfaImage::from_file(&place.paths.master, &context) {
+                Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
+                Err(error) => tracing::warn!(
+                    path = %place.paths.master.display(),
+                    %error,
+                    "failed to load calibration master cache; rebuilding from source frames"
+                ),
+            }
+        }
+        Ok(CachedMaster::Missing(Some(place)))
+    }
+
+    fn store(&self, place: Option<CachePlace>, master: &CfaImage) -> Result<(), CacheError> {
+        let Some(CachePlace { paths, key }) = place else {
+            return Ok(());
+        };
+        master
+            .save_fits(&paths.master)
+            .map_err(|source| CacheError::Write {
+                path: paths.master.clone(),
+                source,
+            })?;
+        file_utils::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(
+            |source| CacheError::Write {
+                path: paths.marker,
+                source,
+            },
+        )
+    }
+}
+
+fn role_cache_paths(frames: &[PathBuf], master_file: &str) -> Result<RoleCachePaths, CacheError> {
     let first = frames.first().expect("empty frame sets are not cached");
     let directory = first.parent().unwrap_or_else(|| Path::new(""));
     if let Some(other) = frames
@@ -262,7 +242,7 @@ fn role_cache_paths(
         .skip(1)
         .find(|path| path.parent().unwrap_or_else(|| Path::new("")) != directory)
     {
-        return Err(BuildMastersError::CacheSourceDirectories {
+        return Err(CacheError::SourceDirectories {
             first: first.clone(),
             other: other.clone(),
         });
@@ -285,8 +265,9 @@ fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
         })?;
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name);
-        hasher.update(&identity.len.to_le_bytes());
-        hasher.update(&identity.mtime_ns.to_le_bytes());
+        identity.write_to(|bytes| {
+            hasher.update(bytes);
+        });
     }
     Ok(hasher.finalize().to_hex().to_string())
 }
@@ -311,8 +292,15 @@ mod tests {
 
     use common::CancelToken;
 
+    use imaginarium::Buffer2;
+    use lumos::{
+        CachedMaster, CfaImage, CfaType, ImageMetadata, MasterBuildError, MasterCache,
+        MasterInputs, MasterRole,
+    };
+
     use crate::astro::nodes::calibration::{
-        BuildMastersError, FrameSetKeyError, build_masters_cached, frame_set_key, role_cache_paths,
+        CacheError, FrameSetKeyError, SourceDirectoryCache, build_masters_cached, frame_set_key,
+        role_cache_paths,
     };
 
     #[test]
@@ -338,7 +326,7 @@ mod tests {
         let error = role_cache_paths(&mixed, "master_dark.fits").unwrap_err();
         assert!(matches!(
             error,
-            BuildMastersError::CacheSourceDirectories {
+            CacheError::SourceDirectories {
                 first,
                 other
             } if first == mixed[0] && other == mixed[1]
@@ -375,6 +363,54 @@ mod tests {
         ));
     }
 
+    /// A master is kept under its frames as the cache read them before the stack: a frame
+    /// rewritten while its role is stacked leaves the marker on the old content, so the next build
+    /// stacks the role again rather than reuse a master of frames that are gone. One stored under
+    /// frames that stayed is read back.
+    #[test]
+    fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
+        let dir = TempDir::new("lens-master-key-before-stack");
+        let frame = dir.join("a.raf");
+        fs::write(&frame, b"a").unwrap();
+        let frames = [frame.clone()];
+        let inputs = MasterInputs {
+            role: MasterRole::Dark,
+            frames: &frames,
+            subtracted: None,
+        };
+        let cache = SourceDirectoryCache {
+            enabled: true,
+            cancel: &CancelToken::never(),
+        };
+        let master = CfaImage::from_plane(
+            Buffer2::new_filled(4, 4, 0.1),
+            CfaType::Mono,
+            ImageMetadata::default(),
+        );
+        let missing = || match cache.load(&inputs).unwrap() {
+            CachedMaster::Missing(Some(place)) => place,
+            CachedMaster::Missing(None) => panic!("the cache is on"),
+            CachedMaster::Kept(_) => panic!("no master is kept for the frames as they are"),
+        };
+
+        let place = missing();
+        let read = place.key.clone();
+        fs::write(&frame, b"bb").unwrap();
+        cache.store(Some(place), &master).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("master_dark.fits.source")).unwrap(),
+            read
+        );
+        let place = missing();
+        assert_ne!(place.key, read);
+
+        cache.store(Some(place), &master).unwrap();
+        assert!(matches!(
+            cache.load(&inputs).unwrap(),
+            CachedMaster::Kept(kept) if kept.data == master.data
+        ));
+    }
+
     /// A missing frame fails the key's `stat` with the cache on, and with it off the key is never
     /// computed: the stack is what reports the missing file.
     #[test]
@@ -390,7 +426,10 @@ mod tests {
             )
             .unwrap_err()
         };
-        assert!(matches!(build(true), BuildMastersError::FrameSet(_)));
-        assert!(matches!(build(false), BuildMastersError::Stack(_)));
+        assert!(matches!(
+            build(true),
+            MasterBuildError::Cache(CacheError::FrameSet(_))
+        ));
+        assert!(matches!(build(false), MasterBuildError::Stack(_)));
     }
 }

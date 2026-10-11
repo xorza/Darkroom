@@ -12,10 +12,8 @@ use crate::internals::assertions::bits;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::cfa_from_plane;
 use crate::internals::prelude::*;
-use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::{MedianMad, median_mut};
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
@@ -269,53 +267,6 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     );
 }
 
-#[test]
-fn xtrans_removes_cosmic_ray_preserves_flat_field() {
-    // X-Trans same-color path: per-color baselines + tiny noise + one bright CR. The CR is
-    // replaced from same-color neighbors (≈ its color's baseline); flat pixels stay put.
-    let cfa = CfaType::XTrans(XTRANS_PATTERN);
-    let size = Size2us::new(18, 18);
-    let color_val = |c: u8| match c {
-        0 => 0.10, // R
-        1 => 0.20, // G
-        _ => 0.30, // B
-    };
-    let mut data = vec![0.0f32; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let p = Vec2us::new(x, y);
-            data[size.index_of(p)] = color_val(cfa.color_at(p));
-        }
-    }
-    patterns::add_gaussian_noise(&mut data, 0.002, 5);
-    let cr = Vec2us::new(9, 9);
-    data[size.index_of(cr)] = 0.95;
-
-    let mut img = cfa_from_plane(Buffer2::new(size.width, size.height, data), cfa);
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
-    let out = img.data.pixels();
-
-    assert!(count >= 1, "X-Trans CR missed");
-    // Replaced with the same-color (G, here) neighborhood median, ≈ 0.20 — well below the spike.
-    let cr_color = cfa.color_at(cr);
-    assert!(
-        (out[size.index_of(cr)] - color_val(cr_color)).abs() < 0.05,
-        "X-Trans CR not repaired to its color baseline: {}",
-        out[size.index_of(cr)]
-    );
-    // A flat pixel of each color far from the CR is untouched (no false positives).
-    for &p in &[Vec2us::new(3, 3), Vec2us::new(4, 3), Vec2us::new(3, 4)] {
-        let c = cfa.color_at(p);
-        assert!(
-            (out[size.index_of(p)] - color_val(c)).abs() < 0.02,
-            "flat {c}-pixel ({},{}) altered: {}",
-            p.x,
-            p.y,
-            out[size.index_of(p)]
-        );
-    }
-}
-
 /// An independently written reference for [`replace_flagged`], asserting the property that makes
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
 /// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
@@ -471,7 +422,10 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
         },
         ..Default::default()
     };
-    assert_eq!(reject_cosmic_rays(&mut image, &config), Err(UnknownAdcStep));
+    assert_eq!(
+        reject_cosmic_rays(&mut image, &config),
+        Err(CosmicRayError::UnknownAdcStep)
+    );
 }
 
 /// A faint hit on a steep sky gradient is caught: the noise is each pixel's local σ about the
@@ -682,90 +636,47 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
     );
 }
 
-/// Each entry of `MEDIAN_EXCESS_SIGMA` is `√(1 + Var(median_n))` for `n` iid unit Gaussians, to
-/// f32: the variance integrated by the trapezoid rule over ±12σ in 48 000 steps, whose error is
-/// far below an f32's. For odd `n` the median is the order statistic `k = (n + 1)/2`, of density
-/// `n!/((k−1)!(n−k)!)·Φᵏ⁻¹(1−Φ)ⁿ⁻ᵏφ`; for even `n` the mean of `j = n/2` and `j + 1`, whose cross
-/// moment integrates `x·y` over their joint density `n!/((j−1)!(n−j−1)!)·Φ(x)ʲ⁻¹(1−Φ(y))ⁿ⁻ʲ⁻¹φ(x)φ(y)`
-/// on `x < y`, the inner integral accumulated as `y` rises. One and two values give 1 and ½.
+/// An X-Trans mosaic is refused and left exactly as it was, samples and flags, before any work:
+/// even a gain the frame cannot convert reports the sensor, the first thing the pass checks. Its
+/// memory charge is refused the same way.
 #[test]
-fn median_excess_sigma_is_the_integrated_order_statistics() {
-    use crate::calibration_masters::cosmic_ray::xtrans::MEDIAN_EXCESS_SIGMA;
-    use crate::math::error_function::erfc;
-
-    const STEPS: usize = 48_000;
-    let (low, step) = (-12.0f64, 24.0 / STEPS as f64);
-    let x: Vec<f64> = (0..=STEPS).map(|i| low + step * i as f64).collect();
-    let phi: Vec<f64> = x
-        .iter()
-        .map(|&x| (-x * x / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt())
-        .collect();
-    let cdf: Vec<f64> = x
-        .iter()
-        .map(|&x| 0.5 * erfc(-x / std::f64::consts::SQRT_2))
-        .collect();
-    let ln_factorial = |n: usize| (1..=n).map(|k| (k as f64).ln()).sum::<f64>();
-    let trapezoid = |f: &dyn Fn(usize) -> f64| {
-        step * ((1..STEPS).map(f).sum::<f64>() + f64::midpoint(f(0), f(STEPS)))
-    };
-    let second_moment = |n: usize, k: usize| {
-        let c = (ln_factorial(n) - ln_factorial(k - 1) - ln_factorial(n - k)).exp();
-        trapezoid(&|i| {
-            c * cdf[i].powi((k - 1) as i32)
-                * (1.0 - cdf[i]).powi((n - k) as i32)
-                * phi[i]
-                * x[i]
-                * x[i]
-        })
-    };
-    let variance = |n: usize| {
-        if n % 2 == 1 {
-            return second_moment(n, n.div_ceil(2));
-        }
-        let j = n / 2;
-        let c = (ln_factorial(n) - ln_factorial(j - 1) - ln_factorial(n - j - 1)).exp();
-        let mut inner = 0.0;
-        let mut cross = 0.0;
-        let mut previous_inner = x[0] * phi[0] * cdf[0].powi((j - 1) as i32);
-        let mut previous_outer = 0.0;
-        for i in 1..=STEPS {
-            let current = x[i] * phi[i] * cdf[i].powi((j - 1) as i32);
-            inner += step * f64::midpoint(previous_inner, current);
-            previous_inner = current;
-            let outer = c * x[i] * phi[i] * (1.0 - cdf[i]).powi((n - j - 1) as i32) * inner;
-            cross += step * f64::midpoint(previous_outer, outer);
-            previous_outer = outer;
-        }
-        (second_moment(n, j) + second_moment(n, j + 1) + 2.0 * cross) / 4.0
-    };
-    assert!((variance(1) - 1.0).abs() < 1e-9);
-    assert!((variance(2) - 0.5).abs() < 1e-9);
-    for (index, &sigma) in MEDIAN_EXCESS_SIGMA.iter().enumerate() {
-        let n = index + 1;
-        let expected = (1.0 + variance(n)).sqrt() as f32;
-        assert!(
-            (sigma - expected).abs() <= f32::EPSILON * expected,
-            "n = {n}: {sigma} against {expected}"
-        );
-    }
-}
-
-/// The X-Trans path on noise alone flags nothing at the defaults: a 256² mosaic of each colour's
-/// sky, 0.04, 0.05 and 0.06, with white noise of σ 0.003. Its significance is the excess over the
-/// fine same-colour median in that excess's own σ, so `sigclip` 4.5 means the tail it means on the
-/// mono path.
-#[test]
-fn xtrans_noise_alone_flags_nothing() {
+fn an_xtrans_mosaic_is_refused_untouched() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
-    let size = Size2us::new(256, 256);
+    let size = Size2us::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.04 + 0.01 * f32::from(cfa.color_at(size.point_of(index))))
+        .map(|index| 0.04 + 0.01 * cfa.color_at(size.point_of(index)) as f32)
         .collect();
-    patterns::add_gaussian_noise(&mut data, 0.003, 21);
-    let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data), cfa);
-    let count = reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
-    assert_eq!(count, 0);
-    assert!(image.flags.is_none());
+    data[size.index_of(Vec2us::new(18, 18))] = 0.95;
+    let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data.clone()), cfa);
+    image.flags = PixelFlags::from_fn(size, |index| {
+        if index == 7 {
+            QualityFlags::SATURATED
+        } else {
+            QualityFlags::default()
+        }
+    });
+    let flags = image.flags.as_ref().unwrap().bytes().to_vec();
+    for noise in [
+        NoiseEstimation::Measured,
+        NoiseEstimation::Gain {
+            electrons_per_adu: 1.5,
+        },
+    ] {
+        let config = CosmicRayConfig {
+            noise,
+            ..Default::default()
+        };
+        assert_eq!(
+            reject_cosmic_rays(&mut image, &config),
+            Err(CosmicRayError::XTransUnsupported)
+        );
+        assert_eq!(bits(image.data.pixels()), bits(&data));
+        assert_eq!(image.flags.as_ref().unwrap().bytes(), flags);
+    }
+    assert_eq!(
+        heap_bytes(&cfa, size),
+        Err(CosmicRayError::XTransUnsupported)
+    );
 }
 
 /// Recomputing only the rows a repair can move gives what recomputing every row gives, bit for bit:

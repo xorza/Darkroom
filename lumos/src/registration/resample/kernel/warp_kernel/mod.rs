@@ -4,6 +4,7 @@
 use glam::{DMat2, DVec2};
 
 use crate::io::image::pixel_flags::Reach;
+use crate::math::floor_i32::FloorI32;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::InterpolationMethod;
@@ -234,8 +235,8 @@ impl WarpKernel {
             (1 - radius, radius)
         } else {
             let within = |t: i32| (t as f32 - frac).abs() < self.reach;
-            let first = floor(frac - self.reach) + 1;
-            let last = -floor(-(frac + self.reach)) - 1;
+            let first = (frac - self.reach).floor_i32() + 1;
+            let last = -(-(frac + self.reach)).floor_i32() - 1;
             (
                 first + i32::from(!within(first)) - i32::from(within(first - 1)),
                 last + i32::from(within(last + 1)) - i32::from(!within(last)),
@@ -304,14 +305,6 @@ fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
     let far = x.lanes_lt(splat(2.0));
     let beyond_one = near.select(outer, inner);
     far.keep(beyond_one)
-}
-
-/// `x.floor()` for a finite `x` within `i32` range: truncation, then one step down for a negative
-/// non-integer.
-#[inline]
-fn floor(x: f32) -> i32 {
-    let truncated = x as i32;
-    truncated - i32::from(x < truncated as f32)
 }
 
 /// The largest singular value of `m`: the square root of the larger eigenvalue of `mᵀm`, whose

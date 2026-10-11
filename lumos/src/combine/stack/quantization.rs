@@ -67,6 +67,7 @@ mod tests {
             noise: [mad_to_sigma(0.1)].into_iter().collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: [0.5].into_iter().collect(),
+            spread: None,
             quantization_sigma,
             electrons_per_unit: None,
             facts: FrameFacts {

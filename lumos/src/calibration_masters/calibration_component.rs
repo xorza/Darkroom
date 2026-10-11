@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::calibration_masters::master_role::MasterRole;
+
 /// Anything a [`CalibrationMasters`](crate::calibration_masters::CalibrationMasters)
 /// bundle can carry: one of the master frames, or the defect map derived from them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

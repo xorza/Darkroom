@@ -12,14 +12,13 @@ use crate::io::image::linear::LinearImage;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
-use crate::pipeline::frame_tier::StagePlan;
-use crate::pipeline::light_source::LightSource;
+use crate::pipeline::frame_parking::StagePlan;
+use crate::pipeline::frame_registrar::FrameRegistrar;
+use crate::pipeline::light_source::{LightFiles, LightSource, Preparation};
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::DetectionResult;
 use crate::star_detection::detector::Diagnostics;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
@@ -48,25 +47,38 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(AlignStackError::NoFrames);
     }
-    config.validate(lights.len())?;
+    config.validate_linear(lights.len())?;
     let run = IngestRun::new(&config.ingest, cancel.clone());
     let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
     register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
 }
 
-/// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
-/// the frame resolved into usable stars. Shared so both front ends report the same numbers.
-pub(crate) fn log_detection(frame: usize, total: usize, result: &DetectionResult) {
-    let diagnostics = &result.diagnostics;
-    tracing::info!(
-        frame,
-        total,
-        candidates = diagnostics.candidates_after_filtering,
-        deblended = diagnostics.deblended_components,
-        measured = diagnostics.stars_after_centroid,
-        stars = result.stars.len(),
-        "detected stars"
-    );
+/// Detect → register → warp → stack calibrated linear lights read from files: FITS or
+/// floating-point TIFF, as [`LinearImage::from_file`] reads them — the output of Siril or
+/// PixInsight, for one.
+///
+/// [`align_and_stack`] for frames on disk: each light is decoded on a worker, checked, and its
+/// stars detected, and when the set would not fit the memory it plans against, parked and warped
+/// through the frame store as [`calibrate_align_stack`] parks its lights, so peak RAM stays flat in
+/// the frame count. With [`Reference::Index`] each light goes through one pass, written once.
+///
+/// [`calibrate_align_stack`]: crate::pipeline::calibrate::calibrate_align_stack
+pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
+    light_paths: &[P],
+    config: &AlignStackConfig,
+    progress: ProgressCallback,
+    cancel: CancelToken,
+) -> Result<AlignStackResult, AlignStackError> {
+    if light_paths.is_empty() {
+        return Err(AlignStackError::NoFrames);
+    }
+    config.validate_linear(light_paths.len())?;
+    let run = IngestRun::new(&config.ingest, cancel.clone());
+    LightFiles {
+        paths: light_paths,
+        preparation: Preparation::Linear,
+    }
+    .stack(config, &run, progress, cancel)
 }
 
 /// Register every frame to the chosen reference, warp it, and combine the survivors.
@@ -87,7 +99,7 @@ pub(crate) fn register_warp_and_stack(
     cancel: CancelToken,
 ) -> Result<AlignStackResult, AlignStackError> {
     let StagePlan {
-        tier,
+        parking,
         warp_concurrency,
     } = stage;
     let total = detected.len();
@@ -126,7 +138,7 @@ pub(crate) fn register_warp_and_stack(
         reference,
         mem::take(&mut detected[reference].stars),
         config,
-        &tier,
+        &parking,
         total,
         &progress,
         &cancel,
@@ -138,17 +150,7 @@ pub(crate) fn register_warp_and_stack(
     let outcomes = concurrency::try_par_map_bounded_owned(
         detected,
         &mut warp_buffers,
-        |buffers, index, detected| {
-            registrar.park(
-                buffers,
-                FrameToPark {
-                    index,
-                    image: detected.image,
-                    stars: &detected.stars,
-                    stats: detected.stats,
-                },
-            )
-        },
+        |buffers, index, detected| registrar.park(buffers, index, detected),
     )?;
     drop(registrar);
     // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
@@ -162,7 +164,7 @@ pub(crate) fn register_warp_and_stack(
         dimensions,
         detection,
     }
-    .combine(&tier, config, progress, cancel)
+    .combine(parking, config, progress, cancel)
 }
 
 /// Choose the reference (alignment anchor) index, validating it has enough stars.

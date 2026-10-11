@@ -7,8 +7,8 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registrar::ParkedFrame;
-use crate::pipeline::frame_tier::FrameTier;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::star_detection::detector::Diagnostics;
@@ -31,7 +31,7 @@ impl RegisteredSet {
     /// Combine the frames that registered.
     pub(crate) fn combine(
         self,
-        tier: &FrameTier,
+        parking: FrameParking,
         config: &AlignStackConfig,
         progress: ProgressCallback,
         cancel: CancelToken,
@@ -41,13 +41,17 @@ impl RegisteredSet {
         }
         let total = self.outcomes.len();
         let mut frames = Vec::with_capacity(total);
+        let mut survivors = Vec::with_capacity(total);
         let mut registrations = Vec::with_capacity(total);
         let mut dropped = Vec::new();
         // Ascending without a sort: the outcomes are in input order.
         for (index, outcome) in self.outcomes.into_iter().enumerate() {
             let parked = outcome.expect("only a cancelled run leaves a light unparked");
             match parked.stored {
-                Some(frame) => frames.push(frame),
+                Some(frame) => {
+                    frames.push(frame);
+                    survivors.push(index);
+                }
                 None => dropped.push(index),
             }
             registrations.push(parked.registration);
@@ -66,17 +70,20 @@ impl RegisteredSet {
 
         let registered = frames.len();
         tracing::info!(frames = registered, "Stacking aligned frames");
+        let parked_lights = parking.parked_lights();
         let mut stacked = stack_stored_frames(
             frames,
-            tier.cache_tier(),
+            parking.into_tier(),
             self.dimensions,
             self.metadata,
             &config.stack.for_survivors(&dropped),
             progress,
             cancel,
-        )?;
+        )
+        // The combine numbers the survivors by position; the caller numbers its lights.
+        .map_err(|error| error.renumbered(&survivors))?;
         tracing::info!("Stack complete");
-        stacked.report.parked_lights = tier.parked_lights();
+        stacked.report.parked_lights = parked_lights;
 
         Ok(AlignStackResult::from_product(
             stacked,

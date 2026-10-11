@@ -11,15 +11,19 @@
 //! would smear a hit across pixels).
 //!
 //! Dispatches per CFA type: **Mono** = textbook subsampled L.A.Cosmic; **Bayer** = deinterleave the
-//! four 2×2 phases and reuse the mono detector per dense same-color plane; **X-Trans** = same-color
-//! stencils on the mosaic via `color_at` (no dense same-color sub-lattice exists there).
+//! four 2×2 phases and reuse the mono detector per dense same-color plane. **X-Trans** is refused
+//! ([`CosmicRayError::XTransUnsupported`]): it has no dense same-colour sub-lattice, and its red
+//! and blue photosites have no point-symmetric same-colour pair nearer than √18 px, so no second
+//! difference separates a hit from a star's convex wing at the scale of a star. No reference tool
+//! runs L.A.Cosmic on an X-Trans mosaic, and Siril refuses its CFA cosmetic correction there.
+//! X-Trans data relies on dithering and stack-time rejection.
 //!
 //! **CFA caveat:** L.A.Cosmic assumes a PSF-sampled image, but a Bayer phase plane is
 //! half-resolution — a tight star (FWHM ≲ 2–3 px in the mosaic) becomes ~1 px there, where the
 //! CR-vs-star fine-structure test weakens. This per-frame rejection is therefore best for **short,
 //! un-dithered** sequences; for dithered sets prefer dither + stack-time σ/winsor rejection, which
-//! out-votes CRs without a per-frame discriminator. (`xtrans_removes_cosmic_ray...` /
-//! `bayer_tight_star...` tests pin the tight-star behavior.)
+//! out-votes CRs without a per-frame discriminator. (The `bayer_tight_star...` test pins the
+//! tight-star behavior.)
 
 mod bayer;
 pub(crate) mod config;
@@ -28,23 +32,22 @@ pub(crate) mod kept_out;
 pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
-pub(crate) mod xtrans;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 
 use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::calibration_masters::cosmic_ray::kept_out::KeptOut;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
-use crate::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per colour.
@@ -60,16 +63,34 @@ const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 /// once.
 const PASS_MASKS: usize = 3;
 
+/// The detector a CFA type gets: one dense plane, or four Bayer phases. X-Trans gets none.
+#[derive(Debug, Clone, Copy)]
+enum Layout {
+    Mono,
+    Bayer(CfaPattern),
+}
+
+impl Layout {
+    const fn of(cfa_type: &CfaType) -> Result<Self, CosmicRayError> {
+        match cfa_type {
+            CfaType::Mono => Ok(Self::Mono),
+            CfaType::Bayer(pattern) => Ok(Self::Bayer(*pattern)),
+            CfaType::XTrans(_) => Err(CosmicRayError::XTransUnsupported),
+        }
+    }
+}
+
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
-/// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
+/// type (mono / Bayer), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
 /// [`QualityFlags::REPAIRED`]. Saturated star cores and pixels with no measurement are kept out of
 /// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number
-/// of CR pixels corrected, or an error when the parametric noise model needs an ADC step the frame
-/// does not record.
+/// of CR pixels corrected, or an error, with the frame untouched, for an X-Trans mosaic or when the
+/// parametric noise model needs an ADC step the frame does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
-) -> Result<usize, UnknownAdcStep> {
+) -> Result<usize, CosmicRayError> {
+    let layout = Layout::of(&image.cfa_type)?;
     let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
     let size = Size2us::new(image.data.width(), image.data.height());
     let kept_out = KeptOut::of(&image.data, image.flags.as_ref());
@@ -88,27 +109,18 @@ pub(crate) fn reject_cosmic_rays(
         mesh: &mesh,
         flat_gain: flat_gain.as_deref(),
     };
-    // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();
     let mut found = BitBuffer2::new_default(size);
-    let count = match &image.cfa_type {
+    let count = match layout {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        CfaType::Bayer(pattern) => BayerDetector::new(config, noise, *pattern).reject(
+        Layout::Bayer(pattern) => BayerDetector::new(config, noise, pattern).reject(
             pixels,
             size,
             &backgrounds,
             kept_out.as_ref(),
             &mut found,
         ),
-        // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        CfaType::XTrans(pattern) => XtransDetector::new(config, noise, *pattern).reject(
-            pixels,
-            size,
-            &backgrounds,
-            kept_out.as_ref(),
-            &mut found,
-        ),
-        CfaType::Mono => MonoDetector::new(config, noise).reject(
+        Layout::Mono => MonoDetector::new(config, noise).reject(
             pixels,
             size,
             &|index| backgrounds.at(0, size.point_of(index)),
@@ -131,13 +143,16 @@ pub(crate) fn reject_cosmic_rays(
 /// its peak: the detector's planes and masks, and the pass's own [`PASS_MASKS`]. Left out are the
 /// fixed sizes: the background mesh, a few tiles per colour and one tile's samples per worker,
 /// about 20 KB each, and the 256 KiB histogram the saturation level is ranked in.
-pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> usize {
-    let detector = match cfa_type {
-        CfaType::Bayer(_) => BayerDetector::heap_bytes(size),
-        CfaType::XTrans(_) => XtransDetector::heap_bytes(size),
-        CfaType::Mono => MonoDetector::heap_bytes(size),
+///
+/// # Errors
+///
+/// [`CosmicRayError::XTransUnsupported`] for an X-Trans mosaic, which the pass refuses.
+pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> Result<usize, CosmicRayError> {
+    let detector = match Layout::of(cfa_type)? {
+        Layout::Bayer(_) => BayerDetector::heap_bytes(size),
+        Layout::Mono => MonoDetector::heap_bytes(size),
     };
-    detector + PASS_MASKS * BitBuffer2::heap_bytes(size)
+    Ok(detector + PASS_MASKS * BitBuffer2::heap_bytes(size))
 }
 
 #[cfg(test)]

@@ -24,6 +24,15 @@ pub struct FrameDimensionMismatch {
 }
 
 impl FrameDimensionMismatch {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
+        Self {
+            index: inputs[self.index],
+            ..self
+        }
+    }
+
     /// `Ok(())` when `actual` matches, else the rejection of frame `index`.
     ///
     /// The Result-returning counterpart to `assert_eq!` for frame geometry, in

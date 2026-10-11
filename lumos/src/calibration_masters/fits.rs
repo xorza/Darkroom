@@ -6,7 +6,7 @@
 //! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
-use std::fs;
+use std::fs::File;
 use std::io;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
@@ -14,14 +14,15 @@ use std::path::Path;
 use common::file_utils;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
-use fits_well::io::{ChecksumStatus, HduKind, SliceReader};
+use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
 use fits_well::table::{ColumnData, TableBuilder, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_component::CalibrationComponent;
 use crate::calibration_masters::calibration_set::CalibrationSet;
-use crate::calibration_masters::defect_map::DefectMap;
+use crate::calibration_masters::defect_map::{DefectMap, HotPixels};
+use crate::calibration_masters::error::{BundleError, DefectTableError};
 use crate::calibration_masters::master_role::MasterRole;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::io::image::cfa::CfaImage;
@@ -36,9 +37,13 @@ use crate::math::size2us::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
-/// 4: each master's header records what calibration removed from it — the dark whether it lost its
-/// bias — and its flags sit in a `LUMFLAGS` extension. A bundle holds no flat-dark.
-const BUNDLE_VERSION: i64 = 4;
+/// 5: each hot pixel of the defect map keeps its excess over the dark around it. Each master's
+/// header records what calibration removed from it — the dark whether it lost its bias — and its
+/// flags sit in a `LUMFLAGS` extension. A bundle holds no flat-dark.
+pub(super) const BUNDLE_VERSION: i64 = 5;
+/// A defect row's `KIND`.
+const HOT: u8 = 0;
+const COLD: u8 = 1;
 
 /// Where each component's HDU sits in a bundle being read.
 #[derive(Debug, Default)]
@@ -90,17 +95,20 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
     })
 }
 
-pub(super) fn load(path: &Path, context: &LoadContext) -> io::Result<CalibrationMasters> {
-    let bytes = fs::read(path)?;
-    let mut reader = FitsReader::from_bytes(&bytes).map_err(fits_to_io)?;
+pub(super) fn load(path: &Path, context: &LoadContext) -> Result<CalibrationMasters, BundleError> {
+    // Streamed, not mapped: a bundle is the user's file, and one rewritten in place while it is
+    // read must fail the load, not fault the process.
+    let mut reader = FitsReader::open(File::open(path)?)?;
     validate_primary(&reader)?;
     verify_checksums(&mut reader)?;
     let indices = bundle_indices(&reader, path)?;
 
     if indices.masters.flat_dark.is_some() {
-        return Err(invalid_data(
-            "a calibration-master bundle holds no flat-dark: the flat is stored prepared",
-        ));
+        return Err(BundleError::FlatDark);
+    }
+    if indices.defects.is_some() && indices.masters.dark.is_none() && indices.masters.flat.is_none()
+    {
+        return Err(BundleError::DefectsWithoutMaster);
     }
     // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
     // trustworthy as one just built — and neither can exist in a state the other would reject.
@@ -128,8 +136,7 @@ pub(super) fn load(path: &Path, context: &LoadContext) -> io::Result<Calibration
         )?
         .map(PreparedFlat::from_divisor),
         read_defect_map(&mut reader, indices.defects)?,
-    )
-    .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
+    )?;
     Ok(masters)
 }
 
@@ -146,112 +153,80 @@ fn bundle_primary_header() -> io::Result<Header> {
     Ok(header)
 }
 
-fn validate_primary(reader: &SliceReader<'_>) -> io::Result<()> {
-    let Some(primary) = reader.hdus().first() else {
-        return Err(invalid_data("calibration-master FITS has no primary HDU"));
-    };
-    if primary.kind != HduKind::Primary || primary.header.naxis().map_err(fits_to_io)? != 0 {
-        return Err(invalid_data(
-            "calibration-master FITS must start with a dataless primary HDU",
-        ));
+fn validate_primary(reader: &StreamReader<File>) -> Result<(), BundleError> {
+    let primary = reader.hdus().first().ok_or(BundleError::NotABundle)?;
+    if primary.kind != HduKind::Primary
+        || primary.header.naxis()? != 0
+        || primary.header.get_text("LUMOSFMT")? != Some(BUNDLE_FORMAT)
+    {
+        return Err(BundleError::NotABundle);
     }
-    if primary.header.get_text("LUMOSFMT").map_err(fits_to_io)? != Some(BUNDLE_FORMAT) {
-        return Err(invalid_data("not a Lumos calibration-master FITS bundle"));
-    }
-    let version = primary
+    let found = primary
         .header
-        .get_integer("LUMOSVER")
-        .map_err(fits_to_io)?
-        .ok_or_else(|| invalid_data("calibration-master FITS is missing LUMOSVER"))?;
-    if version != BUNDLE_VERSION {
-        return Err(invalid_data(format!(
-            "unsupported calibration-master FITS version {version}; expected {BUNDLE_VERSION}"
-        )));
+        .get_integer("LUMOSVER")?
+        .ok_or(BundleError::MissingVersion)?;
+    if found != BUNDLE_VERSION {
+        return Err(BundleError::Version { found });
     }
     Ok(())
 }
 
-fn verify_checksums(reader: &mut SliceReader<'_>) -> io::Result<()> {
-    for index in 0..reader.hdus().len() {
-        let report = reader.verify_checksum(index).map_err(fits_to_io)?;
+fn verify_checksums(reader: &mut StreamReader<File>) -> Result<(), BundleError> {
+    for hdu in 0..reader.hdus().len() {
+        let report = reader.verify_checksum(hdu)?;
         if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
-            return Err(invalid_data(format!(
-                "calibration-master FITS checksum mismatch in HDU {index}"
-            )));
+            return Err(BundleError::Checksum { hdu });
         }
     }
     Ok(())
 }
 
-fn bundle_indices(reader: &SliceReader<'_>, path: &Path) -> io::Result<BundleIndices> {
+fn bundle_indices(reader: &StreamReader<File>, path: &Path) -> Result<BundleIndices, BundleError> {
     // Each master finds its own flags when it is read; this refuses one that names none.
-    FlagsExtension::check_claims(path, reader.hdus())
-        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
+    FlagsExtension::check_claims(path, reader.hdus()).map_err(BundleError::Flags)?;
     let mut indices = BundleIndices::default();
-    for (index, hdu) in reader.hdus().iter().enumerate().skip(1) {
-        let extname = hdu
+    for (hdu, unit) in reader.hdus().iter().enumerate().skip(1) {
+        let extname = unit
             .header
-            .get_text("EXTNAME")
-            .map_err(fits_to_io)?
-            .ok_or_else(|| invalid_data(format!("HDU {index} is missing EXTNAME")))?;
+            .get_text("EXTNAME")?
+            .ok_or(BundleError::MissingExtname { hdu })?;
         if extname.eq_ignore_ascii_case(FLAGS_EXTNAME) {
             continue;
         }
         let component = CalibrationComponent::from_extname(&extname.to_ascii_uppercase())
-            .ok_or_else(|| {
-                invalid_data(format!(
-                    "unknown calibration-master FITS extension {extname:?}"
-                ))
+            .ok_or_else(|| BundleError::UnknownExtension {
+                extname: extname.to_string(),
             })?;
         let slot = match component {
             CalibrationComponent::Master(role) => indices.masters.get_mut(role),
             CalibrationComponent::Defects => &mut indices.defects,
         };
-        record_index(slot, index, extname)?;
+        if slot.replace(hdu).is_some() {
+            return Err(BundleError::DuplicateExtension {
+                extname: extname.to_string(),
+            });
+        }
     }
     Ok(indices)
 }
 
-fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> io::Result<()> {
-    if slot.replace(index).is_some() {
-        return Err(invalid_data(format!(
-            "duplicate calibration-master FITS extension {extname:?}"
-        )));
-    }
-    Ok(())
-}
-
 fn read_master(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: Option<usize>,
     role: MasterRole,
     path: &Path,
     context: &LoadContext,
-) -> io::Result<Option<CfaImage>> {
+) -> Result<Option<CfaImage>, BundleError> {
     let Some(index) = index else {
         return Ok(None);
     };
-    let extname = role.extname();
     let hdu = &reader.hdus()[index];
-    if hdu.kind != HduKind::Image || hdu.header.bitpix().map_err(fits_to_io)? != Bitpix::F32 {
-        return Err(invalid_data(format!(
-            "{extname} must be an uncompressed BITPIX=-32 image extension"
-        )));
+    if hdu.kind != HduKind::Image || hdu.header.bitpix()? != Bitpix::F32 {
+        return Err(BundleError::MasterEncoding { role });
     }
-    if hdu.header.get_text("LUMROLE").map_err(fits_to_io)? != Some(extname) {
-        return Err(invalid_data(format!(
-            "{extname} has invalid Lumos CFA metadata"
-        )));
-    }
-    let prepared = hdu
-        .header
-        .get_logical("LUMPREP")
-        .map_err(fits_to_io)?
-        .unwrap_or(false);
-    if prepared != role.prepared() {
-        return Err(invalid_data(format!(
-            "{extname} has an invalid prepared-master state"
-        )));
+    let prepared = hdu.header.get_logical("LUMPREP")?.unwrap_or(false);
+    if hdu.header.get_text("LUMROLE")? != Some(role.extname()) || prepared != role.prepared() {
+        return Err(BundleError::MasterRecord { role });
     }
     // Every HDU's checksum was verified before any was read.
     let checksum = FitsChecksumProvenance {
@@ -260,12 +235,9 @@ fn read_master(
     };
     read_cfa_hdu(reader, index, path, context, checksum)
         .map(Some)
-        .map_err(|source| {
-            let kind = match source {
-                ImageError::Cancelled { .. } => ErrorKind::Interrupted,
-                _ => ErrorKind::InvalidData,
-            };
-            IoError::new(kind, source)
+        .map_err(|source| match source {
+            ImageError::Cancelled { .. } => BundleError::Cancelled,
+            source => BundleError::Master { role, source },
         })
 }
 
@@ -276,11 +248,16 @@ struct EncodedDefectMap {
 }
 
 fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
-    let (hot, cold) = (map.hot_indices(), map.cold_indices());
-    let mut kinds = Vec::with_capacity(hot.len() + cold.len());
-    kinds.resize(hot.len(), 0);
-    kinds.resize(kinds.len() + cold.len(), 1);
+    let (hot, cold) = (map.hot(), map.cold_indices());
+    let rows = hot.indices.len() + cold.len();
+    let mut kinds = Vec::with_capacity(rows);
+    kinds.resize(hot.indices.len(), HOT);
+    kinds.resize(rows, COLD);
+    let mut excess = Vec::with_capacity(rows);
+    excess.extend_from_slice(&hot.excess);
+    excess.resize(rows, f32::NAN);
     let indices = hot
+        .indices
         .iter()
         .chain(cold)
         .map(|&index| {
@@ -293,6 +270,7 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
         [
             WriteColumn::scalar("KIND", ColumnData::Bytes(kinds)),
             WriteColumn::scalar("INDEX", ColumnData::I64(indices)),
+            WriteColumn::scalar("EXCESS", ColumnData::F32(excess)),
         ],
     )
     .map_err(fits_to_io)?;
@@ -322,71 +300,82 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
 }
 
 fn read_defect_map(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: Option<usize>,
-) -> io::Result<Option<DefectMap>> {
+) -> Result<Option<DefectMap>, BundleError> {
     let Some(index) = index else {
         return Ok(None);
     };
+    let invalid = |error| Err(BundleError::DefectTable(error));
     let header = &reader.hdus()[index].header;
     if reader.hdus()[index].kind != HduKind::BinTable
-        || header.get_text("LUMOSFMT").map_err(fits_to_io)? != Some(DEFECT_FORMAT)
-        || header.get_integer("LUMOSVER").map_err(fits_to_io)? != Some(BUNDLE_VERSION)
+        || header.get_text("LUMOSFMT")? != Some(DEFECT_FORMAT)
+        || header.get_integer("LUMOSVER")? != Some(BUNDLE_VERSION)
     {
-        return Err(invalid_data("DEFECT_MAP has invalid Lumos table metadata"));
+        return invalid(DefectTableError::Format);
     }
-    let dimensions = read_defect_dimensions(header)?;
-    let table = reader.read_table(index).map_err(fits_to_io)?;
+    let Some(dimensions) = read_defect_dimensions(header)? else {
+        return invalid(DefectTableError::Extent);
+    };
+    let table = reader.read_table(index)?;
     let row_count = table.schema().nrows;
-    let ColumnData::Bytes(kinds) = table
-        .column_by_name("KIND")
-        .and_then(|column| column.raw())
-        .map_err(fits_to_io)?
-    else {
-        return Err(invalid_data("DEFECT_MAP KIND must be a byte column"));
+    let column = |name: &'static str| {
+        table
+            .column_by_name(name)
+            .and_then(|column| column.raw())
+            .map_err(|_| BundleError::DefectTable(DefectTableError::Column { column: name }))
     };
-    let ColumnData::I64(indices) = table
-        .column_by_name("INDEX")
-        .and_then(|column| column.raw())
-        .map_err(fits_to_io)?
-    else {
-        return Err(invalid_data("DEFECT_MAP INDEX must be an int64 column"));
+    let ColumnData::Bytes(kinds) = column("KIND")? else {
+        return invalid(DefectTableError::Column { column: "KIND" });
     };
-    if kinds.len() != row_count || indices.len() != row_count {
-        return Err(invalid_data(
-            "DEFECT_MAP column lengths do not match NAXIS2",
-        ));
+    let ColumnData::I64(indices) = column("INDEX")? else {
+        return invalid(DefectTableError::Column { column: "INDEX" });
+    };
+    let ColumnData::F32(excess) = column("EXCESS")? else {
+        return invalid(DefectTableError::Column { column: "EXCESS" });
+    };
+    if kinds.len() != row_count || indices.len() != row_count || excess.len() != row_count {
+        return invalid(DefectTableError::ColumnLength);
     }
-    let mut hot_indices = Vec::new();
-    let mut cold_indices = Vec::new();
-    for (kind, index) in kinds.into_iter().zip(indices) {
-        let index = usize::try_from(index)
-            .map_err(|_| invalid_data("DEFECT_MAP contains a negative or oversized index"))?;
+    let mut hot = HotPixels::default();
+    let mut cold = Vec::new();
+    for (row, ((kind, index), excess)) in kinds.into_iter().zip(indices).zip(excess).enumerate() {
+        let Some(index) = usize::try_from(index)
+            .ok()
+            .filter(|&index| index < dimensions.pixel_count())
+        else {
+            return invalid(DefectTableError::Index { row });
+        };
         match kind {
-            0 => hot_indices.push(index),
-            1 => cold_indices.push(index),
-            _ => return Err(invalid_data("DEFECT_MAP KIND must be 0 or 1")),
+            HOT if excess.is_finite() && excess > 0.0 => {
+                hot.indices.push(index);
+                hot.excess.push(excess);
+            }
+            COLD if excess.is_nan() => cold.push(index),
+            HOT | COLD => return invalid(DefectTableError::Excess { row }),
+            kind => return invalid(DefectTableError::Kind { row, kind }),
         }
     }
-    DefectMap::from_indices(dimensions, hot_indices, cold_indices)
-        .map(Some)
-        .ok_or_else(|| invalid_data("DEFECT_MAP index lies outside its sensor dimensions"))
+    Ok(Some(
+        DefectMap::from_lists(dimensions, hot, cold).expect("every index lies on the sensor"),
+    ))
 }
 
-fn read_defect_dimensions(header: &Header) -> io::Result<Size2us> {
-    let extent = |name: &str| -> io::Result<usize> {
-        header
-            .get_integer(name)
-            .map_err(fits_to_io)?
+/// The sensor extent the table states; `None` when an extent is missing, not positive, or the two
+/// overflow.
+fn read_defect_dimensions(header: &Header) -> Result<Option<Size2us>, BundleError> {
+    let extent = |name: &str| -> Result<Option<usize>, BundleError> {
+        Ok(header
+            .get_integer(name)?
             .and_then(|value| usize::try_from(value).ok())
-            .filter(|&value| value > 0)
-            .ok_or_else(|| invalid_data(format!("DEFECT_MAP has no valid {name}")))
+            .filter(|&value| value > 0))
     };
-    let (width, height) = (extent("LUMWID")?, extent("LUMHEI")?);
-    width
+    let (Some(width), Some(height)) = (extent("LUMWID")?, extent("LUMHEI")?) else {
+        return Ok(None);
+    };
+    Ok(width
         .checked_mul(height)
-        .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
-    Ok(Size2us::new(width, height))
+        .map(|_| Size2us::new(width, height)))
 }
 
 fn invalid_data(message: impl Into<String>) -> IoError {

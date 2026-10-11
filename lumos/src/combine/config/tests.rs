@@ -1,6 +1,7 @@
 use crate::combine::config::*;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
@@ -193,10 +194,10 @@ fn validate_invalid_config_returns_exact_errors() {
         (
             StackConfig {
                 combine: Combine {
-                    method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(
-                        2.0,
-                        f32::INFINITY,
-                    )),
+                    method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(
+                        SigmaBounds::asymmetric(2.0, f32::INFINITY),
+                        3,
+                    ))),
                     small_n: SmallN::median_below(5),
                 },
                 weighting: Weighting::Equal,
@@ -209,21 +210,24 @@ fn validate_invalid_config_returns_exact_errors() {
         (
             StackConfig {
                 combine: Combine {
-                    method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(2.0, 0))),
+                    method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(
+                        SigmaBounds::symmetric(2.0),
+                        0,
+                    ))),
                     small_n: SmallN::median_below(5),
                 },
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "max_iterations",
+            "max_passes",
             0.0,
         ),
         (
             StackConfig {
                 combine: Combine {
                     method: CombineMethod::Mean(Rejection::Winsorized(WinsorizedClipConfig::new(
-                        0.0,
+                        SigmaBounds::symmetric(0.0),
                     ))),
                     small_n: SmallN::median_below(5),
                 },
@@ -238,7 +242,8 @@ fn validate_invalid_config_returns_exact_errors() {
             StackConfig {
                 combine: Combine {
                     method: CombineMethod::Mean(Rejection::LinearFit(LinearFitClipConfig::new(
-                        2.0, 0.0, 3,
+                        SigmaBounds::asymmetric(2.0, 0.0),
+                        4,
                     ))),
                     small_n: SmallN::median_below(5),
                 },
@@ -295,8 +300,34 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "GESD alpha",
+            "alpha",
             1.0,
+        ),
+        (
+            StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(0.0, None))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            "alpha",
+            0.0,
+        ),
+        (
+            StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(0.05, Some(0)))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            "max_outliers",
+            0.0,
         ),
     ];
     for (config, field, value) in range_checks {

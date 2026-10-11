@@ -1,20 +1,23 @@
 use crate::combine::config::{Normalization, Weighting};
+use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::memory::run_memory::RunMemory;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
+use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
-
-use common::CancelToken;
 
 use crate::combine::cache::loader::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_spill::Carries;
+use crate::frame_store::run_scratch::RunScratch;
+use crate::internals::fits::write_fits;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use common::TempDir;
+use fits_well::image::Image as FitsImage;
 
 fn cache_test_frame<I: StackableImage>(
     cache_dir: &Path,
@@ -22,16 +25,37 @@ fn cache_test_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     index: usize,
 ) -> Result<StoredFrame, StackError> {
-    // No frame 0 admitted: these tests are about one frame's cache files, not the set it belongs to.
-    let cancel = CancelToken::never();
-    FrameDiskCache::<I> {
-        scratch: &RunScratch::create(cache_dir).unwrap(),
+    // A fresh intake per call: these tests are about one frame's cache files, not the set it
+    // belongs to, so no frame 0 is admitted before it.
+    let run = IngestRun::planned(
+        RunMemory::new(1 << 40, None),
+        &IngestConfig::with_cache_dir(cache_dir.to_path_buf()),
+    );
+    let progress = ProgressCallback::default();
+    let intake = FrameIntake::new(
+        IntakePlan {
+            dimensions,
+            frame_count: index + 1,
+            decode_slots: 1,
+            stage: StackingStage::Loading,
+        },
+        &run,
+        &progress,
+    );
+    let tier = Tier::Spilled {
+        scratch: RunScratch::create(cache_dir).unwrap(),
+        chunk_memory: 1 << 30,
+    };
+    let paths = vec![source; index + 1];
+    FrameLoad::<I, &Path> {
+        paths: &paths,
+        tier: &tier,
         kept: Some(&DecodeCache::open(cache_dir).unwrap()),
-        admission: &FrameAdmission::new(dimensions, &cancel),
-        context: &LoadContext::new(CancelToken::never(), u64::MAX),
+        intake: &intake,
         step: None,
     }
-    .frame(source, index, None)
+    .frame(index, None)
+    .map(|loaded| loaded.frame)
 }
 
 /// The directory of the decode cache under `cache_dir`.
@@ -39,8 +63,8 @@ fn kept_directory(cache_dir: &Path) -> PathBuf {
     DecodeCache::open(cache_dir).unwrap().path().to_path_buf()
 }
 
-fn spill_of<'a, I: StackableImage>(kept: &'a Path, source: &Path) -> FrameSpill<'a> {
-    FrameSpill::cached(kept, &fs::canonicalize(source).unwrap(), I::DECODER)
+fn spill_of<'a, I: StackableImage>(kept: &'a Path, canonical: &'a Path) -> FrameSpill<'a> {
+    FrameSpill::cached(kept, canonical, I::DECODER)
 }
 
 /// Overwrite sample `index` of a spilled plane in place, as anything outside lumos could.
@@ -60,8 +84,12 @@ fn set_mtime(path: &Path, nanos_past_epoch: u64) {
         .unwrap();
 }
 
-/// A first call decodes and commits; a second maps what the first committed. A rewrite of the
-/// source that keeps its length but moves its mtime by 100 ns decodes again.
+/// A first call decodes and commits; a second maps what the first committed. Each of these decodes
+/// again instead: a plane zeroed behind its commit, as a power loss can leave one; a source made
+/// read-only, which moves its change time alone; a rewrite of the source that keeps its length and
+/// moves its mtime by 100 ns; and one that keeps both, its mtime set back. The kernel stamps the
+/// change time from a clock as coarse as a few milliseconds, so each change of the source waits
+/// 20 ms past the last.
 #[test]
 fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let temp_dir = TempDir::new("lumos_cache_frame_reuse");
@@ -79,23 +107,73 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     assert_eq!(first.source_stats.medians[0], 5.5);
     drop(first);
 
-    // A sample and the statistics changed on disk come back as they are: the frame was mapped and
-    // its statistics read, not measured again.
+    // A sample and the statistics changed on disk and sealed again come back as they are: the
+    // frame was mapped and its statistics read, not measured again.
     let kept = kept_directory(temp_dir.path());
-    let spill = spill_of::<LinearImage>(&kept, &source);
-    poke(&spill.channel_path(0), 2, 102.0);
-    let key = CacheKey::new(
-        CachedSource::of(&source).unwrap().identity,
-        DecoderKind::Linear,
-        &LoadContext::default(),
-    );
-    let mut sentinel = spill.committed(key).unwrap().stats;
-    sentinel.medians[0] = 99.0;
-    spill.commit(key, Carries::Channels, &sentinel).unwrap();
+    let canonical = fs::canonicalize(&source).unwrap();
+    let spill = spill_of::<LinearImage>(&kept, &canonical);
+    let key = || {
+        CacheKey::new(
+            CachedSource::of(&source).unwrap().identity,
+            DecoderKind::Linear,
+            &LoadContext::default(),
+        )
+    };
+    let edit = |value: f32| {
+        poke(&spill.channel_path(0), 2, value);
+        spill.reseal(key(), 1);
+        let committed = spill.committed(key()).unwrap();
+        let mut sentinel = committed.stats;
+        sentinel.medians[0] = 99.0;
+        spill
+            .commit(key(), Carries::Channels, committed.digests, &sentinel)
+            .unwrap();
+    };
+    edit(102.0);
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
     assert_eq!(reused.source_stats.medians[0], 99.0);
     drop(reused);
+
+    fs::write(spill.channel_path(0), [0u8; 48]).unwrap();
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(decoded.channels[0].chunk(0, 12), pixels, "a zeroed plane");
+    assert_eq!(decoded.source_stats.medians[0], 5.5);
+    drop(decoded);
+
+    let settle = || thread::sleep(Duration::from_millis(20));
+    edit(102.0);
+    settle();
+    let mut permissions = fs::metadata(&source).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&source, permissions.clone()).unwrap();
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(
+        decoded.channels[0].chunk(0, 12),
+        pixels,
+        "a read-only source"
+    );
+    drop(decoded);
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "the file is the test's own, made writable again for the rewrites below"
+    )]
+    permissions.set_readonly(false);
+    fs::set_permissions(&source, permissions).unwrap();
+
+    settle();
+    let restored: Vec<f32> = (100..112).map(|i| i as f32).collect();
+    LinearImage::from_pixels(dims, restored.clone())
+        .save(&source)
+        .unwrap();
+    set_mtime(&source, 1_700_000_000_000_000_100);
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(
+        decoded.channels[0].chunk(0, 12),
+        restored,
+        "a rewrite with the mtime set back"
+    );
+    drop(decoded);
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();
     let original_len = fs::metadata(&source).unwrap().len();
@@ -123,18 +201,26 @@ fn cache_frame_validates_a_reused_frame() {
         .unwrap();
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap());
     let kept = kept_directory(temp_dir.path());
-    let spill = spill_of::<LinearImage>(&kept, &source);
+    let canonical = fs::canonicalize(&source).unwrap();
+    let spill = spill_of::<LinearImage>(&kept, &canonical);
 
+    // Sealed again, so the digests pass and the checks behind them are what refuses it.
     poke(&spill.channel_path(0), 2, f32::INFINITY);
+    let key = CacheKey::new(
+        CachedSource::of(&source).unwrap().identity,
+        DecoderKind::Linear,
+        &LoadContext::default(),
+    );
+    spill.reseal(key, 1);
     let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
     assert!(matches!(
         error,
-        StackError::NonFiniteImageSample {
+        StackError::Admission(AdmissionError::NonFiniteImageSample {
             index: 1,
             channel: 0,
             pixel: 2,
             value: f32::INFINITY,
-        }
+        })
     ));
 }
 
@@ -153,82 +239,97 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
 
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap());
     let kept = kept_directory(temp_dir.path());
+    let canonical = fs::canonicalize(&source).unwrap();
     assert_ne!(
-        spill_of::<LinearImage>(&kept, &source).channel_path(0),
-        spill_of::<CfaImage>(&kept, &source).channel_path(0)
+        spill_of::<LinearImage>(&kept, &canonical).channel_path(0),
+        spill_of::<CfaImage>(&kept, &canonical).channel_path(0)
     );
     let error = cache_test_frame::<CfaImage>(temp_dir.path(), &source, dims, 0).unwrap_err();
     assert!(matches!(error, StackError::ImageLoad(_)), "{error:?}");
 }
 
-/// A kept cache serves a second run: frame 1's planes come back from the first run's files, and
-/// frame 0 — always decoded, for the stack's metadata — is committed like the rest, so a run in
-/// which it is not first can reuse it.
+/// A kept cache serves a second run, resident or spilled, whether frame 0 had to be decoded for
+/// the plan (a float TIFF, which has no header to peek) or not (a FITS file): frame 1's planes come
+/// back from the first run's files, and frame 0 — always decoded, for the stack's metadata — is
+/// committed like the rest, so a run in which it is not first can reuse it.
 #[test]
-fn a_kept_disk_cache_is_reused_by_the_next_run() {
+fn a_kept_cache_is_reused_by_the_next_run() {
     let temp_dir = TempDir::new("lumos_cache_kept_run");
     let dims = ImageDimensions::new((4, 3), 1);
-    let paths: Vec<PathBuf> = (0..2)
-        .map(|index| {
-            let path = temp_dir.join(format!("light_{index}.tiff"));
-            LinearImage::from_pixels(dims, vec![0.25 + 0.25 * index as f32; 12])
-                .save(&path)
-                .unwrap();
-            path
-        })
-        .collect();
-    let ingest = IngestConfig {
-        cache_dir: temp_dir.join("cache"),
-        keep_cache: true,
-        ..IngestConfig::default()
-    };
     let config = StackConfig {
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let run = || {
-        load_tiered::<LinearImage, _>(
-            &paths,
-            &config,
-            IngestRun::planned(RunMemory::new(1 << 30, Some(1)), &ingest),
-            None,
-            ProgressCallback::default(),
-        )
-        .unwrap()
-    };
+    for (format, memory_override, spills) in [
+        ("tiff", Some(1), true),
+        ("tiff", None, false),
+        ("fits", Some(1), true),
+        ("fits", None, false),
+    ] {
+        let label = format!("{format}, spilled {spills}");
+        let directory = temp_dir.join(format!("{format}_{spills}"));
+        fs::create_dir_all(&directory).unwrap();
+        let paths: Vec<PathBuf> = (0..2)
+            .map(|index| {
+                let path = directory.join(format!("light_{index}.{format}"));
+                let pixels = vec![0.25 + 0.25 * index as f32; 12];
+                if format == "fits" {
+                    write_fits(&path, &FitsImage::new([4, 3], pixels).unwrap(), None);
+                } else {
+                    LinearImage::from_pixels(dims, pixels).save(&path).unwrap();
+                }
+                path
+            })
+            .collect();
+        let ingest = IngestConfig {
+            cache_dir: directory.join("cache"),
+            keep_cache: true,
+            ..IngestConfig::default()
+        };
+        let run = || {
+            load_tiered::<LinearImage, _>(
+                &paths,
+                &config,
+                IngestRun::planned(RunMemory::new(1 << 30, memory_override), &ingest),
+                None,
+                ProgressCallback::default(),
+            )
+            .unwrap()
+        };
 
-    let first = run();
-    assert!(first.core.tier.spills(), "a one-byte budget spills");
-    drop(first);
-    let directory = kept_directory(&ingest.cache_dir);
-    let key = |path: &Path| {
-        CacheKey::new(
-            CachedSource::of(path).unwrap().identity,
-            DecoderKind::Linear,
-            &LoadContext::default(),
-        )
-    };
-    for path in &paths {
-        assert!(
-            spill_of::<LinearImage>(&directory, path)
-                .committed(key(path))
-                .is_some(),
-            "{} was not committed",
-            path.display()
-        );
-    }
-    for path in &paths {
-        poke(
-            &spill_of::<LinearImage>(&directory, path).channel_path(0),
-            0,
-            0.125,
-        );
-    }
+        let first = run();
+        assert_eq!(first.core.tier.spills(), spills, "{label}");
+        drop(first);
+        let kept = kept_directory(&ingest.cache_dir);
+        let key = |path: &Path| {
+            CacheKey::new(
+                CachedSource::of(path).unwrap().identity,
+                DecoderKind::Linear,
+                &LoadContext::default(),
+            )
+        };
+        for path in &paths {
+            let canonical = fs::canonicalize(path).unwrap();
+            let spill = spill_of::<LinearImage>(&kept, &canonical);
+            assert!(
+                spill.committed(key(path)).is_some(),
+                "{label}: {} was not committed",
+                path.display()
+            );
+            poke(&spill.channel_path(0), 0, 0.125);
+            spill.reseal(key(path), 1);
+        }
 
-    let second = run();
-    assert_eq!(second.frames[0].channels[0].chunk(0, 1), &[0.25]);
-    assert_eq!(second.frames[1].channels[0].chunk(0, 1), &[0.125]);
+        let second = run();
+        assert_eq!(second.frames[0].channels[0].chunk(0, 1), &[0.25], "{label}");
+        assert_eq!(
+            second.frames[1].channels[0].chunk(0, 1),
+            &[0.125],
+            "{label}"
+        );
+        assert!(second.core.metadata.provenance.is_some(), "{label}");
+    }
 }
 
 #[test]
@@ -249,10 +350,10 @@ fn cache_frame_dimension_mismatch() {
 
     assert!(matches!(
         result.unwrap_err(),
-        StackError::DimensionMismatch(FrameDimensionMismatch {
+        StackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
             index: 5,
             expected,
             actual,
-        }) if expected == expected_dims && actual == actual_dims
+        })) if expected == expected_dims && actual == actual_dims
     ));
 }

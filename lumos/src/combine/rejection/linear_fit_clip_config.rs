@@ -4,7 +4,7 @@
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::combine::rejection::validate_max_iterations;
+use crate::combine::rejection::validate_max_passes;
 use crate::error::InvalidConfigField;
 
 /// Configuration for linear fit clipping.
@@ -24,37 +24,31 @@ use crate::error::InvalidConfigField;
 pub struct LinearFitClipConfig {
     /// How far either side of the fitted centre a value may sit, in sigma.
     pub sigma: SigmaBounds,
-    /// The most fitted passes to run after the first clip. The clip stops earlier when a pass
+    /// The most passes to run, the first clip included. The clip stops earlier when a fitted pass
     /// rejects nothing.
-    pub max_iterations: u32,
+    pub max_passes: u32,
 }
 
 impl Default for LinearFitClipConfig {
     fn default() -> Self {
         Self {
             sigma: SigmaBounds::symmetric(3.0),
-            max_iterations: 3,
+            max_passes: 4,
         }
     }
 }
 
 impl LinearFitClipConfig {
-    pub const fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
-        Self {
-            sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
-            max_iterations,
-        }
+    /// Clipping to `sigma` about the fitted line, for at most `max_passes` passes, the first clip
+    /// about the median among them.
+    pub const fn new(sigma: SigmaBounds, max_passes: u32) -> Self {
+        Self { sigma, max_passes }
     }
 
-    /// Validate the clip thresholds and iteration count.
+    /// Validate the clip thresholds and pass count.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;
-        validate_max_iterations(self.max_iterations)
-    }
-
-    /// The first clip, and then the fitted ones.
-    pub(crate) const fn passes(&self) -> usize {
-        1 + self.max_iterations as usize
+        validate_max_passes(self.max_passes)
     }
 
     pub(crate) fn narrow(&self, pass: &Pass<'_>, scores: &mut NormalScores) -> Proposal {

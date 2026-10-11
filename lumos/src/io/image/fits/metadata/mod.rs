@@ -4,12 +4,12 @@ use fits_well::header::Header;
 use fits_well::image::SampleType;
 
 use crate::io::image::calibration_state::CalibrationState;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::image::cfa::xtrans_pattern::XTransPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
-use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
 /// A metadata field and every keyword it is read from: the standard or most common spelling first,
 /// which is also the one written, then the aliases other writers use, as Siril reads them

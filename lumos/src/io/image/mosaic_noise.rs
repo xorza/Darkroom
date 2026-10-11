@@ -86,7 +86,7 @@ fn colour_medians(
         for x in 0..size.width {
             let index = y * size.width + x;
             if !excluded(index) {
-                samples[usize::from(cfa_type.color_at(Vec2us::new(x, y)))].push(mosaic[index]);
+                samples[cfa_type.color_at(Vec2us::new(x, y))].push(mosaic[index]);
             }
         }
     }

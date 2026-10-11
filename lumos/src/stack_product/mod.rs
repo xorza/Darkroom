@@ -168,7 +168,7 @@ impl StackProduct {
 mod tests {
     use crate::internals::prelude::*;
     use crate::io::image::cfa::CfaType;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::run_report::RunReport;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;

@@ -28,7 +28,9 @@ pub struct AlignStackConfig {
     /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
-    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic.
+    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic, for mono
+    /// and Bayer lights; X-Trans lights are refused (see
+    /// [`CosmicRayError::XTransUnsupported`](crate::CosmicRayError::XTransUnsupported)).
     pub cosmic_ray: Option<CosmicRayConfig>,
     /// How the run decodes its lights, the memory it plans against, and where it spills them.
     pub ingest: IngestConfig,
@@ -84,5 +86,13 @@ impl AlignStackConfig {
                 .map_err(AlignStackError::CosmicRayConfig)?;
         }
         Ok(())
+    }
+
+    /// [`Self::validate`] for lights already linear, which no cosmic-ray pass can run on.
+    pub(super) fn validate_linear(&self, frame_count: usize) -> Result<(), AlignStackError> {
+        if self.cosmic_ray.is_some() {
+            return Err(AlignStackError::CosmicRayOnLinearLights);
+        }
+        self.validate(frame_count)
     }
 }

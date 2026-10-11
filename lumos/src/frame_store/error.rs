@@ -39,6 +39,18 @@ pub enum FrameStoreError {
          spill there spends the RAM it was meant to free; set `cache_dir` to a directory on disk"
     )]
     MemoryBackedDirectory { path: PathBuf, filesystem: String },
+    /// The disk a spill goes to holds less than the run will write there: refused before the
+    /// first frame is decoded rather than after hours of them. A figure, not a reservation:
+    /// another writer can still fill the disk later.
+    #[error(
+        "frame-store directory '{path}' has {available} bytes free, and the spill needs {needed}; \
+         free space there or set `cache_dir` to a larger disk"
+    )]
+    InsufficientSpace {
+        path: PathBuf,
+        needed: u64,
+        available: u64,
+    },
     #[error("failed to memory-map frame-store file '{path}': {source}")]
     MemoryMap {
         path: PathBuf,
@@ -61,4 +73,16 @@ pub struct ConditionMismatch {
     pub value: f64,
     pub reference_index: usize,
     pub reference: f64,
+}
+
+impl ConditionMismatch {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
+        Self {
+            index: inputs[self.index],
+            reference_index: inputs[self.reference_index],
+            ..self
+        }
+    }
 }

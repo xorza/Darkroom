@@ -1,6 +1,9 @@
 //! Pixel distribution and accumulation for drizzle reconstruction.
 
+pub(crate) mod drizzle_frame;
+mod drop_quad;
 pub(crate) mod frame_source;
+mod input_map;
 mod kernel_plan;
 mod output_band;
 
@@ -12,19 +15,18 @@ use rayon::prelude::*;
 use std::slice::ChunksMut;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
+use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::accumulator::frame_source::{BandScan, FrameSource};
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, RadialScratch};
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
-use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_quality::DropPlanes;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
-use crate::registration::transform::WarpTransform;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colours, so it never carries more planes, and the output never more channels.
@@ -32,31 +34,6 @@ const MAX_CHANNELS: usize = 3;
 /// Output bands per rayon worker — enough for work-stealing to even out bands that different
 /// amounts of the input reach.
 const BANDS_PER_WORKER: usize = 4;
-
-/// One drizzle input and all metadata that must remain aligned with it.
-#[derive(Debug, Clone)]
-pub struct DrizzleFrame<T> {
-    /// Image or path to load: a demosaiced or mono frame, or a calibrated mosaic whose photosites
-    /// each reach the channel of their colour alone.
-    pub source: T,
-    /// The registration's warp, from the common reference grid to this input — what
-    /// [`RegistrationResult::warp_transform`](crate::RegistrationResult::warp_transform) returns.
-    /// Drizzle maps input pixels through its inverse, SIP included.
-    pub warp: WarpTransform,
-    /// Optional non-negative per-pixel quality weights with the same dimensions as the image.
-    pub pixel_weight_map: Option<Buffer2<f32>>,
-}
-
-impl<T> DrizzleFrame<T> {
-    /// A frame without a per-pixel weight map.
-    pub const fn new(source: T, warp: WarpTransform) -> Self {
-        Self {
-            source,
-            warp,
-            pixel_weight_map: None,
-        }
-    }
-}
 
 /// Every output plane restricted to one contiguous span of the grid: a band of rows while a frame
 /// is scattered in.
@@ -314,33 +291,26 @@ impl DrizzleAccumulator {
 
     fn validate(&self, frame: &DrizzleFrame<impl StackableImage>) -> Result<(), DrizzleError> {
         let index = self.next_frame;
-        FrameDimensionMismatch::check(index, self.input_dims, frame.source.dimensions())?;
-        let deposit = Deposit::of(&frame.source);
-        if deposit != self.deposit {
-            return Err(DrizzleError::PatternMismatch {
-                index,
-                expected: self.deposit.mosaic(),
-                actual: deposit.mosaic(),
-            });
-        }
-        // `find_first` rather than `find_any`: the reported sample is part of the error, so the
-        // frame that fails has to name the same one every run.
-        for channel in 0..self.input_dims.channels() {
-            if let Some((pixel, &value)) = frame
+        // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
+        // pattern, its samples finite.
+        debug_assert_eq!(
+            frame.source.dimensions(),
+            self.input_dims,
+            "drizzle frame {index} reached the accumulator unadmitted: another shape"
+        );
+        debug_assert_eq!(
+            Deposit::of(&frame.source),
+            self.deposit,
+            "drizzle frame {index} reached the accumulator unadmitted: another pattern"
+        );
+        debug_assert!(
+            (0..self.input_dims.channels()).all(|channel| frame
                 .source
                 .channel(channel)
-                .par_iter()
-                .enumerate()
-                .find_first(|(_, value)| !value.is_finite())
-            {
-                return Err(DrizzleError::NonFiniteSample {
-                    index,
-                    channel,
-                    pixel,
-                    value,
-                });
-            }
-        }
+                .iter()
+                .all(|v| v.is_finite())),
+            "drizzle frame {index} reached the accumulator unadmitted: a non-finite sample"
+        );
 
         let Some(pixel_weights) = &frame.pixel_weight_map else {
             return Ok(());
@@ -416,7 +386,7 @@ fn next_band<'a>(
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;
     use crate::io::image::linear::LinearImage;
-    use crate::registration::transform::Transform;
+    use crate::registration::transform::{Transform, WarpTransform};
     use crate::run_report::RunReport;
     use crate::stack_product::StackProduct;
     use crate::stack_product::quality_map::QualityMap;

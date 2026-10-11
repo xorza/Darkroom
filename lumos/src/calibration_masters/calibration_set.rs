@@ -1,10 +1,10 @@
 //! Four calibration roles carrying values of one common type.
 
 use crate::calibration_masters::error::CalibrationError;
+use crate::calibration_masters::master_role::MasterRole;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 
-use crate::calibration_masters::master_role::MasterRole;
 /// Four calibration roles carrying values of one common type.
 ///
 /// Named fields prevent swapping roles when `T` is the same for all four. Raw inputs use path

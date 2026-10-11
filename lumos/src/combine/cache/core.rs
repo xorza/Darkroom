@@ -9,11 +9,11 @@
 use common::CancelToken;
 
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::tier::Tier;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows};
-use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 
@@ -21,7 +21,7 @@ use crate::progress::stacking_progress::StackingStage;
 /// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
-    pub(crate) tier: CacheTier,
+    pub(crate) tier: Tier,
     /// Image dimensions (same for all frames).
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
@@ -31,41 +31,6 @@ pub(crate) struct CacheCore {
     /// Cooperative cancel flag, present during validation and normalization and polled by
     /// [`Self::process_chunks`] during the combine.
     pub(crate) cancel: CancelToken,
-}
-
-/// Where a cache's frames live, and for spilled ones what the combine sizes its row chunks against.
-#[derive(Debug)]
-pub(crate) enum CacheTier {
-    /// Every plane in RAM: the combine walks whole planes and needs no budget.
-    Resident,
-    /// Planes memory-mapped from files, read in row chunks sized against `chunk_memory`: the run's
-    /// planning figure, one number for the combine and for the coverage pass after it.
-    Spilled { chunk_memory: u64 },
-}
-
-impl CacheTier {
-    /// The tier of frames spilled to disk, or resident, under `memory`.
-    pub(crate) const fn of(spilled: bool, memory: RunMemory) -> Self {
-        if spilled {
-            Self::Spilled {
-                chunk_memory: memory.planning(),
-            }
-        } else {
-            Self::Resident
-        }
-    }
-
-    /// What a spilled combine sizes its row chunks against; `None` for a resident one.
-    pub(crate) const fn chunk_memory(&self) -> Option<u64> {
-        match self {
-            Self::Resident => None,
-            Self::Spilled { chunk_memory } => Some(*chunk_memory),
-        }
-    }
-
-    pub(crate) const fn spills(&self) -> bool {
-        matches!(self, Self::Spilled { .. })
-    }
 }
 
 /// Per-chunk context handed to the [`CacheCore::process_chunks`] closure: the input frame
@@ -182,7 +147,8 @@ impl CacheCore {
 pub(crate) mod internals {
     use common::CancelToken;
 
-    use crate::combine::cache::core::{CacheCore, CacheTier};
+    use crate::combine::cache::core::CacheCore;
+    use crate::frame_store::tier::Tier;
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::image_metadata::ImageMetadata;
     use crate::progress::progress_callback::ProgressCallback;
@@ -190,7 +156,7 @@ pub(crate) mod internals {
     impl CacheCore {
         /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
         /// reported and no cancel.
-        pub(crate) fn plain(tier: CacheTier, dimensions: ImageDimensions) -> Self {
+        pub(crate) fn plain(tier: Tier, dimensions: ImageDimensions) -> Self {
             Self {
                 tier,
                 dimensions,

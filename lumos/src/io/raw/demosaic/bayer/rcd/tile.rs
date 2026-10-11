@@ -8,11 +8,12 @@
 
 use std::ops::Range;
 
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd::{
     BORDER, EPS, EPSSQ, INTERPOLATED_BORDER, TILE, discriminate, estimate_green, intp,
     pq_neighbourhood, vh_neighbourhood,
 };
-use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -703,8 +704,8 @@ impl Kernel for Stages<'_> {
         } = self;
         // The column phase of the red and blue sites of each row parity.
         let red_blue = [
-            pattern.color_at(Vec2us::new(0, 0)) & 1,
-            pattern.color_at(Vec2us::new(0, 1)) & 1,
+            pattern.color_at(Vec2us::new(0, 0)).index() & 1,
+            pattern.color_at(Vec2us::new(0, 1)).index() & 1,
         ];
         tile.directions(isa, size);
         tile.green(isa, size, red_blue);
@@ -849,7 +850,7 @@ impl Iterator for Vectors {
 /// The colour of a frame of `pattern` at Bayer phase `phase`.
 #[inline(always)]
 const fn phase_colour(pattern: CfaPattern, phase: usize) -> usize {
-    pattern.color_at(Vec2us::new(phase % 2, phase / 2))
+    pattern.color_at(Vec2us::new(phase % 2, phase / 2)).index()
 }
 
 /// Each of `taps` at the sites from plane column `j`.

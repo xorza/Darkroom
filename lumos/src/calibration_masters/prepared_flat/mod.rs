@@ -120,7 +120,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
                     }) {
                         continue;
                     }
-                    let color = usize::from(cfa_type.color_at(Vec2us::new(x, y)));
+                    let color = cfa_type.color_at(Vec2us::new(x, y));
                     sums.sums[color] += f64::from(value);
                     sums.counts[color] += 1;
                 }
@@ -154,7 +154,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
         .enumerate()
         .for_each(|(y, row)| {
             for (x, value) in row.iter_mut().enumerate() {
-                let color = usize::from(cfa_type.color_at(Vec2us::new(x, y)));
+                let color = cfa_type.color_at(Vec2us::new(x, y));
                 *value = (*value * inv_means[color]).max(MIN_NORMALIZED_FLAT);
             }
         });

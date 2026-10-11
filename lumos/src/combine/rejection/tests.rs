@@ -4,7 +4,6 @@ use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::rejection::rejection_scale::RejectionScale;
-use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::*;
 use crate::internals::invariance::Affine;
 use crate::internals::prelude::*;
@@ -79,7 +78,7 @@ fn rejection_configs_default_and_construct_as_documented() {
         SigmaClipConfig::default(),
         SigmaClipConfig {
             sigma: symmetric(2.5),
-            max_iterations: 3,
+            max_passes: 3,
             scale: RejectionScale::Robust,
         }
     );
@@ -93,7 +92,7 @@ fn rejection_configs_default_and_construct_as_documented() {
         LinearFitClipConfig::default(),
         LinearFitClipConfig {
             sigma: symmetric(3.0),
-            max_iterations: 3
+            max_passes: 4
         }
     );
     assert_eq!(
@@ -117,19 +116,15 @@ fn rejection_configs_default_and_construct_as_documented() {
         ),
         (
             Rejection::sigma_clip(2.0),
-            Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(2.0, 2.0, 3)),
-        ),
-        (
-            Rejection::sigma_clip_asymmetric(4.0, 2.0),
-            Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(4.0, 2.0, 3)),
+            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3)),
         ),
         (
             Rejection::winsorized(3.0),
-            Rejection::Winsorized(WinsorizedClipConfig::new_asymmetric(3.0, 3.0)),
+            Rejection::Winsorized(WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0))),
         ),
         (
             Rejection::linear_fit(2.5),
-            Rejection::LinearFit(LinearFitClipConfig::new(2.5, 2.5, 3)),
+            Rejection::LinearFit(LinearFitClipConfig::new(SigmaBounds::symmetric(2.5), 4)),
         ),
         (
             Rejection::trim(15.0),
@@ -197,37 +192,37 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
         (
             "ramp 2σ",
             &ramp[..],
-            SigmaClipConfig::new(2.0, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3),
             all_but(8, &[7]),
         ),
         (
             "ramp 2.5σ",
             &ramp,
-            SigmaClipConfig::new(2.5, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
             all_but(8, &[7]),
         ),
         (
             "ramp 4σ low, 2σ high",
             &ramp,
-            SigmaClipConfig::new_asymmetric(4.0, 2.0, 3),
+            SigmaClipConfig::new(SigmaBounds::asymmetric(4.0, 2.0), 3),
             all_but(8, &[7]),
         ),
         (
             "low kept",
             &[-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0],
-            SigmaClipConfig::new_asymmetric(10.0, 2.0, 5),
+            SigmaClipConfig::new(SigmaBounds::asymmetric(10.0, 2.0), 5),
             all_but(10, &[9]),
         ),
         (
             "three high",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0],
-            SigmaClipConfig::new(2.0, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3),
             all_but(8, &[5, 6, 7]),
         ),
         (
             "clean",
             &[1.0, 1.125, 1.25, 0.875, 1.0625],
-            SigmaClipConfig::new(3.0, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(3.0), 3),
             all_but(5, &[]),
         ),
         (
@@ -236,19 +231,19 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
                 7990.0, 8000.0, 8010.0, 7995.0, 8005.0, 8000.0, 7990.0, 8010.0, 8000.0, 7995.0,
                 8005.0, 8000.0, 7990.0, 8010.0, 9000.0,
             ],
-            SigmaClipConfig::new(2.5, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
             all_but(15, &[14]),
         ),
         (
             "two levels",
             &two_levels,
-            SigmaClipConfig::new(2.5, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
             all_but(100, &[94, 95, 96, 97, 98, 99]),
         ),
         (
             "hot",
             &hot,
-            SigmaClipConfig::new(2.5, 3),
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
             all_but(20, &[19]),
         ),
         (
@@ -266,7 +261,10 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
     }
     // The asymmetric form at equal thresholds is the symmetric one.
     assert_eq!(
-        kept(Rejection::sigma_clip_asymmetric(2.5, 2.5), &ramp),
+        kept(
+            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3)),
+            &ramp
+        ),
         kept(Rejection::sigma_clip(2.5), &ramp)
     );
 }
@@ -383,25 +381,25 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "off line",
             &[1.0, 2.0, 3.0, 4.0, 100.0, 6.0][..],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
             all_but(6, &[4]),
         ),
         (
             "top",
             &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
             all_but(8, &[7]),
         ),
         (
             "middle",
             &[1.0, 2.0, 3.0, 50.0, 5.0, 6.0, 7.0, 4.0],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
             all_but(8, &[3]),
         ),
         (
             "one pass",
             &[10.0, 10.5, 11.0, 10.2, 10.8, 10.3, 10.7, 50.0],
-            LinearFitClipConfig::new(3.0, 3.0, 1),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 2),
             all_but(8, &[7]),
         ),
         (
@@ -413,13 +411,13 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "trend",
             &[1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
             all_but(8, &[]),
         ),
         (
             "ramp",
             &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 5.0],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
             all_but(10, &[]),
         ),
         (
@@ -431,13 +429,13 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "long",
             &long,
-            LinearFitClipConfig::new(3.0, 3.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 4),
             all_but(100, &[50]),
         ),
         (
             "fit only",
             &fit_only,
-            LinearFitClipConfig::new(3.0, 3.0, 3),
+            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 4),
             all_but(11, &[10]),
         ),
     ] {
@@ -711,37 +709,37 @@ fn winsorized_keeps_exactly_the_samples_its_band_holds() {
         (
             "ramp",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0][..],
-            WinsorizedClipConfig::new(2.0),
+            WinsorizedClipConfig::new(SigmaBounds::symmetric(2.0)),
             all_but(8, &[7]),
         ),
         (
             "high",
             &[1.0, 1.1, 1.2, 0.9, 1.0, 50.0],
-            WinsorizedClipConfig::new_asymmetric(3.0, 2.0),
+            WinsorizedClipConfig::new(SigmaBounds::asymmetric(3.0, 2.0)),
             all_but(6, &[5]),
         ),
         (
             "clean",
             &[2.0, 2.125, 2.25, 1.875, 2.0625],
-            WinsorizedClipConfig::new(3.0),
+            WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0)),
             all_but(5, &[]),
         ),
         (
             "mild at 10σ",
             &mild,
-            WinsorizedClipConfig::new(10.0),
+            WinsorizedClipConfig::new(SigmaBounds::symmetric(10.0)),
             all_but(9, &[]),
         ),
         (
             "mild at 2σ",
             &mild,
-            WinsorizedClipConfig::new(2.0),
+            WinsorizedClipConfig::new(SigmaBounds::symmetric(2.0)),
             all_but(9, &[8]),
         ),
         (
             "three of ten",
             &[-1.5, -1.0, -0.5, 0.0, 0.0, 0.5, 1.0, 10.0, 10.0, 10.0],
-            WinsorizedClipConfig::new(3.0),
+            WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0)),
             all_but(10, &[7, 8, 9]),
         ),
         (
@@ -891,9 +889,18 @@ fn gesd_matches_nist_reference_example() {
         (2.101, 3.094),
         (2.067, 3.085),
     ];
+    let config = GesdConfig::new(0.05, Some(10));
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(&values);
-    let window = Rejection::Gesd(GesdConfig::new(0.05, Some(10))).surviving_window(
+    let statistics = config.statistics(&Pass {
+        sorted: scratch.sorted.values(),
+        positions: scratch.sorted.positions(),
+        window: 0..values.len(),
+        index: 0,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        noise: None,
+    });
+    let window = Rejection::Gesd(config).surviving_window(
         &mut scratch.sorted,
         None,
         DEFAULT_MIN_SURVIVORS,
@@ -901,9 +908,9 @@ fn gesd_matches_nist_reference_example() {
     );
     assert_eq!(window, 0..51);
     let gesd = &mut scratch.methods.gesd;
-    assert_eq!(gesd.statistics.len(), 10);
+    assert_eq!(statistics.len(), 10);
     for (removed, (expected_statistic, expected_critical)) in expected.into_iter().enumerate() {
-        let statistic = gesd.statistics[removed];
+        let statistic = statistics[removed];
         let critical = gesd.critical_value(54 - removed);
         for (computed, printed) in [
             (statistic, expected_statistic),
@@ -1075,7 +1082,7 @@ fn combine_mean_weighs_each_survivor_by_its_own_weight() {
         ),
         (
             "asymmetric sigma clip, weighted",
-            Rejection::sigma_clip_asymmetric(4.0, 2.0),
+            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::asymmetric(4.0, 2.0), 3)),
             &ramp,
             heavy_first(8, 10.0, 1.0),
             26.5 / 16.0,
@@ -1236,7 +1243,9 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
     let kept_under = |scale| {
         let mut scratch = ScratchBuffers::default();
         scratch.sorted.fill(&values);
-        let rejection = Rejection::SigmaClip(SigmaClipConfig::new(2.5, 3).with_scale(scale));
+        let rejection = Rejection::SigmaClip(
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
+        );
         rejection
             .surviving_window(
                 &mut scratch.sorted,
@@ -1269,13 +1278,15 @@ fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
     let survivors = |scale| {
         let mut scratch = ScratchBuffers::default();
         scratch.sorted.fill(&values);
-        let window = Rejection::SigmaClip(SigmaClipConfig::new(2.5, 3).with_scale(scale))
-            .surviving_window(
-                &mut scratch.sorted,
-                Some(noise),
-                DEFAULT_MIN_SURVIVORS,
-                &mut scratch.methods,
-            );
+        let window = Rejection::SigmaClip(
+            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
+        )
+        .surviving_window(
+            &mut scratch.sorted,
+            Some(noise),
+            DEFAULT_MIN_SURVIVORS,
+            &mut scratch.methods,
+        );
         let kept = scratch.sorted.values()[window.clone()].to_vec();
         assert!(kept.is_sorted(), "{scale:?}: {kept:?}");
         for (&value, &position) in kept.iter().zip(&scratch.sorted.positions()[window]) {

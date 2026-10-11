@@ -1,8 +1,6 @@
 use crate::combine::cache::frame_gate::FrameGate;
 use crate::frame_store::cache_key::{CacheKey, DecoderKind};
 use crate::frame_store::decode_cache::DecodeCache;
-use crate::frame_store::disk_root::DiskRoot;
-use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
@@ -20,7 +18,6 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
 use crate::io::image::pixel_flags::QualityFlags;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::mount_table::MountTable;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
 use std::fs;
@@ -104,34 +101,6 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
         kept.path().parent(),
         Some(fs::canonicalize(root.path()).unwrap().as_path())
     );
-}
-
-/// A root on a file system that keeps its files in memory is refused, naming the path and the
-/// file system; one on disk is taken. The mount table is a fixture: `/tmp` is tmpfs over an ext4
-/// root.
-#[test]
-fn a_memory_backed_root_is_refused() {
-    let disk = TempDir::new("frame_store_disk_root");
-    let resolved = fs::canonicalize(disk.path()).unwrap();
-    let mounts = |filesystem: &str| {
-        MountTable::parse(&format!(
-            "22 1 8:2 / / rw - ext4 /dev/sda2 rw\n\
-             28 22 0:30 / {} rw - {filesystem} {filesystem} rw\n",
-            resolved.display()
-        ))
-    };
-    let error = DiskRoot::create(disk.path(), &mounts("tmpfs")).unwrap_err();
-    assert!(
-        matches!(
-            &error,
-            FrameStoreError::MemoryBackedDirectory { path, filesystem }
-                if path == disk.path() && filesystem == "tmpfs"
-        ),
-        "{error:?}"
-    );
-    assert!(DiskRoot::create(disk.path(), &mounts("ramfs")).is_err());
-    let root = DiskRoot::create(&disk.join("below"), &mounts("ext4")).unwrap();
-    assert_eq!(root.path(), resolved.join("below"));
 }
 
 #[test]
@@ -261,6 +230,8 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let identity = FileIdentity {
         len: 16,
         mtime_ns: 1,
+        file_id: None,
+        changed_ns: None,
     };
     let key = CacheKey::new(identity, DecoderKind::Linear, &LoadContext::default());
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);

@@ -76,7 +76,7 @@ impl Display for FramePlane {
 /// it: a sample that clears the coverage floor is guaranteed a positive confidence to divide its
 /// noise by, and `source_noise_variance` a non-zero one too.
 ///
-/// [`FrameCheck::quality_pair`]: crate::combine::cache::frame_check::FrameCheck::quality_pair
+/// [`FrameCheck::quality_pair`]: crate::ingest::frame_check::FrameCheck::quality_pair
 #[derive(Debug, Clone)]
 pub(crate) enum FrameQuality<P> {
     /// No quality planes at all — a frame that was never warped and whose source declared every

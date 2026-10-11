@@ -5,7 +5,8 @@
 //! - CFA (Bayer) pattern artifacts
 
 use crate::internals::test_rng::TestRng;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_colour::CfaColour;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Add random cosmic ray hits to the image.
@@ -71,9 +72,9 @@ pub(crate) fn add_bayer_pattern(
     for y in 0..height {
         for x in 0..width {
             let factor = match pattern.color_at(Vec2us::new(x, y)) {
-                0 => r_factor,
-                2 => b_factor,
-                _ => 1.0,
+                CfaColour::Red => r_factor,
+                CfaColour::Blue => b_factor,
+                CfaColour::Green => 1.0,
             };
 
             let idx = y * width + x;

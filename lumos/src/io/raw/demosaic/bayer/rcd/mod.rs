@@ -15,7 +15,7 @@ use common::CancelToken;
 
 use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::BayerImage;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
 use crate::io::raw::demosaic::tiled;
 use crate::io::raw::demosaic::tiled::Tiling;
@@ -150,7 +150,7 @@ pub(crate) fn demosaic(
     tiled::demosaic(
         bayer.data,
         bayer.size,
-        |position| bayer.pattern.color_at(position),
+        |position| bayer.pattern.color_at(position).index(),
         tiling,
         || Tile::new(bayer.pattern),
         // SAFETY: the driver hands each place's own part to this tile alone, which writes no

@@ -31,7 +31,8 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
-use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+use crate::drizzle::accumulator::DrizzleAccumulator;
+use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::stack::drizzle_images;
