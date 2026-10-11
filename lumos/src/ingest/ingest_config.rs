@@ -3,6 +3,7 @@
 use std::env;
 use std::path::PathBuf;
 
+use crate::frame_store::cache_key::DecodeOptions;
 use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::platform::UserCache;
@@ -49,6 +50,14 @@ impl Default for IngestConfig {
 }
 
 impl IngestConfig {
+    /// The options this configuration decodes every frame under.
+    pub(crate) const fn decode_options(&self) -> DecodeOptions<'_> {
+        DecodeOptions {
+            fits: &self.fits,
+            xtrans_passes: self.xtrans_passes,
+        }
+    }
+
     /// Create a new cache configuration with custom cache directory.
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
         Self {

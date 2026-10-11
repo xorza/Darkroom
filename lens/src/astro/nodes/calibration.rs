@@ -146,10 +146,11 @@ fn build_masters_cached(
     )
 }
 
-/// Each master kept next to its frames, which must share one directory, beside a marker that
-/// keys it by them and by the frames of the master subtracted from each, so a flat cached before
-/// its bias changed is stacked again. Off, it keeps nothing and keys nothing: a key is a `stat` per
-/// frame, and one that fails would fail a build that never reads the cache.
+/// Each master kept next to its frames, which must share one directory, beside a marker that keys
+/// it by them, by the frames of the master subtracted from each, and by lumos's recipe for it, so a
+/// flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
+/// nothing and keys nothing: a key is a `stat` per frame, and one that fails would fail a build
+/// that never reads the cache.
 #[derive(Debug)]
 struct SourceDirectoryCache<'a> {
     enabled: bool,
@@ -175,6 +176,8 @@ impl CachePlace {
         };
         let paths = role_cache_paths(inputs.frames, file)?;
         let mut key = frame_set_key(inputs.frames)?;
+        key.push_str("\nrecipe ");
+        key.push_str(&inputs.recipe.to_string());
         if let Some(subtracted) = &inputs.subtracted {
             key.push_str("\nsubtract ");
             key.push_str(&frame_set_key(subtracted.frames)?);
@@ -294,8 +297,8 @@ mod tests {
 
     use imaginarium::Buffer2;
     use lumos::{
-        CachedMaster, CfaImage, CfaType, ImageMetadata, MasterBuildError, MasterCache,
-        MasterInputs, MasterRole,
+        CachedMaster, CfaImage, CfaType, FitsChecksumPolicy, ImageMetadata, IngestConfig,
+        MasterBuildError, MasterCache, MasterInputs, MasterRecipe, MasterRole,
     };
 
     use crate::astro::nodes::calibration::{
@@ -366,7 +369,7 @@ mod tests {
     /// A master is kept under its frames as the cache read them before the stack: a frame
     /// rewritten while its role is stacked leaves the marker on the old content, so the next build
     /// stacks the role again rather than reuse a master of frames that are gone. One stored under
-    /// frames that stayed is read back.
+    /// frames that stayed is read back, under its own recipe and no other.
     #[test]
     fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         let dir = TempDir::new("lens-master-key-before-stack");
@@ -377,6 +380,7 @@ mod tests {
             role: MasterRole::Dark,
             frames: &frames,
             subtracted: None,
+            recipe: MasterRecipe::of(MasterRole::Dark, &IngestConfig::default()),
         };
         let cache = SourceDirectoryCache {
             enabled: true,
@@ -408,6 +412,19 @@ mod tests {
         assert!(matches!(
             cache.load(&inputs).unwrap(),
             CachedMaster::Kept(kept) if kept.data == master.data
+        ));
+
+        // Another recipe over the same frames, as another lumos or other decode options give, finds
+        // none.
+        let mut strict = IngestConfig::default();
+        strict.fits.checksum = FitsChecksumPolicy::RequireValid;
+        let restacked = MasterInputs {
+            recipe: MasterRecipe::of(MasterRole::Dark, &strict),
+            ..inputs
+        };
+        assert!(matches!(
+            cache.load(&restacked).unwrap(),
+            CachedMaster::Missing(Some(_))
         ));
     }
 
