@@ -6,8 +6,7 @@ Reference projects (shallow clones in `.tmp/`): Siril, DeepSkyStacker, RawTherap
 librtprocess, darktable, ccdproc. PixInsight, astroscrappy and DrizzlePac are compared through
 their documented behaviour or source.
 
-**Status.** Batches 1–14 and 16–18 are done and committed, and Batch 15 except its
-normalization above scale 1. This file holds the
+**Status.** Batches 1–18 are done and committed. This file holds the
 open work only, with the evidence each open finding needs. The six per-area reports it replaces,
 with the done findings and the lists of what was checked and found correct, are in git at
 `a352d8ef1:.notes/lumos-stacking-review/`. Every open finding below was checked again against the
@@ -48,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-15r, 19r, 22, 24, 26, 28                  independent
+19r, 22, 24, 26, 28                       independent
 20 ── 21 ── PIP-5, PIP-19
 20 ── 25
 23 ── 27
@@ -58,48 +57,6 @@ named item.
 - 20 before 25: the kept cache moves into the ingest.
 - 21 before PIP-5 and PIP-19: both change memory-map advice through `ScratchFile`.
 - 23 before 27: the dark scale is fitted on the hot pixels 23 stores with their excess.
-
----
-
-## Batch 15 (rest): CFA drizzle normalization above scale 1 — medium
-
-**Decision:** per-frame statistics, unpaired, with the white noise taken out of the scale.
-
-**Finding.** A CFA-drizzled frame reaches each colour at only part of the output grid: its red
-and blue drops sit on a lattice of `2s` output pixels. The combine normalizes by pixel pairs
-(`photometric_gain`'s errors-in-variables fit, or a ratio of medians over shared pixels). The
-pixels every frame reached thin out with every frame added, so Batch 15 measures each frame
-against the reference over the pixels both reached in the slot's channel (`pairwise_norms` in
-`combine/normalization/mod.rs`). At scale 1 a sub-pixel dither shares every pixel. Above scale 1,
-two frames about one photosite apart put one's red where the other's green fell and share no red
-pixel. The normalized combine then fails with `NoCommonCoverage`: loud, not wrong. Eight frames
-of random dither at scale 2, pixfrac 0.8, fail this way under `StackConfig::light()`.
-
-**Practice.** PixInsight takes the normalization of a drizzle from ImageIntegration on the
-registered, interpolated frames, with per-frame location and scale estimates, not pixel pairs.
-Siril's default normalization (`src/stacking/normalization.c`, `compute_normalization`) measures
-each frame alone, location and scale by IKSS (or `1.5·MAD` in its fast mode) over the frame's
-non-zero pixels, which leaves out the pixels a drizzle did not reach. Siril pairs frames only in
-its optional overlap normalization for mosaics (`compute_normalization_overlaps`), which needs
-more than 3 shared pixels per pair: the same limit as lumos's pairs. Both references keep the
-noise inside the scale estimate, so a noisier frame reads a larger scale.
-
-**Design:**
-1. For frames gathered per channel (CFA drizzle), normalization measures each frame alone, per
-   colour: location from the frame's per-colour source median (`FrameStats::medians`); scale
-   `√(MAD² − σ²)` from a per-colour robust scale of the source mosaic, with `σ` the measured white
-   noise (`FrameStats::noise`). `FrameStats` adds the per-colour MAD.
-2. Global: gain = the reference's scale over the frame's, offset from the medians.
-   Multiplicative: the ratio of the source medians, as for unwarped frames. Pairs stay for every
-   other set, where they are exact.
-3. `√(MAD² − σ²)` is exact for Gaussian parts only, and the doc says so. A frame whose `MAD² ≤ σ²`
-   has no signal structure to scale by and fails with a new `StackError` variant that names it.
-
-**Tests:** a normalized CFA drizzle at scale 2, pixfrac 0.8, eight frames of random dither with
-known per-frame gains and offsets recovers each within the estimator's derived error; a frame of
-pure noise fails with the new error; a normalized CFA drizzle at scale 1 keeps its pins.
-
-**Crates:** lumos, lens, darkroom (a public error changes).
 
 ---
 
