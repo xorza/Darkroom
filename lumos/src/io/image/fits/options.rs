@@ -1,7 +1,7 @@
 use serde::Serialize;
 
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::sample_domain::Pedestal;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// Selects the image HDU decoded from a FITS container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

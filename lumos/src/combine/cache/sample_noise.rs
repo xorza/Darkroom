@@ -123,8 +123,8 @@ mod tests {
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::math::vec2us::Vec2us;
 
     fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {

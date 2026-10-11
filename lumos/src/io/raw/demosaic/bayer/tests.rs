@@ -3,8 +3,10 @@
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
+use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::bayer::rcd::INTERPOLATED_BORDER;
-use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use rayon::ThreadPoolBuilder;
 
@@ -177,7 +179,7 @@ fn mosaic(size: Size2us, pattern: CfaPattern, scene: impl Fn(Vec2us, usize) -> f
     (0..size.pixel_count())
         .map(|index| {
             let pos = size.point_of(index);
-            scene(pos, pattern.color_at(pos))
+            scene(pos, pattern.color_at(pos).index())
         })
         .collect()
 }
@@ -197,7 +199,7 @@ fn constant_colour_reconstructs_on_every_phase() {
             let data = mosaic(size, pattern, |_, channel| colour[channel]);
             let planes = demosaic(&data, size, pattern);
             for (index, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
-                let native = pattern.color_at(pos);
+                let native = pattern.color_at(pos).index();
                 assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
                 for channel in 0..3 {
                     let value = planes[channel][index];
@@ -299,7 +301,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         assert_native(
             &demosaic(&data, size, pattern),
             &data,
-            &|pos| pattern.color_at(pos),
+            &|pos| pattern.color_at(pos).index(),
             size,
             &format!("{pattern:?}"),
         );
@@ -320,7 +322,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         assert_native(
             &planes,
             &data,
-            &|pos| usize::from(cfa_type.color_at(pos)),
+            &|pos| cfa_type.color_at(pos),
             size,
             &format!("{cfa_type:?} {passes:?}, balanced"),
         );
@@ -384,7 +386,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
         (0..cw * ch)
             .map(|i| {
                 let (x, y) = (i % cw, i / cw);
-                scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)))
+                scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)).index())
             })
             .collect()
     };

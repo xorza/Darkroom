@@ -18,6 +18,7 @@ use crate::internals;
 use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_provenance::{
@@ -27,7 +28,6 @@ use crate::io::image::image_provenance::{
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;

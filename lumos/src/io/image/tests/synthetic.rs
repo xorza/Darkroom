@@ -24,6 +24,7 @@ use crate::drizzle::stack::drizzle_stack;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{
@@ -31,7 +32,6 @@ use crate::io::image::fits::options::{
 };
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, ScaleOrigin};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
@@ -777,8 +777,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let dark_value = 0.1f32;
     let pixels: Vec<f32> = (0..size.height)
         .flat_map(|y| {
-            (0..size.width)
-                .map(move |x| target[pattern.color_at(Vec2us::new(x, y)) as usize] + dark_value)
+            (0..size.width).map(move |x| target[pattern.color_at(Vec2us::new(x, y))] + dark_value)
         })
         .collect();
     let image = Image::new(vec![size.width, size.height], pixels.clone()).unwrap();
@@ -828,7 +827,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
+            let channel = pattern.color_at(Vec2us::new(x, y));
             assert_eq!(
                 preview_pixels[(size.index_of(Vec2us::new(x, y))) * 3 + channel],
                 target[channel] + dark_value
@@ -885,7 +884,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(demosaiced.metadata.domain.as_ref().unwrap().scale, 1.0);
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
+            let channel = pattern.color_at(Vec2us::new(x, y));
             let expected = (target[channel] + dark_value) - dark_value;
             assert_eq!(
                 demosaiced.channel(channel)[size.index_of(Vec2us::new(x, y))],
@@ -933,8 +932,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
     let mut mosaic = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            mosaic[size.index_of(Vec2us::new(x, y))] =
-                rgb[cfa.color_at(Vec2us::new(x, y)) as usize];
+            mosaic[size.index_of(Vec2us::new(x, y))] = rgb[cfa.color_at(Vec2us::new(x, y))];
         }
     }
     let image = make_cfa(size, mosaic, cfa)

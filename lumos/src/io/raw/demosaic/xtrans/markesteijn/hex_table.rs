@@ -1,8 +1,9 @@
 //! [`HexTable`]: the pattern facts the Markesteijn tiles read, in their input's and their own
 //! strides.
 
+use crate::io::image::cfa::cfa_colour::CfaColour;
+use crate::io::image::cfa::xtrans_pattern::XTransPattern;
 use crate::io::raw::demosaic::xtrans::markesteijn::{CROP, TILE};
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the input crop's stride, which the
@@ -36,7 +37,7 @@ impl HexTable {
         let mut right_shift = [false; 3];
         for (row, shift) in right_shift.iter_mut().enumerate() {
             let greens = (0..3)
-                .filter(|&col| pattern.color_at(Vec2us::new(col, row)) == 1)
+                .filter(|&col| pattern.color_at(Vec2us::new(col, row)) == CfaColour::Green)
                 .count();
             *shift = greens == 2;
         }
@@ -62,16 +63,19 @@ impl HexTable {
         &self.tile[row % 3][col % 3]
     }
 
-    /// The colour at `(row, col)`: 0 red, 1 green, 2 blue.
+    /// The colour index at `(row, col)`: 0 red, 1 green, 2 blue.
     #[inline(always)]
-    pub(super) const fn colour(&self, row: usize, col: usize) -> u8 {
-        self.pattern.color_at(Vec2us::new(col, row))
+    pub(super) const fn colour(&self, row: usize, col: usize) -> usize {
+        self.pattern.color_at(Vec2us::new(col, row)).index()
     }
 
     /// Whether `(row, col)` is green; greens repeat every three rows and columns.
     #[inline(always)]
     pub(super) const fn is_green(&self, row: usize, col: usize) -> bool {
-        self.pattern.color_at(Vec2us::new(col % 3, row % 3)) == 1
+        matches!(
+            self.pattern.color_at(Vec2us::new(col % 3, row % 3)),
+            CfaColour::Green
+        )
     }
 
     /// Whether row `row` holds two greens in three columns, and its non-green pixels lie three

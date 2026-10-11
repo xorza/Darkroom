@@ -3,6 +3,7 @@
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::io::image::cfa::cfa_colour::CfaColour;
 use crate::math::vec2us::Vec2us;
 
 /// A Fujifilm X-Trans colour filter layout: 6×6 colour indices (0 = red, 1 = green, 2 = blue),
@@ -169,10 +170,13 @@ impl XTransPattern {
         &self.rows
     }
 
-    /// The colour at `pos`: 0 = red, 1 = green, 2 = blue.
+    /// The colour at `pos`.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> u8 {
-        self.rows[pos.y % 6][pos.x % 6]
+    pub const fn color_at(&self, pos: Vec2us) -> CfaColour {
+        match CfaColour::from_index(self.rows[pos.y % 6][pos.x % 6] as usize) {
+            Some(colour) => colour,
+            None => panic!("a pattern's values were checked when it was made"),
+        }
     }
 }
 

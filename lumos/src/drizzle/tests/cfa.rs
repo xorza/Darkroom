@@ -14,8 +14,8 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
@@ -72,8 +72,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
     .into_iter()
     .flat_map(|set| tiers.iter().map(move |ingest| (set.clone(), ingest)))
     {
-        let colour =
-            |x: i64, y: i64| usize::from(cfa_type.color_at(Vec2us::new(x as usize, y as usize)));
+        let colour = |x: i64, y: i64| cfa_type.color_at(Vec2us::new(x as usize, y as usize));
         let frames = dithers
             .iter()
             .map(|&(dx, dy)| {
@@ -182,7 +181,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
             let pixels = (0..size.pixel_count())
                 .map(|index| {
                     let position = Vec2us::new(index % size.width, index / size.width);
-                    let colour = usize::from(rggb.color_at(position));
+                    let colour = rggb.color_at(position);
                     sky(colour, position.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
                 })
                 .collect();
@@ -398,7 +397,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .enumerate()
             .map(|(index, &value)| {
                 let position = Vec2us::new(index % size.width, index / size.width);
-                value * gains[usize::from(rggb.color_at(position))]
+                value * gains[rggb.color_at(position)]
             })
             .collect();
         make_cfa(size, pixels, rggb)

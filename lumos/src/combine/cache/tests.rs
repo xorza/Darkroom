@@ -10,7 +10,7 @@ use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::statistics;
 use crate::memory::memory_plan::MemoryPlan;
 use crate::memory::run_memory::RunMemory;

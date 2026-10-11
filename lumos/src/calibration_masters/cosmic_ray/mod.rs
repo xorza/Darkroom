@@ -37,9 +37,9 @@ use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::size2us::Size2us;
 
 use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;

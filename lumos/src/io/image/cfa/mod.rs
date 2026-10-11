@@ -4,8 +4,11 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
+pub(crate) mod cfa_colour;
 pub(crate) mod cfa_lattice;
+pub(crate) mod cfa_pattern;
 pub(crate) mod colour_raster;
+pub(crate) mod xtrans_pattern;
 
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::io;
@@ -18,7 +21,10 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::io::cancelled::Cancelled;
+use crate::io::image::cfa::cfa_colour::CfaColour;
 use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::image::cfa::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -32,12 +38,11 @@ use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd;
-use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
-use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
+use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -61,14 +66,14 @@ pub enum CfaType {
 }
 
 impl CfaType {
-    /// Get the color index (0=R, 1=G, 2=B) at position (x, y).
-    /// For Mono, always returns 0.
+    /// The colour slot of the photosite at `pos`: its [`CfaColour::index`] under a mosaic, and 0,
+    /// the one slot, on a mono sensor.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> u8 {
+    pub const fn color_at(&self, pos: Vec2us) -> usize {
         match self {
             CfaType::Mono => 0,
-            CfaType::Bayer(p) => p.color_at(pos) as u8,
-            CfaType::XTrans(pattern) => pattern.color_at(pos),
+            CfaType::Bayer(pattern) => pattern.color_at(pos).index(),
+            CfaType::XTrans(pattern) => pattern.color_at(pos).index(),
         }
     }
 
@@ -103,7 +108,7 @@ impl CfaType {
             for x in 0..period {
                 let columns = size.width.saturating_sub(x).div_ceil(period);
                 let rows = size.height.saturating_sub(y).div_ceil(period);
-                counts[self.color_at(Vec2us::new(x, y)) as usize] += columns * rows;
+                counts[self.color_at(Vec2us::new(x, y))] += columns * rows;
             }
         }
         counts
@@ -458,7 +463,7 @@ impl CfaImage {
     /// neighbour, which only a frame narrower than its pattern has, keeps its own sample and
     /// flags. A mono frame is its own proxy.
     pub fn green_proxy(&self) -> LinearImage {
-        const GREEN: u8 = 1;
+        const GREEN: usize = CfaColour::Green.index();
         let size = self.size();
         let mut metadata = ImageMetadata {
             quantization_sigma: None,

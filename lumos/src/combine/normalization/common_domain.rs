@@ -89,7 +89,7 @@ impl CommonDomain {
         domain: &Self,
         size: Size2us,
         cfa_type: &CfaType,
-        colour: u8,
+        colour: usize,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();

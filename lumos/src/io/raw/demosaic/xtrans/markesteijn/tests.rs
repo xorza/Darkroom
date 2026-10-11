@@ -1,8 +1,8 @@
 use crate::internals::prelude::*;
+use crate::io::image::cfa::xtrans_pattern::XTransPattern;
 use crate::io::raw::demosaic::tiled::TilePlace;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern};
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
 const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasses::Three];
 
@@ -75,7 +75,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
             let data: Vec<f32> = (0..size.pixel_count())
                 .map(|index| {
                     let (x, y) = (index % WIDTH, index / WIDTH);
-                    scene(usize::from(pattern.color_at(Vec2us::new(x, y))), x, y)
+                    scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
                 })
                 .collect();
             let planes = demosaic(
@@ -113,7 +113,7 @@ fn constant_colour_reconstructs_to_rounding_at_every_size() {
         let size = Size2us::new(side, side);
         for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data: Vec<f32> = (0..size.pixel_count())
-                .map(|index| colour[usize::from(pattern.color_at(size.point_of(index)))])
+                .map(|index| colour[pattern.color_at(size.point_of(index)).index()])
                 .collect();
             for passes in PASSES {
                 let planes = demosaic(

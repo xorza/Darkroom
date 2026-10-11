@@ -5,7 +5,9 @@ use quickbench::quick_bench;
 
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::io::image::cfa::CfaType;
-use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
+use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::math::size2us::Size2us;
 

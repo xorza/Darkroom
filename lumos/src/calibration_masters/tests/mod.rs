@@ -25,14 +25,14 @@ use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::fits::rewrite_fits;
 use crate::internals::prelude::*;
 use crate::io::image::calibration_state::CalibrationState;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::image::cfa::xtrans_pattern::XTransPattern;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
-use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::{
     BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColourDefects,
@@ -1008,7 +1008,7 @@ fn calibrate_hot_pixel_correction() {
     let mut light_pixels = Buffer2::new_default(w, h);
     for y in 0..h {
         for x in 0..w {
-            light_pixels[(x, y)] = baseline[pattern.color_at(Vec2us::new(x, y)) as usize];
+            light_pixels[(x, y)] = baseline[pattern.color_at(Vec2us::new(x, y))];
         }
     }
     light_pixels[(2, 2)] = 0.9;

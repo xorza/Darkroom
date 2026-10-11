@@ -247,7 +247,7 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
     use crate::internals::cfa::make_cfa;
     use crate::io::image::cfa::CfaType;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
 
     let mut rng = TestRng::new(seed);
     let pixels: Vec<f32> = (0..size.pixel_count())

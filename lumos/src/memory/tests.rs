@@ -1,8 +1,9 @@
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
+use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::math::size2us::Size2us;
 use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows, MIN_CHUNK_ROWS};

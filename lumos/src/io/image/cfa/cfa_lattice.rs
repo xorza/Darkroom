@@ -231,7 +231,7 @@ pub(crate) struct Gathered {
 mod tests {
     use super::*;
     use crate::internals::cfa::XTRANS_PATTERN;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
 
     fn offsets(lattice: &CfaLattice, position: Vec2us, count: usize) -> Vec<(i32, i32)> {
         let stencil = lattice.stencil(position);
@@ -307,7 +307,7 @@ mod tests {
             let size = Size2us::new(25, 19);
             let level = |position: Vec2us| match cfa {
                 CfaType::Bayer(_) => 0.125 * (1 + position.x % 2 + 2 * (position.y % 2)) as f32,
-                _ => 0.125 * f32::from(cfa.color_at(position) + 1),
+                _ => 0.125 * (cfa.color_at(position) + 1) as f32,
             };
             let pixels = Buffer2::new(
                 size.width,

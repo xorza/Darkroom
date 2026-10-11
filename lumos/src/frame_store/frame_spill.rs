@@ -334,10 +334,10 @@ mod tests {
     };
     use crate::frame_store::frame_stats::{FrameStats, SlotSpread};
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::image_provenance::RowOrder;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::io::image::unverified_conditions::UnverifiedConditions;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::math::statistics::mad_to_sigma;
 
     fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {

@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-26, 27, 28, PIP-5, PIP-19                  independent
+27, 28, PIP-5, PIP-19                      independent
 ```
 
 ---
@@ -63,20 +63,6 @@ and the drizzle entries ignore `keep_cache`; a kept frame holds no `ImageMetadat
 light needs. Per Q5, they read a light back from the kept cache before any decode, RAW runs
 caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered stack with
 `keep_cache` decodes no light (count decodes through a test hook).
-
-**Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 26: Layout, visibility, API cleanup — low
-
-| ID | Problem | Change |
-|---|---|---|
-| DMS-13 | `CfaPattern` lives in `io/raw/demosaic/bayer/mod.rs` and `XTransPattern` in `io/raw/demosaic/xtrans/xtrans_pattern.rs`, but FITS, calibration, defect maps and cosmic rays use them: the layering is inverted. `CfaPattern::color_at` returns `usize`, `XTransPattern`/`CfaType` return `u8`. | Move both beside `CfaType` (`io/image/cfa/{cfa_pattern.rs, xtrans_pattern.rs}`); `BayerImage` and `XTransImage` in their own files; a `CfaColour` enum for colour indices. |
-| DRZ-12 | `InputMap`/`SipMap`/`Landing` sit in `drizzle/accumulator/frame_source.rs`; public `DrizzleFrame` in `accumulator/mod.rs`; free `pub(crate)` `sgarea`/`boxer` (`drizzle/geometry.rs`) and `nearest_index` (`registration/resample/kernel/mod.rs`); the same truncating floor twice (`source_position.rs`, `warp_kernel/mod.rs`); `DrizzleConfig::x2()` equals `default()`. Lanczos3 is "highest quality" and Lanczos4 "extreme quality" (`registration_config/mod.rs`); `DrizzleKernel::Lanczos` is "Best quality" although it is limited to s = p = 1 and has negative weights. | `InputMap` → `accumulator/input_map.rs`, `DrizzleFrame` → `accumulator/drizzle_frame.rs`; `boxer` → `DropQuad::overlap`, `sgarea` private; `nearest_index` → a `SourcePosition` method; one floor helper; drop `x2()`; fix the two doc claims. |
-| CAL-18 | History in comments (`fits.rs`: "Version 2 stores…; version 3 keeps…"); doc comments glued to import blocks (`calibration_masters/mod.rs`, `calibration_set.rs`). | Trim; unglue. |
-| CMB-11 | GESD pushes a statistic per removal into production scratch (`gesd_config.rs`, `scratch_buffers.rs`) for one test. | The NIST test recomputes the statistics through a gated helper beside `GesdConfig`; `statistics` leaves the scratch. |
-| CMB-12 | `SigmaClipConfig::new(sigma, iters)` is symmetric, `LinearFitClipConfig::new(low, high, iters)` asymmetric; `max_iterations` counts all passes for σ-clip but the passes after the first for linear fit (`passes() = 1 + max_iterations`). GESD validates `alpha` in `[0, 1)`, and `alpha = 0` makes the critical value the Samuelson bound, so it never rejects; `max_outliers: Some(0)` also disables it. The GESD error names "GESD alpha" where the others name the field. | σ-clip and linear fit take `new(SigmaBounds, max_passes)` with one meaning (all passes); Winsorized, which clips once, takes `new(SigmaBounds)`; GESD validates `alpha ∈ (0, 1)` and `max_outliers ≥ 1`, and names the field. |
 
 **Crates:** lumos, lens, darkroom.
 

@@ -61,7 +61,7 @@ impl FlatGain {
                                 divisor,
                                 cfa_type,
                                 &excluded,
-                                colour as u8,
+                                colour,
                                 Vec2us::new(STEP * i, STEP * j),
                             );
                         }
@@ -270,7 +270,7 @@ fn node_gain(
     divisor: &Buffer2<f32>,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
-    colour: u8,
+    colour: usize,
     node: Vec2us,
 ) -> f32 {
     let size = Size2us::new(divisor.width(), divisor.height());

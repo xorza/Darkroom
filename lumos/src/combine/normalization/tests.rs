@@ -11,9 +11,9 @@ use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::mad_to_sigma;
 use crate::progress::progress_callback::ProgressCallback;
 use common::TempDir;
@@ -843,7 +843,7 @@ fn twilight_flats_normalize_per_colour() {
                 .enumerate()
                 .map(|(index, &level)| {
                     let colour = cfa.color_at(Vec2us::new(index % 16, index / 16));
-                    level * scale[usize::from(colour)]
+                    level * scale[colour]
                 })
                 .collect();
             make_cfa(size, pixels, cfa)
