@@ -1,7 +1,7 @@
 //! `Masters` — a [`lumos::CalibrationMasters`] bundle (master dark / flat /
 //! bias / flat-dark + defect map) wrapped as a scenarium [`CustomValue`] so
 //! a "build masters" node can hand it to a "stack lights" node on a wire.
-//! `Display` reports which masters the bundle carries.
+//! `Display` reports which masters the bundle carries, and how many pixels its defect map names.
 
 use std::any::Any;
 use std::fmt;
@@ -58,6 +58,9 @@ impl Display for Masters {
             }
             write!(f, "{component}")?;
         }
+        if let Some(defects) = self.masters.defect_summary() {
+            write!(f, "; {defects}")?;
+        }
         Ok(())
     }
 }
@@ -104,7 +107,7 @@ mod tests {
     fn display_lists_present_masters() {
         assert_eq!(
             Masters::from(bundle(true)).to_string(),
-            "masters: dark, defects"
+            "masters: dark, defects; 0 defective pixels, 0.000%"
         );
     }
 }

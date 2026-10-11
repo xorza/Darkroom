@@ -47,13 +47,11 @@ named item.
 ## Dependency graph
 
 ```
-24, 26, 28, PIP-5, PIP-19                  independent
+24, 26, 27, 28, PIP-5, PIP-19              independent
 20 ── 25
-23 ── 27
 ```
 
 - 20 before 25: the kept cache moves into the ingest.
-- 23 before 27: the dark scale is fitted on the hot pixels 23 stores with their excess.
 
 ---
 
@@ -68,54 +66,6 @@ and the drizzle entries ignore `keep_cache`; a kept frame holds no `ImageMetadat
 light needs. Per Q5, they read a light back from the kept cache before any decode, RAW runs
 caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered stack with
 `keep_cache` decodes no light (count decodes through a test hook).
-
-**Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 23: Defect map, repairs and bundle — medium (needs real data)
-
-**Findings:** CAL-5 (decided: the map stays per master), CAL-16, and from Batch 26 CAL-10 and
-CAL-15, which touch the same code.
-
-**Problems.**
-- **CAL-5, as decided.** A hot pixel is one whose residual over the per-colour dark background (a
-  64 px colour mesh, confirmed against a robust plane through a ring of same-colour photosites
-  6–8 px away) exceeds `DEFAULT_SIGMA_THRESHOLD = 5` times the master's robust σ
-  (`detect_hot_pixels` in `calibration_masters/defect_map/mod.rs`). This stays: every reference
-  builds the map from the master alone. Open is only its size: nothing reports the flagged
-  fraction per colour, so the coverage loss CAL-5 described cannot be checked.
-- **CAL-16.** `CfaLattice::median` (`io/image/cfa/cfa_lattice.rs`) repairs a Bayer green from
-  its four diagonal greens at √2, which are the other phase (Gr against Gb). On a sensor with Gr/Gb
-  imbalance every repair carries the other phase's level. The function serves defect repairs and
-  null repairs.
-- **CAL-10.** `calibration_masters/fits.rs` reads the whole bundle with `fs::read` (three f32
-  masters of a 60 MP sensor are about 720 MB, beside the decoded masters), and every failure is
-  `io::Error::new(InvalidData, String)`, not an enum of cases.
-- **CAL-15.** `DefectMap` and its methods are `pub` (`lib.rs`) with no caller outside lumos:
-  `lens` and `darkroom` use only `defect_summary()`, and `count()` has test callers only.
-
-**Design.**
-1. Each hot pixel keeps its excess `d_p`: its residual over the ring's plane, or over the mesh
-   where the ring has none, the value the detector already tests. The bundle stores it beside the
-   index (bundle version 5). Batch 27 fits the dark's scale on it.
-2. `DefectSummary` adds the hot and cold counts per colour, so the flagged fraction per colour is
-   reported, and `lens` shows it.
-3. **CAL-16:** Bayer green repairs use same-phase greens only (Gr from Gr, Gb from Gb): the four at
-   distance 2 and the four at 2√2. A same-phase median has no Gr/Gb bias by construction, so no
-   measurement is needed to decide it. Every Bayer green repair through `CfaLattice::median`
-   changes (defects and nulls); the pins move, and the report says so.
-4. **CAL-10:** the bundle loads through a memory map and fails with `BundleError::{NotABundle,
-   Version { found }, Checksum { hdu }, DuplicateExtension, …}`.
-5. **CAL-15:** `DefectMap` and its methods become `pub(crate)`; fix the `crate::DefectMap` doc
-   link in `io/image/cfa/mod.rs`; gate `count()` for tests.
-
-**Tests:**
-- The stored excess of each hot pixel equals its hand-computed ring residual, and the summary's
-  counts per colour are exact on a synthetic dark.
-- A Gr defect is repaired from Gr neighbours only, to the exact median.
-- The bundle round-trips indices and excesses bit-exact; a version 4 bundle fails with
-  `BundleError::Version { found: 4 }`.
 
 **Crates:** lumos, lens, darkroom.
 
@@ -217,7 +167,7 @@ ratio (or 1) and the run is marked unverified. Siril offers noise-minimizing dar
 (`DarkFrame.cpp`). The 1 °C tolerance also accepts about 12% thermal error without a record.
 
 **Design (decided: fit k per light on hot-pixel residuals, bias-removed darks only).**
-1. **Pixels:** Batch 23's hot pixels not flagged in the light
+1. **Pixels:** the defect map's hot pixels (`HotPixels`, each with its excess) not flagged in the light
    (`SATURATED`, `NO_DATA`), selected on the dark's excess `d_p` alone. Selecting on the
    regressor leaves a least-squares slope unbiased; selecting on the light's value would bias it.
    Their significance in the master keeps `d_p`'s own noise small, so the errors-in-variables

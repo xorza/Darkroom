@@ -158,7 +158,7 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
     let map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
-    assert_eq!(map.hot_indices(), hot);
+    assert_eq!(map.hot().indices, hot);
 
     let flat = expose(0.8, 2);
     let map = DefectMap::new(flat.size())
@@ -188,8 +188,9 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
         DefectMap::new(dark.size())
             .detect_hot(&dark, sigma, &CancelToken::never())
             .unwrap()
-            .hot_indices()
-            .to_vec()
+            .hot()
+            .indices
+            .clone()
     };
     assert_eq!(hot_at(8.0), extreme);
     let lenient = hot_at(3.0);

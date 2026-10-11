@@ -162,7 +162,8 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     let margin_x = size.width / 10;
     let margin_y = size.height / 10;
     let at_edge = map
-        .hot_indices()
+        .hot()
+        .indices
         .iter()
         .filter(|&&index| {
             let p = size.point_of(index);
@@ -174,7 +175,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
         })
         .count();
     let mut bins = [0usize; BINS * BINS];
-    for &index in map.hot_indices() {
+    for &index in &map.hot().indices {
         let p = size.point_of(index);
         let bx = (p.x * BINS / size.width).min(BINS - 1);
         let by = (p.y * BINS / size.height).min(BINS - 1);
@@ -182,7 +183,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     }
 
     HotMaskMetrics {
-        hot: map.hot_indices().len(),
+        hot: map.hot().indices.len(),
         at_edge,
         fullest_bin: *bins.iter().max().unwrap(),
     }
@@ -248,16 +249,17 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     assert_eq!(second.size, first.size);
     assert_eq!(full.size, first.size);
 
-    let intersection = sorted_intersection_count(first.map.hot_indices(), second.map.hot_indices());
-    let union = first.map.hot_indices().len() + second.map.hot_indices().len() - intersection;
+    let intersection =
+        sorted_intersection_count(&first.map.hot().indices, &second.map.hot().indices);
+    let union = first.map.hot().indices.len() + second.map.hot().indices.len() - intersection;
     let jaccard = intersection as f32 / union as f32;
     let first_metrics = hot_mask_metrics(&first.map, first.size);
     let second_metrics = hot_mask_metrics(&second.map, second.size);
     let full_metrics = hot_mask_metrics(&full.map, full.size);
     println!(
         "  alternating master-dark hot masks: {} and {}, intersection {}, Jaccard {:.4}",
-        first.map.hot_indices().len(),
-        second.map.hot_indices().len(),
+        first.map.hot().indices.len(),
+        second.map.hot().indices.len(),
         intersection,
         jaccard
     );

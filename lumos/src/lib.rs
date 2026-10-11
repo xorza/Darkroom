@@ -62,9 +62,9 @@ mod star_detection;
 
 pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration_masters::cosmic_ray::error::CosmicRayError;
-pub use calibration_masters::defect_map::DefectMap;
 pub use calibration_masters::error::{
-    CalibrationError, DarkMismatch, MasterBuildError, SubtractionError,
+    BundleError, CalibrationError, DarkMismatch, DefectTableError, MasterBuildError,
+    SubtractionError,
 };
 pub use calibration_masters::temperature_source::TemperatureSource;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
@@ -104,11 +104,12 @@ pub use math::vec2us::Vec2us;
 
 pub use calibration_masters::calibration_component::CalibrationComponent;
 pub use calibration_masters::calibration_set::CalibrationSet;
+pub use calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
 pub use calibration_masters::master_cache::{
     MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
 };
 pub use calibration_masters::master_role::MasterRole;
-pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary};
+pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 
 /// Star detection: the detector, its configuration, and the stars and diagnostics it returns, each
 /// under its own name.

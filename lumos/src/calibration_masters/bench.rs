@@ -13,11 +13,11 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
+use crate::calibration_masters::defect_map::DefectMap;
 use crate::internals::cfa::make_cfa;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::{
-    CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig,
-    DEFAULT_SIGMA_THRESHOLD, DefectMap,
+    CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig, DEFAULT_SIGMA_THRESHOLD,
 };
 
 /// A realistic APS-C sub-frame size for the per-pixel CFA passes.
