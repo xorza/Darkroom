@@ -48,10 +48,7 @@ named item.
 
 ```
 26, 27, 28, PIP-5, PIP-19                  independent
-20 ── 25
 ```
-
-- 20 before 25: the kept cache moves into the ingest.
 
 ---
 
@@ -68,40 +65,6 @@ caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered st
 `keep_cache` decodes no light (count decodes through a test hook).
 
 **Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 25: Kept-cache integrity — low-medium
-
-**Finding PIP-17.** The kept cache trusts `common::FileIdentity` (length and mtime) and an
-FNV-64 file stem (`frame_store/cache_key.rs` has no source path):
-- a same-size rewrite that keeps the mtime (`rsync -t`, `cp -p`, a re-export) reuses stale
-  planes;
-- a stem collision with equal length and mtime reads another source's planes, so the
-  `frame_spill.rs` doc claim "a clash rebuilds the frame, it never reads another's" is false;
-- after a power loss a commit can outlive its plane contents (`PublicationMode::Cache` does not
-  fsync; XFS zero-fills), and zeros pass the finiteness check.
-
-**Design (decided: blake3 moves from `[dev-dependencies]` to `[dependencies]` of lumos).**
-1. The `Commit` records the canonical source path and a blake3 digest of each file it names
-   (channels, quality planes, flags, stratified samples). Reuse verifies each digest as it reads:
-   the reuse pass already reads every channel (`FrameCheck::stored_samples`), and the planes it
-   does not read yet are read for their digest. A mismatch is a miss.
-2. A path mismatch is a miss, which makes the `frame_spill.rs` doc claim true.
-3. `FileIdentity` (in `common`) adds the file id and the change time where the platform has them:
-   `st_ino` and `st_ctime` on Unix; the file index and change time on Windows through
-   `windows-sys` (`GetFileInformationByHandleEx`, under the `Win32_Storage_FileSystem` feature
-   `common` already enables). A field the platform lacks is a documented `None`. The per-OS code
-   goes to `common/src/file_utils/platform/{unix,windows}.rs`, with the `cfg` functions already in
-   `common/src/file_utils/mod.rs`. Scenarium's resource cache and `lens` also compare
-   `FileIdentity`: a metadata-only change (`chmod`, a rename) becomes a miss there too, a rebuild,
-   never a wrong read.
-4. Bump the sidecar pin.
-
-**Tests:** a plane rewritten with the same length and mtime is a miss; a zeroed plane is a miss;
-a stem collision with another path is a miss; on Unix a `chmod` of the source is a miss.
-
-**Crates:** `--workspace`.
 
 ---
 
@@ -230,6 +193,8 @@ real X-Trans set. Only when it passes does `XTransUnsupported` go.
 - **Batch 23:** the flagged fraction per colour on a cooled-CMOS master and on a DSLR set. If it
   is large on a well-stacked cooled master, the threshold multiplier is the lever. Gr/Gb repairs.
 - **Batch 27:** `k` across a DSLR session, and the residual hot-pixel pattern with and without it.
+- **Batch 25:** `common/src/file_utils/platform/windows.rs` is checked only by a Windows clippy;
+  run the `common` tests on Windows, `FileIdentity::of` above all.
 - **Batch 21:** `platform/macos.rs` is not compiled here (no macOS target), and
   `platform/windows.rs` only through a Windows clippy of the platform module. Build and test lumos
   on macOS and on Windows, the free space and the Job-object memory most of all.

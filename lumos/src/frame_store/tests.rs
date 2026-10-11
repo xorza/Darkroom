@@ -230,6 +230,8 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let identity = FileIdentity {
         len: 16,
         mtime_ns: 1,
+        file_id: None,
+        changed_ns: None,
     };
     let key = CacheKey::new(identity, DecoderKind::Linear, &LoadContext::default());
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);

@@ -197,7 +197,9 @@ impl StampJob {
             let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
             hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
             let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
-            hasher.write_pod(file.len).write_pod(file.mtime_ns);
+            file.write_to(|bytes| {
+                hasher.write_bytes(bytes);
+            });
         }
         Ok(FsPathId::Directory(hasher.finish()))
     }
@@ -255,7 +257,12 @@ pub(super) mod internals {
         /// folds a path can be pinned to a constant — no test controls a
         /// real file's mtime.
         pub(crate) fn file(len: u64, mtime_ns: i128) -> Self {
-            FsPathId::File(FileIdentity { len, mtime_ns })
+            FsPathId::File(FileIdentity {
+                len,
+                mtime_ns,
+                file_id: None,
+                changed_ns: None,
+            })
         }
     }
 }

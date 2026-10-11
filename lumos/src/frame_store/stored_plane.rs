@@ -68,6 +68,14 @@ impl<T: Pod> StoredPlane<T> {
         }
     }
 
+    /// Every sample, as bytes.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Memory(buffer) => bytemuck::cast_slice(buffer.pixels()),
+            Self::Mapped { file, .. } => file.bytes(),
+        }
+    }
+
     #[inline]
     pub(crate) fn chunk(&self, start: usize, end: usize) -> &[T] {
         match self {
