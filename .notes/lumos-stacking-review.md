@@ -62,8 +62,7 @@ named item.
 
 ## Batch 20: One ingest stage — medium (design)
 
-**Findings:** PIP-11, PIP-12, PIP-13, PIP-10, PIP-4, CAL-14, and the issue-log entry on
-`stack()` of RAW paths as `LinearImage`.
+**Findings:** PIP-11, PIP-12, PIP-13, PIP-10, PIP-4, CAL-14.
 
 **Problems.**
 - **PIP-11.** Three decode–admit–store loops. `combine/cache/loader/mod.rs`: peek →
@@ -97,9 +96,6 @@ named item.
 - **CAL-14.** The master-building rule (each role stacked under its preset; flats take the
   flat-dark, else the bias, per frame; then `from_images`) is written twice:
   `calibration_masters::internals::masters_from_files` and `lens/src/astro/nodes/calibration.rs`.
-- **Issue log.** `stack()` of camera RAW paths as `LinearImage`: `FramePeek::of_decoded` counts
-  `decoder_bytes: 0`, so the memory plan leaves out LibRaw's file buffer and unpacked raw, and
-  frame 0 is decoded before the plan.
 
 **Design.**
 1. `ingest::Ingest<Source, Sink>`: one peek → plan → decode → admit → store loop. Sources:
@@ -109,9 +105,9 @@ named item.
    drizzle entries consume it. The drizzle entries keep one frame in drizzle at a time (each
    drizzle is parallel inside), and their stored size comes from the drizzle output, as
    `DrizzleTier::for_run` counts it today.
-2. Every source peeks before any decode. A RAW path decoded as `LinearImage` peeks through
-   `raw_cfa_frame_info` and counts `CfaFrameInfo::decoder_bytes`, as RAW mosaics already do. Then
-   delete the issue-log entry.
+2. Every source peeks before any decode where its format has a header to read: RAW and mosaic
+   FITS through `CfaFrameInfo`, linear FITS through `fits_linear_dimensions` (done). A float TIFF
+   has none, and its frame 0 is still decoded first.
 3. `FrameCheck` and `SetFacts` move into `ingest/`. Admission has its own error enum
    (`AdmissionError`), converted into `StackError`, `AlignStackError` and `DrizzleError` at each
    boundary. The drizzle entries are admitted like the others, and their own finiteness check
@@ -136,8 +132,7 @@ named item.
 
 **Tests:** every pipeline, loader and drizzle test stays green with unchanged pins; a new
 `align_and_stack_paths` test spills calibrated RGB FITS lights; `keep_cache` reuse on the RAM tier
-and in a registered RAW run skips the decode (count decodes through a test hook); a RAW
-`LinearImage` stack's peek carries the same `decoder_bytes` as the mosaic peek of that file; a
+and in a registered RAW run skips the decode (count decodes through a test hook); a
 drizzle input with a non-finite sample fails admission with its index.
 
 **Crates:** lumos, lens, darkroom.
