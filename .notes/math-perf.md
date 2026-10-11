@@ -22,13 +22,19 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `noise/frame/mrs_estimate_split/1024` | 0.45 | | Same, and shares of 8192 values, so one gain bin still spreads over every worker. |
 | `noise/frame/mrs_estimate_split/4096` | 0.44 | | Same. |
 | `noise/gain_bin/4096` | 0.29 | | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
-| `statistics/median_mut/16` | 0.59 | | Selection on integer keys in `total_cmp`'s order, mapped once each way, where `total_cmp` mapped both operands of every comparison. Same medians. |
-| `statistics/median_mut/4096` | 0.89 | | Same. |
-| `statistics/median_mad/16` | 0.68 | | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
-| `statistics/median_mad/4096` | 0.88 | | Same. |
-| `statistics/mad_with_scratch/16` | 0.62 | | Median of magnitudes. |
-| `statistics/robust_sigma_f64/16` | 0.64 | | Both medians on keys. |
-| `statistics/sigma_clipped/4096` | 1.04 | | `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. The clip still maps its values each pass; next to fix. |
+| `statistics/median_mut/16` | 0.55 | 0.79 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
+| `statistics/median_mut/4096` | 0.82 | | Same. On arm64 the float comparison is cheap, so the gain there is the skipped map. |
+| `statistics/median_mad/16` | 0.64 | | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
+| `statistics/median_mad/4096` | 0.81 | | Same. |
+| `statistics/mad_with_scratch/4096` | 0.81 | | Median of magnitudes. |
+| `statistics/robust_sigma_f64/4096` | 0.84 | | Both medians on keys. |
+| `statistics/sigma_clipped/16` | 0.89 | | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
+| `statistics/sigma_clipped/4096` | 0.96 | | Same. |
+| `statistics/frame/plane_median/radix/24000000` | 0.93 | | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
+
+The `statistics` rows are against a baseline measured again after the bench fix that batches in-place
+inputs to stay in cache (`52e54d2c6`): before it, a batch of copies outgrew the cache and the
+4096-value figures moved by up to 2×.
 
 ## Not taken
 

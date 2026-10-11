@@ -1,5 +1,6 @@
 //! The order statistics over the sizes they run at: a combine pixel's frames, a star's stamp and a
-//! background tile; and a whole plane's median, by radix and by selection.
+//! background tile; and a whole plane's median, by radix over the 64-value runs normalization
+//! feeds it, and by selection.
 
 use std::hint::black_box;
 
@@ -72,12 +73,12 @@ pub(crate) fn benches(c: &mut Criterion) {
         let mut median = RadixMedian::default();
         b.iter(|| {
             let mut high = median.high_pass();
-            for &value in black_box(&plane) {
-                high.add(value);
+            for word in black_box(&plane).chunks(64) {
+                high.add_all(word);
             }
             let mut low = high.finish();
-            for &value in &plane {
-                low.add(value);
+            for word in plane.chunks(64) {
+                low.add_all(word);
             }
             low.median()
         });

@@ -78,6 +78,22 @@ impl<'a> HighPass<'a> {
         self.len += 1;
     }
 
+    /// Count every value of `values`, as [`Self::add`] counts one: eight keys at a time, so that the
+    /// key's map vectorizes and only the increments are one by one.
+    #[inline]
+    pub(crate) fn add_all(&mut self, values: &[f32]) {
+        let (octets, rest) = values.as_chunks::<8>();
+        for octet in octets {
+            for key in octet.map(key) {
+                self.counts[(key >> 16) as usize] += 1;
+            }
+        }
+        for &value in rest {
+            self.counts[(key(value) >> 16) as usize] += 1;
+        }
+        self.len += values.len();
+    }
+
     /// The values counted so far.
     pub(crate) const fn len(&self) -> usize {
         self.len
@@ -141,6 +157,45 @@ impl LowPass<'_> {
                     *upper_min = (*upper_min).min(key);
                 }
             }
+        }
+    }
+
+    /// Read every value of `values`, as [`Self::add`] reads one. Eight keys are tested at a time,
+    /// and only those in the middle bins go on: a pass over a plane counts few of its values.
+    #[inline]
+    pub(crate) fn add_all(&mut self, values: &[f32]) {
+        let (octets, rest) = values.as_chunks::<8>();
+        match &mut self.middle {
+            Middle::OneBin { high, .. } => {
+                let high = *high;
+                for octet in octets {
+                    let keys = octet.map(key);
+                    if keys.iter().any(|&key| key >> 16 == high) {
+                        for key in keys {
+                            if key >> 16 == high {
+                                self.counts[(key & 0xFFFF) as usize] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            Middle::Split {
+                lower,
+                upper,
+                lower_max,
+                upper_min,
+            } => {
+                for octet in octets {
+                    for key in octet.map(key) {
+                        let high = key >> 16;
+                        *lower_max = (*lower_max).max(if high == *lower { key } else { 0 });
+                        *upper_min = (*upper_min).min(if high == *upper { key } else { u32::MAX });
+                    }
+                }
+            }
+        }
+        for &value in rest {
+            self.add(value);
         }
     }
 
@@ -256,6 +311,20 @@ mod tests {
         low.median()
     }
 
+    /// The same median, both passes fed `values` in runs of `run`.
+    fn radix_median_in_runs(values: &[f32], run: usize) -> f32 {
+        let mut median = RadixMedian::default();
+        let mut high = median.high_pass();
+        for chunk in values.chunks(run) {
+            high.add_all(chunk);
+        }
+        let mut low = high.finish();
+        for chunk in values.chunks(run) {
+            low.add_all(chunk);
+        }
+        low.median()
+    }
+
     /// The key orders values as `total_cmp` does, and maps back to the same bits.
     #[test]
     fn keys_follow_the_total_order() {
@@ -306,7 +375,8 @@ mod tests {
     /// Cross-check against `median_mut` on sets that put the middle ranks in every position, all
     /// far from overflow:
     /// signed values on both sides of zero, both zeros, runs of duplicates, and counts from 1 to
-    /// 400, odd and even. The two agree bit for bit.
+    /// 400, odd and even. The two agree bit for bit, and so do runs of 7, which leave a remainder
+    /// to every octet, and of 64, a mask word's.
     #[test]
     fn the_median_is_bit_identical_to_selection() {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
@@ -331,6 +401,13 @@ mod tests {
                 expected.to_bits(),
                 "{len} values"
             );
+            for run in [7, 64] {
+                assert_eq!(
+                    radix_median_in_runs(&values, run).to_bits(),
+                    expected.to_bits(),
+                    "{len} values in runs of {run}"
+                );
+            }
         }
     }
 }

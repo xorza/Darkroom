@@ -13,7 +13,8 @@ use std::ops::{Add, Mul, Sub};
 pub(crate) trait Float:
     Copy + PartialOrd + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
 {
-    /// The signed integer of the same width, which [`Self::into_keys`] maps a value to.
+    /// The signed integer of the same width: the bits of a value with its sign bit clear order
+    /// as `total_cmp` orders the values, and [`Self::map_keys`] makes them so for any value.
     type Key: Ord + Copy + Default;
 
     /// What an empty input measures to.
@@ -23,21 +24,59 @@ pub(crate) trait Float:
 
     fn abs(self) -> Self;
 
-    /// `values` mapped in place to keys whose integer order is `total_cmp`'s: a negative
-    /// value's bits below the sign flip. A selection on the keys compares integers, where one under
-    /// `total_cmp` maps both operands of every comparison. The map is its own inverse, so
-    /// [`Self::from_keys`] restores the values.
-    fn into_keys(values: &mut [Self]) -> &mut [Self::Key];
+    /// Whether any of `values` has its sign bit set, by one OR over their bits.
+    fn any_sign_bit(values: &[Self]) -> bool;
 
-    /// The values of keys [`Self::into_keys`] made, mapped back in place.
-    fn from_keys(keys: &mut [Self::Key]) -> &mut [Self];
+    /// `values` read in place as their bits.
+    fn as_keys(values: &mut [Self]) -> &mut [Self::Key];
 
-    /// The value one key stands for.
+    /// `keys` read in place as the values whose bits they are.
+    fn as_values(keys: &mut [Self::Key]) -> &mut [Self];
+
+    /// Flip the bits below the sign of every key whose sign bit is set: what puts a negative
+    /// value's bits in `total_cmp`'s order, and, being its own inverse, takes them back out.
+    fn map_keys(keys: &mut [Self::Key]);
+
+    /// The value a key in `total_cmp`'s order stands for.
     fn from_key(key: Self::Key) -> Self;
+}
 
-    /// `magnitudes`, none of them with its sign bit set, read as their keys: such a value's bits
-    /// are its key already, so nothing is mapped.
-    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [Self::Key];
+/// Values read in place as keys in `total_cmp`'s order. A selection on the keys compares integers,
+/// where one under `total_cmp` maps both operands of every comparison. Values with no sign bit
+/// set, as sky levels and deviations are, are their own keys and are not written; any other slice
+/// is mapped once in and once out.
+#[derive(Debug)]
+pub(crate) struct OrderKeys<'a, F: Float> {
+    keys: &'a mut [F::Key],
+    mapped: bool,
+}
+
+impl<'a, F: Float> OrderKeys<'a, F> {
+    pub(crate) fn of(values: &'a mut [F]) -> Self {
+        let mapped = F::any_sign_bit(values);
+        let keys = F::as_keys(values);
+        if mapped {
+            F::map_keys(keys);
+        }
+        Self { keys, mapped }
+    }
+
+    /// Whether the values were mapped: when not, the keys are the values' own bits.
+    pub(crate) const fn mapped(&self) -> bool {
+        self.mapped
+    }
+
+    pub(crate) const fn keys(&mut self) -> &mut [F::Key] {
+        self.keys
+    }
+
+    /// The values again, in the order the keys were left in.
+    pub(crate) fn into_values(self) -> &'a mut [F] {
+        if self.mapped {
+            F::map_keys(self.keys);
+        }
+        F::as_values(self.keys)
+    }
 }
 
 /// The bits of an `f32` whose `i32` order is [`f32::total_cmp`]'s, as `std` computes them, and
@@ -62,30 +101,30 @@ impl Float for f32 {
     }
 
     #[inline]
-    fn into_keys(values: &mut [Self]) -> &mut [i32] {
-        let keys: &mut [i32] = bytemuck::cast_slice_mut(values);
-        for key in keys.iter_mut() {
-            *key = total_order_32(*key);
-        }
-        keys
+    fn any_sign_bit(values: &[Self]) -> bool {
+        values.iter().fold(0, |bits, value| bits | value.to_bits()) >> 31 != 0
     }
 
     #[inline]
-    fn from_keys(keys: &mut [i32]) -> &mut [Self] {
-        for key in keys.iter_mut() {
+    fn as_keys(values: &mut [Self]) -> &mut [i32] {
+        bytemuck::cast_slice_mut(values)
+    }
+
+    #[inline]
+    fn as_values(keys: &mut [i32]) -> &mut [Self] {
+        bytemuck::cast_slice_mut(keys)
+    }
+
+    #[inline]
+    fn map_keys(keys: &mut [i32]) {
+        for key in keys {
             *key = total_order_32(*key);
         }
-        bytemuck::cast_slice_mut(keys)
     }
 
     #[inline]
     fn from_key(key: i32) -> Self {
         f32::from_bits(total_order_32(key).cast_unsigned())
-    }
-
-    #[inline]
-    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [i32] {
-        bytemuck::cast_slice_mut(magnitudes)
     }
 }
 
@@ -100,29 +139,29 @@ impl Float for f64 {
     }
 
     #[inline]
-    fn into_keys(values: &mut [Self]) -> &mut [i64] {
-        let keys: &mut [i64] = bytemuck::cast_slice_mut(values);
-        for key in keys.iter_mut() {
-            *key = total_order_64(*key);
-        }
-        keys
+    fn any_sign_bit(values: &[Self]) -> bool {
+        values.iter().fold(0, |bits, value| bits | value.to_bits()) >> 63 != 0
     }
 
     #[inline]
-    fn from_keys(keys: &mut [i64]) -> &mut [Self] {
-        for key in keys.iter_mut() {
+    fn as_keys(values: &mut [Self]) -> &mut [i64] {
+        bytemuck::cast_slice_mut(values)
+    }
+
+    #[inline]
+    fn as_values(keys: &mut [i64]) -> &mut [Self] {
+        bytemuck::cast_slice_mut(keys)
+    }
+
+    #[inline]
+    fn map_keys(keys: &mut [i64]) {
+        for key in keys {
             *key = total_order_64(*key);
         }
-        bytemuck::cast_slice_mut(keys)
     }
 
     #[inline]
     fn from_key(key: i64) -> Self {
         f64::from_bits(total_order_64(key).cast_unsigned())
-    }
-
-    #[inline]
-    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [i64] {
-        bytemuck::cast_slice_mut(magnitudes)
     }
 }
