@@ -12,7 +12,9 @@
 //! its own pixels — a colour over its photosites — and coverage narrows them: frames that each
 //! cover every pixel are measured over all of them, and when any frame contributes at only some
 //! pixels — a warp's edge, or a source's declared nulls — over [`common_domain`], the pixels every
-//! frame reached.
+//! frame reached. Frames gathered in each channel by their own rule, a drizzle of mosaics, are
+//! measured pair by pair against the reference, or one by one when some pair shares no pixel —
+//! see [`fitted_frame_norms`].
 
 pub(crate) mod common_domain;
 pub(crate) mod photometric_gain;
@@ -27,6 +29,7 @@ use crate::combine::config::Normalization;
 use crate::combine::error::StackError;
 use crate::combine::normalization::common_domain::{CommonDomain, WORD_BITS};
 use crate::combine::normalization::photometric_gain::{paired_photometric_gain, sample_stats};
+use crate::frame_store::frame_stats::SlotSpread;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
@@ -35,6 +38,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
 use crate::math::statistics::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
+use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 
 /// One slot's affine normalization, applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -255,7 +259,9 @@ fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
 /// all of them, where the statistics measured on the sources at load already describe the
 /// pixels combined; over the common domain otherwise, since each source was measured over a
 /// different set of pixels than the one the frames share; and pair by pair when a frame is
-/// gathered in each channel by its own rule — see [`pairwise_norms`].
+/// gathered in each channel by its own rule — see [`pairwise_norms`] — or, when some pair of those
+/// shares no pixel, each frame by its own statistics — see [`per_frame_norms`]. One rule holds for
+/// the whole set, so no two frames are scaled by different estimators.
 fn fitted_frame_norms(
     frames: &[StoredFrame],
     dimensions: ImageDimensions,
@@ -272,8 +278,15 @@ fn fitted_frame_norms(
     };
     let gated = frames.iter().any(|frame| !frame.quality.is_none());
     let per_channel = frames.iter().any(|frame| frame.quality.per_channel());
+    let mut estimator = "common";
     let norms = if per_channel {
-        pairwise_norms(planes, normalization, reference, cancel)?
+        if let Some(norms) = pairwise_norms(planes, normalization, reference, cancel)? {
+            estimator = "pairwise";
+            norms
+        } else {
+            estimator = "per-frame";
+            per_frame_norms(frames, normalization, reference)?
+        }
     } else {
         let all: Vec<&StoredFrame> = frames.iter().collect();
         let domain = gated
@@ -300,7 +313,7 @@ fn fitted_frame_norms(
         slots = slots.count(),
         ref_frame = reference,
         common_domain = gated && !per_channel,
-        pairwise = per_channel,
+        estimator,
         ?normalization,
         "Computed normalization"
     );
@@ -316,15 +329,14 @@ fn fitted_frame_norms(
 /// only part of the grid — at scale 2 and pixfrac 1, a Bayer red at 9 output pixels of 16 — so
 /// their intersection thins out with every frame added. A pair keeps as many as two frames share,
 /// and a pair is all either fit compares. Above scale 1 a pair can still share none: two frames a
-/// photosite apart put one's red where the other's green fell. The pair's domain is then empty,
-/// and the normalization fails with [`StackError::NoCommonCoverage`] rather than compare the
-/// frames over nothing.
+/// photosite apart put one's red where the other's green fell. The pair's domain is then empty, and
+/// this returns `None` rather than compare the frames over nothing.
 fn pairwise_norms(
     planes: SlotPlanes<'_>,
     normalization: Normalization,
     reference: usize,
     cancel: &CancelToken,
-) -> Result<Vec<FrameNorm>, StackError> {
+) -> Result<Option<Vec<FrameNorm>>, StackError> {
     let frames = planes.frames;
     let slots = planes.slots;
     let pixel_count = planes.pixel_count;
@@ -335,10 +347,15 @@ fn pairwise_norms(
             let frame_index = pair_index / slot_count;
             let slot = pair_index % slot_count;
             if frame_index == reference {
-                return Ok(SlotNorm::IDENTITY);
+                return Ok(Some(SlotNorm::IDENTITY));
             }
             let pair = [&frames[frame_index], &frames[reference]];
-            let domain = CommonDomain::build(&pair, slots.channel(slot), pixel_count, cancel)?;
+            let domain = match CommonDomain::build(&pair, slots.channel(slot), pixel_count, cancel)
+            {
+                Ok(domain) => domain,
+                Err(StackError::NoCommonCoverage) => return Ok(None),
+                Err(error) => return Err(error),
+            };
             let indices = stratified_indices(&domain, cancel)?;
             let [ours, theirs] = [frame_index, reference].map(|index| {
                 measure_plane(
@@ -378,26 +395,122 @@ fn pairwise_norms(
                         variance(reference)?,
                         cancel,
                     )?;
-                    Ok(SlotNorm {
+                    Ok(Some(SlotNorm {
                         gain,
                         offset: reference_median - frame_median * gain,
-                    })
+                    }))
                 }
                 Normalization::Multiplicative => SlotNorm::median_ratio(
                     (frame_index, frame_median),
                     (reference, reference_median),
                     slot,
-                ),
+                )
+                .map(Some),
                 Normalization::None => unreachable!("handled by the caller"),
             }
         })
-        .collect::<Result<Vec<_>, StackError>>()?;
-    Ok(fitted
-        .chunks(slot_count)
-        .map(|slots| FrameNorm {
-            slots: slots.iter().copied().collect(),
-        })
-        .collect())
+        .collect::<Result<Option<Vec<_>>, StackError>>()?;
+    Ok(fitted.map(|fitted| {
+        fitted
+            .chunks(slot_count)
+            .map(|slots| FrameNorm {
+                slots: slots.iter().copied().collect(),
+            })
+            .collect()
+    }))
+}
+
+/// The norms of frames gathered in each channel by their own rule, measured one by one from the
+/// statistics each source was measured with, as Siril's default normalization and PixInsight's
+/// measure each frame: no pixel is paired, so no pair of frames has to share one.
+///
+/// A slot's location is its source median. Its scale is its robust spread with the white noise
+/// taken out, `√(spread² − σ²)`: the signal's own spread, which a frame's transparency scales,
+/// where the spread alone would read a noisier frame as a brighter one. Subtracting variances is
+/// exact for independent Gaussian parts and an approximation otherwise; `σ` is the noise where no
+/// flat amplified it, so on a vignetted frame the noise left in is a little more than none, alike
+/// in every frame of one setup. `Global` takes the gain as the reference's scale over the frame's
+/// and puts the medians on each other; `Multiplicative` takes the ratio of the medians.
+///
+/// A slot whose `spread² − σ²` does not clear [`SIGNAL_SIGNIFICANCE`] standard errors of its own
+/// estimate holds no signal to scale by: on pure noise the difference scatters about zero, and its
+/// square root would be a gain drawn from that scatter.
+///
+/// # Errors
+/// [`StackError::NoSignalScale`] for a `Global` slot without a significant signal spread, and as
+/// [`SlotNorm::median_ratio`] for `Multiplicative`.
+fn per_frame_norms(
+    frames: &[StoredFrame],
+    normalization: Normalization,
+    reference: usize,
+) -> Result<Vec<FrameNorm>, StackError> {
+    let medians: Vec<ArrayVec<f32, 3>> = frames
+        .iter()
+        .map(|frame| frame.source_stats.medians.clone())
+        .collect();
+    match normalization {
+        Normalization::Multiplicative => multiplicative_norms(&medians, reference),
+        Normalization::Global => {
+            let scale = |index: usize, slot: usize| -> Result<f64, StackError> {
+                let stats = &frames[index].source_stats;
+                let spread = stats
+                    .spread
+                    .as_ref()
+                    .expect("a frame gathered per channel was measured with its spread")[slot];
+                let noise = stats.slot_noise(slot);
+                let signal = f64::from(spread.sigma).powi(2) - f64::from(noise).powi(2);
+                if signal > SIGNAL_SIGNIFICANCE * spread_variance_error(spread, noise) {
+                    Ok(signal.sqrt())
+                } else {
+                    Err(StackError::NoSignalScale {
+                        index,
+                        slot,
+                        spread: spread.sigma,
+                        noise,
+                    })
+                }
+            };
+            frames
+                .iter()
+                .enumerate()
+                .map(|(index, frame)| {
+                    let slots = (0..frame.source_stats.medians.len())
+                        .map(|slot| {
+                            let gain = (scale(reference, slot)? / scale(index, slot)?) as f32;
+                            Ok(if index == reference {
+                                SlotNorm::IDENTITY
+                            } else {
+                                SlotNorm {
+                                    gain,
+                                    offset: medians[reference][slot] - medians[index][slot] * gain,
+                                }
+                            })
+                        })
+                        .collect::<Result<_, StackError>>()?;
+                    Ok(FrameNorm { slots })
+                })
+                .collect()
+        }
+        Normalization::None => unreachable!("handled by the caller"),
+    }
+}
+
+/// Standard errors of its own estimate that a slot's `spread² − σ²` has to clear to count as signal:
+/// at 3, pure Gaussian noise passes once in about 740 slots, and that one is still refused loud
+/// enough to name, as no other wrong gain would be.
+const SIGNAL_SIGNIFICANCE: f64 = 3.0;
+
+/// The standard error of `spread² − σ²` on pure Gaussian noise of σ `noise`: each side a
+/// `1.4826·MAD` estimate of σ, whose variance is `σ²/(2n)` over its 36.75% efficiency against the
+/// standard deviation, `1.3605·σ²/n`, so `5.442·σ⁴/n` for its square. The spread takes `n` from its
+/// own count; the white noise from pairs of photosites on rows thinned to
+/// [`MAX_STATISTIC_SAMPLES`] per colour, taken here as the smaller of that and the spread's count.
+fn spread_variance_error(spread: SlotSpread, noise: f32) -> f64 {
+    const SQUARED_MAD_SIGMA_VARIANCE: f64 = 5.442;
+    let spread_samples = spread.samples.max(1) as f64;
+    let noise_samples = spread.samples.clamp(1, MAX_STATISTIC_SAMPLES) as f64;
+    f64::from(noise).powi(2)
+        * (SQUARED_MAD_SIGMA_VARIANCE * (1.0 / spread_samples + 1.0 / noise_samples)).sqrt()
 }
 
 /// The least noisy frame: the lowest mean noise variance over its slots, each σ carried into the

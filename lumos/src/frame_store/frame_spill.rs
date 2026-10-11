@@ -27,7 +27,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "157873e17ae97d8f";
+pub(crate) const SIDECAR_PIN: &str = "48edcf1b1733ee7b";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -291,7 +291,7 @@ mod tests {
     use crate::frame_store::frame_spill::{
         Carries, Commit, FrameSpill, SIDECAR_FORMAT, SIDECAR_PIN, Sidecar,
     };
-    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame_store::frame_stats::{FrameStats, SlotSpread};
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_provenance::RowOrder;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
@@ -305,6 +305,15 @@ mod tests {
             noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: channels.iter().map(|&(median, _)| median).collect(),
+            spread: Some(
+                channels
+                    .iter()
+                    .map(|&(_, mad)| SlotSpread {
+                        sigma: 2.0 * mad,
+                        samples: 4096,
+                    })
+                    .collect(),
+            ),
             quantization_sigma,
             electrons_per_unit: Some(2.5),
             facts: FrameFacts {

@@ -25,6 +25,7 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
         noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
         read_share: [0.0; 3].into_iter().collect(),
         sky: channels.iter().map(|&(median, _)| median).collect(),
+        spread: None,
         quantization_sigma: None,
         electrons_per_unit: None,
         facts: FrameFacts {
@@ -1091,4 +1092,100 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
             .iter()
             .all(|&slot| slot == SlotNorm::IDENTITY)
     );
+}
+
+/// Frames gathered per channel of which some pair shares no pixel are normalized one by one, from
+/// their source statistics: three 4×1 RGB frames, each reaching one pixel of its own in every
+/// channel, so no pixel is shared at all. The scale is `√(spread² − σ²)`, chosen on 3-4-5 triangles
+/// so every figure is exact: the reference (frame 0, the quietest) has median 2, σ 0.375 and
+/// spread 0.625, a scale of 0.5; frame 1 median 8, σ 3, spread 5, a scale of 4; frame 2 median 4,
+/// σ 0.75, spread 1.25, a scale of 1.
+///
+/// Global: gain `0.5/4 = 0.125`, offset `2 − 8·0.125 = 1`; and `0.5`, `2 − 4·0.5 = 0`.
+/// Multiplicative: `2/8 = 0.25` and `2/4 = 0.5`. A frame whose spread is its noise holds no signal
+/// to scale by and is named; so is one whose excess stays inside three standard errors of the
+/// estimate, `3·σ²·√(5.442·2/n)`: at σ 3 over 4096 samples, 1.392, which a spread of 3.2 (an excess
+/// of 1.24) does not clear.
+#[test]
+fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
+    let dimensions = ImageDimensions::new((4, 1), 3);
+    let frame = |reached: usize, median: f32, noise: f32, spread: f32| {
+        let mut stats = channel_stats(&[(median, 0.0); 3]);
+        stats.noise = [noise; 3].into_iter().collect();
+        stats.spread = Some(
+            [SlotSpread {
+                sigma: spread,
+                samples: 4096,
+            }; 3]
+                .into_iter()
+                .collect(),
+        );
+        let plane: Vec<f32> = (0..4)
+            .map(|x| if x == reached { median } else { 0.0 })
+            .collect();
+        let drops = (0..3)
+            .map(|_| {
+                let reach: Vec<f32> = (0..4).map(|x| f32::from(u8::from(x == reached))).collect();
+                DropPlanes {
+                    weight: Buffer2::new(4, 1, reach.clone()),
+                    confidence: Buffer2::new(4, 1, reach),
+                }
+            })
+            .collect();
+        StoredFrame::from_memory(
+            LinearImage::from_planar_channels(dimensions, vec![plane; 3]),
+            FrameQuality::Drizzled { drops },
+            stats,
+        )
+    };
+    let norms = |frames: &[StoredFrame], normalization| {
+        FrameNorm::measure(
+            frames,
+            dimensions,
+            Slots::of_frames(frames, dimensions),
+            normalization,
+            &CancelToken::never(),
+        )
+    };
+    let frames = [
+        frame(0, 2.0, 0.375, 0.625),
+        frame(1, 8.0, 3.0, 5.0),
+        frame(2, 4.0, 0.75, 1.25),
+    ];
+    let expect = |normalization, expected: [(f32, f32); 3]| {
+        let measured = norms(&frames, normalization).unwrap().unwrap();
+        for (index, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
+            assert!(
+                norm.slots
+                    .iter()
+                    .all(|&slot| slot == SlotNorm { gain, offset }),
+                "frame {index} under {normalization:?}: {:?}",
+                norm.slots
+            );
+        }
+    };
+    expect(
+        Normalization::Global,
+        [(1.0, 0.0), (0.125, 1.0), (0.5, 0.0)],
+    );
+    expect(
+        Normalization::Multiplicative,
+        [(1.0, 0.0), (0.25, 0.0), (0.5, 0.0)],
+    );
+
+    for (spread, case) in [(3.0, "no excess"), (3.2, "an excess inside the error")] {
+        let flat = [frame(0, 2.0, 0.375, 0.625), frame(1, 8.0, 3.0, spread)];
+        let error = norms(&flat, Normalization::Global).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StackError::NoSignalScale {
+                    index: 1,
+                    slot: 0,
+                    ..
+                }
+            ),
+            "{case}: {error:?}"
+        );
+    }
 }

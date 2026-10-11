@@ -67,6 +67,20 @@ pub enum StackError {
         median: f32,
     },
 
+    /// A normalization that scales each frame by its own spread found this one's spread no larger
+    /// than its white noise: the slot holds no signal structure to scale by.
+    #[error(
+        "frame {index} has spread {spread} in slot {slot}, no larger than its white noise {noise}; \
+         it holds no signal to scale a normalization by"
+    )]
+    NoSignalScale {
+        index: usize,
+        /// A channel, or a colour of a mosaic.
+        slot: usize,
+        spread: f32,
+        noise: f32,
+    },
+
     /// The master a calibration stack subtracts from every frame is of another sensor shape or
     /// pattern than frame `index`.
     #[error(

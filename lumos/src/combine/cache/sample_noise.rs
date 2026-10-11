@@ -133,6 +133,7 @@ mod tests {
             noise: noise.iter().copied().collect(),
             read_share: [0.0; 3].into_iter().collect(),
             sky: noise.iter().map(|_| 0.5).collect(),
+            spread: None,
             quantization_sigma,
             electrons_per_unit: electrons,
             facts: FrameFacts {
