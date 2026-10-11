@@ -1,4 +1,4 @@
-//! The bit masks one detection accumulates, shared by the mono and X-Trans paths.
+//! The bit masks one detection accumulates, for the mono detector and the Bayer phases it serves.
 
 use rayon::prelude::*;
 

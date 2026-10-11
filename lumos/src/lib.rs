@@ -61,7 +61,7 @@ mod stack_product;
 mod star_detection;
 
 pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
+pub use calibration_masters::cosmic_ray::error::CosmicRayError;
 pub use calibration_masters::defect_map::DefectMap;
 pub use calibration_masters::error::{CalibrationError, DarkMismatch};
 pub use calibration_masters::temperature_source::TemperatureSource;

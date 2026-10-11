@@ -236,9 +236,19 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         // One frame's pass peaks at the largest of: the decoder's own bytes beside the mosaic it
         // makes, the demosaic, the cosmic-ray pass over the mosaic, and the statistics, a copy of
         // every channel beside the demosaiced frame.
-        let cosmic_ray = self.cosmic_ray.map_or(0, |_| {
-            plane_bytes + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size())
-        });
+        // Refused here, before any light is decoded, when the pass cannot run on this sensor.
+        let cosmic_ray = match self.cosmic_ray {
+            Some(_) => {
+                plane_bytes
+                    + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size()).map_err(
+                        |source| AlignStackError::CosmicRay {
+                            path: first.to_path_buf(),
+                            source,
+                        },
+                    )?
+            }
+            None => 0,
+        };
         Ok(LightShape {
             dimensions,
             run: RunShape {

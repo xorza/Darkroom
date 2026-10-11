@@ -28,7 +28,9 @@ pub struct AlignStackConfig {
     /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
-    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic.
+    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic, for mono
+    /// and Bayer lights; X-Trans lights are refused (see
+    /// [`CosmicRayError::XTransUnsupported`](crate::CosmicRayError::XTransUnsupported)).
     pub cosmic_ray: Option<CosmicRayConfig>,
     /// How the run decodes its lights, the memory it plans against, and where it spills them.
     pub ingest: IngestConfig,

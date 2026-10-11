@@ -8,7 +8,6 @@
 //! Run: `cargo test -p lumos --release --features bench calibration_masters::bench -- --ignored
 //! --nocapture`
 
-use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
@@ -162,19 +161,6 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(CfaType::Mono);
-    let config = CosmicRayConfig::default();
-    b.bench(|| {
-        let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
-    });
-}
-
-/// The X-Trans path, which had no bench while it was the one still recomputing its same-colour
-/// neighbour set per pixel — a 13×13 `color_at` sweep plus a distance sort at every pixel of every
-/// iteration. It now walks the precomputed per-phase table the defect scan uses.
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_cosmic_ray_reject_xtrans(b: ::quickbench::Bencher) {
-    let frame = cosmic_ray_frame(CfaType::XTrans(XTRANS_PATTERN));
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();

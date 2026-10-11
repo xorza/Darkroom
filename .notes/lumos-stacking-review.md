@@ -6,8 +6,8 @@ Reference projects (shallow clones in `.tmp/`): Siril, DeepSkyStacker, RawTherap
 librtprocess, darktable, ccdproc. PixInsight, astroscrappy and DrizzlePac are compared through
 their documented behaviour or source.
 
-**Status.** Batches 1–12, 14 and 16–18 are done and committed. Batch 13 is done except its
-X-Trans part, and Batch 15 except its normalization above scale 1. This file holds the
+**Status.** Batches 1–14 and 16–18 are done and committed, and Batch 15 except its
+normalization above scale 1. This file holds the
 open work only, with the evidence each open finding needs. The six per-area reports it replaces,
 with the done findings and the lists of what was checked and found correct, are in git at
 `a352d8ef1:.notes/lumos-stacking-review/`. Every open finding below was checked again against the
@@ -48,7 +48,7 @@ named item.
 ## Dependency graph
 
 ```
-13r, 15r, 19r, 22, 24, 26, 28             independent
+15r, 19r, 22, 24, 26, 28                  independent
 20 ── 21 ── PIP-5, PIP-19
 20 ── 25
 23 ── 27
@@ -58,51 +58,6 @@ named item.
 - 20 before 25: the kept cache moves into the ingest.
 - 21 before PIP-5 and PIP-19: both change memory-map advice through `ScratchFile`.
 - 23 before 27: the dark scale is fitted on the hot pixels 23 stores with their excess.
-
----
-
-## Batch 13 (rest): Refuse X-Trans in the cosmic-ray pass — small
-
-**Decision:** refuse now, research later.
-
-**Finding.** On an X-Trans mosaic the single-frame cosmic-ray pass flags the whole of a star, at
-every size tried (Gaussian σ 0.8 to 4 px, peak 0.5 over a sky of 0.05, noise 0.003), at nine
-sub-pixel positions, even with `objlim` raised from 5 to 40. Mono L.A.Cosmic keeps every one of
-those stars at `objlim` 5. The Batch 13 changes did not cause it. **The output is quietly wrong
-today** on every X-Trans light that this pass runs on.
-
-**Cause.** The X-Trans significance is `L⁺ = max(0, v − median of the 8 nearest same-colour
-neighbours)` (`calibration_masters/cosmic_ray/xtrans.rs`). That is not a second difference. On a
-star's convex wings it is positive, because the nearest same-colour neighbours of a red or blue
-photosite lie on one side more than the other. There the fine structure `median₈ − median₂₄` is
-near zero. The contrast test passes in the wings, the wing pixels become primary detections, and
-the growth step, which tests no contrast, spreads from them into the core over the iterations (217
-pixels of one σ = 3 star). Mono's `L⁺` is a clipped Laplacian, which is zero on convex wings.
-
-A symmetric second difference is not available for red and blue: on the Fujifilm layout no red or
-blue photosite has a point-symmetric same-colour pair nearer than √18 ≈ 4.2 px, which is too
-coarse for stars of FWHM 3 to 6 px. Greens have symmetric pairs at √2.
-
-**Practice.** No reference tool runs L.A.Cosmic on an X-Trans mosaic, so there is no statistic to
-copy. astroscrappy works on a monochrome image only. Siril refuses its own CFA cosmetic correction
-on X-Trans ("Cosmetic correction cannot be applied on X-Trans files", `src/core/preprocess.c`).
-For colour data the references rely on dithering and stack-time rejection, as the module doc of
-`cosmic_ray` already advises.
-
-**Design:** `reject_cosmic_rays` returns a typed error for an X-Trans frame:
-`cosmic_ray/error.rs` becomes an enum (`UnknownAdcStep`, `XTransUnsupported`), and
-`AlignStackError::CosmicRay` carries it. `XtransDetector`, its tests, its arm of `heap_bytes` and
-the X-Trans lines of the module doc go. The doc says that X-Trans data relies on dithering and
-stack-time rejection. The X-Trans parts of CAL-7 (`objlim` calibration, star preservation) and
-CAL-9 (local recompute) close with the detector. The rest of Batch 13 is done: the saturated-star
-mask (CAL-6), the σ normalization (CAL-7), the detector types (CAL-17), and the mono and Bayer local
-recompute (CAL-9).
-
-**Tests:** an X-Trans frame returns `XTransUnsupported` and is left unchanged, samples and flags;
-`calibrate_align_stack` of X-Trans lights with a cosmic-ray config fails with that error and the
-first light's path; mono and Bayer results are unchanged (pins).
-
-**Crates:** lumos, lens, darkroom (a public error changes).
 
 ---
 
@@ -560,7 +515,7 @@ exposures still fails with `MasterConditions`.
 
 ## Research items
 
-### X-Trans cosmic-ray statistic (after Batch 13)
+### X-Trans cosmic-ray statistic
 
 A statistic for single-frame cosmic-ray detection on X-Trans that is zero on a linear slope,
 negative on a star's convex wings and positive at a peak: for example the residual of a robust
