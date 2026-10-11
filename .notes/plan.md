@@ -9,17 +9,11 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| I4, PIP-19, PIP-5 | Spilled reads fault maps the budget never counts | Do | B6 |
 | PIP-4 | Kept cache for the registered pipeline and the drizzle | Do | B7 |
 | PIP-6 | Park the mosaic instead of the demosaiced frame | Measure | B8 |
 | — | First float-TIFF light decoded twice | Do, low priority | B9 |
 | — | X-Trans cosmic-ray statistic | Defer | — |
 | RAW-10, DMS-6 | RAW buffer vs file open; WB inside the demosaic | Blocked on real data | — |
-
-I4, PIP-5 and PIP-19 are one defect class: the frame store reads spilled planes by faulting
-memory maps, so the page cache the read needs is outside every figure the memory plan holds. B6
-replaces the faults with explicit copies into buffers the plan counts, which fixes the thrash and
-gives PIP-19 its overlap.
 
 ## How to run this plan
 
@@ -48,51 +42,10 @@ gives PIP-19 its overlap.
 
 ```
 B9                          independent
-B6 → B8                     explicit spill reads → mosaic parking measured; both measure cold
-                            reads with `StoredPlane::evict` (Linux; `libc` dev-dependency)
+B8                          measures cold reads with `StoredPlane::evict` (Linux; `libc`
+                            dev-dependency)
 B7                          independent
 ```
-
----
-
-## B6. Spilled planes are copied into counted buffers, not faulted (I4, PIP-19, PIP-5)
-
-**Evidence.**
-- I4: `combine/cache/core.rs`, `process_chunks`, hands each frame's chunk to the combine as a
-  slice of its map (`StoredPlane::chunk`). The chunk budget (`ChunkMemoryLayout`) counts those
-  bytes, but they are page cache, charged to the cgroup outside the process's own memory and
-  evicted at the kernel's choice. 40 spilled 2048² frames, `memory_override` 128 MiB, under
-  `MemoryMax=320M` read 1.77 TB in ten minutes without finishing a pass.
-- PIP-19: each chunk boundary is a barrier followed by a burst of page faults; I/O and compute do
-  not overlap.
-- PIP-5: `pipeline/pipeline_frame.rs` warps a parked frame straight from its map, advised
-  `Sequential`; a 90° turn reads one column per output row. The plan already charges the source
-  as resident, so the map saves no memory, and under a cgroup it has I4's thrash too.
-
-**Solution.**
-1. `StoredPlane::read_into(start, end, &mut [T])`: a resident plane copies its slice, a mapped one
-   copies from its map front to back. The copy touches each page once in file order, so the
-   page cache it needs is the readahead window, not the chunk.
-2. `process_chunks` keeps two chunk buffers (`ChunkBuffers`, owned by the pass and reused): a
-   reader thread fills chunk k+1 while the combine runs on chunk k. On the resident tier the
-   chunks stay borrowed slices, no copy.
-3. `ChunkMemoryLayout` charges `2 × input_bytes` per row on the spilled tier, so the two buffers
-   fit the budget the plan already reads.
-4. The warp of a parked frame copies the frame into an owned `LinearImage` first (one sequential
-   read), then warps from RAM.
-5. `MappedFile` keeps `Sequential`: every remaining map read is front to back.
-
-**Measure (cold reads, `StoredPlane::evict` between passes).** Combine bench, spilled, 40 frames: map + faults against copy + overlap.
-Adopt when the copy is no slower; report the overlap's gain (PIP-19 expected ≥ 10%). Warp bench,
-parked, at 0°, 90° and 180°: owned read against the map.
-
-**Test.** `disk_tier_output_is_bit_identical_to_memory_tier` holds; a pass over a spilled set
-reads each plane once per chunk (count `read_into` calls through a test hook); the issue's cgroup
-run finishes with total reads within 2× the spill size per pass (`/proc/self/io` `read_bytes`),
-run by hand as a check left for the user if no cgroup is available to the test. The I4 entry is
-removed from `ISSUES.md`.
-
-**Crates:** lumos.
 
 ---
 
@@ -131,7 +84,7 @@ runs decodes again; a metadata round trip with every field set compares equal.
 **Evidence.** Auto reference + spill parks each demosaiced light, three planes and flags, where
 the calibrated mosaic, one plane and flags, would do, at the cost of a second demosaic.
 
-**Measure (cold reads, `StoredPlane::evict` between passes, after B6).** Pipeline bench, Auto + spill, both ways on SSD. Adopt the
+**Measure (cold reads, `StoredPlane::evict` between passes).** Pipeline bench, Auto + spill, both ways on SSD. Adopt the
 faster. The output is bit identical either way, since the demosaic is deterministic; a test holds
 that.
 

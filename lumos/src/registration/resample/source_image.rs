@@ -1,7 +1,5 @@
 //! [`SourceImage`]: the frame a warp reads, wherever its planes are.
 
-use std::borrow::Cow;
-
 use arrayvec::ArrayVec;
 
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -9,14 +7,12 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::PixelFlags;
 use crate::math::size2us::Size2us;
 
-/// A frame as the warp reads it: its planes borrowed from wherever they live — a `LinearImage` in
-/// memory, or a parked frame's memory maps, read in place rather than copied — and its flags.
+/// A frame as the warp reads it: its planes and its flags, borrowed from a `LinearImage` in memory.
 #[derive(Debug)]
 pub(crate) struct SourceImage<'a> {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) planes: ArrayVec<SourcePlane<'a>, 3>,
-    /// Borrowed from an image in memory; owned when read back from a parked frame's map.
-    pub(crate) flags: Option<Cow<'a, PixelFlags>>,
+    pub(crate) flags: Option<&'a PixelFlags>,
 }
 
 /// One plane of a [`SourceImage`]: its samples row by row, and the row length.
@@ -37,7 +33,7 @@ impl<'a> SourceImage<'a> {
                     width,
                 })
                 .collect(),
-            flags: image.flags.as_ref().map(Cow::Borrowed),
+            flags: image.flags.as_ref(),
         }
     }
 

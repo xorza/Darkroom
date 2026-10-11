@@ -15,6 +15,7 @@ use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 use crate::registration::register;
 use crate::registration::resample::WarpBuffers;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::result::RegistrationError;
 use crate::star_detection::star::Star;
 
@@ -135,9 +136,14 @@ impl<'a> FrameRegistrar<'a> {
         let mut warped = buffers
             .take()
             .unwrap_or_else(|| WarpBuffers::new(image.dimensions()));
-        warped.warp_into(&image.source(), &warp, self.config.registration.warp);
+        let image = image.into_resident();
+        warped.warp_into(
+            &SourceImage::of(&image),
+            &warp,
+            self.config.registration.warp,
+        );
         let metadata = image
-            .metadata()
+            .metadata
             .clone()
             .warped(|p| warp.apply(p), image.dimensions().size());
         drop(image);

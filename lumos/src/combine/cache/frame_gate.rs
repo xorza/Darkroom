@@ -1,6 +1,7 @@
 //! [`FrameGate`]: where the combine gathers one frame's samples over a chunk, and at what
 //! confidence.
 
+use crate::combine::cache::frame_chunk::FrameChunk;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
@@ -42,33 +43,36 @@ pub(crate) struct GateSample {
 }
 
 impl<'a> FrameGate<'a> {
-    /// `frame`'s gate over the pixels `start..end` of `channel`.
+    /// `frame`'s gate over the pixels `start..end` of `channel`, read in place from its planes.
     pub(crate) fn of(frame: &'a StoredFrame, channel: usize, start: usize, end: usize) -> Self {
-        match &frame.quality {
+        Self::of_chunk(&FrameChunk::borrowed(frame, start..end), channel)
+    }
+
+    /// A frame's gate over `chunk`, in `channel`.
+    pub(crate) fn of_chunk(chunk: &FrameChunk<'a>, channel: usize) -> Self {
+        match &chunk.quality {
             FrameQuality::None => Self::Everywhere,
-            FrameQuality::Planes {
+            &FrameQuality::Planes {
                 coverage,
                 confidence,
             } => Self::Planes {
-                coverage: coverage.chunk(start, end),
-                confidence: confidence.chunk(start, end),
+                coverage,
+                confidence,
             },
             FrameQuality::Mask { excluded } => Self::Mask {
-                flags: frame
+                flags: chunk
                     .flags
-                    .as_ref()
-                    .expect("a masked frame stores the flags its mask reads")
-                    .chunk(start, end),
+                    .expect("a masked frame stores the flags its mask reads"),
                 excluded: *excluded,
             },
             FrameQuality::Drizzled { .. } => {
-                let drops = frame
+                let drops = chunk
                     .quality
                     .drops(channel)
                     .expect("a drizzled frame holds its drops");
                 Self::Drizzled {
-                    weight: drops.weight.chunk(start, end),
-                    confidence: drops.confidence.chunk(start, end),
+                    weight: drops.weight,
+                    confidence: drops.confidence,
                 }
             }
         }

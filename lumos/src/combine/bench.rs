@@ -137,3 +137,166 @@ fn bench_stack_300(b: ::quickbench::Bencher) {
         }
     }
 }
+
+const SPILLED_FRAMES: u32 = 40;
+/// A chunk budget well under the 160 MiB the frames hold, so the walk takes several chunks.
+const SPILLED_CHUNK_MEMORY: u64 = 64 << 20;
+
+/// The weighted mean of 40 spilled 1 MP frames on a 64 MiB chunk budget, the reads of the spill
+/// tier against the reduction: `warm` with every plane in the page cache, `cold` with every plane
+/// evicted before the pass, and `evict` the eviction alone, which `cold` includes. Where the
+/// system cannot evict, `cold` reads warm and says nothing of the disk.
+#[quick_bench(warmup_time_ms = 500, bench_time_ms = 5000)]
+fn bench_spilled_mean_40(b: ::quickbench::Bencher) {
+    use common::TempDir;
+
+    use crate::combine::cache::core::CacheCore;
+    use crate::combine::cache::sample_noise::SampleNoise;
+    use crate::combine::cache::slots::Slots;
+    use crate::combine::cache::{CombineRequest, FrameCache};
+    use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::stored_frame::StoredFrame;
+    use crate::frame_store::tier::Tier;
+    use crate::stack_product::quality_planes::QualityPlanes;
+
+    let directory = TempDir::new("lumos_bench_spilled_mean");
+    let scratch = RunScratch::create(directory.path()).unwrap();
+    let frames: Vec<StoredFrame> = (0..SPILLED_FRAMES)
+        .map(|f| {
+            let image = synth_frame(SIZE, f);
+            let stats = FrameStats::measure(&image);
+            StoredFrame::spill(&scratch, &image, &FrameQuality::None, stats).unwrap()
+        })
+        .collect();
+    let dimensions = ImageDimensions::new(SIZE, 1);
+    let cache = FrameCache::from_stored_frames(
+        frames,
+        CacheCore::plain(
+            Tier::Spilled {
+                scratch,
+                chunk_memory: SPILLED_CHUNK_MEMORY,
+            },
+            dimensions,
+        ),
+        Normalization::None,
+    )
+    .unwrap();
+    let slots = Slots::new(None, 1);
+    let noise = SampleNoise::new(
+        cache.frames.iter().map(|frame| &frame.source_stats),
+        None,
+        slots,
+    );
+    let mean = || {
+        let request = CombineRequest {
+            weights: None,
+            planes: QualityPlanes::STANDARD,
+            min_survivors: DEFAULT_MIN_SURVIVORS,
+            noise: Some(&noise),
+            slots,
+        };
+        black_box(cache.process_chunked(request, |samples, scratch| {
+            Rejection::sigma_clip(2.5).combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, true)
+        }))
+    };
+    let evict = || {
+        for frame in &cache.frames {
+            for plane in &frame.channels {
+                black_box(plane.evict());
+            }
+        }
+    };
+    b.bench_labeled("warm", mean);
+    b.bench_labeled("evict", evict);
+    b.bench_labeled("cold", || {
+        evict();
+        mean()
+    });
+}
+
+/// The issue's case of a spilled combine under a memory cgroup: 40 frames of 2048² (640 MiB)
+/// combined on a 128 MiB chunk budget, the bytes the process read from storage
+/// (`/proc/self/io`'s `read_bytes`) and the time reported. Run alone under a cap, as
+/// `systemd-run --user --scope -p MemoryMax=320M <test binary> --exact <this> --ignored
+/// --nocapture`: the reads should stay near the spill size, one pass of it.
+#[test]
+#[ignore = "a manual check under a memory cgroup"]
+fn spilled_mean_under_a_memory_cap() {
+    use std::fs;
+    use std::time::Instant;
+
+    use common::TempDir;
+
+    use crate::combine::cache::core::CacheCore;
+    use crate::combine::cache::sample_noise::SampleNoise;
+    use crate::combine::cache::slots::Slots;
+    use crate::combine::cache::{CombineRequest, FrameCache};
+    use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::stored_frame::StoredFrame;
+    use crate::frame_store::tier::Tier;
+    use crate::stack_product::quality_planes::QualityPlanes;
+
+    let read_bytes = || -> u64 {
+        fs::read_to_string("/proc/self/io")
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("read_bytes: "))
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let size = Size2us::new(2048, 2048);
+    let directory = TempDir::new("lumos_spilled_mean_cap");
+    let scratch = RunScratch::create(directory.path()).unwrap();
+    let frames: Vec<StoredFrame> = (0..40)
+        .map(|f| {
+            let image = synth_frame(size, f);
+            let stats = FrameStats::measure(&image);
+            StoredFrame::spill(&scratch, &image, &FrameQuality::None, stats).unwrap()
+        })
+        .collect();
+    for frame in &frames {
+        for plane in &frame.channels {
+            plane.evict();
+        }
+    }
+    let cache = FrameCache::from_stored_frames(
+        frames,
+        CacheCore::plain(
+            Tier::Spilled {
+                scratch,
+                chunk_memory: 128 << 20,
+            },
+            ImageDimensions::new(size, 1),
+        ),
+        Normalization::None,
+    )
+    .unwrap();
+    let slots = Slots::new(None, 1);
+    let noise = SampleNoise::new(
+        cache.frames.iter().map(|frame| &frame.source_stats),
+        None,
+        slots,
+    );
+    let before = read_bytes();
+    let started = Instant::now();
+    let request = CombineRequest {
+        weights: None,
+        planes: QualityPlanes::STANDARD,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        noise: Some(&noise),
+        slots,
+    };
+    black_box(cache.process_chunked(request, |samples, scratch| {
+        Rejection::sigma_clip(2.5).combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, true)
+    }));
+    eprintln!(
+        "read {} MiB in {:?} for a 640 MiB spill",
+        (read_bytes() - before) >> 20,
+        started.elapsed()
+    );
+}
