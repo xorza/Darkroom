@@ -29,7 +29,7 @@ named item.
   of `--all-features` in `cargo test` for `lumos`. A batch that changes a public `lumos` API also
   runs `lens` and `darkroom`. A batch that changes `common` runs `--workspace`, since every member
   uses it.
-- **SIMD kernels** (Batch 22): after the change,
+- **SIMD kernels**: after a change to one,
   `cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)"
   $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter` must print 0.
 - **Snapshots.** `internals/characterization` pins outputs. A batch that changes an output on
@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-22, 24, 26, 28, PIP-5, PIP-19              independent
+24, 26, 28, PIP-5, PIP-19                  independent
 20 ── 25
 23 ── 27
 ```
@@ -70,34 +70,6 @@ caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered st
 `keep_cache` decodes no light (count decodes through a test hook).
 
 **Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 22: Combine hot loop — medium (measure first)
-
-**Finding CMB-6.** The gather in `combine/cache/mod.rs` sets the worst-case row time for large
-N. Per sample it tests the loop-invariant `Option`s (`frame_norms`, `weights`, `flags`, `noise`),
-asks `gates[frame].sample`, and with noise on calls `noise.model(frame, slot)`, interpolates the
-frame's flat gain (`rows.at(slot, gain_point)`), and divides `gain / (electrons · q)`. The
-pixel-outer, frame-inner order touches one cache line in each of N image planes, plus quality and
-flag planes, per 16 pixels; beyond about 32 streams the L2 prefetcher stops tracking them, so
-spilled frames take demand misses. Siril has the same strided gather (`median_and_mean.c`), so
-this is parity, not a regression.
-
-**Steps:**
-1. For each row tile of 64–256 px, loop the frames on the outside and write a `[tile][frame]`
-   buffer of normalized values, mask bits, effective weights (the drizzle drop weight included)
-   and noise terms. Then reduce each pixel from contiguous memory.
-2. Apply `v · gain + offset` with `simd::Isa` as a multiply then an add, never a fused
-   multiply-add, so it rounds as the scalar code does.
-3. Monomorphize away the invariant `Option`s.
-4. Keep `gain / (electrons · q)` a division: a precomputed reciprocal rounds differently. It
-   vectorizes in the transposed pass.
-
-**Acceptance:** `bench_stack_300` (large N and ragged rows) at least 1.3× faster; output bit
-identical (the per-pixel f64 accumulation order is unchanged).
-
-**Crates:** lumos.
 
 ---
 
