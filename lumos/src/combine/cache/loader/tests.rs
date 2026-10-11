@@ -7,10 +7,14 @@ use std::io::{Seek, SeekFrom, Write};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
+use std::fs;
+use std::path::PathBuf;
+
 use crate::combine::cache::loader::*;
-use crate::error::FrameDimensionMismatch;
+use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::cache_key::DecoderKind;
-use crate::frame_store::frame_spill::Carries;
+use crate::frame_store::frame_spill::FrameSpill;
+use crate::frame_store::frame_spill::{Carries, Decoded};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::internals::fits::write_fits;
 use crate::io::image::cfa::CfaImage;
@@ -126,7 +130,15 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
         let mut sentinel = committed.stats;
         sentinel.medians[0] = 99.0;
         spill
-            .commit(key(), Carries::Channels, committed.digests, &sentinel)
+            .commit(
+                key(),
+                Decoded {
+                    carries: Carries::Channels,
+                    ..committed.decoded
+                },
+                committed.digests,
+                &sentinel,
+            )
             .unwrap();
     };
     edit(102.0);
@@ -250,8 +262,9 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
 
 /// A kept cache serves a second run, resident or spilled, whether frame 0 had to be decoded for
 /// the plan (a float TIFF, which has no header to peek) or not (a FITS file): frame 1's planes come
-/// back from the first run's files, and frame 0 — always decoded, for the stack's metadata — is
-/// committed like the rest, so a run in which it is not first can reuse it.
+/// back from the first run's files, and so do frame 0's when no decode was spent on it, the stack's
+/// metadata with them. A frame 0 decoded for the plan is taken from that decode and committed
+/// again.
 #[test]
 fn a_kept_cache_is_reused_by_the_next_run() {
     let temp_dir = TempDir::new("lumos_cache_kept_run");
@@ -322,7 +335,12 @@ fn a_kept_cache_is_reused_by_the_next_run() {
         }
 
         let second = run();
-        assert_eq!(second.frames[0].channels[0].chunk(0, 1), &[0.25], "{label}");
+        let first_sample = if format == "fits" { 0.125 } else { 0.25 };
+        assert_eq!(
+            second.frames[0].channels[0].chunk(0, 1),
+            &[first_sample],
+            "{label}"
+        );
         assert_eq!(
             second.frames[1].channels[0].chunk(0, 1),
             &[0.125],

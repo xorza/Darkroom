@@ -57,6 +57,18 @@ impl StoredImage {
             .map(move |plane| plane.chunk(0, samples))
     }
 
+    /// The image read back into RAM: its channels, flags and metadata, each plane copied out of
+    /// its map front to back.
+    pub(crate) fn load(&self) -> LinearImage {
+        let mut image = LinearImage::from_planar_channels(
+            self.dimensions,
+            self.planes().map(<[f32]>::to_vec).collect::<Vec<_>>(),
+        );
+        image.metadata = self.metadata.clone();
+        image.flags = self.flags();
+        image
+    }
+
     /// The image's flags, copied out of the map: a byte a pixel, against the four a channel
     /// costs.
     pub(crate) fn flags(&self) -> Option<PixelFlags> {
@@ -96,5 +108,20 @@ impl StoredImage {
             flat_gain,
             source_stats,
         })
+    }
+}
+
+#[cfg(all(test, feature = "bench"))]
+pub(crate) mod internals {
+    use crate::frame_store::stored_image::StoredImage;
+    use crate::frame_store::stored_plane::StoredPlane;
+
+    impl StoredImage {
+        /// Drop the image's pages from the page cache: see
+        /// [`StoredPlane::evict`](crate::frame_store::stored_plane::StoredPlane::evict).
+        pub(crate) fn evict(&self) -> bool {
+            self.channels.iter().all(StoredPlane::evict)
+                && self.flags.as_ref().is_none_or(StoredPlane::evict)
+        }
     }
 }

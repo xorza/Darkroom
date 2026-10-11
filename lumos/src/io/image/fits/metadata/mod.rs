@@ -40,6 +40,9 @@ pub(super) enum MetadataField {
     DataMax,
 }
 
+/// No temperature lies at or below it.
+const ABSOLUTE_ZERO_CELSIUS: f64 = -273.15;
+
 impl MetadataField {
     /// The keywords the field is read from, the first present one winning.
     pub(super) const fn keywords(self) -> &'static [&'static str] {
@@ -76,6 +79,55 @@ impl MetadataField {
         self.keywords()[0]
     }
 
+    /// Whether a finite `value` is one a numeric field can hold; a text field holds any.
+    const fn accepts(self, value: f64) -> bool {
+        match self {
+            // Seconds; a bias is exposed for 0 s.
+            Self::ExposureTime => value >= 0.0,
+            // A camera's gain setting, of which 0 is one.
+            Self::Gain => value >= 0.0,
+            // Electrons per ADU, millimetres, micrometres.
+            Self::Egain | Self::FocalLength | Self::PixelSizeX | Self::PixelSizeY => value > 0.0,
+            Self::CcdTemp | Self::CameraTemp | Self::SetTemp => value > ABSOLUTE_ZERO_CELSIUS,
+            // sec z: 1 at the zenith, more toward the horizon.
+            Self::Airmass => value >= 1.0,
+            Self::Iso | Self::XBinning | Self::YBinning => value >= 1.0,
+            Self::DataMax
+            | Self::Offset
+            | Self::Object
+            | Self::Instrument
+            | Self::Telescope
+            | Self::DateObs
+            | Self::DateLocal
+            | Self::Filter
+            | Self::ImageType => true,
+        }
+    }
+
+    /// The field's real value: the first of its keywords given as a finite number it accepts.
+    fn real(self, header: &Header) -> Option<f64> {
+        self.read(header, |header, key| {
+            read_real_where(header, key, |value| self.accepts(value))
+        })
+    }
+
+    /// The field's integer value: the first of its keywords given as an integer of `T` it
+    /// accepts.
+    fn integer<T: TryFrom<i64>>(self, header: &Header) -> Option<T> {
+        self.read(header, |header, key| {
+            header
+                .get_integer(key)?
+                .map(|value| {
+                    // An `i64` past 2⁵³ rounds here, far past every bound a field states.
+                    self.accepts(value as f64)
+                        .then(|| T::try_from(value).ok())
+                        .flatten()
+                        .ok_or(fits_well::FitsError::KeywordOutOfRange { name: key })
+                })
+                .transpose()
+        })
+    }
+
     /// The field's value from `header`: the first of its keywords that `read` finds in a form it
     /// can have. One given in another form is skipped, with the reason logged, for the next.
     fn read<T>(
@@ -94,33 +146,32 @@ impl MetadataField {
 /// one never costs the frame.
 pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMetadata {
     let text = |field: MetadataField| field.read(header, read_text);
-    let real = |field: MetadataField| field.read(header, Header::get_real);
     ImageMetadata {
         object: text(MetadataField::Object),
         instrument: text(MetadataField::Instrument),
         telescope: text(MetadataField::Telescope),
         date_obs: text(MetadataField::DateObs),
         date_local: text(MetadataField::DateLocal),
-        exposure_time: MetadataField::ExposureTime.read(header, read_exposure),
-        iso: MetadataField::Iso.read(header, read_u32),
+        exposure_time: MetadataField::ExposureTime.real(header),
+        iso: MetadataField::Iso.integer(header),
         sample_type: Some(sample_type),
         camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
         filter: text(MetadataField::Filter),
-        gain: real(MetadataField::Gain),
-        egain: real(MetadataField::Egain),
-        ccd_temp: MetadataField::CcdTemp.read(header, read_temperature),
-        camera_temp: MetadataField::CameraTemp.read(header, read_temperature),
+        gain: MetadataField::Gain.real(header),
+        egain: MetadataField::Egain.real(header),
+        ccd_temp: MetadataField::CcdTemp.real(header),
+        camera_temp: MetadataField::CameraTemp.real(header),
         image_type: text(MetadataField::ImageType),
-        xbinning: MetadataField::XBinning.read(header, read_i32),
-        ybinning: MetadataField::YBinning.read(header, read_i32),
-        set_temp: real(MetadataField::SetTemp),
-        offset: MetadataField::Offset.read(header, read_i32),
-        focal_length: real(MetadataField::FocalLength),
-        airmass: real(MetadataField::Airmass),
+        xbinning: MetadataField::XBinning.integer(header),
+        ybinning: MetadataField::YBinning.integer(header),
+        set_temp: MetadataField::SetTemp.real(header),
+        offset: MetadataField::Offset.integer(header),
+        focal_length: MetadataField::FocalLength.real(header),
+        airmass: MetadataField::Airmass.real(header),
         ra_deg: read_ra_deg(header),
         dec_deg: read_dec_deg(header),
-        pixel_size_x: real(MetadataField::PixelSizeX),
-        pixel_size_y: real(MetadataField::PixelSizeY),
+        pixel_size_x: MetadataField::PixelSizeX.real(header),
+        pixel_size_y: MetadataField::PixelSizeY.real(header),
         // The decoder fills these: they depend on the decode plan as well as the header.
         data_max: None,
         provenance: None,
@@ -167,7 +218,7 @@ fn read_flags<const N: usize>(header: &Header, keywords: [&str; N]) -> [bool; N]
 /// The header's `DATAMAX`, in the file's sample units; `None`, with the reason logged, when it is
 /// absent or given in a form it cannot have.
 pub(super) fn read_data_max(header: &Header) -> Option<f64> {
-    MetadataField::DataMax.read(header, Header::get_real)
+    MetadataField::DataMax.real(header)
 }
 
 /// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
@@ -602,25 +653,6 @@ pub(super) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 
-fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>> {
-    header
-        .get_integer(key)?
-        .map(|value| {
-            u32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
-        })
-        .transpose()
-}
-
-/// Seconds, never negative: a bias is exposed for 0 s.
-fn read_exposure(header: &Header, key: &'static str) -> fits_well::Result<Option<f64>> {
-    read_real_where(header, key, |seconds| seconds >= 0.0)
-}
-
-/// Degrees Celsius, above absolute zero.
-fn read_temperature(header: &Header, key: &'static str) -> fits_well::Result<Option<f64>> {
-    read_real_where(header, key, |celsius| celsius > -273.15)
-}
-
 fn read_real_where(
     header: &Header,
     key: &'static str,
@@ -634,15 +666,6 @@ fn read_real_where(
             } else {
                 Err(fits_well::FitsError::KeywordOutOfRange { name: key })
             }
-        })
-        .transpose()
-}
-
-fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>> {
-    header
-        .get_integer(key)?
-        .map(|value| {
-            i32::try_from(value).map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: key })
         })
         .transpose()
 }

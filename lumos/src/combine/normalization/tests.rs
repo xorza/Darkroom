@@ -148,9 +148,9 @@ fn paired_gain_recovers_scale_after_residual_clipping() {
 
     let cancel = CancelToken::never();
     let reference_stats = sample_stats(&reference, &cancel).unwrap();
-    let gain =
+    let paired =
         paired_photometric_gain(&frame, &reference, reference_stats, 1.0, 4.0, &cancel).unwrap();
-    assert_eq!(gain, 2.0);
+    assert_eq!(paired.gain, 2.0);
 }
 
 /// Deming's slope depends on the noise ratio `λ = σ²_ref/σ²_frame`. Frame [8, 9, 10, 11, 12]
@@ -177,11 +177,64 @@ fn deming_gain_weighs_each_sides_noise() {
             &cancel,
         )
         .unwrap()
+        .gain
     };
     assert_eq!(gain(1.0, 1.0), 2.369_802_2);
     assert_eq!(gain(1.0, 4.0), 2.347_452_9);
     assert_eq!(gain(4.0, 4.0), gain(1.0, 1.0));
     assert_eq!(gain(0.0, 0.0), gain(1.0, 1.0));
+}
+
+/// The Deming gain's stated error is the scatter of the gains it gives: 400 draws of 2000 pairs of
+/// a field `x = 0.1 + 0.5·u³`, `u` uniform — mostly sky, with a tail of stars — read by the frame
+/// with noise σ 0.01 and by the reference as `1.6·x + 0.02` with noise σ 0.015. The relative
+/// standard deviation of the 400 gains and the mean stated error agree within 10%: the scatter of
+/// a standard deviation over 400 draws is 1/√798 ≈ 3.5% of it, so 10% is about three of those.
+#[test]
+fn the_deming_error_is_the_scatter_of_the_gains() {
+    let cancel = CancelToken::never();
+    let mut rng = TestRng::new(0xDE41);
+    let draws = 400;
+    let mut gains = Vec::with_capacity(draws);
+    let mut stated = 0.0;
+    for _ in 0..draws {
+        let field: Vec<f32> = (0..2000)
+            .map(|_| 0.1 + 0.5 * rng.next_f32().powi(3))
+            .collect();
+        let frame: Vec<f32> = field
+            .iter()
+            .map(|&x| x + 0.01 * rng.next_gaussian_f32())
+            .collect();
+        let reference: Vec<f32> = field
+            .iter()
+            .map(|&x| 1.6 * x + 0.02 + 0.015 * rng.next_gaussian_f32())
+            .collect();
+        let reference_stats = sample_stats(&reference, &cancel).unwrap();
+        let paired = paired_photometric_gain(
+            &frame,
+            &reference,
+            reference_stats,
+            0.01f64.powi(2),
+            0.015f64.powi(2),
+            &cancel,
+        )
+        .unwrap();
+        gains.push(f64::from(paired.gain));
+        stated += paired.relative_error;
+    }
+    let mean = gains.iter().sum::<f64>() / draws as f64;
+    let scatter =
+        (gains.iter().map(|gain| (gain - mean).powi(2)).sum::<f64>() / (draws - 1) as f64).sqrt()
+            / mean;
+    let stated = stated / draws as f64;
+    assert!(
+        (mean - 1.6).abs() < 3.0 * scatter * mean / (draws as f64).sqrt(),
+        "{mean}"
+    );
+    assert!(
+        (stated / scatter - 1.0).abs() < 0.1,
+        "stated {stated}, measured {scatter}"
+    );
 }
 
 /// Pairs that fall where the frame rises carry no positive covariance, and the Deming fit cannot
@@ -195,9 +248,9 @@ fn a_fit_without_positive_covariance_keeps_the_seed() {
     let reference = [15.0, 12.0, 10.0, 9.0, 5.0];
     let cancel = CancelToken::never();
     let reference_stats = sample_stats(&reference, &cancel).unwrap();
-    let gain =
+    let paired =
         paired_photometric_gain(&frame, &reference, reference_stats, 1.0, 1.0, &cancel).unwrap();
-    assert_eq!(gain, 2.0);
+    assert_eq!(paired.gain, 2.0);
 }
 
 /// A multiplicative normalization divides by each frame's median, so a frame at a median of 0 is
@@ -994,7 +1047,8 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
 ///
 /// Global fits each pair's exact line: gain `1/a` and offset `−b/a` for a frame at `a·r + b`, so
 /// (0.5, −0.5) and (2, 0.5). Multiplicative divides the pair's medians, the middle pixel of each
-/// three: `r_mid / (a·r_mid + b)`.
+/// three: `r_mid / (a·r_mid + b)`. Each frame's spread is its noise and its source median 0, so no
+/// frame has a scale or a level of its own and the pairs stand alone.
 #[test]
 fn per_channel_frames_are_normalized_pair_by_pair() {
     let dimensions = ImageDimensions::new((8, 1), 3);
@@ -1038,10 +1092,21 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
                 })
                 .collect();
             let mad = if frame == 2 { 1.0 } else { 2.0 };
+            let mut stats = channel_stats(&[(0.0, mad); 3]);
+            stats.spread = Some(
+                stats
+                    .noise
+                    .iter()
+                    .map(|&sigma| SlotSpread {
+                        sigma,
+                        samples: 4096,
+                    })
+                    .collect(),
+            );
             StoredFrame::from_memory(
                 LinearImage::from_planar_channels(dimensions, planes),
                 FrameQuality::Drizzled { drops },
-                channel_stats(&[(0.0, mad); 3]),
+                stats,
             )
         })
         .collect();
@@ -1091,6 +1156,110 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
             .slots
             .iter()
             .all(|&slot| slot == SlotNorm::IDENTITY)
+    );
+}
+
+/// A pair too thin to fit gives way to the per-frame norms for the whole set; one that fits exactly
+/// keeps the pairs. Three 6×1 RGB frames: the reference (frame 0) reaches every pixel at
+/// `r = x + 1`, frame 1 pixels 0 to 2 at `2r + 1`, frame 2 pixels 3 to 5 at `r/2 − 1/4`, so each
+/// pair shares three pixels. Their source statistics are the 3-4-5 figures of the test below, over
+/// 4096 samples each, whose per-frame gains state errors of about 4%: frame 1's scale
+/// `√(5² − 3²) = 4` carries `√(5.442·(5⁴ + 3⁴)/4096)/(2·16) = 3.0%` and the reference's 3.0%.
+///
+/// - Jittered by 0.3, −0.5 and 0.4 off its line, frame 1's pair fits over three pixels to an error
+///   past that, and every frame takes its per-frame norm: Global (0.125, 1) and (0.5, 0),
+///   Multiplicative 1/4 and 1/2, as below.
+/// - On their exact lines both pairs fit with no error, and the pairs stand: Global (1/2, −1/2) and
+///   (2, 1/2).
+#[test]
+fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
+    let dimensions = ImageDimensions::new((6, 1), 3);
+    let frames = |jitter: [f32; 3]| -> Vec<StoredFrame> {
+        let shape = [(1.0f32, 0.0f32, 0..6), (2.0, 1.0, 0..3), (0.5, -0.25, 3..6)];
+        let figures = [
+            (2.0f32, 0.375f32, 0.625f32),
+            (8.0, 3.0, 5.0),
+            (4.0, 0.75, 1.25),
+        ];
+        shape
+            .into_iter()
+            .zip(figures)
+            .enumerate()
+            .map(|(index, ((a, b, reach), (median, noise, spread)))| {
+                let plane: Vec<f32> = (0..6)
+                    .map(|x| {
+                        if !reach.contains(&x) {
+                            return 0.0;
+                        }
+                        let shift = if index == 1 { jitter[x] } else { 0.0 };
+                        a * (x + 1) as f32 + b + shift
+                    })
+                    .collect();
+                let reached: Vec<f32> = (0..6)
+                    .map(|x| f32::from(u8::from(reach.contains(&x))))
+                    .collect();
+                let drops = (0..3)
+                    .map(|_| DropPlanes {
+                        weight: Buffer2::new(6, 1, reached.clone()),
+                        confidence: Buffer2::new(6, 1, reached.clone()),
+                    })
+                    .collect();
+                let mut stats = channel_stats(&[(median, 0.0); 3]);
+                stats.noise = [noise; 3].into_iter().collect();
+                stats.spread = Some(
+                    [SlotSpread {
+                        sigma: spread,
+                        samples: 4096,
+                    }; 3]
+                        .into_iter()
+                        .collect(),
+                );
+                StoredFrame::from_memory(
+                    LinearImage::from_planar_channels(dimensions, vec![plane; 3]),
+                    FrameQuality::Drizzled { drops },
+                    stats,
+                )
+            })
+            .collect()
+    };
+    let norms = |frames: &[StoredFrame], normalization| {
+        FrameNorm::measure(
+            frames,
+            dimensions,
+            Slots::of_frames(frames, dimensions),
+            normalization,
+            &CancelToken::never(),
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let expect = |measured: Vec<FrameNorm>, expected: [(f32, f32); 3], case: &str| {
+        for (index, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
+            assert!(
+                norm.slots
+                    .iter()
+                    .all(|&slot| slot == SlotNorm { gain, offset }),
+                "{case}: frame {index}: {:?}",
+                norm.slots
+            );
+        }
+    };
+
+    let thin = frames([0.3, -0.5, 0.4]);
+    expect(
+        norms(&thin, Normalization::Global),
+        [(1.0, 0.0), (0.125, 1.0), (0.5, 0.0)],
+        "thin, global",
+    );
+    expect(
+        norms(&thin, Normalization::Multiplicative),
+        [(1.0, 0.0), (0.25, 0.0), (0.5, 0.0)],
+        "thin, multiplicative",
+    );
+    expect(
+        norms(&frames([0.0; 3]), Normalization::Global),
+        [(1.0, 0.0), (0.5, -0.5), (2.0, 0.5)],
+        "exact, global",
     );
 }
 

@@ -4,7 +4,9 @@
 use common::{FileIdentity, SerdeFormat};
 use serde::{Deserialize, Serialize};
 
+use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::image::load_context::LoadContext;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 
 /// Which decoder produced a cached frame's planes.
 ///
@@ -121,18 +123,33 @@ pub(crate) struct CacheKey {
 
 impl CacheKey {
     pub(crate) fn new(source: FileIdentity, decoder: DecoderKind, context: &LoadContext) -> Self {
-        // Every field of the options, the checksum policy too: a frame cached without a check
-        // would otherwise pass for one that a required checksum admitted.
-        let options = common::serialize(
-            &(&context.fits, context.xtrans_passes),
-            SerdeFormat::Bitcode,
-        )
-        .expect("decode options of plain enums and scalars always serialize");
         Self {
             source,
             decoder,
             decode_version: DECODE_VERSION,
-            options: fnv1a(FNV1A_OFFSET, &options),
+            options: DecodeOptions {
+                fits: &context.fits,
+                xtrans_passes: context.xtrans_passes,
+            }
+            .digest(),
         }
+    }
+}
+
+/// The options a decode's output depends on, which a [`LoadContext`] and an
+/// [`IngestConfig`](crate::IngestConfig) both carry, hashed one way for every cache keyed on them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DecodeOptions<'a> {
+    pub(crate) fits: &'a FitsLoadOptions,
+    pub(crate) xtrans_passes: MarkesteijnPasses,
+}
+
+impl DecodeOptions<'_> {
+    /// FNV-1a of every field as bitcode, the checksum policy too: a frame decoded without a check
+    /// would otherwise pass for one that a required checksum admitted.
+    pub(crate) fn digest(self) -> u64 {
+        let bytes = common::serialize(&(self.fits, self.xtrans_passes), SerdeFormat::Bitcode)
+            .expect("decode options of plain enums and scalars always serialize");
+        fnv1a(FNV1A_OFFSET, &bytes)
     }
 }

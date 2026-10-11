@@ -2,6 +2,8 @@
 
 use std::array;
 
+use serde::{Deserialize, Serialize};
+
 use crate::io::image::cfa::CfaType;
 use crate::io::image::flat_gain::FlatGain;
 use crate::math::noise::difference_noise::DifferenceNoise;
@@ -16,7 +18,7 @@ use crate::math::vec2us::Vec2us;
 ///
 /// Slot `c` is colour `c` of the pattern, which is channel `c` of the demosaiced frame. The values
 /// are in the samples' own units and in the sensor's balance, which the demosaic keeps.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MosaicNoise {
     /// Each colour's white-noise standard deviation where no flat amplified it, over the photosites
     /// no flag names.

@@ -31,7 +31,7 @@ use crate::calibration_masters::error::{
 };
 use crate::calibration_masters::light_calibration::{LightCalibration, Subtracted};
 use crate::calibration_masters::master_cache::{
-    CachedMaster, MasterCache, MasterInputs, SubtractedFrames,
+    CachedMaster, MasterCache, MasterInputs, MasterRecipe, SubtractedFrames,
 };
 use crate::calibration_masters::master_subtraction::{MasterSubtraction, Subtractor};
 use crate::combine::cache::FrameCache;
@@ -196,6 +196,7 @@ impl CalibrationMasters {
                     role: subtractor.role,
                     frames,
                 }),
+                recipe: MasterRecipe::of(role, ingest),
             };
             let key = match cache.load(&inputs).map_err(MasterBuildError::Cache)? {
                 CachedMaster::Kept(master) => return Ok(Some(*master)),

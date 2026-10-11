@@ -51,14 +51,15 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config.validate(light_paths.len())?;
     let run = IngestRun::new(&config.ingest, cancel.clone());
     let notes = CalibrationNotes::default();
-    let mut result = LightFiles {
-        paths: light_paths,
-        preparation: Preparation::Calibrate {
+    let mut result = LightFiles::new(
+        light_paths,
+        Preparation::Calibrate {
             masters,
             cosmic_ray: config.cosmic_ray.as_ref(),
             notes: &notes,
         },
-    }
+        &run,
+    )?
     .stack(config, &run, progress, cancel)?;
     notes.report_into(&mut result.product.report, masters);
     Ok(result)

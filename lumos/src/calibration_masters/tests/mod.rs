@@ -1966,13 +1966,15 @@ fn a_flat_dark_is_matched_to_the_flat() {
 }
 
 /// Each flat takes its bias before the flats are normalized and combined. Two 8 × 8
-/// flats of a field `f` that is 1 everywhere but 0.5 at the four corners, at 0.5·f and 0.25·f, both
-/// on an offset of 1/32, with that offset as the bias.
-/// - Subtracted per frame they are 0.5·f and 0.25·f; the second's median 0.25 against the first's
-///   0.5 gives it gain 2, and the mean is 0.5·f: a corner reads half the centre, exactly.
-/// - Normalized first, the medians are 0.53125 and 0.28125, and the second's gain 17/9 scales its
-///   offset too. The centre averages to 0.53125 and a corner to (0.28125 + 0.15625·17/9)/2; less
-///   the offset, a corner reads 0.5139 of the centre: a vignetting residual of 2.8%.
+/// flats of a field `f` that is 1 everywhere but 0.5 at the four corners, at 0.25·f and 0.5·f, both
+/// on an offset of 1/32, with that offset as the bias. The dimmer flat is the reference whether
+/// the two noiseless frames' noise estimates tie, the first winning, or follow their structure.
+/// - Subtracted per frame they are 0.25·f and 0.5·f; the second's median 0.5 against the first's
+///   0.25 gives it gain 1/2, and the mean is 0.25·f: a corner reads half the centre, exactly.
+/// - Normalized first, the medians are 0.28125 and 0.53125, and the second's gain 9/17 scales its
+///   offset too. The centre averages to 0.28125 and a corner to (0.15625 + 0.28125·9/17)/2 =
+///   0.152574; less the offset, a corner reads 0.121324/0.25 = 0.4853 of the centre: a vignetting
+///   residual of −2.9%.
 ///
 /// Both on the memory tier and on the disk tier, which spills the subtracted frames for the run.
 #[test]
@@ -1987,7 +1989,7 @@ fn flats_are_calibrated_before_they_are_combined() {
         }
     };
     let directory = TempDir::new("lumos-flat-calibration");
-    let paths: Vec<PathBuf> = [0.5f32, 0.25]
+    let paths: Vec<PathBuf> = [0.25f32, 0.5]
         .into_iter()
         .enumerate()
         .map(|(index, level)| {
@@ -2049,7 +2051,7 @@ fn flats_are_calibrated_before_they_are_combined() {
         late.subtract(&bias, DomainMap::IDENTITY);
         let ratio = corner_over_centre(&late);
         assert!(
-            (ratio - 0.5139).abs() < 1e-4,
+            (ratio - 0.4853).abs() < 1e-4,
             "{memory_override:?}: {ratio}"
         );
     }

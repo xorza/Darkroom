@@ -166,3 +166,22 @@ impl FileSystem {
         files::free_space(path)
     }
 }
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::platform::{MappedFile, os};
+
+    impl MappedFile {
+        /// Drop the file's pages from the page cache, so the next read comes from the disk: what a
+        /// bench of cold reads does between passes. `false` where the system offers no way, as
+        /// macOS and Windows here, and the next read may come from memory.
+        pub(crate) fn evict(&self) -> bool {
+            os::internals::evict(&self.map)
+        }
+
+        /// The share of the file's pages in memory; `None` where the system does not say.
+        pub(crate) fn resident_share(&self) -> Option<f64> {
+            os::internals::resident_share(&self.map)
+        }
+    }
+}

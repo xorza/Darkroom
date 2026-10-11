@@ -180,12 +180,10 @@ impl WarpBuffers {
         let reach = method.reach();
         let flagged = image
             .flags
-            .as_deref()
             .map(|flags| FlaggedSources::new(image, flags, reach));
         let sampler = FrameSampler::new(method, image, flagged.as_ref(), config.border_value);
         let mut flag_plane = image
             .flags
-            .as_deref()
             .filter(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED))
             .map(|_| Buffer2::<u8>::new_default(width, size.height));
         let flag_rows = flag_plane

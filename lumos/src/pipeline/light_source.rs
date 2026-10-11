@@ -8,6 +8,8 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
+use crate::frame_store::decode_cache::DecodeCache;
+use crate::frame_store::error::KeptDecodeError;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
@@ -49,11 +51,13 @@ pub(crate) enum LightSource<'a, P> {
     Files(LightFiles<'a, P>),
 }
 
-/// Lights read from files, and what each goes through before its stars are detected.
+/// Lights read from files, what each goes through before its stars are detected, and the decode
+/// cache they are read through when the run keeps one.
 #[derive(Debug)]
 pub(crate) struct LightFiles<'a, P> {
-    pub(crate) paths: &'a [P],
-    pub(crate) preparation: Preparation<'a>,
+    paths: &'a [P],
+    preparation: Preparation<'a>,
+    kept: Option<DecodeCache>,
 }
 
 /// What a light read from a file goes through before its stars are detected.
@@ -266,7 +270,29 @@ impl LightShape {
     }
 }
 
-impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
+impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
+    /// The lights of `paths`, each through `preparation`, read through the decode cache when
+    /// `run` keeps one.
+    ///
+    /// # Errors
+    ///
+    /// The decode cache cannot be opened.
+    pub(crate) fn new(
+        paths: &'a [P],
+        preparation: Preparation<'a>,
+        run: &IngestRun,
+    ) -> Result<Self, AlignStackError> {
+        let kept = run
+            .keep_cache
+            .then(|| DecodeCache::open(&run.cache_dir))
+            .transpose()?;
+        Ok(Self {
+            paths,
+            preparation,
+            kept,
+        })
+    }
+
     /// Stack the lights: with [`Reference::Index`] in one pass, each light prepared, detected,
     /// registered, warped and stored by one worker; with [`Reference::Auto`] every light prepared
     /// and detected first, since the reference is the sharpest, and parked until it registers.
@@ -287,7 +313,8 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
     }
 
     /// The run's shape, from the first file's header — or, for a linear format with none to read,
-    /// its decode.
+    /// its decode — once the decode cache, when the run keeps one, is known to have room for the
+    /// lights it does not hold yet.
     fn shape(
         &self,
         config: &AlignStackConfig,
@@ -299,8 +326,14 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
             Preparation::Linear => {
                 let dimensions = match LinearImage::peek(first, &run.context) {
                     Some(peek) => peek.dimensions,
-                    None => load_light(first, &run.context)?.dimensions(),
+                    None => self
+                        .decode::<LinearImage>(first, &run.context)?
+                        .dimensions(),
                 };
+                self.ensure_kept_space::<LinearImage>(
+                    dimensions.frame_bytes() + dimensions.pixel_count(),
+                    &run.context,
+                )?;
                 return Ok(LightShape::linear(
                     dimensions,
                     self.paths.len(),
@@ -316,6 +349,11 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
             }
         })?;
         let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
+        // A kept mosaic is its plane and a flag byte a photosite.
+        self.ensure_kept_space::<CfaImage>(
+            plane_bytes + info.dimensions.pixel_count(),
+            &run.context,
+        )?;
         let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
         let dimensions = ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
         // One frame's pass peaks at the largest of: the decoder's own bytes beside the mosaic it
@@ -505,10 +543,9 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
             notes,
         } = self.preparation
         else {
-            return load_light(path, context);
+            return self.decode(path, context);
         };
-        let mut cfa =
-            CfaImage::from_file(path, context).map_err(|source| load_error(path, source))?;
+        let mut cfa: CfaImage = self.decode(path, context)?;
         let outcome =
             masters
                 .calibrate(&mut cfa)
@@ -530,6 +567,37 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
         cfa.demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
+
+    /// `path` decoded as an `I` under `context`: through the decode cache when the run keeps one,
+    /// a RAW light as its uncalibrated mosaic, so a later run with other masters reuses it too.
+    fn decode<I: StackableImage>(
+        &self,
+        path: &Path,
+        context: &LoadContext,
+    ) -> Result<I, AlignStackError> {
+        let decoded = match &self.kept {
+            Some(kept) => kept.decode::<I>(path, context),
+            None => I::load(path, context).map_err(KeptDecodeError::from),
+        };
+        decoded.map_err(|error| match error {
+            KeptDecodeError::Decode(source) => load_error(path, source),
+            KeptDecodeError::Store(source) => AlignStackError::FrameStore(source),
+        })
+    }
+
+    /// Check the decode cache's disk holds the `kept_bytes` each light it does not hold yet will
+    /// write, decoded as an `I`.
+    fn ensure_kept_space<I: StackableImage>(
+        &self,
+        kept_bytes: usize,
+        context: &LoadContext,
+    ) -> Result<(), AlignStackError> {
+        if let Some(kept) = &self.kept {
+            let missing = kept.missing::<I>(self.paths, context) as u64;
+            kept.ensure_space(missing.saturating_mul(kept_bytes as u64))?;
+        }
+        Ok(())
+    }
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
@@ -545,11 +613,6 @@ fn log_detection(frame: usize, total: usize, result: &DetectionResult) {
         stars = result.stars.len(),
         "detected stars"
     );
-}
-
-/// A linear light as it decodes.
-fn load_light(path: &Path, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
-    LinearImage::from_file(path, context).map_err(|source| load_error(path, source))
 }
 
 /// A light that could not be decoded: the run's cancel when that stopped it, else the file named.

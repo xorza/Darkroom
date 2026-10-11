@@ -147,10 +147,11 @@ fn a_master_states_the_largest_step_of_its_inputs() {
 /// combining must be **bit-identical** to the all-RAM combine — same frames, same math, only the
 /// plane storage differs. Exercises σ-clip rejection + noise weighting + a partial coverage map (so
 /// the coverage spill round-trips too), mono and RGB, with no normalization and with the global
-/// one, whose common-domain medians are then read from mapped planes.
+/// one, whose common-domain medians are then read from mapped planes. A starved budget walks the
+/// 150 rows in three chunks of 64, 64 and 22, each read while the one before it is reduced.
 #[test]
 fn disk_tier_output_is_bit_identical_to_memory_tier() {
-    let (w, h, n) = (40usize, 30usize, 12usize);
+    let (w, h, n) = (24usize, 150usize, 12usize);
     for channels in [1, 3] {
         for normalization in [Normalization::None, Normalization::Global] {
             let label = format!("{channels} channels, {normalization:?}");
@@ -235,16 +236,17 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             };
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
-            // With no memory at all the floor holds the whole 30-row image past the budget: its
-            // resident image, weight and inverse variance planes, the coverage plane the gather
-            // writes and the flag byte a pixel no frame reached is flagged in, 40 × 30 × (12c + 5)
-            // B, beside the rows of every channel of the 12 frames, the six coverage-and-confidence
-            // pairs and the four flat gain grids at a byte a pixel, 40 × 30 × (48c + 52) B. The
-            // stack is the same.
+            // With no memory at all the floor of 64 rows holds past the budget the resident image,
+            // weight and inverse variance planes, the coverage plane the gather writes and the
+            // flag byte a pixel no frame reached is flagged in, 24 × 150 × (12c + 5) B, beside two
+            // chunks — the one reduced and the next one read — of 64 rows of every channel of the
+            // 12 frames, the six coverage-and-confidence pairs and the four flat gain grids at a
+            // byte a pixel, 2 × 24 × 64 × (48c + 52) B: 190 656c + 177 744 B in all. The stack is
+            // the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.chunk_overcommit_bytes,
-                72_000 * channels as u64 + 68_400,
+                190_656 * channels as u64 + 177_744,
                 "{label}"
             );
             for channel in 0..channels {

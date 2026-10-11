@@ -13,7 +13,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceContainer {
     Fits,
     CameraRaw,
@@ -32,14 +32,14 @@ impl From<FileFormat> for SourceContainer {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecoderProvenance {
     FitsWell,
     LibRaw,
     Imaginarium,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransferProvenance {
     /// FITS samples divided into the pipeline's `[0, 1]` domain. The physical values the file
     /// declared are recoverable through the image's [`SampleDomain`](crate::SampleDomain).
@@ -53,7 +53,7 @@ pub enum TransferProvenance {
     UnspecifiedRaster,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColorProvenance {
     SensorCfa,
     SensorRgb,
@@ -62,7 +62,7 @@ pub enum ColorProvenance {
     UnmanagedRaster { alpha_dropped: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DemosaicProvenance {
     None,
     LumosRcd,
@@ -117,7 +117,7 @@ impl Display for RowOrder {
 }
 
 /// Decoder decisions that affect the meaning of the returned samples.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImageProvenance {
     pub container: SourceContainer,
     pub decoder: DecoderProvenance,
