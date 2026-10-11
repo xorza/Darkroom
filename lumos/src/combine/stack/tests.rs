@@ -1144,6 +1144,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                 noise: [mad_to_sigma(mad)].into_iter().collect(),
                 read_share: [0.0; 3].into_iter().collect(),
                 sky: [median].into_iter().collect(),
+                spread: None,
                 quantization_sigma: None,
                 electrons_per_unit: None,
                 facts: FrameFacts {

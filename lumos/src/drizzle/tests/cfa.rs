@@ -232,6 +232,97 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     );
 }
 
+/// Above scale 1 a normalized CFA drizzle needs no pixel shared between frames: eight RGGB frames
+/// dithered by whole pixels along x, drizzled at scale 2 and pixfrac 0.8, so a frame shifted by an
+/// odd pixel puts its red where the reference's green fell and shares no red pixel with it. The
+/// frames are normalized one by one from their source statistics instead of pair by pair.
+///
+/// The scene varies along y alone, `f(y) = 1/4 + (y mod 8)/32`, with no noise, and frame `k` reads
+/// `g_k·f + o_k` at gains that are powers of 2 and dyadic offsets. A whole-pixel shift along x
+/// leaves every colour's samples the same multiset, so each frame's median and spread are exactly
+/// `g_k` times the reference's, and its white noise is 0: every norm is exact. Red and blue
+/// photosites sit on a product lattice, so a drop's x-weights factor out of every red and blue
+/// output pixel, which then reads the same mean over source rows in every frame. Normalized, each
+/// frame there reads what frame 0 (the reference: all frames tie at no noise, and the first wins)
+/// reads alone. Green photosites alternate their columns by row, which ties their mix of rows to
+/// the shift's parity, so green is not compared.
+///
+/// The bound is rounding: a drizzled pixel sums a few drops in f32, the normalization scales by a
+/// power of 2 and adds a dyadic offset, and the combine averages in f64; a few ulps at a level
+/// under 4, so 16 ulps of 4.
+#[test]
+fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
+    let size = Size2us::new(32, 32);
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let scene = |y: usize| 0.25 + (y % 8) as f32 / 32.0;
+    let affine = [
+        (1.0f32, 0.0f32),
+        (2.0, 0.125),
+        (0.5, -0.0625),
+        (4.0, 0.25),
+        (1.0, 0.5),
+        (2.0, -0.125),
+        (0.5, 0.375),
+        (4.0, -0.25),
+    ];
+    let frame = |k: usize| {
+        let (gain, offset) = affine[k];
+        let pixels = (0..size.pixel_count())
+            .map(|index| gain * scene(index / size.width) + offset)
+            .collect();
+        DrizzleFrame::new(
+            make_cfa(size, pixels, rggb),
+            warp_of(Transform::translation(DVec2::new(k as f64, 0.0))),
+        )
+    };
+    let config = DrizzleConfig {
+        fill_value: -1.0,
+        ..kernel_config(DrizzleKernel::Square, 2.0, 0.8)
+    };
+    let drizzle = |frames: Vec<DrizzleFrame<CfaImage>>, normalization| {
+        drizzle_cfa_images(
+            frames,
+            &config,
+            &StackConfig {
+                normalization,
+                weighting: Weighting::Equal,
+                ..StackConfig::light()
+            },
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product
+    };
+    let all = drizzle(
+        (0..affine.len()).map(frame).collect(),
+        Normalization::Global,
+    );
+    let alone = drizzle(vec![frame(0)], Normalization::None);
+    let bound = 16.0 * f32::EPSILON * 4.0;
+    let mut compared = 0;
+    for c in [0, 2] {
+        for (index, (&value, &expected)) in all
+            .image
+            .channel(c)
+            .pixels()
+            .iter()
+            .zip(alone.image.channel(c).pixels())
+            .enumerate()
+        {
+            if value == -1.0 || expected == -1.0 {
+                continue;
+            }
+            compared += 1;
+            assert!(
+                (value - expected).abs() <= bound,
+                "channel {c} pixel {index}: {value} against {expected}"
+            );
+        }
+    }
+    assert!(compared > 0, "no red or blue pixel was compared");
+}
+
 /// A frame of another mosaic pattern is refused before it deposits anything: its photosites
 /// would reach other channels at the same positions.
 #[test]

@@ -283,8 +283,12 @@ fn accumulate<I: StackableImage>(
         let frame = frame?;
         // Measured on the frame as it arrives, before its drops are spread: the drizzled pixels
         // average several, and would understate it. A mosaic's are measured per colour, which
-        // its drizzle makes the channels.
-        let source_stats = FrameStats::measure(&frame.source).into_drizzled();
+        // its drizzle makes the channels, with the spread its per-frame normalization scales by.
+        let source_stats = match deposit {
+            Deposit::Mosaic(_) => FrameStats::measure_with_spread(&frame.source),
+            Deposit::Channels(_) => FrameStats::measure(&frame.source),
+        }
+        .into_drizzled();
         let mut accumulator = DrizzleAccumulator::new(input_dims, deposit, drizzle.clone(), index)?;
         accumulator.add_frame(&frame)?;
         unconverged_points += accumulator.unconverged_points();
