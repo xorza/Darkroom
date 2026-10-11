@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-27, PIP-5, PIP-19                          independent
+PIP-5, PIP-19                              independent
 ```
 
 ---
@@ -63,43 +63,6 @@ and the drizzle entries ignore `keep_cache`; a kept frame holds no `ImageMetadat
 light needs. Per Q5, they read a light back from the kept cache before any decode, RAW runs
 caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered stack with
 `keep_cache` decodes no light (count decodes through a test hook).
-
-**Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 27: Dark scaling for unregulated sensors — medium (needs real data)
-
-**Finding CAL-19.** A DSLR states no sensor temperature, so its dark is subtracted at the exposure
-ratio (or 1) and the run is marked unverified. Siril offers noise-minimizing dark optimization
-(`preprocess.c`, golden-section search on k ∈ [0, 2]); DSS scales by entropy or hot pixels
-(`DarkFrame.cpp`). The 1 °C tolerance also accepts about 12% thermal error without a record.
-
-**Design (decided: fit k per light on hot-pixel residuals, bias-removed darks only).**
-1. **Pixels:** the defect map's hot pixels (`HotPixels`, each with its excess) not flagged in the light
-   (`SATURATED`, `NO_DATA`), selected on the dark's excess `d_p` alone. Selecting on the
-   regressor leaves a least-squares slope unbiased; selecting on the light's value would bias it.
-   Their significance in the master keeps `d_p`'s own noise small, so the errors-in-variables
-   attenuation stays small. DSS fits its dark factor on the same pixels
-   (`ComputeDarkFactorFromMedian`).
-2. **The light's excess** `l_p`: the raw light less the bias (through its domain map), before the
-   dark and the flat, less the same local reference as `d_p` (the ring's plane through the light's
-   same-colour photosites). The flat does not shade dark current, so the fit comes before it.
-3. **Fit** `l_p = k·d_p` through the origin by least squares, iterated with a 3σ clip on the
-   residuals' MAD-based σ, so stars, hits and unstable pixels fall out.
-4. With at least 100 pixels left, `k` replaces the exposure ratio as the dark's scale in
-   `LightCalibration`; otherwise the exposure ratio stands. The fit reads only those pixels and
-   their rings, before the fused pass. `CalibrationOutcome` records `k`, its standard error, the
-   pixel count and which scale was used.
-5. **Temperature:** a temperature difference is a warning (`TemperatureDifference` in the outcome,
-   `dark_temperature_differences` in the report). The warning stays when the fit corrects it; the
-   outcome's scale source says whether it was corrected.
-6. Only a bias-removed dark (`DarkBias::Removed`). A dark that holds the bias keeps today's rules.
-
-**Tests:** a synthetic light with a dark scaled by a known `k` (1.37), a sky gradient, and stars on
-some candidates recovers `k` within the derived error `σ_l / √Σd_p²`, and the starred candidates
-are clipped; too few pixels falls back to the exposure ratio and says so; a light 3 °C from its dark
-recovers the `k` its synthetic dark current was scaled by.
 
 **Crates:** lumos, lens, darkroom.
 

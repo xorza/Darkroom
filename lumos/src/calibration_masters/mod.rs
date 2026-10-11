@@ -5,6 +5,7 @@ pub(crate) mod calibration_outcome;
 pub(crate) mod calibration_set;
 pub(crate) mod cosmic_ray;
 pub(crate) mod dark_match;
+pub(crate) mod dark_scale;
 pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
@@ -22,6 +23,7 @@ use std::path::Path;
 use common::CancelToken;
 
 use crate::calibration_masters::dark_match::DarkMatch;
+use crate::calibration_masters::dark_scale::{DarkScale, DarkScaleSource, FitLight};
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::defect_map::defect_summary::DefectSummary;
 use crate::calibration_masters::error::{
@@ -556,8 +558,10 @@ impl CalibrationMasters {
     ///
     /// Applies calibration on raw (un-demosaiced) data:
     /// 1. The bias and the dark, the dark matched to the light: exposure within 1%, temperature
-    ///    within 1 °C. A bias-removed dark of another exposure is scaled by the light's exposure
-    ///    over its own; one that holds the bias is refused. A fact one side does not declare is
+    ///    within 1 °C. A bias-removed dark is scaled by the slope of the light's excess on its own
+    ///    at the hot pixels ([`DarkScale`]), or, with too few of them, by the light's exposure over
+    ///    its own; one that holds the bias and differs in exposure is refused. A temperature
+    ///    outside the tolerance is a warning, not a refusal. A fact one side does not declare is
     ///    not compared, and the outcome says so.
     /// 2. Flat division with normalization
     /// 3. CFA-aware defect pixel correction
@@ -609,7 +613,6 @@ impl CalibrationMasters {
                     source,
                 })?;
                 outcome.unverified = matched.unverified;
-                outcome.dark_scale = matched.scale;
                 outcome.dark_temperature = matched.temperature;
                 outcome.dark_temperature_difference = matched.temperature_difference;
                 let map = master_map(domain.as_ref(), dark, MasterRole::Dark)?;
@@ -618,16 +621,40 @@ impl CalibrationMasters {
             })
             .transpose()?;
 
+        let bias_term = bias.map(|(bias, map)| Subtracted {
+            samples: bias.data.pixels(),
+            map,
+            scale: 1.0,
+        });
+        // A bias-removed dark is scaled, by the fit where its hot pixels allow; one that holds the
+        // bias is subtracted as it is, the exposures having matched.
+        outcome.dark_scale = dark
+            .as_ref()
+            .filter(|_| !dark_holds_bias)
+            .map(|(_, map, matched)| match &self.defect_map {
+                Some(defects) => DarkScale::fit(
+                    defects.hot(),
+                    FitLight {
+                        light: image,
+                        bias: bias_term,
+                        imposed: self.imposed.as_ref(),
+                        dark_gain: map.gain,
+                    },
+                    matched.factor(),
+                ),
+                None => DarkScale {
+                    factor: matched.factor(),
+                    source: DarkScaleSource::Exposure { fit_pixels: 0 },
+                },
+            });
         LightCalibration {
-            bias: bias.map(|(bias, map)| Subtracted {
-                samples: bias.data.pixels(),
-                map,
-                scale: 1.0,
-            }),
+            bias: bias_term,
             dark: dark.map(|(dark, map, matched)| Subtracted {
                 samples: dark.data.pixels(),
                 map,
-                scale: matched.factor(),
+                scale: outcome
+                    .dark_scale
+                    .map_or(matched.factor(), |scale| scale.factor),
             }),
             flat: self.flat.as_ref().map(|flat| flat.divisor().data.pixels()),
             imposed: self.imposed.as_ref(),
