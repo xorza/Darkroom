@@ -16,6 +16,7 @@ use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
+use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::tier::Tier;
 use crate::internals::synthetic::fixtures::star_field;
@@ -811,6 +812,119 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     assert_eq!((path, source), (xtrans, CosmicRayError::XTransUnsupported));
 }
 
+/// Calibrated lights on disk as RGB float FITS cubes, the configuration that reads them, and the
+/// decode context it implies.
+struct LinearLights {
+    base: LinearImage,
+    paths: Vec<PathBuf>,
+    config: AlignStackConfig,
+    context: LoadContext,
+}
+
+impl LinearLights {
+    /// Five dithered 112 × 112 views of one star field, its channels at 1, 0.8 and 0.6 of it,
+    /// written under `scratch`.
+    fn write(scratch: &TempDir) -> Self {
+        let base = star_field(Size2us::new(112, 112), 30, 4242).image;
+        let frames = [
+            base.clone(),
+            shifted(&base, 5.0, -3.0),
+            shifted(&base, -4.0, 6.0),
+            shifted(&base, 2.0, 7.0),
+            shifted(&base, -6.0, -2.0),
+        ];
+        let (width, height) = (base.width(), base.height());
+        let paths: Vec<PathBuf> = frames
+            .iter()
+            .enumerate()
+            .map(|(index, frame)| {
+                let path = scratch.join(format!("light_{index}.fits"));
+                let planar: Vec<f32> = [1.0f32, 0.8, 0.6]
+                    .iter()
+                    .flat_map(|&gain| frame.channel(0).pixels().iter().map(move |&v| v * gain))
+                    .collect();
+                write_fits(
+                    &path,
+                    &FitsImage::new([width, height, 3], planar).unwrap(),
+                    None,
+                );
+                path
+            })
+            .collect();
+        let mut config = AlignStackConfig::default();
+        config.registration.ransac.seed = 0x5EED_0F5E;
+        config.ingest.fits.cube = FitsCubeInterpretation::Rgb;
+        config.ingest.fits.float_scale = FitsFloatScale::Normalized;
+        let context = LoadContext {
+            fits: config.ingest.fits.clone(),
+            ..LoadContext::new(CancelToken::never(), u64::MAX)
+        };
+        Self {
+            base,
+            paths,
+            config,
+            context,
+        }
+    }
+}
+
+/// With `keep_cache` every light of a registered stack is kept on the first run, and reads back bit
+/// for bit as its source decodes, metadata and all; the kept lights edited on disk move the next
+/// run, which they would not if that run decoded the sources.
+#[test]
+fn kept_lights_are_read_back_by_the_next_run() {
+    let scratch = TempDir::new("lumos_linear_kept");
+    let LinearLights {
+        base,
+        paths,
+        mut config,
+        context,
+    } = LinearLights::write(&scratch);
+    let width = base.width();
+    config.ingest.keep_cache = true;
+    config.ingest.cache_dir = scratch.join("kept");
+    let run = || {
+        align_and_stack_paths(
+            &paths,
+            &config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+    };
+    let first = run();
+    let decode_cache = DecodeCache::open(&config.ingest.cache_dir).unwrap();
+    for path in &paths {
+        let kept_light: LinearImage = decode_cache.decode(path, &context).unwrap();
+        let decoded = LinearImage::from_file(path, &context).unwrap();
+        for channel in 0..3 {
+            assert_eq!(
+                bits(kept_light.channel(channel).pixels()),
+                bits(decoded.channel(channel).pixels()),
+                "{} channel {channel} read back",
+                path.display()
+            );
+        }
+        assert_eq!(
+            format!("{:?}", kept_light.metadata),
+            format!("{:?}", decoded.metadata)
+        );
+    }
+    for path in &paths {
+        decode_cache.edit_kept::<LinearImage>(path, &context, |plane| {
+            // A gentle gradient, which no affine norm undoes and no rejection clips.
+            for (index, sample) in plane.iter_mut().enumerate() {
+                *sample += 1e-5 * (index % width) as f32;
+            }
+        });
+    }
+    assert_ne!(
+        bits(first.product.image.channel(0).pixels()),
+        bits(run().product.image.channel(0).pixels()),
+        "the edited kept lights are read back"
+    );
+}
+
 /// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held:
 /// five dithered 112 × 112 RGB float FITS cubes of one star field, its channels at 1, 0.8 and 0.6
 /// of it, read as RGB. The held run is the reference; the paths run matches it bit for bit resident
@@ -820,41 +934,12 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 #[test]
 fn calibrated_lights_on_disk_stack_as_held_ones_do() {
     let scratch = TempDir::new("lumos_linear_paths");
-    let base = star_field(Size2us::new(112, 112), 30, 4242).image;
-    let frames = [
-        base.clone(),
-        shifted(&base, 5.0, -3.0),
-        shifted(&base, -4.0, 6.0),
-        shifted(&base, 2.0, 7.0),
-        shifted(&base, -6.0, -2.0),
-    ];
-    let (width, height) = (base.width(), base.height());
-    let paths: Vec<PathBuf> = frames
-        .iter()
-        .enumerate()
-        .map(|(index, frame)| {
-            let path = scratch.join(format!("light_{index}.fits"));
-            let planar: Vec<f32> = [1.0f32, 0.8, 0.6]
-                .iter()
-                .flat_map(|&gain| frame.channel(0).pixels().iter().map(move |&v| v * gain))
-                .collect();
-            write_fits(
-                &path,
-                &FitsImage::new([width, height, 3], planar).unwrap(),
-                None,
-            );
-            path
-        })
-        .collect();
-
-    let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = 0x5EED_0F5E;
-    config.ingest.fits.cube = FitsCubeInterpretation::Rgb;
-    config.ingest.fits.float_scale = FitsFloatScale::Normalized;
-    let context = LoadContext {
-        fits: config.ingest.fits.clone(),
-        ..LoadContext::new(CancelToken::never(), u64::MAX)
-    };
+    let LinearLights {
+        base,
+        paths,
+        config,
+        context,
+    } = LinearLights::write(&scratch);
     let held: Vec<LinearImage> = paths
         .iter()
         .map(|path| LinearImage::from_file(path, &context).unwrap())

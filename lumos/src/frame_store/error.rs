@@ -4,6 +4,7 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::frame_store::capture_conditions::CaptureCondition;
+use crate::io::image::error::ImageError;
 
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]
@@ -85,4 +86,13 @@ impl ConditionMismatch {
             ..self
         }
     }
+}
+
+/// Why a frame could not be read through the decode cache: its decode, or the cache.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum KeptDecodeError {
+    #[error(transparent)]
+    Decode(#[from] ImageError),
+    #[error(transparent)]
+    Store(#[from] FrameStoreError),
 }

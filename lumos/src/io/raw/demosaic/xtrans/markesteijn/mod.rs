@@ -27,7 +27,7 @@ mod hex_table;
 mod tile;
 
 use common::CancelToken;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
@@ -50,7 +50,7 @@ const CROP: usize = TILE + 2 * READ_REACH;
 
 /// How many passes the X-Trans demosaic makes: four directions, or eight with the green computed
 /// again from nearer pixels — LibRaw's default and RawTherapee's best, at about twice the time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum MarkesteijnPasses {
     #[default]
     One,

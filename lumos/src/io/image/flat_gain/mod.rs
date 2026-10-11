@@ -6,6 +6,7 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::io::image::cfa::CfaType;
 use crate::math::noise::background_split::GainBins;
@@ -24,7 +25,8 @@ pub(crate) const STEP: usize = 4;
 ///
 /// Held on a grid of nodes 4 pixels apart, node `(i, j)` at pixel `(4i, 4j)` and the last on each
 /// axis at or past the image's last pixel, and read bilinearly between them.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "FlatGainRecord", try_from = "FlatGainRecord")]
 pub struct FlatGain {
     /// The image the grid covers.
     size: Size2us,
@@ -32,6 +34,69 @@ pub struct FlatGain {
     /// Each channel's bins of equal count over the sensor's gain, which a frame's noise is
     /// measured over before any warp moves it.
     bins: ArrayVec<GainBins, 3>,
+}
+
+/// A [`FlatGain`] as a kept frame's record holds it: the image it covers, each channel's node grid
+/// row-major, and each channel's bins, which a warp carries over from the sensor rather than
+/// measuring again.
+#[derive(Serialize, Deserialize)]
+struct FlatGainRecord {
+    width: usize,
+    height: usize,
+    nodes: Vec<Vec<f32>>,
+    bins: Vec<GainBins>,
+}
+
+/// Why a record is no [`FlatGain`]: what a damaged kept frame reads as, a miss rather than a gain
+/// that covers other pixels.
+#[derive(Debug, thiserror::Error)]
+#[error("a flat gain record of {channels} channels, {bins} bin sets, or nodes off its grid")]
+struct InvalidFlatGain {
+    channels: usize,
+    bins: usize,
+}
+
+impl From<FlatGain> for FlatGainRecord {
+    fn from(gain: FlatGain) -> Self {
+        Self {
+            width: gain.size.width,
+            height: gain.size.height,
+            nodes: gain.nodes.into_iter().map(Buffer2::into_vec).collect(),
+            bins: gain.bins.into_iter().collect(),
+        }
+    }
+}
+
+impl TryFrom<FlatGainRecord> for FlatGain {
+    type Error = InvalidFlatGain;
+
+    fn try_from(record: FlatGainRecord) -> Result<Self, InvalidFlatGain> {
+        let invalid = InvalidFlatGain {
+            channels: record.nodes.len(),
+            bins: record.bins.len(),
+        };
+        let size = Size2us::new(record.width, record.height);
+        let grid = GainGrid::of(size);
+        let shaped = (1..=3).contains(&record.nodes.len())
+            && record.bins.len() == record.nodes.len()
+            && size.pixel_count() > 0
+            && record.nodes.iter().all(|plane| {
+                plane.len() == grid.columns * grid.rows
+                    && plane.iter().all(|gain| gain.is_finite() && *gain > 0.0)
+            });
+        if !shaped {
+            return Err(invalid);
+        }
+        Ok(Self {
+            size,
+            nodes: record
+                .nodes
+                .into_iter()
+                .map(|plane| Buffer2::new(grid.columns, grid.rows, plane))
+                .collect(),
+            bins: record.bins.into_iter().collect(),
+        })
+    }
 }
 
 impl FlatGain {

@@ -1,20 +1,17 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use common::FileIdentity;
+use std::path::Path;
 
 use crate::calibration_masters::error::SubtractionError;
 use crate::combine::cache::core::CacheCore;
 use crate::combine::config::StackConfig;
 use crate::combine::error::StackError;
-use crate::frame_store::cache_key::CacheKey;
+use crate::error::FrameDimensionMismatch;
+use crate::frame_store::cached_source::CachedSource;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::tier::Tier;
@@ -98,10 +95,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         &run.cache_dir,
     )?;
     if let Some(kept) = &kept {
-        let missing = paths
-            .iter()
-            .filter(|path| !committed::<I>(kept, path.as_ref(), &run.context))
-            .count() as u64;
+        let missing = kept.missing::<I>(paths, &run.context) as u64;
         kept.ensure_space(missing.saturating_mul(peek.resident_bytes() as u64))?;
     }
     let intake = FrameIntake::new(
@@ -122,14 +116,9 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         step,
     };
 
-    // Frame 0 carries the stack metadata, which a kept frame does not keep: with a kept cache it is
-    // decoded whatever the cache holds, first and alone, and its decode serves a later run in which
-    // it is not frame 0. Without one every frame decodes in parallel, frame 0 among them.
-    let first = match early {
-        Some(early) => Some(load.frame(0, Some(early))?),
-        None if kept.is_some() => Some(load.frame(0, Some(load.decode(0)?))?),
-        None => None,
-    };
+    // Frame 0 carries the stack metadata, which a kept frame keeps with it. Frame 0 decoded for
+    // the plan is taken in first; every other frame in parallel.
+    let first = early.map(|early| load.frame(0, Some(early))).transpose()?;
     let start = usize::from(first.is_some());
     let mut slots = vec![(); plan.decode_concurrency];
     let rest = intake.map(start..paths.len(), &mut slots, |(), index| {
@@ -159,16 +148,6 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-/// Whether the decode cache holds a frame committed for `path` as it is now: what a run that
-/// reads it will not write again.
-fn committed<I: StackableImage>(kept: &DecodeCache, path: &Path, context: &LoadContext) -> bool {
-    CachedSource::of(path).is_ok_and(|source| {
-        FrameSpill::cached(kept.path(), &source.canonical, I::DECODER)
-            .committed(CacheKey::new(source.identity, I::DECODER, context))
-            .is_some()
-    })
-}
-
 fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, StackError> {
     match I::load(path, context) {
         Ok(image) => Ok(image),
@@ -185,28 +164,6 @@ fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I
 struct Decoded<I> {
     image: I,
     source: Result<CachedSource, FrameStoreError>,
-}
-
-/// A source file as a kept cache names it: its canonical path, and its identity when it was read.
-#[derive(Debug)]
-struct CachedSource {
-    canonical: PathBuf,
-    identity: FileIdentity,
-}
-
-impl CachedSource {
-    fn of(path: &Path) -> Result<Self, FrameStoreError> {
-        let metadata_error = |source| FrameStoreError::ReadMetadata {
-            path: path.to_path_buf(),
-            source,
-        };
-        let canonical = fs::canonicalize(path).map_err(metadata_error)?;
-        let identity = FileIdentity::of(&canonical).map_err(metadata_error)?;
-        Ok(Self {
-            canonical,
-            identity,
-        })
-    }
 }
 
 /// A frame in its tier, with the stack metadata when it is frame 0.
@@ -281,13 +238,13 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
             Some(Decoded { image, source }) => (source?, Some(image)),
             None => (CachedSource::of(path)?, None),
         };
-        let spill = FrameSpill::cached(kept.path(), &source.canonical, I::DECODER);
-        let key = CacheKey::new(source.identity, I::DECODER, context);
 
         if decoded_image.is_none()
-            && let Some(frame) = StoredFrame::reuse(&spill, key, dimensions)?
+            && let Some(reused) = kept.reuse::<I>(&source, context)?
         {
             tracing::debug!(source = %path.display(), "Reusing existing cache files");
+            FrameDimensionMismatch::check(index, dimensions, reused.dimensions)?;
+            let frame = reused.frame;
             self.intake.check_facts(index, &frame.source_stats.facts)?;
             let check = FrameCheck {
                 index,
@@ -299,7 +256,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
             self.intake.complete_one();
             return Ok(LoadedFrame {
                 frame,
-                metadata: None,
+                metadata: (index == 0).then_some(reused.metadata),
             });
         }
 
@@ -308,15 +265,9 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
             None => load_image::<I>(path, context)?,
         };
         let stats = self.intake.admit(index, &image)?;
-        if CachedSource::of(path)?.identity != source.identity {
-            return Err(FrameStoreError::SourceChanged {
-                path: path.to_path_buf(),
-            }
-            .into());
-        }
         let metadata = (index == 0).then(|| image.metadata().clone());
         let quality = FrameQuality::for_unwarped(&image);
-        let frame = StoredFrame::cache(&spill, key, &image, &quality, stats)?;
+        let frame = kept.keep(path, &source, &image, &quality, stats, context)?;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }

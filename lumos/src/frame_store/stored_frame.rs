@@ -8,7 +8,7 @@ use imaginarium::Buffer2;
 use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill, PlaneDigests};
+use crate::frame_store::frame_spill::{Carries, Committed, Decoded, FrameSpill, PlaneDigests};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
@@ -17,6 +17,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::StratifiedSamples;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
@@ -41,6 +42,41 @@ pub(crate) struct StoredFrame {
 /// kept when they hold any flag but `NO_DATA`.
 const fn keeps<P>(flags: &PixelFlags, quality: &FrameQuality<P>) -> bool {
     quality.mask().is_some() || flags.contains_other_than(QualityFlags::NO_DATA)
+}
+
+/// A kept frame read back from the decode cache: its planes mapped, and the shape and metadata it
+/// was committed with.
+#[derive(Debug)]
+pub(crate) struct ReusedFrame {
+    pub(crate) frame: StoredFrame,
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) metadata: ImageMetadata,
+}
+
+impl ReusedFrame {
+    /// The frame as the image it was decoded to, copied out of its maps into RAM: for an entry
+    /// that changes the frame in place, as calibration does.
+    pub(crate) fn into_image<I: StackableImage>(self) -> I {
+        let Self {
+            frame,
+            dimensions,
+            metadata,
+        } = self;
+        let size = dimensions.size();
+        let pixels = dimensions.pixel_count();
+        let parts = ImageParts {
+            planes: frame
+                .channels
+                .iter()
+                .map(|plane| Buffer2::new(size.width, size.height, plane.chunk(0, pixels).to_vec()))
+                .collect(),
+            flags: frame
+                .flags
+                .as_ref()
+                .map(|plane| PixelFlags::from_bytes(size, plane.chunk(0, pixels))),
+        };
+        I::from_parts(parts, frame.source_stats.facts.cfa_type, metadata)
+    }
 }
 
 impl StoredFrame {
@@ -120,7 +156,8 @@ impl StoredFrame {
             .collect()
     }
 
-    /// [`Self::spill`], then commit the files as a kept frame decoded under `key`.
+    /// [`Self::spill`], then commit the files as a kept frame decoded under `key`, with the
+    /// image's shape and metadata.
     pub(crate) fn cache(
         spill: &FrameSpill<'_>,
         key: CacheKey,
@@ -128,10 +165,6 @@ impl StoredFrame {
         quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        debug_assert!(
-            image.metadata().flat_gain.is_none(),
-            "a kept frame is as its source decodes, and no flat divided that"
-        );
         debug_assert!(
             quality.coverage().is_none(),
             "a kept frame is unwarped, and so carries no quality planes"
@@ -143,27 +176,41 @@ impl StoredFrame {
             (None, None) => Carries::Channels,
         };
         let digests = PlaneDigests::of(&frame.channels, frame.flags.as_ref());
-        spill.commit(key, carries, digests, &frame.source_stats)?;
+        spill.commit(
+            key,
+            Decoded {
+                dimensions: image.dimensions(),
+                carries,
+                metadata: image.metadata().clone(),
+            },
+            digests,
+            &frame.source_stats,
+        )?;
         Ok(frame)
     }
 
-    /// The frame [`Self::cache`] committed to `spill`'s files under `key`, mapped; `None` when
-    /// there is none whole to reuse — no commit for this source under this key, or a plane
-    /// missing, of another size, or holding other bytes than it was committed with. The digests
-    /// read every page of the planes, which the checks a reused frame passes read next anyway.
+    /// The frame [`Self::cache`] committed to `spill`'s files under `key`, mapped, with the shape
+    /// and metadata it was committed with, its flat gain back in RAM from them; `None` when there
+    /// is none whole to reuse — no commit for this source under this key, or a plane missing, of
+    /// another size, or holding other bytes than it was committed with. The digests read every
+    /// page of the planes, which the checks a reused frame passes read next anyway.
     pub(crate) fn reuse(
         spill: &FrameSpill<'_>,
         key: CacheKey,
-        dimensions: ImageDimensions,
-    ) -> Result<Option<Self>, FrameStoreError> {
+    ) -> Result<Option<ReusedFrame>, FrameStoreError> {
         let Some(Committed {
             stats: source_stats,
-            carries,
+            decoded,
             digests,
         }) = spill.committed(key)
         else {
             return Ok(None);
         };
+        let Decoded {
+            dimensions,
+            carries,
+            metadata,
+        } = decoded;
         if !spill.channels_on_disk(dimensions)
             || (carries.flags() && !spill.flags_on_disk(dimensions))
         {
@@ -185,13 +232,18 @@ impl StoredFrame {
         if PlaneDigests::of(&channels, flags.as_ref()) != digests {
             return Ok(None);
         }
-        Ok(Some(Self {
-            channels,
-            samples: None,
-            quality,
-            flags,
-            flat_gain: None,
-            source_stats,
+        let flat_gain = metadata.flat_gain.as_deref().map(StoredGain::from_memory);
+        Ok(Some(ReusedFrame {
+            frame: Self {
+                channels,
+                samples: None,
+                quality,
+                flags,
+                flat_gain,
+                source_stats,
+            },
+            dimensions,
+            metadata,
         }))
     }
 }

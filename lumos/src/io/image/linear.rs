@@ -379,6 +379,22 @@ impl StackableImage for LinearImage {
             flags: self.flags,
         }
     }
+
+    fn from_parts(parts: ImageParts, _cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self {
+        let ImageParts { planes, flags } = parts;
+        let first = &planes[0];
+        let dimensions = ImageDimensions::new((first.width(), first.height()), planes.len());
+        let mut image = Self::from_planar_channels(
+            dimensions,
+            planes
+                .into_iter()
+                .map(Buffer2::into_vec)
+                .collect::<Vec<_>>(),
+        );
+        image.metadata = metadata;
+        image.flags = flags;
+        image
+    }
 }
 
 impl From<Buffer2<f32>> for LinearImage {

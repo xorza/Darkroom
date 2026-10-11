@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| PIP-4 | Kept cache for the registered pipeline and the drizzle | Do | B7 |
 | PIP-6 | Park the mosaic instead of the demosaiced frame | Measure | B8 |
 | — | First float-TIFF light decoded twice | Do, low priority | B9 |
 | — | X-Trans cosmic-ray statistic | Defer | — |
@@ -44,38 +43,7 @@ otherwise. Line numbers drift, so search for the named item.
 B9                          independent
 B8                          measures cold reads with `StoredPlane::evict` (Linux; `libc`
                             dev-dependency)
-B7                          independent
 ```
-
----
-
-## B7. Kept cache for the registered pipeline and the drizzle (PIP-4)
-
-**Evidence.** `IngestConfig::keep_cache` serves `stack()` and the calibration masters only.
-`calibrate_align_stack`, `align_and_stack_paths`, `drizzle_stack` and `drizzle_cfa_stack` decode
-every light on every run: a kept frame holds its planes and its `FrameStats`, not its
-`ImageMetadata`, which calibration, the warp and the master all read.
-
-**Decision (Q5, option A):** the commit records the full `ImageMetadata`.
-
-**Solution.**
-1. serde on `ImageMetadata` and its parts that lack it: `ImageProvenance`, `MosaicNoise`,
-   `CalibrationState`, `FlatGain` (held by `Arc`), and `SampleTypeRecord`, a lumos mirror of
-   `fits_well::SampleType` with `From` both ways, since the `fits-well` submodule stays
-   serde-free.
-2. `frame_spill.rs`: the `Commit` record carries the metadata; `SIDECAR_PIN` moves.
-3. The kept-frame logic leaves `combine/cache/loader/mod.rs` (`CachedSource`, `kept_frame`, the
-   before-and-after identity check) for one type in `frame_store` that every entry uses: the stack
-   loader, `LightFiles::prepare`, and the drizzle file entries.
-4. RAW lights keep the uncalibrated `CfaImage` decode, linear lights the linear one. A hit is
-   copied into an owned image before calibration, which writes in place.
-5. `IngestConfig::keep_cache`'s doc names every entry.
-
-**Test.** A rerun of a registered stack and of a CFA drizzle with `keep_cache` decodes no light
-(count decodes through a test hook) and gives a bit-identical output; a light rewritten between
-runs decodes again; a metadata round trip with every field set compares equal.
-
-**Crates:** lumos, lens, darkroom.
 
 ---
 
