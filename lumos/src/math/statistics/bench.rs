@@ -3,7 +3,7 @@
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::math::statistics::clipped_stats::ClippedStats;
@@ -26,7 +26,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| median_mut(black_box(values)),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("median_mad", len), |b| {
@@ -34,7 +34,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| MedianMad::of_mut(black_box(values)),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("mad_with_scratch", len), |b| {
@@ -54,7 +54,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| ClippedStats::sigma_clipped(black_box(values), &mut deviations, 3.0, 5),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("spread", len), |b| {

@@ -680,7 +680,11 @@ fn median_mut_equals_the_sorted_median() {
         } else {
             f64::midpoint(sorted[len / 2 - 1], sorted[len / 2])
         };
-        assert_eq!(median_of_magnitudes(&mut magnitudes), expected, "len = {len}");
+        assert_eq!(
+            median_of_magnitudes(&mut magnitudes),
+            expected,
+            "len = {len}"
+        );
     }
 }
 

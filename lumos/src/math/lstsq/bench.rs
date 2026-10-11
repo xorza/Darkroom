@@ -3,7 +3,7 @@
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput};
 use nalgebra::DMatrix;
 
 use crate::bench::fixture::{self, Scale};
@@ -22,7 +22,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched(
                 || design.clone(),
                 |design| Lstsq::new(black_box(design)),
-                BatchSize::LargeInput,
+                fixture::in_place(design.len() * size_of::<f64>()),
             );
         });
         group.bench_function(BenchmarkId::new("solve", &shape), |b| {
