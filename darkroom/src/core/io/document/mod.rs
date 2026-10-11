@@ -143,8 +143,13 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
 
     let document_entries = archive
         .file_names()
-        .filter(|name| *name == DOCUMENT_ENTRY)
-        .count();
+        .try_fold(0, |count, name| {
+            name.map(|name| count + usize::from(name == DOCUMENT_ENTRY))
+        })
+        .map_err(|source| DocumentLoadError::InspectArchive {
+            path: path.to_path_buf(),
+            source,
+        })?;
     if document_entries != 1 {
         return Err(DocumentLoadError::DocumentEntryCount {
             path: path.to_path_buf(),
