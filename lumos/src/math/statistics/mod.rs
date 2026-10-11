@@ -1,6 +1,6 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
-use crate::math::statistics::float::Float;
+use crate::math::statistics::float::{Float, OrderKeys};
 
 pub(crate) mod clipped_stats;
 pub(crate) mod float;
@@ -59,13 +59,13 @@ pub(crate) const fn mad_to_sigma(mad: f32) -> f32 {
 /// The median of `data`, in place.
 ///
 /// Mutates the input buffer (partial sort via quickselect), and ranks NaN rather than tripping
-/// over it: the selection runs on the keys of [`Float::into_keys`], in `total_cmp`'s order.
+/// over it: the selection runs on [`OrderKeys`], in `total_cmp`'s order.
 #[inline]
 pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
-    let keys = F::into_keys(data);
-    let median = median_of_keys::<F>(keys);
-    F::from_keys(keys);
+    let mut keys = OrderKeys::of(data);
+    let median = median_of_keys::<F>(keys.keys());
+    keys.into_values();
     median
 }
 
@@ -74,7 +74,7 @@ pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
 #[inline]
 pub(crate) fn median_of_magnitudes<F: Float>(magnitudes: &mut [F]) -> F {
     debug_assert!(!magnitudes.is_empty());
-    let keys = F::magnitude_keys(magnitudes);
+    let keys = F::as_keys(magnitudes);
     debug_assert!(
         keys.iter().all(|&key| key >= F::Key::default()),
         "a magnitude with its sign bit set"

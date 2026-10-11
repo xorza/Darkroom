@@ -4,11 +4,10 @@ use std::iter;
 
 use arrayvec::ArrayVec;
 
+use crate::math::statistics::float::{Float, OrderKeys};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{
-    abs_deviation_inplace, mad_to_sigma, median_mut, median_of_magnitudes,
-};
+use crate::math::statistics::{mad_to_sigma, median_of_keys, median_of_magnitudes};
 use crate::math::sum::mean_f32;
 
 /// Scratch space a sigma-clip pass borrows for its per-value deviations.
@@ -103,44 +102,91 @@ enum ClipPass {
     Clipped { kept: usize },
 }
 
-/// One pass over `values`, at least 3 long: their median and MAD, then every value beyond `kappa`
-/// σ of the median dropped, the survivors closed up at the front.
-fn clip_pass(values: &mut [f32], deviations: &mut [f32], kappa: f32) -> ClipPass {
-    debug_assert!(values.len() >= 3 && deviations.len() == values.len());
-    let median = median_mut(values);
-    deviations.copy_from_slice(values);
-    abs_deviation_inplace(deviations, median);
+/// One pass over the values `keys` stand for, at least 3, each read by `decode`: their median and
+/// MAD, then every value beyond `kappa` σ of the median dropped, the survivors' keys closed up at
+/// the front.
+fn clip_pass(
+    keys: &mut [i32],
+    deviations: &mut [f32],
+    kappa: f32,
+    decode: impl Fn(i32) -> f32 + Copy,
+) -> ClipPass {
+    debug_assert!(keys.len() >= 3 && deviations.len() == keys.len());
+    let median = median_of_keys::<f32>(keys);
+    fill_deviations(keys, median, deviations, decode);
     let mad = median_of_magnitudes(deviations);
     let sigma = mad_to_sigma(mad);
     if sigma <= Spread::resolution(median) {
         return ClipPass::Converged(MedianMad { median, mad: 0.0 });
     }
 
-    // The selection reordered the deviations, so each is taken again from its value.
+    // The selection reordered the deviations, so each is taken again from its value. Every key is
+    // written and the survivors' count alone moves, so no branch hangs on a value.
     let threshold = kappa * sigma;
     let mut kept = 0;
-    for i in 0..values.len() {
-        if (values[i] - median).abs() <= threshold {
-            values[kept] = values[i];
-            kept += 1;
-        }
+    for i in 0..keys.len() {
+        let key = keys[i];
+        keys[kept] = key;
+        kept += usize::from((decode(key) - median).abs() <= threshold);
     }
-    if kept == values.len() {
+    if kept == keys.len() {
         ClipPass::Converged(MedianMad { median, mad })
     } else {
         ClipPass::Clipped { kept }
     }
 }
 
-/// The median and MAD of the survivors, under the total order, through `deviations`.
-fn survivors_location(values: &mut [f32], deviations: &mut [f32]) -> MedianMad {
-    debug_assert!(!values.is_empty() && deviations.len() == values.len());
-    let median = median_mut(values);
-    deviations.copy_from_slice(values);
-    abs_deviation_inplace(deviations, median);
+/// The median and MAD of the values `keys` stand for, under the total order, through `deviations`.
+fn survivors_location(
+    keys: &mut [i32],
+    deviations: &mut [f32],
+    decode: impl Fn(i32) -> f32 + Copy,
+) -> MedianMad {
+    debug_assert!(!keys.is_empty() && deviations.len() == keys.len());
+    let median = median_of_keys::<f32>(keys);
+    fill_deviations(keys, median, deviations, decode);
     MedianMad {
         median,
         mad: median_of_magnitudes(deviations),
+    }
+}
+
+/// `|x − median|` for each value `keys` stand for.
+fn fill_deviations(keys: &[i32], median: f32, deviations: &mut [f32], decode: impl Fn(i32) -> f32) {
+    for (deviation, &key) in deviations.iter_mut().zip(keys) {
+        *deviation = (decode(key) - median).abs();
+    }
+}
+
+/// The location and the count of the values a clip kept at the front of its keys.
+#[derive(Debug, Clone, Copy)]
+struct Survivors {
+    location: MedianMad,
+    len: usize,
+}
+
+/// Iteratively clip the values `keys` stand for, each read by `decode`, then measure what survived.
+fn clip(
+    keys: &mut [i32],
+    deviations: &mut [f32],
+    kappa: f32,
+    iterations: usize,
+    decode: impl Fn(i32) -> f32 + Copy,
+) -> Survivors {
+    let mut len = keys.len();
+    for _ in 0..iterations {
+        if len < 3 {
+            break;
+        }
+        match clip_pass(&mut keys[..len], &mut deviations[..len], kappa, decode) {
+            ClipPass::Converged(location) => return Survivors { location, len },
+            ClipPass::Clipped { kept } => len = kept,
+        }
+    }
+    // A pass keeps at least the values at the median, so `len` stays at least 1.
+    Survivors {
+        location: survivors_location(&mut keys[..len], &mut deviations[..len], decode),
+        len,
     }
 }
 
@@ -154,23 +200,17 @@ fn sigma_clipped_core(
     kappa: f32,
     iterations: usize,
 ) -> ClippedStats {
-    let mut len = values.len();
-    let mut converged = None;
-    for _ in 0..iterations {
-        if len < 3 {
-            break;
-        }
-        match clip_pass(&mut values[..len], &mut deviations[..len], kappa) {
-            ClipPass::Converged(location) => {
-                converged = Some(location);
-                break;
-            }
-            ClipPass::Clipped { kept } => len = kept,
-        }
-    }
-
-    // A pass keeps at least the values at the median, so `len` stays at least 1.
-    let location =
-        converged.unwrap_or_else(|| survivors_location(&mut values[..len], &mut deviations[..len]));
-    ClippedStats::from_median_mad(location, mean_f32(&values[..len]))
+    // The values are clipped as their total-order keys, mapped at most once each way: each pass
+    // selects twice, and the keys select with nothing mapped. Keys left unmapped are the values'
+    // own bits, which read back as the values with no flip.
+    let mut order = OrderKeys::of(values);
+    let survivors = if order.mapped() {
+        clip(order.keys(), deviations, kappa, iterations, f32::from_key)
+    } else {
+        clip(order.keys(), deviations, kappa, iterations, |key| {
+            f32::from_bits(key.cast_unsigned())
+        })
+    };
+    let values = order.into_values();
+    ClippedStats::from_median_mad(survivors.location, mean_f32(&values[..survivors.len]))
 }
