@@ -34,6 +34,7 @@ use crate::io::image::fits::gain_extension::GAIN_EXTNAME;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::FitsChecksumProvenance;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
@@ -248,6 +249,30 @@ pub(crate) fn fits_cfa_frame_info(
         cfa_type,
         decoder_bytes: 0,
     })
+}
+
+/// The dimensions a linear FITS image of `path` decodes to, from its header alone: the same
+/// selection, cube reading and limits [`load_linear_fits`] applies, without reading a sample. A
+/// header that declares a mosaic is refused, as the load refuses it.
+pub(crate) fn fits_linear_dimensions(
+    path: &Path,
+    context: &LoadContext,
+) -> Result<ImageDimensions, ImageError> {
+    let selected = SelectedFits::open(path, context)?;
+    let dimensions = selected.plan.dimensions;
+    let cfa_type = read_cfa_from_headers(
+        selected.header(),
+        dimensions.height(),
+        context.fits.unstated_bayer_pattern,
+    )
+    .map_err(|source| ImageError::fits(path, source))?;
+    if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
+        return Err(ImageError::scientific_rejection(
+            path,
+            "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+        ));
+    }
+    Ok(dimensions)
 }
 
 #[cfg(all(test, feature = "bench"))]
