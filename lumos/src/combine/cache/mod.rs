@@ -1,21 +1,19 @@
 //! Chunked combine engine for resident and memory-mapped stacking frames.
 
 pub(crate) mod core;
-pub(crate) mod frame_check;
 pub(crate) mod frame_gate;
 pub(crate) mod frame_weights;
 pub(crate) mod loader;
 pub(crate) mod sample;
 pub(crate) mod sample_noise;
-pub(crate) mod set_facts;
 pub(crate) mod slots;
 
 use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::calibration_masters::error::SubtractionError;
 use crate::combine::cache::core::{CacheCore, ChunkContext};
-use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::loader::LoadedCache;
@@ -23,7 +21,6 @@ use crate::combine::cache::sample::{
     CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
 };
 use crate::combine::cache::sample_noise::{NoiseColumns, SampleNoise};
-use crate::combine::cache::set_facts::SetFacts;
 use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Normalization, StackConfig};
 use crate::combine::error::StackError;
@@ -35,8 +32,10 @@ use crate::error::FrameDimensionMismatch;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::tier::Tier;
+use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
+use crate::ingest::set_facts::SetFacts;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::flat_gain;
@@ -658,7 +657,7 @@ impl FrameCache {
         paths: &[P],
         config: &StackConfig,
         run: IngestRun,
-        step: Option<&dyn FrameStep<CfaImage>>,
+        step: Option<&dyn FrameStep<CfaImage, Error = SubtractionError>>,
         progress: ProgressCallback,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(

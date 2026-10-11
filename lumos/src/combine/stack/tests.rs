@@ -2,6 +2,7 @@ use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Combine, Normalization, SmallN};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
+use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::memory::run_memory::RunMemory;
@@ -588,11 +589,11 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     assert!(
         matches!(
             stack([Some(RowOrder::TopDown), Some(RowOrder::BottomUp)]).unwrap_err(),
-            StackError::RowOrderMismatch {
+            StackError::Admission(AdmissionError::RowOrderMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
-            }
+            })
         ),
         "a mirrored frame must be named, not averaged in"
     );
@@ -650,11 +651,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 Some((1.0, ScaleOrigin::Assumed, None)),
             ])
             .unwrap_err(),
-            StackError::SampleDomainMismatch {
+            StackError::Admission(AdmissionError::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
-            }
+            })
         ),
         "a declared span against an assumed one must be named, not absorbed into the fitted gain"
     );
@@ -702,11 +703,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 Some((1.0, ScaleOrigin::Declared, Some("count/s"))),
             ])
             .unwrap_err(),
-            StackError::SampleDomainMismatch {
+            StackError::Admission(AdmissionError::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
-            }
+            })
         ),
         "two units on one span must be named"
     );
@@ -732,11 +733,11 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
                 }
             )
             .unwrap_err(),
-            StackError::SampleDomainMismatch {
+            StackError::Admission(AdmissionError::SampleDomainMismatch {
                 index: 2,
                 reference_index: 1,
                 ..
-            }
+            })
         ),
         "a unitless first frame must not vouch for two frames that disagree with each other"
     );
@@ -780,7 +781,10 @@ fn stack_images_dimension_errors() {
     );
     assert!(matches!(
         result.unwrap_err(),
-        StackError::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
+        StackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
+            index: 1,
+            ..
+        }))
     ));
 
     // Either plane of the pair is named for itself; the wrong-shaped one is the one reported.
@@ -866,12 +870,12 @@ fn stack_images_rejects_invalid_warp_quality_values() {
         assert!(
             matches!(
                 error,
-                StackError::InvalidWarpPlaneValue {
+                StackError::Admission(AdmissionError::InvalidQualityPlaneValue {
                     index: 0,
                     plane,
                     pixel: 1,
                     value,
-                } if plane == expected_plane && value == expected_value
+                }) if plane == expected_plane && value == expected_value
             ),
             "expected an out-of-range {expected_plane} value, got {error:?}"
         );
@@ -908,13 +912,13 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
         assert!(
             matches!(
                 error,
-                StackError::FrameQualityPairMismatch {
+                StackError::Admission(AdmissionError::FrameQualityPairMismatch {
                     index: 0,
                     pixel: 1,
                     plane: FramePlane::Coverage,
                     support,
                     confidence,
-                } if support == expected_coverage && confidence == expected_confidence
+                }) if support == expected_coverage && confidence == expected_confidence
             ),
             "expected a pair mismatch at pixel 1, got {error:?}"
         );
@@ -966,12 +970,12 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         )
         .unwrap_err();
 
-        let StackError::NonFiniteImageSample {
+        let StackError::Admission(AdmissionError::NonFiniteImageSample {
             index,
             channel,
             pixel,
             value,
-        } = error
+        }) = error
         else {
             panic!("expected a non-finite image sample error, got {error:?}");
         };

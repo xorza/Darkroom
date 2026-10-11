@@ -71,10 +71,7 @@ named item.
   `DetectorPool::try_map` → `FrameParking`. Since Batch 14, `drizzle/stack.rs`: a lazy serial load
   → drizzle → `Tier::store`, with its own finiteness check
   (`DrizzleError::NonFiniteSample`) in place of `FrameAdmission`. Each fix lands two or three
-  times, and admission semantics differ. `ingest/frame_admission.rs` and
-  `ingest/frame_step.rs` import
-  `combine::cache::{frame_check, set_facts}` and `combine::error::StackError`, while the loader
-  imports `ingest`: a cycle.
+  times, and admission semantics differ.
 - **PIP-13.** Frame carriers multiply: `FrameToPark` duplicates `DetectedFrame`; `StoredImage`
   (channels, flags, metadata) duplicates `StoredFrame`; `Lights::Held` re-implements
   `concurrency::try_par_map_bounded_owned` with `Mutex<Option<_>>` cells; the loader has nine
@@ -102,10 +99,10 @@ named item.
 2. Every source peeks before any decode where its format has a header to read: RAW and mosaic
    FITS through `CfaFrameInfo`, linear FITS through `fits_linear_dimensions` (done). A float TIFF
    has none, and its frame 0 is still decoded first.
-3. `FrameCheck` and `SetFacts` move into `ingest/`. Admission has its own error enum
-   (`AdmissionError`), converted into `StackError`, `AlignStackError` and `DrizzleError` at each
-   boundary. The drizzle entries are admitted like the others, and their own finiteness check
-   goes. `ingest` no longer imports `combine`.
+3. The drizzle entries are admitted like the others, through `FrameAdmission`, and their own
+   finiteness check goes. (Done: `FrameCheck` and `SetFacts` are in `ingest/`, admission fails
+   with `AdmissionError`, a step with its own `FrameStep::Error`, and `ingest` imports nothing of
+   `combine`.)
 5. PIP-13: `FrameToPark` becomes `&DetectedFrame` plus an index; `StoredImage` becomes a
    `StoredFrame` with `FrameQuality::None`, its metadata beside it in `PipelineFrame::Spilled`;
    `Lights::Held` uses `try_par_map_bounded_owned`; the loader's private types fold into the

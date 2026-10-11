@@ -15,7 +15,6 @@
 
 use common::CancelToken;
 
-use crate::combine::CANCEL_POLL_CHUNK;
 use crate::combine::error::StackError;
 use crate::io::cancelled::Cancelled;
 use crate::math::statistics::spread::Spread;
@@ -63,8 +62,8 @@ impl PairedMoments {
             covariance: 0.0,
         };
         for (frame_chunk, reference_chunk) in frame
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(reference.chunks(CANCEL_POLL_CHUNK))
+            .chunks(Cancelled::POLL_CHUNK)
+            .zip(reference.chunks(Cancelled::POLL_CHUNK))
         {
             Cancelled::check(cancel)?;
             for (&frame_value, &reference_value) in frame_chunk.iter().zip(reference_chunk) {
@@ -134,8 +133,8 @@ impl Seed {
         let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
         let mut ratios = Vec::new();
         for (frame_chunk, reference_chunk) in frame
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(reference.chunks(CANCEL_POLL_CHUNK))
+            .chunks(Cancelled::POLL_CHUNK)
+            .zip(reference.chunks(Cancelled::POLL_CHUNK))
         {
             Cancelled::check(cancel)?;
             ratios.extend(frame_chunk.iter().zip(reference_chunk).filter_map(
@@ -194,8 +193,8 @@ impl ResidualWindow {
         let offset = reference_stats.median - frame_stats.median * gain;
         let mut residuals = Vec::with_capacity(frame.len());
         for (frame_chunk, reference_chunk) in frame
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(reference.chunks(CANCEL_POLL_CHUNK))
+            .chunks(Cancelled::POLL_CHUNK)
+            .zip(reference.chunks(Cancelled::POLL_CHUNK))
         {
             Cancelled::check(cancel)?;
             residuals.extend(frame_chunk.iter().zip(reference_chunk).map(

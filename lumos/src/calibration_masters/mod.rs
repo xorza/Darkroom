@@ -21,7 +21,7 @@ use common::CancelToken;
 
 use crate::calibration_masters::dark_match::DarkMatch;
 use crate::calibration_masters::defect_map::DefectMap;
-use crate::calibration_masters::error::CalibrationError;
+use crate::calibration_masters::error::{CalibrationError, SubtractionError};
 use crate::calibration_masters::light_calibration::{LightCalibration, Subtracted};
 use crate::calibration_masters::master_subtraction::{MasterSubtraction, Subtractor};
 use crate::combine::cache::FrameCache;
@@ -137,7 +137,7 @@ pub fn stack_cfa_master(
     };
     let step = subtraction
         .as_ref()
-        .map(|step| step as &dyn FrameStep<CfaImage>);
+        .map(|step| step as &dyn FrameStep<CfaImage, Error = SubtractionError>);
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
         let cache = FrameCache::from_cfa_paths(paths, &config, run, step, progress)?;
         if role.is_dark() {

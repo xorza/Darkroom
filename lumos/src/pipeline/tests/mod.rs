@@ -3,6 +3,7 @@ mod mem_budget_probe;
 use crate::combine::config::{
     Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
 };
+use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -317,7 +318,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     )
     .unwrap_err();
 
-    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -610,7 +611,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            AlignStackError::Stack(StackError::NonFiniteImageSample {
+            AlignStackError::Admission(AdmissionError::NonFiniteImageSample {
                 index: 1,
                 channel: 0,
                 pixel: 5,
@@ -670,7 +671,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     };
 
     let error = run(&paths, &AlignStackConfig::default());
-    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,

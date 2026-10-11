@@ -1,4 +1,5 @@
 use crate::combine::config::{Normalization, Weighting};
+use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::memory::run_memory::RunMemory;
 use std::fs::OpenOptions;
@@ -129,12 +130,12 @@ fn cache_frame_validates_a_reused_frame() {
     let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
     assert!(matches!(
         error,
-        StackError::NonFiniteImageSample {
+        StackError::Admission(AdmissionError::NonFiniteImageSample {
             index: 1,
             channel: 0,
             pixel: 2,
             value: f32::INFINITY,
-        }
+        })
     ));
 }
 
@@ -249,10 +250,10 @@ fn cache_frame_dimension_mismatch() {
 
     assert!(matches!(
         result.unwrap_err(),
-        StackError::DimensionMismatch(FrameDimensionMismatch {
+        StackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
             index: 5,
             expected,
             actual,
-        }) if expected == expected_dims && actual == actual_dims
+        })) if expected == expected_dims && actual == actual_dims
     ));
 }
