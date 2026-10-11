@@ -46,7 +46,7 @@ impl DMat3 {
 
     /// Matrix multiplication: `self * rhs`.
     #[inline]
-    pub(crate) fn mul_mat(&self, rhs: &DMat3) -> DMat3 {
+    pub(crate) const fn mul_mat(&self, rhs: &DMat3) -> DMat3 {
         let a = &self.data;
         let b = &rhs.data;
         DMat3 {
@@ -66,7 +66,7 @@ impl DMat3 {
 
     /// Compute the determinant.
     #[inline]
-    pub(crate) fn determinant(&self) -> f64 {
+    pub(crate) const fn determinant(&self) -> f64 {
         let d = &self.data;
         d[0] * (d[4] * d[8] - d[5] * d[7]) - d[1] * (d[3] * d[8] - d[5] * d[6])
             + d[2] * (d[3] * d[7] - d[4] * d[6])
@@ -118,7 +118,7 @@ impl DMat3 {
     /// and would read pixel (0,0). Affine/similarity/euclidean have a `[0,0,1]`
     /// bottom row, so `w` is structurally 1 and this branch never fires for them.
     #[inline]
-    pub(crate) fn transform_point(&self, p: DVec2) -> DVec2 {
+    pub(crate) const fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
         let w = d[6] * p.x + d[7] * p.y + d[8];
         if w.abs() <= f64::EPSILON {

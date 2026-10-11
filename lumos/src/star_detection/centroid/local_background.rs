@@ -9,7 +9,7 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::statistics::ClippedStats;
+use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
 

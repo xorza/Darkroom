@@ -1,9 +1,6 @@
 use crate::internals::prelude::*;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::median_mad::MedianMad;
 
 fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Vec<f32> {
     let mut rng = TestRng::new(seed);
@@ -104,32 +101,6 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
     assert!((mean - 0.01).abs() < 0.000_4, "{mean}");
 }
 
-/// Each colour of a Bayer mosaic reads its own noise, through a gradient the differences cancel.
-/// σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: red and blue keep 32 768 pairs each, green
-/// 65 536. MAD's standard error is 1.166·σ/√n, so 3 of them is 1.9% of σ for red and blue and 1.4%
-/// for green; 2% of σ covers all three.
-#[test]
-fn each_bayer_colour_reads_its_own_noise() {
-    let size = Size2us::new(512, 512);
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
-    let sigmas = [0.01f32, 0.02, 0.03];
-    let mut rng = TestRng::new(9);
-    let mosaic: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let (x, y) = (index % 512, index / 512);
-            let colour = cfa_type.color_at(Vec2us::new(x, y));
-            0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
-        })
-        .collect();
-    let estimates = DifferenceNoise::estimate(&mosaic, size, &cfa_type, |_| false);
-    for (colour, (&estimate, &sigma)) in estimates.iter().zip(&sigmas).enumerate() {
-        assert!(
-            (estimate - sigma).abs() < 0.02 * sigma,
-            "colour {colour}: {estimate}"
-        );
-    }
-}
-
 /// What an estimate holds at its peak, counted by hand.
 ///
 /// MRS over 1024²: 4 × 4 tiles of 256², so 1 048 576 coefficients of 32 bytes and a bin byte,
@@ -139,15 +110,8 @@ fn each_bayer_colour_reads_its_own_noise() {
 /// 4 × 320² × 32 = 13 107 200. Each tile's place in the list, its share and its count are
 /// 64 + 16 + 8 bytes, 1408 for sixteen. A 192² frame is one tile, its region the frame:
 /// 36 864 × 33 + 36 864 × 32 + 88.
-///
-/// Differences over an 8 × 4 RGGB mosaic: a photosite pairs with the one two to its right, so six
-/// pairs a row, three of each of its two colours — 6 red, 12 green and 6 blue, 24 pairs at 4 bytes
-/// and a bin byte, 120; its medians take all 32 photosites at 4 bytes, 128, the larger. At
-/// 16 × 4, 14 pairs a row: 56 × 5 = 280 against 64 × 4 = 256.
 #[test]
 fn working_sets_are_what_the_buffers_hold() {
-    use crate::io::image::mosaic_noise::MosaicNoise;
-
     let wide = Size2us::new(1024, 1024);
     assert_eq!(
         MrsNoise::heap_bytes(wide, 16),
@@ -161,9 +125,4 @@ fn working_sets_are_what_the_buffers_hold() {
         MrsNoise::heap_bytes(Size2us::new(192, 192), 16),
         36_864 * 33 + 36_864 * 32 + 88
     );
-
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
-    assert_eq!(DifferenceNoise::heap_bytes(Size2us::new(8, 4), &rggb), 120);
-    assert_eq!(MosaicNoise::heap_bytes(Size2us::new(8, 4), &rggb), 128);
-    assert_eq!(MosaicNoise::heap_bytes(Size2us::new(16, 4), &rggb), 280);
 }

@@ -47,7 +47,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 
 mod simd;

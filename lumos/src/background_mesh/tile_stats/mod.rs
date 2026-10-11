@@ -4,7 +4,7 @@
 
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::statistics::ClippedStats;
+use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;

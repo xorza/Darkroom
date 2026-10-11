@@ -8,7 +8,8 @@ use crate::calibration_masters::defect_map::ring_reference::RingReference;
 use crate::calibration_masters::light_calibration::Subtracted;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::math::statistics::{MedianMad, mad_to_sigma};
+use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics::median_mad::MedianMad;
 
 /// The fewest hot pixels the fit keeps for its factor to stand; with fewer the exposure ratio does.
 const MIN_FIT_PIXELS: usize = 100;

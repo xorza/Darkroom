@@ -14,7 +14,8 @@ use crate::internals::cfa::cfa_from_plane;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::math::statistics::{MedianMad, median_mut};
+use crate::math::statistics::median_mad::MedianMad;
+use crate::math::statistics::median_mut;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.

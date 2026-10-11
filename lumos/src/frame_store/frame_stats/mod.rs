@@ -14,7 +14,7 @@ use crate::math::noise::background_split::BackgroundSplit;
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::statistics;
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
 
 /// Per-frame statistics, per slot: a channel, or a colour of a mosaic, whose one channel holds three
@@ -38,7 +38,9 @@ pub(crate) struct FrameStats {
     /// does ([`Self::measure_with_spread`]); `None` elsewhere.
     pub(crate) spread: Option<ArrayVec<SlotSpread, 3>>,
     pub(crate) quantization_sigma: Option<f32>,
-    /// From [`CcdNoise::electrons_per_unit`], when the source states its gain.
+    /// From [`ImageMetadata::electrons_per_unit`], when the source states its gain.
+    ///
+    /// [`ImageMetadata::electrons_per_unit`]: crate::io::image::image_metadata::ImageMetadata::electrons_per_unit
     pub(crate) electrons_per_unit: Option<f32>,
     /// What the decoder said the samples are; what makes two frames' statistics comparable at all.
     pub(crate) facts: FrameFacts,
@@ -189,7 +191,7 @@ impl FrameStats {
                 Some(mosaic_noise) => mosaic_noise.quantization_sigma,
                 None => metadata.quantization_sigma,
             },
-            electrons_per_unit: CcdNoise::electrons_per_unit(metadata),
+            electrons_per_unit: metadata.electrons_per_unit(),
             facts,
         }
     }

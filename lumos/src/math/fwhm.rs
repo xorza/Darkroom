@@ -12,13 +12,13 @@ const FWHM_PER_SIGMA_F32: f32 = FWHM_PER_SIGMA as f32;
 
 /// Convert FWHM to Gaussian sigma.
 #[inline]
-pub(crate) fn fwhm_to_sigma(fwhm: f32) -> f32 {
+pub(crate) const fn fwhm_to_sigma(fwhm: f32) -> f32 {
     fwhm / FWHM_PER_SIGMA_F32
 }
 
 /// Convert Gaussian sigma to FWHM.
 #[inline]
-pub(crate) fn sigma_to_fwhm(sigma: f32) -> f32 {
+pub(crate) const fn sigma_to_fwhm(sigma: f32) -> f32 {
     sigma * FWHM_PER_SIGMA_F32
 }
 
