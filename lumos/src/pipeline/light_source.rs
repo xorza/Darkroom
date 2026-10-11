@@ -567,9 +567,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         cfa.demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
-}
 
-impl<P> LightFiles<'_, P> {
     /// `path` decoded as an `I` under `context`: through the decode cache when the run keeps one,
     /// a RAW light as its uncalibrated mosaic, so a later run with other masters reuses it too.
     fn decode<I: StackableImage>(
@@ -593,10 +591,7 @@ impl<P> LightFiles<'_, P> {
         &self,
         kept_bytes: usize,
         context: &LoadContext,
-    ) -> Result<(), AlignStackError>
-    where
-        P: AsRef<Path>,
-    {
+    ) -> Result<(), AlignStackError> {
         if let Some(kept) = &self.kept {
             let missing = kept.missing::<I>(self.paths, context) as u64;
             kept.ensure_space(missing.saturating_mul(kept_bytes as u64))?;
