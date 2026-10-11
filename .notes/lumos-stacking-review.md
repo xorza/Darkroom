@@ -60,33 +60,17 @@ named item.
 
 ---
 
-## Batch 20: One ingest stage (rest) — medium
+## Batch 20 (rest): Kept cache for the registered pipeline and the drizzle — blocked on Q5
 
-**Done:** one `frame_store::Tier` (PIP-12); `FrameCheck` and `SetFacts` in `ingest/` with
-`AdmissionError` and a typed `FrameStep::Error`, so `ingest` imports nothing of `combine`; one
-`ingest::FrameIntake` (admission, decode context, progress, the bounded map with its cancel check)
-that the stack loader, both pipeline passes and the drizzle take their frames in through, the
-drizzle admitted like the others (PIP-11); `FrameToPark` gave way to `DetectedFrame`, held lights
-go through the owned map, and the loader's private types folded into `FrameLoad` (PIP-13).
-`StoredImage` stays a type of its own: a parked image keeps every flag and its metadata for the
-warp, where a `StoredFrame` keeps what the combine reads.
+**Done:** one `Tier`, one `FrameIntake`, admission in `ingest`, `align_and_stack_paths`, the kept
+cache on every tier of `stack()` and the masters, and `CalibrationMasters::build` with its
+`MasterCache` hook, which `lens` calls.
 
-**Left: PIP-4's registered and drizzle part (blocked on Q5 in `lumos-stacking-review_QUESTIONS.md`), CAL-14.** (PIP-10 is done: `align_and_stack_paths`. PIP-4 is done for `stack()` and the masters, on every tier.)
-- **PIP-4 (rest).** The registered pipeline and the drizzle entries ignore `keep_cache`; a kept
-  frame holds no `ImageMetadata`, which every light needs (Q5).
-- **CAL-14.** The master-building rule (each role stacked under its preset; flats take the
-  flat-dark, else the bias, per frame; then `from_images`) is written twice:
-  `calibration_masters::internals::masters_from_files` and `lens/src/astro/nodes/calibration.rs`.
-
-**Design.**
-1. PIP-4 (rest, per Q5): the registered pipeline and the drizzle read a light back from the kept
-   cache before any decode. RAW runs cache the uncalibrated `CfaImage` decode, which is what the
-   key describes, before the masters apply.
-2. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
-   a per-role cache hook for `lens`, and `lens` calls it. `stack_cfa_master` becomes private.
-
-**Tests:** `keep_cache` reuse in a registered run skips the decode (count decodes through a test
-hook); every other test stays green with unchanged pins.
+**Left (PIP-4, blocked on Q5 in `lumos-stacking-review_QUESTIONS.md`):** the registered pipeline
+and the drizzle entries ignore `keep_cache`; a kept frame holds no `ImageMetadata`, which every
+light needs. Per Q5, they read a light back from the kept cache before any decode, RAW runs
+caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered stack with
+`keep_cache` decodes no light (count decodes through a test hook).
 
 **Crates:** lumos, lens, darkroom.
 

@@ -7,6 +7,7 @@ use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
+use crate::calibration_masters::master_cache::{MasterCache, MasterInputs};
 use crate::calibration_masters::master_subtraction::Subtractor;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
@@ -41,9 +42,11 @@ use common::TempDir;
 use fits_well::FitsReader;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
+use std::convert::Infallible;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {
@@ -1928,6 +1931,127 @@ fn flats_are_calibrated_before_they_are_combined() {
             "{memory_override:?}: {ratio}"
         );
     }
+}
+
+/// The builder stacks each role under its preset and takes the bias from every flat when no
+/// flat-dark is given, as `flats_are_calibrated_before_they_are_combined` does by hand: the flat
+/// master's corner reads 0.5 of its centre. Its cache is read before each role is stacked and
+/// written once it is: it stores the bias with nothing subtracted and the flats with the bias's
+/// frames, and a dark it already holds is not stacked — its frames name no file, and the build
+/// still succeeds with the held dark.
+#[test]
+fn the_builder_calibrates_the_flats_and_keeps_each_master() {
+    /// One master the cache was asked to keep: its role, its frame count, and the role and frame
+    /// count of the master taken from each of its frames.
+    #[derive(Debug, PartialEq)]
+    struct Kept {
+        role: MasterRole,
+        frames: usize,
+        subtracted: Option<(MasterRole, usize)>,
+    }
+    #[derive(Debug, Default)]
+    struct Recorder {
+        held_dark: Option<CfaImage>,
+        stored: Mutex<Vec<Kept>>,
+    }
+    impl MasterCache<PathBuf> for Recorder {
+        type Error = Infallible;
+
+        fn load(&self, inputs: &MasterInputs<'_, PathBuf>) -> Result<Option<CfaImage>, Infallible> {
+            Ok(match inputs.role {
+                MasterRole::Dark => self.held_dark.clone(),
+                _ => None,
+            })
+        }
+
+        fn store(
+            &self,
+            inputs: &MasterInputs<'_, PathBuf>,
+            _: &CfaImage,
+        ) -> Result<(), Infallible> {
+            self.stored.lock().unwrap().push(Kept {
+                role: inputs.role,
+                frames: inputs.frames.len(),
+                subtracted: inputs
+                    .subtracted
+                    .map(|subtracted| (subtracted.role, subtracted.frames.len())),
+            });
+            Ok(())
+        }
+    }
+
+    let size = Size2us::new(8, 8);
+    let offset = 1.0 / 32.0;
+    let directory = TempDir::new("lumos-master-builder");
+    let write = |name: &str, value: &dyn Fn(usize) -> f32| -> PathBuf {
+        let frame = make_cfa(
+            size,
+            (0..size.pixel_count()).map(value).collect(),
+            CfaType::Mono,
+        );
+        let path = directory.join(name);
+        frame.save_fits(&path).unwrap();
+        path
+    };
+    let vignette = |i: usize| {
+        let (x, y) = (i % 8, i / 8);
+        if (x == 0 || x == 7) && (y == 0 || y == 7) {
+            0.5
+        } else {
+            1.0
+        }
+    };
+    let bias: Vec<PathBuf> = (0..2)
+        .map(|index| write(&format!("bias_{index}.fits"), &|_| offset))
+        .collect();
+    let flats: Vec<PathBuf> = [0.5f32, 0.25]
+        .into_iter()
+        .enumerate()
+        .map(|(index, level)| {
+            write(&format!("flat_{index}.fits"), &|i| {
+                offset + level * vignette(i)
+            })
+        })
+        .collect();
+    let darks = vec![directory.join("absent_dark.fits")];
+    let mut held_dark = constant_cfa(size, 0.01, CfaType::Mono);
+    held_dark.metadata.calibration = CalibrationState::BIAS;
+    let cache = Recorder {
+        held_dark: Some(held_dark),
+        ..Recorder::default()
+    };
+    let masters = CalibrationMasters::build(
+        CalibrationSet {
+            dark: darks.as_slice(),
+            flat: flats.as_slice(),
+            bias: bias.as_slice(),
+            flat_dark: &[],
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+        &IngestConfig::with_cache_dir(directory.join("cache")),
+        &cache,
+        &ProgressCallback::default(),
+        &CancelToken::never(),
+    )
+    .unwrap();
+    let flat = masters.flat.as_ref().unwrap().divisor();
+    assert_eq!(flat.data[(0, 0)] / flat.data[(3, 3)], 0.5);
+    assert!(masters.dark.is_some(), "the held dark is in the set");
+    assert_eq!(
+        *cache.stored.lock().unwrap(),
+        [
+            Kept {
+                role: MasterRole::Bias,
+                frames: 2,
+                subtracted: None,
+            },
+            Kept {
+                role: MasterRole::Flat,
+                frames: 2,
+                subtracted: Some((MasterRole::Bias, 2)),
+            },
+        ]
+    );
 }
 
 /// A master states the exposure and temperature its frames share, and the frames of a dark have to
