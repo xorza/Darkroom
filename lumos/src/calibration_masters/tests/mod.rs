@@ -1,3 +1,4 @@
+mod dark_scale;
 mod mem_budget;
 #[cfg(feature = "real-data")]
 mod real_data;
@@ -5,6 +6,7 @@ mod synthetic;
 
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
+use crate::calibration_masters::dark_scale::{DarkScale, DarkScaleSource};
 use crate::calibration_masters::defect_map::{DefectMap, HotPixels};
 use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
 use crate::calibration_masters::master_cache::{MasterCache, MasterInputs};
@@ -1681,6 +1683,13 @@ fn a_dark_is_matched_to_the_light() {
         light
     };
     let bias = || constant_cfa(size, 0.125, CfaType::Mono);
+    // A flat dark has no hot pixel to fit on, so a bias-removed one is scaled by the exposures.
+    let ratio = |factor| {
+        Some(DarkScale {
+            factor,
+            source: DarkScaleSource::Exposure { fit_pixels: 0 },
+        })
+    };
 
     let unseparated = bundle(CalibrationSet {
         dark: Some(dark(Some(120.0), Some(-10.0))),
@@ -1706,7 +1715,7 @@ fn a_dark_is_matched_to_the_light() {
     assert_eq!(
         separated.calibrate(&mut scaled),
         Ok(CalibrationOutcome {
-            dark_scale: Some(2.5),
+            dark_scale: ratio(2.5),
             dark_temperature: Some(TemperatureSource::Sensor),
             ..CalibrationOutcome::default()
         })
@@ -1718,6 +1727,7 @@ fn a_dark_is_matched_to_the_light() {
         assert_eq!(
             separated.calibrate(&mut matched),
             Ok(CalibrationOutcome {
+                dark_scale: ratio(1.0),
                 dark_temperature: Some(TemperatureSource::Sensor),
                 ..CalibrationOutcome::default()
             })
@@ -1728,6 +1738,7 @@ fn a_dark_is_matched_to_the_light() {
     assert_eq!(
         separated.calibrate(&mut warmer),
         Ok(CalibrationOutcome {
+            dark_scale: ratio(1.0),
             dark_temperature: Some(TemperatureSource::Sensor),
             dark_temperature_difference: Some(TemperatureDifference {
                 reading: TemperatureSource::Sensor,
@@ -1771,6 +1782,7 @@ fn a_dark_is_matched_to_the_light() {
             separated.calibrate(&mut silent),
             Ok(CalibrationOutcome {
                 unverified,
+                dark_scale: ratio(1.0),
                 dark_temperature,
                 ..CalibrationOutcome::default()
             })
@@ -1795,7 +1807,7 @@ fn a_dark_is_matched_to_the_light() {
         assert_eq!(
             stacked_calibrated.calibrate(&mut scaled),
             Ok(CalibrationOutcome {
-                dark_scale: Some(2.5),
+                dark_scale: ratio(2.5),
                 dark_temperature: Some(TemperatureSource::Sensor),
                 ..CalibrationOutcome::default()
             })

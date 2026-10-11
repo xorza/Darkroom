@@ -30,8 +30,11 @@ pub struct RunReport {
     /// Lights calibrated with a dark of another temperature, past the tolerance: warned, not
     /// refused. Each outcome holds the two temperatures.
     pub dark_temperature_differences: u64,
-    /// Lights whose bias-removed dark was scaled to their exposure.
+    /// Lights whose bias-removed dark was scaled by their exposure over its own, the fit having
+    /// too few hot pixels, and the two exposures differing.
     pub scaled_darks: u64,
+    /// Lights whose bias-removed dark was scaled by a fit on the hot pixels.
+    pub fitted_dark_scales: u64,
     /// The conditions not compared when the flat-dark was taken from the flat, or from any frame
     /// the flat was stacked from.
     pub unverified_flat_dark: UnverifiedConditions,

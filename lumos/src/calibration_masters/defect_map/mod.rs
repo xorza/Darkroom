@@ -50,7 +50,7 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 pub(crate) mod defect_summary;
-mod ring_reference;
+pub(crate) mod ring_reference;
 pub(crate) mod sampling;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
@@ -378,7 +378,7 @@ fn detect_hot_pixels(
             if residual <= median + cut {
                 return None;
             }
-            match ring.at(data, &cfa_type, point) {
+            match ring.at(size, |index| f64::from(data[index]), &cfa_type, point) {
                 Some(level) => {
                     let excess = data[i] - level;
                     (excess > cut).then_some((i, excess))

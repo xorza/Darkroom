@@ -7,6 +7,7 @@ use common::CancelToken;
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
+use crate::calibration_masters::dark_scale::DarkScaleSource;
 use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::ingest::ingest_run::IngestRun;
 use crate::pipeline::config::AlignStackConfig;
@@ -70,6 +71,7 @@ pub(crate) struct CalibrationNotes {
     unverified_temperatures: AtomicU64,
     temperature_differences: AtomicU64,
     scaled_darks: AtomicU64,
+    fitted_dark_scales: AtomicU64,
     camera_temperature_darks: AtomicU64,
 }
 
@@ -87,7 +89,18 @@ impl CalibrationNotes {
             &self.temperature_differences,
             outcome.dark_temperature_difference.is_some(),
         );
-        count(&self.scaled_darks, outcome.dark_scale.is_some());
+        count(
+            &self.scaled_darks,
+            outcome.dark_scale.is_some_and(|scale| {
+                matches!(scale.source, DarkScaleSource::Exposure { .. }) && scale.factor != 1.0
+            }),
+        );
+        count(
+            &self.fitted_dark_scales,
+            outcome
+                .dark_scale
+                .is_some_and(|scale| matches!(scale.source, DarkScaleSource::Fitted { .. })),
+        );
         count(
             &self.camera_temperature_darks,
             outcome.dark_temperature == Some(TemperatureSource::Camera),
@@ -99,6 +112,7 @@ impl CalibrationNotes {
         report.unverified_dark_temperatures = self.unverified_temperatures.load(Ordering::Relaxed);
         report.dark_temperature_differences = self.temperature_differences.load(Ordering::Relaxed);
         report.scaled_darks = self.scaled_darks.load(Ordering::Relaxed);
+        report.fitted_dark_scales = self.fitted_dark_scales.load(Ordering::Relaxed);
         report.camera_temperature_darks = self.camera_temperature_darks.load(Ordering::Relaxed);
         report.unverified_flat_dark = masters.unverified_flat_dark();
         report.floored_flat_pixels = masters.floored_flat_pixels() as u64;
@@ -108,13 +122,15 @@ impl CalibrationNotes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calibration_masters::dark_scale::DarkScale;
     use crate::calibration_masters::temperature_difference::TemperatureDifference;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
 
-    /// Four lights: one unverified in exposure, one in temperature and scaled, one matched on its
-    /// camera's temperature, one matched on its sensor's 3 °C off. The report counts each fact once
-    /// per light that met it, and carries the bundle's floored flat pixels and unverified
-    /// flat-dark, here none.
+    /// Five lights: one unverified in exposure, one in temperature and scaled by its exposure, one
+    /// matched on its camera's temperature, one matched on its sensor's 3 °C off and scaled by a fit,
+    /// and one whose dark was scaled by 1, which is no scaling. The report counts each fact once per
+    /// light that met it, and carries the bundle's floored flat pixels and unverified flat-dark,
+    /// here none.
     #[test]
     fn the_notes_count_what_calibration_could_not_check() {
         let notes = CalibrationNotes::default();
@@ -130,7 +146,10 @@ mod tests {
                 exposure: false,
                 temperature: true,
             },
-            dark_scale: Some(2.5),
+            dark_scale: Some(DarkScale {
+                factor: 2.5,
+                source: DarkScaleSource::Exposure { fit_pixels: 40 },
+            }),
             dark_temperature: None,
             dark_temperature_difference: None,
         });
@@ -139,11 +158,25 @@ mod tests {
             ..CalibrationOutcome::default()
         });
         notes.record(CalibrationOutcome {
+            dark_scale: Some(DarkScale {
+                factor: 1.31,
+                source: DarkScaleSource::Fitted {
+                    pixels: 400,
+                    standard_error: 0.002,
+                },
+            }),
             dark_temperature: Some(TemperatureSource::Sensor),
             dark_temperature_difference: Some(TemperatureDifference {
                 reading: TemperatureSource::Sensor,
                 frame: -7.0,
                 dark: -10.0,
+            }),
+            ..CalibrationOutcome::default()
+        });
+        notes.record(CalibrationOutcome {
+            dark_scale: Some(DarkScale {
+                factor: 1.0,
+                source: DarkScaleSource::Exposure { fit_pixels: 0 },
             }),
             ..CalibrationOutcome::default()
         });
@@ -155,11 +188,12 @@ mod tests {
                 report.unverified_dark_temperatures,
                 report.dark_temperature_differences,
                 report.scaled_darks,
+                report.fitted_dark_scales,
                 report.camera_temperature_darks,
                 report.floored_flat_pixels,
                 report.unverified_flat_dark
             ),
-            (1, 1, 1, 1, 1, 0, UnverifiedConditions::NONE)
+            (1, 1, 1, 1, 1, 1, 0, UnverifiedConditions::NONE)
         );
     }
 }

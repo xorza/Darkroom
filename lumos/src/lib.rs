@@ -107,6 +107,7 @@ pub use math::vec2us::Vec2us;
 pub use calibration_masters::calibration_component::CalibrationComponent;
 pub use calibration_masters::calibration_outcome::CalibrationOutcome;
 pub use calibration_masters::calibration_set::CalibrationSet;
+pub use calibration_masters::dark_scale::{DarkScale, DarkScaleSource};
 pub use calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
 pub use calibration_masters::master_cache::{
     MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,

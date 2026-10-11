@@ -20,7 +20,7 @@ pub(crate) struct Subtracted<'a> {
 impl Subtracted<'_> {
     /// What the master takes from the light at `index`.
     #[inline(always)]
-    fn at(&self, index: usize) -> f64 {
+    pub(crate) fn at(&self, index: usize) -> f64 {
         f64::from(self.samples[index]) * (self.map.gain * self.scale) + self.map.offset
     }
 }
