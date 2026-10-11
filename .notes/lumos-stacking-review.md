@@ -71,10 +71,7 @@ go through the owned map, and the loader's private types folded into `FrameLoad`
 `StoredImage` stays a type of its own: a parked image keeps every flag and its metadata for the
 warp, where a `StoredFrame` keeps what the combine reads.
 
-**Left: PIP-10, PIP-4, CAL-14.**
-- **PIP-10.** Calibrated lights on disk (Siril or PixInsight FITS) have no tiered entry:
-  `align_and_stack` takes `Vec<LinearImage>`, so the caller decodes every frame, the inputs stay
-  resident and never spill. The `calibrate_align_stack` doc sends such users there.
+**Left: PIP-4, CAL-14.** (PIP-10 is done: `align_and_stack_paths`.)
 - **PIP-4.** `keep_cache` works only for `stack()` and `stack_cfa_master` on the spill tier. The
   loader's RAM branch never opens the cache, so a rerun that fits in RAM decodes every frame again
   and a `keep_cache` run that fits writes nothing. `calibrate_align_stack`, `align_and_stack` and
@@ -84,18 +81,14 @@ warp, where a `StoredFrame` keeps what the combine reads.
   `calibration_masters::internals::masters_from_files` and `lens/src/astro/nodes/calibration.rs`.
 
 **Design.**
-1. PIP-10: a public `align_and_stack_paths` over calibrated linear files, decoded on workers as
-   `LightSource::Paths`, parked on the spill tier as RAW lights are. Single-pass
-   `Reference::Index` applies to it. Fix the `calibrate_align_stack` doc to name it.
-2. PIP-4: the kept cache is a decode-level memo, looked up before any decode on every tier, its
+1. PIP-4: the kept cache is a decode-level memo, looked up before any decode on every tier, its
    planes mapped whatever the tier. Every entry honours `keep_cache`. RAW runs cache the
    uncalibrated `CfaImage` decode, which is what the key describes, before the masters apply.
-3. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
+2. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
    a per-role cache hook for `lens`, and `lens` calls it. `stack_cfa_master` becomes private.
 
-**Tests:** every pipeline, loader and drizzle test stays green with unchanged pins; a new
-`align_and_stack_paths` test spills calibrated RGB FITS lights; `keep_cache` reuse on the RAM tier
-and in a registered run skips the decode (count decodes through a test hook).
+**Tests:** `keep_cache` reuse on the RAM tier and in a registered run skips the decode (count
+decodes through a test hook); every other test stays green with unchanged pins.
 
 **Crates:** lumos, lens, darkroom.
 

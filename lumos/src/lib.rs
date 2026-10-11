@@ -169,7 +169,7 @@ pub use stack_product::coverage::Coverage;
 pub use stack_product::quality_map::QualityMap;
 pub use stack_product::quality_planes::QualityPlanes;
 
-pub use pipeline::align::align_and_stack;
+pub use pipeline::align::{align_and_stack, align_and_stack_paths};
 pub use pipeline::calibrate::calibrate_align_stack;
 pub use pipeline::config::{AlignStackConfig, Reference};
 pub use pipeline::error::AlignStackError;

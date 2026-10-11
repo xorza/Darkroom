@@ -48,6 +48,13 @@ pub enum AlignStackError {
     RegistrationConfig(InvalidConfigField),
     #[error("invalid cosmic-ray configuration: {0}")]
     CosmicRayConfig(InvalidConfigField),
+    /// A cosmic-ray pass asked of lights that are already linear: the pass runs on a mosaic
+    /// before its demosaic would smear a hit across pixels, and these lights have none.
+    #[error(
+        "single-frame cosmic-ray rejection runs on mosaic lights before their demosaic; these \
+         lights are already linear, so leave it to stack-time rejection"
+    )]
+    CosmicRayOnLinearLights,
     #[error("cannot reject cosmic rays in light frame '{path}': {source}")]
     CosmicRay {
         path: PathBuf,

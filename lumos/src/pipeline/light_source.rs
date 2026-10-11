@@ -2,11 +2,14 @@
 
 use std::path::Path;
 
+use common::CancelToken;
+
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -18,9 +21,9 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::{DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES};
-use crate::pipeline::align::log_detection;
+use crate::pipeline::align::{log_detection, register_warp_and_stack};
 use crate::pipeline::calibrate::CalibrationNotes;
-use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
@@ -42,18 +45,29 @@ pub(crate) enum LightSource<'a, P> {
     /// machine, so the plan charges them only what the run adds, and they stay resident whatever
     /// the tier: spilling them would be a write and a read-back for nothing.
     Held(Vec<LinearImage>),
-    /// Mosaics read from files, each calibrated, cleaned of cosmic rays and demosaiced on a worker.
-    Raw(RawLights<'a, P>),
+    /// Lights read from files, each made ready on a worker.
+    Files(LightFiles<'a, P>),
 }
 
-/// Mosaic lights and what each goes through before its stars are detected.
+/// Lights read from files, and what each goes through before its stars are detected.
 #[derive(Debug)]
-pub(crate) struct RawLights<'a, P> {
+pub(crate) struct LightFiles<'a, P> {
     pub(crate) paths: &'a [P],
-    pub(crate) masters: &'a CalibrationMasters,
-    pub(crate) cosmic_ray: Option<&'a CosmicRayConfig>,
-    /// What calibrating them could not check, counted for the run's report.
-    pub(crate) notes: &'a CalibrationNotes,
+    pub(crate) preparation: Preparation<'a>,
+}
+
+/// What a light read from a file goes through before its stars are detected.
+#[derive(Debug)]
+pub(crate) enum Preparation<'a> {
+    /// A mosaic, calibrated, cleaned of cosmic rays and demosaiced.
+    Calibrate {
+        masters: &'a CalibrationMasters,
+        cosmic_ray: Option<&'a CosmicRayConfig>,
+        /// What calibrating them could not check, counted for the run's report.
+        notes: &'a CalibrationNotes,
+    },
+    /// An image already calibrated, taken as it decodes.
+    Linear,
 }
 
 /// The detected lights, and the memory decisions the register-warp stage reads.
@@ -125,7 +139,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     pub(crate) const fn len(&self) -> usize {
         match self {
             Self::Held(frames) => frames.len(),
-            Self::Raw(raw) => raw.paths.len(),
+            Self::Files(files) => files.paths.len(),
         }
     }
 
@@ -192,8 +206,8 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                     detect(detector, index, image).map(DetectedSamples::resident)
                 })?
             }
-            Self::Raw(raw) => intake.map(0..total, detectors.slots(), |detector, index| {
-                let image = raw.prepare(raw.paths[index].as_ref(), intake.context())?;
+            Self::Files(files) => intake.map(0..total, detectors.slots(), |detector, index| {
+                let image = files.prepare(files.paths[index].as_ref(), intake.context())?;
                 detect(detector, index, image)?.parked(&stage.parking)
             })?,
         };
@@ -207,45 +221,94 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         config: &AlignStackConfig,
         run: &IngestRun,
     ) -> Result<LightShape, AlignStackError> {
-        let quality = config.stack.quality;
         match self {
-            Self::Held(frames) => {
-                let dimensions = frames[0].dimensions();
-                let frame_bytes = dimensions.frame_bytes();
-                let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
-                Ok(LightShape {
-                    dimensions,
-                    run: RunShape {
-                        frame_count: frames.len(),
-                        // What a held frame's pass adds is the copy its statistics sort.
-                        decode: DemosaicMemory {
-                            output_bytes: frame_bytes,
-                            peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
-                        },
-                        held_bytes: frame_bytes,
-                        detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                        warp: Some(PerFrameBytes::new(
-                            plane_bytes,
-                            frame_bytes,
-                            dimensions.flat_gain_bytes(),
-                        )),
-                        output_bytes: quality.resident_bytes(dimensions),
-                    },
-                })
-            }
-            Self::Raw(raw) => raw.shape(config, run),
+            // They were in memory before the run read the machine: the plan charges them as held.
+            Self::Held(frames) => Ok(LightShape::linear(
+                frames[0].dimensions(),
+                frames.len(),
+                true,
+                config,
+            )),
+            Self::Files(files) => files.shape(config, run),
         }
     }
 }
 
-impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
-    /// The run's shape, from the first file's header.
+impl LightShape {
+    /// The shape of `frame_count` linear lights of `dimensions`, `held` by the caller or decoded
+    /// one at a time: what one's pass adds is the copy its statistics sort.
+    const fn linear(
+        dimensions: ImageDimensions,
+        frame_count: usize,
+        held: bool,
+        config: &AlignStackConfig,
+    ) -> Self {
+        let frame_bytes = dimensions.frame_bytes();
+        let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
+        Self {
+            dimensions,
+            run: RunShape {
+                frame_count,
+                decode: DemosaicMemory {
+                    output_bytes: frame_bytes,
+                    peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+                },
+                held_bytes: if held { frame_bytes } else { 0 },
+                detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+                warp: Some(PerFrameBytes::new(
+                    plane_bytes,
+                    frame_bytes,
+                    dimensions.flat_gain_bytes(),
+                )),
+                output_bytes: config.stack.quality.resident_bytes(dimensions),
+            },
+        }
+    }
+}
+
+impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
+    /// Stack the lights: with [`Reference::Index`] in one pass, each light prepared, detected,
+    /// registered, warped and stored by one worker; with [`Reference::Auto`] every light prepared
+    /// and detected first, since the reference is the sharpest, and parked until it registers.
+    pub(crate) fn stack(
+        self,
+        config: &AlignStackConfig,
+        run: &IngestRun,
+        progress: ProgressCallback,
+        cancel: CancelToken,
+    ) -> Result<AlignStackResult, AlignStackError> {
+        match config.reference {
+            Reference::Index(reference) => self.stack_in_one_pass(reference, config, run, progress),
+            Reference::Auto => {
+                let detected = LightSource::Files(self).detect(config, run, &progress)?;
+                register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
+            }
+        }
+    }
+
+    /// The run's shape, from the first file's header — or, for a linear format with none to read,
+    /// its decode.
     fn shape(
         &self,
         config: &AlignStackConfig,
         run: &IngestRun,
     ) -> Result<LightShape, AlignStackError> {
         let first = self.paths[0].as_ref();
+        let cosmic_ray = match self.preparation {
+            Preparation::Calibrate { cosmic_ray, .. } => cosmic_ray,
+            Preparation::Linear => {
+                let dimensions = match LinearImage::peek(first, &run.context) {
+                    Some(peek) => peek.dimensions,
+                    None => load_light(first, &run.context)?.dimensions(),
+                };
+                return Ok(LightShape::linear(
+                    dimensions,
+                    self.paths.len(),
+                    false,
+                    config,
+                ));
+            }
+        };
         let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| {
             AlignStackError::Load {
                 path: first.to_path_buf(),
@@ -259,7 +322,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         // makes, the demosaic, the cosmic-ray pass over the mosaic, and the statistics, a copy of
         // every channel beside the demosaiced frame.
         // Refused here, before any light is decoded, when the pass cannot run on this sensor.
-        let cosmic_ray = match self.cosmic_ray {
+        let cosmic_ray = match cosmic_ray {
             Some(_) => {
                 plane_bytes
                     + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size()).map_err(
@@ -433,20 +496,21 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         .combine(parking, config, progress, cancel.clone())
     }
 
-    /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.
+    /// Load one light and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
+    /// rays when asked, and demosaiced; a linear image as it decodes.
     fn prepare(&self, path: &Path, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
-        let mut cfa = match CfaImage::from_file(path, context) {
-            Ok(image) => image,
-            Err(ImageError::Cancelled { .. }) => return Err(AlignStackError::Cancelled),
-            Err(source) => {
-                return Err(AlignStackError::Load {
-                    path: path.to_path_buf(),
-                    source: Box::new(source),
-                });
-            }
+        let Preparation::Calibrate {
+            masters,
+            cosmic_ray,
+            notes,
+        } = self.preparation
+        else {
+            return load_light(path, context);
         };
-        self.notes.record(self.masters.calibrate(&mut cfa)?);
-        if let Some(cosmic_ray) = self.cosmic_ray {
+        let mut cfa =
+            CfaImage::from_file(path, context).map_err(|source| load_error(path, source))?;
+        notes.record(masters.calibrate(&mut cfa)?);
+        if let Some(cosmic_ray) = cosmic_ray {
             let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
                 AlignStackError::CosmicRay {
                     path: path.to_path_buf(),
@@ -458,5 +522,21 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         // The demosaic polls the cancel token between its passes.
         cfa.demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
+    }
+}
+
+/// A linear light as it decodes.
+fn load_light(path: &Path, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
+    LinearImage::from_file(path, context).map_err(|source| load_error(path, source))
+}
+
+/// A light that could not be decoded: the run's cancel when that stopped it, else the file named.
+fn load_error(path: &Path, source: ImageError) -> AlignStackError {
+    match source {
+        ImageError::Cancelled { .. } => AlignStackError::Cancelled,
+        source => AlignStackError::Load {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        },
     }
 }

@@ -87,4 +87,12 @@ impl AlignStackConfig {
         }
         Ok(())
     }
+
+    /// [`Self::validate`] for lights already linear, which no cosmic-ray pass can run on.
+    pub(super) fn validate_linear(&self, frame_count: usize) -> Result<(), AlignStackError> {
+        if self.cosmic_ray.is_some() {
+            return Err(AlignStackError::CosmicRayOnLinearLights);
+        }
+        self.validate(frame_count)
+    }
 }
