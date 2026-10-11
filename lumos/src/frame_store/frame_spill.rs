@@ -6,12 +6,11 @@
 //! no name at all: it goes to [`RunScratch`](crate::frame_store::run_scratch::RunScratch).
 
 use std::fmt::Display;
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::SerdeFormat;
 use common::file_utils;
-use memmap2::Mmap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -211,29 +210,6 @@ fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
 }
 
-pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result<(), FrameStoreError> {
-    file_utils::publish_bytes(path, bytes, file_utils::PublicationMode::Cache).map_err(|source| {
-        FrameStoreError::WriteFile {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
-}
-
-/// Memory-map a spilled file.
-pub(crate) fn map_file(path: &Path) -> Result<Mmap, FrameStoreError> {
-    let file = File::open(path).map_err(|source| FrameStoreError::OpenFile {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    // SAFETY: lumos writes every file it maps through an atomic publish and never rewrites one in
-    // place; a file replaced by another process after the map is the documented mmap hazard.
-    unsafe { Mmap::map(&file) }.map_err(|source| FrameStoreError::MemoryMap {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
 /// A sidecar payload behind its layout tag.
 #[derive(Debug, Serialize, Deserialize)]
 struct Sidecar<T> {
@@ -250,7 +226,12 @@ fn write_sidecar<T: Serialize>(path: &Path, value: &T) -> Result<(), FrameStoreE
     // filesystem or the caller can cause.
     let bytes = common::serialize(&sidecar, SerdeFormat::Bitcode)
         .expect("a sidecar of plain scalars always serializes");
-    write_file(path, &bytes)
+    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Cache).map_err(|source| {
+        FrameStoreError::WriteFile {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
 }
 
 /// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.

@@ -56,6 +56,17 @@ pub(crate) struct RunShape {
 }
 
 impl RunShape {
+    /// The most a spilled run of this shape holds in its scratch at once: each frame as the
+    /// combine reads it, decoded or warped. A frame parked until its reference is known is dropped
+    /// before its warped one is stored, and is no larger than it.
+    pub(crate) const fn spill_bytes(&self) -> u64 {
+        let per_frame = match self.warp {
+            None => self.decode.output_bytes,
+            Some(warp) => warp.warped,
+        };
+        (self.frame_count as u64).saturating_mul(per_frame as u64)
+    }
+
     /// A stack of frames decoded straight into the combine, with no warp: each one's resident
     /// bytes (its pixels, and its quality planes if it may carry them) plus the statistics
     /// scratch its decode holds beside them.

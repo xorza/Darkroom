@@ -74,7 +74,7 @@ impl DrizzleShape {
                     * weight_plane,
         };
         let plan = MemoryPlan::plan(shape, rayon::current_num_threads(), run.memory.planning());
-        Tier::for_plan(&plan, run.memory, &run.cache_dir)
+        Tier::for_plan(&plan, shape.spill_bytes(), run.memory, &run.cache_dir)
             .map_err(|source| DrizzleError::Stack(source.into()))
     }
 }

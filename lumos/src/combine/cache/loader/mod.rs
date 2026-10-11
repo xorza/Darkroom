@@ -71,11 +71,8 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
     // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
     // for.
-    let plan = MemoryPlan::plan(
-        peek.run_shape(paths.len(), config.quality.resident_bytes(dimensions)),
-        rayon::current_num_threads(),
-        run.memory.planning(),
-    );
+    let shape = peek.run_shape(paths.len(), config.quality.resident_bytes(dimensions));
+    let plan = MemoryPlan::plan(shape, rayon::current_num_threads(), run.memory.planning());
     tracing::info!(
         frame_count = paths.len(),
         sample_count = dimensions.sample_count(),
@@ -84,13 +81,29 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         "Image cache storage decision"
     );
 
-    let tier = Tier::for_plan(&plan, run.memory, &run.cache_dir)?;
     // A decode-level memo: looked up before any decode on every tier, its planes mapped from the
-    // files whatever the tier, since a mapped plane reads as a resident one does.
-    let kept = run
-        .keep_cache
+    // files whatever the tier, since a mapped plane reads as a resident one does. A frame through
+    // a step is not what its source decodes to, so a stepped run neither reads nor writes it.
+    let kept = (run.keep_cache && step.is_none())
         .then(|| DecodeCache::open(&run.cache_dir))
         .transpose()?;
+    let tier = Tier::for_plan(
+        &plan,
+        if kept.is_some() {
+            0
+        } else {
+            shape.spill_bytes()
+        },
+        run.memory,
+        &run.cache_dir,
+    )?;
+    if let Some(kept) = &kept {
+        let missing = paths
+            .iter()
+            .filter(|path| !committed::<I>(kept, path.as_ref(), &run.context))
+            .count() as u64;
+        kept.ensure_space(missing.saturating_mul(peek.resident_bytes() as u64))?;
+    }
     let intake = FrameIntake::new(
         IntakePlan {
             dimensions,
@@ -143,6 +156,16 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             progress,
             cancel: run.context.cancel,
         },
+    })
+}
+
+/// Whether the decode cache holds a frame committed for `path` as it is now: what a run that
+/// reads it will not write again.
+fn committed<I: StackableImage>(kept: &DecodeCache, path: &Path, context: &LoadContext) -> bool {
+    CachedSource::of(path).is_ok_and(|source| {
+        FrameSpill::cached(kept.path(), &source.canonical, I::DECODER)
+            .committed(CacheKey::new(source.identity, I::DECODER, context))
+            .is_some()
     })
 }
 
@@ -226,7 +249,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
     /// to, so it goes to the tier whatever the cache.
     fn frame(&self, index: usize, decoded: Option<Decoded<I>>) -> Result<LoadedFrame, StackError> {
         let path = self.paths[index].as_ref();
-        if let Some(kept) = self.kept.filter(|_| self.step.is_none()) {
+        if let Some(kept) = self.kept {
             return self.kept_frame(kept, path, index, decoded);
         }
         let image = match decoded {

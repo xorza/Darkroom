@@ -47,15 +47,12 @@ named item.
 ## Dependency graph
 
 ```
-22, 24, 26, 28                            independent
-20 ── 21 ── PIP-5, PIP-19
+22, 24, 26, 28, PIP-5, PIP-19              independent
 20 ── 25
 23 ── 27
 ```
 
-- 20 before 21: the disk-space check goes where the one `Tier` is built, which Batch 20 makes.
 - 20 before 25: the kept cache moves into the ingest.
-- 21 before PIP-5 and PIP-19: both change memory-map advice through `ScratchFile`.
 - 23 before 27: the dark scale is fitted on the hot pixels 23 stores with their excess.
 
 ---
@@ -73,76 +70,6 @@ caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered st
 `keep_cache` decodes no light (count decodes through a test hook).
 
 **Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 21: Platform entity, statics, disk space — low-medium
-
-**Findings:** PIP-14, PIP-15, PIP-16, PIP-22, PIP-24.
-
-**Problems.**
-- **PIP-14.** Platform branches sit outside one entity: `frame_store/stored_plane.rs` (a
-  `#[cfg(windows)]` field, `#[cfg(unix)]` advice), `frame_store/run_scratch.rs` (`open_deleting`
-  per OS), `ingest/ingest_config.rs` (`default_cache_root` on `cfg!(windows)` and
-  `cfg!(target_os = "macos")`), and `memory/mod.rs` (the macOS zero-available workaround inline).
-  `memory/cgroup_memory.rs` and `mount_table.rs` are Linux-only and work because the files are
-  absent elsewhere. Windows Job-object limits are never read, and no API says so.
-- **PIP-15.** Mutable statics where an owner would do: `GROUPS` and `SYSTEM` in `memory/mod.rs`
-  (the `SYSTEM` comment justifies a 15 µs saving, which the outside world does not force) and
-  `COUNTER` in `frame_store/run_scratch.rs`.
-- **PIP-16.** No disk-space check before a spill: a run finds `ENOSPC` after hours of decode and
-  registration, and loses the work. Siril computes the output size and tests the free space first
-  (`.tmp/siril/src/core/processing.c`, `io/sequence.c` `seq_compute_size`, `core/OS_utils.c`
-  `test_available_space`).
-- **PIP-22.** `frame_store/frame_spill.rs` names cache files with `FramePlane`'s `Display`, which
-  is prose for errors: rewording an error renames the files, and the commit then misses them and
-  leaves orphans.
-- **PIP-24.** Free `pub(crate)` functions where an owner exists: `memory::{available_memory,
-  memory_budget, load_concurrency}` (for `RunMemory`), `frame_spill::{write_file, map_file}`
-  (only `StoredPlane` uses them), `pipeline/align.rs` `log_detection` (only `light_source` uses
-  it). `stored_plane.rs` discards the `advise` result without saying why.
-  `pipeline/detector_pool.rs`
-  and `ingest/ingest_run.rs` are over the 40% test share.
-
-**Design.**
-1. One `platform/` module: `mod.rs` picks `linux.rs`, `macos.rs` or `windows.rs`, with Unix code
-   both share in `unix.rs`. Its API is the same on every OS, and no caller uses `cfg`:
-   - `ScratchFile`: create deleted-on-close, map, advise (a documented no-op where the OS has no
-     advice);
-   - `SystemMemory`: the available memory and the process's limit. Linux reads cgroups
-     (`CgroupMemory` and `MountTable` move in), Windows reads the Job object, macOS has no limit
-     source (a documented `None`). The macOS zero-available workaround moves into `macos.rs`;
-   - the default cache root (`default_cache_root`);
-   - the free space of the filesystem that holds a path.
-2. Windows memory (decided: the `windows` crate 0.62, already in `Cargo.lock`, a Windows-only
-   workspace dependency with `Win32_System_JobObjects`): available = the smallest of the free
-   memory, the process limit less the process's committed memory, and the job limit less the
-   job's committed memory, each limit only where its flag (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`,
-   `JOB_OBJECT_LIMIT_JOB_MEMORY`) is set. The cgroup reader also takes a limit less its usage: a
-   limit alone overstates what a process that already holds memory can allocate. Confirm the
-   query for the job's current commit against the Windows SDK documentation before writing it.
-   `common` keeps its `windows-sys` use as it is.
-3. PIP-15: `SystemMemory` is created per run in `RunMemory::read`, with no `SYSTEM` or `GROUPS`
-   statics. `COUNTER` moves onto `RunScratch`; `create_new` with `AlreadyExists` already handles
-   collisions across instances.
-4. PIP-16: where Batch 20 builds the `Tier`, before any write, estimate the bytes the run writes:
-   the stored frames (warped, drizzled or decoded, as the plan sizes them), the parked set on the
-   Auto path, and the kept-cache frames not yet committed when `keep_cache` is set. Compare with
-   the free space of the filesystem of the scratch root, and of the kept cache when it is on
-   another one. Free space comes from `sysinfo::Disks` (already a dependency): the disk whose mount
-   point is the longest prefix of the canonicalized root. Fail with
-   `FrameStoreError::InsufficientSpace { needed, available }`. The check is advisory: space can
-   still run out later.
-5. PIP-22: `FramePlane::file_tag()` names cache files; `Display` stays prose.
-6. PIP-24: the three memory functions become `RunMemory` methods; `write_file` and `map_file`
-   move into `stored_plane.rs`; `log_detection` moves to its user; the ignored `advise` result
-   says why it is ignored (advice is a hint); split the two over-tested files.
-
-**Tests:** the `SystemMemory` and `ScratchFile` APIs on Linux; `InsufficientSpace` from a fake
-free-space figure through a test seam, with the needed bytes hand-computed for a spilled warped
-run and a spilled drizzle run.
-
-**Crates:** lumos.
 
 ---
 
@@ -402,10 +329,10 @@ real X-Trans set. Only when it passes does `XTransUnsupported` go.
 
 | ID | Question | How |
 |---|---|---|
-| PIP-5 | A parked frame is warped straight from a map advised `Sequential` (`frame_store/stored_plane.rs`, `pipeline/pipeline_frame.rs`). A 180° flip reads rows in reverse, a 90° turn reads one column per output row, against the readahead. The plan already charges the source as resident, so the map saves nothing. | After Batch 21. Add legs to `pipeline/bench.rs`: Auto + spill warp at 0°, 90° and 180°, `Sequential` against `Normal`. Adopt `Normal` (or an owned read) if any angle is at least 1.2× faster and none is slower. |
+| PIP-5 | A parked frame is warped straight from a map advised `Sequential` (`frame_store/stored_plane.rs`, `pipeline/pipeline_frame.rs`). A 180° flip reads rows in reverse, a 90° turn reads one column per output row, against the readahead. The plan already charges the source as resident, so the map saves nothing. | Add legs to `pipeline/bench.rs`: Auto + spill warp at 0°, 90° and 180°, `Sequential` against `Normal`. Adopt `Normal` (or an owned read) if any angle is at least 1.2× faster and none is slower. |
 | PIP-6 | Auto + spill parks the demosaiced frame (3 planes) where the calibrated mosaic (1 plane plus flags) would do, at the cost of a second demosaic. | Bench both on SSD; adopt the faster. The output is identical, because the demosaic is deterministic. |
 | PIP-18 | `FrameStats::measure`'s `slot_median` collects each slot's samples, one frame across the slots in parallel: what `DECODE_TRANSIENT_FACTOR = 2` pays for, and it caps decode concurrency on tight budgets. | Replace the copy with the exact radix select (`math/statistics/radix_median.rs`) over the f32 bits in streaming passes with the same keep predicate. Adopt if bit identical; then set `DECODE_TRANSIENT_FACTOR` to the largest transient left. |
-| PIP-19 | Disk I/O and compute do not overlap: each chunk boundary is a barrier and then a burst of page faults. DSS measured reads at about 7% of combine time. | After Batch 21. `madvise(WILLNEED)` the next chunk through `ScratchFile`; adopt if the spill-tier combine bench gains at least 10%. |
+| PIP-19 | Disk I/O and compute do not overlap: each chunk boundary is a barrier and then a burst of page faults. DSS measured reads at about 7% of combine time. | `madvise(WILLNEED)` the next chunk through `MappedFile` (`platform/mod.rs`); adopt if the spill-tier combine bench gains at least 10%. |
 | RAW-10 | Every RAW load reads the whole file and opens it from memory (`io/raw/libraw.rs`, `libraw_open_buffer`). | `bench_unpack_file_vs_buffer` (`bench` + `real-data`) on CR2, CR3, NEF and RAF. *Needs real data.* |
 | RAW-12 | Decode makes two passes over the raw buffer: `UnpackedRaw::decode_flags` (`io/raw/unpacked_raw.rs`: a `%` and `/` per pixel, a flag plane always allocated and zero-filled, a serial count) and `normalize` (`io/raw/black_level/mod.rs`: a channel closure and black lookup per pixel). | Fuse into one row pass with per-row tables over the CFA and repeat periods, per-row flag counts, and a flag plane made only once a row flags something. Add a synthetic leg to `io/raw/bench.rs`; adopt if decode time (excluding `unpack`) falls and the output is bit identical. |
 | CMB-17 | Winsorized walks the copy twice per clamp step, mean then squared deviations, up to 50 steps × N per pixel (`combine/rejection/winsorized_clip_config.rs`). | Fuse each step into one f64 pass of sums shifted by the previous centre. This is as accurate but rounds differently, and a sample at a clamp boundary can change side, so it is not bit identical. Adopt only if `bench_stack_300` Winsorized is at least 1.2× faster and the user approves the pin change, with the largest output change stated. |
@@ -421,6 +348,9 @@ real X-Trans set. Only when it passes does `XTransUnsupported` go.
 - **Batch 23:** the flagged fraction per colour on a cooled-CMOS master and on a DSLR set. If it
   is large on a well-stacked cooled master, the threshold multiplier is the lever. Gr/Gb repairs.
 - **Batch 27:** `k` across a DSLR session, and the residual hot-pixel pattern with and without it.
+- **Batch 21:** `platform/macos.rs` is not compiled here (no macOS target), and
+  `platform/windows.rs` only through a Windows clippy of the platform module. Build and test lumos
+  on macOS and on Windows, the free space and the Job-object memory most of all.
 - **RAW-10, DMS-6:** the measurements in their rows.
 
 ---
