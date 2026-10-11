@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use fits_well::image::SampleType;
 use glam::DVec2;
+use serde::{Deserialize, Serialize};
 
 use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::flat_gain::FlatGain;
@@ -11,11 +12,12 @@ use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, Ro
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::sample_type_record::SampleTypeRecord;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::size2us::Size2us;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageMetadata {
     pub object: Option<String>,
     /// The camera: a FITS `INSTRUME`, or a camera RAW's make and model.
@@ -32,6 +34,10 @@ pub struct ImageMetadata {
     pub iso: Option<u32>,
     /// The type a FITS source stored its samples as, after its unsigned-offset convention;
     /// `None` for a source with no such declaration.
+    #[serde(
+        serialize_with = "SampleTypeRecord::serialize_option",
+        deserialize_with = "SampleTypeRecord::deserialize_option"
+    )]
     pub sample_type: Option<SampleType>,
     /// The multipliers that balance the samples as stored, `[R, G1, B, G2]`, normalized so the
     /// smallest is `1.0`: the camera's as-shot balance, or unity for a RAW file whose samples

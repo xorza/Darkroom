@@ -20,9 +20,11 @@ pub struct IngestConfig {
     /// `%LOCALAPPDATA%\lumos` on Windows, with `/var/tmp/lumos` or the temporary directory where
     /// there is no home to find.
     pub cache_dir: PathBuf,
-    /// Keep each decoded frame of a [`stack`](crate::stack) or of a calibration master in the
-    /// decode cache, for a later run on the same files to reuse, whether the run fits in memory or
-    /// spills. The registered pipeline and the drizzle neither read nor write it.
+    /// Keep each decoded frame in the decode cache, with its metadata, for a later run on the same
+    /// files to reuse, whether the run fits in memory or spills: the frames of a
+    /// [`stack`](crate::stack) and of a calibration master, the lights of a registered stack — a
+    /// RAW light as its uncalibrated mosaic, so other masters reuse it too — and the frames of a
+    /// drizzle.
     ///
     /// Off by default: a kept frame costs its whole size on disk until you delete the directory.
     /// A run's own scratch is never kept either way.

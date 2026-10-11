@@ -272,6 +272,18 @@ impl StackableImage for CfaImage {
             flags: self.flags,
         }
     }
+
+    fn from_parts(parts: ImageParts, cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self {
+        let ImageParts { planes, flags } = parts;
+        assert_eq!(planes.len(), 1, "a mosaic is one plane");
+        let data = planes.into_iter().next().expect("one plane");
+        Self {
+            data,
+            cfa_type: cfa_type.expect("a mosaic states its pattern"),
+            metadata,
+            flags,
+        }
+    }
 }
 
 impl CfaImage {

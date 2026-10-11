@@ -1,11 +1,13 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FitsHduProvenance {
     pub index: usize,
     pub extname: Option<String>,
     pub extver: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FitsChecksumState {
     NotChecked,
     Absent,
@@ -13,7 +15,7 @@ pub enum FitsChecksumState {
     Valid,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FitsChecksumProvenance {
     pub datasum: FitsChecksumState,
     pub checksum: FitsChecksumState,
@@ -29,7 +31,7 @@ impl FitsChecksumProvenance {
     };
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FitsTransferProvenance {
     pub bscale: f64,
     pub bzero: f64,

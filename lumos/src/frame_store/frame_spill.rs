@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use common::SerdeFormat;
 use common::file_utils;
+use imaginarium::Buffer2;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -21,12 +22,14 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
+use crate::math::size2us::Size2us;
 
 /// The sidecar layout pin: the digest of a fixed [`Commit`] and [`FrameStats`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "61969e64650726e7";
+pub(crate) const SIDECAR_PIN: &str = "70df554b1dc47f3a";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -95,24 +98,33 @@ impl<'a> FrameSpill<'a> {
         fs::metadata(self.flags_path()).is_ok_and(|metadata| metadata.len() == expected)
     }
 
-    /// Record a kept frame whose planes are all written, decoded under `key`, with the digests of
-    /// the planes as written. The commit record goes last, so a run killed before it leaves a cache
-    /// the next run rebuilds.
+    /// Record a kept frame whose planes are all written, decoded under `key` into `decoded`, with
+    /// the digests of the planes as written. The commit record goes last, so a run killed before it
+    /// leaves a cache the next run rebuilds.
     pub(crate) fn commit(
         &self,
         key: CacheKey,
-        carries: Carries,
+        decoded: Decoded,
         digests: PlaneDigests,
         stats: &FrameStats,
     ) -> Result<(), FrameStoreError> {
         write_sidecar(&self.stats_path(), stats)?;
+        let Decoded {
+            dimensions,
+            carries,
+            metadata,
+        } = decoded;
         write_sidecar(
             &self.commit_path(),
             &Commit {
                 key,
                 source: self.source.as_os_str().as_encoded_bytes().to_vec(),
+                width: dimensions.width(),
+                height: dimensions.height(),
+                channels: dimensions.channels(),
                 carries,
                 digests,
+                metadata,
             },
         )
     }
@@ -134,9 +146,15 @@ impl<'a> FrameSpill<'a> {
         {
             return None;
         }
+        let dimensions =
+            ImageDimensions::checked(Size2us::new(commit.width, commit.height), commit.channels)?;
         Some(Committed {
             stats,
-            carries: commit.carries,
+            decoded: Decoded {
+                dimensions,
+                carries: commit.carries,
+                metadata: commit.metadata,
+            },
             digests: commit.digests,
         })
     }
@@ -173,13 +191,20 @@ impl PlaneStore for FrameSpill<'_> {
         StoredPlane::map(&path)
     }
 
-    fn store_gain(&self, _channel: usize, _nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
-        unreachable!("a kept frame is as its source decodes, and no flat divided that")
+    /// Held in memory: a kept frame's flat gain travels whole in its commit's metadata, a sixteenth
+    /// of a plane per channel, and is read back from there.
+    fn store_gain(&self, _channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
+        Ok(StoredPlane::Memory(Buffer2::new(
+            nodes.len(),
+            1,
+            nodes.to_vec(),
+        )))
     }
 }
 
 /// The record that commits a kept frame: the key its planes were decoded under, the source they
-/// are of, which planes it wrote beside its channels, and what those planes held.
+/// are of, the frame's shape, which planes it wrote beside its channels, what those planes held,
+/// and the decode's metadata, which a later run takes the frame back with.
 ///
 /// The carried planes are what make a frame whose flags are gone a cache to rebuild rather than a
 /// frame with no nulls: reusing its channels without them would put the fill under every null, or
@@ -190,8 +215,21 @@ struct Commit {
     key: CacheKey,
     /// The source's canonical path, as its platform encodes it.
     source: Vec<u8>,
+    width: usize,
+    height: usize,
+    channels: usize,
     carries: Carries,
     digests: PlaneDigests,
+    metadata: ImageMetadata,
+}
+
+/// What a decode left beside its planes, which a commit records: the frame's shape, the planes it
+/// wrote beside its channels, and its metadata.
+#[derive(Debug, Clone)]
+pub(crate) struct Decoded {
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) carries: Carries,
+    pub(crate) metadata: ImageMetadata,
 }
 
 /// The blake3 digest of each plane a reuse reads: every channel, and the flags plane when the
@@ -237,7 +275,7 @@ impl Carries {
 #[derive(Debug)]
 pub(crate) struct Committed {
     pub(crate) stats: FrameStats,
-    pub(crate) carries: Carries,
+    pub(crate) decoded: Decoded,
     pub(crate) digests: PlaneDigests,
 }
 
@@ -288,7 +326,11 @@ pub(crate) mod internals {
     use std::path::Path;
 
     use crate::frame_store::cache_key::CacheKey;
-    use crate::frame_store::frame_spill::{Commit, FrameSpill, PlaneDigests, read_sidecar};
+    use crate::frame_store::frame_spill::{
+        Commit, Decoded, FrameSpill, PlaneDigests, read_sidecar,
+    };
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::math::size2us::Size2us;
 
     impl<'a> FrameSpill<'a> {
         /// A kept frame's files under `stem` in `directory`, of a source with no path:
@@ -313,7 +355,16 @@ pub(crate) mod internals {
                 flags: commit.carries.flags().then(|| digest(&self.flags_path())),
             };
             let stats = read_sidecar(&self.stats_path()).unwrap();
-            self.commit(key, commit.carries, digests, &stats).unwrap();
+            let decoded = Decoded {
+                dimensions: ImageDimensions::checked(
+                    Size2us::new(commit.width, commit.height),
+                    commit.channels,
+                )
+                .unwrap(),
+                carries: commit.carries,
+                metadata: commit.metadata,
+            };
+            self.commit(key, decoded, digests, &stats).unwrap();
         }
     }
 }
@@ -329,15 +380,34 @@ mod tests {
     use crate::frame_store::capture_conditions::CaptureConditions;
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::frame_facts::FrameFacts;
+    use std::sync::Arc;
+
+    use fits_well::image::SampleType;
+    use imaginarium::Buffer2;
+
     use crate::frame_store::frame_spill::{
-        Carries, Commit, FrameSpill, PlaneDigests, SIDECAR_FORMAT, SIDECAR_PIN, Sidecar,
+        Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_FORMAT, SIDECAR_PIN, Sidecar,
     };
     use crate::frame_store::frame_stats::{FrameStats, SlotSpread};
+    use crate::io::image::calibration_state::CalibrationState;
     use crate::io::image::cfa::CfaType;
     use crate::io::image::cfa::cfa_pattern::CfaPattern;
+    use crate::io::image::fits::provenance::{
+        FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
+    };
+    use crate::io::image::flat_gain::{FlatGain, GainGrid};
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::image_metadata::ImageMetadata;
     use crate::io::image::image_provenance::RowOrder;
+    use crate::io::image::image_provenance::{
+        ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+        TransferProvenance,
+    };
+    use crate::io::image::mosaic_noise::MosaicNoise;
     use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::io::image::unverified_conditions::UnverifiedConditions;
+    use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+    use crate::math::size2us::Size2us;
     use crate::math::statistics::mad_to_sigma;
 
     fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {
@@ -387,6 +457,107 @@ mod tests {
         }
     }
 
+    /// Metadata with every field set, its flat gain and every part of its provenance among them.
+    fn metadata() -> ImageMetadata {
+        let size = Size2us::new(9, 5);
+        let grid = GainGrid::of(size);
+        let nodes = (0..3)
+            .map(|channel| {
+                Buffer2::new(
+                    grid.columns,
+                    grid.rows,
+                    (0..grid.columns * grid.rows)
+                        .map(|node| 1.0 + 0.125 * (node + channel) as f32)
+                        .collect(),
+                )
+            })
+            .collect();
+        ImageMetadata {
+            object: Some("M 42".to_owned()),
+            instrument: Some("ZWO ASI2600MC".to_owned()),
+            telescope: Some("RedCat 51".to_owned()),
+            date_obs: Some("2026-01-02T03:04:05".to_owned()),
+            date_local: Some("2026-01-02T04:04:05".to_owned()),
+            exposure_time: Some(300.0),
+            iso: Some(800),
+            sample_type: Some(SampleType::U16),
+            camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            filter: Some("L-eXtreme".to_owned()),
+            gain: Some(100.0),
+            egain: Some(0.25),
+            ccd_temp: Some(-10.0),
+            camera_temp: Some(21.5),
+            image_type: Some("LIGHT".to_owned()),
+            xbinning: Some(1),
+            ybinning: Some(2),
+            set_temp: Some(-10.0),
+            offset: Some(50),
+            focal_length: Some(250.0),
+            airmass: Some(1.25),
+            ra_deg: Some(83.82),
+            dec_deg: Some(-5.39),
+            pixel_size_x: Some(3.76),
+            pixel_size_y: Some(3.76),
+            data_max: Some(65535.0),
+            provenance: Some(ImageProvenance {
+                container: SourceContainer::Fits,
+                decoder: DecoderProvenance::FitsWell,
+                transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
+                    bscale: 1.0,
+                    bzero: 32768.0,
+                    hdu: FitsHduProvenance {
+                        index: 1,
+                        extname: Some("SCI".to_owned()),
+                        extver: Some(2),
+                    },
+                    checksum: FitsChecksumProvenance {
+                        datasum: FitsChecksumState::Valid,
+                        checksum: FitsChecksumState::Absent,
+                    },
+                }),
+                color: ColorProvenance::SensorCfa,
+                clipped: true,
+                demosaic: DemosaicProvenance::LumosMarkesteijn {
+                    passes: MarkesteijnPasses::Three,
+                },
+                row_order: RowOrder::BottomUp,
+            }),
+            domain: Some(SampleDomain {
+                scale: 65535.0,
+                origin: ScaleOrigin::Declared,
+                pedestal: Pedestal::Kept(2048.0),
+                unit: Some("ADU".to_owned()),
+            }),
+            quantization_sigma: Some(4.4e-6),
+            mosaic_noise: Some(MosaicNoise {
+                sigma: [0.01, 0.02, 0.03],
+                read_share: [0.25, 0.5, 0.75],
+                sky: [0.1, 0.2, 0.3],
+                quantization_sigma: Some(4.4e-6),
+            }),
+            flat_gain: Some(Arc::new(FlatGain::from_nodes(size, nodes))),
+            saturation_flagged: true,
+            calibration: CalibrationState {
+                bias: true,
+                thermal: true,
+                flat: false,
+            },
+            unverified_dark: UnverifiedConditions {
+                exposure: true,
+                temperature: false,
+            },
+        }
+    }
+
+    /// What a decode of 4 × 3 mono left, carrying `carries`, with [`metadata`].
+    fn decoded(carries: Carries) -> Decoded {
+        Decoded {
+            dimensions: ImageDimensions::new((4, 3), 1),
+            carries,
+            metadata: metadata(),
+        }
+    }
+
     /// A key spelled out field by field, so the pin below does not move with `DECODE_VERSION` or
     /// the default options.
     const fn key(decode_version: u64) -> CacheKey {
@@ -415,11 +586,15 @@ mod tests {
         let commit = Commit {
             key: key(7),
             source: b"/data/lights/light_0001.cr2".to_vec(),
+            width: 6024,
+            height: 4022,
+            channels: 1,
             carries: Carries::NullMask,
             digests: PlaneDigests {
                 channels: vec![[3; 32], [5; 32]],
                 flags: Some([7; 32]),
             },
+            metadata: metadata(),
         };
         common::serialize_into(&commit, SerdeFormat::Bitcode, &mut bytes).unwrap();
         let stats = stats(&[(0.5, 0.25), (0.75, 0.125)], Some(2e-5));
@@ -447,9 +622,20 @@ mod tests {
                 Carries::Flags,
             ),
         ] {
-            spill.commit(key, carries, digests(), &stats).unwrap();
+            spill
+                .commit(key, decoded(carries), digests(), &stats)
+                .unwrap();
             let committed = spill.committed(key).unwrap();
-            assert_eq!(committed.carries, carries);
+            assert_eq!(committed.decoded.carries, carries);
+            assert_eq!(
+                committed.decoded.dimensions,
+                ImageDimensions::new((4, 3), 1)
+            );
+            assert_eq!(
+                format!("{:?}", committed.decoded.metadata),
+                format!("{:?}", metadata()),
+                "every field of the metadata, its flat gain among them, reads back"
+            );
             assert_eq!(committed.stats.medians, stats.medians);
             assert_eq!(committed.stats.quantization_sigma, stats.quantization_sigma);
             assert_eq!(committed.stats.facts, stats.facts);
@@ -469,7 +655,7 @@ mod tests {
             spill
                 .commit(
                     key,
-                    Carries::Channels,
+                    decoded(Carries::Channels),
                     digests(),
                     &stats(&[(42.5, 3.25)], Some(sigma)),
                 )
@@ -478,7 +664,7 @@ mod tests {
         }
 
         spill
-            .commit(key, Carries::Channels, digests(), &valid)
+            .commit(key, decoded(Carries::Channels), digests(), &valid)
             .unwrap();
         fs::write(spill.stats_path(), b"bad").unwrap();
         assert!(spill.committed(key).is_none(), "corrupt statistics");
@@ -495,7 +681,7 @@ mod tests {
         assert!(spill.committed(key).is_none(), "another layout tag");
 
         spill
-            .commit(key, Carries::Channels, digests(), &valid)
+            .commit(key, decoded(Carries::Channels), digests(), &valid)
             .unwrap();
         fs::remove_file(spill.commit_path()).unwrap();
         assert!(spill.committed(key).is_none(), "no commit record");
@@ -503,7 +689,7 @@ mod tests {
         let blocker = directory.join("not_a_directory");
         fs::write(&blocker, b"file").unwrap();
         let error = FrameSpill::named(&blocker, "frame")
-            .commit(key, Carries::Channels, digests(), &valid)
+            .commit(key, decoded(Carries::Channels), digests(), &valid)
             .unwrap_err();
         let expected = blocker.join("frame.stats");
         assert!(matches!(

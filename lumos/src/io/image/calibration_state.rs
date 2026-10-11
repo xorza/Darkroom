@@ -1,5 +1,7 @@
 //! [`CalibrationState`]: the parts of a frame's signal that calibration removed.
 
+use serde::{Deserialize, Serialize};
+
 /// The parts of a frame's signal that calibration removed from its samples.
 ///
 /// A frame holds the bias and the dark current's signal additively, and the flat field's response
@@ -7,7 +9,7 @@
 /// removed twice: a flat-dark stacked with the bias taken from each frame holds the dark signal
 /// alone, so the flat it is taken from still needs its bias, and a dark that lost its bias scales
 /// with exposure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CalibrationState {
     /// The bias: the sensor's offset and its fixed pattern.
     pub bias: bool,

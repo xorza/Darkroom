@@ -14,6 +14,7 @@ pub(crate) mod mosaic_noise;
 pub(crate) mod pixel_flags;
 pub(crate) mod preview_image;
 pub(crate) mod sample_domain;
+pub(crate) mod sample_type_record;
 pub(crate) mod standard;
 pub(crate) mod unverified_conditions;
 

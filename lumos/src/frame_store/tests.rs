@@ -6,6 +6,7 @@ use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::internals::panic_message;
@@ -221,8 +222,10 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 /// A cached frame comes back whole or not at all. Its mask returns with its channels — reusing the
 /// channels without it would put the fill under its nulls into the stack as data on every run after
 /// the first — and a frame committed with one is rebuilt when its flags are gone, rather than read
-/// as a frame with no nulls. Another key finds nothing: another decode
-/// version, decoder, X-Trans pass count or FITS HDU.
+/// as a frame with no nulls, and one whose plane is shorter than the shape it was committed with is
+/// rebuilt too. Read back whole it is the image it was decoded to; one a flat divided comes back with
+/// its flat gain. Another key finds nothing:
+/// another decode version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let directory = TempDir::new("frame_store_cached_quality");
@@ -244,16 +247,25 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     };
 
     let spill = cache("masked", &image);
-    let reused = StoredFrame::reuse(&spill, key, dimensions)
-        .unwrap()
-        .unwrap();
-    assert_eq!(reused.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
-    assert_eq!(reused.quality.mask(), Some(QualityFlags::NO_DATA));
+    let reused = StoredFrame::reuse(&spill, key).unwrap().unwrap();
+    assert_eq!(reused.dimensions, dimensions);
+    assert_eq!(reused.frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(reused.frame.quality.mask(), Some(QualityFlags::NO_DATA));
     assert_eq!(
-        reused.flags.as_ref().unwrap().chunk(0, 4),
+        reused.frame.flags.as_ref().unwrap().chunk(0, 4),
         &[0, 0, QualityFlags::NO_DATA.byte(), 0]
     );
-    drop(reused);
+    // Read back whole, the frame is the image it was decoded to, flags and metadata with it.
+    let restored: LinearImage = reused.into_image();
+    assert_eq!(restored.channel(0).pixels(), image.channel(0).pixels());
+    assert_eq!(
+        restored.flags.as_ref().unwrap().bytes(),
+        image.flags.as_ref().unwrap().bytes()
+    );
+    assert_eq!(
+        format!("{:?}", restored.metadata),
+        format!("{:?}", image.metadata)
+    );
 
     let other_version = CacheKey {
         decode_version: key.decode_version ^ 1,
@@ -280,46 +292,57 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         .into_iter()
         .chain(other_options)
     {
-        assert!(
-            StoredFrame::reuse(&spill, other, dimensions)
-                .unwrap()
-                .is_none()
-        );
+        assert!(StoredFrame::reuse(&spill, other).unwrap().is_none());
     }
-    assert!(
-        StoredFrame::reuse(&spill, key, ImageDimensions::new((4, 1), 1))
-            .unwrap()
-            .is_some(),
-        "the same sample count is the same plane size"
-    );
-    assert!(
-        StoredFrame::reuse(&spill, key, ImageDimensions::new((3, 2), 1))
-            .unwrap()
-            .is_none(),
-        "planes of another size"
-    );
 
     fs::remove_file(spill.flags_path()).unwrap();
     assert!(
-        StoredFrame::reuse(&spill, key, dimensions)
-            .unwrap()
-            .is_none(),
+        StoredFrame::reuse(&spill, key).unwrap().is_none(),
         "a mask without its flags"
     );
 
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let spill = cache("plain", &plain);
-    let reused = StoredFrame::reuse(&spill, key, dimensions)
+    let reused = StoredFrame::reuse(&spill, key).unwrap().unwrap();
+    assert!(reused.frame.quality.is_none());
+    assert!(reused.frame.flat_gain.is_none());
+    drop(reused);
+
+    // A frame a flat divided keeps its gain in its commit's metadata, and comes back with it: the
+    // grid of the metadata, and the stored gain the combine reads, one channel of it.
+    let gain = Arc::new(FlatGain::of_divisor(
+        &Buffer2::new(2, 2, vec![0.5, 0.25, 1.0, 0.5]),
+        &CfaType::Mono,
+        |_| false,
+    ));
+    let mut flattened = plain.clone();
+    flattened.metadata.flat_gain = Some(Arc::clone(&gain));
+    let reused = StoredFrame::reuse(&cache("flattened", &flattened), key)
         .unwrap()
         .unwrap();
-    assert!(reused.quality.is_none());
-    drop(reused);
-    fs::remove_file(spill.channel_path(0)).unwrap();
     assert!(
-        StoredFrame::reuse(&spill, key, dimensions)
+        reused
+            .metadata
+            .flat_gain
+            .as_ref()
             .unwrap()
-            .is_none()
+            .planes()
+            .eq(gain.planes())
     );
+    assert_eq!(
+        reused.frame.flat_gain.as_ref().map(StoredGain::channels),
+        Some(1)
+    );
+    drop(reused);
+    let channel = fs::read(spill.channel_path(0)).unwrap();
+    fs::write(spill.channel_path(0), &channel[..12]).unwrap();
+    assert!(
+        StoredFrame::reuse(&spill, key).unwrap().is_none(),
+        "a plane shorter than the shape it was committed with"
+    );
+    fs::write(spill.channel_path(0), &channel).unwrap();
+    fs::remove_file(spill.channel_path(0)).unwrap();
+    assert!(StoredFrame::reuse(&spill, key).unwrap().is_none());
 }
 
 #[test]

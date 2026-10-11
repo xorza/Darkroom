@@ -26,6 +26,18 @@ impl ImageDimensions {
         Self { size, channels }
     }
 
+    /// The dimensions `size` and `channels` describe, or `None` where [`Self::new`] would panic: for
+    /// a figure read back from a file rather than one the code made.
+    pub(crate) fn checked(size: Size2us, channels: usize) -> Option<Self> {
+        let representable = size.width > 0
+            && size.height > 0
+            && size.width <= Self::MAX_SIDE
+            && size.height <= Self::MAX_SIDE
+            && (channels == 1 || channels == 3)
+            && size.pixel_count().checked_mul(channels).is_some();
+        representable.then_some(Self { size, channels })
+    }
+
     /// Panic unless `size` and `channels` describe a representable image.
     ///
     /// The same contract [`Self::new`] enforces, split out for callers that carry the extent in
