@@ -1634,6 +1634,7 @@ dependencies = [
  "glam 0.34.1",
  "image",
  "imaginarium",
+ "libc",
  "libraw-sys",
  "memmap2",
  "nalgebra",

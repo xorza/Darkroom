@@ -44,6 +44,9 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     /// The image's channel planes and its flags, moved out.
     fn into_parts(self) -> ImageParts;
 
+    /// The image `parts` make, of `cfa_type` and with `metadata`: a kept frame read back whole.
+    fn from_parts(parts: ImageParts, cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self;
+
     /// The gain a flat applied to the image's pixels, for an image a flat divided.
     ///
     /// # Panics

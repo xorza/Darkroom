@@ -38,6 +38,21 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use memmap2::Mmap;
+
+    /// Nothing: this system offers no call that drops a file's pages from its cache here.
+    pub(crate) const fn evict(_map: &Mmap) -> bool {
+        false
+    }
+
+    /// `None`: not read on this system.
+    pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
+        None
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;

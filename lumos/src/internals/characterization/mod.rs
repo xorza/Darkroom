@@ -9,13 +9,19 @@
 
 mod snapshot;
 
+use std::path::PathBuf;
+
 use crate::calibration_masters::calibration_set::CalibrationSet;
-use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration_masters::master_cache::MASTER_PIN;
+use crate::calibration_masters::master_role::MasterRole;
+use crate::calibration_masters::master_subtraction::Subtractor;
+use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master};
 use crate::combine::config::{Normalization, StackConfig, Weighting};
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::cache_key::DECODE_PINS;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
@@ -220,6 +226,88 @@ fn calibrate_snapshot() {
         image_snapshot(&mut snapshot, &demosaiced);
     }
     assert_decode("demosaic", &snapshot, DECODE_PINS.demosaic);
+}
+
+/// The master stack a cached master is keyed by: a bias of 3 frames, a dark of 3 and a flat of 8
+/// with the bias taken from each frame, every role under its preset, stacked from RGGB mosaic FITS
+/// frames of 32 × 32 with Gaussian noise, a vignetted flat and a dark with hot pixels.
+#[test]
+fn master_snapshot() {
+    if !pinned_host() {
+        return;
+    }
+    let size = Size2us::new(32, 32);
+    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let scratch = TempDir::new("lumos_master_snapshot");
+    let mut rng = TestRng::new(0x3A57);
+    let mut write = |name: String, level: &dyn Fn(usize) -> f32, sigma: f32| -> PathBuf {
+        let pixels = (0..size.pixel_count())
+            .map(|i| level(i) + sigma * rng.next_gaussian_f32())
+            .collect();
+        let path = scratch.join(name);
+        save_cfa_fits(&path, &make_cfa(size, pixels, bayer)).unwrap();
+        path
+    };
+    let vignette = |i: usize| {
+        let (x, y) = ((i % 32) as f32 - 15.5, (i / 32) as f32 - 15.5);
+        1.0 - 0.3 * (x * x + y * y) / (2.0 * 15.5 * 15.5)
+    };
+    let bias: Vec<PathBuf> = (0..3)
+        .map(|k| write(format!("bias_{k}.fits"), &|_| 0.02, 0.002))
+        .collect();
+    let darks: Vec<PathBuf> = (0..3)
+        .map(|k| {
+            write(
+                format!("dark_{k}.fits"),
+                &|i| if i % 97 == 5 { 0.4 } else { 0.025 },
+                0.002,
+            )
+        })
+        .collect();
+    let flats: Vec<PathBuf> = (0..8)
+        .map(|k| {
+            let level = 0.3 + 0.02 * k as f32;
+            write(
+                format!("flat_{k}.fits"),
+                &|i| 0.02 + level * vignette(i),
+                0.004,
+            )
+        })
+        .collect();
+    let ingest = IngestConfig::with_cache_dir(scratch.join("cache"));
+    let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
+        stack_cfa_master(
+            paths,
+            role,
+            role.stack_config(),
+            &ingest,
+            subtract,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let bias_master = stack(&bias, MasterRole::Bias, None);
+    let dark_master = stack(&darks, MasterRole::Dark, None);
+    let flat_master = stack(
+        &flats,
+        MasterRole::Flat,
+        Some(Subtractor {
+            role: MasterRole::Bias,
+            master: &bias_master,
+        }),
+    );
+    let mut snapshot = Snapshot::default();
+    for master in [&bias_master, &dark_master, &flat_master] {
+        cfa_snapshot(&mut snapshot, master);
+    }
+    assert_eq!(
+        snapshot.finish(),
+        MASTER_PIN,
+        "the master stack moved: state the reason with the change and set MASTER_PIN to this \
+         digest, which moves every MasterRecipe so a cached master is stacked again"
+    );
 }
 
 /// The statistics a kept frame is committed with: the star field as a mono frame, as an RGGB

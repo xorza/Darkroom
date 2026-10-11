@@ -33,6 +33,8 @@ use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
 use crate::drizzle::error::DrizzleError;
+use crate::frame_store::decode_cache::DecodeCache;
+use crate::frame_store::error::KeptDecodeError;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
@@ -47,8 +49,11 @@ use crate::io::image::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 
+/// `frame`'s source decoded as an `I` under `context`, through the decode cache when the run keeps
+/// one.
 fn load_drizzle_frame<I: StackableImage, P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
+    kept: Option<&DecodeCache>,
     context: &LoadContext,
 ) -> Result<DrizzleFrame<I>, DrizzleError> {
     let DrizzleFrame {
@@ -56,12 +61,21 @@ fn load_drizzle_frame<I: StackableImage, P: AsRef<Path>>(
         warp,
         pixel_weight_map,
     } = frame;
-    let image = match I::load(source.as_ref(), context) {
+    let decoded = match kept {
+        Some(kept) => kept.decode::<I>(source.as_ref(), context),
+        None => I::load(source.as_ref(), context).map_err(KeptDecodeError::from),
+    };
+    let image = match decoded {
         Ok(image) => image,
         // Cancellation is the run stopping, not this file failing, so it leaves the load error
         // behind and reports as the drizzle's own.
-        Err(ImageError::Cancelled { .. }) => return Err(DrizzleError::Cancelled),
-        Err(error) => return Err(DrizzleError::ImageLoad(error)),
+        Err(KeptDecodeError::Decode(ImageError::Cancelled { .. })) => {
+            return Err(DrizzleError::Cancelled);
+        }
+        Err(KeptDecodeError::Decode(error)) => return Err(DrizzleError::ImageLoad(error)),
+        Err(KeptDecodeError::Store(error)) => {
+            return Err(DrizzleError::Stack(StackError::FrameStore(error)));
+        }
     };
     Ok(DrizzleFrame {
         source: image,
@@ -188,10 +202,23 @@ fn drizzle_paths<I: StackableImage, P: AsRef<Path>>(
     let frame_count = frames.len();
     let run = IngestRun::new(&drizzle.ingest, cancel);
     let context = run.context.clone();
+    let kept = run
+        .keep_cache
+        .then(|| DecodeCache::open(&run.cache_dir))
+        .transpose()
+        .map_err(|error| DrizzleError::Stack(error.into()))?;
+    if let Some(kept) = &kept {
+        let sources: Vec<&Path> = frames.iter().map(|frame| frame.source.as_ref()).collect();
+        if let Some(peek) = sources.first().and_then(|first| I::peek(first, &context)) {
+            let missing = kept.missing::<I>(&sources, &context) as u64;
+            kept.ensure_space(missing.saturating_mul(peek.resident_bytes() as u64))
+                .map_err(|error| DrizzleError::Stack(error.into()))?;
+        }
+    }
     // Lazy, so only the frame currently being drizzled is resident.
     let loaded = frames
         .into_iter()
-        .map(move |frame| load_drizzle_frame::<I, P>(frame, &context));
+        .map(move |frame| load_drizzle_frame::<I, P>(frame, kept.as_ref(), &context));
     accumulate(
         loaded,
         frame_count,

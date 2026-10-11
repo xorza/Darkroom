@@ -1,6 +1,7 @@
 //! [`BackgroundSplit`]: a frame's background noise split by how a flat amplified it.
 
 use arrayvec::ArrayVec;
+use serde::{Deserialize, Serialize};
 
 /// The background variance of a flat-divided frame: `σ²·(ρ·g² + (1 − ρ)·g)` at a pixel the flat
 /// multiplied by `g = 1/f`.
@@ -94,7 +95,7 @@ impl<T> BinnedSamples<T> {
 }
 
 /// The bounds between [`GAIN_BINS`] bins of equal count over a frame's flat gain, ascending.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GainBins {
     bounds: ArrayVec<f32, { GAIN_BINS - 1 }>,
 }

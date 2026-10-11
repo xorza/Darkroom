@@ -1,6 +1,7 @@
 //! Chunked combine engine for resident and memory-mapped stacking frames.
 
 pub(crate) mod core;
+pub(crate) mod frame_chunk;
 pub(crate) mod frame_gate;
 pub(crate) mod frame_weights;
 pub(crate) mod loader;
@@ -335,6 +336,7 @@ impl FrameCache {
             .process_chunks(&self.frames, chunking.rows, |output_slice, ctx| {
                 let ChunkContext {
                     frames,
+                    chunks,
                     width,
                     channel,
                     pixel_offset,
@@ -343,21 +345,11 @@ impl FrameCache {
                 let chunk_pixels = output_slice.len();
                 debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
                 let chunk_end = pixel_offset + chunk_pixels;
-                let gates: Vec<FrameGate<'_>> = self
-                    .frames
+                let gates: Vec<FrameGate<'_>> = chunks
                     .iter()
-                    .map(|frame| FrameGate::of(frame, channel, pixel_offset, chunk_end))
+                    .map(|chunk| FrameGate::of_chunk(chunk, channel))
                     .collect();
-                let flags: Vec<Option<&[u8]>> = self
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        frame
-                            .flags
-                            .as_ref()
-                            .map(|plane| plane.chunk(pixel_offset, chunk_end))
-                    })
-                    .collect();
+                let flags: Vec<Option<&[u8]>> = chunks.iter().map(|chunk| chunk.flags).collect();
                 // The node rows of each frame's flat gain the chunk reads, for the noise model, and
                 // the grid they share: every frame has the stack's size.
                 let gain_grid = GainGrid::of(dimensions.size());

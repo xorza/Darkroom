@@ -81,6 +81,29 @@ fn excluded_pixels_leave_the_estimate() {
     );
 }
 
+/// A frame the support covers whole still reads its noise: 48 × 48 of σ = 0.01 crossed by one
+/// bright 32-pixel line, whose coarse layers reach every pixel, leaves no pixel outside the
+/// support, and the k-σ estimate of the first layer stands. Each frame reads above 0, and the mean
+/// of 16 reads σ within 4%: one frame's estimate scatters by 5.2% (400 frames measured), against
+/// 1.7% on the noise alone, as the line's trace in the first layer is clipped more or less with
+/// each draw; the mean of 16 scatters by 1.3%, and 4% is three of that.
+#[test]
+fn a_frame_the_support_covers_whole_reads_its_noise() {
+    let size = Size2us::new(48, 48);
+    let estimates: Vec<f32> = (0..16)
+        .map(|seed| {
+            let mut frame = white_noise(size, 0.01, 11 + seed);
+            for x in 8..40 {
+                frame[24 * 48 + x] += 1.0;
+            }
+            MrsNoise::estimate(&frame, size, |_| false)
+        })
+        .collect();
+    assert!(estimates.iter().all(|&sigma| sigma > 0.0), "{estimates:?}");
+    let mean = estimates.iter().sum::<f32>() / 16.0;
+    assert!((mean - 0.01).abs() < 0.000_4, "{mean}");
+}
+
 /// Each colour of a Bayer mosaic reads its own noise, through a gradient the differences cancel.
 /// σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: red and blue keep 32 768 pairs each, green
 /// 65 536. MAD's standard error is 1.166·σ/√n, so 3 of them is 1.9% of σ for red and blue and 1.4%

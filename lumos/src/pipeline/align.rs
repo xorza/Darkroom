@@ -74,11 +74,7 @@ pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
     }
     config.validate_linear(light_paths.len())?;
     let run = IngestRun::new(&config.ingest, cancel.clone());
-    LightFiles {
-        paths: light_paths,
-        preparation: Preparation::Linear,
-    }
-    .stack(config, &run, progress, cancel)
+    LightFiles::new(light_paths, Preparation::Linear, &run)?.stack(config, &run, progress, cancel)
 }
 
 /// Register every frame to the chosen reference, warp it, and combine the survivors.

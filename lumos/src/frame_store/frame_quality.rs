@@ -111,9 +111,9 @@ impl<P> DropPlanes<P> {
         }
     }
 
-    fn try_map<Q, E>(
-        &self,
-        mut convert: impl FnMut(FramePlane, &P) -> Result<Q, E>,
+    fn try_map<'s, Q, E>(
+        &'s self,
+        mut convert: impl FnMut(FramePlane, &'s P) -> Result<Q, E>,
     ) -> Result<DropPlanes<Q>, E> {
         Ok(DropPlanes {
             weight: convert(FramePlane::DropWeight, &self.weight)?,
@@ -270,9 +270,9 @@ impl<P> FrameQuality<P> {
     /// Borrows rather than consumes because its one caller writes the planes to disk and maps them
     /// back — it never needed to own them, and leaving them with the caller is what lets a warped
     /// frame's buffers be reused for the next frame instead of being freed and faulted in again.
-    pub(crate) fn try_map<Q, E>(
-        &self,
-        mut convert: impl FnMut(FramePlane, &P) -> Result<Q, E>,
+    pub(crate) fn try_map<'s, Q, E>(
+        &'s self,
+        mut convert: impl FnMut(FramePlane, &'s P) -> Result<Q, E>,
     ) -> Result<FrameQuality<Q>, E> {
         match self {
             Self::None => Ok(FrameQuality::None),

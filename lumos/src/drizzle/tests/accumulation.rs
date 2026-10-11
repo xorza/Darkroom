@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use common::TempDir;
 
 use super::*;
+use crate::frame_store::decode_cache::DecodeCache;
 use crate::ingest::error::AdmissionError;
 use crate::registration::distortion::sip::SipPolynomial;
 
@@ -58,9 +59,9 @@ fn drizzle_stack_refuses_before_decoding() {
     assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
 }
 
-/// From paths, a drizzle gives what the same frames give in memory once loaded; a file that does
-/// not load is `ImageLoad`; and the run's token governs the decode — a cancelled run reports
-/// `Cancelled`.
+/// From paths, a drizzle gives what the same frames give in memory once loaded, and with
+/// `keep_cache` reads them back from the decode cache on the next run; a file that does not load is
+/// `ImageLoad`; and the run's token governs the decode — a cancelled run reports `Cancelled`.
 #[test]
 fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let scratch = TempDir::new("lumos_drizzle_stack");
@@ -119,6 +120,39 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
     assert_eq!(
         from_paths.image.channel(0).pixels(),
         in_memory.image.channel(0).pixels()
+    );
+
+    // Kept, the frames are written on the first run and read back by the next: a kept frame edited
+    // on disk moves the second, which it would not if that run decoded the source.
+    let mut kept = config.clone();
+    kept.ingest.keep_cache = true;
+    kept.ingest.cache_dir = scratch.join("kept");
+    let run_kept = || {
+        drizzle_stack(
+            frames(&paths),
+            &kept,
+            &plain_stack(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product
+    };
+    assert_eq!(
+        run_kept().image.channel(0).pixels(),
+        in_memory.image.channel(0).pixels()
+    );
+    DecodeCache::open(&kept.ingest.cache_dir)
+        .unwrap()
+        .edit_kept::<LinearImage>(&paths[1], &LoadContext::default(), |plane| {
+            for sample in plane.iter_mut() {
+                *sample += 0.125;
+            }
+        });
+    assert_ne!(
+        run_kept().image.channel(0).pixels(),
+        in_memory.image.channel(0).pixels(),
+        "the edited kept frame is read back"
     );
 
     let missing = [paths[0].clone(), scratch.join("missing.tiff")];
