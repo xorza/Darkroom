@@ -68,6 +68,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 pub(crate) struct CalibrationNotes {
     unverified_exposures: AtomicU64,
     unverified_temperatures: AtomicU64,
+    temperature_differences: AtomicU64,
     scaled_darks: AtomicU64,
     camera_temperature_darks: AtomicU64,
 }
@@ -82,6 +83,10 @@ impl CalibrationNotes {
             &self.unverified_temperatures,
             outcome.unverified.temperature,
         );
+        count(
+            &self.temperature_differences,
+            outcome.dark_temperature_difference.is_some(),
+        );
         count(&self.scaled_darks, outcome.dark_scale.is_some());
         count(
             &self.camera_temperature_darks,
@@ -92,6 +97,7 @@ impl CalibrationNotes {
     fn report_into(&self, report: &mut RunReport, masters: &CalibrationMasters) {
         report.unverified_dark_exposures = self.unverified_exposures.load(Ordering::Relaxed);
         report.unverified_dark_temperatures = self.unverified_temperatures.load(Ordering::Relaxed);
+        report.dark_temperature_differences = self.temperature_differences.load(Ordering::Relaxed);
         report.scaled_darks = self.scaled_darks.load(Ordering::Relaxed);
         report.camera_temperature_darks = self.camera_temperature_darks.load(Ordering::Relaxed);
         report.unverified_flat_dark = masters.unverified_flat_dark();
@@ -102,11 +108,13 @@ impl CalibrationNotes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calibration_masters::temperature_difference::TemperatureDifference;
     use crate::io::image::unverified_conditions::UnverifiedConditions;
 
     /// Four lights: one unverified in exposure, one in temperature and scaled, one matched on its
-    /// camera's temperature, one clean. The report counts each fact once per light that met it, and
-    /// carries the bundle's floored flat pixels and unverified flat-dark, here none.
+    /// camera's temperature, one matched on its sensor's 3 °C off. The report counts each fact once
+    /// per light that met it, and carries the bundle's floored flat pixels and unverified
+    /// flat-dark, here none.
     #[test]
     fn the_notes_count_what_calibration_could_not_check() {
         let notes = CalibrationNotes::default();
@@ -124,6 +132,7 @@ mod tests {
             },
             dark_scale: Some(2.5),
             dark_temperature: None,
+            dark_temperature_difference: None,
         });
         notes.record(CalibrationOutcome {
             dark_temperature: Some(TemperatureSource::Camera),
@@ -131,6 +140,11 @@ mod tests {
         });
         notes.record(CalibrationOutcome {
             dark_temperature: Some(TemperatureSource::Sensor),
+            dark_temperature_difference: Some(TemperatureDifference {
+                reading: TemperatureSource::Sensor,
+                frame: -7.0,
+                dark: -10.0,
+            }),
             ..CalibrationOutcome::default()
         });
         let mut report = RunReport::default();
@@ -139,12 +153,13 @@ mod tests {
             (
                 report.unverified_dark_exposures,
                 report.unverified_dark_temperatures,
+                report.dark_temperature_differences,
                 report.scaled_darks,
                 report.camera_temperature_darks,
                 report.floored_flat_pixels,
                 report.unverified_flat_dark
             ),
-            (1, 1, 1, 1, 0, UnverifiedConditions::NONE)
+            (1, 1, 1, 1, 1, 0, UnverifiedConditions::NONE)
         );
     }
 }

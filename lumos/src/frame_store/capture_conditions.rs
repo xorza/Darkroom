@@ -49,19 +49,26 @@ impl CaptureConditions {
         }
     }
 
-    /// Whether every frame of `set` that states a condition agrees with every other one on it. The
-    /// camera body's temperature is not held to it: a body warms through a session of darks while
-    /// the sensor they measure is what matters, so a set whose bodies drifted only states none.
+    /// Whether every frame of `set` that states an exposure agrees with every other one on it.
     ///
     /// # Errors
     ///
-    /// The first frame, in index order, whose exposure and then whose temperature lies outside the
-    /// tolerance of an earlier frame's, named beside the earlier frame at the far end of the range.
-    pub(crate) fn check_agreement(
+    /// The first frame, in index order, whose exposure lies outside the tolerance of an earlier
+    /// frame's, named beside the earlier frame at the far end of the range.
+    pub(crate) fn check_exposures(
         set: impl IntoIterator<Item = Self> + Clone,
     ) -> Result<(), ConditionMismatch> {
-        CaptureCondition::Exposure.check_agreement(set.clone())?;
-        CaptureCondition::Temperature.check_agreement(set)
+        CaptureCondition::Exposure.check_agreement(set)
+    }
+
+    /// The first frame of `set` whose sensor temperature lies outside the tolerance of an earlier
+    /// frame's: not a refusal, since no reference refuses on temperature, but a set of which
+    /// [`Self::shared`] states no temperature. The camera body's is not compared: a body warms
+    /// through a session of darks while the sensor they measure is what matters.
+    pub(crate) fn temperature_disagreement(
+        set: impl IntoIterator<Item = Self> + Clone,
+    ) -> Option<ConditionMismatch> {
+        CaptureCondition::Temperature.check_agreement(set).err()
     }
 }
 
@@ -202,7 +209,7 @@ mod tests {
             conditions(Some(301.0), Some(-9.5)),
             conditions(Some(302.5), Some(-9.75)),
         ];
-        assert_eq!(CaptureConditions::check_agreement(set), Ok(()));
+        assert_eq!(CaptureConditions::check_exposures(set), Ok(()));
         assert_eq!(
             CaptureConditions::shared(set),
             conditions(Some(903.5 / 3.0), Some(-29.25 / 3.0))
@@ -216,14 +223,14 @@ mod tests {
             conditions(Some(120.0), Some(0.0)),
             conditions(Some(120.0), None),
         ];
-        assert_eq!(CaptureConditions::check_agreement(silent), Ok(()));
+        assert_eq!(CaptureConditions::check_exposures(silent), Ok(()));
         assert_eq!(
             CaptureConditions::shared(silent),
             conditions(Some(120.0), None)
         );
         // Nothing stated at all: nothing to compare, nothing shared.
         let none = [conditions(None, None), conditions(None, None)];
-        assert_eq!(CaptureConditions::check_agreement(none), Ok(()));
+        assert_eq!(CaptureConditions::check_exposures(none), Ok(()));
         assert_eq!(CaptureConditions::shared(none), conditions(None, None));
         // Camera bodies at 20.5 and 21 °C share 20.75; at 20.5 and 24 °C — a body warming through a
         // session of darks — they share none, and the set is not refused for it.
@@ -236,7 +243,7 @@ mod tests {
             Some(20.75)
         );
         let warming = [body(20.5), body(24.0)];
-        assert_eq!(CaptureConditions::check_agreement(warming), Ok(()));
+        assert_eq!(CaptureConditions::temperature_disagreement(warming), None);
         assert_eq!(CaptureConditions::shared(warming).camera_temp, None);
     }
 
@@ -250,7 +257,7 @@ mod tests {
             conditions(Some(300.0), None),
         ];
         assert_eq!(
-            CaptureConditions::check_agreement(mixed),
+            CaptureConditions::check_exposures(mixed),
             Err(ConditionMismatch {
                 condition: CaptureCondition::Exposure,
                 index: 1,
@@ -268,8 +275,8 @@ mod tests {
             conditions(None, Some(-10.5)),
         ];
         assert_eq!(
-            CaptureConditions::check_agreement(drifting),
-            Err(ConditionMismatch {
+            CaptureConditions::temperature_disagreement(drifting),
+            Some(ConditionMismatch {
                 condition: CaptureCondition::Temperature,
                 index: 2,
                 value: -10.5,
@@ -277,6 +284,8 @@ mod tests {
                 reference: -9.4,
             })
         );
+        assert_eq!(CaptureConditions::check_exposures(drifting), Ok(()));
+        assert_eq!(CaptureConditions::shared(drifting).ccd_temp, None);
     }
 
     #[test]

@@ -66,6 +66,7 @@ pub use calibration_masters::error::{
     BundleError, CalibrationError, DarkMismatch, DefectTableError, MasterBuildError,
     SubtractionError,
 };
+pub use calibration_masters::temperature_difference::TemperatureDifference;
 pub use calibration_masters::temperature_source::TemperatureSource;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
@@ -104,6 +105,7 @@ pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 
 pub use calibration_masters::calibration_component::CalibrationComponent;
+pub use calibration_masters::calibration_outcome::CalibrationOutcome;
 pub use calibration_masters::calibration_set::CalibrationSet;
 pub use calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
 pub use calibration_masters::master_cache::{

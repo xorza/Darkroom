@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-27, 28, PIP-5, PIP-19                      independent
+27, PIP-5, PIP-19                          independent
 ```
 
 ---
@@ -91,8 +91,9 @@ ratio (or 1) and the run is marked unverified. Siril offers noise-minimizing dar
    `LightCalibration`; otherwise the exposure ratio stands. The fit reads only those pixels and
    their rings, before the fused pass. `CalibrationOutcome` records `k`, its standard error, the
    pixel count and which scale was used.
-5. **Temperature:** Batch 28 makes a temperature difference a warning. The warning stays when
-   the fit corrects it; the outcome's scale source says whether it was corrected.
+5. **Temperature:** a temperature difference is a warning (`TemperatureDifference` in the outcome,
+   `dark_temperature_differences` in the report). The warning stays when the fit corrects it; the
+   outcome's scale source says whether it was corrected.
 6. Only a bias-removed dark (`DarkBias::Removed`). A dark that holds the bias keeps today's rules.
 
 **Tests:** a synthetic light with a dark scaled by a known `k` (1.37), a sky gradient, and stars on
@@ -101,44 +102,6 @@ are clipped; too few pixels falls back to the exposure ratio and says so; a ligh
 recovers the `k` its synthetic dark current was scaled by.
 
 **Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 28: Temperature warns, never refuses — small
-
-**Decision:** lumos does not refuse a frame or a master for its temperature. A temperature
-outside `TEMPERATURE_TOLERANCE` is a warning: the run report counts it, the outcome records it,
-and `tracing::warn!` logs it. No reference refuses on temperature (Siril, DSS and ccdproc read
-none; PixInsight scales the dark per light "even for temperature-regulated cameras").
-
-**Where lumos refuses today.**
-- `DarkMatch::new` (`calibration_masters/dark_match.rs`) returns `DarkMismatch::Temperature` when
-  a light and its dark, or a flat and its flat-dark, differ by more than 1 °C, on the sensor's
-  reading where both state it, else on the camera body's.
-- `CaptureConditions::check_agreement` (`frame_store/capture_conditions.rs`), called when a dark
-  master is stacked (`calibration_masters/mod.rs`), returns `StackError::MasterConditions` with a
-  `ConditionMismatch` when two frames of the set differ in sensor temperature.
-
-**Design.**
-1. `DarkMatch::new` compares the temperatures as today, and records a difference outside the
-   tolerance instead of returning an error: `DarkMatch` and `CalibrationOutcome` carry it (the
-   reading compared, the frame's and the dark's values). `DarkMismatch::Temperature` goes.
-2. `RunReport` counts the lights whose dark differed in temperature, beside
-   `unverified_dark_temperatures`. A flat whose flat-dark differed is recorded with the flat's
-   other unverified conditions (`unverified_flat_dark`).
-3. `check_agreement` checks the exposure only. A dark set whose sensor temperatures disagree
-   stacks; the master states no shared temperature (`CaptureConditions::shared` already gives
-   `None` then), so its lights count as unverified, and the stack's report says the set
-   disagreed. `ConditionMismatch` keeps the exposure case.
-4. A dark that is not scaled for temperature removes the wrong dark current, about 12% per °C. The
-   warning's doc says so, and says that a fitted scale (Batch 27) corrects it.
-
-**Tests:** a light 3 °C from its dark calibrates, and its outcome and the run report record the
-difference; inside the tolerance, nothing is recorded; a dark set whose sensor temperatures span
-3 °C stacks, states no temperature, and its report says the set disagreed; a dark set of two
-exposures still fails with `MasterConditions`.
-
-**Crates:** lumos, lens, darkroom (public errors and report fields change).
 
 ---
 

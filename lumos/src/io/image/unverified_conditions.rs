@@ -2,16 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The capture conditions not compared when a master holding dark signal was taken from a frame:
-/// the frame or the master did not state them. A dark of another exposure or temperature leaves a
-/// residual of dark signal that nothing reports, so the record says where the match was not
-/// checked.
+/// The capture conditions not known to match when a master holding dark signal was taken from a
+/// frame: the frame or the master did not state them, or, for a temperature, the two differed. A
+/// dark of another exposure or temperature leaves a residual of dark signal that nothing reports,
+/// so the record says where the match was not checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct UnverifiedConditions {
     /// The exposures were not compared.
     pub exposure: bool,
-    /// No temperature was compared: the two did not both state the sensor's, nor the camera
-    /// body's. Most DSLRs state neither, Canon only the body's.
+    /// No temperature is known to match: the two did not both state the sensor's, nor the camera
+    /// body's — most DSLRs state neither, Canon only the body's — or the one compared differed.
+    /// A [`CalibrationOutcome`](crate::CalibrationOutcome)
+    /// tells the two apart.
     pub temperature: bool,
 }
 
