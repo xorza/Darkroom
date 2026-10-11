@@ -1,4 +1,5 @@
-use crate::io::raw::black_level::{BlackLevel, DngLevels, LibrawBlack};
+use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack};
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
@@ -88,29 +89,57 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     assert_eq!(repeat.size, Size2us::new(3, 2));
     assert_eq!(&*repeat.values, &[0.0, 2.0, 4.0, 6.0, 8.0, 10.0]);
 
+    // Eight columns, past the six after which the channel's period of 2 and the pattern's of 3
+    // repeat together, so a row's levels wrap once. A zero at visible (2, 1) has no measurement;
+    // channel 0 saturates at 6000 ADU, which visible (0, 0) reads and (2, 0) misses by one.
     let layout = SensorLayout {
-        raw: Size2us::new(8, 5),
-        active: Size2us::new(6, 3),
+        raw: Size2us::new(10, 5),
+        active: Size2us::new(8, 3),
         margin: Vec2us::new(1, 1),
     };
-    let raw: Vec<u16> = (0..layout.raw.pixel_count())
+    let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
         .map(|index| 2000 + (index * 37 % 9000) as u16)
         .collect();
+    raw[2 * 10 + 3] = 0;
+    raw[10 + 1] = 6000;
+    raw[10 + 3] = 5999;
     let channel = |x: usize, y: usize| [[0, 1], [3, 2]][y % 2][x % 2];
-    let pixels = black.normalize(&raw, layout, channel);
+    let saturation = [6000.0, 1e9, 1e9, 1e9];
+    let decoded = black.decode(
+        &raw,
+        layout,
+        channel,
+        2,
+        FlagRule {
+            zero_is_bad: true,
+            saturation,
+        },
+    );
+    let flags = decoded.flags.unwrap();
     for y in 0..3 {
-        for x in 0..6 {
-            let value = raw[(y + 1) * 8 + x + 1];
+        for x in 0..8 {
+            let value = raw[(y + 1) * 10 + x + 1];
             let pattern = [5, 7, 9, 11, 13, 15][(y % 2) * 3 + x % 3];
             let integer_black = 2047 + [1, 0, 2, 0][channel(x, y)] + pattern;
             let expected = ((f64::from(value) - f64::from(integer_black)) / 12_948.0) as f32;
             assert_eq!(
-                pixels[y * 6 + x].to_bits(),
+                decoded.pixels[y * 8 + x].to_bits(),
                 expected.to_bits(),
                 "({x}, {y}): {value} over black {integer_black}"
             );
+            let expected_flags = if value == 0 {
+                QualityFlags::NO_DATA
+            } else if f64::from(value) >= saturation[channel(x, y)] {
+                QualityFlags::SATURATED
+            } else {
+                QualityFlags::default()
+            };
+            assert_eq!(flags.at(y * 8 + x), expected_flags, "({x}, {y}): {value}");
         }
     }
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+    assert_eq!(flags.at(0), QualityFlags::SATURATED);
+    assert_eq!(flags.at(2), QualityFlags::default());
 }
 
 /// Where LibRaw truncated a mean of the masked pixels, the mean itself is used. Sums 204 837,

@@ -18,10 +18,10 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, SATURATION_FRACTION};
+use crate::io::image::pixel_flags::SATURATION_FRACTION;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw;
-use crate::io::raw::black_level::{BlackLevel, DngLevels, LibrawBlack};
+use crate::io::raw::black_level::{BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack};
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
@@ -220,36 +220,32 @@ impl UnpackedRaw {
         }
     }
 
-    /// The flags the raw values themselves settle for the active area of `raw`:
-    /// [`QualityFlags::SATURATED`] at each channel's saturation level, and
-    /// [`QualityFlags::NO_DATA`] on the zeros of a `zero_is_bad` camera; `None` when no photosite
-    /// carries either.
+    /// The active area of `raw` normalized, and the flags its raw values themselves settle:
+    /// [`QualityFlags`](crate::io::image::pixel_flags::QualityFlags)`::SATURATED` at each
+    /// channel's saturation level, and `NO_DATA` on the zeros of a `zero_is_bad` camera; no flags
+    /// when no photosite carries either.
     ///
     /// Saturation is decided here, on the raw value before black is subtracted, because after a
     /// dark subtraction and a flat division the level differs at every pixel. LibRaw's own
     /// processing replaces `zero_is_bad` zeros with a same-colour mean (`remove_zeroes`); lumos reads
     /// the raw buffer itself, so without the flag a dead photosite would normalize to
     /// `−black / span` and enter every stage as a measurement.
-    pub(super) fn decode_flags(&self, raw: &[u16]) -> Option<PixelFlags> {
-        let SensorLayout {
-            raw: raw_size,
-            active,
-            margin,
-        } = self.layout;
-        // Copied out: the closure runs on rayon workers, and `self` holds the libraw handle.
-        let (zero_is_bad, saturation) = (self.zero_is_bad, self.saturation);
-        let channel_at = self.channel_map();
-        PixelFlags::from_fn(active, |index| {
-            let (x, y) = (index % active.width, index / active.width);
-            let value = raw[(y + margin.y) * raw_size.width + x + margin.x];
-            if value == 0 && zero_is_bad {
-                QualityFlags::NO_DATA
-            } else if f64::from(value) >= saturation[channel_at(x, y)] {
-                QualityFlags::SATURATED
-            } else {
-                QualityFlags::default()
-            }
-        })
+    pub(super) fn decode(&self, raw: &[u16]) -> DecodedRaw {
+        self.black_level.decode(
+            raw,
+            self.layout,
+            self.channel_map(),
+            self.cfa_type.map_or(1, |cfa_type| cfa_type.period()),
+            self.flag_rule(),
+        )
+    }
+
+    /// Copied out: the rule runs on rayon workers, and `self` holds the libraw handle.
+    const fn flag_rule(&self) -> FlagRule {
+        FlagRule {
+            zero_is_bad: self.zero_is_bad,
+            saturation: self.saturation,
+        }
     }
 
     /// One ADU's uniform-error σ in the normalized domain, or `None` when a compressed curve makes
@@ -283,10 +279,7 @@ impl UnpackedRaw {
     pub(super) fn into_cfa_image(self) -> Result<CfaImage, RawError> {
         let cfa_type = self.cfa_type.ok_or(RawError::NotACfaFrame)?;
         let raw = self.libraw.raw_image().ok_or(RawError::NoRawImage)?;
-        let pixels = self
-            .black_level
-            .normalize(raw, self.layout, self.channel_map());
-        let flags = self.decode_flags(raw);
+        let DecodedRaw { pixels, flags } = self.decode(raw);
         let metadata = ImageMetadata {
             quantization_sigma: self.quantization_sigma(),
             saturation_flagged: true,

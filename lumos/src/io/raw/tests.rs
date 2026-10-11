@@ -354,7 +354,7 @@ fn the_raw_values_settle_no_data_and_saturation() {
             },
         )
         .unwrap();
-        raw.decode_flags(raw.libraw.raw_image().unwrap()).unwrap()
+        raw.decode(raw.libraw.raw_image().unwrap()).flags.unwrap()
     };
 
     let flags = flags_for(2);
