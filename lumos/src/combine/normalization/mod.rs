@@ -494,9 +494,9 @@ fn per_frame_norms(
     }
 }
 
-/// Standard errors of its own estimate that a slot's `spread² − σ²` has to clear to count as signal:
-/// at 3, pure Gaussian noise passes once in about 740 slots, and that one is still refused loud
-/// enough to name, as no other wrong gain would be.
+/// Standard errors of its own estimate that a slot's `spread² − σ²` has to clear to count as
+/// signal: at 3, pure Gaussian noise passes once in about 740 slots, and that one is still refused
+/// loud enough to name, as no other wrong gain would be.
 const SIGNAL_SIGNIFICANCE: f64 = 3.0;
 
 /// The standard error of `spread² − σ²` on pure Gaussian noise of σ `noise`: each side a

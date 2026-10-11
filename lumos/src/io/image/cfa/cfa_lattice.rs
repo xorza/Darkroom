@@ -249,8 +249,8 @@ mod tests {
     }
 
     /// The nearest eight: mono's are the 8-connected ring; every Bayer photosite's, a green's as a
-    /// red's, are the stride-2 ring of its own phase at distances 2 and 2√2. A green's four diagonal
-    /// greens at √2 are the other phase, and not among them.
+    /// red's, are the stride-2 ring of its own phase at distances 2 and 2√2. A green's four
+    /// diagonal greens at √2 are the other phase, and not among them.
     #[test]
     fn the_nearest_eight_are_the_nearest_rings() {
         let ring = |step: i32, diagonal: i32| {
@@ -295,8 +295,8 @@ mod tests {
     }
 
     /// With each filter held at its own constant — each X-Trans colour, each Bayer phase, so Gr and
-    /// Gb differ — every pixel's median is its filter's value, interior or border: a neighbour under
-    /// another filter, a Gb beside a Gr included, would mix them.
+    /// Gb differ — every pixel's median is its filter's value, interior or border: a neighbour
+    /// under another filter, a Gb beside a Gr included, would mix them.
     #[test]
     fn the_median_reads_only_its_own_filter() {
         for cfa in [

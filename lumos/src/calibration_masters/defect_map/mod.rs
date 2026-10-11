@@ -75,8 +75,8 @@ use rayon::prelude::*;
 /// dark, and **cold/dead** pixels (abnormally low response) from a master flat.
 ///
 /// Each is detected per CFA color and replaced with the median of its neighbours under the same
-/// filter during correction. The two defects come from *different* masters by necessity: a dark has no
-/// illumination, so dead pixels are invisible in it (they read the same near-zero as a normal
+/// filter during correction. The two defects come from *different* masters by necessity: a dark has
+/// no illumination, so dead pixels are invisible in it (they read the same near-zero as a normal
 /// dark pixel) — they only reveal themselves as dark spots in an illuminated flat.
 #[derive(Debug, Clone)]
 pub(crate) struct DefectMap {

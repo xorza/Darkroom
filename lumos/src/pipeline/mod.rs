@@ -2,8 +2,9 @@
 //!
 //! [`align::align_and_stack`] registers, warps, and combines already-calibrated images;
 //! [`calibrate::calibrate_align_stack`] prepends RAW calibration. Both choose a memory tier
-//! ([`frame_parking::FrameParking`]) and then run the same body — the difference between an all-RAM run and
-//! a memory-bounded one is where a [`pipeline_frame::PipelineFrame`] lives, not which code executes.
+//! ([`frame_parking::FrameParking`]) and then run the same body — the difference between an all-RAM
+//! run and a memory-bounded one is where a [`pipeline_frame::PipelineFrame`] lives, not which code
+//! executes.
 
 pub(crate) mod align;
 pub(crate) mod calibrate;

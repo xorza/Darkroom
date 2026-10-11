@@ -18,8 +18,8 @@ impl DropQuad {
     /// The area the drop shares with the output pixel whose lower-left corner is `corner`.
     ///
     /// Shifts the quadrilateral so that the cell becomes the unit square `[0,1]×[0,1]`, then sums
-    /// the signed areas of its edges. Output pixels are integer-centred (pixel `o` spans
-    /// `[o - 0.5, o + 0.5]`, as at `STScI`), so a caller passes the cell's corner `o - 0.5`. Port of
+    /// the signed areas of its edges. Output pixels are integer-centred (pixel `o` spans `[o - 0.5,
+    /// o + 0.5]`, as at `STScI`), so a caller passes the cell's corner `o - 0.5`. Port of
     /// `boxer()`.
     #[inline]
     pub(super) fn overlap(&self, corner: DVec2) -> f64 {

@@ -119,10 +119,10 @@ fn masters(dark: CfaImage) -> CalibrationMasters {
 /// below, so the bound is what shows them clipped.
 ///
 /// The light's excess at a hot pixel is its noise plus the noise of its ring's plane, an intercept
-/// over 168 photosites: `σ·√(1 + 1/168)`. Through the origin the slope's error is that over
-/// `√Σd²`, so the fitted scale lies within 3 of those of the true one, and the error the fit
-/// reports, from the MAD of about 240 residuals, within 20% of it: the MAD's own spread at that count is
-/// about 6%.
+/// over 168 photosites: `σ·√(1 + 1/168)`. Through the origin the slope's error is that over `√Σd²`,
+/// so the fitted scale lies within 3 of those of the true one, and the error the fit reports, from
+/// the MAD of about 240 residuals, within 20% of it: the MAD's own spread at that count is about
+/// 6%.
 #[test]
 fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
     let (dark, hot) = dark(256, 5);

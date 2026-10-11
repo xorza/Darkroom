@@ -10,9 +10,6 @@ pub enum CfaColour {
 }
 
 impl CfaColour {
-    /// Every colour, in index order.
-    pub const ALL: [Self; 3] = [Self::Red, Self::Green, Self::Blue];
-
     /// The colour's slot in a per-colour array.
     #[inline(always)]
     pub const fn index(self) -> usize {

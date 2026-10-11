@@ -214,22 +214,43 @@ impl SubtractionError {
 pub enum MasterBuildError<E> {
     /// A role's master could not be stacked.
     #[error(transparent)]
-    Stack(#[from] StackError),
+    Stack(StackError),
     /// The stacked masters do not make a set.
     #[error(transparent)]
-    Calibration(#[from] CalibrationError),
+    Calibration(CalibrationError),
     /// The cache could not be read or written.
     #[error("calibration master cache: {0}")]
     Cache(E),
-    /// The build was cancelled between roles.
+    /// The build was cancelled: between roles, inside a role's stack, or while the set was
+    /// assembled.
     #[error("calibration master build cancelled")]
     Cancelled,
+}
+
+/// A cancel inside a role's stack is the build's cancel.
+impl<E> From<StackError> for MasterBuildError<E> {
+    fn from(error: StackError) -> Self {
+        match error {
+            StackError::Cancelled => Self::Cancelled,
+            error => Self::Stack(error),
+        }
+    }
+}
+
+/// A cancel while the set is assembled is the build's cancel.
+impl<E> From<CalibrationError> for MasterBuildError<E> {
+    fn from(error: CalibrationError) -> Self {
+        match error {
+            CalibrationError::Cancelled => Self::Cancelled,
+            error => Self::Calibration(error),
+        }
+    }
 }
 
 /// Why [`CalibrationMasters::load`](crate::CalibrationMasters::load) could not read a bundle.
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
-    /// The file could not be opened or mapped.
+    /// The file could not be opened or read.
     #[error("calibration-master bundle: {0}")]
     Io(#[from] io::Error),
     /// The file is not well-formed FITS, or a header value has the wrong type.

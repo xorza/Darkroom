@@ -6,6 +6,7 @@
 //! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
+use std::fs::File;
 use std::io;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
@@ -13,7 +14,7 @@ use std::path::Path;
 use common::file_utils;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
-use fits_well::io::{ChecksumStatus, HduKind, SliceReader};
+use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
 use fits_well::table::{ColumnData, TableBuilder, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
@@ -33,7 +34,6 @@ use crate::io::image::fits::flags_extension::{FLAGS_EXTNAME, FlagsExtension};
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::platform::MappedFile;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
@@ -96,10 +96,9 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
 }
 
 pub(super) fn load(path: &Path, context: &LoadContext) -> Result<CalibrationMasters, BundleError> {
-    // SAFETY: a bundle is published whole under its name and never rewritten in place; a file
-    // another program truncates while it is mapped is the documented mmap hazard.
-    let file = unsafe { MappedFile::open(path) }?;
-    let mut reader = FitsReader::from_bytes(file.bytes())?;
+    // Streamed, not mapped: a bundle is the user's file, and one rewritten in place while it is
+    // read must fail the load, not fault the process.
+    let mut reader = FitsReader::open(File::open(path)?)?;
     validate_primary(&reader)?;
     verify_checksums(&mut reader)?;
     let indices = bundle_indices(&reader, path)?;
@@ -154,7 +153,7 @@ fn bundle_primary_header() -> io::Result<Header> {
     Ok(header)
 }
 
-fn validate_primary(reader: &SliceReader<'_>) -> Result<(), BundleError> {
+fn validate_primary(reader: &StreamReader<File>) -> Result<(), BundleError> {
     let primary = reader.hdus().first().ok_or(BundleError::NotABundle)?;
     if primary.kind != HduKind::Primary
         || primary.header.naxis()? != 0
@@ -172,7 +171,7 @@ fn validate_primary(reader: &SliceReader<'_>) -> Result<(), BundleError> {
     Ok(())
 }
 
-fn verify_checksums(reader: &mut SliceReader<'_>) -> Result<(), BundleError> {
+fn verify_checksums(reader: &mut StreamReader<File>) -> Result<(), BundleError> {
     for hdu in 0..reader.hdus().len() {
         let report = reader.verify_checksum(hdu)?;
         if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
@@ -182,7 +181,7 @@ fn verify_checksums(reader: &mut SliceReader<'_>) -> Result<(), BundleError> {
     Ok(())
 }
 
-fn bundle_indices(reader: &SliceReader<'_>, path: &Path) -> Result<BundleIndices, BundleError> {
+fn bundle_indices(reader: &StreamReader<File>, path: &Path) -> Result<BundleIndices, BundleError> {
     // Each master finds its own flags when it is read; this refuses one that names none.
     FlagsExtension::check_claims(path, reader.hdus()).map_err(BundleError::Flags)?;
     let mut indices = BundleIndices::default();
@@ -212,7 +211,7 @@ fn bundle_indices(reader: &SliceReader<'_>, path: &Path) -> Result<BundleIndices
 }
 
 fn read_master(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: Option<usize>,
     role: MasterRole,
     path: &Path,
@@ -301,7 +300,7 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
 }
 
 fn read_defect_map(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: Option<usize>,
 ) -> Result<Option<DefectMap>, BundleError> {
     let Some(index) = index else {

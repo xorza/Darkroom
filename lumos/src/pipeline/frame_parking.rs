@@ -5,13 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::memory_plan::MemoryPlan;
-
-use crate::frame_store::stored_image::StoredImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;

@@ -110,7 +110,7 @@ pub use calibration_masters::calibration_set::CalibrationSet;
 pub use calibration_masters::dark_scale::{DarkScale, DarkScaleSource};
 pub use calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
 pub use calibration_masters::master_cache::{
-    MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
+    CachedMaster, MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
 };
 pub use calibration_masters::master_role::MasterRole;
 pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};

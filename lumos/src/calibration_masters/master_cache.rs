@@ -37,25 +37,41 @@ impl<P> Clone for SubtractedFrames<'_, P> {
 
 impl<P> Copy for SubtractedFrames<'_, P> {}
 
+/// What a [`MasterCache`] holds for one role's inputs as they are now.
+#[derive(Debug)]
+pub enum CachedMaster<K> {
+    /// The master kept for them, boxed as it outweighs any key.
+    Kept(Box<CfaImage>),
+    /// None: the role is stacked, and its master kept under `K`, the inputs as
+    /// [`MasterCache::load`] read them.
+    Missing(K),
+}
+
 /// Where [`CalibrationMasters::build`](crate::CalibrationMasters::build) keeps a role's master
 /// between runs: read before the role is stacked, written once it is.
 pub trait MasterCache<P> {
     /// Why the cache could not be read or written.
     type Error;
 
-    /// The master kept for `inputs`, when one is kept for them as they are now.
+    /// The inputs as [`Self::load`] read them, before the stack read them: a master is kept under
+    /// what its frames were, so a frame changed while it was stacked keys the old content, and the
+    /// next build stacks the role again rather than reuse the master.
+    type Key;
+
+    /// The master kept for `inputs` as they are now, or the key to keep one under once it is
+    /// stacked.
     ///
     /// # Errors
     ///
     /// The cache cannot tell whether it holds one.
-    fn load(&self, inputs: &MasterInputs<'_, P>) -> Result<Option<CfaImage>, Self::Error>;
+    fn load(&self, inputs: &MasterInputs<'_, P>) -> Result<CachedMaster<Self::Key>, Self::Error>;
 
-    /// Keep `master`, stacked from `inputs`, for a later build.
+    /// Keep `master`, stacked from the inputs `key` was read from, for a later build.
     ///
     /// # Errors
     ///
     /// The cache cannot keep it.
-    fn store(&self, inputs: &MasterInputs<'_, P>, master: &CfaImage) -> Result<(), Self::Error>;
+    fn store(&self, key: Self::Key, master: &CfaImage) -> Result<(), Self::Error>;
 }
 
 /// No cache: every master is stacked.
@@ -64,12 +80,13 @@ pub struct NoMasterCache;
 
 impl<P> MasterCache<P> for NoMasterCache {
     type Error = std::convert::Infallible;
+    type Key = ();
 
-    fn load(&self, _inputs: &MasterInputs<'_, P>) -> Result<Option<CfaImage>, Self::Error> {
-        Ok(None)
+    fn load(&self, _inputs: &MasterInputs<'_, P>) -> Result<CachedMaster<()>, Self::Error> {
+        Ok(CachedMaster::Missing(()))
     }
 
-    fn store(&self, _inputs: &MasterInputs<'_, P>, _master: &CfaImage) -> Result<(), Self::Error> {
+    fn store(&self, (): (), _master: &CfaImage) -> Result<(), Self::Error> {
         Ok(())
     }
 }
