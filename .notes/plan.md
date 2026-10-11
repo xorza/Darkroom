@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| I1 | FITS real keywords accept any value | Do | B1 |
 | I2 | MRS noise reads 0 when the support covers every pixel | Do | B2 |
 | I5 | Master cache key ignores how lumos stacks | Do | B3 |
 | I3 | Pairwise CFA-drizzle normalization fits thin pairs | Do | B4 |
@@ -52,50 +51,10 @@ gives PIP-19 its overlap.
 ## Dependency graph
 
 ```
-B1, B2, B3, B4, B9          independent
+B2, B3, B4, B9              independent
 B5 → B6 → B8                eviction helper → explicit spill reads → mosaic parking measured
 B7                          independent; after B3 if both are open, as both move sidecar pins
 ```
-
----
-
-## B1. FITS real keywords hold their physical ranges (I1)
-
-**Evidence.** `io/image/fits/metadata/mod.rs`, `read_metadata`: `GAIN`, `EGAIN`, `SET-TEMP`,
-`FOCALLEN`, `AIRMASS`, `XPIXSZ`/`YPIXSZ` and their aliases, and `DATAMAX` go through
-`Header::get_real` with no check, so a negative gain, a 0 pixel size or an infinite value enters
-`ImageMetadata` and is written back into every FITS lumos saves. Exposure and the temperatures
-already use `read_real_where`. `XBINNING`/`YBINNING` take any `i32` and `ISOSPEED` takes 0. Only
-`CcdNoise::electrons_per_unit` filters `egain` on its own; every other value travels as given.
-
-**Solution.** The range is the field's property, so it lives on `MetadataField`:
-`MetadataField::accepts(self, value: f64) -> bool`, one arm per real field, and every real field
-reads through `read_real_where(header, key, |v| field.accepts(v))`. A value outside its range is
-refused for that keyword, logged, and the next alias is tried, as a value of the wrong type is
-now.
-
-| Field | Accepted | Why |
-|---|---|---|
-| `GAIN` | finite, ≥ 0 | a camera's gain setting; 0 is a real setting |
-| `EGAIN`, `CVF` | finite, > 0 | electrons per ADU |
-| `SET-TEMP` | finite, > −273.15 | °C, as the measured temperatures |
-| `FOCALLEN` and aliases | finite, > 0 | mm |
-| `AIRMASS` | finite, ≥ 1 | sec z, which is 1 at the zenith and grows toward the horizon |
-| pixel sizes | finite, > 0 | µm |
-| `DATAMAX` | finite | file units, any sign |
-| `XBINNING`, `YBINNING` | ≥ 1 | integer binning |
-| `ISOSPEED` | ≥ 1 | |
-
-**Steps.** 1. Add `accepts` and route the real fields through it. 2. Give the binnings and ISO
-their bounds in `read_i32`/`read_u32` callers. 3. Keep `CcdNoise`'s own filter: `ImageMetadata`
-is public and a caller can still set any value.
-
-**Test.** Extend the field sweep in `fits/metadata/tests.rs`: for each field, the boundary that is
-kept (`GAIN` 0, `AIRMASS` 1.0) reads back, and the values just outside (`EGAIN` 0, `AIRMASS` 0.99,
-a pixel size 0, `−1`, `1e400` as written text) read `None`; an invalid first alias falls through
-to a valid second one (`FOCALLEN = -5`, `FOCAL = 400` → 400).
-
-**Crates:** lumos.
 
 ---
 
