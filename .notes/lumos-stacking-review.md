@@ -84,6 +84,8 @@ real X-Trans set. Only when it passes does `XTransUnsupported` go.
 
 ## Measure before you change
 
+PIP-5, PIP-6 and PIP-19 wait on [Q6](lumos-stacking-review_QUESTIONS.md#q6-how-to-measure-the-spill-tiers-disk-reads-pip-5-pip-6-pip-19): how to measure cold reads.
+
 | ID | Question | How |
 |---|---|---|
 | PIP-5 | A parked frame is warped straight from a map advised `Sequential` (`frame_store/stored_plane.rs`, `pipeline/pipeline_frame.rs`). A 180° flip reads rows in reverse, a 90° turn reads one column per output row, against the readahead. The plan already charges the source as resident, so the map saves nothing. | Add legs to `pipeline/bench.rs`: Auto + spill warp at 0°, 90° and 180°, `Sequential` against `Normal`. Adopt `Normal` (or an owned read) if any angle is at least 1.2× faster and none is slower. |
