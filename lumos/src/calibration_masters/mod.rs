@@ -30,7 +30,9 @@ use crate::calibration_masters::error::{
     BundleError, CalibrationError, MasterBuildError, SubtractionError,
 };
 use crate::calibration_masters::light_calibration::{LightCalibration, Subtracted};
-use crate::calibration_masters::master_cache::{MasterCache, MasterInputs, SubtractedFrames};
+use crate::calibration_masters::master_cache::{
+    CachedMaster, MasterCache, MasterInputs, SubtractedFrames,
+};
 use crate::calibration_masters::master_subtraction::{MasterSubtraction, Subtractor};
 use crate::combine::cache::FrameCache;
 use crate::combine::config::StackConfig;
@@ -163,8 +165,9 @@ impl CalibrationMasters {
     /// says, and assemble the set ([`Self::from_images`]): the bias and the flat-dark first, then
     /// the flats, each with its flat-dark or else the bias taken from every frame before the
     /// multiplicative normalization scales it, as PixInsight and Siril calibrate flats, then the
-    /// dark. A role with no frames has no master. `cache` is read before a role is stacked and
-    /// written once it is; [`NoMasterCache`](crate::NoMasterCache) stacks every one.
+    /// dark. A role with no frames has no master. `cache` is read before a role is stacked, and
+    /// written once it is under the key that read gave; [`NoMasterCache`](crate::NoMasterCache)
+    /// stacks every one.
     ///
     /// # Errors
     ///
@@ -194,9 +197,10 @@ impl CalibrationMasters {
                     frames,
                 }),
             };
-            if let Some(master) = cache.load(&inputs).map_err(MasterBuildError::Cache)? {
-                return Ok(Some(master));
-            }
+            let key = match cache.load(&inputs).map_err(MasterBuildError::Cache)? {
+                CachedMaster::Kept(master) => return Ok(Some(*master)),
+                CachedMaster::Missing(key) => key,
+            };
             let master = stack_cfa_master(
                 paths,
                 role,
@@ -207,9 +211,7 @@ impl CalibrationMasters {
                 cancel.clone(),
             )?
             .expect("a role with frames stacks a master");
-            cache
-                .store(&inputs, &master)
-                .map_err(MasterBuildError::Cache)?;
+            cache.store(key, &master).map_err(MasterBuildError::Cache)?;
             Ok(Some(master))
         };
         let bias = stack(MasterRole::Bias, None)?;
@@ -378,7 +380,7 @@ impl CalibrationMasters {
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map,
     /// under `context`: its cancellation, which reads as [`BundleError::Cancelled`], and its
-    /// memory limit on each master's decode. The file is memory-mapped, not copied into RAM.
+    /// memory limit on each master's decode. The file is streamed, never read into RAM whole.
     ///
     /// # Errors
     ///

@@ -678,12 +678,12 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 }
 
 /// The RAW front end checks each light as it decodes: a light whose dimensions differ from the
-/// first light's header is refused at its own index, an invalid cosmic-ray config before any
-/// light decodes, and parametric cosmic-ray noise on a light
-/// whose decoder recorded no ADC step — a float FITS — names that light. So does a calibration
-/// that refuses one light: a 10 s dark that still holds its bias, against a 20 s second light. A cosmic-ray pass over
-/// X-Trans lights is refused from the first light's header, before any light is decoded: the
-/// second path names no file, and the error is still the first light's.
+/// first light's header is refused at its own index, an invalid cosmic-ray config before any light
+/// decodes, and parametric cosmic-ray noise on a light whose decoder recorded no ADC step — a float
+/// FITS — names that light. So does a calibration that refuses one light: a 10 s dark that still
+/// holds its bias, against a 20 s second light. A cosmic-ray pass over X-Trans lights is refused
+/// from the first light's header, before any light is decoded: the second path names no file, and
+/// the error is still the first light's.
 #[test]
 fn the_raw_front_end_checks_each_light_at_decode() {
     let scratch = TempDir::new("lumos_decode_checks");
@@ -812,11 +812,11 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 }
 
 /// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held:
-/// five dithered 112 × 112 RGB float FITS cubes of one star field, its channels at 1, 0.8 and 0.6 of it,
-/// read as RGB. The held run is the reference; the paths run matches it bit for bit resident and
-/// spilled, with the found reference and with it named. The spilled two-pass run parks every
-/// light and reads back every registered frame; the spilled one-pass run parks none. A
-/// cosmic-ray pass, which runs on mosaics alone, is refused for linear lights by both entries.
+/// five dithered 112 × 112 RGB float FITS cubes of one star field, its channels at 1, 0.8 and 0.6
+/// of it, read as RGB. The held run is the reference; the paths run matches it bit for bit resident
+/// and spilled, with the found reference and with it named. The spilled two-pass run parks every
+/// light and reads back every registered frame; the spilled one-pass run parks none. A cosmic-ray
+/// pass, which runs on mosaics alone, is refused for linear lights by both entries.
 #[test]
 fn calibrated_lights_on_disk_stack_as_held_ones_do() {
     let scratch = TempDir::new("lumos_linear_paths");

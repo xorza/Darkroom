@@ -99,9 +99,10 @@ mod tests {
         assert_eq!(*reports.lock().unwrap(), expected);
     }
 
-    /// A callback that runs rayon work of its own still sees every count in order: a worker
-    /// waiting for the parts of its loop that others took steals units of the stage meanwhile,
-    /// which complete on the same thread and must not wait for the report they are inside. A watchdog fails the test where a deadlock would hang it.
+    /// A callback that runs rayon work of its own still sees every count in order: a worker waiting
+    /// for the parts of its loop that others took steals units of the stage meanwhile, which
+    /// complete on the same thread and must not wait for the report they are inside. A watchdog
+    /// fails the test where a deadlock would hang it.
     #[test]
     fn a_callback_that_uses_rayon_completes() {
         let (sender, receiver) = mpsc::channel();

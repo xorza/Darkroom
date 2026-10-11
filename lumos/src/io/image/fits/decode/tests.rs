@@ -1,7 +1,6 @@
 use crate::internals::prelude::*;
 
 use crate::io::image::sample_domain::Pedestal;
-use std::fs::File;
 
 use fits_well::FitsWriter;
 use fits_well::header::Header;

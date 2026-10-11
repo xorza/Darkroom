@@ -25,10 +25,10 @@ use crate::run_report::RunReport;
 /// dropped and reported in
 /// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped).
 ///
-/// With [`Reference::Index`](crate::Reference::Index) the reference is prepared first, and each other light then goes
-/// through its preparation, its registration and its warp in one pass, written once. With
-/// [`Reference::Auto`](crate::Reference::Auto) every light is prepared and detected first, since the reference is the
-/// sharpest one, and parked until it registers.
+/// With [`Reference::Index`](crate::Reference::Index) the reference is prepared first, and each
+/// other light then goes through its preparation, its registration and its warp in one pass,
+/// written once. With [`Reference::Auto`](crate::Reference::Auto) every light is prepared and
+/// detected first, since the reference is the sharpest one, and parked until it registers.
 ///
 /// The sensor geometry is peeked from the first frame's header without a decode, so the memory
 /// tier is chosen before any pixels are read. When the frame set plus its per-frame scratch
@@ -127,10 +127,10 @@ mod tests {
     use crate::io::image::unverified_conditions::UnverifiedConditions;
 
     /// Five lights: one unverified in exposure, one in temperature and scaled by its exposure, one
-    /// matched on its camera's temperature, one matched on its sensor's 3 °C off and scaled by a fit,
-    /// and one whose dark was scaled by 1, which is no scaling. The report counts each fact once per
-    /// light that met it, and carries the bundle's floored flat pixels and unverified flat-dark,
-    /// here none.
+    /// matched on its camera's temperature, one matched on its sensor's 3 °C off and scaled by a
+    /// fit, and one whose dark was scaled by 1, which is no scaling. The report counts each fact
+    /// once per light that met it, and carries the bundle's floored flat pixels and unverified
+    /// flat-dark, here none.
     #[test]
     fn the_notes_count_what_calibration_could_not_check() {
         let notes = CalibrationNotes::default();

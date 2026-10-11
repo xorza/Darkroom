@@ -17,9 +17,10 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
+use std::fs::File;
 use std::path::Path;
 
-use fits_well::io::SliceReader;
+use fits_well::io::StreamReader;
 
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
@@ -167,12 +168,12 @@ pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaIma
         .into_cfa(path)
 }
 
-/// The Lumos CFA image in HDU `index` of a file already open in memory, with its flags extension,
+/// The Lumos CFA image in HDU `index` of a file already open, with its flags extension,
 /// under the caller's `context` — its cancellation, memory limit and float scale — with the
 /// checksum state the caller verified for both. Held to the version check every file entry point
 /// applies; an HDU that is not a Lumos CFA image is refused.
 pub(crate) fn read_cfa_hdu(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: usize,
     path: &Path,
     context: &LoadContext,

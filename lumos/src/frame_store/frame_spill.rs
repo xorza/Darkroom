@@ -291,8 +291,8 @@ pub(crate) mod internals {
     use crate::frame_store::frame_spill::{Commit, FrameSpill, PlaneDigests, read_sidecar};
 
     impl<'a> FrameSpill<'a> {
-        /// A kept frame's files under `stem` in `directory`, of a source with no path: [`Self::cached`]'s
-        /// naming with a stem a test can read.
+        /// A kept frame's files under `stem` in `directory`, of a source with no path:
+        /// [`Self::cached`]'s naming with a stem a test can read.
         pub(crate) fn named(directory: &'a Path, stem: &str) -> Self {
             Self {
                 directory,

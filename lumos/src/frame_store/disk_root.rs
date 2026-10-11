@@ -76,10 +76,10 @@ mod tests {
     use crate::memory::memory_plan::{PerFrameBytes, RunShape};
 
     /// A spill that needs more than the disk holds is refused with both figures; one that fits, or
-    /// a disk that could not be read, passes. What a run writes: 10 frames of 100 × 100 RGB, a plane
-    /// 40 000 B and the frame 120 000 B. Warped, each holds the frame, two quality planes, its
-    /// flags and no gain: 120 000 + 80 000 + 10 000 = 210 000 B, so 2 100 000 B for the set. Decoded
-    /// straight into the combine, each is its resident bytes, here 130 000 B, so 1 300 000 B.
+    /// a disk that could not be read, passes. What a run writes: 10 frames of 100 × 100 RGB, a
+    /// plane 40 000 B and the frame 120 000 B. Warped, each holds the frame, two quality planes,
+    /// its flags and no gain: 120 000 + 80 000 + 10 000 = 210 000 B, so 2 100 000 B for the set.
+    /// Decoded straight into the combine, each is its resident bytes, here 130 000 B: 1 300 000 B.
     #[test]
     fn a_spill_the_disk_cannot_hold_is_refused() {
         let warped = RunShape {

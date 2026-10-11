@@ -10,8 +10,8 @@ use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    LoadContext, MasterBuildError, MasterCache, MasterInputs, MasterRole,
+    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
+    IngestConfig, LoadContext, MasterBuildError, MasterCache, MasterInputs, MasterRole,
 };
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
@@ -156,9 +156,17 @@ struct SourceDirectoryCache<'a> {
     cancel: &'a CancelToken,
 }
 
-impl SourceDirectoryCache<'_> {
-    /// Where `inputs`' master is kept, and the marker it is kept under.
-    fn place(inputs: &MasterInputs<'_, PathBuf>) -> Result<(RoleCachePaths, String), CacheError> {
+/// Where a role's master is kept, and the marker its frames key it by as they were read before
+/// the stack.
+#[derive(Debug)]
+struct CachePlace {
+    paths: RoleCachePaths,
+    key: String,
+}
+
+impl CachePlace {
+    /// The place of `inputs`' master, keyed by its frames as they are now.
+    fn of(inputs: &MasterInputs<'_, PathBuf>) -> Result<Self, CacheError> {
         let file = match inputs.role {
             MasterRole::Dark => "master_dark.fits",
             MasterRole::Flat => "master_flat.fits",
@@ -171,49 +179,46 @@ impl SourceDirectoryCache<'_> {
             key.push_str("\nsubtract ");
             key.push_str(&frame_set_key(subtracted.frames)?);
         }
-        Ok((paths, key))
+        Ok(Self { paths, key })
     }
 }
 
 impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
     type Error = CacheError;
+    /// `None` with the cache off.
+    type Key = Option<CachePlace>;
 
-    fn load(&self, inputs: &MasterInputs<'_, PathBuf>) -> Result<Option<CfaImage>, CacheError> {
-        if !self.enabled {
-            return Ok(None);
-        }
-        let (paths, key) = Self::place(inputs)?;
-        match fs::read_to_string(&paths.marker).ok() {
-            Some(marker) if marker == key && paths.master.is_file() => {
-                let context = LoadContext {
-                    cancel: self.cancel.clone(),
-                    ..Default::default()
-                };
-                match CfaImage::from_file(&paths.master, &context) {
-                    Ok(master) => Ok(Some(master)),
-                    Err(error) => {
-                        tracing::warn!(
-                            path = %paths.master.display(),
-                            %error,
-                            "failed to load calibration master cache; rebuilding from source frames"
-                        );
-                        Ok(None)
-                    }
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
-    fn store(
+    fn load(
         &self,
         inputs: &MasterInputs<'_, PathBuf>,
-        master: &CfaImage,
-    ) -> Result<(), CacheError> {
+    ) -> Result<CachedMaster<Option<CachePlace>>, CacheError> {
         if !self.enabled {
-            return Ok(());
+            return Ok(CachedMaster::Missing(None));
         }
-        let (paths, key) = Self::place(inputs)?;
+        let place = CachePlace::of(inputs)?;
+        let marked =
+            fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
+        if marked && place.paths.master.is_file() {
+            let context = LoadContext {
+                cancel: self.cancel.clone(),
+                ..Default::default()
+            };
+            match CfaImage::from_file(&place.paths.master, &context) {
+                Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
+                Err(error) => tracing::warn!(
+                    path = %place.paths.master.display(),
+                    %error,
+                    "failed to load calibration master cache; rebuilding from source frames"
+                ),
+            }
+        }
+        Ok(CachedMaster::Missing(Some(place)))
+    }
+
+    fn store(&self, place: Option<CachePlace>, master: &CfaImage) -> Result<(), CacheError> {
+        let Some(CachePlace { paths, key }) = place else {
+            return Ok(());
+        };
         master
             .save_fits(&paths.master)
             .map_err(|source| CacheError::Write {
@@ -287,10 +292,15 @@ mod tests {
 
     use common::CancelToken;
 
-    use lumos::MasterBuildError;
+    use imaginarium::Buffer2;
+    use lumos::{
+        CachedMaster, CfaImage, CfaType, ImageMetadata, MasterBuildError, MasterCache,
+        MasterInputs, MasterRole,
+    };
 
     use crate::astro::nodes::calibration::{
-        CacheError, FrameSetKeyError, build_masters_cached, frame_set_key, role_cache_paths,
+        CacheError, FrameSetKeyError, SourceDirectoryCache, build_masters_cached, frame_set_key,
+        role_cache_paths,
     };
 
     #[test]
@@ -350,6 +360,54 @@ mod tests {
             error,
             FrameSetKeyError::Metadata { path, source }
                 if path == first && source.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    /// A master is kept under its frames as the cache read them before the stack: a frame
+    /// rewritten while its role is stacked leaves the marker on the old content, so the next build
+    /// stacks the role again rather than reuse a master of frames that are gone. One stored under
+    /// frames that stayed is read back.
+    #[test]
+    fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
+        let dir = TempDir::new("lens-master-key-before-stack");
+        let frame = dir.join("a.raf");
+        fs::write(&frame, b"a").unwrap();
+        let frames = [frame.clone()];
+        let inputs = MasterInputs {
+            role: MasterRole::Dark,
+            frames: &frames,
+            subtracted: None,
+        };
+        let cache = SourceDirectoryCache {
+            enabled: true,
+            cancel: &CancelToken::never(),
+        };
+        let master = CfaImage::from_plane(
+            Buffer2::new_filled(4, 4, 0.1),
+            CfaType::Mono,
+            ImageMetadata::default(),
+        );
+        let missing = || match cache.load(&inputs).unwrap() {
+            CachedMaster::Missing(Some(place)) => place,
+            CachedMaster::Missing(None) => panic!("the cache is on"),
+            CachedMaster::Kept(_) => panic!("no master is kept for the frames as they are"),
+        };
+
+        let place = missing();
+        let read = place.key.clone();
+        fs::write(&frame, b"bb").unwrap();
+        cache.store(Some(place), &master).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("master_dark.fits.source")).unwrap(),
+            read
+        );
+        let place = missing();
+        assert_ne!(place.key, read);
+
+        cache.store(Some(place), &master).unwrap();
+        assert!(matches!(
+            cache.load(&inputs).unwrap(),
+            CachedMaster::Kept(kept) if kept.data == master.data
         ));
     }
 

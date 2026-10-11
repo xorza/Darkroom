@@ -112,13 +112,12 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 
     // Each role stacks under its own preset, the flats with the bias taken from every frame; the
     // set is assembled once every master exists.
-    let no_frames: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::build(
         CalibrationSet {
             dark: darks.as_slice(),
             flat: flats.as_slice(),
             bias: bias.as_slice(),
-            flat_dark: no_frames.as_slice(),
+            flat_dark: &[],
         },
         DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::default(),

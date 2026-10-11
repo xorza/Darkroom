@@ -8,8 +8,8 @@ use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::calibration_masters::dark_scale::{DarkScale, DarkScaleSource};
 use crate::calibration_masters::defect_map::{DefectMap, HotPixels};
-use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
-use crate::calibration_masters::master_cache::{MasterCache, MasterInputs};
+use crate::calibration_masters::error::{CalibrationError, DarkMismatch, MasterBuildError};
+use crate::calibration_masters::master_cache::{CachedMaster, MasterCache, MasterInputs};
 use crate::calibration_masters::master_subtraction::Subtractor;
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
@@ -2058,9 +2058,9 @@ fn flats_are_calibrated_before_they_are_combined() {
 /// The builder stacks each role under its preset and takes the bias from every flat when no
 /// flat-dark is given, as `flats_are_calibrated_before_they_are_combined` does by hand: the flat
 /// master's corner reads 0.5 of its centre. Its cache is read before each role is stacked and
-/// written once it is: it stores the bias with nothing subtracted and the flats with the bias's
-/// frames, and a dark it already holds is not stacked — its frames name no file, and the build
-/// still succeeds with the held dark.
+/// written once it is, under the key its read gave: it stores the bias with nothing subtracted and
+/// the flats with the bias's frames, and a dark it already holds is not stacked — its frames name
+/// no file, and the build still succeeds with the held dark.
 #[test]
 fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     /// One master the cache was asked to keep: its role, its frame count, and the role and frame
@@ -2078,26 +2078,26 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     }
     impl MasterCache<PathBuf> for Recorder {
         type Error = Infallible;
+        type Key = Kept;
 
-        fn load(&self, inputs: &MasterInputs<'_, PathBuf>) -> Result<Option<CfaImage>, Infallible> {
-            Ok(match inputs.role {
-                MasterRole::Dark => self.held_dark.clone(),
-                _ => None,
+        fn load(
+            &self,
+            inputs: &MasterInputs<'_, PathBuf>,
+        ) -> Result<CachedMaster<Kept>, Infallible> {
+            Ok(match (inputs.role, &self.held_dark) {
+                (MasterRole::Dark, Some(dark)) => CachedMaster::Kept(Box::new(dark.clone())),
+                _ => CachedMaster::Missing(Kept {
+                    role: inputs.role,
+                    frames: inputs.frames.len(),
+                    subtracted: inputs
+                        .subtracted
+                        .map(|subtracted| (subtracted.role, subtracted.frames.len())),
+                }),
             })
         }
 
-        fn store(
-            &self,
-            inputs: &MasterInputs<'_, PathBuf>,
-            _: &CfaImage,
-        ) -> Result<(), Infallible> {
-            self.stored.lock().unwrap().push(Kept {
-                role: inputs.role,
-                frames: inputs.frames.len(),
-                subtracted: inputs
-                    .subtracted
-                    .map(|subtracted| (subtracted.role, subtracted.frames.len())),
-            });
+        fn store(&self, key: Kept, _: &CfaImage) -> Result<(), Infallible> {
+            self.stored.lock().unwrap().push(key);
             Ok(())
         }
     }
@@ -2174,6 +2174,55 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
             },
         ]
     );
+}
+
+/// A cancel inside a role's stack reaches the caller as the build's own cancel, as one between
+/// roles does, not as a failed stack: a cache that cancels the build as it is read for the bias,
+/// whose two frames are then stacked under the cancel.
+#[test]
+fn a_cancel_inside_a_stack_is_the_builds_cancel() {
+    #[derive(Debug)]
+    struct Cancelling(CancelToken);
+    impl MasterCache<PathBuf> for Cancelling {
+        type Error = Infallible;
+        type Key = ();
+
+        fn load(&self, _: &MasterInputs<'_, PathBuf>) -> Result<CachedMaster<()>, Infallible> {
+            self.0.cancel();
+            Ok(CachedMaster::Missing(()))
+        }
+
+        fn store(&self, (): (), _: &CfaImage) -> Result<(), Infallible> {
+            Ok(())
+        }
+    }
+
+    let directory = TempDir::new("lumos-master-build-cancel");
+    let bias: Vec<PathBuf> = (0..2)
+        .map(|index| {
+            let path = directory.join(format!("bias_{index}.fits"));
+            constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono)
+                .save_fits(&path)
+                .unwrap();
+            path
+        })
+        .collect();
+    let cancel = CancelToken::new();
+    let error = CalibrationMasters::build(
+        CalibrationSet {
+            dark: &[],
+            flat: &[],
+            bias: bias.as_slice(),
+            flat_dark: &[],
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+        &IngestConfig::with_cache_dir(directory.join("cache")),
+        &Cancelling(cancel.clone()),
+        &ProgressCallback::default(),
+        &cancel,
+    )
+    .unwrap_err();
+    assert!(matches!(error, MasterBuildError::Cancelled), "{error:?}");
 }
 
 /// A master states the exposure and temperature its frames share; the frames of a dark have to

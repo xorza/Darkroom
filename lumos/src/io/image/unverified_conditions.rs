@@ -12,8 +12,7 @@ pub struct UnverifiedConditions {
     pub exposure: bool,
     /// No temperature is known to match: the two did not both state the sensor's, nor the camera
     /// body's — most DSLRs state neither, Canon only the body's — or the one compared differed.
-    /// A [`CalibrationOutcome`](crate::CalibrationOutcome)
-    /// tells the two apart.
+    /// A [`CalibrationOutcome`](crate::CalibrationOutcome) tells the two apart.
     pub temperature: bool,
 }
 

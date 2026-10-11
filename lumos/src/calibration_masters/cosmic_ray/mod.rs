@@ -12,8 +12,8 @@
 //!
 //! Dispatches per CFA type: **Mono** = textbook subsampled L.A.Cosmic; **Bayer** = deinterleave the
 //! four 2×2 phases and reuse the mono detector per dense same-color plane. **X-Trans** is refused
-//! ([`CosmicRayError::XTransUnsupported`]): it has no dense same-colour sub-lattice, and its red and
-//! blue photosites have no point-symmetric same-colour pair nearer than √18 px, so no second
+//! ([`CosmicRayError::XTransUnsupported`]): it has no dense same-colour sub-lattice, and its red
+//! and blue photosites have no point-symmetric same-colour pair nearer than √18 px, so no second
 //! difference separates a hit from a star's convex wing at the scale of a star. No reference tool
 //! runs L.A.Cosmic on an X-Trans mosaic, and Siril refuses its CFA cosmetic correction there.
 //! X-Trans data relies on dithering and stack-time rejection.
