@@ -429,6 +429,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
             resident_bytes: 10 * 4 + 1,
+            beside_bytes: 0,
         }
     );
     assert_eq!(
@@ -436,6 +437,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
             resident_bytes: 13 * 4 + 1,
+            beside_bytes: 0,
         }
     );
 
@@ -445,6 +447,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         ChunkMemoryLayout {
             input_bytes: 13 * 4,
             resident_bytes: 3 * 4 + 1,
+            beside_bytes: 0,
         }
     );
 
@@ -455,6 +458,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         ChunkMemoryLayout {
             input_bytes: 13 * 4 + 1,
             resident_bytes: 10 * 4 + 1,
+            beside_bytes: 0,
         }
     );
 
@@ -485,6 +489,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         ChunkMemoryLayout {
             input_bytes: 3 * (3 * 4 + 1),
             resident_bytes: 10 * 4 + 1,
+            beside_bytes: 0,
         }
     );
 }
@@ -697,6 +702,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
                     fits_in_ram: false,
                     decode_concurrency: 1,
                     warp_concurrency: 1,
+                    overcommit_bytes: 0,
                 },
                 0,
                 RunMemory::new(1 << 30, Some(123_456)),

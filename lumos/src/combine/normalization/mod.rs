@@ -91,7 +91,65 @@ pub(crate) struct FrameNorm {
     pub(crate) slots: ArrayVec<SlotNorm, 3>,
 }
 
+/// How a set's frames cover the pixels, which decides where [`FrameNorm::measure`] measures them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetCoverage {
+    /// Each slot is measured over the pixels every frame covers, or over a stratified sample of
+    /// them all when every frame covers every pixel, which holds less.
+    Common,
+    /// Each frame is gathered in each channel by its own rule: measured pair by pair.
+    PerChannel,
+}
+
 impl FrameNorm {
+    /// The most bytes [`Self::measure`] holds for `frame_count` frames of `dimensions` read in
+    /// `slots`, covering the pixels as `coverage` says, with `threads` workers.
+    ///
+    /// Each slot is measured over at most [`SAMPLE_LIMIT`] of its pixels. Over the pixels the
+    /// frames share, the run holds the domain's mask, one more per colour of a mosaic, each slot's
+    /// sample indices and the reference's samples, and each job in work a median's histogram, a
+    /// frame's samples and one transient copy of them — for its median, its seed's ratios, or a
+    /// fit's residuals. A set every frame covers whole holds the same less the masks and the
+    /// histograms. Pair by pair,
+    /// each job holds its pair's mask, indices, both frames' samples and a histogram, and for a
+    /// fitted gain the transient copy. A job never waits on a nested parallel loop, so no more of
+    /// them are alive than there are workers. The ratio of medians needs no samples where the
+    /// sources' medians describe the pixels combined, so nothing then.
+    pub(crate) fn working_bytes(
+        frame_count: usize,
+        dimensions: ImageDimensions,
+        slots: Slots,
+        normalization: Normalization,
+        coverage: SetCoverage,
+        threads: usize,
+    ) -> usize {
+        let samples: ArrayVec<usize, 3> = (0..slots.count())
+            .map(|slot| {
+                StratifiedSamples::new(dimensions.size(), slots.mosaic().as_ref(), slot).len()
+            })
+            .collect();
+        let most = samples.iter().copied().max().unwrap_or(0);
+        let shared: usize = samples
+            .iter()
+            .map(|&count| count * (size_of::<usize>() + size_of::<f32>()))
+            .sum();
+        let mask = CommonDomain::mask_bytes(dimensions.pixel_count());
+        let masks = mask * (1 + slots.mosaic().map_or(0, |_| slots.count()));
+        let workers = threads.min(frame_count * slots.count());
+        let sample = size_of::<f32>();
+        let histogram = RadixMedian::HISTOGRAM_BYTES;
+        let pair = mask + most * size_of::<usize>() + 2 * most * sample + histogram;
+        match (normalization, coverage) {
+            (Normalization::None, _) => 0,
+            (Normalization::Multiplicative, SetCoverage::Common) => masks + workers * histogram,
+            (Normalization::Global, SetCoverage::Common) => {
+                masks + shared + workers * (histogram + 2 * most * sample)
+            }
+            (Normalization::Multiplicative, SetCoverage::PerChannel) => workers * pair,
+            (Normalization::Global, SetCoverage::PerChannel) => workers * (pair + most * sample),
+        }
+    }
+
     /// The per-frame affine every frame is combined through, or `None` when every frame is taken as
     /// it stands.
     ///
@@ -355,12 +413,12 @@ fn pairwise_norms(
                 return Ok(Some(SlotEstimate::EXACT_IDENTITY));
             }
             let pair = [&frames[frame_index], &frames[reference]];
-            let domain = match CommonDomain::build(&pair, slots.channel(slot), pixel_count, cancel)
-            {
-                Ok(domain) => domain,
-                Err(StackError::NoCommonCoverage) => return Ok(None),
-                Err(error) => return Err(error),
-            };
+            let domain =
+                match CommonDomain::build_in_job(&pair, slots.channel(slot), pixel_count, cancel) {
+                    Ok(domain) => domain,
+                    Err(StackError::NoCommonCoverage) => return Ok(None),
+                    Err(error) => return Err(error),
+                };
             let indices = stratified_indices(&domain, cancel)?;
             let [ours, theirs] = [frame_index, reference].map(|index| {
                 measure_plane(

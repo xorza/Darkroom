@@ -19,9 +19,6 @@ pub(crate) fn memory_budget(available_memory: u64) -> u64 {
     (u128::from(available_memory) * u128::from(MEMORY_PERCENT) / 100) as u64
 }
 
-/// Statistics hold a full-frame scratch buffer beside the decoded pixels.
-pub(crate) const DECODE_TRANSIENT_FACTOR: usize = 2;
-
 /// Frames that may be in flight at once: budget minus what stays resident, divided by the peak
 /// one in-flight frame adds, capped at the worker count and never below one.
 pub(crate) fn load_concurrency(
@@ -50,7 +47,7 @@ pub(crate) const FRAME_QUALITY_PLANES: usize = 2;
 /// measured around, and the pixels with no data). A bitmask is a thirty-second of an f32 plane;
 /// charging each as a whole one keeps this integral and errs high.
 ///
-/// `star_detection::mem_budget` pins the detector's actual pool and checks it against this,
+/// `star_detection::tests::pool_working_set` pins the detector's actual pool and checks it against this,
 /// so a stage that grows its scratch cannot drift away from the planner silently.
 pub(crate) const DETECTION_WORKING_PLANES: usize = 9;
 

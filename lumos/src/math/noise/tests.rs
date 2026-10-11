@@ -129,3 +129,41 @@ fn each_bayer_colour_reads_its_own_noise() {
         );
     }
 }
+
+/// What an estimate holds at its peak, counted by hand.
+///
+/// MRS over 1024²: 4 × 4 tiles of 256², so 1 048 576 coefficients of 32 bytes and a bin byte,
+/// 34 603 008. The tiles start at 0, 256, 512 and 768 on each axis and reach 32 past their core,
+/// clipped to the frame: regions 288, 320, 320 and 288 wide. All sixteen in work on 16 threads
+/// hold (288 + 320 + 320 + 288)² = 1216² pixels at 32 bytes, 47 316 992; on 4, the four largest,
+/// 4 × 320² × 32 = 13 107 200. Each tile's place in the list, its share and its count are
+/// 64 + 16 + 8 bytes, 1408 for sixteen. A 192² frame is one tile, its region the frame:
+/// 36 864 × 33 + 36 864 × 32 + 88.
+///
+/// Differences over an 8 × 4 RGGB mosaic: a photosite pairs with the one two to its right, so six
+/// pairs a row, three of each of its two colours — 6 red, 12 green and 6 blue, 24 pairs at 4 bytes
+/// and a bin byte, 120; its medians take all 32 photosites at 4 bytes, 128, the larger. At
+/// 16 × 4, 14 pairs a row: 56 × 5 = 280 against 64 × 4 = 256.
+#[test]
+fn working_sets_are_what_the_buffers_hold() {
+    use crate::io::image::mosaic_noise::MosaicNoise;
+
+    let wide = Size2us::new(1024, 1024);
+    assert_eq!(
+        MrsNoise::peak_bytes(wide, 16),
+        34_603_008 + 47_316_992 + 1408
+    );
+    assert_eq!(
+        MrsNoise::peak_bytes(wide, 4),
+        34_603_008 + 13_107_200 + 1408
+    );
+    assert_eq!(
+        MrsNoise::peak_bytes(Size2us::new(192, 192), 16),
+        36_864 * 33 + 36_864 * 32 + 88
+    );
+
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    assert_eq!(DifferenceNoise::peak_bytes(Size2us::new(8, 4), &rggb), 120);
+    assert_eq!(MosaicNoise::peak_bytes(Size2us::new(8, 4), &rggb), 128);
+    assert_eq!(MosaicNoise::peak_bytes(Size2us::new(16, 4), &rggb), 280);
+}

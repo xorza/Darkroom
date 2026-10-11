@@ -225,6 +225,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     Tier::Spilled {
                         scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
                         chunk_memory: RunMemory::new(memory, None).planning(),
+                        overcommit_bytes: 0,
+                        beside_bytes: 0,
                     },
                     dims,
                     metadata,
@@ -235,7 +237,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 .unwrap()
             };
             let disk = spilled(1 << 30);
-            assert_eq!(disk.report.chunk_overcommit_bytes, 0, "{label}");
+            assert_eq!(disk.report.overcommit_bytes, 0, "{label}");
             // With no memory at all the floor of 64 rows holds past the budget the resident image,
             // weight and inverse variance planes, the coverage plane the gather writes and the
             // flag byte a pixel no frame reached is flagged in, 24 × 150 × (12c + 5) B, beside two
@@ -245,7 +247,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             // the same.
             let starved = spilled(0);
             assert_eq!(
-                starved.report.chunk_overcommit_bytes,
+                starved.report.overcommit_bytes,
                 190_656 * channels as u64 + 177_744,
                 "{label}"
             );

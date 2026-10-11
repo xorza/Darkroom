@@ -22,6 +22,7 @@ use std::path::Path;
 
 use fits_well::io::StreamReader;
 
+use crate::frame_store::frame_peek::FramePeek;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
@@ -35,7 +36,6 @@ use crate::io::image::fits::gain_extension::GAIN_EXTNAME;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::FitsChecksumProvenance;
-use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
@@ -248,17 +248,19 @@ pub(crate) fn fits_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,
-        decoder_bytes: 0,
+        decoder_bytes: usize::try_from(selected.plan.beside_frame_bytes())
+            .expect("a decode the plan admitted fits the address space"),
     })
 }
 
-/// The dimensions a linear FITS image of `path` decodes to, from its header alone: the same
-/// selection, cube reading and limits [`load_linear_fits`] applies, without reading a sample. A
-/// header that declares a mosaic is refused, as the load refuses it.
-pub(crate) fn fits_linear_dimensions(
+/// What a linear FITS image of `path` is worth to a memory estimate, from its header alone: the
+/// dimensions it decodes to and what its decode holds beside them, by the same selection, cube
+/// reading and limits [`load_linear_fits`] applies, without reading a sample. A header that
+/// declares a mosaic is refused, as the load refuses it.
+pub(crate) fn fits_linear_peek(
     path: &Path,
     context: &LoadContext,
-) -> Result<ImageDimensions, ImageError> {
+) -> Result<FramePeek, ImageError> {
     let selected = SelectedFits::open(path, context)?;
     let dimensions = selected.plan.dimensions;
     let cfa_type = read_cfa_from_headers(
@@ -273,7 +275,12 @@ pub(crate) fn fits_linear_dimensions(
             "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
         ));
     }
-    Ok(dimensions)
+    Ok(FramePeek {
+        dimensions,
+        decoder_bytes: usize::try_from(selected.plan.beside_frame_bytes())
+            .expect("a decode the plan admitted fits the address space"),
+        mosaic: None,
+    })
 }
 
 #[cfg(all(test, feature = "bench"))]

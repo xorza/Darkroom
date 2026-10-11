@@ -49,6 +49,8 @@ fn cache_test_frame<I: StackableImage>(
     let tier = Tier::Spilled {
         scratch: RunScratch::create(cache_dir).unwrap(),
         chunk_memory: 1 << 30,
+        overcommit_bytes: 0,
+        beside_bytes: 0,
     };
     let paths = vec![source; index + 1];
     FrameLoad::<I, &Path> {

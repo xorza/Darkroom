@@ -199,6 +199,8 @@ mod tests {
             FrameParking::new(Tier::Spilled {
                 scratch: RunScratch::create(directory.path()).unwrap(),
                 chunk_memory: 1 << 20,
+                overcommit_bytes: 0,
+                beside_bytes: 0,
             })
         };
         let dims = ImageDimensions::new((4, 1), 1);

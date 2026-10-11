@@ -69,6 +69,12 @@ pub(super) struct FitsDecodePlan {
 }
 
 impl FitsDecodePlan {
+    /// What the decode holds beside the frame it makes, its pixels and its flags: the reader's
+    /// chunk buffers, and a compressed image's tiles.
+    pub(super) const fn beside_frame_bytes(&self) -> u64 {
+        self.peak_bytes - self.decoded_bytes - self.flag_plane_bytes
+    }
+
     /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
     /// as read, and the flag plane the decode may hold until the two are joined.
     pub(super) fn admit_flags_extension(
@@ -293,12 +299,17 @@ pub(super) fn preflight_fits_image(
     } else {
         0
     };
-    // The reader's copy of a chunk as stored, and the scratch it byte-swaps or decodes it into,
-    // which the conversion writes straight into the output and which is still held while the flag
-    // plane is built.
+    // The reader's copy of a chunk as stored, and the words it byte-swaps it into — none for
+    // bytes, which it hands over as read — which the conversion writes straight into the output
+    // and which are still held while the flag plane is built.
+    let swapped_chunk_bytes = if stored_bitpix == FitsBitpix::U8 {
+        0
+    } else {
+        native_chunk_bytes.next_multiple_of(size_of::<u64>() as u64)
+    };
     let peak_bytes = decoded_bytes
         .checked_add(native_chunk_bytes)
-        .and_then(|bytes| bytes.checked_add(native_chunk_bytes))
+        .and_then(|bytes| bytes.checked_add(swapped_chunk_bytes))
         .and_then(|bytes| bytes.checked_add(flag_plane_bytes))
         .and_then(|bytes| {
             if hdu.kind == HduKind::CompressedImage {

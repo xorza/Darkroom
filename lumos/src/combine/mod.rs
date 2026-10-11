@@ -11,7 +11,7 @@
 pub(crate) mod cache;
 pub(crate) mod config;
 pub(crate) mod error;
-mod normalization;
+pub(crate) mod normalization;
 pub(crate) mod pixel_coverage;
 pub(crate) mod rejection;
 pub(crate) mod stack;

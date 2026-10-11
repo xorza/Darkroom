@@ -182,7 +182,8 @@ impl Seed {
     ) -> Result<Self, StackError> {
         let frame_floor = LEVER_SIGMAS * mad_to_sigma(frame_stats.mad);
         let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
-        let mut ratios = Vec::new();
+        // Every pair at most, so the ratios never grow past the room they took.
+        let mut ratios = Vec::with_capacity(frame.len());
         for (frame_chunk, reference_chunk) in frame
             .chunks(Cancelled::POLL_CHUNK)
             .zip(reference.chunks(Cancelled::POLL_CHUNK))

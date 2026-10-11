@@ -1,5 +1,3 @@
-mod mem_budget_probe;
-
 use crate::combine::config::{
     Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
 };
@@ -814,6 +812,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 
 /// Calibrated lights on disk as RGB float FITS cubes, the configuration that reads them, and the
 /// decode context it implies.
+#[derive(Debug)]
 struct LinearLights {
     base: LinearImage,
     paths: Vec<PathBuf>,
@@ -822,16 +821,15 @@ struct LinearLights {
 }
 
 impl LinearLights {
-    /// Five dithered 112 × 112 views of one star field, its channels at 1, 0.8 and 0.6 of it,
-    /// written under `scratch`.
+    /// Three dithered 128 × 128 views of one star field, its channels at 1, 0.8 and 0.6 of it,
+    /// written under `scratch`. Every light registers on this field; on 112 × 112 with 30 stars,
+    /// most found no matching pattern.
     fn write(scratch: &TempDir) -> Self {
-        let base = star_field(Size2us::new(112, 112), 30, 4242).image;
+        let base = star_field(Size2us::new(128, 128), 40, 4242).image;
         let frames = [
             base.clone(),
             shifted(&base, 5.0, -3.0),
             shifted(&base, -4.0, 6.0),
-            shifted(&base, 2.0, 7.0),
-            shifted(&base, -6.0, -2.0),
         ];
         let (width, height) = (base.width(), base.height());
         let paths: Vec<PathBuf> = frames
@@ -925,69 +923,25 @@ fn kept_lights_are_read_back_by_the_next_run() {
     );
 }
 
-/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held:
-/// five dithered 112 × 112 RGB float FITS cubes of one star field, its channels at 1, 0.8 and 0.6
-/// of it, read as RGB. The held run is the reference; the paths run matches it bit for bit resident
-/// and spilled, with the found reference and with it named. The spilled two-pass run parks every
-/// light and reads back every registered frame; the spilled one-pass run parks none. A cosmic-ray
-/// pass, which runs on mosaics alone, is refused for linear lights by both entries.
+/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held,
+/// with the found reference. The spilled two-pass run parks every light and reads back every
+/// registered frame. A cosmic-ray pass, which runs on mosaics alone, is refused for linear lights
+/// by both entries.
 #[test]
-fn calibrated_lights_on_disk_stack_as_held_ones_do() {
-    let scratch = TempDir::new("lumos_linear_paths");
+fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() {
+    let scratch = TempDir::new("lumos_linear_paths_found");
+    let lights = LinearLights::write(&scratch);
+    assert_tiers_stack_as_held(&lights, &scratch, |_| Reference::Auto);
+
     let LinearLights {
         base,
         paths,
         config,
-        context,
-    } = LinearLights::write(&scratch);
-    let held: Vec<LinearImage> = paths
-        .iter()
-        .map(|path| LinearImage::from_file(path, &context).unwrap())
-        .collect();
-    assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
-    let expected = align_and_stack(
-        held,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
-
-    let tier = |memory: u64, cache: &str, reference: Reference| {
-        let mut config = config.clone();
-        config.ingest.memory_override = Some(memory);
-        config.ingest.cache_dir = scratch.join(cache);
-        config.reference = reference;
-        align_and_stack_paths(
-            &paths,
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
-    };
-    let named = Reference::Index(expected.alignment.reference);
-    let report = |result: &AlignStackResult| {
-        (
-            result.product.report.parked_lights,
-            result.product.report.spilled_frames,
-        )
-    };
-    let registered = expected.alignment.registered() as u64;
-    for (memory, cache, reference, parked, spilled) in [
-        (u64::MAX, "ram", Reference::Auto, 0, 0),
-        (1, "spill", Reference::Auto, paths.len() as u64, registered),
-        (u64::MAX, "ram_named", named, 0, 0),
-        (1, "spill_named", named, 0, registered),
-    ] {
-        let result = tier(memory, cache, reference);
-        assert_eq!(report(&result), (parked, spilled), "{cache}");
-        assert_same_stack(&expected, &result, cache);
-    }
-
+        ..
+    } = lights;
     let cosmic = AlignStackConfig {
         cosmic_ray: Some(CosmicRayConfig::default()),
-        ..config.clone()
+        ..config
     };
     assert!(matches!(
         align_and_stack_paths(
@@ -1007,6 +961,74 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do() {
         ),
         Err(AlignStackError::CosmicRayOnLinearLights)
     ));
+}
+
+/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held,
+/// with the held run's reference named. The spilled one-pass run parks no light.
+#[test]
+fn calibrated_lights_on_disk_stack_as_held_ones_do_around_a_named_reference() {
+    let scratch = TempDir::new("lumos_linear_paths_named");
+    let lights = LinearLights::write(&scratch);
+    assert_tiers_stack_as_held(&lights, &scratch, Reference::Index);
+}
+
+/// The held run of `lights`, read as RGB, registers every light, and `align_and_stack_paths`
+/// matches it bit for bit resident and spilled, under the reference `reference` makes of the held
+/// run's.
+fn assert_tiers_stack_as_held(
+    lights: &LinearLights,
+    scratch: &TempDir,
+    reference: impl Fn(usize) -> Reference,
+) {
+    let LinearLights {
+        paths,
+        config,
+        context,
+        ..
+    } = lights;
+    let held: Vec<LinearImage> = paths
+        .iter()
+        .map(|path| LinearImage::from_file(path, context).unwrap())
+        .collect();
+    assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
+    let expected = align_and_stack(
+        held,
+        config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+    let registered = expected.alignment.registered();
+    assert_eq!(registered, paths.len(), "every light registers");
+
+    let reference = reference(expected.alignment.reference);
+    let parked_when_spilled = match reference {
+        Reference::Auto => paths.len() as u64,
+        Reference::Index(_) => 0,
+    };
+    for (memory, cache, parked, spilled) in [
+        (u64::MAX, "ram", 0, 0),
+        (1, "spill", parked_when_spilled, registered as u64),
+    ] {
+        let mut config = config.clone();
+        config.ingest.memory_override = Some(memory);
+        config.ingest.cache_dir = scratch.join(cache);
+        config.reference = reference;
+        let result = align_and_stack_paths(
+            paths,
+            &config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+        let report = &result.product.report;
+        assert_eq!(
+            (report.parked_lights, report.spilled_frames),
+            (parked, spilled),
+            "{cache}"
+        );
+        assert_same_stack(&expected, &result, cache);
+    }
 }
 
 /// Both front ends report the same stages for the same work, so a progress consumer can read the

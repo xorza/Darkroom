@@ -522,7 +522,7 @@ pub(crate) mod internals {
     }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
-    /// `mem_budget` weighs against
+    /// `cosmic_ray_scratch` weighs against
     /// [`MONO_SCRATCH_PLANES`](crate::calibration_masters::cosmic_ray::mono::MONO_SCRATCH_PLANES).
     ///
     /// Destructured rather than summed through a helper, so a plane added to or dropped from

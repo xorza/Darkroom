@@ -173,6 +173,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     // The 120 000 decoded bytes, two stored chunks of the whole 100 rows at 8 bytes a sample, and
     // the flag plane a float image may need for its NaNs, a byte for each of the 10 000 pixels.
     assert_eq!(plan.peak_bytes, 290_000);
+    assert_eq!(plan.beside_frame_bytes(), 160_000, "the two chunks");
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,
@@ -277,8 +278,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     );
     let reason = unsupported_reason(load_linear_fits(&zero_path, &load_context()).unwrap_err());
     assert!(reason.contains("must be nonzero"));
-    let reason =
-        unsupported_reason(fits_linear_dimensions(&zero_path, &load_context()).unwrap_err());
+    let reason = unsupported_reason(fits_linear_peek(&zero_path, &load_context()).unwrap_err());
     assert!(
         reason.contains("must be nonzero"),
         "the peek refuses what the load refuses"
@@ -291,11 +291,15 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
     let loaded = load_linear_fits(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
+    // The decode reads one channel's two rows at a time: 4 samples of 4 bytes as stored, and as
+    // many swapped into words, beside the frame.
+    let peek = fits_linear_peek(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(
-        fits_linear_dimensions(&rgb_path, &rgb_load_context()).unwrap(),
+        peek.dimensions,
         loaded.dimensions(),
         "the header gives what the decode makes"
     );
+    assert_eq!(peek.decoder_bytes, 32);
 
     let mosaic_path = directory.join("mosaic.fits");
     save_cfa_fits(
@@ -308,7 +312,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     )
     .unwrap();
     assert!(matches!(
-        fits_linear_dimensions(&mosaic_path, &load_context()),
+        fits_linear_peek(&mosaic_path, &load_context()),
         Err(ImageError::ScientificInputRejected { .. })
     ));
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);

@@ -357,18 +357,11 @@ impl StackableImage for LinearImage {
         LinearImage::from_file(path, context)
     }
 
-    /// A FITS header answers without a decode; its reader streams the samples, so it holds nothing
-    /// beside the frame. A float TIFF has no header this reads apart from its pixels.
+    /// A FITS header answers without a decode, the reader's chunk buffers with it. A float TIFF
+    /// has no header this reads apart from its pixels.
     fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
         match InputFormat::of(path).ok()? {
-            InputFormat::Fits => {
-                fits_decode::fits_linear_dimensions(path, context)
-                    .ok()
-                    .map(|dimensions| FramePeek {
-                        dimensions,
-                        decoder_bytes: 0,
-                    })
-            }
+            InputFormat::Fits => fits_decode::fits_linear_peek(path, context).ok(),
             InputFormat::CameraRaw | InputFormat::Raster(_) => None,
         }
     }

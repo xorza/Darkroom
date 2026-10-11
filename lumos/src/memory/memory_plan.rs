@@ -2,7 +2,7 @@
 
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory;
-use crate::memory::{DECODE_TRANSIENT_FACTOR, FRAME_QUALITY_PLANES};
+use crate::memory::FRAME_QUALITY_PLANES;
 
 /// What one frame costs the register-and-warp stage, derived from the decoded frame rather than
 /// assumed — so a mono frame is not charged for channels it does not have, and a demosaiced
@@ -53,6 +53,9 @@ pub(crate) struct RunShape {
     /// What the combine holds resident beside its frames — see
     /// [`QualityPlanes::resident_bytes`](crate::QualityPlanes::resident_bytes).
     pub(crate) output_bytes: usize,
+    /// What the normalization holds beside the frames before the combine allocates its output —
+    /// see [`FrameNorm::working_bytes`](crate::combine::normalization::FrameNorm::working_bytes).
+    pub(crate) normalization_bytes: usize,
 }
 
 impl RunShape {
@@ -68,25 +71,27 @@ impl RunShape {
     }
 
     /// A stack of frames decoded straight into the combine, with no warp: each one's resident
-    /// bytes (its pixels, and its quality planes if it may carry them) plus the statistics
-    /// scratch its decode holds beside them.
+    /// bytes (its pixels, and its quality planes if it may carry them) plus what measuring its
+    /// statistics holds beside them, `scratch_bytes`, and what its normalization and its combine
+    /// hold beside the set.
     pub(crate) const fn decoded_stack(
         frame_count: usize,
         resident_bytes: usize,
-        frame_bytes: usize,
+        scratch_bytes: usize,
         output_bytes: usize,
+        normalization_bytes: usize,
     ) -> Self {
         Self {
             frame_count,
             decode: DemosaicMemory {
                 output_bytes: resident_bytes,
-                peak_bytes: resident_bytes
-                    .saturating_add((DECODE_TRANSIENT_FACTOR - 1).saturating_mul(frame_bytes)),
+                peak_bytes: resident_bytes.saturating_add(scratch_bytes),
             },
             held_bytes: 0,
             detection_bytes: 0,
             warp: None,
             output_bytes,
+            normalization_bytes,
         }
     }
 }
@@ -99,6 +104,9 @@ pub(crate) struct MemoryPlan {
     pub(crate) decode_concurrency: usize,
     /// For a run with no warp stage, the worker count: nothing to bound.
     pub(crate) warp_concurrency: usize,
+    /// Bytes past the budget the run holds anyway, because not even its smallest step fits: one
+    /// frame in work, or the normalization's samples. Zero for a resident run, which fits whole.
+    pub(crate) overcommit_bytes: u64,
 }
 
 impl MemoryPlan {
@@ -106,7 +114,9 @@ impl MemoryPlan {
     ///
     /// The run fits in RAM only when each of its peaks does: decoding every frame (plus one
     /// decode's transient and its detector), holding every warped frame while `workers` of them
-    /// are being worked on, and holding every frame beside the combine's resident output planes.
+    /// are being worked on, and holding every frame beside the combine's resident output planes or
+    /// its normalization's samples, whichever is larger. A spilled run whose smallest step does not
+    /// fit holds it anyway and says how far past the budget: [`Self::overcommit_bytes`].
     ///
     /// A resident frame's own bytes count once, in the resident set, so what each in-flight frame
     /// adds is only what it holds beyond them; a spilled frame's bytes are all transient.
@@ -118,6 +128,7 @@ impl MemoryPlan {
             detection_bytes,
             warp,
             output_bytes,
+            normalization_bytes,
         } = shape;
         debug_assert!(
             held_bytes <= decode.output_bytes,
@@ -148,7 +159,9 @@ impl MemoryPlan {
         let warped_resident = (warped_added as u64).saturating_mul(frame_count as u64);
         let working_peak =
             warped_resident.saturating_add((resident_warp as u64).saturating_mul(workers as u64));
-        let combine_peak = warped_resident.saturating_add(output_bytes as u64);
+        // The normalization is done with before the combine allocates its output.
+        let combine_peak =
+            warped_resident.saturating_add(output_bytes.max(normalization_bytes) as u64);
         let fits_in_ram = decode_minimum.max(working_peak).max(combine_peak) <= usable;
 
         let (resident_frames, decode_bytes, warp_bytes) = if fits_in_ram {
@@ -172,10 +185,16 @@ impl MemoryPlan {
             available,
             workers,
         );
+        let overcommit_bytes = if fits_in_ram {
+            0
+        } else {
+            (decode_bytes.max(warp_bytes).max(normalization_bytes) as u64).saturating_sub(usable)
+        };
         Self {
             fits_in_ram,
             decode_concurrency,
             warp_concurrency,
+            overcommit_bytes,
         }
     }
 
@@ -196,6 +215,7 @@ impl MemoryPlan {
             detection_bytes,
             warp,
             output_bytes,
+            normalization_bytes,
         } = shape;
         assert!(
             frame_count > 0,
@@ -211,23 +231,26 @@ impl MemoryPlan {
             .saturating_add(detection_bytes);
         let warped_resident = (warp.warped as u64).saturating_mul(frame_count as u64);
         let working_minimum = warped_resident.saturating_add(in_flight as u64);
-        let combine_peak = warped_resident.saturating_add(output_bytes as u64);
+        let combine_peak =
+            warped_resident.saturating_add(output_bytes.max(normalization_bytes) as u64);
         let fits_in_ram = working_minimum.max(combine_peak) <= usable;
+        // A spilled worker keeps its warp buffers beside the frame it works on.
+        let spilled_worker = in_flight.saturating_add(warp.warped);
         let concurrency = if fits_in_ram {
             memory::load_concurrency(warp.warped, in_flight, frame_count, available, workers)
         } else {
-            memory::load_concurrency(
-                warp.warped,
-                in_flight.saturating_add(warp.warped),
-                0,
-                available,
-                workers,
-            )
+            memory::load_concurrency(warp.warped, spilled_worker, 0, available, workers)
+        };
+        let overcommit_bytes = if fits_in_ram {
+            0
+        } else {
+            (spilled_worker.max(normalization_bytes) as u64).saturating_sub(usable)
         };
         Self {
             fits_in_ram,
             decode_concurrency: concurrency,
             warp_concurrency: concurrency,
+            overcommit_bytes,
         }
     }
 }

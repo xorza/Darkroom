@@ -70,6 +70,7 @@ impl CacheCore {
         };
         let held = ChunkMemoryLayout {
             input_bytes: 2 * memory.input_bytes,
+            beside_bytes: self.tier.beside_bytes(),
             ..memory
         };
         let chunking = held.chunk_rows(self.dimensions.size(), chunk_memory);

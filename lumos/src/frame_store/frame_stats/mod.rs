@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::background_split::BackgroundSplit;
@@ -67,6 +68,22 @@ impl FrameStats {
         Self::measured(image, true)
     }
 
+    /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
+    /// workers: its noise first — a mosaic's by [`MosaicNoise`], any other frame's by [`MrsNoise`]
+    /// one channel at a time — then the samples its levels sort, every slot's at once.
+    pub(crate) fn scratch_bytes(
+        dimensions: ImageDimensions,
+        mosaic: Option<&CfaType>,
+        threads: usize,
+    ) -> usize {
+        let size = dimensions.size();
+        match mosaic {
+            Some(cfa_type) => MosaicNoise::peak_bytes(size, cfa_type)
+                .max(dimensions.pixel_count() * size_of::<f32>()),
+            None => MrsNoise::peak_bytes(size, threads).max(dimensions.frame_bytes()),
+        }
+    }
+
     fn measured(image: &impl StackableImage, with_spread: bool) -> Self {
         let dimensions = image.dimensions();
         let metadata = image.metadata();
@@ -99,8 +116,9 @@ impl FrameStats {
                 ArrayVec::from(mosaic_noise.sigma),
                 ArrayVec::from(mosaic_noise.read_share),
             ),
+            // One channel at a time: each estimate spreads its tiles over the workers already, and
+            // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
-                .into_par_iter()
                 .map(|channel| {
                     let plane = image.channel(channel);
                     let size = dimensions.size();
@@ -124,8 +142,6 @@ impl FrameStats {
                         None => (MrsNoise::estimate(plane, size, excluded), 0.0),
                     }
                 })
-                .collect::<Vec<_>>()
-                .into_iter()
                 .unzip(),
         };
         let nulls = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA));
@@ -142,8 +158,9 @@ impl FrameStats {
                     })
                 })
                 .collect(),
+            // One channel at a time: each estimate spreads its tiles over the workers already, and
+            // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
-                .into_par_iter()
                 .map(|channel| {
                     SlotLevel::of(image.channel(channel), width, with_spread, |index, _| {
                         measured(index)
@@ -232,17 +249,21 @@ impl SlotLevel {
         with_spread: bool,
         keep: impl Fn(usize, Vec2us) -> bool,
     ) -> Self {
-        let mut samples: Vec<f32> = plane
-            .chunks(width)
-            .enumerate()
-            .flat_map(|(y, row)| {
-                let keep = &keep;
+        let kept = |y: usize, x: usize| keep(y * width + x, Vec2us::new(x, y));
+        let mut count = 0;
+        for (y, row) in plane.chunks(width).enumerate() {
+            count += (0..row.len()).filter(|&x| kept(y, x)).count();
+        }
+        // Counted first, so the copy is the one its sort needs and no larger.
+        let mut samples = Vec::with_capacity(count);
+        for (y, row) in plane.chunks(width).enumerate() {
+            samples.extend(
                 row.iter()
                     .enumerate()
-                    .filter(move |&(x, _)| keep(y * width + x, Vec2us::new(x, y)))
-                    .map(|(_, &sample)| sample)
-            })
-            .collect();
+                    .filter(|&(x, _)| kept(y, x))
+                    .map(|(_, &sample)| sample),
+            );
+        }
         if samples.is_empty() {
             return Self {
                 median: 0.0,

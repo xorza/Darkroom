@@ -1358,3 +1358,58 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
         );
     }
 }
+
+/// What measuring the norms holds, counted by hand for three frames of 100 × 100.
+///
+/// A mono slot samples all 10 000 pixels; the mask is a row of 10 000 bits padded to 79 × 128,
+/// 1264 B; a median's histogram is 2¹⁶ counts of 4 bytes, 262 144 B. Over the pixels the frames
+/// share, `Global` holds the mask, the slot's indices and the reference's samples at 8 + 4 bytes,
+/// 120 000, and on each of two workers a histogram and two copies of 40 000 B of samples:
+/// 1264 + 120 000 + 2 × 342 144 = 805 552, and 463 408 on one worker. `Multiplicative` holds the
+/// mask and the histograms, 525 552. Pair by pair each worker holds a mask, 80 000 B of indices,
+/// both frames' samples and a histogram, 423 408, and for `Global` one more copy, 463 408: twice
+/// that on two workers, 846 816 and 926 816.
+///
+/// An RGGB mosaic is three slots of 2500, 5000 and 2500 photosites: indices and reference samples
+/// of 120 000 B, the domain's mask and one per colour, 5056 B, and on each worker a histogram and
+/// two copies of the largest slot's 20 000 B: 5056 + 120 000 + 2 × 302 144 = 729 344.
+#[test]
+fn the_working_set_is_what_the_measurement_holds() {
+    use crate::combine::cache::slots::Slots;
+    use crate::combine::config::Normalization;
+
+    let dimensions = ImageDimensions::new((100, 100), 1);
+    let mono = Slots::new(None, 1);
+    let bytes = |slots, normalization, coverage, threads| {
+        FrameNorm::working_bytes(3, dimensions, slots, normalization, coverage, threads)
+    };
+    for (normalization, coverage, threads, expected) in [
+        (Normalization::Global, SetCoverage::Common, 2, 805_552),
+        (Normalization::Global, SetCoverage::Common, 1, 463_408),
+        (
+            Normalization::Multiplicative,
+            SetCoverage::Common,
+            2,
+            525_552,
+        ),
+        (
+            Normalization::Multiplicative,
+            SetCoverage::PerChannel,
+            2,
+            846_816,
+        ),
+        (Normalization::Global, SetCoverage::PerChannel, 2, 926_816),
+        (Normalization::None, SetCoverage::Common, 2, 0),
+    ] {
+        assert_eq!(
+            bytes(mono, normalization, coverage, threads),
+            expected,
+            "{normalization:?}, {coverage:?}, {threads} workers"
+        );
+    }
+    let rggb = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
+    assert_eq!(
+        bytes(rggb, Normalization::Global, SetCoverage::Common, 2),
+        729_344
+    );
+}

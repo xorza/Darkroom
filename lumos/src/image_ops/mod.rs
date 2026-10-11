@@ -39,8 +39,6 @@ pub(crate) mod stretching;
 #[cfg(all(test, feature = "bench", feature = "real-data"))]
 mod bench;
 #[cfg(test)]
-mod mem_budget_probe;
-#[cfg(test)]
 mod tests;
 
 /// Samples per rayon work item. Parallelizing per sample drowns a cheap per-pixel op in rayon's

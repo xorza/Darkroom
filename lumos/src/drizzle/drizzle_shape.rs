@@ -1,8 +1,11 @@
 //! [`DrizzleShape`]: what a drizzle run holds, and the tier its drizzled frames live in.
 
+use crate::combine::cache::slots::Slots;
 use crate::combine::config::StackConfig;
+use crate::combine::normalization::{FrameNorm, SetCoverage};
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -49,6 +52,13 @@ impl DrizzleShape {
             + 2 * deposit.weight_planes() * weight_plane
             + output.pixel_count();
         let input_bytes = input.frame_bytes() + input.pixel_count();
+        let threads = rayon::current_num_threads();
+        // Each frame's statistics are measured on its input before its drizzle starts.
+        let mosaic = match deposit {
+            Deposit::Mosaic(cfa_type) => Some(cfa_type),
+            Deposit::Channels(_) => None,
+        };
+        let measured = input_bytes + FrameStats::scratch_bytes(input, mosaic.as_ref(), threads);
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
         // frees at most its own size from the plan's figures.
         let held_bytes = match origin {
@@ -59,7 +69,7 @@ impl DrizzleShape {
             frame_count,
             decode: DemosaicMemory {
                 output_bytes: drizzled,
-                peak_bytes: drizzled.saturating_add(input_bytes),
+                peak_bytes: drizzled.saturating_add(input_bytes).max(measured),
             },
             held_bytes,
             detection_bytes: 0,
@@ -72,9 +82,25 @@ impl DrizzleShape {
                 + usize::from(stack.quality.coverage)
                     * (deposit.weight_planes() - 1)
                     * weight_plane,
+            // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each
+            // channel by its colour's own.
+            normalization_bytes: FrameNorm::working_bytes(
+                frame_count,
+                output,
+                Slots::new(None, output.channels()),
+                stack.normalization,
+                match deposit {
+                    Deposit::Mosaic(_) => SetCoverage::PerChannel,
+                    Deposit::Channels(_) => SetCoverage::Common,
+                },
+                threads,
+            ),
         };
-        let plan = MemoryPlan::plan(shape, rayon::current_num_threads(), run.memory.planning());
+        let plan = MemoryPlan::plan(shape, threads, run.memory.planning());
+        // The depth of every weight plane is summed as the frames arrive and gates the product
+        // after the combine, so it is held beside the combine throughout.
         Tier::for_plan(&plan, shape.spill_bytes(), run.memory, &run.cache_dir)
+            .map(|tier| tier.holding_beside((deposit.weight_planes() * weight_plane) as u64))
             .map_err(|source| DrizzleError::Stack(source.into()))
     }
 }

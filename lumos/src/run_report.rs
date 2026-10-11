@@ -44,10 +44,11 @@ pub struct RunReport {
     /// Frames the combine read from disk because the set did not fit in memory: zero for a run
     /// that kept every frame resident.
     pub spilled_frames: u64,
-    /// Bytes the combine held past the memory budget, because not even its smallest chunk of rows
-    /// fit beside its output planes: zero when every chunk fit. The frames' planes are mapped
-    /// files, so the excess costs page-cache thrashing rather than an allocation failure.
-    pub chunk_overcommit_bytes: u64,
+    /// Bytes the run held past the memory budget, because not even the smallest step of one of
+    /// its stages fit in it: one frame in work, the normalization's samples, or the combine's
+    /// smallest chunk of rows beside its output planes. The stages run one after another, so this
+    /// is the largest of their excesses; zero when every step fit.
+    pub overcommit_bytes: u64,
     /// Calibrated lights written to disk between their detection and their registration, because
     /// the reference was not known until every light was detected: zero for a resident run, and
     /// for one whose reference was named, which registers each light as it arrives.
