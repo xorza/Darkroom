@@ -138,7 +138,7 @@ impl FrameStats {
                 .into_par_iter()
                 .map(|colour| {
                     SlotLevel::of(image.channel(0), width, with_spread, |index, position| {
-                        measured(index) && usize::from(cfa_type.color_at(position)) == colour
+                        measured(index) && cfa_type.color_at(position) == colour
                     })
                 })
                 .collect(),

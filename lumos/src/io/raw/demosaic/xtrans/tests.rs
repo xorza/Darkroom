@@ -1,9 +1,11 @@
 use crate::internals::assertions::assert_close;
 use crate::internals::test_rng::TestRng;
+use crate::io::image::cfa::cfa_colour::CfaColour;
+use crate::io::image::cfa::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
-use crate::io::raw::demosaic::xtrans::*;
+use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
 
@@ -11,10 +13,10 @@ use common::CancelToken;
 fn xtrans_pattern_color_at() {
     let pattern = test_pattern();
     // Check corners
-    assert_eq!(pattern.color_at(Vec2us::new(0, 0)), 1); // G
-    assert_eq!(pattern.color_at(Vec2us::new(2, 0)), 0); // R
-    assert_eq!(pattern.color_at(Vec2us::new(5, 0)), 2); // B
-    assert_eq!(pattern.color_at(Vec2us::new(0, 2)), 2); // B
+    assert_eq!(pattern.color_at(Vec2us::new(0, 0)), CfaColour::Green);
+    assert_eq!(pattern.color_at(Vec2us::new(2, 0)), CfaColour::Red);
+    assert_eq!(pattern.color_at(Vec2us::new(5, 0)), CfaColour::Blue);
+    assert_eq!(pattern.color_at(Vec2us::new(0, 2)), CfaColour::Blue);
     // Check wrapping
     assert_eq!(
         pattern.color_at(Vec2us::new(0, 6)),

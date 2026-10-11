@@ -227,7 +227,7 @@ impl<'a> FrameSource<'a> {
             values: self.planes.iter().map(|plane| plane[pixel.index]).collect(),
             colour: self
                 .mosaic
-                .map(|cfa_type| usize::from(cfa_type.color_at(pixel.position))),
+                .map(|cfa_type| cfa_type.color_at(pixel.position)),
             carried: self.flags.map_or(0, |flags| {
                 flags.at(pixel.index).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
             }),

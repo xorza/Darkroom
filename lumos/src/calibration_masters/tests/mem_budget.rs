@@ -14,7 +14,7 @@ use crate::calibration_masters::cosmic_ray::mono::internals::mono_scratch_floats
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::internals::cfa::cfa_from_plane;
 use crate::io::image::cfa::CfaType;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 

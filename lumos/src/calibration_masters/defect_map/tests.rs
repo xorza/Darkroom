@@ -9,7 +9,8 @@ use crate::math::vec2us::Vec2us;
 
 use crate::calibration_masters::defect_map::sampling::collect_color_sample_indices;
 use crate::calibration_masters::defect_map::sampling::internals::collect_color_samples;
-use crate::{internals::cfa::make_cfa, io::raw::demosaic::bayer::CfaPattern};
+use crate::internals::cfa::make_cfa;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)
@@ -31,7 +32,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             CfaType::XTrans(_) => 6,
         };
 
-        for target_color in 0..cfa_type.num_colors() as u8 {
+        for target_color in 0..cfa_type.num_colors() {
             let mut expected_rows = vec![false; height];
             let mut expected_columns = vec![false; width];
             let mut expected_phases = vec![false; period * period];
@@ -284,7 +285,7 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(12usize, 12usize);
     // Distinct per-color baselines so a wrong-color repair is detectable.
-    let color_val = |c: u8| match c {
+    let color_val = |c: usize| match c {
         0 => 0.1, // R
         1 => 0.2, // G
         _ => 0.3, // B
@@ -350,7 +351,7 @@ fn cfa_hot_pixel_correction_bayer() {
     let size = Size2us::new(6, 6);
     let baseline = [100.0f32, 200.0, 50.0];
     let mut pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|i| baseline[pattern.color_at(size.point_of(i)) as usize])
+        .map(|i| baseline[pattern.color_at(size.point_of(i))])
         .collect();
     pixels[2 * 6 + 2] = 10000.0;
     let mut image = make_cfa(size, pixels, pattern);
@@ -479,7 +480,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            let color = cfa.color_at(Vec2us::new(x, y)) as usize;
+            let color = cfa.color_at(Vec2us::new(x, y));
             let x_unit = x as f32 / (size.width - 1) as f32;
             let y_unit = y as f32 / (size.height - 1) as f32;
             let baseline = [0.01, 0.02, 0.03][color];
@@ -683,7 +684,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
 fn xtrans_cold_pixel_detected() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(24usize, 24usize);
-    let color_val = |c: u8| 0.1 * f32::from(c + 1);
+    let color_val = |c: usize| 0.1 * (c + 1) as f32;
     let mut px: Vec<f32> = (0..size.pixel_count())
         .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();

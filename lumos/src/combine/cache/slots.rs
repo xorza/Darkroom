@@ -34,7 +34,7 @@ impl Slots {
     /// The slot of the pixel at `position` in `channel`.
     pub(crate) const fn slot(&self, channel: usize, position: Vec2us) -> usize {
         match &self.mosaic {
-            Some(cfa) => cfa.color_at(position) as usize,
+            Some(cfa) => cfa.color_at(position),
             None => channel,
         }
     }

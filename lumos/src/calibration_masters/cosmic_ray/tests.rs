@@ -644,7 +644,7 @@ fn an_xtrans_mosaic_is_refused_untouched() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.04 + 0.01 * f32::from(cfa.color_at(size.point_of(index))))
+        .map(|index| 0.04 + 0.01 * cfa.color_at(size.point_of(index)) as f32)
         .collect();
     data[size.index_of(Vec2us::new(18, 18))] = 0.95;
     let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data.clone()), cfa);

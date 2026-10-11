@@ -33,9 +33,9 @@ use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::tiled;
 use crate::io::raw::demosaic::tiled::Tiling;
-use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::io::raw::demosaic::xtrans::markesteijn::tile::Tile;
+use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::math::size2us::Size2us;
 
 /// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
@@ -112,7 +112,7 @@ pub(crate) fn demosaic(
     tiled::demosaic(
         xtrans.data,
         xtrans.size,
-        |position| usize::from(xtrans.pattern.color_at(position)),
+        |position| xtrans.pattern.color_at(position).index(),
         passes.tiling(),
         || Tile::new(passes.directions()),
         // SAFETY: the driver hands each place's own part to this tile alone, which writes no

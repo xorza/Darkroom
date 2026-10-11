@@ -10,6 +10,7 @@ use fits_well::io::{BLOCK_SIZE, HduKind};
 
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_transfer, write_fits};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
@@ -18,7 +19,6 @@ use crate::io::image::fits::options::{
 };
 use crate::io::image::fits::provenance::FitsChecksumState;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use common::TempDir;
 use std::fs;
 

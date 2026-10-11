@@ -265,7 +265,7 @@ impl UnpackedRaw {
     fn channel_map(&self) -> impl Fn(usize, usize) -> usize + Sync + use<> {
         let (cfa_type, filters) = (self.cfa_type, self.visible_filters);
         move |x: usize, y: usize| match cfa_type {
-            Some(CfaType::XTrans(pattern)) => usize::from(pattern.color_at(Vec2us::new(x, y))),
+            Some(CfaType::XTrans(pattern)) => pattern.color_at(Vec2us::new(x, y)).index(),
             Some(CfaType::Bayer(_)) => raw::libraw_filter_color(filters, y, x),
             Some(CfaType::Mono) | None => 0,
         }

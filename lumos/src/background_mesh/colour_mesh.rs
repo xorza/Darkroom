@@ -58,7 +58,6 @@ impl ColourMesh {
             let grid = if *cfa == CfaType::Mono {
                 workspace.tile_stats(pixels, excluded, tile_size, SIGMA_CLIP_ITERATIONS, true)
             } else {
-                let colour = u8::try_from(colour).expect("three colours");
                 workspace.tile_stats_where(
                     pixels,
                     &|position| {
@@ -140,7 +139,7 @@ fn spans(length: usize, centres: &[f32]) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
 
     /// An RGGB mosaic of 128 × 128 with red at 1/8 + x/1024, green at 1/4 and blue at 3/8: each
     /// colour's mesh reads its own level, and red's gradient. Tiles of 64 are centred at 31.5 and

@@ -170,7 +170,7 @@ impl DefectMap {
                 ..ColourDefects::default()
             })
             .collect();
-        let colour_of = |index: usize| cfa.color_at(self.dimensions.point_of(index)) as usize;
+        let colour_of = |index: usize| cfa.color_at(self.dimensions.point_of(index));
         for &index in &self.hot.indices {
             colours[colour_of(index)].hot += 1;
         }
@@ -178,7 +178,7 @@ impl DefectMap {
             colours[colour_of(index)].cold += 1;
         }
         self.mask
-            .for_each_set(|point| colours[cfa.color_at(point) as usize].defective += 1);
+            .for_each_set(|point| colours[cfa.color_at(point)].defective += 1);
         DefectSummary {
             hot_pixels: self.hot.indices.len(),
             cold_pixels: self.cold_indices.len(),
@@ -370,7 +370,7 @@ fn detect_hot_pixels(
                 return None;
             }
             let point = size.point_of(i);
-            let color = cfa_type.color_at(point) as usize;
+            let color = cfa_type.color_at(point);
             let ColorStats { median, sigma } = stats[color];
             let local = background.at(color, point);
             let cut = sigma_threshold * sigma.max(local.noise);
@@ -477,7 +477,7 @@ fn compute_per_color_residual_stats(
     let num_colors = cfa_type.num_colors();
     let mut stats = ArrayVec::new();
 
-    for color in 0..num_colors as u8 {
+    for color in 0..num_colors {
         let mut samples = collect_color_residual_samples(data, cfa_type, color, background);
 
         if samples.is_empty() {

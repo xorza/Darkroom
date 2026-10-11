@@ -4,8 +4,8 @@ use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use common::CancelToken;
 
 use crate::internals::cfa::XTRANS_PATTERN;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::pixel_flags::{QualityFlags, SATURATION_FRACTION};
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::error::LibrawCode;
 use crate::io::raw::libraw::internals::BayerDump;
 use crate::io::raw::unpacked_raw::{instrument, saturation_level};

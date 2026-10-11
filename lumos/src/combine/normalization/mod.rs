@@ -203,7 +203,7 @@ impl<'a> SlotPixels<'a> {
                     domain,
                     dimensions.size(),
                     cfa_type,
-                    slot as u8,
+                    slot,
                     cancel,
                 )?)),
             })

@@ -342,7 +342,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let mut rng = TestRng::new(7);
     let pixels = (0..size.pixel_count())
         .map(|index| {
-            let colour = usize::from(cfa_type.color_at(Vec2us::new(index % 64, index / 64)));
+            let colour = cfa_type.color_at(Vec2us::new(index % 64, index / 64));
             level[colour] + sigma[colour] * rng.next_gaussian_f32()
         })
         .collect();
@@ -695,11 +695,13 @@ fn each_pattern_names_its_demosaic() {
 /// = 2, and the greens the other 7; a 6 × 6 X-Trans period has 8 reds, 20 greens and 8 blues.
 #[test]
 fn every_pattern_names_the_colour_at_each_position() {
-    let colour_of = |letter: u8| match letter {
-        b'R' => 0,
-        b'G' => 1,
-        b'B' => 2,
-        _ => unreachable!(),
+    let colour_of = |letter: u8| -> usize {
+        match letter {
+            b'R' => 0,
+            b'G' => 1,
+            b'B' => 2,
+            _ => unreachable!(),
+        }
     };
     for (pattern, filters) in [
         (CfaPattern::Rggb, 0x9494_9494),
@@ -712,9 +714,13 @@ fn every_pattern_names_the_colour_at_each_position() {
             for x in 0..4 {
                 let expected = colour_of(spelling[(y % 2) * 2 + x % 2]);
                 let pos = Vec2us::new(x, y);
-                assert_eq!(pattern.color_at(pos) as u8, expected, "{pattern:?} {pos:?}");
+                assert_eq!(
+                    pattern.color_at(pos).index(),
+                    expected,
+                    "{pattern:?} {pos:?}"
+                );
                 assert_eq!(CfaType::Bayer(pattern).color_at(pos), expected);
-                assert_eq!(raw::libraw_filter_color(filters, y, x) as u8, expected);
+                assert_eq!(raw::libraw_filter_color(filters, y, x), expected);
             }
         }
     }
@@ -724,7 +730,7 @@ fn every_pattern_names_the_colour_at_each_position() {
             assert_eq!(CfaType::Mono.color_at(pos), 0);
             assert_eq!(
                 CfaType::XTrans(XTRANS_PATTERN).color_at(pos),
-                XTRANS_PATTERN.rows()[y % 6][x % 6]
+                usize::from(XTRANS_PATTERN.rows()[y % 6][x % 6])
             );
         }
     }
@@ -744,7 +750,7 @@ fn every_pattern_names_the_colour_at_each_position() {
             let mut counted = vec![0; cfa.num_colors()];
             for y in 0..size.height {
                 for x in 0..size.width {
-                    counted[cfa.color_at(Vec2us::new(x, y)) as usize] += 1;
+                    counted[cfa.color_at(Vec2us::new(x, y))] += 1;
                 }
             }
             assert_eq!(
@@ -867,7 +873,7 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
             let samples: Vec<f32> = (0..size.pixel_count())
                 .map(|index| {
                     let (x, y) = (index % size.width, index / size.width);
-                    scene(x, y) / gains[cfa_type.color_at(Vec2us::new(x, y)) as usize]
+                    scene(x, y) / gains[cfa_type.color_at(Vec2us::new(x, y))]
                 })
                 .collect();
             let false_colour = |balance: Option<[f32; 4]>| {

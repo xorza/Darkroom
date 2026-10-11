@@ -35,7 +35,7 @@ use crate::internals::synthetic::fixtures::{
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::star_detection::config::Config;
 use crate::star_detection::detector::StarDetector;
 

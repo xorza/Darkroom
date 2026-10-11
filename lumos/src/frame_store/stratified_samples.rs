@@ -27,7 +27,7 @@ impl StratifiedSamples {
     /// The sample of slot `slot` of an image of `size`: a colour of `mosaic`, or a channel
     /// without one.
     pub(crate) fn new(size: Size2us, mosaic: Option<&CfaType>, slot: usize) -> Self {
-        let colour = mosaic.map(|cfa_type| ColourRaster::new(cfa_type, size, slot as u8));
+        let colour = mosaic.map(|cfa_type| ColourRaster::new(cfa_type, size, slot));
         let pixels = colour
             .as_ref()
             .map_or(size.pixel_count(), ColourRaster::count);

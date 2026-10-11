@@ -8,8 +8,8 @@ use crate::calibration_masters::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFla
 use crate::internals::assertions::bits;
 use crate::internals::cfa::make_cfa;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::sample_domain::DomainMap;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
     if let Some(subtractor) = subtractor {
@@ -101,7 +101,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         let mut expected_divisors = Vec::with_capacity(size.pixel_count());
         for y in 0..size.height {
             for x in 0..size.width {
-                let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
+                let color = cfa_type.color_at(Vec2us::new(x, y));
                 let divisor = if counts[color].is_multiple_of(2) {
                     0.5
                 } else {
