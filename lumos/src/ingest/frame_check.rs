@@ -7,12 +7,11 @@
 
 use common::CancelToken;
 
-use crate::combine::CANCEL_POLL_CHUNK;
-use crate::combine::cache::set_facts::SetFacts;
-use crate::combine::error::StackError;
 use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
 use crate::frame_store::stackable_image::StackableImage;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::ingest::error::AdmissionError;
+use crate::ingest::set_facts::SetFacts;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 
@@ -28,7 +27,7 @@ pub(crate) struct FrameCheck<'a> {
 
 impl FrameCheck<'_> {
     /// Every sample of a decoded image is finite.
-    pub(crate) fn samples(self, image: &impl StackableImage) -> Result<(), StackError> {
+    pub(crate) fn samples(self, image: &impl StackableImage) -> Result<(), AdmissionError> {
         self.sample_channels(
             (0..image.dimensions().channels()).map(|channel| image.channel(channel)),
         )
@@ -44,7 +43,7 @@ impl FrameCheck<'_> {
         frame: &StoredFrame,
         dimensions: ImageDimensions,
         facts: &mut SetFacts,
-    ) -> Result<(), StackError> {
+    ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
         self.geometry(frame, dimensions)?;
         facts.admit(self.index, &frame.source_stats.facts)?;
@@ -57,7 +56,7 @@ impl FrameCheck<'_> {
         self,
         frame: &StoredFrame,
         dimensions: ImageDimensions,
-    ) -> Result<(), StackError> {
+    ) -> Result<(), AdmissionError> {
         let pixel_count = dimensions.pixel_count();
         match &frame.quality {
             FrameQuality::Planes {
@@ -84,7 +83,7 @@ impl FrameCheck<'_> {
         self,
         channels: &[StoredPlane],
         pixel_count: usize,
-    ) -> Result<(), StackError> {
+    ) -> Result<(), AdmissionError> {
         self.sample_channels(channels.iter().map(|plane| plane.chunk(0, pixel_count)))
     }
 
@@ -104,7 +103,7 @@ impl FrameCheck<'_> {
         kind: FramePlane,
         support: &[f32],
         confidence: &[f32],
-    ) -> Result<(), StackError> {
+    ) -> Result<(), AdmissionError> {
         debug_assert_eq!(
             support.len(),
             confidence.len(),
@@ -112,16 +111,16 @@ impl FrameCheck<'_> {
         );
         let index = self.index;
         for (chunk, (support, confidence)) in support
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(confidence.chunks(CANCEL_POLL_CHUNK))
+            .chunks(Cancelled::POLL_CHUNK)
+            .zip(confidence.chunks(Cancelled::POLL_CHUNK))
             .enumerate()
         {
             Cancelled::check(self.cancel)?;
-            let pixel = |offset| chunk * CANCEL_POLL_CHUNK + offset;
+            let pixel = |offset| chunk * Cancelled::POLL_CHUNK + offset;
             for (offset, (&support, &confidence)) in support.iter().zip(confidence).enumerate() {
                 for (kind, value) in [(kind, support), (FramePlane::Confidence, confidence)] {
                     if !kind.accepts(value) {
-                        return Err(StackError::InvalidWarpPlaneValue {
+                        return Err(AdmissionError::InvalidQualityPlaneValue {
                             index,
                             plane: kind,
                             pixel: pixel(offset),
@@ -130,7 +129,7 @@ impl FrameCheck<'_> {
                     }
                 }
                 if (support > 0.0) != (confidence > 0.0) {
-                    return Err(StackError::FrameQualityPairMismatch {
+                    return Err(AdmissionError::FrameQualityPairMismatch {
                         index,
                         pixel: pixel(offset),
                         plane: kind,
@@ -147,10 +146,14 @@ impl FrameCheck<'_> {
     ///
     /// A stored plane carries no width or height, so this compares plane counts and sample counts
     /// — enough to guarantee every `chunk(..)` below is in range.
-    fn geometry(self, frame: &StoredFrame, dimensions: ImageDimensions) -> Result<(), StackError> {
+    fn geometry(
+        self,
+        frame: &StoredFrame,
+        dimensions: ImageDimensions,
+    ) -> Result<(), AdmissionError> {
         let index = self.index;
         if frame.channels.len() != dimensions.channels() {
-            return Err(StackError::StoredFrameChannels {
+            return Err(AdmissionError::StoredFrameChannels {
                 index,
                 expected: dimensions.channels(),
                 actual: frame.channels.len(),
@@ -172,7 +175,7 @@ impl FrameCheck<'_> {
             .chain(frame.quality.present());
         for (kind, plane) in planes {
             if plane.samples() != expected {
-                return Err(StackError::StoredFramePlaneSamples {
+                return Err(AdmissionError::StoredFramePlaneSamples {
                     index,
                     plane: kind,
                     expected,
@@ -188,16 +191,16 @@ impl FrameCheck<'_> {
     fn sample_channels<'s>(
         self,
         channels: impl IntoIterator<Item = &'s [f32]>,
-    ) -> Result<(), StackError> {
+    ) -> Result<(), AdmissionError> {
         for (channel, samples) in channels.into_iter().enumerate() {
-            for (chunk, values) in samples.chunks(CANCEL_POLL_CHUNK).enumerate() {
+            for (chunk, values) in samples.chunks(Cancelled::POLL_CHUNK).enumerate() {
                 Cancelled::check(self.cancel)?;
                 for (offset, value) in values.iter().copied().enumerate() {
                     if !value.is_finite() {
-                        return Err(StackError::NonFiniteImageSample {
+                        return Err(AdmissionError::NonFiniteImageSample {
                             index: self.index,
                             channel,
-                            pixel: chunk * CANCEL_POLL_CHUNK + offset,
+                            pixel: chunk * Cancelled::POLL_CHUNK + offset,
                             value,
                         });
                     }

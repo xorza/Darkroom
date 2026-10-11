@@ -116,3 +116,59 @@ pub enum DarkMismatch {
         dark: f64,
     },
 }
+
+/// Why the master a calibration stack subtracts from every frame cannot be taken from them: the
+/// master itself, or frame `index` it meets.
+#[derive(Debug, thiserror::Error)]
+pub enum SubtractionError {
+    /// The master a calibration stack subtracts from every frame is of another sensor shape or
+    /// pattern than frame `index`.
+    #[error(
+        "frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}, or of another pattern"
+    )]
+    SubtractorShape {
+        index: usize,
+        frame: Size2us,
+        subtractor: Size2us,
+    },
+
+    /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
+    #[error(
+        "frame {index} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
+    )]
+    SubtractorDomain {
+        index: usize,
+        frame: Box<SampleDomain>,
+        subtractor: Box<SampleDomain>,
+    },
+
+    /// The master a calibration stack would subtract from every frame lost, when it was itself
+    /// stacked, everything its role holds, or more than its role may lose: a bias anything, a dark
+    /// or a flat-dark more than its bias.
+    #[error("the {subtractor} master is calibrated past anything it could subtract")]
+    OverCalibratedSubtractor { subtractor: MasterRole },
+
+    /// The master a calibration stack would subtract holds more than a frame of the stacked role
+    /// may lose before it is combined: a dark or a flat-dark only its bias, a bias nothing, and no
+    /// frame its flat response.
+    #[error(
+        "the {subtractor} master holds more than a {target} frame may lose before it is combined"
+    )]
+    SubtractorForRole {
+        target: MasterRole,
+        subtractor: MasterRole,
+    },
+
+    /// Frame `index` already lost a part of what the subtracted master holds: subtracted again,
+    /// that part would be removed twice.
+    #[error("frame {index} already lost part of what the {subtractor} master holds")]
+    SubtractedTwice {
+        index: usize,
+        subtractor: MasterRole,
+    },
+
+    /// The master holding dark signal that a calibration stack subtracts was taken under other
+    /// conditions than frame `index`.
+    #[error("frame {index} cannot take the subtracted master: {source}")]
+    SubtractorConditions { index: usize, source: DarkMismatch },
+}

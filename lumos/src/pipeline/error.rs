@@ -7,6 +7,7 @@ use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::FrameStoreError;
+use crate::ingest::error::AdmissionError;
 use crate::io::image::error::ImageError;
 
 /// Failures from calibrated-image and RAW registered stacking.
@@ -54,8 +55,21 @@ pub enum AlignStackError {
     },
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
+    /// A light failed the checks every frame of the set passes, whether as it was decoded or when
+    /// the survivors were combined.
+    #[error(transparent)]
+    Admission(AdmissionError),
     #[error(transparent)]
     Stack(StackError),
+}
+
+impl From<AdmissionError> for AlignStackError {
+    fn from(error: AdmissionError) -> Self {
+        match error {
+            AdmissionError::Cancelled => Self::Cancelled,
+            error => Self::Admission(error),
+        }
+    }
 }
 
 /// A combine failure arrives at the one path a caller matches it on: a cancel, an empty set or a
@@ -66,6 +80,7 @@ impl From<StackError> for AlignStackError {
             StackError::Cancelled => Self::Cancelled,
             StackError::NoFrames => Self::NoFrames,
             StackError::FrameStore(error) => Self::FrameStore(error),
+            StackError::Admission(error) => Self::Admission(error),
             error => Self::Stack(error),
         }
     }

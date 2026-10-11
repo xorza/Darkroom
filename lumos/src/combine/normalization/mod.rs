@@ -23,7 +23,6 @@ use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::combine::CANCEL_POLL_CHUNK;
 use crate::combine::cache::slots::Slots;
 use crate::combine::config::Normalization;
 use crate::combine::error::StackError;
@@ -161,7 +160,7 @@ struct PlaneMeasurement {
 }
 
 const _: () = assert!(
-    CANCEL_POLL_CHUNK.is_multiple_of(WORD_BITS),
+    Cancelled::POLL_CHUNK.is_multiple_of(WORD_BITS),
     "a gather chunk starts on a mask word"
 );
 
@@ -237,7 +236,7 @@ impl<'a> SlotPixels<'a> {
 /// The combine's constructors admit the set's facts first ([`SetFacts`]), so every declared domain
 /// converts.
 ///
-/// [`SetFacts`]: crate::combine::cache::set_facts::SetFacts
+/// [`SetFacts`]: crate::ingest::set_facts::SetFacts
 fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
     let reference = frames
         .iter()
@@ -725,7 +724,7 @@ fn measure_plane(
     debug_assert!(indices.is_sorted(), "the sample indices ascend");
     let values = plane.chunk(0, pixel_count);
     let mut samples = Vec::with_capacity(indices.len());
-    for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
+    for chunk in indices.chunks(Cancelled::POLL_CHUNK) {
         Cancelled::check(cancel)?;
         samples.extend(chunk.iter().map(|&index| values[index]));
     }
@@ -754,9 +753,9 @@ fn for_each_in_domain(
     cancel: &CancelToken,
     mut visit: impl FnMut(f32),
 ) -> Result<(), StackError> {
-    for (chunk, chunk_values) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
+    for (chunk, chunk_values) in values.chunks(Cancelled::POLL_CHUNK).enumerate() {
         Cancelled::check(cancel)?;
-        let base = chunk * CANCEL_POLL_CHUNK;
+        let base = chunk * Cancelled::POLL_CHUNK;
         let end = base + chunk_values.len();
         // The mask is one row, so word `w` covers pixels `64w..64w + 64`, and a chunk starts on a
         // word: its words are read once each instead of a bit lookup per pixel.
@@ -790,12 +789,12 @@ fn stratified_indices(
     for (group, words) in domain
         .valid
         .words
-        .chunks(CANCEL_POLL_CHUNK / WORD_BITS)
+        .chunks(Cancelled::POLL_CHUNK / WORD_BITS)
         .enumerate()
     {
         Cancelled::check(cancel)?;
         for (offset, &word) in words.iter().enumerate() {
-            let base = (group * (CANCEL_POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
+            let base = (group * (Cancelled::POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
             let mut bits = word;
             while bits != 0 && indices.len() < retained {
                 let bit = bits.trailing_zeros() as usize;
@@ -828,7 +827,7 @@ fn source_noise_variance(
     };
     let values = confidence.chunk(0, pixel_count);
     let mut inverse_confidence = 0.0;
-    for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
+    for chunk in indices.chunks(Cancelled::POLL_CHUNK) {
         Cancelled::check(cancel)?;
         for &index in chunk {
             let value = f64::from(values[index]);

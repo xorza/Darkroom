@@ -7,6 +7,7 @@
 //! building mosaics from known colours and demosaicing them back.
 
 use crate::combine::config::{Normalization, StackConfig, Weighting};
+use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::QualityFlags;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -366,11 +367,13 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     };
     assert!(matches!(
         stack_paths(&[&normalized_path, &adu_path]),
-        Err(StackError::SampleDomainMismatch {
-            index: 1,
-            reference_index: 0,
-            ..
-        })
+        Err(StackError::Admission(
+            AdmissionError::SampleDomainMismatch {
+                index: 1,
+                reference_index: 0,
+                ..
+            }
+        ))
     ));
     assert!(stack_paths(&[&normalized_path, &normalized_path]).is_ok());
 }
@@ -441,22 +444,24 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         assert!(
             matches!(
                 linear_set(&other_span),
-                Err(StackError::SampleDomainMismatch {
-                    index: 1,
-                    reference_index: 0,
-                    ..
-                })
+                Err(StackError::Admission(
+                    AdmissionError::SampleDomainMismatch {
+                        index: 1,
+                        reference_index: 0,
+                        ..
+                    }
+                ))
             ),
             "{tier}"
         );
         assert!(
             matches!(
                 linear_set(&mirrored),
-                Err(StackError::RowOrderMismatch {
+                Err(StackError::Admission(AdmissionError::RowOrderMismatch {
                     index: 1,
                     reference_index: 0,
                     ..
-                })
+                }))
             ),
             "{tier}"
         );
@@ -472,12 +477,12 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         assert!(
             matches!(
                 cfa_set,
-                Err(StackError::CfaPatternMismatch {
+                Err(StackError::Admission(AdmissionError::CfaPatternMismatch {
                     index: 1,
                     reference_index: 0,
                     actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
                     expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
-                })
+                }))
             ),
             "{tier}"
         );

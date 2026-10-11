@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use common::FileIdentity;
 use imaginarium::Buffer2;
 
+use crate::calibration_masters::error::SubtractionError;
 use crate::combine::config::StackConfig;
 use crate::combine::error::StackError;
 use crate::concurrency;
@@ -34,7 +35,7 @@ use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 
 use crate::combine::cache::core::CacheCore;
-use crate::combine::cache::frame_check::FrameCheck;
+use crate::ingest::frame_check::FrameCheck;
 
 /// The frames one tier loaded, and frame 0's metadata, which the stack carries.
 #[derive(Debug)]
@@ -59,7 +60,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
     run: IngestRun,
-    step: Option<&dyn FrameStep<I>>,
+    step: Option<&dyn FrameStep<I, Error = SubtractionError>>,
     progress: ProgressCallback,
 ) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
@@ -219,7 +220,7 @@ struct TierLoad<'a, I, P> {
     /// How many frames decode at once.
     concurrency: usize,
     context: &'a LoadContext,
-    step: Option<&'a dyn FrameStep<I>>,
+    step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
 }
 
 impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
@@ -361,7 +362,7 @@ struct FrameDiskCache<'a, I: StackableImage> {
     kept: Option<&'a DecodeCache>,
     admission: &'a FrameAdmission<'a>,
     context: &'a LoadContext,
-    step: Option<&'a dyn FrameStep<I>>,
+    step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
 }
 
 impl<I: StackableImage> FrameDiskCache<'_, I> {

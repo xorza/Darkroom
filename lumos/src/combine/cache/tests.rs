@@ -6,6 +6,7 @@ use crate::combine::rejection::Rejection;
 use crate::frame_store::frame_quality::{DropPlanes, FramePlane, FrameQuality};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
@@ -156,12 +157,12 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            StackError::StoredFramePlaneSamples {
+            StackError::Admission(AdmissionError::StoredFramePlaneSamples {
                 index: 1,
                 plane: FramePlane::Channel,
                 expected: 8,
                 actual: 4,
-            }
+            })
         ),
         "expected a geometry error naming frame 1, got {error:?}"
     );
@@ -178,12 +179,12 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     assert!(
         matches!(
             error,
-            StackError::StoredFramePlaneSamples {
+            StackError::Admission(AdmissionError::StoredFramePlaneSamples {
                 plane: FramePlane::Coverage,
                 expected: 8,
                 actual: 2,
                 ..
-            }
+            })
         ),
         "expected a coverage geometry error, got {error:?}"
     );
@@ -246,12 +247,12 @@ fn stored_frames_must_share_one_cfa_pattern() {
         assert!(
             matches!(
                 error,
-                StackError::CfaPatternMismatch {
+                StackError::Admission(AdmissionError::CfaPatternMismatch {
                     index: 1,
                     actual: a,
                     reference_index: 0,
                     expected: e,
-                } if a == actual && e == expected
+                }) if a == actual && e == expected
             ),
             "{error:?}"
         );
@@ -313,13 +314,13 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
         assert!(
             matches!(
                 error,
-                StackError::FrameQualityPairMismatch {
+                StackError::Admission(AdmissionError::FrameQualityPairMismatch {
                     index: 0,
                     pixel: 2,
                     plane,
                     support: 1.0,
                     confidence: 0.0,
-                } if plane == kind
+                }) if plane == kind
             ),
             "{kind}: expected a pair mismatch at pixel 2, got {error:?}"
         );
@@ -350,12 +351,12 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     assert!(
         matches!(
             error,
-            StackError::InvalidWarpPlaneValue {
+            StackError::Admission(AdmissionError::InvalidQualityPlaneValue {
                 index: 0,
                 plane: FramePlane::DropWeight,
                 pixel: 1,
                 value: -0.5,
-            }
+            })
         ),
         "expected a negative drop weight at pixel 1, got {error:?}"
     );
