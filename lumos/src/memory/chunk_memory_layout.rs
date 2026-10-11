@@ -14,6 +14,8 @@ pub(crate) struct ChunkMemoryLayout {
     /// Bytes per pixel of the image-sized planes held throughout chunk processing: four for each
     /// f32 plane, one for the flag plane.
     pub(crate) resident_bytes: usize,
+    /// Bytes the run holds beside the pass for its whole length, outside the combine.
+    pub(crate) beside_bytes: u64,
 }
 
 /// The rows a combine pass reads at once, and what that holds beyond the budget.
@@ -26,13 +28,15 @@ pub(crate) struct ChunkRows {
 }
 
 impl ChunkMemoryLayout {
-    /// Rows a combine may hold at once: the budget left after the resident planes, divided by the
-    /// cost of a row, floored at [`MIN_CHUNK_ROWS`] so a tight budget still makes progress.
+    /// Rows a combine may hold at once: the budget left after the resident planes and what the run
+    /// holds beside them, divided by the cost of a row, floored at [`MIN_CHUNK_ROWS`] so a tight
+    /// budget still makes progress.
     pub(crate) fn chunk_rows(self, size: Size2us, available_memory: u64) -> ChunkRows {
         let bytes_per_row = (size.width as u64).saturating_mul(self.input_bytes as u64);
         let resident_bytes = (size.width as u64)
             .saturating_mul(size.height as u64)
-            .saturating_mul(self.resident_bytes as u64);
+            .saturating_mul(self.resident_bytes as u64)
+            .saturating_add(self.beside_bytes);
         let budget = memory::memory_budget(available_memory);
         if bytes_per_row == 0 {
             return ChunkRows {

@@ -177,6 +177,8 @@ fn bench_spilled_mean_40(b: ::quickbench::Bencher) {
             Tier::Spilled {
                 scratch,
                 chunk_memory: SPILLED_CHUNK_MEMORY,
+                overcommit_bytes: 0,
+                beside_bytes: 0,
             },
             dimensions,
         ),
@@ -270,6 +272,8 @@ fn spilled_mean_under_a_memory_cap() {
             Tier::Spilled {
                 scratch,
                 chunk_memory: 128 << 20,
+                overcommit_bytes: 0,
+                beside_bytes: 0,
             },
             ImageDimensions::new(size, 1),
         ),

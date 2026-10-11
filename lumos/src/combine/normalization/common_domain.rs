@@ -41,6 +41,11 @@ impl CommonDomain {
         BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
     }
 
+    /// The bytes a domain over `pixel_count` pixels holds: its mask.
+    pub(crate) fn mask_bytes(pixel_count: usize) -> usize {
+        BitBuffer2::storage_bytes(Size2us::new(pixel_count, 1))
+    }
+
     /// Intersect every frame's coverage of `channel` into the pixels all of them contribute at.
     ///
     /// In parallel over spans of the mask, each reading its span of every frame: AND is
@@ -57,25 +62,39 @@ impl CommonDomain {
             .par_chunks_mut(Cancelled::POLL_CHUNK / WORD_BITS)
             .enumerate()
             .try_for_each(|(span, words)| {
-                Cancelled::check(cancel)?;
-                let base = span * Cancelled::POLL_CHUNK;
-                if base < pixel_count {
-                    let end = (base + words.len() * WORD_BITS).min(pixel_count);
-                    for frame in frames {
-                        let gate = FrameGate::of(frame, channel, base, end);
-                        if !gate.everywhere() {
-                            intersect_span(words, end - base, |index| gate.sample(index).is_some());
-                        }
-                    }
-                }
-                Ok::<_, StackError>(())
+                intersect_frames(frames, channel, pixel_count, span, words, cancel)
             })?;
-        let sample_count = common_domain.count_ones();
+        Self::of_mask(common_domain)
+    }
+
+    /// [`Self::build`] one span after another, for a caller already parallel over its jobs: a job
+    /// that waited on a nested parallel loop would let its worker take up another job meanwhile,
+    /// and the jobs alive at once, each holding its scratch, would outnumber the workers.
+    pub(super) fn build_in_job(
+        frames: &[&StoredFrame],
+        channel: usize,
+        pixel_count: usize,
+        cancel: &CancelToken,
+    ) -> Result<Self, StackError> {
+        let mut common_domain = Self::full_mask(pixel_count);
+        for (span, words) in common_domain
+            .words
+            .chunks_mut(Cancelled::POLL_CHUNK / WORD_BITS)
+            .enumerate()
+        {
+            intersect_frames(frames, channel, pixel_count, span, words, cancel)?;
+        }
+        Self::of_mask(common_domain)
+    }
+
+    /// The domain `valid` holds; [`StackError::NoCommonCoverage`] when it holds no pixel.
+    fn of_mask(valid: BitBuffer2) -> Result<Self, StackError> {
+        let sample_count = valid.count_ones();
         if sample_count == 0 {
             return Err(StackError::NoCommonCoverage);
         }
         Ok(Self {
-            valid: common_domain,
+            valid,
             sample_count,
         })
     }
@@ -111,15 +130,32 @@ impl CommonDomain {
                 }
                 Ok::<_, StackError>(())
             })?;
-        let sample_count = valid.count_ones();
-        if sample_count == 0 {
-            return Err(StackError::NoCommonCoverage);
-        }
-        Ok(Self {
-            valid,
-            sample_count,
-        })
+        Self::of_mask(valid)
     }
+}
+
+/// Intersect span `span` of a mask over `pixel_count` pixels, its `words`, with every frame's
+/// coverage of `channel` there.
+fn intersect_frames(
+    frames: &[&StoredFrame],
+    channel: usize,
+    pixel_count: usize,
+    span: usize,
+    words: &mut [u64],
+    cancel: &CancelToken,
+) -> Result<(), StackError> {
+    Cancelled::check(cancel)?;
+    let base = span * Cancelled::POLL_CHUNK;
+    if base < pixel_count {
+        let end = (base + words.len() * WORD_BITS).min(pixel_count);
+        for frame in frames {
+            let gate = FrameGate::of(frame, channel, base, end);
+            if !gate.everywhere() {
+                intersect_span(words, end - base, |index| gate.sample(index).is_some());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Intersect `words`, the mask over `pixels` pixels from a word's start, with the pixels `is_valid`
@@ -147,18 +183,19 @@ fn intersect_span(words: &mut [u64], pixels: usize, is_valid: impl Fn(usize) -> 
 mod tests {
     use crate::combine::normalization::common_domain::CommonDomain;
 
-    /// The common-domain mask is one bit per pixel, not one byte.
+    /// The common-domain mask is one bit per pixel, not one byte, and [`CommonDomain::mask_bytes`]
+    /// is what it holds.
     ///
-    /// Nothing else would notice a revert to `Vec<bool>`: the combine would still be correct, still
-    /// pass every test, and simply hold eight times the mask. At 6144² that is 37.7 MB against 4.7
-    /// MB — on top of the frame data the loader is already budgeting for, and invisible to
-    /// `load_budget_is_respected_across_configs`, which models frames rather than scratch.
+    /// Nothing else would notice a revert to `Vec<bool>` at the sizes the tests run: the combine
+    /// would still be correct and simply hold eight times the mask, 37.7 MB against 4.7 MB at 6144²,
+    /// beside the frame data the plan charges.
     #[test]
     fn common_domain_mask_stays_one_bit_per_pixel() {
         for pixels in [1024 * 1024usize, 6144 * 6144] {
             let mask = CommonDomain::full_mask(pixels);
             let packed = mask.words.len() * size_of::<u64>();
             let unpacked = pixels * size_of::<bool>();
+            assert_eq!(CommonDomain::mask_bytes(pixels), packed, "{pixels} px");
 
             // Rows pad to 128 bits, so a single-row mask carries at most 15 bytes of slack.
             assert!(

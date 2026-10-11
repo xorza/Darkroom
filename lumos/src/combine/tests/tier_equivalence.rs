@@ -4,8 +4,7 @@
 //!
 //! The budget accounting itself is
 //! `memory::tests::planned_concurrency_never_overshoots_its_tier_budget`, which sweeps the loader's
-//! plan too; the live peak-RSS measurement is the `#[ignore]`d `master_stack_memory_probe` test in
-//! `mem_budget_probe`.
+//! plan too; the live heap a run holds is measured by the `memory_budget` integration test.
 //!
 //! [`load_to_disk`]: crate::combine::cache
 //! [`load_in_memory`]: crate::combine::cache

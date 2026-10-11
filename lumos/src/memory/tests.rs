@@ -14,7 +14,7 @@ use crate::stack_product::quality_planes::QualityPlanes;
 
 const MIB: u64 = 1024 * 1024;
 /// The detector's planes these plans are written for. The planner's arithmetic is what they pin;
-/// the detector's own count is pinned against the planner in `star_detection::mem_budget`.
+/// the detector's own count is pinned against the planner in `star_detection::tests::pool_working_set`.
 const DETECTOR_PLANES: usize = 7;
 const GB: u64 = 1024 * MIB;
 const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
@@ -88,16 +88,24 @@ fn load_concurrency_accounts_for_resident_and_transient_memory() {
 fn a_decoded_stack_charges_its_frames_scratch_and_output() {
     let frame = plane(4);
     let shape =
-        |output_planes: usize| RunShape::decoded_stack(10, frame, frame, output_planes * frame);
+        |output_planes: usize| RunShape::decoded_stack(10, frame, frame, output_planes * frame, 0);
     let boundary = available_for_usable(48 * MIB);
     assert!(MemoryPlan::plan(shape(2), 8, boundary).fits_in_ram);
     assert!(!MemoryPlan::plan(shape(2), 8, boundary - 2).fits_in_ram);
     assert!(MemoryPlan::plan(shape(0), 8, boundary - 2).fits_in_ram);
     assert!(!MemoryPlan::plan(shape(3), 8, boundary).fits_in_ram);
+    // The normalization is done before the output is allocated, so the larger of the two counts:
+    // two planes of it beside two of output fit as two of output alone, a third does not.
+    let normalized = |planes: usize| RunShape {
+        normalization_bytes: planes * frame,
+        ..shape(2)
+    };
+    assert!(MemoryPlan::plan(normalized(2), 8, boundary).fits_in_ram);
+    assert!(!MemoryPlan::plan(normalized(3), 8, boundary).fits_in_ram);
 
     // A masked frame's quality planes are resident, the scratch is one plain frame on top: 30 MiB
     // resident, 34 MiB decode peak.
-    let masked = RunShape::decoded_stack(10, 3 * MIB as usize, MIB as usize, 0);
+    let masked = RunShape::decoded_stack(10, 3 * MIB as usize, MIB as usize, 0, 0);
     assert_eq!(masked.decode.output_bytes, 3 * MIB as usize);
     assert_eq!(masked.decode.peak_bytes, 4 * MIB as usize);
     assert!(MemoryPlan::plan(masked, 8, available_for_usable(31 * MIB)).fits_in_ram);
@@ -105,7 +113,7 @@ fn a_decoded_stack_charges_its_frames_scratch_and_output() {
 
     // Saturating arithmetic: a frame count no budget can hold never wraps into "fits".
     assert!(
-        !MemoryPlan::plan(RunShape::decoded_stack(2, usize::MAX, 1, 0), 8, u64::MAX).fits_in_ram
+        !MemoryPlan::plan(RunShape::decoded_stack(2, usize::MAX, 1, 0, 0), 8, u64::MAX).fits_in_ram
     );
 }
 
@@ -147,12 +155,13 @@ fn held_frames_are_charged_only_what_the_run_adds() {
         frame_count: 30,
         decode: DemosaicMemory {
             output_bytes: frame_bytes,
-            peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+            peak_bytes: 2 * frame_bytes,
         },
         held_bytes,
         detection_bytes: DETECTOR_PLANES * plane_bytes,
         warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes, 0)),
         output_bytes: 0,
+        normalization_bytes: 0,
     };
     assert_eq!(
         PerFrameBytes::new(plane_bytes, frame_bytes, 0).warped,
@@ -166,6 +175,7 @@ fn held_frames_are_charged_only_what_the_run_adds() {
             fits_in_ram: true,
             decode_concurrency: 8,
             warp_concurrency: 8,
+            overcommit_bytes: 0,
         }
     );
     assert!(!MemoryPlan::plan(shape(frame_bytes), 8, available_for_usable(peak - 1)).fits_in_ram);
@@ -176,7 +186,10 @@ fn held_frames_are_charged_only_what_the_run_adds() {
 /// One pass over ten frames of 10 MiB planes, eight threads: a decode peaks at 7P, the
 /// detector holds 7P, and a warped frame is 5¼P. A worker holds 14P, and on the spill tier its 5¼P
 /// warp buffers too. Resident needs the 52½P warped set beside one worker, 66½P, where one worker
-/// fits; at 164½P all eight do. A byte below 66½P the run spills, and three 19¼P workers fit.
+/// fits; at 164½P all eight do. A byte below 66½P the run spills, and three 19¼P workers fit; at
+/// 10P not even one does, and it holds 9¼P past the budget. A normalization of 20P beside the
+/// warped set, 72½P, keeps the run off the resident tier at 66½P; one of 30P on the spill tier
+/// holds 20P past a 10P budget.
 #[test]
 fn a_single_pass_holds_the_warped_set_beside_its_workers() {
     let plane_bytes = plane(10);
@@ -190,6 +203,23 @@ fn a_single_pass_holds_the_warped_set_beside_its_workers() {
     assert_eq!(concurrency(at(quarters(266))), (true, 1));
     assert_eq!(concurrency(at(quarters(658))), (true, 8));
     assert_eq!(concurrency(at(quarters(266) - 2)), (false, 3));
+    let quarter = plane_bytes as u64 / 4;
+    assert_eq!(at(quarters(266)).overcommit_bytes, 0);
+    assert_eq!(at(quarters(40)).overcommit_bytes, 37 * quarter);
+
+    let normalized = |planes: usize, available| {
+        MemoryPlan::single_pass(
+            RunShape {
+                normalization_bytes: planes * plane_bytes,
+                ..shape
+            },
+            8,
+            available,
+        )
+    };
+    assert!(!normalized(20, quarters(266)).fits_in_ram);
+    assert!(normalized(20, quarters(290)).fits_in_ram);
+    assert_eq!(normalized(30, quarters(40)).overcommit_bytes, 80 * quarter);
 }
 
 /// Rows per chunk by hand: the usable budget over the bytes a row of every input plane costs,
@@ -201,7 +231,8 @@ fn a_single_pass_holds_the_warped_set_beside_its_workers() {
 /// - Nothing available: the floor.
 /// - 1 MiB available is 786 432 B usable; six resident 100×200 planes take 480 000, and nine input
 ///   planes cost 3600 B a row, so 85 whole rows fit. A resident flag plane adds 20 000 B, which
-///   leaves 79.
+///   leaves 79; 108 000 B the run holds beside the pass leave 198 432 B, 55 rows, under the floor:
+///   64 rows of 3600 B, 480 000 + 108 000 + 230 400 − 786 432 = 31 968 B over.
 /// - Ten resident planes take 800 000 B, past the budget: the floor, holding 64 rows of 3600 B
 ///   beside them, 800 000 + 230 400 − 786 432 = 243 968 B over. Nothing available holds 64 rows of
 ///   800 B over.
@@ -212,6 +243,7 @@ fn chunk_rows_match_budget_arithmetic() {
     let layout = |input_planes: usize, resident_planes: usize, flags: usize| ChunkMemoryLayout {
         input_bytes: input_planes * size_of::<f32>(),
         resident_bytes: resident_planes * size_of::<f32>() + flags,
+        beside_bytes: 0,
     };
     let fits = |rows| ChunkRows {
         rows,
@@ -244,6 +276,15 @@ fn chunk_rows_match_budget_arithmetic() {
         (layout(2, 0, 0), Size2us::new(100, 100), 0, floor(64 * 800)),
         (layout(9, 6, 0), Size2us::new(100, 200), MIB, fits(85)),
         (layout(9, 6, 1), Size2us::new(100, 200), MIB, fits(79)),
+        (
+            ChunkMemoryLayout {
+                beside_bytes: 108_000,
+                ..layout(9, 6, 0)
+            },
+            Size2us::new(100, 200),
+            MIB,
+            floor(31_968),
+        ),
         (
             layout(9, 10, 0),
             Size2us::new(100, 200),
@@ -320,8 +361,9 @@ fn available_for_usable(usable: u64) -> u64 {
 }
 
 /// The shape `calibrate_align_stack` plans `frames` frames with, cosmic rays off: the decode
-/// raised to the statistics' copy of every channel beside the frame, the detector's 7 planes
-/// beside each decode, and the warp of the demosaiced output.
+/// raised to the statistics' copy of every channel beside the frame — at these sizes more than the
+/// noise estimate holds — the detector's planes beside each decode, and the warp of the demosaiced
+/// output.
 fn pipeline_shape(
     plane_bytes: usize,
     demosaic: DemosaicMemory,
@@ -330,11 +372,12 @@ fn pipeline_shape(
 ) -> RunShape {
     RunShape {
         frame_count: frames,
-        decode: demosaic.with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
+        decode: demosaic.with_peak_at_least(2 * demosaic.output_bytes),
         held_bytes: 0,
         detection_bytes: DETECTOR_PLANES * plane_bytes,
         warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes, 0)),
         output_bytes,
+        normalization_bytes: 0,
     }
 }
 
@@ -406,6 +449,7 @@ fn fan_out_follows_each_demosaics_peak() {
                 fits_in_ram: true,
                 decode_concurrency: 6,
                 warp_concurrency: 8,
+                overcommit_bytes: 0,
             },
         ),
         (
@@ -414,6 +458,7 @@ fn fan_out_follows_each_demosaics_peak() {
                 fits_in_ram: false,
                 decode_concurrency: 4,
                 warp_concurrency: 7,
+                overcommit_bytes: 0,
             },
         ),
         (
@@ -422,6 +467,7 @@ fn fan_out_follows_each_demosaics_peak() {
                 fits_in_ram: false,
                 decode_concurrency: 2,
                 warp_concurrency: 7,
+                overcommit_bytes: 0,
             },
         ),
     ] {
@@ -440,6 +486,7 @@ fn small_set_uses_all_workers_in_ram() {
             fits_in_ram: true,
             decode_concurrency: 5,
             warp_concurrency: 5,
+            overcommit_bytes: 0,
         }
     );
 }
@@ -503,7 +550,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
 fn planned_concurrency_never_overshoots_its_tier_budget() {
     for &plane_mib in &[16u64, 64, 100, 400] {
         let plane_bytes = plane(plane_mib);
-        let decoded = |frames| RunShape::decoded_stack(frames, plane_bytes, plane_bytes, 0);
+        let decoded = |frames| RunShape::decoded_stack(frames, plane_bytes, plane_bytes, 0, 0);
         for &frames in &[4usize, 12, 30, 60] {
             let shapes = [
                 mono(plane_bytes),
@@ -567,7 +614,7 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
 
 /// 100 MiB planes, twenty frames of a 22P decode, sixteen workers.
 /// - 2 GiB → 15.36P usable: spilled, under one 29P decode and two 8¼P warps; both pinned or bound
-///   to 1.
+///   to 1, the decode 13.64P past the budget, 1364 MiB.
 /// - 16 GiB → 122.88P: the warp, 105P + 16 × 3P, still spills; four 29P decodes and fourteen
 ///   8¼P warps fit.
 /// - 2⁵⁰ B: everything fits and the workers bind.
@@ -583,6 +630,7 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
                 fits_in_ram: false,
                 decode_concurrency: 1,
                 warp_concurrency: 1,
+                overcommit_bytes: 1364 << 20,
             },
         ),
         (
@@ -591,6 +639,7 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
                 fits_in_ram: false,
                 decode_concurrency: 4,
                 warp_concurrency: 14,
+                overcommit_bytes: 0,
             },
         ),
         (
@@ -599,6 +648,7 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
                 fits_in_ram: true,
                 decode_concurrency: 16,
                 warp_concurrency: 16,
+                overcommit_bytes: 0,
             },
         ),
     ] {

@@ -579,7 +579,9 @@ impl FrameCache {
                 kept_flagged_samples: kept_flagged.totals(),
                 variance_background_only: planes.inverse_variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
-                chunk_overcommit_bytes: chunking.overcommit_bytes,
+                overcommit_bytes: chunking
+                    .overcommit_bytes
+                    .max(self.core.tier.overcommit_bytes()),
                 spilled_frames: if self.core.tier.spills() {
                     self.frames.len() as u64
                 } else {
@@ -641,6 +643,7 @@ impl FrameCache {
                 * size_of::<f32>()
                 + self.coverage_channels(planes) * size_of::<f32>()
                 + usize::from(self.flag_plane()),
+            beside_bytes: 0,
         }
     }
 

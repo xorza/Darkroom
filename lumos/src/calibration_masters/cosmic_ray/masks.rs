@@ -150,7 +150,7 @@ fn grow_box(
 
 /// One cosmic-ray mask: one bit per pixel.
 ///
-/// Its own function so `mem_budget` can weigh exactly what the detector allocates. A detection
+/// Its own function so `cosmic_ray_scratch` can weigh exactly what the detector allocates. A detection
 /// holds three ([`CrMasks`]), so the packing is worth three times its face value.
 fn new_cr_mask(size: Size2us) -> BitBuffer2 {
     BitBuffer2::new_default(size)
@@ -161,7 +161,7 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
 
-    /// The mask as the detector allocates it, for `mem_budget` to weigh.
+    /// The mask as the detector allocates it, for `cosmic_ray_scratch` to weigh.
     pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {
         super::new_cr_mask(size)
     }

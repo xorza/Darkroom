@@ -8,7 +8,6 @@ mod characterization;
 pub(crate) mod fits;
 pub(crate) mod images;
 pub(crate) mod invariance;
-pub(crate) mod mem_probe;
 pub(crate) mod prelude;
 #[cfg(feature = "real-data")]
 pub(crate) mod real_data;

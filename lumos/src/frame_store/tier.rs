@@ -22,10 +22,14 @@ pub(crate) enum Tier {
     Resident,
     /// Planes in `scratch`, memory-mapped back and read in row chunks sized against
     /// `chunk_memory`: the run's planning figure, one number for the combine and for every pass
-    /// after it.
+    /// after it. `overcommit_bytes` is what its plan holds past the budget anyway — see
+    /// [`MemoryPlan::overcommit_bytes`] — and `beside_bytes` what the run holds beside the combine
+    /// for its whole pass, which the chunks leave room for.
     Spilled {
         scratch: RunScratch,
         chunk_memory: u64,
+        overcommit_bytes: u64,
+        beside_bytes: u64,
     },
 }
 
@@ -46,16 +50,51 @@ impl Tier {
         if plan.fits_in_ram {
             return Ok(Self::Resident);
         }
+        if plan.overcommit_bytes > 0 {
+            tracing::warn!(
+                overcommit_bytes = plan.overcommit_bytes,
+                "the smallest step of a stage does not fit the memory budget"
+            );
+        }
         let scratch = RunScratch::create(cache_dir)?;
         scratch.ensure_space(spill_bytes)?;
         Ok(Self::Spilled {
             scratch,
             chunk_memory: memory.planning(),
+            overcommit_bytes: plan.overcommit_bytes,
+            beside_bytes: 0,
         })
     }
 
     pub(crate) const fn spills(&self) -> bool {
         matches!(self, Self::Spilled { .. })
+    }
+
+    /// This tier, its combine leaving room for `bytes` the run holds beside it for its whole pass.
+    pub(crate) const fn holding_beside(mut self, bytes: u64) -> Self {
+        if let Self::Spilled { beside_bytes, .. } = &mut self {
+            *beside_bytes = bytes;
+        }
+        self
+    }
+
+    /// What the run holds beside a spilled combine for its whole pass; nothing for a resident one,
+    /// which needs no budget.
+    pub(crate) const fn beside_bytes(&self) -> u64 {
+        match self {
+            Self::Resident => 0,
+            Self::Spilled { beside_bytes, .. } => *beside_bytes,
+        }
+    }
+
+    /// Bytes the run's plan holds past the budget: zero for a resident run, which fits whole.
+    pub(crate) const fn overcommit_bytes(&self) -> u64 {
+        match self {
+            Self::Resident => 0,
+            Self::Spilled {
+                overcommit_bytes, ..
+            } => *overcommit_bytes,
+        }
     }
 
     /// What a spilled combine sizes its row chunks against; `None` for a resident one.

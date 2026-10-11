@@ -18,10 +18,9 @@
 //! [`metric_curves`] and [`subpixel_accuracy`] are the graded forward-model tests: they assert the
 //! *shape* of the detector's response through `metrics` rather than a pass/fail threshold.
 
-mod mem_budget;
-mod mem_budget_probe;
 mod metric_curves;
 mod pipeline_tests;
+mod pool_working_set;
 #[cfg(feature = "real-data")]
 pub(crate) mod real_data;
 mod stage_effects;

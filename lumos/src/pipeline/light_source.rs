@@ -8,6 +8,8 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
+use crate::combine::cache::slots::Slots;
+use crate::combine::normalization::{FrameNorm, SetCoverage};
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::KeptDecodeError;
 use crate::frame_store::frame_stats::FrameStats;
@@ -20,9 +22,10 @@ use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::raw::demosaic::DemosaicMemory;
+use crate::memory::DETECTION_WORKING_PLANES;
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
-use crate::memory::{DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES};
 use crate::pipeline::align::register_warp_and_stack;
 use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::{AlignStackConfig, Reference};
@@ -161,12 +164,9 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     ) -> Result<DetectedLights, AlignStackError> {
         let total = self.len();
         debug_assert!(total > 0, "each entry refuses an empty set");
-        let shape = self.shape(config, run)?;
-        let plan = MemoryPlan::plan(
-            shape.run,
-            rayon::current_num_threads(),
-            run.memory.planning(),
-        );
+        let threads = rayon::current_num_threads();
+        let shape = self.shape(config, run, threads)?;
+        let plan = MemoryPlan::plan(shape.run, threads, run.memory.planning());
         let stage = StagePlan::new(&plan, shape.run.spill_bytes(), run)?;
         tracing::info!(
             frames = total,
@@ -218,12 +218,13 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         Ok(DetectedLights { frames, stage })
     }
 
-    /// The run's shape, from the first held frame or the first file's header: no light is decoded
-    /// before the tier is chosen.
+    /// The run's shape with `threads` workers, from the first held frame or the first file's
+    /// header: no light is decoded before the tier is chosen.
     fn shape(
         &self,
         config: &AlignStackConfig,
         run: &IngestRun,
+        threads: usize,
     ) -> Result<LightShape, AlignStackError> {
         match self {
             // They were in memory before the run read the machine: the plan charges them as held.
@@ -232,20 +233,41 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                 frames.len(),
                 true,
                 config,
+                threads,
             )),
-            Self::Files(files) => files.shape(config, run),
+            Self::Files(files) => files.shape(config, run, threads),
         }
     }
 }
 
 impl LightShape {
+    /// What normalizing `frame_count` registered lights of `dimensions` holds: each warped frame
+    /// covers only the pixels its warp reached.
+    fn normalization_bytes(
+        config: &AlignStackConfig,
+        dimensions: ImageDimensions,
+        frame_count: usize,
+        threads: usize,
+    ) -> usize {
+        FrameNorm::working_bytes(
+            frame_count,
+            dimensions,
+            Slots::new(None, dimensions.channels()),
+            config.stack.normalization,
+            SetCoverage::Common,
+            threads,
+        )
+    }
+
     /// The shape of `frame_count` linear lights of `dimensions`, `held` by the caller or decoded
-    /// one at a time: what one's pass adds is the copy its statistics sort.
-    const fn linear(
+    /// one at a time, with `threads` workers: what one's pass adds is what its statistics and its
+    /// detection's noise estimate hold.
+    fn linear(
         dimensions: ImageDimensions,
         frame_count: usize,
         held: bool,
         config: &AlignStackConfig,
+        threads: usize,
     ) -> Self {
         let frame_bytes = dimensions.frame_bytes();
         let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
@@ -255,7 +277,7 @@ impl LightShape {
                 frame_count,
                 decode: DemosaicMemory {
                     output_bytes: frame_bytes,
-                    peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+                    peak_bytes: frame_bytes + FrameStats::scratch_bytes(dimensions, None, threads),
                 },
                 held_bytes: if held { frame_bytes } else { 0 },
                 detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
@@ -265,6 +287,12 @@ impl LightShape {
                     dimensions.flat_gain_bytes(),
                 )),
                 output_bytes: config.stack.quality.resident_bytes(dimensions),
+                normalization_bytes: Self::normalization_bytes(
+                    config,
+                    dimensions,
+                    frame_count,
+                    threads,
+                ),
             },
         }
     }
@@ -319,6 +347,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         &self,
         config: &AlignStackConfig,
         run: &IngestRun,
+        threads: usize,
     ) -> Result<LightShape, AlignStackError> {
         let first = self.paths[0].as_ref();
         let cosmic_ray = match self.preparation {
@@ -339,6 +368,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                     self.paths.len(),
                     false,
                     config,
+                    threads,
                 ));
             }
         };
@@ -357,8 +387,9 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
         let dimensions = ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
         // One frame's pass peaks at the largest of: the decoder's own bytes beside the mosaic it
-        // makes, the demosaic, the cosmic-ray pass over the mosaic, and the statistics, a copy of
-        // every channel beside the demosaiced frame.
+        // makes, the demosaic, the cosmic-ray pass over the mosaic, the noise the demosaic measures
+        // on the mosaic and its flags, and the statistics or the detection's noise estimate beside
+        // the demosaiced frame, which run one after the other.
         // Refused here, before any light is decoded, when the pass cannot run on this sensor.
         let cosmic_ray = match cosmic_ray {
             Some(_) => {
@@ -379,7 +410,17 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 decode: demosaic
                     .with_peak_at_least(plane_bytes.saturating_add(info.decoder_bytes))
                     .with_peak_at_least(cosmic_ray)
-                    .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
+                    .with_peak_at_least(if info.cfa_type.is_mosaic() {
+                        plane_bytes
+                            + info.dimensions.flag_plane_bytes()
+                            + MosaicNoise::peak_bytes(info.dimensions.size(), &info.cfa_type)
+                    } else {
+                        0
+                    })
+                    .with_peak_at_least(
+                        demosaic.output_bytes
+                            + FrameStats::scratch_bytes(dimensions, None, threads),
+                    ),
                 held_bytes: 0,
                 detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
                 warp: Some(PerFrameBytes::new(
@@ -388,6 +429,12 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                     dimensions.flat_gain_bytes(),
                 )),
                 output_bytes: config.stack.quality.resident_bytes(dimensions),
+                normalization_bytes: LightShape::normalization_bytes(
+                    config,
+                    dimensions,
+                    self.paths.len(),
+                    threads,
+                ),
             },
         })
     }
@@ -410,12 +457,9 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 count: total,
             });
         }
-        let shape = self.shape(config, run)?;
-        let plan = MemoryPlan::single_pass(
-            shape.run,
-            rayon::current_num_threads(),
-            run.memory.planning(),
-        );
+        let threads = rayon::current_num_threads();
+        let shape = self.shape(config, run, threads)?;
+        let plan = MemoryPlan::single_pass(shape.run, threads, run.memory.planning());
         let StagePlan {
             parking,
             warp_concurrency: workers,
@@ -512,9 +556,10 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         })?;
         drop(slot_pairs);
         drop(registrar);
-        // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
-        // against the memory without them.
+        // A worker's buffers are a warped frame's worth each, and its detector's pool the planes
+        // detection holds: the combine sizes its chunks against the memory without them.
         drop(buffers);
+        drop(detectors);
 
         let mut outcomes = Vec::with_capacity(total);
         let mut detection = Vec::with_capacity(total);

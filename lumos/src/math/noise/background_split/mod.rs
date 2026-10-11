@@ -1,5 +1,8 @@
 //! [`BackgroundSplit`]: a frame's background noise split by how a flat amplified it.
 
+use std::array;
+use std::ops::Range;
+
 use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
@@ -34,63 +37,127 @@ pub(crate) struct GainBin {
 /// with residuals to spare, each holding an eighth of the samples.
 pub(crate) const GAIN_BINS: usize = 8;
 
+const _: () = assert!(GAIN_BINS <= 1 << u8::BITS, "a sample's bin is a byte");
+
 /// The fewest samples a bin is measured over: a bin with fewer merges with its neighbours in gain.
 /// A variance over 256 samples carries a standard error of √(2/256) ≈ 9%.
 pub(crate) const MIN_BIN_SAMPLES: usize = 256;
 
-/// A frame's noise samples by gain bin, with each bin's sum of gains: what an estimator fills
-/// before it measures each bin's variance.
+/// A frame's noise samples, each tagged with its gain bin, and each bin's sum of gains: what an
+/// estimator fills before it measures each bin's variance. The samples stay in the one buffer the
+/// caller sized, and [`Self::measure`] groups them by bin in place, so the samples are held once.
 #[derive(Debug)]
 pub(crate) struct BinnedSamples<T> {
-    bins: [Vec<T>; GAIN_BINS],
+    samples: Vec<T>,
+    bins: Vec<u8>,
     gain_sums: [f64; GAIN_BINS],
 }
 
 impl<T> BinnedSamples<T> {
-    pub(crate) fn new() -> Self {
+    /// Room for `capacity` samples, more than which [`Self::push`] never takes.
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            bins: Default::default(),
+            samples: Vec::with_capacity(capacity),
+            bins: Vec::with_capacity(capacity),
             gain_sums: [0.0; GAIN_BINS],
         }
     }
 
+    /// `samples`, each in the bin of the gain `gain` reads for it.
+    pub(crate) fn of(samples: Vec<T>, bins: &GainBins, gain: impl Fn(&T) -> f32) -> Self {
+        let mut gain_sums = [0.0; GAIN_BINS];
+        let bins = samples
+            .iter()
+            .map(|sample| {
+                let gain = gain(sample);
+                let bin = bins.bin(gain);
+                gain_sums[bin] += f64::from(gain);
+                bin as u8
+            })
+            .collect();
+        Self {
+            samples,
+            bins,
+            gain_sums,
+        }
+    }
+
+    /// The bytes `count` samples hold here: each sample and its bin.
+    pub(crate) const fn bytes(count: usize) -> usize {
+        count * (size_of::<T>() + size_of::<u8>())
+    }
+
     pub(crate) fn push(&mut self, bins: &GainBins, gain: f32, sample: T) {
+        debug_assert!(
+            self.samples.len() < self.samples.capacity(),
+            "a sample past the room the caller sized"
+        );
         let bin = bins.bin(gain);
-        self.bins[bin].push(sample);
+        self.samples.push(sample);
+        self.bins.push(bin as u8);
         self.gain_sums[bin] += f64::from(gain);
     }
 
     /// The bins `variance` measures: each run of bins in gain order merged until it holds
     /// [`MIN_BIN_SAMPLES`], a short last run into the one before it; one run of every sample when
     /// all of them are fewer. A frame too small to fill the bins still has its noise measured,
-    /// over coarser runs of gain.
-    pub(crate) fn measure(self, mut variance: impl FnMut(&mut Vec<T>) -> f64) -> Vec<GainBin> {
-        let mut runs: Vec<(Vec<T>, f64)> = Vec::new();
-        let mut open: Option<(Vec<T>, f64)> = None;
-        for (samples, gain_sum) in self.bins.into_iter().zip(self.gain_sums) {
-            let (run, sum) = open.get_or_insert_with(|| (Vec::new(), 0.0));
-            run.extend(samples);
-            *sum += gain_sum;
-            if run.len() >= MIN_BIN_SAMPLES {
-                runs.extend(open.take());
+    /// over coarser runs of gain. Within a run the samples come in no particular order.
+    pub(crate) fn measure(mut self, mut variance: impl FnMut(&mut [T]) -> f64) -> Vec<GainBin> {
+        let mut counts = [0usize; GAIN_BINS];
+        for &bin in &self.bins {
+            counts[usize::from(bin)] += 1;
+        }
+        self.group(&counts);
+        let mut runs: ArrayVec<(Range<usize>, f64), GAIN_BINS> = ArrayVec::new();
+        let (mut start, mut end, mut sum) = (0, 0, 0.0);
+        for (count, gain_sum) in counts.into_iter().zip(self.gain_sums) {
+            end += count;
+            sum += gain_sum;
+            if end - start >= MIN_BIN_SAMPLES {
+                runs.push((start..end, sum));
+                (start, sum) = (end, 0.0);
             }
         }
-        if let Some((short, sum)) = open.filter(|(short, _)| !short.is_empty()) {
+        if end > start {
             match runs.last_mut() {
                 Some((last, last_sum)) => {
-                    last.extend(short);
+                    last.end = end;
                     *last_sum += sum;
                 }
-                None => runs.push((short, sum)),
+                None => runs.push((start..end, sum)),
             }
         }
         runs.into_iter()
-            .map(|(mut samples, gain_sum)| GainBin {
-                gain: gain_sum / samples.len() as f64,
-                variance: variance(&mut samples),
-                samples: samples.len(),
+            .map(|(run, gain_sum)| GainBin {
+                gain: gain_sum / run.len() as f64,
+                samples: run.len(),
+                variance: variance(&mut self.samples[run]),
             })
             .collect()
+    }
+
+    /// Put the samples in bin order, in place: each bin's `counts` share, in turn, swaps every
+    /// sample it holds that belongs elsewhere to the next open place of that sample's bin.
+    fn group(&mut self, counts: &[usize; GAIN_BINS]) {
+        let mut next = [0usize; GAIN_BINS];
+        for bin in 1..GAIN_BINS {
+            next[bin] = next[bin - 1] + counts[bin - 1];
+        }
+        let ends: [usize; GAIN_BINS] = array::from_fn(|bin| next[bin] + counts[bin]);
+        for bin in 0..GAIN_BINS {
+            while next[bin] < ends[bin] {
+                let at = next[bin];
+                let home = usize::from(self.bins[at]);
+                if home == bin {
+                    next[bin] += 1;
+                } else {
+                    let to = next[home];
+                    self.samples.swap(at, to);
+                    self.bins.swap(at, to);
+                    next[home] += 1;
+                }
+            }
+        }
     }
 }
 

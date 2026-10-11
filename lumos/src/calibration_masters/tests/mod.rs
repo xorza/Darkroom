@@ -1,5 +1,5 @@
+mod cosmic_ray_scratch;
 mod dark_scale;
-mod mem_budget;
 #[cfg(feature = "real-data")]
 mod real_data;
 mod synthetic;

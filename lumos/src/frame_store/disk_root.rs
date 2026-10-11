@@ -92,9 +92,10 @@ mod tests {
             detection_bytes: 0,
             warp: Some(PerFrameBytes::new(40_000, 120_000, 0)),
             output_bytes: 0,
+            normalization_bytes: 0,
         };
         assert_eq!(warped.spill_bytes(), 2_100_000);
-        let decoded = RunShape::decoded_stack(10, 130_000, 120_000, 0);
+        let decoded = RunShape::decoded_stack(10, 130_000, 120_000, 0, 0);
         assert_eq!(decoded.spill_bytes(), 1_300_000);
 
         let path = Path::new("/scratch");

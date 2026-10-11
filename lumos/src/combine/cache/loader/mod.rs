@@ -68,8 +68,14 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
     // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
     // for.
-    let shape = peek.run_shape(paths.len(), config.quality.resident_bytes(dimensions));
-    let plan = MemoryPlan::plan(shape, rayon::current_num_threads(), run.memory.planning());
+    let threads = rayon::current_num_threads();
+    let shape = peek.run_shape(
+        paths.len(),
+        config.quality.resident_bytes(dimensions),
+        config.normalization,
+        threads,
+    );
+    let plan = MemoryPlan::plan(shape, threads, run.memory.planning());
     tracing::info!(
         frame_count = paths.len(),
         sample_count = dimensions.sample_count(),

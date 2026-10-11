@@ -86,6 +86,11 @@ impl PooledBuffer for BitBuffer2 {
 }
 
 impl BitBuffer2 {
+    /// The bytes a buffer of `size` holds: its words, each row padded to the alignment.
+    pub(crate) fn storage_bytes(size: Size2us) -> usize {
+        bit_layout(size).num_words * size_of::<u64>()
+    }
+
     /// Create a new bit buffer filled with the given value.
     #[inline]
     pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {

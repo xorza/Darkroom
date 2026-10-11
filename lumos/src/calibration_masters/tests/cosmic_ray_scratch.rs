@@ -1,7 +1,7 @@
 //! What the calibration masters hold that is not frame data.
 //!
-//! The tiered loader's frame budgeting is covered by `combine`'s `mem_budget`; this pins the
-//! cosmic-ray scratch the pipeline's decode budget charges, against what the detectors allocate.
+//! Pins the cosmic-ray scratch the pipeline's decode budget charges against what the detectors
+//! allocate; that a run holds no more than its budget is the `memory_budget` integration test's.
 
 use imaginarium::Buffer2;
 

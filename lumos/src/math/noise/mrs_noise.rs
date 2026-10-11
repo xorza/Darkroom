@@ -2,6 +2,7 @@
 
 use std::mem;
 
+use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -71,10 +72,14 @@ const TILES_PER_AXIS: usize = 4;
 /// Wider than the transform reaches from a pixel: two taps of `2^(j−1)` at each of the four
 /// layers, 2 × (1 + 2 + 4 + 8) = 30.
 const MARGIN: usize = 32;
+/// The bytes a tile's transform holds for each pixel of its region: the image, the smooth, the
+/// next smooth and the convolution's scratch in f32, and the first layer and the significance in
+/// f64.
+const TILE_BYTES_PER_PIXEL: usize = 4 * size_of::<f32>() + 2 * size_of::<f64>();
 
 /// One analysed pixel: its first detail layer, the largest layer significance `max_j |w_j|/σ_j`,
 /// and the image minus the smooth residual.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct Coefficients {
     /// The pixel's row-major index in the image.
     index: usize,
@@ -91,7 +96,8 @@ impl MrsNoise {
         size: Size2us,
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> f32 {
-        sigma(&coefficients(plane, size, &excluded), size) as f32
+        let coefficients = coefficients(plane, size, &excluded);
+        sigma(&|| coefficients.iter(), size) as f32
     }
 
     /// The background of `plane` under a flat whose gain at pixel `index` is `gain(index)`: the
@@ -104,15 +110,35 @@ impl MrsNoise {
         gain: impl Fn(usize) -> f32,
         bins: &GainBins,
     ) -> BackgroundSplit {
-        let mut binned = BinnedSamples::new();
-        for coefficient in coefficients(plane, size, &excluded) {
-            binned.push(bins, gain(coefficient.index), coefficient);
-        }
-        BackgroundSplit::fit(&binned.measure(|coefficients| sigma(coefficients, size).powi(2)))
+        let binned = BinnedSamples::of(coefficients(plane, size, &excluded), bins, |coefficient| {
+            gain(coefficient.index)
+        });
+        BackgroundSplit::fit(
+            &binned.measure(|coefficients| sigma(&|| coefficients.iter(), size).powi(2)),
+        )
+    }
+
+    /// The most bytes an estimate over a `size` image holds at once, with `threads` workers to
+    /// share its tiles: [`Self::estimate_split`]'s coefficients, each with its gain bin, the
+    /// six planes of every tile in work, the largest first, and the tile list beside them.
+    /// [`Self::estimate`] holds no bins and so a byte a coefficient less.
+    pub(crate) fn peak_bytes(size: Size2us, threads: usize) -> usize {
+        let tiles = tiles(size);
+        let analysed: usize = tiles.iter().map(Tile::core_pixels).sum();
+        let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
+            tiles.iter().map(Tile::region_pixels).collect();
+        regions.sort_unstable_by(|a, b| b.cmp(a));
+        let in_work: usize = regions.iter().take(threads.max(1)).sum();
+        BinnedSamples::<Coefficients>::bytes(analysed)
+            + in_work * TILE_BYTES_PER_PIXEL
+            + tiles.len()
+                * (size_of::<Tile>() + size_of::<&mut [Coefficients]>() + size_of::<usize>())
     }
 }
 
-/// The coefficients of every tile's core pixels that `excluded` does not name.
+/// The coefficients of every tile's core pixels that `excluded` does not name, in tile order and
+/// row-major within a tile: each tile writes its core into its own share of one buffer sized for
+/// every core pixel, and the shares close up over the pixels excluded.
 fn coefficients(
     plane: &[f32],
     size: Size2us,
@@ -120,52 +146,76 @@ fn coefficients(
 ) -> Vec<Coefficients> {
     debug_assert_eq!(plane.len(), size.pixel_count());
     let scales = SCALES.min(max_scales(size));
-    tiles(size)
-        .into_par_iter()
-        .flat_map_iter(|tile| tile_coefficients(plane, size, tile, scales, excluded))
-        .collect()
+    let tiles = tiles(size);
+    let mut coefficients = vec![Coefficients::default(); tiles.iter().map(Tile::core_pixels).sum()];
+    let mut shares: Vec<&mut [Coefficients]> = Vec::with_capacity(tiles.len());
+    let mut rest = coefficients.as_mut_slice();
+    for tile in &tiles {
+        let (share, tail) = rest.split_at_mut(tile.core_pixels());
+        shares.push(share);
+        rest = tail;
+    }
+    let mut kept = Vec::with_capacity(tiles.len());
+    tiles
+        .par_iter()
+        .zip(shares)
+        .map(|(&tile, share)| tile_coefficients(plane, size, tile, scales, excluded, share))
+        .collect_into_vec(&mut kept);
+    let (mut start, mut end) = (0, 0);
+    for (tile, kept) in tiles.iter().zip(kept) {
+        coefficients.copy_within(start..start + kept, end);
+        start += tile.core_pixels();
+        end += kept;
+    }
+    coefficients.truncate(end);
+    coefficients
 }
 
-/// The noise standard deviation the support iteration settles on over `coefficients` of a `size`
-/// image, corrected for the method's response to white noise; `0` for fewer than two. Where the
-/// iteration leaves too few pixels outside the support or does not converge — a small frame whose
-/// coarse layers reach every pixel from one bright structure — the k-σ estimate of the first layer
-/// over the pixels its kernel lies inside the frame at, run to the same convergence and corrected
-/// for its own response; `0` when no two such pixels remain.
-fn sigma(coefficients: &[Coefficients], size: Size2us) -> f64 {
-    if coefficients.len() < 2 {
+/// The noise standard deviation the support iteration settles on over the coefficients
+/// `coefficients` walks, of a `size` image, corrected for the method's response to white noise;
+/// `0` for fewer than two. Where the iteration leaves too few pixels outside the support or does
+/// not converge — a small frame whose coarse layers reach every pixel from one bright structure —
+/// the k-σ estimate of the first layer over the pixels its kernel lies inside the frame at, run to
+/// the same convergence and corrected for its own response; `0` when no two such pixels remain.
+fn sigma<'a, I>(coefficients: &impl Fn() -> I, size: Size2us) -> f64
+where
+    I: Iterator<Item = &'a Coefficients>,
+{
+    let count = coefficients().count();
+    if count < 2 {
         return 0.0;
     }
-    if let Some(sigma) = support_sigma(coefficients) {
+    if let Some(sigma) = support_sigma(coefficients, count) {
         return sigma / WHITE_NOISE_RESPONSE;
     }
     let reach = FIRST_LAYER_REACH;
-    let interior: Vec<Coefficients> = coefficients
-        .iter()
-        .copied()
-        .filter(|c| {
+    let interior = || {
+        coefficients().filter(move |c| {
             let (x, y) = (c.index % size.width, c.index / size.width);
             (reach..size.width.saturating_sub(reach)).contains(&x)
                 && (reach..size.height.saturating_sub(reach)).contains(&y)
         })
-        .collect();
+    };
     tracing::debug!(
-        pixels = coefficients.len(),
-        interior = interior.len(),
+        pixels = count,
+        interior = interior().count(),
         "the multiresolution support leaves too few noise pixels; using the k-σ estimate"
     );
     k_sigma(&interior, CONVERGENCE, MAX_ITERATIONS) / FIRST_LAYER_RESPONSE / K_SIGMA_RESPONSE
 }
 
-/// The support iteration's σ, uncorrected; `None` when an iteration leaves fewer than
-/// one in [`MIN_NOISE_SHARE`] of `coefficients`, or two, outside the support, or none converges.
-fn support_sigma(coefficients: &[Coefficients]) -> Option<f64> {
-    let floor = coefficients.len().div_ceil(MIN_NOISE_SHARE).max(2);
+/// The support iteration's σ over the `count` coefficients `coefficients` walks, uncorrected;
+/// `None` when an iteration leaves fewer than one in [`MIN_NOISE_SHARE`] of them, or two, outside
+/// the support, or none converges.
+fn support_sigma<'a, I>(coefficients: &impl Fn() -> I, count: usize) -> Option<f64>
+where
+    I: Iterator<Item = &'a Coefficients>,
+{
+    let floor = count.div_ceil(MIN_NOISE_SHARE).max(2);
     let mut sigma = k_sigma(coefficients, START_CONVERGENCE, START_ITERATIONS) / LAYER_SIGMA[0];
     for _ in 0..MAX_ITERATIONS {
         let next = Deviation::of(
-            coefficients
-                .iter()
+            coefficients()
                 .filter(|c| c.significance < K * sigma)
                 .map(|c| c.detail),
         );
@@ -187,6 +237,18 @@ fn support_sigma(coefficients: &[Coefficients]) -> Option<f64> {
 struct Tile {
     core: [usize; 4],
     region: [usize; 4],
+}
+
+impl Tile {
+    const fn core_pixels(&self) -> usize {
+        let [x0, x1, y0, y1] = self.core;
+        (x1 - x0) * (y1 - y0)
+    }
+
+    const fn region_pixels(&self) -> usize {
+        let [x0, x1, y0, y1] = self.region;
+        (x1 - x0) * (y1 - y0)
+    }
 }
 
 /// Up to [`TILES_PER_AXIS`]² tiles spread evenly over `size`, each core [`TILE`] wide or the whole
@@ -224,27 +286,23 @@ fn tiles(size: Size2us) -> Vec<Tile> {
 }
 
 /// The transform of one tile, and the coefficients of its core pixels that `excluded` does not
-/// name.
+/// name, written to the front of `share`, one place a core pixel; how many it wrote.
 fn tile_coefficients(
     plane: &[f32],
     size: Size2us,
     tile: Tile,
     scales: usize,
     excluded: &impl Fn(usize) -> bool,
-) -> Vec<Coefficients> {
+    share: &mut [Coefficients],
+) -> usize {
+    debug_assert_eq!(share.len(), tile.core_pixels());
     let [rx0, rx1, ry0, ry1] = tile.region;
     let (width, height) = (rx1 - rx0, ry1 - ry0);
-    let image = Buffer2::new(
-        width,
-        height,
-        (ry0..ry1)
-            .flat_map(|y| {
-                plane[y * size.width + rx0..y * size.width + rx1]
-                    .iter()
-                    .copied()
-            })
-            .collect(),
-    );
+    let mut pixels = Vec::with_capacity(width * height);
+    for y in ry0..ry1 {
+        pixels.extend_from_slice(&plane[y * size.width + rx0..y * size.width + rx1]);
+    }
+    let image = Buffer2::new(width, height, pixels);
     let mut smooth = image.clone();
     let mut next = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
@@ -262,32 +320,36 @@ fn tile_coefficients(
         mem::swap(&mut smooth, &mut next);
     }
     let [cx0, cx1, cy0, cy1] = tile.core;
-    let mut coefficients = Vec::with_capacity((cx1 - cx0) * (cy1 - cy0));
+    let mut kept = 0;
     for y in cy0..cy1 {
         for x in cx0..cx1 {
             if excluded(y * size.width + x) {
                 continue;
             }
             let local = (y - ry0) * width + (x - rx0);
-            coefficients.push(Coefficients {
+            share[kept] = Coefficients {
                 index: y * size.width + x,
                 first_layer: first_layer[local],
                 significance: significance[local],
                 detail: f64::from(image.pixels()[local]) - f64::from(smooth.pixels()[local]),
-            });
+            };
+            kept += 1;
         }
     }
-    coefficients
+    kept
 }
 
-/// The k-σ clipped standard deviation of the first detail layer, iterated until it moves by less
-/// than `convergence` of itself or `iterations` run out.
-fn k_sigma(coefficients: &[Coefficients], convergence: f64, iterations: usize) -> f64 {
-    let mut sigma = Deviation::of(coefficients.iter().map(|c| c.first_layer)).sigma;
+/// The k-σ clipped standard deviation of the first detail layer of the coefficients
+/// `coefficients` walks, iterated until it moves by less than `convergence` of itself or
+/// `iterations` run out.
+fn k_sigma<'a, I>(coefficients: &impl Fn() -> I, convergence: f64, iterations: usize) -> f64
+where
+    I: Iterator<Item = &'a Coefficients>,
+{
+    let mut sigma = Deviation::of(coefficients().map(|c| c.first_layer)).sigma;
     for _ in 0..iterations {
         let next = Deviation::of(
-            coefficients
-                .iter()
+            coefficients()
                 .map(|c| c.first_layer)
                 .filter(|w| w.abs() < K * sigma),
         )

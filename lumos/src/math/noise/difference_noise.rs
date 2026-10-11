@@ -36,10 +36,12 @@ impl DifferenceNoise {
         cfa_type: &CfaType,
         excluded: impl Fn(usize) -> bool,
     ) -> ArrayVec<f32, 3> {
-        let mut differences: ArrayVec<Vec<f32>, 3> =
-            (0..cfa_type.num_colors()).map(|_| Vec::new()).collect();
-        for_each_pair(mosaic, size, cfa_type, &excluded, |pair| {
-            differences[pair.colour].push(pair.difference);
+        let mut differences: ArrayVec<Vec<f32>, 3> = pair_counts(size, cfa_type, &excluded)
+            .into_iter()
+            .map(Vec::with_capacity)
+            .collect();
+        for_each_pair(size, cfa_type, &excluded, |pair| {
+            differences[pair.colour].push(pair.difference(mosaic, size));
         });
         differences.iter_mut().map(|colour| sigma(colour)).collect()
     }
@@ -54,17 +56,18 @@ impl DifferenceNoise {
         excluded: impl Fn(usize) -> bool,
         gain: &FlatGain,
     ) -> ArrayVec<BackgroundSplit, 3> {
-        let mut binned: ArrayVec<BinnedSamples<f32>, 3> = (0..cfa_type.num_colors())
-            .map(|_| BinnedSamples::new())
+        let mut binned: ArrayVec<BinnedSamples<f32>, 3> = pair_counts(size, cfa_type, &excluded)
+            .into_iter()
+            .map(BinnedSamples::with_capacity)
             .collect();
-        for_each_pair(mosaic, size, cfa_type, &excluded, |pair| {
+        for_each_pair(size, cfa_type, &excluded, |pair| {
             let colour = pair.colour;
             let y = pair.y as f32;
             let at = f32::midpoint(
                 gain.at(colour, pair.x as f32, y),
                 gain.at(colour, pair.neighbour as f32, y),
             );
-            binned[colour].push(gain.bins(colour), at, pair.difference);
+            binned[colour].push(gain.bins(colour), at, pair.difference(mosaic, size));
         });
         binned
             .into_iter()
@@ -75,31 +78,54 @@ impl DifferenceNoise {
             })
             .collect()
     }
+
+    /// The most bytes an estimate over a mosaic of `size` and `cfa_type` holds: every pair of
+    /// every colour, as [`Self::estimate_split`] holds them, each with its gain bin.
+    pub(crate) fn peak_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
+        pair_counts(size, cfa_type, &|_| false)
+            .into_iter()
+            .map(BinnedSamples::<f32>::bytes)
+            .sum()
+    }
 }
 
-/// One difference of a photosite and the nearest same-colour photosite to its right.
+/// A photosite and the nearest same-colour photosite to its right.
 #[derive(Debug, Clone, Copy)]
 struct Pair {
     x: usize,
     neighbour: usize,
     y: usize,
     colour: usize,
-    difference: f32,
 }
 
-/// Every pair of every `row_step`-th row, so each colour keeps at most about
+impl Pair {
+    fn difference(self, mosaic: &[f32], size: Size2us) -> f32 {
+        let row = &mosaic[self.y * size.width..(self.y + 1) * size.width];
+        row[self.x] - row[self.neighbour]
+    }
+}
+
+/// How many pairs of each colour [`for_each_pair`] visits under `excluded`.
+fn pair_counts(
+    size: Size2us,
+    cfa_type: &CfaType,
+    excluded: &impl Fn(usize) -> bool,
+) -> ArrayVec<usize, 3> {
+    let mut counts: ArrayVec<usize, 3> = (0..cfa_type.num_colors()).map(|_| 0).collect();
+    for_each_pair(size, cfa_type, excluded, |pair| counts[pair.colour] += 1);
+    counts
+}
+
+/// Every pair of every `row_step`-th row of a `size` mosaic, so each colour keeps at most about
 /// `MAX_STATISTIC_SAMPLES`; pairs touching a pixel `excluded` names are skipped.
 fn for_each_pair(
-    mosaic: &[f32],
     size: Size2us,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
     mut visit: impl FnMut(Pair),
 ) {
-    debug_assert_eq!(mosaic.len(), size.pixel_count());
     let row_step = (size.pixel_count() / (cfa_type.num_colors() * MAX_STATISTIC_SAMPLES)).max(1);
     for y in (0..size.height).step_by(row_step) {
-        let row = &mosaic[y * size.width..(y + 1) * size.width];
         for x in 0..size.width {
             let colour = cfa_type.color_at(Vec2us::new(x, y));
             let Some(neighbour) = (x + 1..(x + 1 + MAX_REACH).min(size.width))
@@ -115,7 +141,6 @@ fn for_each_pair(
                 neighbour,
                 y,
                 colour,
-                difference: row[x] - row[neighbour],
             });
         }
     }

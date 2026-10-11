@@ -796,11 +796,14 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let cache_loaded = <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
     assert_eq!(cache_loaded.data, loaded.data);
     assert_eq!(cache_loaded.cfa_type, loaded.cfa_type);
+    // The reader holds the whole frame as one chunk beside it: 1024 samples of 4 bytes as
+    // stored, and as many swapped into words.
     assert_eq!(
         <CfaImage as StackableImage>::peek(&path, &LoadContext::default()),
         Some(FramePeek {
             dimensions: ImageDimensions::new((size.width, size.height), 1),
-            decoder_bytes: 0,
+            decoder_bytes: 8192,
+            mosaic: Some(pattern),
         })
     );
 

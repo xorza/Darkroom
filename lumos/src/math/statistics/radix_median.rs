@@ -56,6 +56,9 @@ enum Middle {
 }
 
 impl RadixMedian {
+    /// The bytes the histogram holds once a median has started.
+    pub(crate) const HISTOGRAM_BYTES: usize = BINS * size_of::<u32>();
+
     /// Start a median: feed every value to the pass this returns, then every value again to the
     /// pass that one finishes into.
     pub(crate) fn high_pass(&mut self) -> HighPass<'_> {
