@@ -6,7 +6,6 @@ use std::io;
 use crate::calibration_masters::calibration_component::CalibrationComponent;
 use crate::calibration_masters::fits::BUNDLE_VERSION;
 use crate::calibration_masters::master_role::MasterRole;
-use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::combine::error::StackError;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
@@ -104,8 +103,8 @@ pub enum CalibrationError {
     },
 }
 
-/// A master holding dark signal does not match the frame it is taken from: dark current depends on
-/// the exposure and, by about 12% per degree, on the sensor temperature.
+/// A master holding dark signal cannot be taken from the frame: dark current grows with the
+/// exposure, and this dark cannot be scaled to the frame's.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq)]
 pub enum DarkMismatch {
     /// The dark was exposed for another time than the frame, and it cannot be scaled to the
@@ -114,13 +113,6 @@ pub enum DarkMismatch {
         "the dark's exposure {dark} s does not match the frame's {frame} s, and the dark cannot be scaled to it"
     )]
     Exposure { frame: f64, dark: f64 },
-    /// The dark was taken at another temperature than the frame, by the `reading` both state.
-    #[error("the dark's {reading} temperature {dark} °C does not match the frame's {frame} °C")]
-    Temperature {
-        reading: TemperatureSource,
-        frame: f64,
-        dark: f64,
-    },
 }
 
 /// Why the master a calibration stack subtracts from every frame cannot be taken from them: the

@@ -1,5 +1,6 @@
 //! [`CalibrationOutcome`]: what calibrating one light checked, and what it could not.
 
+use crate::calibration_masters::temperature_difference::TemperatureDifference;
 use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 
@@ -15,4 +16,6 @@ pub struct CalibrationOutcome {
     /// The temperature the dark was matched on: the sensor's, or the camera body's where the two
     /// do not both state the sensor's; `None` when they share neither, which `unverified` records.
     pub dark_temperature: Option<TemperatureSource>,
+    /// The dark's and the light's temperatures, when they differ past the tolerance.
+    pub dark_temperature_difference: Option<TemperatureDifference>,
 }

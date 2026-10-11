@@ -13,6 +13,7 @@ pub(crate) mod master_cache;
 pub(crate) mod master_role;
 pub(crate) mod master_subtraction;
 pub(crate) mod prepared_flat;
+pub(crate) mod temperature_difference;
 pub(crate) mod temperature_source;
 
 use std::io;
@@ -103,7 +104,8 @@ pub struct CalibrationMasters {
 /// # Errors
 ///
 /// A [`StackError`]: the subtractor does not fit the role, a frame does not fit the subtractor, a
-/// dark's frames disagree on their exposure or temperature, or the stack itself fails.
+/// dark's frames disagree on their exposure, or the stack itself fails. Frames that disagree on
+/// their sensor temperature stack, warned of, into a master that states none.
 pub(crate) fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     role: MasterRole,
@@ -134,13 +136,19 @@ pub(crate) fn stack_cfa_master(
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
         let cache = FrameCache::from_cfa_paths(paths, &config, run, step, progress)?;
         if role.is_dark() {
-            CaptureConditions::check_agreement(
-                cache
-                    .frames
-                    .iter()
-                    .map(|frame| frame.source_stats.facts.conditions),
-            )
-            .map_err(|source| StackError::MasterConditions { role, source })?;
+            let conditions = cache
+                .frames
+                .iter()
+                .map(|frame| frame.source_stats.facts.conditions);
+            CaptureConditions::check_exposures(conditions.clone())
+                .map_err(|source| StackError::MasterConditions { role, source })?;
+            if let Some(disagreement) = CaptureConditions::temperature_disagreement(conditions) {
+                tracing::warn!(
+                    %role,
+                    %disagreement,
+                    "the frames of the master disagree on their sensor temperature; it states none"
+                );
+            }
         }
         Ok(cache)
     })?;
@@ -603,6 +611,7 @@ impl CalibrationMasters {
                 outcome.unverified = matched.unverified;
                 outcome.dark_scale = matched.scale;
                 outcome.dark_temperature = matched.temperature;
+                outcome.dark_temperature_difference = matched.temperature_difference;
                 let map = master_map(domain.as_ref(), dark, MasterRole::Dark)?;
                 after_subtracting(&mut domain, dark);
                 Ok((dark, map, matched))
@@ -812,7 +821,19 @@ fn record_removal(
     );
     frame.metadata.calibration = frame.metadata.calibration.union(removes);
     if let Some(matched) = matched {
-        frame.metadata.unverified_dark = frame.metadata.unverified_dark.union(matched.unverified);
+        // A temperature that differed is no more known to match than one never compared.
+        let differed = UnverifiedConditions {
+            exposure: false,
+            temperature: matched.temperature_difference.is_some(),
+        };
+        frame.metadata.unverified_dark = frame
+            .metadata
+            .unverified_dark
+            .union(matched.unverified)
+            .union(differed);
+        if let Some(difference) = matched.temperature_difference {
+            tracing::warn!(%role, %difference, "a dark of another temperature was subtracted");
+        }
     }
 }
 
