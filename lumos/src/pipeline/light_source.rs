@@ -509,7 +509,14 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
         };
         let mut cfa =
             CfaImage::from_file(path, context).map_err(|source| load_error(path, source))?;
-        notes.record(masters.calibrate(&mut cfa)?);
+        let outcome =
+            masters
+                .calibrate(&mut cfa)
+                .map_err(|source| AlignStackError::Calibration {
+                    path: path.to_path_buf(),
+                    source: Box::new(source),
+                })?;
+        notes.record(outcome);
         if let Some(cosmic_ray) = cosmic_ray {
             let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
                 AlignStackError::CosmicRay {

@@ -118,6 +118,107 @@ pub enum AdmissionError {
     Cancelled,
 }
 
+impl AdmissionError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::DimensionMismatch(mismatch) => {
+                Self::DimensionMismatch(mismatch.renumbered(inputs))
+            }
+            Self::StoredFrameChannels {
+                index,
+                expected,
+                actual,
+            } => Self::StoredFrameChannels {
+                index: inputs[index],
+                expected,
+                actual,
+            },
+            Self::StoredFramePlaneSamples {
+                index,
+                plane,
+                expected,
+                actual,
+            } => Self::StoredFramePlaneSamples {
+                index: inputs[index],
+                plane,
+                expected,
+                actual,
+            },
+            Self::SampleDomainMismatch {
+                index,
+                actual,
+                reference_index,
+                expected,
+            } => Self::SampleDomainMismatch {
+                index: inputs[index],
+                actual,
+                reference_index: inputs[reference_index],
+                expected,
+            },
+            Self::RowOrderMismatch {
+                index,
+                actual,
+                reference_index,
+                expected,
+            } => Self::RowOrderMismatch {
+                index: inputs[index],
+                actual,
+                reference_index: inputs[reference_index],
+                expected,
+            },
+            Self::CfaPatternMismatch {
+                index,
+                actual,
+                reference_index,
+                expected,
+            } => Self::CfaPatternMismatch {
+                index: inputs[index],
+                actual,
+                reference_index: inputs[reference_index],
+                expected,
+            },
+            Self::NonFiniteImageSample {
+                index,
+                channel,
+                pixel,
+                value,
+            } => Self::NonFiniteImageSample {
+                index: inputs[index],
+                channel,
+                pixel,
+                value,
+            },
+            Self::InvalidQualityPlaneValue {
+                index,
+                plane,
+                pixel,
+                value,
+            } => Self::InvalidQualityPlaneValue {
+                index: inputs[index],
+                plane,
+                pixel,
+                value,
+            },
+            Self::FrameQualityPairMismatch {
+                index,
+                pixel,
+                plane,
+                support,
+                confidence,
+            } => Self::FrameQualityPairMismatch {
+                index: inputs[index],
+                pixel,
+                plane,
+                support,
+                confidence,
+            },
+            Self::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
 impl From<Cancelled> for AdmissionError {
     fn from(Cancelled: Cancelled) -> Self {
         Self::Cancelled

@@ -38,8 +38,13 @@ pub enum AlignStackError {
     },
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
-    #[error(transparent)]
-    Calibration(#[from] CalibrationError),
+    #[error("cannot calibrate light frame '{path}': {source}")]
+    Calibration {
+        path: PathBuf,
+        /// Boxed for the reason [`Self::Load`]'s source is.
+        #[source]
+        source: Box<CalibrationError>,
+    },
     /// Both config variants carry the same payload, so neither derives `From` — a bare `?` would
     /// have to guess which config the field came from.
     #[error("invalid star-detection configuration: {0}")]

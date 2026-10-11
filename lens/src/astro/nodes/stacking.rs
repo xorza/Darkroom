@@ -35,8 +35,9 @@ const fn quality(demand: &[OutputDemand]) -> QualityPlanes {
     }
 }
 
-/// The alignment reference: the frame an index names, or, unset, the
-/// richest frame. A negative index names no frame.
+/// The alignment reference: the frame an index names, or, unset, the frame
+/// with the lowest median FWHM among those with enough stars. A negative index
+/// names no frame.
 fn reference(index: &DynamicValue) -> InvokeResult<Reference> {
     if matches!(index, DynamicValue::Unbound) {
         return Ok(Reference::Auto);
@@ -126,10 +127,10 @@ pub(crate) fn register(library: &mut Library) {
         .input(RegistrationPreset::config_input("Registration Config", 4))
         .input(CombineMethodChoice::picker("Combine"))
         .input(CombineMethodChoice::config_input("Combine Config", 6))
-        .input(
-            FuncInput::optional("Reference", DataType::Int)
-                .description("Alignment reference frame index; unset picks the richest frame."),
-        )
+        .input(FuncInput::optional("Reference", DataType::Int).description(
+            "Alignment reference frame index; unset picks the frame with the lowest \
+                     median FWHM among those with enough stars.",
+        ))
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Stacked image."))
         .output(
             FuncOutput::new("Coverage", IMAGE_DATA_TYPE).description("Per-pixel frame-count map."),

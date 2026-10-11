@@ -120,6 +120,82 @@ pub enum StackError {
     Admission(AdmissionError),
 }
 
+impl StackConfigError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::InvalidManualWeight { index, value } => Self::InvalidManualWeight {
+                index: inputs[index],
+                value,
+            },
+            error @ (Self::Field(_)
+            | Self::InvalidManualWeightSum
+            | Self::ManualWeightCountMismatch { .. }
+            | Self::RejectingSmallNFallback) => error,
+        }
+    }
+}
+
+impl StackError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::Config(error) => Self::Config(error.renumbered(inputs)),
+            Self::NonPositiveMedian {
+                index,
+                slot,
+                median,
+            } => Self::NonPositiveMedian {
+                index: inputs[index],
+                slot,
+                median,
+            },
+            Self::NoSignalScale {
+                index,
+                slot,
+                spread,
+                noise,
+            } => Self::NoSignalScale {
+                index: inputs[index],
+                slot,
+                spread,
+                noise,
+            },
+            Self::Subtraction(error) => Self::Subtraction(error.renumbered(inputs)),
+            Self::MasterConditions { role, source } => Self::MasterConditions {
+                role,
+                source: source.renumbered(inputs),
+            },
+            Self::NoNoiseToWeigh { index } => Self::NoNoiseToWeigh {
+                index: inputs[index],
+            },
+            Self::WarpPlaneDimensionMismatch {
+                index,
+                plane,
+                expected_width,
+                expected_height,
+                actual_width,
+                actual_height,
+            } => Self::WarpPlaneDimensionMismatch {
+                index: inputs[index],
+                plane,
+                expected_width,
+                expected_height,
+                actual_width,
+                actual_height,
+            },
+            Self::Admission(error) => Self::Admission(error.renumbered(inputs)),
+            error @ (Self::FrameStore(_)
+            | Self::NoFrames
+            | Self::Cancelled
+            | Self::NoCommonCoverage
+            | Self::ImageLoad(_)) => error,
+        }
+    }
+}
+
 impl From<FrameDimensionMismatch> for StackError {
     fn from(mismatch: FrameDimensionMismatch) -> Self {
         Self::Admission(AdmissionError::DimensionMismatch(mismatch))
@@ -150,6 +226,40 @@ mod tests {
 
     use crate::combine::error::*;
     use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::image_provenance::RowOrder;
+
+    /// Survivors 0, 1 and 2 are inputs 0, 3 and 5: a frame index and a reference index both read
+    /// through the list, and an error that names no frame comes back as it was.
+    #[test]
+    fn a_renumbered_error_names_the_callers_frames() {
+        let inputs = [0, 3, 5];
+        let error = StackError::Admission(AdmissionError::RowOrderMismatch {
+            index: 2,
+            actual: RowOrder::BottomUp,
+            reference_index: 1,
+            expected: RowOrder::TopDown,
+        })
+        .renumbered(&inputs);
+        assert!(
+            matches!(
+                error,
+                StackError::Admission(AdmissionError::RowOrderMismatch {
+                    index: 5,
+                    reference_index: 3,
+                    ..
+                })
+            ),
+            "{error:?}"
+        );
+        assert!(matches!(
+            StackError::NoNoiseToWeigh { index: 1 }.renumbered(&inputs),
+            StackError::NoNoiseToWeigh { index: 3 }
+        ));
+        assert!(matches!(
+            StackError::NoCommonCoverage.renumbered(&inputs),
+            StackError::NoCommonCoverage
+        ));
+    }
 
     #[test]
     fn each_plane_carries_its_own_range_and_label() {
