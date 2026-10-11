@@ -7,7 +7,7 @@ use rayon::ThreadPoolBuilder;
 
 use crate::concurrency;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
-use crate::concurrency::{try_par_map_bounded_owned, try_par_map_limited};
+use crate::concurrency::{try_par_map_bounded, try_par_map_bounded_owned};
 
 #[test]
 fn job_scratch_leases_are_exclusive_and_reused() {
@@ -28,7 +28,7 @@ fn job_scratch_leases_are_exclusive_and_reused() {
 }
 
 #[test]
-fn limited_map_preserves_order_and_reaches_the_exact_cap() {
+fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
     let pool = ThreadPoolBuilder::new().num_threads(4).build().unwrap();
     let barrier = Arc::new(Barrier::new(3));
     let in_flight = AtomicUsize::new(0);
@@ -36,7 +36,8 @@ fn limited_map_preserves_order_and_reaches_the_exact_cap() {
     let items: Vec<usize> = (0..6).collect();
 
     let result = pool.install(|| {
-        try_par_map_limited(&items, 3, |_index, value| {
+        try_par_map_bounded(items.len(), &mut [(); 3], |(), index| {
+            let value = &items[index];
             let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             max_observed.fetch_max(current, Ordering::SeqCst);
             barrier.wait();
@@ -66,13 +67,14 @@ fn wait_for_failure(failed: &AtomicBool) {
 }
 
 #[test]
-fn limited_map_propagates_error_and_stops_taking_work() {
+fn bounded_map_propagates_error_and_stops_taking_work() {
     const SLOTS: usize = 3;
     let started = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
     let items: Vec<usize> = (0..1000).collect();
 
-    let result = try_par_map_limited(&items, SLOTS, |_index, value| {
+    let result = try_par_map_bounded(items.len(), &mut [(); SLOTS], |(), index| {
+        let value = &items[index];
         started.fetch_add(1, Ordering::SeqCst);
         if *value == 0 {
             failed.store(true, Ordering::SeqCst);
@@ -98,8 +100,7 @@ fn limited_map_propagates_error_and_stops_taking_work() {
 #[test]
 fn the_lowest_failing_index_is_reported() {
     let failed = AtomicBool::new(false);
-    let items: Vec<usize> = (0..4).collect();
-    let result = try_par_map_limited(&items, 2, |index, _value| match index {
+    let result = try_par_map_bounded(4, &mut [(); 2], |(), index| match index {
         0 => {
             wait_for_failure(&failed);
             Err(0)
@@ -114,15 +115,15 @@ fn the_lowest_failing_index_is_reported() {
 }
 
 #[test]
-fn limited_map_accepts_empty_input() {
-    let result = try_par_map_limited(&[], 2, |_index, value: &usize| Ok::<_, ()>(*value));
+fn bounded_map_accepts_empty_input() {
+    let result = try_par_map_bounded(0, &mut [(); 2], |(), index| Ok::<_, ()>(index));
     assert_eq!(result.unwrap(), Vec::<usize>::new());
 }
 
 #[test]
-#[should_panic(expected = "max_concurrent must be positive")]
-fn limited_map_rejects_zero_concurrency() {
-    let _refused = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
+#[should_panic(expected = "a bounded map needs at least one slot")]
+fn bounded_map_rejects_zero_slots() {
+    let _refused = try_par_map_bounded(1, &mut [(); 0], |(), index| Ok::<_, ()>(index));
 }
 
 #[test]

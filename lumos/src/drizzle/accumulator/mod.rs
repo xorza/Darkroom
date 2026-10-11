@@ -18,7 +18,6 @@ use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, Radial
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
-use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_quality::DropPlanes;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -314,33 +313,26 @@ impl DrizzleAccumulator {
 
     fn validate(&self, frame: &DrizzleFrame<impl StackableImage>) -> Result<(), DrizzleError> {
         let index = self.next_frame;
-        FrameDimensionMismatch::check(index, self.input_dims, frame.source.dimensions())?;
-        let deposit = Deposit::of(&frame.source);
-        if deposit != self.deposit {
-            return Err(DrizzleError::PatternMismatch {
-                index,
-                expected: self.deposit.mosaic(),
-                actual: deposit.mosaic(),
-            });
-        }
-        // `find_first` rather than `find_any`: the reported sample is part of the error, so the
-        // frame that fails has to name the same one every run.
-        for channel in 0..self.input_dims.channels() {
-            if let Some((pixel, &value)) = frame
+        // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
+        // pattern, its samples finite.
+        debug_assert_eq!(
+            frame.source.dimensions(),
+            self.input_dims,
+            "drizzle frame {index} reached the accumulator unadmitted: another shape"
+        );
+        debug_assert_eq!(
+            Deposit::of(&frame.source),
+            self.deposit,
+            "drizzle frame {index} reached the accumulator unadmitted: another pattern"
+        );
+        debug_assert!(
+            (0..self.input_dims.channels()).all(|channel| frame
                 .source
                 .channel(channel)
-                .par_iter()
-                .enumerate()
-                .find_first(|(_, value)| !value.is_finite())
-            {
-                return Err(DrizzleError::NonFiniteSample {
-                    index,
-                    channel,
-                    pixel,
-                    value,
-                });
-            }
-        }
+                .iter()
+                .all(|v| v.is_finite())),
+            "drizzle frame {index} reached the accumulator unadmitted: a non-finite sample"
+        );
 
         let Some(pixel_weights) = &frame.pixel_weight_map else {
             return Ok(());

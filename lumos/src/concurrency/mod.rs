@@ -125,31 +125,7 @@ where
         .collect())
 }
 
-/// Maps a fallible operation over `items`, at most `max_concurrent` at a time, passing each
-/// item's index alongside it.
-///
-/// The index is supplied because callers almost always need it — to name a spill file, to report
-/// which frame failed — and would otherwise each build a `Vec<(usize, &T)>` to carry it in.
-/// See [`try_par_map_bounded`] for the scheduling and the early-exit bound.
-pub(crate) fn try_par_map_limited<T, R, E, F>(
-    items: &[T],
-    max_concurrent: usize,
-    operation: F,
-) -> Result<Vec<R>, E>
-where
-    T: Sync,
-    R: Send,
-    E: Send,
-    F: Fn(usize, &T) -> Result<R, E> + Sync,
-{
-    assert!(max_concurrent > 0, "max_concurrent must be positive");
-    let mut slots = vec![(); max_concurrent];
-    try_par_map_bounded(items.len(), &mut slots, |(), index| {
-        operation(index, &items[index])
-    })
-}
-
-/// Consuming counterpart to [`try_par_map_limited`], with a slot bound to each in-flight worker.
+/// Consuming counterpart to [`try_par_map_bounded`]: each item moved into its job.
 ///
 /// Taking items by value is what lets a caller drop each input as soon as its output exists — the
 /// property that keeps the register/warp stage from holding the whole input and output sets

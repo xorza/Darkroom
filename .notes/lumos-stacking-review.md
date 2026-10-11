@@ -60,23 +60,18 @@ named item.
 
 ---
 
-## Batch 20: One ingest stage — medium (design)
+## Batch 20: One ingest stage (rest) — medium
 
-**Findings:** PIP-11, PIP-13, PIP-10, PIP-4, CAL-14. (PIP-12 is done: one `frame_store::Tier`.)
+**Done:** one `frame_store::Tier` (PIP-12); `FrameCheck` and `SetFacts` in `ingest/` with
+`AdmissionError` and a typed `FrameStep::Error`, so `ingest` imports nothing of `combine`; one
+`ingest::FrameIntake` (admission, decode context, progress, the bounded map with its cancel check)
+that the stack loader, both pipeline passes and the drizzle take their frames in through, the
+drizzle admitted like the others (PIP-11); `FrameToPark` gave way to `DetectedFrame`, held lights
+go through the owned map, and the loader's private types folded into `FrameLoad` (PIP-13).
+`StoredImage` stays a type of its own: a parked image keeps every flag and its metadata for the
+warp, where a `StoredFrame` keeps what the combine reads.
 
-**Problems.**
-- **PIP-11.** Three decode–admit–store loops. `combine/cache/loader/mod.rs`: peek →
-  `MemoryPlan::plan` → `FrameAdmission` → `try_par_map_limited` → RAM, scratch or kept store.
-  `pipeline/light_source.rs`: peek → `MemoryPlan::plan` or `single_pass` → `FrameAdmission` →
-  `DetectorPool::try_map` → `FrameParking`. Since Batch 14, `drizzle/stack.rs`: a lazy serial load
-  → drizzle → `Tier::store`, with its own finiteness check
-  (`DrizzleError::NonFiniteSample`) in place of `FrameAdmission`. Each fix lands two or three
-  times, and admission semantics differ.
-- **PIP-13.** Frame carriers multiply: `FrameToPark` duplicates `DetectedFrame`; `StoredImage`
-  (channels, flags, metadata) duplicates `StoredFrame`; `Lights::Held` re-implements
-  `concurrency::try_par_map_bounded_owned` with `Mutex<Option<_>>` cells; the loader has nine
-  private types (`LoadedTier`, `LoadedCache`, `EarlyDecode`, `Decoded`, `CachedSource`,
-  `CheckedImage`, `LoadedMemoryFrame`, `TierLoad`, `FrameDiskCache`).
+**Left: PIP-10, PIP-4, CAL-14.**
 - **PIP-10.** Calibrated lights on disk (Siril or PixInsight FITS) have no tiered entry:
   `align_and_stack` takes `Vec<LinearImage>`, so the caller decodes every frame, the inputs stay
   resident and never spill. The `calibrate_align_stack` doc sends such users there.
@@ -89,38 +84,18 @@ named item.
   `calibration_masters::internals::masters_from_files` and `lens/src/astro/nodes/calibration.rs`.
 
 **Design.**
-1. `ingest::Ingest<Source, Sink>`: one peek → plan → decode → admit → store loop. Sources:
-   `Paths { paths, decoder, step: Option<&dyn FrameStep> }`, which serves `stack()` and PIP-10;
-   `Held(Vec<I>)`; `Raw { paths, masters, cosmic_ray }`. Sinks: `Park` (registration's first
-   pass) and `Store` (straight to the combine). `FrameCache::from_paths`, `LightSource` and the
-   drizzle entries consume it. The drizzle entries keep one frame in drizzle at a time (each
-   drizzle is parallel inside), and their stored size comes from the drizzle output, as
-   `DrizzleShape::tier` counts it today.
-2. Every source peeks before any decode where its format has a header to read: RAW and mosaic
-   FITS through `CfaFrameInfo`, linear FITS through `fits_linear_dimensions` (done). A float TIFF
-   has none, and its frame 0 is still decoded first.
-3. The drizzle entries are admitted like the others, through `FrameAdmission`, and their own
-   finiteness check goes. (Done: `FrameCheck` and `SetFacts` are in `ingest/`, admission fails
-   with `AdmissionError`, a step with its own `FrameStep::Error`, and `ingest` imports nothing of
-   `combine`.)
-5. PIP-13: `FrameToPark` becomes `&DetectedFrame` plus an index; `StoredImage` becomes a
-   `StoredFrame` with `FrameQuality::None`, its metadata beside it in `PipelineFrame::Spilled`;
-   `Lights::Held` uses `try_par_map_bounded_owned`; the loader's private types fold into the
-   ingest.
-6. PIP-4: the kept cache is a decode-level memo, looked up before any decode on every tier:
-   mapped on the spill tier, read into RAM on the RAM tier. RAW runs cache the uncalibrated
-   `CfaImage` decode, which is what the key describes, before the masters apply. Every entry
-   honours `keep_cache`.
-7. PIP-10: a public `align_and_stack_paths` over calibrated linear files, decoded on workers
-   through the `Paths` source. Single-pass `Reference::Index` applies to it. Fix the
-   `calibrate_align_stack` doc to name it.
-8. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
+1. PIP-10: a public `align_and_stack_paths` over calibrated linear files, decoded on workers as
+   `LightSource::Paths`, parked on the spill tier as RAW lights are. Single-pass
+   `Reference::Index` applies to it. Fix the `calibrate_align_stack` doc to name it.
+2. PIP-4: the kept cache is a decode-level memo, looked up before any decode on every tier, its
+   planes mapped whatever the tier. Every entry honours `keep_cache`. RAW runs cache the
+   uncalibrated `CfaImage` decode, which is what the key describes, before the masters apply.
+3. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
    a per-role cache hook for `lens`, and `lens` calls it. `stack_cfa_master` becomes private.
 
 **Tests:** every pipeline, loader and drizzle test stays green with unchanged pins; a new
 `align_and_stack_paths` test spills calibrated RGB FITS lights; `keep_cache` reuse on the RAM tier
-and in a registered RAW run skips the decode (count decodes through a test hook); a
-drizzle input with a non-finite sample fails admission with its index.
+and in a registered run skips the decode (count decodes through a test hook).
 
 **Crates:** lumos, lens, darkroom.
 

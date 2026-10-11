@@ -1,5 +1,7 @@
 use crate::internals::prelude::*;
 use std::convert::Infallible;
+
+use crate::concurrency;
 use std::hint::black_box;
 use std::iter;
 
@@ -37,11 +39,10 @@ fn bench_detector_batch_reuse_1k(b: quickbench::Bencher) {
     });
     b.bench_labeled("reused", || {
         black_box(
-            detectors
-                .try_map(images.len(), |detector, index| {
-                    Ok::<_, Infallible>(detector.detect(images[index]))
-                })
-                .unwrap(),
+            concurrency::try_par_map_bounded(images.len(), detectors.slots(), |detector, index| {
+                Ok::<_, Infallible>(detector.detect(images[index]))
+            })
+            .unwrap(),
         )
     });
 }

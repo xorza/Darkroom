@@ -7,6 +7,7 @@ use std::f32::consts::SQRT_2;
 
 use super::*;
 use crate::drizzle::stack::drizzle_cfa_images;
+use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::synthetic::camera::Camera;
@@ -345,11 +346,12 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     assert!(
         matches!(
             error,
-            DrizzleError::PatternMismatch {
+            DrizzleError::Admission(AdmissionError::CfaPatternMismatch {
                 index: 1,
                 expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
-            }
+                reference_index: 0,
+            })
         ),
         "{error:?}"
     );

@@ -1,13 +1,13 @@
 //! [`LightSource`]: where a registered stack's lights come from, and the stage that detects them.
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::ingest::frame_admission::FrameAdmission;
+use crate::frame_store::frame_stats::FrameStats;
+use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
@@ -24,16 +24,16 @@ use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame_parking::StagePlan;
-use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark, ParkedFrame};
+use crate::pipeline::frame_parking::{FrameParking, StagePlan};
+use crate::pipeline::frame_registrar::{FrameRegistrar, ParkedFrame};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
-use crate::progress::stage_counter::StageCounter;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::Diagnostics;
+use crate::star_detection::detector::{Diagnostics, StarDetector};
+use crate::star_detection::star::Star;
 
 /// Where a registered stack's lights come from.
 #[derive(Debug)]
@@ -70,19 +70,55 @@ struct LightShape {
     run: RunShape,
 }
 
+/// A light's samples and what its detection found, before the light is held where its tier says.
+#[derive(Debug)]
+struct DetectedSamples {
+    image: LinearImage,
+    stars: Vec<Star>,
+    diagnostics: Diagnostics,
+    stats: FrameStats,
+}
+
+impl DetectedSamples {
+    /// The light kept where the caller put it.
+    fn resident(self) -> DetectedFrame {
+        let Self {
+            image,
+            stars,
+            diagnostics,
+            stats,
+        } = self;
+        DetectedFrame {
+            image: PipelineFrame::Resident(image),
+            stars,
+            diagnostics,
+            stats,
+        }
+    }
+
+    /// The light parked where `parking` says, until its registration.
+    fn parked(self, parking: &FrameParking) -> Result<DetectedFrame, AlignStackError> {
+        let Self {
+            image,
+            stars,
+            diagnostics,
+            stats,
+        } = self;
+        Ok(DetectedFrame {
+            image: parking.hold(image)?,
+            stars,
+            diagnostics,
+            stats,
+        })
+    }
+}
+
 /// One light through the single pass: its parked frame and how it registered — `None` for the
 /// reference, parked apart, and where the run was cancelled — and its detection funnel.
 #[derive(Debug, Default)]
 struct PassedLight {
     frame: Option<ParkedFrame>,
     diagnostics: Diagnostics,
-}
-
-/// The lights as the workers take them: a held frame moves out of its cell once.
-#[derive(Debug)]
-enum Lights<'a, P> {
-    Held(Vec<Mutex<Option<LinearImage>>>),
-    Raw(RawLights<'a, P>),
 }
 
 impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
@@ -122,46 +158,45 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             "Preparing lights and detecting stars"
         );
 
-        let lights = match self {
-            Self::Held(frames) => Lights::Held(
-                frames
-                    .into_iter()
-                    .map(|frame| Mutex::new(Some(frame)))
-                    .collect(),
-            ),
-            Self::Raw(raw) => Lights::Raw(raw),
-        };
-        let cancel = &run.context.cancel;
-        let admission = FrameAdmission::new(shape.dimensions, cancel);
         let slots = plan.decode_concurrency.min(total);
-        let context = run.context.for_decode_slots(slots);
-        let done = StageCounter::new(progress, StackingStage::Preparing, total);
+        let intake = FrameIntake::new(
+            IntakePlan {
+                dimensions: shape.dimensions,
+                frame_count: total,
+                decode_slots: slots,
+                stage: StackingStage::Preparing,
+            },
+            run,
+            progress,
+        );
         // Bounded by the plan, which charges each in-flight frame its decode and the detector's
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
         // is also what a cancel has to drain.
         let mut detectors = DetectorPool::from_config(&config.detection, slots)
             .map_err(AlignStackError::DetectionConfig)?;
-        let frames = detectors.try_map(total, |detector, index| {
-            // Cancelled: abort the batch rather than spend the rest of the budget preparing
-            // frames the run will discard.
-            if cancel.is_cancelled() {
-                return Err(AlignStackError::Cancelled);
-            }
-            let image = lights.take(index, &context)?;
-            let stats = admission.admit(index, &image)?;
+        let detect = |detector: &mut StarDetector, index: usize, image: LinearImage| {
+            let stats = intake.admit(index, &image)?;
             let result = detector.detect(&image);
-            let image = match lights {
-                Lights::Held(_) => PipelineFrame::Resident(image),
-                Lights::Raw(_) => stage.parking.hold(image)?,
-            };
-            log_detection(done.complete_one(), total, &result);
-            Ok(DetectedFrame {
+            log_detection(intake.complete_one(), total, &result);
+            Ok::<_, AlignStackError>(DetectedSamples {
                 image,
                 stars: result.stars,
                 diagnostics: result.diagnostics,
                 stats,
             })
-        })?;
+        };
+        let frames = match self {
+            // A held frame stays where the caller put it, whatever the tier.
+            Self::Held(frames) => {
+                intake.map_owned(frames, detectors.slots(), |detector, index, image| {
+                    detect(detector, index, image).map(DetectedSamples::resident)
+                })?
+            }
+            Self::Raw(raw) => intake.map(0..total, detectors.slots(), |detector, index| {
+                let image = raw.prepare(raw.paths[index].as_ref(), intake.context())?;
+                detect(detector, index, image)?.parked(&stage.parking)
+            })?,
+        };
         Ok(DetectedLights { frames, stage })
     }
 
@@ -199,19 +234,6 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                 })
             }
             Self::Raw(raw) => raw.shape(config, run),
-        }
-    }
-}
-
-impl<P: AsRef<Path> + Sync> Lights<'_, P> {
-    fn take(&self, index: usize, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
-        match self {
-            Self::Held(cells) => Ok(cells[index]
-                .lock()
-                .expect("no holder of this lock panicked")
-                .take()
-                .expect("each light is taken once")),
-            Self::Raw(raw) => raw.prepare(raw.paths[index].as_ref(), context),
         }
     }
 }
@@ -306,9 +328,18 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             "Preparing, detecting and registering lights in one pass"
         );
         let cancel = &run.context.cancel;
-        let admission = FrameAdmission::new(shape.dimensions, cancel);
-        let prepared = StageCounter::new(&progress, StackingStage::Preparing, total);
-        let mut detectors = DetectorPool::from_config(&config.detection, workers.min(total))
+        let slots = workers.min(total);
+        let intake = FrameIntake::new(
+            IntakePlan {
+                dimensions: shape.dimensions,
+                frame_count: total,
+                decode_slots: slots,
+                stage: StackingStage::Preparing,
+            },
+            run,
+            &progress,
+        );
+        let mut detectors = DetectorPool::from_config(&config.detection, slots)
             .map_err(AlignStackError::DetectionConfig)?;
 
         if cancel.is_cancelled() {
@@ -316,9 +347,9 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
         }
         // The reference decodes alone, on every thread a decode may use.
         let image = self.prepare(self.paths[reference].as_ref(), &run.context)?;
-        let stats = admission.admit(reference, &image)?;
+        let stats = intake.admit(reference, &image)?;
         let result = detectors.first().detect(&image);
-        log_detection(prepared.complete_one(), total, &result);
+        log_detection(intake.complete_one(), total, &result);
         let required = config
             .registration
             .matching
@@ -342,35 +373,34 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             &progress,
             cancel,
         );
-        let mut buffers: Vec<Option<WarpBuffers>> = (0..workers.min(total)).map(|_| None).collect();
-        let context = run.context.for_decode_slots(workers.min(total));
+        let mut buffers: Vec<Option<WarpBuffers>> = (0..slots).map(|_| None).collect();
         let reference_frame = registrar.park(
             &mut buffers[0],
-            FrameToPark {
-                index: reference,
+            reference,
+            DetectedFrame {
                 image: PipelineFrame::Resident(image),
-                stars: &[],
+                stars: Vec::new(),
+                diagnostics: Diagnostics::default(),
                 stats,
             },
         )?;
 
-        let others = detectors.try_map_with(total, &mut buffers, |detector, buffers, index| {
+        let mut slot_pairs = detectors.paired_with(&mut buffers);
+        let others = intake.map(0..total, &mut slot_pairs, |(detector, buffers), index| {
             if index == reference {
-                return Ok(PassedLight::default());
+                return Ok::<_, AlignStackError>(PassedLight::default());
             }
-            if cancel.is_cancelled() {
-                return Err(AlignStackError::Cancelled);
-            }
-            let image = self.prepare(self.paths[index].as_ref(), &context)?;
-            let stats = admission.admit(index, &image)?;
+            let image = self.prepare(self.paths[index].as_ref(), intake.context())?;
+            let stats = intake.admit(index, &image)?;
             let result = detector.detect(&image);
-            log_detection(prepared.complete_one(), total, &result);
+            log_detection(intake.complete_one(), total, &result);
             let frame = registrar.park(
                 buffers,
-                FrameToPark {
-                    index,
+                index,
+                DetectedFrame {
                     image: PipelineFrame::Resident(image),
-                    stars: &result.stars,
+                    stars: result.stars,
+                    diagnostics: Diagnostics::default(),
                     stats,
                 },
             )?;
@@ -379,6 +409,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
                 diagnostics: result.diagnostics,
             })
         })?;
+        drop(slot_pairs);
         drop(registrar);
         // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
         // against the memory without them.

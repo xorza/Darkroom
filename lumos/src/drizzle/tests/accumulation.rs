@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use common::TempDir;
 
 use super::*;
+use crate::ingest::error::AdmissionError;
 use crate::registration::distortion::sip::SipPolynomial;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
@@ -153,6 +154,44 @@ fn drizzle_images_empty() {
         CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+}
+
+/// Every frame is admitted as the combine admits it, before its drops spread: a NaN at pixel 6 of
+/// frame 1 would turn every output pixel its drop reaches into NaN, and is named instead.
+#[test]
+fn drizzle_admits_each_frame_before_it_deposits() {
+    let mut pixels = vec![1.0; 16];
+    pixels[6] = f32::NAN;
+    let frames = vec![
+        DrizzleFrame::new(
+            constant_image(Size2us::new(4, 4), 1.0),
+            WarpTransform::new(Transform::identity()),
+        ),
+        DrizzleFrame::new(
+            gray_image(Size2us::new(4, 4), pixels),
+            WarpTransform::new(Transform::identity()),
+        ),
+    ];
+    let error = drizzle_images(
+        frames,
+        &DrizzleConfig::default(),
+        &plain_stack(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            DrizzleError::Admission(AdmissionError::NonFiniteImageSample {
+                index: 1,
+                channel: 0,
+                pixel: 6,
+                value,
+            }) if value.is_nan()
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -338,7 +377,10 @@ fn drizzle_images_dimension_mismatch() {
     );
     assert!(matches!(
         result.unwrap_err(),
-        DrizzleError::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
+        DrizzleError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
+            index: 1,
+            ..
+        }))
     ));
 }
 
@@ -756,22 +798,6 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         }
     ));
 
-    let mut pixels = vec![1.0; 16];
-    pixels[6] = f32::NAN;
-    let frame = DrizzleFrame::new(
-        gray_image(Size2us::new(4, 4), pixels),
-        WarpTransform::new(Transform::identity()),
-    );
-    let error = acc.add_frame(&frame).unwrap_err();
-    assert!(matches!(
-        error,
-        DrizzleError::NonFiniteSample {
-            index: 0,
-            channel: 0,
-            pixel: 6,
-            value,
-        } if value.is_nan()
-    ));
     // Every refusal left the accumulator as it was.
     assert!(acc.accumulated_weights().pixels().iter().all(|&w| w == 0.0));
 
