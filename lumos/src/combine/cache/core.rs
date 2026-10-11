@@ -18,7 +18,7 @@ use crate::frame_store::tier::Tier;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows};
+use crate::memory::stage::{Stage, Width};
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 
@@ -57,31 +57,36 @@ pub(super) struct ChunkContext<'a> {
 }
 
 impl CacheCore {
-    /// The rows a pass holding `memory` reads at once: the whole image for a resident stack, and
-    /// the rows the chunk budget leaves room for on the disk tier, where two chunks are held at
-    /// once — the one reduced and the next one read. A pass the floor puts past the budget says
-    /// so in the log.
-    pub(super) fn chunk_rows(&self, memory: ChunkMemoryLayout) -> ChunkRows {
-        let Some(chunk_memory) = self.tier.chunk_memory() else {
-            return ChunkRows {
-                rows: self.dimensions.height(),
+    /// The rows the combine `stage` reads at once, and what the run holds past the budget: the
+    /// whole image for a resident stack, which reads its frames where they lie; on the disk tier
+    /// the rows the budget leaves room for beside what the run holds beside the combine, two chunks
+    /// held at once — the one reduced and the next one read. The overcommit is the larger of the
+    /// combine's own and the earlier stages'. A pass the floor puts past the budget says so in the
+    /// log.
+    pub(super) fn chunk_rows(&self, stage: Stage) -> Width {
+        let Some(combine) = self.tier.combine_budget() else {
+            return Width {
+                units: self.dimensions.height(),
                 overcommit_bytes: 0,
             };
         };
-        let held = ChunkMemoryLayout {
-            input_bytes: 2 * memory.input_bytes,
-            beside_bytes: self.tier.beside_bytes(),
-            ..memory
+        let double_buffered = Stage {
+            held: stage.held + combine.beside_bytes,
+            in_flight: 2 * stage.in_flight,
+            ..stage
         };
-        let chunking = held.chunk_rows(self.dimensions.size(), chunk_memory);
-        if chunking.overcommit_bytes > 0 {
+        let width = double_buffered.width(combine.budget, 1, 0, true);
+        if width.overcommit_bytes > 0 {
             tracing::warn!(
-                rows = chunking.rows,
-                overcommit_bytes = chunking.overcommit_bytes,
+                rows = width.units,
+                overcommit_bytes = width.overcommit_bytes,
                 "the smallest combine chunk does not fit the memory budget"
             );
         }
-        chunking
+        Width {
+            overcommit_bytes: width.overcommit_bytes.max(combine.prior_overcommit),
+            ..width
+        }
     }
 
     /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),

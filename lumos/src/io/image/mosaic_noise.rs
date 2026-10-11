@@ -36,9 +36,9 @@ impl MosaicNoise {
     /// The most bytes [`Self::measure`] holds over a mosaic of `size` and the three-colour
     /// `cfa_type`: the larger of the pairs its noise is measured over and the samples its medians
     /// are, which it holds one after the other.
-    pub(crate) fn peak_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
+    pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
         let medians: usize = sample_counts(size, cfa_type, &|_| false).iter().sum();
-        DifferenceNoise::peak_bytes(size, cfa_type).max(medians * size_of::<f32>())
+        DifferenceNoise::heap_bytes(size, cfa_type).max(medians * size_of::<f32>())
     }
 
     /// Measured on `mosaic`, a row-major `size` image of a three-colour `cfa_type`, over the

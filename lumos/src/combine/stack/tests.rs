@@ -2,6 +2,7 @@ use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Combine, Normalization, SmallN};
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::frame_facts::FrameFacts;
+use crate::frame_store::tier::CombineBudget;
 use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
@@ -224,9 +225,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     stored,
                     Tier::Spilled {
                         scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
-                        chunk_memory: RunMemory::new(memory, None).planning(),
-                        overcommit_bytes: 0,
-                        beside_bytes: 0,
+                        combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
                     },
                     dims,
                     metadata,

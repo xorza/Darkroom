@@ -8,28 +8,6 @@ pub(crate) mod bayer;
 pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
-/// What one decode costs: the bytes it leaves, and its peak on the way there, the output included.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DemosaicMemory {
-    pub(crate) output_bytes: usize,
-    pub(crate) peak_bytes: usize,
-}
-
-impl DemosaicMemory {
-    /// This decode inside a pass that at some point holds `bytes`: its peak raised to at least
-    /// that.
-    pub(crate) const fn with_peak_at_least(self, bytes: usize) -> Self {
-        Self {
-            output_bytes: self.output_bytes,
-            peak_bytes: if bytes > self.peak_bytes {
-                bytes
-            } else {
-                self.peak_bytes
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod memory_tests {
     use crate::internals::cfa::XTRANS_PATTERN;
@@ -38,33 +16,38 @@ mod memory_tests {
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::raw::demosaic::bayer::rcd;
     use crate::io::raw::demosaic::xtrans::markesteijn;
+    use crate::memory::footprint::Footprint;
 
     /// Mono holds its one plane. Both demosaics hold the input, the three output planes and the
-    /// pool's tile buffers, whatever the frame's size.
+    /// tile buffers of each of the run's workers, whatever the frame's size: four workers' here.
     #[test]
-    fn demosaic_memory_counts_each_plane_the_kernel_holds() {
+    fn demosaic_footprint_counts_each_plane_the_kernel_holds() {
         let even = ImageDimensions::new((10, 8), 1);
         let odd = ImageDimensions::new((5, 3), 1);
 
-        let mono = CfaType::Mono.demosaic_memory(even);
-        assert_eq!(mono.output_bytes, 80 * 4);
-        assert_eq!(mono.peak_bytes, 80 * 4);
+        let mono = CfaType::Mono.demosaic_footprint(even, 4);
+        assert_eq!(mono, Footprint::kept(80 * 4));
 
         for (cfa_type, workspace) in [
             (
                 CfaType::Bayer(CfaPattern::Rggb),
-                rcd::internals::workspace_bytes(),
+                rcd::internals::workspace_bytes(4),
             ),
             (
                 CfaType::XTrans(XTRANS_PATTERN),
-                markesteijn::internals::workspace_bytes(),
+                markesteijn::internals::workspace_bytes(4),
             ),
         ] {
             for dimensions in [even, odd] {
                 let plane = dimensions.pixel_count() * 4;
-                let memory = cfa_type.demosaic_memory(dimensions);
-                assert_eq!(memory.output_bytes, 3 * plane, "{cfa_type:?}");
-                assert_eq!(memory.peak_bytes, 4 * plane + workspace, "{cfa_type:?}");
+                assert_eq!(
+                    cfa_type.demosaic_footprint(dimensions, 4),
+                    Footprint {
+                        kept: 3 * plane,
+                        peak: 4 * plane + workspace,
+                    },
+                    "{cfa_type:?}"
+                );
             }
         }
     }

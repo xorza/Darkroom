@@ -83,7 +83,7 @@ impl<T> BinnedSamples<T> {
     }
 
     /// The bytes `count` samples hold here: each sample and its bin.
-    pub(crate) const fn bytes(count: usize) -> usize {
+    pub(crate) const fn heap_bytes(count: usize) -> usize {
         count * (size_of::<T>() + size_of::<u8>())
     }
 

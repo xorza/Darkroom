@@ -30,13 +30,13 @@ use common::CancelToken;
 use serde::{Deserialize, Serialize};
 
 use crate::io::cancelled::Cancelled;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::tiled;
 use crate::io::raw::demosaic::tiled::Tiling;
 use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::io::raw::demosaic::xtrans::markesteijn::tile::Tile;
 use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::math::size2us::Size2us;
+use crate::memory::footprint::Footprint;
 
 /// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
 /// per core) a 26 MP frame demosaics in 245 ms at one pass and 703 ms at three with tiles of 96,
@@ -93,10 +93,10 @@ impl MarkesteijnPasses {
     }
 }
 
-/// The memory a demosaic of a frame of `size` holds — see [`tiled::demosaic_memory`] — charged at
-/// eight directions, the most.
-pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
-    tiled::demosaic_memory(size, Tile::bytes(8))
+/// What a demosaic of a frame of `size` holds on `workers` — see [`tiled::footprint`] — charged
+/// at eight directions, the most.
+pub(crate) const fn footprint(size: Size2us, workers: usize) -> Footprint {
+    tiled::footprint(size, Tile::bytes(8), workers)
 }
 
 /// Demosaic an X-Trans frame with `passes` passes, its colours balanced by its gains.
@@ -139,10 +139,10 @@ pub(crate) mod internals {
         }
     }
 
-    /// The tile buffers of every worker of the pool — see [`tiled::workspace_bytes`] — charged at
-    /// eight directions, the most.
-    pub(crate) fn workspace_bytes() -> usize {
-        tiled::workspace_bytes(Tile::bytes(8))
+    /// The tile buffers of `workers` — see [`tiled::workspace_bytes`] — charged at eight
+    /// directions, the most.
+    pub(crate) fn workspace_bytes(workers: usize) -> usize {
+        tiled::workspace_bytes(Tile::bytes(8), workers)
     }
 }
 

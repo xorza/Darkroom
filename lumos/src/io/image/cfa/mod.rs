@@ -37,7 +37,6 @@ use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::io::raw;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::xtrans::markesteijn;
@@ -45,6 +44,7 @@ use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::memory::footprint::Footprint;
 
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;
@@ -144,18 +144,18 @@ impl CfaType {
         })
     }
 
-    /// The memory a demosaic of a `dimensions` frame of this pattern holds at once.
-    pub(crate) fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
+    /// What a demosaic of a `dimensions` frame of this pattern holds on `workers`.
+    pub(crate) const fn demosaic_footprint(
+        self,
+        dimensions: ImageDimensions,
+        workers: usize,
+    ) -> Footprint {
         match self {
             Self::Mono => {
-                let bytes = dimensions.pixel_count().saturating_mul(size_of::<f32>());
-                DemosaicMemory {
-                    output_bytes: bytes,
-                    peak_bytes: bytes,
-                }
+                Footprint::kept(dimensions.pixel_count().saturating_mul(size_of::<f32>()))
             }
-            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size()),
-            Self::XTrans(_) => markesteijn::demosaic_memory(dimensions.size()),
+            Self::Bayer(_) => rcd::footprint(dimensions.size(), workers),
+            Self::XTrans(_) => markesteijn::footprint(dimensions.size(), workers),
         }
     }
 

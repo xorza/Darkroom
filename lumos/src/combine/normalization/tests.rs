@@ -1381,7 +1381,7 @@ fn the_working_set_is_what_the_measurement_holds() {
     let dimensions = ImageDimensions::new((100, 100), 1);
     let mono = Slots::new(None, 1);
     let bytes = |slots, normalization, coverage, threads| {
-        FrameNorm::working_bytes(3, dimensions, slots, normalization, coverage, threads)
+        FrameNorm::heap_bytes(3, dimensions, slots, normalization, coverage, threads)
     };
     for (normalization, coverage, threads, expected) in [
         (Normalization::Global, SetCoverage::Common, 2, 805_552),

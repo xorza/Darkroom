@@ -96,7 +96,7 @@ pub(crate) fn register_warp_and_stack(
 ) -> Result<AlignStackResult, AlignStackError> {
     let StagePlan {
         parking,
-        warp_concurrency,
+        warp_width,
     } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
@@ -140,7 +140,7 @@ pub(crate) fn register_warp_and_stack(
         &cancel,
     );
     // One reusable set of warp output planes per in-flight worker.
-    let mut warp_buffers: Vec<Option<WarpBuffers>> = (0..warp_concurrency).map(|_| None).collect();
+    let mut warp_buffers: Vec<Option<WarpBuffers>> = (0..warp_width).map(|_| None).collect();
     // Taking each detected record by value frees its input image as soon as the warped output
     // exists, so this stage never holds the complete input and warped sets simultaneously.
     let outcomes = concurrency::try_par_map_bounded_owned(

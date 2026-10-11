@@ -248,7 +248,7 @@ pub(crate) fn fits_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,
-        decoder_bytes: usize::try_from(selected.plan.beside_frame_bytes())
+        decoder_bytes: usize::try_from(selected.beside_frame_bytes())
             .expect("a decode the plan admitted fits the address space"),
     })
 }
@@ -277,7 +277,7 @@ pub(crate) fn fits_linear_peek(
     }
     Ok(FramePeek {
         dimensions,
-        decoder_bytes: usize::try_from(selected.plan.beside_frame_bytes())
+        decoder_bytes: usize::try_from(selected.beside_frame_bytes())
             .expect("a decode the plan admitted fits the address space"),
         mosaic: None,
     })

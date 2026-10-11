@@ -150,20 +150,20 @@ fn working_sets_are_what_the_buffers_hold() {
 
     let wide = Size2us::new(1024, 1024);
     assert_eq!(
-        MrsNoise::peak_bytes(wide, 16),
+        MrsNoise::heap_bytes(wide, 16),
         34_603_008 + 47_316_992 + 1408
     );
     assert_eq!(
-        MrsNoise::peak_bytes(wide, 4),
+        MrsNoise::heap_bytes(wide, 4),
         34_603_008 + 13_107_200 + 1408
     );
     assert_eq!(
-        MrsNoise::peak_bytes(Size2us::new(192, 192), 16),
+        MrsNoise::heap_bytes(Size2us::new(192, 192), 16),
         36_864 * 33 + 36_864 * 32 + 88
     );
 
     let rggb = CfaType::Bayer(CfaPattern::Rggb);
-    assert_eq!(DifferenceNoise::peak_bytes(Size2us::new(8, 4), &rggb), 120);
-    assert_eq!(MosaicNoise::peak_bytes(Size2us::new(8, 4), &rggb), 128);
-    assert_eq!(MosaicNoise::peak_bytes(Size2us::new(16, 4), &rggb), 280);
+    assert_eq!(DifferenceNoise::heap_bytes(Size2us::new(8, 4), &rggb), 120);
+    assert_eq!(MosaicNoise::heap_bytes(Size2us::new(8, 4), &rggb), 128);
+    assert_eq!(MosaicNoise::heap_bytes(Size2us::new(16, 4), &rggb), 280);
 }

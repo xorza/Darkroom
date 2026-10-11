@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
+use arrayvec::ArrayVec;
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::ImageData;
@@ -41,6 +42,9 @@ pub(super) struct SelectedFits {
     flags_hdu: Option<usize>,
     /// The HDU of the image's flat gain extension, when a flat divided it.
     gain_hdu: Option<usize>,
+    /// The bytes of each extension the decode reads after the image, in the order it reads them:
+    /// the flags, a byte a pixel, then the gain grid.
+    extension_bytes: ArrayVec<u64, 2>,
 }
 
 impl SelectedFits {
@@ -70,6 +74,17 @@ impl SelectedFits {
         }
         let gain_hdu =
             GainExtension::locate(path, reader.hdus(), selected.index, plan.dimensions.size())?;
+        let mut extension_bytes = ArrayVec::new();
+        if flags_hdu.is_some() {
+            extension_bytes.push(plan.dimensions.pixel_count() as u64);
+        }
+        if let Some(gain_hdu) = gain_hdu {
+            let image = reader.hdus()[gain_hdu]
+                .image()
+                .map_err(|source| ImageError::fits(path, source))?;
+            extension_bytes
+                .push((image.shape.iter().product::<usize>() * image.bitpix.elem_size()) as u64);
+        }
         Ok(Self {
             reader,
             selected,
@@ -77,7 +92,14 @@ impl SelectedFits {
             lumos_cfa,
             flags_hdu,
             gain_hdu,
+            extension_bytes,
         })
+    }
+
+    /// What the decode holds beside the frame it makes — see
+    /// [`FitsDecodePlan::beside_frame_bytes`] — over this file's extensions.
+    pub(super) fn beside_frame_bytes(&self) -> u64 {
+        self.plan.beside_frame_bytes(&self.extension_bytes)
     }
 
     /// The selected HDU's header.

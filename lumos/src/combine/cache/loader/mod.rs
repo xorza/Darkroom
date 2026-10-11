@@ -22,7 +22,7 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
-use crate::memory::memory_plan::MemoryPlan;
+use crate::memory::run_plan::RunPlan;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 
@@ -32,6 +32,9 @@ pub(super) struct LoadedCache {
     pub(super) frames: Vec<StoredFrame>,
     pub(super) core: CacheCore,
 }
+
+/// The stage of [`FramePeek::stages`] that decodes the frames.
+const DECODE: usize = 0;
 
 /// Load every frame into the tier its set fits, each through `step` when given.
 ///
@@ -68,19 +71,17 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
     // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
     // for.
-    let threads = rayon::current_num_threads();
-    let shape = peek.run_shape(
+    let budget = run.budget;
+    let plan = RunPlan::of(
         paths.len(),
-        config.quality.resident_bytes(dimensions),
-        config.normalization,
-        threads,
+        &peek.stages(paths.len(), config, budget.workers()),
+        budget,
     );
-    let plan = MemoryPlan::plan(shape, threads, run.memory.planning());
     tracing::info!(
         frame_count = paths.len(),
         sample_count = dimensions.sample_count(),
-        planning_mb = run.memory.planning() / (1024 * 1024),
-        use_in_memory = plan.fits_in_ram,
+        budget_mb = budget.usable() / (1024 * 1024),
+        resident = plan.resident,
         "Image cache storage decision"
     );
 
@@ -92,12 +93,12 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         .transpose()?;
     let tier = Tier::for_plan(
         &plan,
+        budget,
         if kept.is_some() {
             0
         } else {
-            shape.spill_bytes()
+            (peek.resident_bytes() as u64).saturating_mul(paths.len() as u64)
         },
-        run.memory,
         &run.cache_dir,
     )?;
     if let Some(kept) = &kept {
@@ -108,7 +109,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         IntakePlan {
             dimensions,
             frame_count: paths.len(),
-            decode_slots: plan.decode_concurrency,
+            decode_slots: plan.width(DECODE),
             stage: StackingStage::Loading,
         },
         &run,
@@ -126,7 +127,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // the plan is taken in first; every other frame in parallel.
     let first = early.map(|early| load.frame(0, Some(early))).transpose()?;
     let start = usize::from(first.is_some());
-    let mut slots = vec![(); plan.decode_concurrency];
+    let mut slots = vec![(); plan.width(DECODE)];
     let rest = intake.map(start..paths.len(), &mut slots, |(), index| {
         load.frame(index, None)
     })?;

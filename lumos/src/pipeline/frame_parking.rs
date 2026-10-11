@@ -10,46 +10,47 @@ use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::memory::memory_plan::MemoryPlan;
+use crate::memory::run_plan::RunPlan;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;
 
-/// The memory decisions the register-warp stage reads, both taken from one [`MemoryPlan`]: where a
+/// The memory decisions the register-warp stage reads, both taken from one [`RunPlan`]: where a
 /// frame parks, and how many frames are warped at once.
 #[derive(Debug)]
 pub(crate) struct StagePlan {
     pub(crate) parking: FrameParking,
-    pub(crate) warp_concurrency: usize,
+    pub(crate) warp_width: usize,
 }
 
 impl StagePlan {
-    /// The stage of a run `plan` decided, whose spill writes `spill_bytes` when it spills.
+    /// Where `plan` parks the lights, and the width of its stage `warp`, which warps them; a spill
+    /// checked for room for the `spill_bytes` the run will write.
     pub(crate) fn new(
-        plan: &MemoryPlan,
+        plan: &RunPlan,
+        warp: usize,
         spill_bytes: u64,
         run: &IngestRun,
     ) -> Result<Self, AlignStackError> {
         Ok(Self {
             parking: FrameParking::new(Tier::for_plan(
                 plan,
+                run.budget,
                 spill_bytes,
-                run.memory,
                 &run.cache_dir,
             )?),
-            warp_concurrency: plan.warp_concurrency,
+            warp_width: plan.width(warp),
         })
     }
 }
 
-/// A frame in the store, plus the buffers the tier released — `None` when it kept them.
 #[derive(Debug)]
 pub(crate) struct StoredWarp {
     pub(crate) frame: StoredFrame,
     pub(crate) reusable: Option<WarpBuffers>,
 }
 
-/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the [`MemoryPlan`] and
+/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the [`RunPlan`] and
 /// threaded through the pipeline body, which is otherwise identical either way, and how many
 /// calibrated lights it parked on disk before their registration, for the run's report.
 #[derive(Debug)]
@@ -177,6 +178,8 @@ impl FrameParking {
 
 #[cfg(test)]
 mod tests {
+    use crate::frame_store::tier::CombineBudget;
+    use crate::memory::run_memory::RunMemory;
     use common::TempDir;
 
     use crate::combine::cache::frame_gate::FrameGate;
@@ -198,9 +201,7 @@ mod tests {
         let spill = || {
             FrameParking::new(Tier::Spilled {
                 scratch: RunScratch::create(directory.path()).unwrap(),
-                chunk_memory: 1 << 20,
-                overcommit_bytes: 0,
-                beside_bytes: 0,
+                combine: CombineBudget::new(RunMemory::new(1 << 20, None).budget(1)),
             })
         };
         let dims = ImageDimensions::new((4, 1), 1);

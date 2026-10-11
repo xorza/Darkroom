@@ -42,8 +42,8 @@ impl CommonDomain {
     }
 
     /// The bytes a domain over `pixel_count` pixels holds: its mask.
-    pub(crate) fn mask_bytes(pixel_count: usize) -> usize {
-        BitBuffer2::storage_bytes(Size2us::new(pixel_count, 1))
+    pub(crate) fn heap_bytes(pixel_count: usize) -> usize {
+        BitBuffer2::heap_bytes(Size2us::new(pixel_count, 1))
     }
 
     /// Intersect every frame's coverage of `channel` into the pixels all of them contribute at.
@@ -183,7 +183,7 @@ fn intersect_span(words: &mut [u64], pixels: usize, is_valid: impl Fn(usize) -> 
 mod tests {
     use crate::combine::normalization::common_domain::CommonDomain;
 
-    /// The common-domain mask is one bit per pixel, not one byte, and [`CommonDomain::mask_bytes`]
+    /// The common-domain mask is one bit per pixel, not one byte, and [`CommonDomain::heap_bytes`]
     /// is what it holds.
     ///
     /// Nothing else would notice a revert to `Vec<bool>` at the sizes the tests run: the combine
@@ -195,7 +195,7 @@ mod tests {
             let mask = CommonDomain::full_mask(pixels);
             let packed = mask.words.len() * size_of::<u64>();
             let unpacked = pixels * size_of::<bool>();
-            assert_eq!(CommonDomain::mask_bytes(pixels), packed, "{pixels} px");
+            assert_eq!(CommonDomain::heap_bytes(pixels), packed, "{pixels} px");
 
             // Rows pad to 128 bits, so a single-row mask carries at most 15 bytes of slack.
             assert!(

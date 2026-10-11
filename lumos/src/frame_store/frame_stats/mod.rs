@@ -71,16 +71,16 @@ impl FrameStats {
     /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
     /// workers: its noise first — a mosaic's by [`MosaicNoise`], any other frame's by [`MrsNoise`]
     /// one channel at a time — then the samples its levels sort, every slot's at once.
-    pub(crate) fn scratch_bytes(
+    pub(crate) fn heap_bytes(
         dimensions: ImageDimensions,
         mosaic: Option<&CfaType>,
         threads: usize,
     ) -> usize {
         let size = dimensions.size();
         match mosaic {
-            Some(cfa_type) => MosaicNoise::peak_bytes(size, cfa_type)
+            Some(cfa_type) => MosaicNoise::heap_bytes(size, cfa_type)
                 .max(dimensions.pixel_count() * size_of::<f32>()),
-            None => MrsNoise::peak_bytes(size, threads).max(dimensions.frame_bytes()),
+            None => MrsNoise::heap_bytes(size, threads).max(dimensions.frame_bytes()),
         }
     }
 

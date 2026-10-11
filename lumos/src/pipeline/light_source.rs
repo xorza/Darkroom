@@ -12,8 +12,10 @@ use crate::combine::cache::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SetCoverage};
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::KeptDecodeError;
+use crate::frame_store::frame_peek::FramePeek;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stored_layout::StoredLayout;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -23,9 +25,10 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::mosaic_noise::MosaicNoise;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::DETECTION_WORKING_PLANES;
-use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
+use crate::memory::footprint::Footprint;
+use crate::memory::run_plan::RunPlan;
+use crate::memory::stage::{Stage, Units};
 use crate::pipeline::align::register_warp_and_stack;
 use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::{AlignStackConfig, Reference};
@@ -84,11 +87,13 @@ pub(crate) struct DetectedLights {
     pub(crate) stage: StagePlan,
 }
 
-/// What a run of lights costs: each one's demosaiced dimensions, and the shape the plan reads.
+/// What a run of lights holds: each one's demosaiced dimensions, its way from its file or the
+/// caller to detected, and what the caller held of it before the run read the machine.
 #[derive(Debug)]
 struct LightShape {
     dimensions: ImageDimensions,
-    run: RunShape,
+    prepared: Footprint,
+    held: usize,
 }
 
 /// A light's samples and what its detection found, before the light is held where its tier says.
@@ -164,19 +169,23 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     ) -> Result<DetectedLights, AlignStackError> {
         let total = self.len();
         debug_assert!(total > 0, "each entry refuses an empty set");
-        let threads = rayon::current_num_threads();
-        let shape = self.shape(config, run, threads)?;
-        let plan = MemoryPlan::plan(shape.run, threads, run.memory.planning());
-        let stage = StagePlan::new(&plan, shape.run.spill_bytes(), run)?;
+        let budget = run.budget;
+        let shape = self.shape(run)?;
+        let plan = RunPlan::of(
+            total,
+            &shape.found_reference(total, config, budget.workers()),
+            budget,
+        );
+        let stage = StagePlan::new(&plan, LightShape::WARP, shape.spill_bytes(total), run)?;
         tracing::info!(
             frames = total,
-            planning_mb = run.memory.planning() / (1024 * 1024),
-            concurrency = plan.decode_concurrency,
+            budget_mb = budget.usable() / (1024 * 1024),
+            concurrency = plan.width(LightShape::PREPARE),
             spilling = stage.parking.spills(),
             "Preparing lights and detecting stars"
         );
 
-        let slots = plan.decode_concurrency.min(total);
+        let slots = plan.width(LightShape::PREPARE);
         let intake = FrameIntake::new(
             IntakePlan {
                 dimensions: shape.dimensions,
@@ -218,83 +227,143 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         Ok(DetectedLights { frames, stage })
     }
 
-    /// The run's shape with `threads` workers, from the first held frame or the first file's
-    /// header: no light is decoded before the tier is chosen.
-    fn shape(
-        &self,
-        config: &AlignStackConfig,
-        run: &IngestRun,
-        threads: usize,
-    ) -> Result<LightShape, AlignStackError> {
+    /// The run's shape, from the first held frame or the first file's header: no light is decoded
+    /// before the tier is chosen.
+    fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
         match self {
             // They were in memory before the run read the machine: the plan charges them as held.
             Self::Held(frames) => Ok(LightShape::linear(
-                frames[0].dimensions(),
-                frames.len(),
+                FramePeek::of_decoded(&frames[0]),
                 true,
-                config,
-                threads,
+                run.budget.workers(),
             )),
-            Self::Files(files) => files.shape(config, run, threads),
+            Self::Files(files) => files.shape(run),
         }
     }
 }
 
 impl LightShape {
-    /// What normalizing `frame_count` registered lights of `dimensions` holds: each warped frame
-    /// covers only the pixels its warp reached.
-    fn normalization_bytes(
-        config: &AlignStackConfig,
-        dimensions: ImageDimensions,
-        frame_count: usize,
-        threads: usize,
-    ) -> usize {
-        FrameNorm::working_bytes(
-            frame_count,
-            dimensions,
-            Slots::new(None, dimensions.channels()),
-            config.stack.normalization,
-            SetCoverage::Common,
-            threads,
-        )
+    /// The stage of [`Self::found_reference`] that prepares the lights.
+    const PREPARE: usize = 0;
+    /// The stage of [`Self::found_reference`] that warps the lights.
+    const WARP: usize = 1;
+    /// The stage of [`Self::named_reference`] that takes each light through all of it.
+    const PASS: usize = 0;
+
+    /// Linear lights as `peek` reads them on `workers`, `held` by the caller or decoded one at a
+    /// time: a light's way is its decode and its statistics.
+    fn linear(peek: FramePeek, held: bool, workers: usize) -> Self {
+        let prepared = peek.footprint(workers);
+        Self {
+            dimensions: peek.dimensions,
+            prepared,
+            held: if held { prepared.kept } else { 0 },
+        }
     }
 
-    /// The shape of `frame_count` linear lights of `dimensions`, `held` by the caller or decoded
-    /// one at a time, with `threads` workers: what one's pass adds is what its statistics and its
-    /// detection's noise estimate hold.
-    fn linear(
-        dimensions: ImageDimensions,
+    /// The bytes a warped light keeps: its channels, its two quality planes, its flags and its
+    /// gain grid.
+    const fn warped(&self) -> usize {
+        StoredLayout::warped(self.dimensions).heap_bytes(self.dimensions)
+    }
+
+    /// The most `frame_count` lights write to a spill: each as it is warped, which is no smaller
+    /// than as it was parked.
+    const fn spill_bytes(&self, frame_count: usize) -> u64 {
+        (self.warped() as u64).saturating_mul(frame_count as u64)
+    }
+
+    /// What each worker's detector holds throughout: its pool of image-sized planes.
+    const fn detector_bytes(&self) -> usize {
+        DETECTION_WORKING_PLANES * self.dimensions.pixel_count() * size_of::<f32>()
+    }
+
+    /// The stages of `frame_count` lights with the reference found, under `config` on `workers`:
+    /// each light prepared and detected; then warped, the light it warps from in hand; the
+    /// normalization; the combine.
+    fn found_reference(
+        &self,
         frame_count: usize,
-        held: bool,
         config: &AlignStackConfig,
-        threads: usize,
-    ) -> Self {
-        let frame_bytes = dimensions.frame_bytes();
-        let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
-        Self {
-            dimensions,
-            run: RunShape {
-                frame_count,
-                decode: DemosaicMemory {
-                    output_bytes: frame_bytes,
-                    peak_bytes: frame_bytes + FrameStats::scratch_bytes(dimensions, None, threads),
-                },
-                held_bytes: if held { frame_bytes } else { 0 },
-                detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                warp: Some(PerFrameBytes::new(
-                    plane_bytes,
-                    frame_bytes,
-                    dimensions.flat_gain_bytes(),
-                )),
-                output_bytes: config.stack.quality.resident_bytes(dimensions),
-                normalization_bytes: Self::normalization_bytes(
-                    config,
-                    dimensions,
-                    frame_count,
-                    threads,
-                ),
+        workers: usize,
+    ) -> [Stage; 4] {
+        let warped = self.warped() - self.held;
+        let [normalize, combine] = self.combined(warped, frame_count, config, workers);
+        [
+            Stage {
+                kept: self.prepared.kept - self.held,
+                held: 0,
+                in_flight: self.prepared.transient() + self.detector_bytes(),
+                units: Units::Frames,
             },
-        }
+            Stage {
+                kept: warped,
+                held: 0,
+                in_flight: self.prepared.kept,
+                units: Units::Frames,
+            },
+            normalize,
+            combine,
+        ]
+    }
+
+    /// The stages of `frame_count` lights with the reference named, under `config` on `workers`:
+    /// each light taken through its preparation, its detection and its warp by one worker, which
+    /// keeps only the warped light; the normalization; the combine.
+    fn named_reference(
+        &self,
+        frame_count: usize,
+        config: &AlignStackConfig,
+        workers: usize,
+    ) -> [Stage; 3] {
+        debug_assert_eq!(self.held, 0, "a single pass decodes its own lights");
+        let warped = self.warped();
+        let [normalize, combine] = self.combined(warped, frame_count, config, workers);
+        [
+            Stage {
+                kept: warped,
+                held: 0,
+                in_flight: self.prepared.peak + self.detector_bytes(),
+                units: Units::Frames,
+            },
+            normalize,
+            combine,
+        ]
+    }
+
+    /// The normalization and the combine of `frame_count` warped lights, each kept at `kept`: every
+    /// warped light covers only the pixels its warp reached.
+    fn combined(
+        &self,
+        kept: usize,
+        frame_count: usize,
+        config: &AlignStackConfig,
+        workers: usize,
+    ) -> [Stage; 2] {
+        let dimensions = self.dimensions;
+        [
+            Stage {
+                kept,
+                held: FrameNorm::heap_bytes(
+                    frame_count,
+                    dimensions,
+                    Slots::new(None, dimensions.channels()),
+                    config.stack.normalization,
+                    SetCoverage::Common,
+                    workers,
+                ),
+                in_flight: 0,
+                units: Units::Whole,
+            },
+            Stage {
+                kept,
+                held: config.stack.quality.heap_bytes(dimensions),
+                in_flight: frame_count
+                    * StoredLayout::warped(dimensions).pixel_bytes()
+                    * dimensions.width(),
+                units: Units::Rows(dimensions.height()),
+            },
+        ]
     }
 }
 
@@ -343,33 +412,20 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     /// The run's shape, from the first file's header — or, for a linear format with none to read,
     /// its decode — once the decode cache, when the run keeps one, is known to have room for the
     /// lights it does not hold yet.
-    fn shape(
-        &self,
-        config: &AlignStackConfig,
-        run: &IngestRun,
-        threads: usize,
-    ) -> Result<LightShape, AlignStackError> {
+    fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
         let first = self.paths[0].as_ref();
+        let workers = run.budget.workers();
         let cosmic_ray = match self.preparation {
             Preparation::Calibrate { cosmic_ray, .. } => cosmic_ray,
             Preparation::Linear => {
-                let dimensions = match LinearImage::peek(first, &run.context) {
-                    Some(peek) => peek.dimensions,
-                    None => self
-                        .decode::<LinearImage>(first, &run.context)?
-                        .dimensions(),
+                let peek = match LinearImage::peek(first, &run.context) {
+                    Some(peek) => peek,
+                    None => {
+                        FramePeek::of_decoded(&self.decode::<LinearImage>(first, &run.context)?)
+                    }
                 };
-                self.ensure_kept_space::<LinearImage>(
-                    dimensions.frame_bytes() + dimensions.pixel_count(),
-                    &run.context,
-                )?;
-                return Ok(LightShape::linear(
-                    dimensions,
-                    self.paths.len(),
-                    false,
-                    config,
-                    threads,
-                ));
+                self.ensure_kept_space::<LinearImage>(peek.resident_bytes(), &run.context)?;
+                return Ok(LightShape::linear(peek, false, workers));
             }
         };
         let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| {
@@ -378,64 +434,46 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 source: Box::new(source),
             }
         })?;
-        let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
-        // A kept mosaic is its plane and a flag byte a photosite.
-        self.ensure_kept_space::<CfaImage>(
-            plane_bytes + info.dimensions.pixel_count(),
-            &run.context,
-        )?;
-        let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
-        let dimensions = ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
-        // One frame's pass peaks at the largest of: the decoder's own bytes beside the mosaic it
-        // makes, the demosaic, the cosmic-ray pass over the mosaic, the noise the demosaic measures
-        // on the mosaic and its flags, and the statistics or the detection's noise estimate beside
-        // the demosaiced frame, which run one after the other.
+        let size = info.dimensions.size();
+        let mosaic = StoredLayout::decoded(info.dimensions).heap_bytes(info.dimensions);
+        self.ensure_kept_space::<CfaImage>(mosaic, &run.context)?;
         // Refused here, before any light is decoded, when the pass cannot run on this sensor.
         let cosmic_ray = match cosmic_ray {
-            Some(_) => {
-                plane_bytes
-                    + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size()).map_err(
-                        |source| AlignStackError::CosmicRay {
-                            path: first.to_path_buf(),
-                            source,
-                        },
-                    )?
-            }
+            Some(_) => cosmic_ray::heap_bytes(&info.cfa_type, size).map_err(|source| {
+                AlignStackError::CosmicRay {
+                    path: first.to_path_buf(),
+                    source,
+                }
+            })?,
             None => 0,
         };
+        let noise = if info.cfa_type.is_mosaic() {
+            MosaicNoise::heap_bytes(size, &info.cfa_type)
+        } else {
+            0
+        };
+        // The flags travel from the mosaic to the frame its demosaic makes.
+        let flags = info.dimensions.flag_plane_bytes();
+        let demosaic = info.cfa_type.demosaic_footprint(info.dimensions, workers);
+        let dimensions = ImageDimensions::new(size, info.cfa_type.num_colors());
+        // The decoder's bytes beside the mosaic it makes; the cosmic-ray pass over the mosaic; the
+        // noise the demosaic measures on it; the demosaic; the statistics, or the detection's
+        // noise estimate, beside the demosaiced frame.
+        let prepared = Footprint {
+            kept: mosaic,
+            peak: mosaic + info.decoder_bytes,
+        }
+        .beside(cosmic_ray)
+        .beside(noise)
+        .then(Footprint {
+            kept: demosaic.kept + flags,
+            peak: demosaic.peak + flags,
+        })
+        .beside(FrameStats::heap_bytes(dimensions, None, workers));
         Ok(LightShape {
             dimensions,
-            run: RunShape {
-                frame_count: self.paths.len(),
-                decode: demosaic
-                    .with_peak_at_least(plane_bytes.saturating_add(info.decoder_bytes))
-                    .with_peak_at_least(cosmic_ray)
-                    .with_peak_at_least(if info.cfa_type.is_mosaic() {
-                        plane_bytes
-                            + info.dimensions.flag_plane_bytes()
-                            + MosaicNoise::peak_bytes(info.dimensions.size(), &info.cfa_type)
-                    } else {
-                        0
-                    })
-                    .with_peak_at_least(
-                        demosaic.output_bytes
-                            + FrameStats::scratch_bytes(dimensions, None, threads),
-                    ),
-                held_bytes: 0,
-                detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                warp: Some(PerFrameBytes::new(
-                    plane_bytes,
-                    demosaic.output_bytes,
-                    dimensions.flat_gain_bytes(),
-                )),
-                output_bytes: config.stack.quality.resident_bytes(dimensions),
-                normalization_bytes: LightShape::normalization_bytes(
-                    config,
-                    dimensions,
-                    self.paths.len(),
-                    threads,
-                ),
-            },
+            prepared,
+            held: 0,
         })
     }
 
@@ -457,17 +495,21 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 count: total,
             });
         }
-        let threads = rayon::current_num_threads();
-        let shape = self.shape(config, run, threads)?;
-        let plan = MemoryPlan::single_pass(shape.run, threads, run.memory.planning());
+        let budget = run.budget;
+        let shape = self.shape(run)?;
+        let plan = RunPlan::of(
+            total,
+            &shape.named_reference(total, config, budget.workers()),
+            budget,
+        );
         let StagePlan {
             parking,
-            warp_concurrency: workers,
-        } = StagePlan::new(&plan, shape.run.spill_bytes(), run)?;
+            warp_width: workers,
+        } = StagePlan::new(&plan, LightShape::PASS, shape.spill_bytes(total), run)?;
         tracing::info!(
             frames = total,
             reference,
-            planning_mb = run.memory.planning() / (1024 * 1024),
+            budget_mb = budget.usable() / (1024 * 1024),
             concurrency = workers,
             spilling = parking.spills(),
             "Preparing, detecting and registering lights in one pass"
@@ -668,5 +710,82 @@ fn load_error(path: &Path, source: ImageError) -> AlignStackError {
             path: path.to_path_buf(),
             source: Box::new(source),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::combine::config::{Normalization, StackConfig};
+    use crate::frame_store::frame_peek::FramePeek;
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::memory::stage::{Stage, Units};
+    use crate::pipeline::config::AlignStackConfig;
+    use crate::pipeline::light_source::LightShape;
+    use crate::stack_product::quality_planes::QualityPlanes;
+
+    /// Three mono lights of 4 × 4 with no normalization and the image alone, on one worker.
+    ///
+    /// A light decodes to 16 pixels of 4 bytes and 16 flag bytes, 80 B, and its statistics are
+    /// MRS over one tile that is the frame: 16 coefficients of 33 bytes, 32 bytes of transform a
+    /// pixel and 88 of bookkeeping, 1128 B. Its detector holds 9 planes, 576 B. Warped it holds 3
+    /// planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a row reads 12 + 1 B a
+    /// pixel and 4 B of gain over 16 pixels, rounded up to 1: 14 B a pixel, 168 B for three over 4
+    /// pixels. The combine holds the image and its flag byte, 80 B.
+    ///
+    /// Found, a light in work holds its statistics and its detector, 1704 B, and a warp its 80 B
+    /// source. Named, a worker holds the light at its peak, 1208 B, and the detector. Held by the
+    /// caller, a light keeps nothing until it is warped, then 224 − 80 = 144 B.
+    #[test]
+    fn a_light_is_kept_as_each_stage_leaves_it() {
+        let peek = FramePeek {
+            dimensions: ImageDimensions::new((4, 4), 1),
+            decoder_bytes: 0,
+            mosaic: None,
+        };
+        let config = AlignStackConfig {
+            stack: StackConfig {
+                normalization: Normalization::None,
+                quality: QualityPlanes::IMAGE_ONLY,
+                ..StackConfig::light()
+            },
+            ..AlignStackConfig::default()
+        };
+        let stage = |kept, held, in_flight, units| Stage {
+            kept,
+            held,
+            in_flight,
+            units,
+        };
+        let tail = |kept| {
+            [
+                stage(kept, 0, 0, Units::Whole),
+                stage(kept, 80, 168, Units::Rows(4)),
+            ]
+        };
+        let decoded = LightShape::linear(peek, false, 1);
+        let [normalize, combine] = tail(224);
+        assert_eq!(
+            decoded.found_reference(3, &config, 1),
+            [
+                stage(80, 0, 1704, Units::Frames),
+                stage(224, 0, 80, Units::Frames),
+                normalize,
+                combine,
+            ]
+        );
+        assert_eq!(
+            decoded.named_reference(3, &config, 1),
+            [stage(224, 0, 1784, Units::Frames), normalize, combine]
+        );
+        let [normalize, combine] = tail(144);
+        assert_eq!(
+            LightShape::linear(peek, true, 1).found_reference(3, &config, 1),
+            [
+                stage(0, 0, 1704, Units::Frames),
+                stage(144, 0, 80, Units::Frames),
+                normalize,
+                combine,
+            ]
+        );
     }
 }
