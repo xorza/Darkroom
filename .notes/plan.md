@@ -9,7 +9,7 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| — | First float-TIFF light decoded twice | Do, low priority | B9 |
+| — | First float-TIFF light decoded twice | Do, low priority — blocked on Q1 | B9 |
 | — | X-Trans cosmic-ray statistic | Defer | — |
 | RAW-10, DMS-6 | RAW buffer vs file open; WB inside the demosaic | Blocked on real data | — |
 
@@ -44,14 +44,16 @@ B9                          independent
 
 ---
 
-## B9. A float TIFF's dimensions from its header (low priority)
+## B9. A float TIFF's dimensions from its header (low priority) — blocked on Q1
 
 **Evidence.** `pipeline/light_source.rs`, `LightFiles::shape`: `LinearImage::peek` reads no TIFF
 header, so the first float-TIFF light is decoded in full to size the run, before the plan exists,
 and decoded again by the intake.
 
 **Solution.** `LinearImage::peek` for TIFF through a header-only probe in `imaginarium`, a
-matching submodule change. Where the probe cannot answer, keep today's decode.
+matching submodule change. Where the probe cannot answer, keep today's decode. Blocked on
+[Q1](plan_QUESTIONS.md#q1-where-a-float-tiffs-dimensions-are-read-from-its-header-b9): the
+submodule is its own repository.
 
 **Test.** Peek gives the decode's dimensions on mono and RGB float TIFFs; the pipeline decodes
 the first TIFF light once (decode counter).
