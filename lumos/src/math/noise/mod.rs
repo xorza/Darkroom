@@ -7,5 +7,8 @@ pub(crate) mod ccd_noise;
 pub(crate) mod gain_bins;
 pub(crate) mod mrs_noise;
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;

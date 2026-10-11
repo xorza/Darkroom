@@ -326,5 +326,8 @@ impl<const N: usize> Cholesky<N> {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;

@@ -169,5 +169,8 @@ pub(crate) fn max_scales(size: Size2us) -> usize {
     min_dim.ilog2() as usize
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;

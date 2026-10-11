@@ -211,5 +211,8 @@ pub use image_ops::ml::denoise::MlDenoise;
 #[cfg(feature = "ml")]
 pub use image_ops::ml::star_removal::{RemoveStars, StarRemovalResult};
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 #[cfg(test)]
 mod internals;

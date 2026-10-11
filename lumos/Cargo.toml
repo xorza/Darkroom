@@ -11,9 +11,7 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-# Compiles the colocated `bench.rs` drivers (quickbench `#[test] #[ignore]` benches) and the
-# helpers only they reach. Not part of the supported surface.
-bench = []
+bench = ["dep:criterion"]
 
 [dependencies]
 common = { workspace = true, features = ["introspect-derive"] }
@@ -38,6 +36,7 @@ nalgebra = { workspace = true }
 statrs = { workspace = true }
 arrayvec = { workspace = true }
 blake3 = { workspace = true }
+criterion = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
@@ -56,3 +55,11 @@ tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = { workspace = true }
+
+[lib]
+bench = false
+
+[[bench]]
+name = "lumos"
+harness = false
+required-features = ["bench"]

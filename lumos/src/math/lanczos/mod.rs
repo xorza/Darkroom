@@ -34,5 +34,8 @@ fn sin_pi(t: f64) -> f64 {
     if whole % 2.0 == 0.0 { sine } else { -sine }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;
