@@ -10,7 +10,7 @@ use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{mad_with_scratch, median_fast, median_mut, robust_sigma_f64};
+use crate::math::statistics::{mad_with_scratch, median_mut, robust_sigma_f64};
 
 /// A combine pixel's frames, a star's stamp, a 64² background tile.
 const LENGTHS: [usize; 3] = [16, 256, 4_096];
@@ -26,14 +26,6 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| median_mut(black_box(values)),
-                BatchSize::SmallInput,
-            );
-        });
-        group.bench_function(BenchmarkId::new("median_fast", len), |b| {
-            let values = fixture::sky(len, 2);
-            b.iter_batched_ref(
-                || values.clone(),
-                |values| median_fast(black_box(values)),
                 BatchSize::SmallInput,
             );
         });

@@ -1,6 +1,5 @@
 //! The float widths [`crate::math::statistics`]' order statistics run at.
 
-use std::cmp::Ordering;
 use std::ops::{Add, Mul, Sub};
 
 /// What a median or a MAD needs of the type it is measuring.
@@ -14,42 +13,48 @@ use std::ops::{Add, Mul, Sub};
 pub(crate) trait Float:
     Copy + PartialOrd + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
 {
+    /// The signed integer of the same width, which [`Self::into_keys`] maps a value to.
+    type Key: Ord + Copy + Default;
+
     /// What an empty input measures to.
     const ZERO: Self;
     /// Averages the two middle elements of an even-length slice.
     const HALF: Self;
 
-    /// A total order, so a slice holding NaN still selects a meaningful rank.
-    /// Shaped like `std`'s own so it passes straight to `select_nth_unstable_by`.
-    fn total_cmp(&self, other: &Self) -> Ordering;
-
-    /// `partial_cmp` with NaN folded to `Equal` — an order at all only on NaN-free data.
-    ///
-    /// Cheaper than [`Self::total_cmp`], which first maps both operands' bit patterns onto a
-    /// total order. Measured at roughly 15% off a 4096-sample median.
-    fn fast_cmp(&self, other: &Self) -> Ordering;
-
     fn abs(self) -> Self;
 
-    /// The larger of the two, dropping a lone NaN — `std`'s own `max`.
-    fn max(self, other: Self) -> Self;
+    /// `values` mapped in place to keys whose integer order is `total_cmp`'s: a negative
+    /// value's bits below the sign flip. A selection on the keys compares integers, where one under
+    /// `total_cmp` maps both operands of every comparison. The map is its own inverse, so
+    /// [`Self::from_keys`] restores the values.
+    fn into_keys(values: &mut [Self]) -> &mut [Self::Key];
 
-    fn is_nan(self) -> bool;
+    /// The values of keys [`Self::into_keys`] made, mapped back in place.
+    fn from_keys(keys: &mut [Self::Key]) -> &mut [Self];
+
+    /// The value one key stands for.
+    fn from_key(key: Self::Key) -> Self;
+
+    /// `magnitudes`, none of them with its sign bit set, read as their keys: such a value's bits
+    /// are its key already, so nothing is mapped.
+    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [Self::Key];
+}
+
+/// The bits of an `f32` whose `i32` order is [`f32::total_cmp`]'s, as `std` computes them, and
+/// back: the flip keeps the sign bit, so a second one undoes the first.
+const fn total_order_32(bits: i32) -> i32 {
+    bits ^ ((bits >> 31).cast_unsigned() >> 1).cast_signed()
+}
+
+/// [`total_order_32`] for an `f64`.
+const fn total_order_64(bits: i64) -> i64 {
+    bits ^ ((bits >> 63).cast_unsigned() >> 1).cast_signed()
 }
 
 impl Float for f32 {
+    type Key = i32;
     const ZERO: Self = 0.0;
     const HALF: Self = 0.5;
-
-    #[inline]
-    fn total_cmp(&self, other: &Self) -> Ordering {
-        f32::total_cmp(self, other)
-    }
-
-    #[inline]
-    fn fast_cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
-    }
 
     #[inline]
     fn abs(self) -> Self {
@@ -57,29 +62,37 @@ impl Float for f32 {
     }
 
     #[inline]
-    fn max(self, other: Self) -> Self {
-        f32::max(self, other)
+    fn into_keys(values: &mut [Self]) -> &mut [i32] {
+        let keys: &mut [i32] = bytemuck::cast_slice_mut(values);
+        for key in keys.iter_mut() {
+            *key = total_order_32(*key);
+        }
+        keys
     }
 
     #[inline]
-    fn is_nan(self) -> bool {
-        f32::is_nan(self)
+    fn from_keys(keys: &mut [i32]) -> &mut [Self] {
+        for key in keys.iter_mut() {
+            *key = total_order_32(*key);
+        }
+        bytemuck::cast_slice_mut(keys)
+    }
+
+    #[inline]
+    fn from_key(key: i32) -> Self {
+        f32::from_bits(total_order_32(key).cast_unsigned())
+    }
+
+    #[inline]
+    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [i32] {
+        bytemuck::cast_slice_mut(magnitudes)
     }
 }
 
 impl Float for f64 {
+    type Key = i64;
     const ZERO: Self = 0.0;
     const HALF: Self = 0.5;
-
-    #[inline]
-    fn total_cmp(&self, other: &Self) -> Ordering {
-        f64::total_cmp(self, other)
-    }
-
-    #[inline]
-    fn fast_cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
-    }
 
     #[inline]
     fn abs(self) -> Self {
@@ -87,12 +100,29 @@ impl Float for f64 {
     }
 
     #[inline]
-    fn max(self, other: Self) -> Self {
-        f64::max(self, other)
+    fn into_keys(values: &mut [Self]) -> &mut [i64] {
+        let keys: &mut [i64] = bytemuck::cast_slice_mut(values);
+        for key in keys.iter_mut() {
+            *key = total_order_64(*key);
+        }
+        keys
     }
 
     #[inline]
-    fn is_nan(self) -> bool {
-        f64::is_nan(self)
+    fn from_keys(keys: &mut [i64]) -> &mut [Self] {
+        for key in keys.iter_mut() {
+            *key = total_order_64(*key);
+        }
+        bytemuck::cast_slice_mut(keys)
+    }
+
+    #[inline]
+    fn from_key(key: i64) -> Self {
+        f64::from_bits(total_order_64(key).cast_unsigned())
+    }
+
+    #[inline]
+    fn magnitude_keys(magnitudes: &mut [Self]) -> &mut [i64] {
+        bytemuck::cast_slice_mut(magnitudes)
     }
 }

@@ -187,10 +187,9 @@ fn median_mut_orders_nan_last() {
     assert_eq!(median_mut(&mut [1.0f32, f32::NAN, 3.0, 2.0, 5.0]), 3.0);
 }
 
-/// NaN input is a contract violation, not a supported case: `partial_cmp` orders a NaN `Equal`
-/// against everything, so the partition may return any element. Debug builds say so instead of
-/// handing back a number that looks like a median. Release compiles the check out, so this test
-/// only holds where `debug_assertions` is on.
+/// NaN input is a contract violation, not a supported case: a NaN never passes the band, so the
+/// survivors' mean would carry one the clip never had the chance to drop. Debug builds say so.
+/// Release compiles the check out, so this test only holds where `debug_assertions` is on.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "NaN-free")]
@@ -600,22 +599,6 @@ fn sigma_clipped_stack_scratch_too_small_panics() {
     let _ = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
 }
 
-/// `median_fast` and `median_mut` are one median: the middle element for an odd count, the mean of
-/// the two middle ones for an even count. Sorted [1, 3, 7, 9] → (3 + 7)/2; sorted [2, 4, 6, 8, 10]
-/// → 6.
-#[test]
-fn median_fast_matches_median_mut_at_both_parities() {
-    for (values, expected) in [
-        (vec![9.0f32, 1.0, 7.0, 3.0], 5.0),
-        (vec![10.0, 4.0, 6.0, 2.0, 8.0], 6.0),
-    ] {
-        let fast = median_fast(&mut values.clone());
-        let exact = median_mut(&mut values.clone());
-        assert_eq!(fast, expected, "{values:?}");
-        assert_eq!(exact, expected, "{values:?}");
-    }
-}
-
 #[test]
 fn sigma_clipped_stats_iterations_improve_result() {
     // Good values: 41 at 0.30, 40 at 0.32 (true median = 0.30, odd count = 81)
@@ -672,9 +655,10 @@ fn mad_floored_raises_only_a_spread_below_the_floor() {
 }
 
 /// One selection gives the same median a full sort does, at both parities and with duplicates
-/// present — what SIP's clip relies on when it trades the sort away.
+/// present — what SIP's clip relies on when it trades the sort away — and so does the selection on
+/// magnitudes, which reads their bits as keys with nothing mapped.
 #[test]
-fn median_fast_equals_the_sorted_median() {
+fn median_mut_equals_the_sorted_median() {
     for len in 1..40usize {
         let data: Vec<f64> = (0..len)
             .map(|i| (i * 37 % len) as f64 * 0.1 - 1.5)
@@ -686,17 +670,18 @@ fn median_fast_equals_the_sorted_median() {
         } else {
             f64::midpoint(sorted[len / 2 - 1], sorted[len / 2])
         };
-        assert_eq!(median_fast(&mut data.clone()), expected, "len = {len}");
-    }
-}
+        assert_eq!(median_mut(&mut data.clone()), expected, "len = {len}");
 
-/// The fast path's NaN contract, exercised at `f64` — see [`sigma_clip_rejects_nan_input`] for
-/// why a NaN is a contract violation rather than a case.
-#[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "NaN-free")]
-fn median_fast_rejects_nan_input() {
-    median_fast(&mut [1.0f64, f64::NAN, 3.0]);
+        let mut magnitudes: Vec<f64> = data.iter().map(|value| value.abs()).collect();
+        let mut sorted = magnitudes.clone();
+        sorted.sort_unstable_by(f64::total_cmp);
+        let expected = if len % 2 == 1 {
+            sorted[len / 2]
+        } else {
+            f64::midpoint(sorted[len / 2 - 1], sorted[len / 2])
+        };
+        assert_eq!(median_of_magnitudes(&mut magnitudes), expected, "len = {len}");
+    }
 }
 
 #[test]

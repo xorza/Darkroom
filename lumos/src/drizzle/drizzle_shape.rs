@@ -158,7 +158,7 @@ mod tests {
     /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, and
     /// 16 flag bytes: 208 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B, measured by
     /// MRS over one tile that is the frame: 4 coefficients of 33 bytes, 32 bytes of transform a
-    /// pixel and 88 of bookkeeping, 348 B, the way's peak at 368 B, 160 past the frame it keeps.
+    /// pixel and 136 of bookkeeping, 396 B, the way's peak at 416 B, 208 past the frame it keeps.
     /// The depth of the one weight plane, 64 B, is held through every stage. The combine holds the
     /// image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row reads three frames
     /// of 13 B a pixel over 4 pixels, 156 B.
@@ -182,7 +182,7 @@ mod tests {
                 Stage {
                     kept: 208,
                     held: 64,
-                    in_flight: 160,
+                    in_flight: 208,
                     units: Units::Serial,
                 },
                 Stage {

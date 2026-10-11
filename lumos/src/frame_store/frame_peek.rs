@@ -128,8 +128,8 @@ mod tests {
     /// bin byte, 49 000, more than its 40 000 B of level samples: its decode peaks at 99 000 B,
     /// and a decoder holding 50 000 B beside the frame raises that to 100 000 B. As a plain frame
     /// its noise is measured by MRS over one tile that is the frame, 10 000 coefficients of 33
-    /// bytes and a region of 32 bytes a pixel, 650 000, and the tile's 88 bytes of bookkeeping: a
-    /// peak of 700 088 B, whatever the workers, one tile having nothing to share.
+    /// bytes and a region of 32 bytes a pixel, 650 000, and the tile's 136 bytes of bookkeeping:
+    /// a peak of 700 136 B, whatever the workers, one tile having nothing to share.
     ///
     /// Three such mosaics stacked to the image alone, with no normalization: the decode keeps
     /// 50 000 B a frame and holds 49 000 more in work; the normalization holds nothing; the combine
@@ -146,7 +146,7 @@ mod tests {
         for (mosaic, decoder_bytes, peak) in [
             (rggb, 0, 99_000),
             (rggb, 50_000, 100_000),
-            (None, 0, 700_088),
+            (None, 0, 700_136),
         ] {
             for workers in [1, 8] {
                 assert_eq!(

@@ -59,23 +59,41 @@ pub(crate) const fn mad_to_sigma(mad: f32) -> f32 {
 /// The median of `data`, in place.
 ///
 /// Mutates the input buffer (partial sort via quickselect), and ranks NaN rather than tripping
-/// over it — see [`Float::total_cmp`].
+/// over it: the selection runs on the keys of [`Float::into_keys`], in `total_cmp`'s order.
 #[inline]
 pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
+    let keys = F::into_keys(data);
+    let median = median_of_keys::<F>(keys);
+    F::from_keys(keys);
+    median
+}
 
-    let len = data.len();
-    let mid = len / 2;
+/// The median of `magnitudes`, in place: values with no sign bit set, as `|x − c|` makes them,
+/// whose bits order as `total_cmp` does already, so they select with nothing mapped either way.
+#[inline]
+pub(crate) fn median_of_magnitudes<F: Float>(magnitudes: &mut [F]) -> F {
+    debug_assert!(!magnitudes.is_empty());
+    let keys = F::magnitude_keys(magnitudes);
+    debug_assert!(
+        keys.iter().all(|&key| key >= F::Key::default()),
+        "a magnitude with its sign bit set"
+    );
+    median_of_keys::<F>(keys)
+}
 
-    if len & 1 == 1 {
-        let (_, median, _) = data.select_nth_unstable_by(mid, F::total_cmp);
-        *median
-    } else {
-        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, F::total_cmp);
-        let right = *right_median;
-        let left = left_part.iter().copied().reduce(F::max).unwrap();
-        (left + right) * F::HALF
+/// The median of the values `keys` stand for: the middle one of an odd count, the mean of the two
+/// middle ones of an even count.
+#[inline]
+fn median_of_keys<F: Float>(keys: &mut [F::Key]) -> F {
+    let len = keys.len();
+    let (lower_part, upper, _) = keys.select_nth_unstable(len / 2);
+    let upper = F::from_key(*upper);
+    if len % 2 == 1 {
+        return upper;
     }
+    let lower = F::from_key(*lower_part.iter().max().unwrap());
+    (lower + upper) * F::HALF
 }
 
 /// MAD-scaled robust sigma of `data`: `1.4826 · median|x − median(x)|`, or `0.0` when empty.
@@ -92,31 +110,6 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
     scratch.extend_from_slice(data);
     let median = median_mut(scratch);
     MAD_TO_SIGMA * mad_with_scratch(data, median, scratch)
-}
-
-/// Median under [`Float::fast_cmp`], with no NaN handling: one partition, plus a scan of the lower
-/// half for an even count, whose median is the mean of the two middle elements.
-///
-/// `data` must contain no NaN: comparing one orders it `Equal` against everything, which is not
-/// a total order, and `select_nth_unstable_by` is then free to return any element. Not unsound —
-/// just a meaningless median, which is why this is checked rather than left to the caller's
-/// comment. Every decoded frame satisfies it (the FITS reader rejects non-finite pixels and RAW
-/// decodes from integers), so the check is debug-only and the hot paths pay nothing in release.
-#[inline]
-fn median_fast<F: Float>(data: &mut [F]) -> F {
-    debug_assert!(!data.is_empty());
-    debug_assert!(
-        !data.iter().any(|value| value.is_nan()),
-        "median_fast requires NaN-free data; use median_mut for data that may hold NaN"
-    );
-
-    let len = data.len();
-    let (lower, median, _) = data.select_nth_unstable_by(len / 2, F::fast_cmp);
-    if len % 2 == 1 {
-        return *median;
-    }
-    let below = lower.iter().copied().reduce(F::max).unwrap();
-    (below + *median) * F::HALF
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
@@ -141,7 +134,7 @@ pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut 
         return F::ZERO;
     }
     fill_abs_deviations(values, median, scratch);
-    median_mut(scratch)
+    median_of_magnitudes(scratch)
 }
 
 /// MAD floored at `floor_fraction * center`.

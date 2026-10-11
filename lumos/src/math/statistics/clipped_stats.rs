@@ -6,7 +6,9 @@ use arrayvec::ArrayVec;
 
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{abs_deviation_inplace, mad_to_sigma, median_fast, median_mut};
+use crate::math::statistics::{
+    abs_deviation_inplace, mad_to_sigma, median_mut, median_of_magnitudes,
+};
 use crate::math::sum::mean_f32;
 
 /// Scratch space a sigma-clip pass borrows for its per-value deviations.
@@ -68,8 +70,8 @@ impl ClippedStats {
     /// Sigma-clipped median, MAD-sigma and mean of `values`, rejecting outliers beyond
     /// `kappa × sigma` from the median over `iterations` passes.
     ///
-    /// `values` must be NaN-free — the clip iteration medians with [`median_fast`] — and is
-    /// reordered in place.
+    /// `values` must be NaN-free, as a NaN never passes the clip's band and so has no place among
+    /// the survivors whose mean this reports, and is reordered in place.
     ///
     /// `deviations` is borrowed scratch, overwritten in full; only its length matters. Sizing it
     /// is [`DeviationScratch`]'s job, so a heap caller can reuse one `Vec` across calls and a
@@ -83,6 +85,10 @@ impl ClippedStats {
         if values.is_empty() {
             return ClippedStats::ZERO;
         }
+        debug_assert!(
+            !values.iter().any(|value| value.is_nan()),
+            "sigma_clipped requires NaN-free values"
+        );
 
         sigma_clipped_core(values, deviations.sized_to(values.len()), kappa, iterations)
     }
@@ -97,20 +103,20 @@ enum ClipPass {
     Clipped { kept: usize },
 }
 
-/// One pass over `values`, at least 3 long: the median and MAD under [`median_fast`], then every
-/// value beyond `kappa` σ of the median dropped, the survivors closed up at the front.
+/// One pass over `values`, at least 3 long: their median and MAD, then every value beyond `kappa`
+/// σ of the median dropped, the survivors closed up at the front.
 fn clip_pass(values: &mut [f32], deviations: &mut [f32], kappa: f32) -> ClipPass {
     debug_assert!(values.len() >= 3 && deviations.len() == values.len());
-    let median = median_fast(values);
+    let median = median_mut(values);
     deviations.copy_from_slice(values);
     abs_deviation_inplace(deviations, median);
-    let mad = median_fast(deviations);
+    let mad = median_of_magnitudes(deviations);
     let sigma = mad_to_sigma(mad);
     if sigma <= Spread::resolution(median) {
         return ClipPass::Converged(MedianMad { median, mad: 0.0 });
     }
 
-    // `median_fast` reordered the deviations, so each is taken again from its value.
+    // The selection reordered the deviations, so each is taken again from its value.
     let threshold = kappa * sigma;
     let mut kept = 0;
     for i in 0..values.len() {
@@ -134,7 +140,7 @@ fn survivors_location(values: &mut [f32], deviations: &mut [f32]) -> MedianMad {
     abs_deviation_inplace(deviations, median);
     MedianMad {
         median,
-        mad: median_mut(deviations),
+        mad: median_of_magnitudes(deviations),
     }
 }
 
