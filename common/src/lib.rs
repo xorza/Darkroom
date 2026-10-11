@@ -42,7 +42,7 @@ mod introspect;
 mod serde;
 
 pub use cancel_token::CancelToken;
-pub use file_utils::file_identity::FileIdentity;
+pub use file_utils::file_identity::{FileId, FileIdentity};
 pub use float_ext::FloatExt;
 #[cfg(any(test, feature = "internals"))]
 pub use internals::temp_dir::TempDir;

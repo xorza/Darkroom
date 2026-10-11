@@ -4,6 +4,7 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::memory::run_memory::RunMemory;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
+use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::combine::cache::loader::*;
@@ -62,8 +63,8 @@ fn kept_directory(cache_dir: &Path) -> PathBuf {
     DecodeCache::open(cache_dir).unwrap().path().to_path_buf()
 }
 
-fn spill_of<'a, I: StackableImage>(kept: &'a Path, source: &Path) -> FrameSpill<'a> {
-    FrameSpill::cached(kept, &fs::canonicalize(source).unwrap(), I::DECODER)
+fn spill_of<'a, I: StackableImage>(kept: &'a Path, canonical: &'a Path) -> FrameSpill<'a> {
+    FrameSpill::cached(kept, canonical, I::DECODER)
 }
 
 /// Overwrite sample `index` of a spilled plane in place, as anything outside lumos could.
@@ -83,8 +84,12 @@ fn set_mtime(path: &Path, nanos_past_epoch: u64) {
         .unwrap();
 }
 
-/// A first call decodes and commits; a second maps what the first committed. A rewrite of the
-/// source that keeps its length but moves its mtime by 100 ns decodes again.
+/// A first call decodes and commits; a second maps what the first committed. Each of these decodes
+/// again instead: a plane zeroed behind its commit, as a power loss can leave one; a source made
+/// read-only, which moves its change time alone; a rewrite of the source that keeps its length and
+/// moves its mtime by 100 ns; and one that keeps both, its mtime set back. The kernel stamps the
+/// change time from a clock as coarse as a few milliseconds, so each change of the source waits
+/// 20 ms past the last.
 #[test]
 fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let temp_dir = TempDir::new("lumos_cache_frame_reuse");
@@ -102,23 +107,73 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     assert_eq!(first.source_stats.medians[0], 5.5);
     drop(first);
 
-    // A sample and the statistics changed on disk come back as they are: the frame was mapped and
-    // its statistics read, not measured again.
+    // A sample and the statistics changed on disk and sealed again come back as they are: the
+    // frame was mapped and its statistics read, not measured again.
     let kept = kept_directory(temp_dir.path());
-    let spill = spill_of::<LinearImage>(&kept, &source);
-    poke(&spill.channel_path(0), 2, 102.0);
-    let key = CacheKey::new(
-        CachedSource::of(&source).unwrap().identity,
-        DecoderKind::Linear,
-        &LoadContext::default(),
-    );
-    let mut sentinel = spill.committed(key).unwrap().stats;
-    sentinel.medians[0] = 99.0;
-    spill.commit(key, Carries::Channels, &sentinel).unwrap();
+    let canonical = fs::canonicalize(&source).unwrap();
+    let spill = spill_of::<LinearImage>(&kept, &canonical);
+    let key = || {
+        CacheKey::new(
+            CachedSource::of(&source).unwrap().identity,
+            DecoderKind::Linear,
+            &LoadContext::default(),
+        )
+    };
+    let edit = |value: f32| {
+        poke(&spill.channel_path(0), 2, value);
+        spill.reseal(key(), 1);
+        let committed = spill.committed(key()).unwrap();
+        let mut sentinel = committed.stats;
+        sentinel.medians[0] = 99.0;
+        spill
+            .commit(key(), Carries::Channels, committed.digests, &sentinel)
+            .unwrap();
+    };
+    edit(102.0);
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
     assert_eq!(reused.source_stats.medians[0], 99.0);
     drop(reused);
+
+    fs::write(spill.channel_path(0), [0u8; 48]).unwrap();
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(decoded.channels[0].chunk(0, 12), pixels, "a zeroed plane");
+    assert_eq!(decoded.source_stats.medians[0], 5.5);
+    drop(decoded);
+
+    let settle = || thread::sleep(Duration::from_millis(20));
+    edit(102.0);
+    settle();
+    let mut permissions = fs::metadata(&source).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&source, permissions.clone()).unwrap();
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(
+        decoded.channels[0].chunk(0, 12),
+        pixels,
+        "a read-only source"
+    );
+    drop(decoded);
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "the file is the test's own, made writable again for the rewrites below"
+    )]
+    permissions.set_readonly(false);
+    fs::set_permissions(&source, permissions).unwrap();
+
+    settle();
+    let restored: Vec<f32> = (100..112).map(|i| i as f32).collect();
+    LinearImage::from_pixels(dims, restored.clone())
+        .save(&source)
+        .unwrap();
+    set_mtime(&source, 1_700_000_000_000_000_100);
+    let decoded = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
+    assert_eq!(
+        decoded.channels[0].chunk(0, 12),
+        restored,
+        "a rewrite with the mtime set back"
+    );
+    drop(decoded);
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();
     let original_len = fs::metadata(&source).unwrap().len();
@@ -146,9 +201,17 @@ fn cache_frame_validates_a_reused_frame() {
         .unwrap();
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap());
     let kept = kept_directory(temp_dir.path());
-    let spill = spill_of::<LinearImage>(&kept, &source);
+    let canonical = fs::canonicalize(&source).unwrap();
+    let spill = spill_of::<LinearImage>(&kept, &canonical);
 
+    // Sealed again, so the digests pass and the checks behind them are what refuses it.
     poke(&spill.channel_path(0), 2, f32::INFINITY);
+    let key = CacheKey::new(
+        CachedSource::of(&source).unwrap().identity,
+        DecoderKind::Linear,
+        &LoadContext::default(),
+    );
+    spill.reseal(key, 1);
     let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
     assert!(matches!(
         error,
@@ -176,9 +239,10 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
 
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap());
     let kept = kept_directory(temp_dir.path());
+    let canonical = fs::canonicalize(&source).unwrap();
     assert_ne!(
-        spill_of::<LinearImage>(&kept, &source).channel_path(0),
-        spill_of::<CfaImage>(&kept, &source).channel_path(0)
+        spill_of::<LinearImage>(&kept, &canonical).channel_path(0),
+        spill_of::<CfaImage>(&kept, &canonical).channel_path(0)
     );
     let error = cache_test_frame::<CfaImage>(temp_dir.path(), &source, dims, 0).unwrap_err();
     assert!(matches!(error, StackError::ImageLoad(_)), "{error:?}");
@@ -246,18 +310,15 @@ fn a_kept_cache_is_reused_by_the_next_run() {
             )
         };
         for path in &paths {
+            let canonical = fs::canonicalize(path).unwrap();
+            let spill = spill_of::<LinearImage>(&kept, &canonical);
             assert!(
-                spill_of::<LinearImage>(&kept, path)
-                    .committed(key(path))
-                    .is_some(),
+                spill.committed(key(path)).is_some(),
                 "{label}: {} was not committed",
                 path.display()
             );
-            poke(
-                &spill_of::<LinearImage>(&kept, path).channel_path(0),
-                0,
-                0.125,
-            );
+            poke(&spill.channel_path(0), 0, 0.125);
+            spill.reseal(key(path), 1);
         }
 
         let second = run();

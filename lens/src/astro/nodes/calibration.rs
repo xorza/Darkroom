@@ -260,8 +260,9 @@ fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
         })?;
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name);
-        hasher.update(&identity.len.to_le_bytes());
-        hasher.update(&identity.mtime_ns.to_le_bytes());
+        identity.write_to(|bytes| {
+            hasher.update(bytes);
+        });
     }
     Ok(hasher.finalize().to_hex().to_string())
 }
