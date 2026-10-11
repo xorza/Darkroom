@@ -27,20 +27,20 @@ use crate::file_utils::file_identity::FileId;
 
 /// What the system states of a file beside its length and modification time.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct Stated {
-    pub(crate) file_id: Option<FileId>,
-    pub(crate) changed_ns: Option<i128>,
+pub(super) struct Stated {
+    pub(super) file_id: Option<FileId>,
+    pub(super) changed_ns: Option<i128>,
 }
 
 /// A file's metadata and what the system states of it beside, read together.
 #[derive(Debug)]
-pub(crate) struct Observed {
-    pub(crate) metadata: Metadata,
-    pub(crate) stated: Stated,
+pub(super) struct Observed {
+    pub(super) metadata: Metadata,
+    pub(super) stated: Stated,
 }
 
 /// Replace `destination` with `source` in one step: a reader sees the old file or the new one.
-pub(crate) fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
+pub(super) fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
     os::replace(source, destination, mode)
 }
 
@@ -52,17 +52,17 @@ pub(crate) fn replace(source: &Path, destination: &Path, mode: PublicationMode) 
         reason = "const where no directory is synced, not on Unix"
     )
 )]
-pub(crate) fn sync_parent(parent: &Path) -> io::Result<()> {
+pub(super) fn sync_parent(parent: &Path) -> io::Result<()> {
     os::sync_parent(parent)
 }
 
 /// What `metadata` states beside length and modification time, on a system whose metadata holds
 /// it: Unix's does, Windows' does not.
-pub(crate) fn stated(metadata: &Metadata) -> Stated {
+pub(super) fn stated(metadata: &Metadata) -> Stated {
     os::stated(metadata)
 }
 
 /// The file `path` names, following a link, with everything the system states of it.
-pub(crate) fn observe(path: &Path) -> io::Result<Observed> {
+pub(super) fn observe(path: &Path) -> io::Result<Observed> {
     os::observe(path)
 }

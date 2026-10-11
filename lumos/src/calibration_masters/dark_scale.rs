@@ -38,7 +38,8 @@ pub enum DarkScaleSource {
 }
 
 /// What a fit reads of one light: its raw samples, its bias, how its pixels are flagged before
-/// calibration, and the gain that carries the dark's samples into its domain.
+/// calibration — the masters' unmeasured pixels among them — and the gain that carries the dark's
+/// samples into its domain.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FitLight<'a> {
     pub(crate) light: &'a CfaImage,
@@ -56,10 +57,12 @@ struct Pair {
 
 impl DarkScale {
     /// The scale of a bias-removed dark for `light`, fitted on the `hot` pixels, else
-    /// `exposure_ratio`.
+    /// `exposure_ratio`: when fewer than 100 pairs are kept, or the slope is not a positive
+    /// number, which no dark current gives.
     ///
-    /// A hot pixel takes part unless the light has no measurement there or saturated it, and is
-    /// chosen on the dark's excess alone: selecting on the regressor leaves a least-squares slope
+    /// A hot pixel takes part unless the light has no measurement there or saturated it, or a
+    /// master did — a dark that saturated a hot pixel cut its excess short — and is chosen on the
+    /// dark's excess alone: selecting on the regressor leaves a least-squares slope
     /// unbiased, where selecting on the light would bias it. The light's excess is its sample less
     /// the bias, less the same reference the dark's excess was taken against — a robust plane
     /// through the ring of its colour's photosites — so the sky, a gradient and the dark's
