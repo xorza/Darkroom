@@ -9,10 +9,9 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::ingest::ingest_run::IngestRun;
-use crate::pipeline::align::register_warp_and_stack;
-use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::light_source::{LightSource, RawLights};
+use crate::pipeline::light_source::{LightFiles, Preparation};
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::run_report::RunReport;
@@ -25,9 +24,9 @@ use crate::run_report::RunReport;
 /// dropped and reported in
 /// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped).
 ///
-/// With [`Reference::Index`] the reference is prepared first, and each other light then goes
+/// With [`Reference::Index`](crate::Reference::Index) the reference is prepared first, and each other light then goes
 /// through its preparation, its registration and its warp in one pass, written once. With
-/// [`Reference::Auto`] every light is prepared and detected first, since the reference is the
+/// [`Reference::Auto`](crate::Reference::Auto) every light is prepared and detected first, since the reference is the
 /// sharpest one, and parked until it registers.
 ///
 /// The sensor geometry is peeked from the first frame's header without a decode, so the memory
@@ -35,8 +34,9 @@ use crate::run_report::RunReport;
 /// won't fit the budget, every parked and warped frame goes through the frame store's memory maps
 /// and peak RAM stays flat in the frame count.
 ///
-/// For frames that are already calibrated (e.g. pre-processed FITS), skip this and call
-/// [`align_and_stack`](crate::pipeline::align::align_and_stack) directly.
+/// For lights already calibrated (e.g. pre-processed FITS), skip this and call
+/// [`align_and_stack_paths`](crate::pipeline::align::align_and_stack_paths), or
+/// [`align_and_stack`](crate::pipeline::align::align_and_stack) for frames already decoded.
 pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
@@ -50,21 +50,15 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config.validate(light_paths.len())?;
     let run = IngestRun::new(&config.ingest, cancel.clone());
     let notes = CalibrationNotes::default();
-    let lights = RawLights {
+    let mut result = LightFiles {
         paths: light_paths,
-        masters,
-        cosmic_ray: config.cosmic_ray.as_ref(),
-        notes: &notes,
-    };
-    let mut result = match config.reference {
-        Reference::Index(reference) => {
-            lights.stack_in_one_pass(reference, config, &run, progress)?
-        }
-        Reference::Auto => {
-            let detected = LightSource::Raw(lights).detect(config, &run, &progress)?;
-            register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)?
-        }
-    };
+        preparation: Preparation::Calibrate {
+            masters,
+            cosmic_ray: config.cosmic_ray.as_ref(),
+            notes: &notes,
+        },
+    }
+    .stack(config, &run, progress, cancel)?;
     notes.report_into(&mut result.product.report, masters);
     Ok(result)
 }

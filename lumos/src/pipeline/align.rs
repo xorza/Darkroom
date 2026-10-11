@@ -14,7 +14,7 @@ use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::StagePlan;
 use crate::pipeline::frame_registrar::FrameRegistrar;
-use crate::pipeline::light_source::LightSource;
+use crate::pipeline::light_source::{LightFiles, LightSource, Preparation};
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
@@ -48,10 +48,38 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(AlignStackError::NoFrames);
     }
-    config.validate(lights.len())?;
+    config.validate_linear(lights.len())?;
     let run = IngestRun::new(&config.ingest, cancel.clone());
     let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
     register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
+}
+
+/// Detect → register → warp → stack calibrated linear lights read from files: FITS or
+/// floating-point TIFF, as [`LinearImage::from_file`] reads them — the output of Siril or
+/// PixInsight, for one.
+///
+/// [`align_and_stack`] for frames on disk: each light is decoded on a worker, checked, and its
+/// stars detected, and when the set would not fit the memory it plans against, parked and warped
+/// through the frame store as [`calibrate_align_stack`] parks its lights, so peak RAM stays flat in
+/// the frame count. With [`Reference::Index`] each light goes through one pass, written once.
+///
+/// [`calibrate_align_stack`]: crate::pipeline::calibrate::calibrate_align_stack
+pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
+    light_paths: &[P],
+    config: &AlignStackConfig,
+    progress: ProgressCallback,
+    cancel: CancelToken,
+) -> Result<AlignStackResult, AlignStackError> {
+    if light_paths.is_empty() {
+        return Err(AlignStackError::NoFrames);
+    }
+    config.validate_linear(light_paths.len())?;
+    let run = IngestRun::new(&config.ingest, cancel.clone());
+    LightFiles {
+        paths: light_paths,
+        preparation: Preparation::Linear,
+    }
+    .stack(config, &run, progress, cancel)
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
