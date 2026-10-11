@@ -21,7 +21,7 @@ use std::time::Instant;
 use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    MasterRole, ProgressCallback, calibrate_align_stack, stack_cfa_master,
+    NoMasterCache, ProgressCallback, calibrate_align_stack,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -110,27 +110,20 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         "Calibration frames"
     );
 
-    // Each role stacks under its own preset; the set is assembled once every master exists.
-    let stack = |paths: &[PathBuf], role: MasterRole| {
-        stack_cfa_master(
-            paths,
-            role,
-            role.stack_config(),
-            &IngestConfig::default(),
-            None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("failed to stack a calibration master")
-    };
-    let masters = CalibrationMasters::from_images(
+    // Each role stacks under its own preset, the flats with the bias taken from every frame; the
+    // set is assembled once every master exists.
+    let no_frames: Vec<PathBuf> = Vec::new();
+    let masters = CalibrationMasters::build(
         CalibrationSet {
-            dark: stack(&darks, MasterRole::Dark),
-            flat: stack(&flats, MasterRole::Flat),
-            bias: stack(&bias, MasterRole::Bias),
-            flat_dark: None,
+            dark: darks.as_slice(),
+            flat: flats.as_slice(),
+            bias: bias.as_slice(),
+            flat_dark: no_frames.as_slice(),
         },
         DEFAULT_SIGMA_THRESHOLD,
+        &IngestConfig::default(),
+        &NoMasterCache,
+        &ProgressCallback::default(),
         &CancelToken::never(),
     )
     .expect("failed to build calibration masters");

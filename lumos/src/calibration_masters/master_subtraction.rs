@@ -13,9 +13,9 @@ use crate::io::image::sample_domain::DomainMap;
 /// A master to take from each frame of a calibration stack, in its role: a flat's flat-dark or
 /// bias, so the multiplicative normalization scales the flat's own signal, or a dark's bias.
 #[derive(Debug, Clone, Copy)]
-pub struct Subtractor<'a> {
-    pub role: MasterRole,
-    pub master: &'a CfaImage,
+pub(crate) struct Subtractor<'a> {
+    pub(crate) role: MasterRole,
+    pub(crate) master: &'a CfaImage,
 }
 
 /// A [`Subtractor`] checked against the role of the frames it is taken from, with the parts it

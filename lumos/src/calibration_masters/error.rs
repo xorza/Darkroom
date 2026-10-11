@@ -3,6 +3,7 @@
 use crate::calibration_masters::calibration_component::CalibrationComponent;
 use crate::calibration_masters::master_role::MasterRole;
 use crate::calibration_masters::temperature_source::TemperatureSource;
+use crate::combine::error::StackError;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::size2us::Size2us;
@@ -171,4 +172,21 @@ pub enum SubtractionError {
     /// conditions than frame `index`.
     #[error("frame {index} cannot take the subtracted master: {source}")]
     SubtractorConditions { index: usize, source: DarkMismatch },
+}
+
+/// Why [`CalibrationMasters::build`](crate::CalibrationMasters::build) could not build the masters.
+#[derive(Debug, thiserror::Error)]
+pub enum MasterBuildError<E> {
+    /// A role's master could not be stacked.
+    #[error(transparent)]
+    Stack(#[from] StackError),
+    /// The stacked masters do not make a set.
+    #[error(transparent)]
+    Calibration(#[from] CalibrationError),
+    /// The cache could not be read or written.
+    #[error("calibration master cache: {0}")]
+    Cache(E),
+    /// The build was cancelled between roles.
+    #[error("calibration master build cancelled")]
+    Cancelled,
 }
