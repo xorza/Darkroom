@@ -1,2 +1,1 @@
 # Open issues
-- `lumos` registered pipeline on glibc (`pipeline/light_source.rs`, `LightFiles::stack`): `calibrate_align_stack` of 12 dithered RGGB lights of 2048² with `memory_override` 256 MiB peaks at 512 MiB anonymous memory against a 192 MiB budget, and a 512 MiB memory cgroup kills it. The planes each frame allocates and frees stay in glibc's per-thread malloc arenas: with `GLIBC_TUNABLES=glibc.malloc.arena_max=1` the same run peaks at 241 MiB. `pipeline::bench::parked_lights_under_a_memory_cap` reproduces it.
