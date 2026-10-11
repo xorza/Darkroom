@@ -20,17 +20,56 @@ pub(crate) struct GainBin {
     pub(crate) samples: usize,
 }
 
+/// Samples [`BinnedSamples`] holds and groups by bin in place: one buffer, or columns that are
+/// permuted together.
+pub(crate) trait Samples {
+    /// A run of consecutive samples, as a measure reads it.
+    type Run<'a>
+    where
+        Self: 'a;
+
+    /// The bytes one sample holds.
+    const BYTES: usize;
+
+    fn len(&self) -> usize;
+
+    fn swap(&mut self, a: usize, b: usize);
+
+    fn run(&mut self, range: Range<usize>) -> Self::Run<'_>;
+}
+
+impl<T> Samples for Vec<T> {
+    type Run<'a>
+        = &'a mut [T]
+    where
+        T: 'a;
+
+    const BYTES: usize = size_of::<T>();
+
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn swap(&mut self, a: usize, b: usize) {
+        <[T]>::swap(self, a, b);
+    }
+
+    fn run(&mut self, range: Range<usize>) -> &mut [T] {
+        &mut self[range]
+    }
+}
+
 /// A frame's noise samples, each tagged with its gain bin, and each bin's sum of gains: what an
-/// estimator fills before it measures each bin's variance. The samples stay in the one buffer the
+/// estimator fills before it measures each bin's variance. The samples stay in the buffers the
 /// caller sized, and [`Self::measure`] groups them by bin in place, so the samples are held once.
 #[derive(Debug)]
-pub(crate) struct BinnedSamples<T> {
-    samples: Vec<T>,
+pub(crate) struct BinnedSamples<S> {
+    samples: S,
     bins: Vec<u8>,
     gain_sums: [f64; GAIN_BINS],
 }
 
-impl<T> BinnedSamples<T> {
+impl<T> BinnedSamples<Vec<T>> {
     /// Room for `capacity` samples, more than which [`Self::push`] never takes.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -40,13 +79,25 @@ impl<T> BinnedSamples<T> {
         }
     }
 
-    /// `samples`, each in the bin of the gain `gain` reads for it.
-    pub(crate) fn of(samples: Vec<T>, bins: &GainBins, gain: impl Fn(&T) -> f32) -> Self {
+    pub(crate) fn push(&mut self, bins: &GainBins, gain: f32, sample: T) {
+        debug_assert!(
+            self.samples.len() < self.samples.capacity(),
+            "a sample past the room the caller sized"
+        );
+        let bin = bins.bin(gain);
+        self.samples.push(sample);
+        self.bins.push(bin as u8);
+        self.gain_sums[bin] += f64::from(gain);
+    }
+}
+
+impl<S: Samples> BinnedSamples<S> {
+    /// `samples`, each in the bin of the gain `gain` reads for the sample at its position.
+    pub(crate) fn of(samples: S, bins: &GainBins, gain: impl Fn(&S, usize) -> f32) -> Self {
         let mut gain_sums = [0.0; GAIN_BINS];
-        let bins = samples
-            .iter()
-            .map(|sample| {
-                let gain = gain(sample);
+        let bins = (0..samples.len())
+            .map(|position| {
+                let gain = gain(&samples, position);
                 let bin = bins.bin(gain);
                 gain_sums[bin] += f64::from(gain);
                 bin as u8
@@ -61,18 +112,7 @@ impl<T> BinnedSamples<T> {
 
     /// The bytes `count` samples hold here: each sample and its bin.
     pub(crate) const fn heap_bytes(count: usize) -> usize {
-        count * (size_of::<T>() + size_of::<u8>())
-    }
-
-    pub(crate) fn push(&mut self, bins: &GainBins, gain: f32, sample: T) {
-        debug_assert!(
-            self.samples.len() < self.samples.capacity(),
-            "a sample past the room the caller sized"
-        );
-        let bin = bins.bin(gain);
-        self.samples.push(sample);
-        self.bins.push(bin as u8);
-        self.gain_sums[bin] += f64::from(gain);
+        count * (S::BYTES + size_of::<u8>())
     }
 
     /// The bins `variance` measures: each run of bins in gain order merged until it holds
@@ -81,7 +121,7 @@ impl<T> BinnedSamples<T> {
     /// over coarser runs of gain. Within a run the samples come in no particular order.
     pub(crate) fn measure(
         mut self,
-        mut variance: impl FnMut(&mut [T]) -> f64,
+        mut variance: impl FnMut(S::Run<'_>) -> f64,
     ) -> ArrayVec<GainBin, GAIN_BINS> {
         let mut counts = [0usize; GAIN_BINS];
         for &bin in &self.bins {
@@ -111,7 +151,7 @@ impl<T> BinnedSamples<T> {
             .map(|(run, gain_sum)| GainBin {
                 gain: gain_sum / run.len() as f64,
                 samples: run.len(),
-                variance: variance(&mut self.samples[run]),
+                variance: variance(self.samples.run(run)),
             })
             .collect()
     }
