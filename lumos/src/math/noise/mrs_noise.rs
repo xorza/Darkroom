@@ -188,13 +188,16 @@ impl Samples for Coefficients {
         self.detail.swap(a, b);
     }
 
-    fn run(&mut self, range: Range<usize>) -> CoefficientRun<'_> {
-        CoefficientRun {
-            index: &self.index[range.clone()],
-            first_layer: &self.first_layer[range.clone()],
-            significance: &self.significance[range.clone()],
-            detail: &self.detail[range],
-        }
+    fn runs(&mut self, ranges: &[Range<usize>]) -> Vec<CoefficientRun<'_>> {
+        ranges
+            .iter()
+            .map(|range| CoefficientRun {
+                index: &self.index[range.clone()],
+                first_layer: &self.first_layer[range.clone()],
+                significance: &self.significance[range.clone()],
+                detail: &self.detail[range.clone()],
+            })
+            .collect()
     }
 }
 
@@ -216,7 +219,7 @@ impl MrsNoise {
         plane: &[f32],
         size: Size2us,
         excluded: impl Fn(usize) -> bool + Sync,
-        gain: impl Fn(usize) -> f32,
+        gain: impl Fn(usize) -> f32 + Sync,
         bins: &GainBins,
     ) -> BackgroundSplit {
         let binned = BinnedSamples::of(
@@ -396,19 +399,31 @@ fn tile_coefficients(
         );
     }
     let image = Buffer2::new(width, height, pixels);
-    let mut smooth = image.clone();
+    let mut smooth = Buffer2::new_default(width, height);
     let mut next = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
-    let mut first_layer = vec![0.0f64; width * height];
-    let mut significance = vec![0.0f64; width * height];
-    for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales) {
+    // The first layer is built as it is first smoothed, so neither it nor the significance is
+    // cleared first: the largest significance of one layer is that layer's.
+    atrous_smooth(&image, &mut smooth, &mut scratch, 1);
+    let first_layer: Vec<f64> = smooth
+        .pixels()
+        .iter()
+        .zip(image.pixels())
+        .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse))
+        .collect();
+    let mut significance: Vec<f64> = first_layer
+        .iter()
+        .map(|detail| detail.abs() / LAYER_SIGMA[0])
+        .collect();
+    for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
         atrous_smooth(&smooth, &mut next, &mut scratch, 1 << scale);
-        for (index, (&coarse, &fine)) in next.pixels().iter().zip(smooth.pixels()).enumerate() {
+        for ((significance, &coarse), &fine) in significance
+            .iter_mut()
+            .zip(next.pixels())
+            .zip(smooth.pixels())
+        {
             let detail = f64::from(fine) - f64::from(coarse);
-            if scale == 0 {
-                first_layer[index] = detail;
-            }
-            significance[index] = significance[index].max(detail.abs() / layer_sigma);
+            *significance = significance.max(detail.abs() / layer_sigma);
         }
         mem::swap(&mut smooth, &mut next);
     }

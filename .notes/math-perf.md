@@ -17,27 +17,30 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 
 | Bench | Linux | macOS | Change |
 |---|---|---|---|
-| `noise/frame/mrs_estimate/1024` | 0.38 | | Two-pass deviation without a division per value, in parallel shares added in a fixed order; coefficients stored as columns, so a pass reads only the columns it needs. Moves bits: the corrected two-pass sum (Chan, Golub & LeVeque) replaces Welford's update, and errs less. |
-| `noise/frame/mrs_estimate/4096` | 0.38 | | Same. |
-| `noise/frame/mrs_estimate_split/1024` | 0.45 | | Same, and shares of 8192 values, so one gain bin still spreads over every worker. |
-| `noise/frame/mrs_estimate_split/4096` | 0.44 | | Same. |
-| `noise/gain_bin/4096` | 0.29 | | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
-| `statistics/median_mut/16` | 0.55 | 0.79 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
-| `statistics/median_mut/4096` | 0.82 | | Same. On arm64 the float comparison is cheap, so the gain there is the skipped map. |
-| `statistics/median_mad/16` | 0.64 | | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
-| `statistics/median_mad/4096` | 0.81 | | Same. |
-| `statistics/mad_with_scratch/4096` | 0.81 | | Median of magnitudes. |
-| `statistics/robust_sigma_f64/4096` | 0.84 | | Both medians on keys. |
-| `statistics/sigma_clipped/16` | 0.89 | | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
-| `statistics/sigma_clipped/4096` | 0.96 | | Same. |
-| `statistics/frame/plane_median/radix/24000000` | 0.93 | | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
+| `noise/frame/mrs_estimate/1024` | 0.30 | 0.23 | Two-pass deviation without a division per value, in parallel shares added in a fixed order; coefficients stored as columns, so a pass reads only the columns it needs; a tile builds its first layer and significance as it first smooths, with no plane cleared or copied first. Moves bits: the corrected two-pass sum (Chan, Golub & LeVeque) replaces Welford's update, and errs less. |
+| `noise/frame/mrs_estimate/4096` | 0.36 | 0.23 | Same. |
+| `noise/frame/mrs_estimate_split/1024` | 0.35 | 0.51 | Same; shares of 8192 values; the gain bins measured in parallel, each on its own; the samples tagged in parallel shares. Moves bits: each bin's gain sum is added share by share. |
+| `noise/frame/mrs_estimate_split/4096` | 0.36 | 0.40 | Same. |
+| `noise/frame/binned_measure/1000000` | 0.88 | | The bins measured in parallel. |
+| `noise/gain_bin/4096` | 0.29 | 0.60 | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
+| `statistics/median_mut/16` | 0.55 | 0.77 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
+| `statistics/median_mut/4096` | 0.82 | 1.06 | Same. On arm64 the integer selection is no faster than the float one, so the sign check is a cost there. |
+| `statistics/median_mad/16` | 0.64 | 0.76 | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
+| `statistics/median_mad/4096` | 0.81 | 1.05 | Same. |
+| `statistics/mad_with_scratch/4096` | 0.81 | 1.06 | Median of magnitudes. |
+| `statistics/robust_sigma_f64/4096` | 0.84 | 1.16 | Both medians on keys. |
+| `statistics/sigma_clipped/16` | 0.89 | 0.99 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
+| `statistics/sigma_clipped/4096` | 0.96 | 0.90 | Same. |
+| `statistics/frame/plane_median/radix/24000000` | 0.93 | 0.67 | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
 
 The `statistics` rows are against a baseline measured again after the bench fix that batches in-place
 inputs to stay in cache (`52e54d2c6`): before it, a batch of copies outgrew the cache and the
-4096-value figures moved by up to 2×.
+4096-value figures moved by up to 2×. The Linux frame-scale figures move by about ±10% from run to
+run on this laptop.
 
 ## Not taken
 
 | Change | Why |
 |---|---|
 | `LanczosLut::at` truncation in place of `floor` | No measurable gain on x86-64-v3, where `floor` is one instruction. |
+| MRS coefficient columns zeroed in parallel | Slower: a fresh allocation's zero pages cost nothing until written, and an explicit fill writes all 32 MB. |

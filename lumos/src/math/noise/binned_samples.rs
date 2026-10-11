@@ -1,15 +1,20 @@
 //! [`BinnedSamples`]: a frame's noise samples, grouped by the bin of flat gain each was taken at.
 
 use std::array;
+use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use rayon::prelude::*;
 
 use crate::math::noise::gain_bins::{GAIN_BINS, GainBins};
 
 /// The fewest samples a bin is measured over: a bin with fewer merges with its neighbours in gain.
 /// A variance over 256 samples carries a standard error of √(2/256) ≈ 9%.
 const MIN_BIN_SAMPLES: usize = 256;
+
+/// How many samples one parallel share of [`BinnedSamples::of`] tags.
+const BIN_SHARE: usize = 1 << 14;
 
 /// The noise measured over the samples of one bin of flat gain.
 #[derive(Debug, Clone, Copy)]
@@ -24,7 +29,7 @@ pub(crate) struct GainBin {
 /// permuted together.
 pub(crate) trait Samples {
     /// A run of consecutive samples, as a measure reads it.
-    type Run<'a>
+    type Run<'a>: Send
     where
         Self: 'a;
 
@@ -35,10 +40,11 @@ pub(crate) trait Samples {
 
     fn swap(&mut self, a: usize, b: usize);
 
-    fn run(&mut self, range: Range<usize>) -> Self::Run<'_>;
+    /// The runs `ranges` cover, which ascend and do not overlap.
+    fn runs(&mut self, ranges: &[Range<usize>]) -> Vec<Self::Run<'_>>;
 }
 
-impl<T> Samples for Vec<T> {
+impl<T: Send> Samples for Vec<T> {
     type Run<'a>
         = &'a mut [T]
     where
@@ -54,8 +60,18 @@ impl<T> Samples for Vec<T> {
         <[T]>::swap(self, a, b);
     }
 
-    fn run(&mut self, range: Range<usize>) -> &mut [T] {
-        &mut self[range]
+    fn runs(&mut self, ranges: &[Range<usize>]) -> Vec<&mut [T]> {
+        let mut runs = Vec::with_capacity(ranges.len());
+        let mut rest = self.as_mut_slice();
+        let mut offset = 0;
+        for range in ranges {
+            let (_, tail) = mem::take(&mut rest).split_at_mut(range.start - offset);
+            let (run, tail) = tail.split_at_mut(range.len());
+            runs.push(run);
+            rest = tail;
+            offset = range.end;
+        }
+        runs
     }
 }
 
@@ -92,20 +108,38 @@ impl<T> BinnedSamples<Vec<T>> {
 }
 
 impl<S: Samples> BinnedSamples<S> {
-    /// `samples`, each in the bin of the gain `gain` reads for the sample at its position.
-    pub(crate) fn of(samples: S, bins: &GainBins, gain: impl Fn(&S, usize) -> f32) -> Self {
-        let mut gain_sums = [0.0; GAIN_BINS];
-        let bins = (0..samples.len())
-            .map(|position| {
-                let gain = gain(&samples, position);
-                let bin = bins.bin(gain);
-                gain_sums[bin] += f64::from(gain);
-                bin as u8
+    /// `samples`, each in the bin of the gain `gain` reads for the sample at its position: tagged
+    /// in parallel shares of [`BIN_SHARE`], each summing its own gains, the shares' sums added in
+    /// order so the bits do not depend on the thread count.
+    pub(crate) fn of(samples: S, bins: &GainBins, gain: impl Fn(&S, usize) -> f32 + Sync) -> Self
+    where
+        S: Sync,
+    {
+        let mut tags = vec![0u8; samples.len()];
+        let mut shares = Vec::with_capacity(tags.len().div_ceil(BIN_SHARE));
+        tags.par_chunks_mut(BIN_SHARE)
+            .enumerate()
+            .map(|(share, tags)| {
+                let start = share * BIN_SHARE;
+                let mut sums = [0.0f64; GAIN_BINS];
+                for (offset, tag) in tags.iter_mut().enumerate() {
+                    let gain = gain(&samples, start + offset);
+                    let bin = bins.bin(gain);
+                    sums[bin] += f64::from(gain);
+                    *tag = bin as u8;
+                }
+                sums
             })
-            .collect();
+            .collect_into_vec(&mut shares);
+        let mut gain_sums = [0.0; GAIN_BINS];
+        for share in shares {
+            for (sum, part) in gain_sums.iter_mut().zip(share) {
+                *sum += part;
+            }
+        }
         Self {
             samples,
-            bins,
+            bins: tags,
             gain_sums,
         }
     }
@@ -118,10 +152,11 @@ impl<S: Samples> BinnedSamples<S> {
     /// The bins `variance` measures: each run of bins in gain order merged until it holds
     /// [`MIN_BIN_SAMPLES`], a short last run into the one before it; one run of every sample when
     /// all of them are fewer. A frame too small to fill the bins still has its noise measured,
-    /// over coarser runs of gain. Within a run the samples come in no particular order.
+    /// over coarser runs of gain. Within a run the samples come in no particular order. The runs
+    /// are measured in parallel, each on its own.
     pub(crate) fn measure(
         mut self,
-        mut variance: impl FnMut(S::Run<'_>) -> f64,
+        variance: impl Fn(S::Run<'_>) -> f64 + Sync,
     ) -> ArrayVec<GainBin, GAIN_BINS> {
         let mut counts = [0usize; GAIN_BINS];
         for &bin in &self.bins {
@@ -147,11 +182,20 @@ impl<S: Samples> BinnedSamples<S> {
                 None => runs.push((start..end, sum)),
             }
         }
+        let ranges: ArrayVec<Range<usize>, GAIN_BINS> =
+            runs.iter().map(|(range, _)| range.clone()).collect();
+        let mut variances = Vec::with_capacity(ranges.len());
+        self.samples
+            .runs(&ranges)
+            .into_par_iter()
+            .map(&variance)
+            .collect_into_vec(&mut variances);
         runs.into_iter()
-            .map(|(run, gain_sum)| GainBin {
-                gain: gain_sum / run.len() as f64,
-                samples: run.len(),
-                variance: variance(self.samples.run(run)),
+            .zip(variances)
+            .map(|((range, gain_sum), variance)| GainBin {
+                gain: gain_sum / range.len() as f64,
+                samples: range.len(),
+                variance,
             })
             .collect()
     }
