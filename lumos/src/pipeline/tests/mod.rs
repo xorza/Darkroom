@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
@@ -36,7 +37,7 @@ use crate::star_detection::detector::StarDetector;
 use common::TempDir;
 
 use crate::internals::assertions::bits;
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 
 fn base_field() -> LinearImage {
     star_field(Size2us::new(256, 256), 40, 66666).image
@@ -639,7 +640,9 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 
 /// The RAW front end checks each light as it decodes: a light whose dimensions differ from the
 /// first light's header is refused at its own index, and parametric cosmic-ray noise on a light
-/// whose decoder recorded no ADC step — a float FITS — names that light.
+/// whose decoder recorded no ADC step — a float FITS — names that light. A cosmic-ray pass over
+/// X-Trans lights is refused from the first light's header, before any light is decoded: the
+/// second path names no file, and the error is still the first light's.
 #[test]
 fn the_raw_front_end_checks_each_light_at_decode() {
     let scratch = TempDir::new("lumos_decode_checks");
@@ -693,10 +696,33 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         ..AlignStackConfig::default()
     };
     let error = run(&paths[..1], &parametric);
-    let AlignStackError::CosmicRay { path, .. } = error else {
+    let AlignStackError::CosmicRay { path, source } = error else {
         panic!("expected the light without an ADC step to be named, got {error:?}");
     };
-    assert_eq!(path, paths[0]);
+    assert_eq!(
+        (path, source),
+        (paths[0].clone(), CosmicRayError::UnknownAdcStep)
+    );
+
+    let xtrans = scratch.path().join("xtrans_0.fits");
+    let cfa = make_cfa(
+        Size2us::new(36, 36),
+        vec![0.1; 36 * 36],
+        CfaType::XTrans(XTRANS_PATTERN),
+    );
+    save_cfa_fits(&xtrans, &cfa).expect("write synthetic X-Trans light");
+    let cosmic = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig::default()),
+        ..AlignStackConfig::default()
+    };
+    let error = run(
+        &[xtrans.clone(), scratch.path().join("absent.fits")],
+        &cosmic,
+    );
+    let AlignStackError::CosmicRay { path, source } = error else {
+        panic!("expected the X-Trans light to be refused, got {error:?}");
+    };
+    assert_eq!((path, source), (xtrans, CosmicRayError::XTransUnsupported));
 }
 
 /// Both front ends report the same stages for the same work, so a progress consumer can read the

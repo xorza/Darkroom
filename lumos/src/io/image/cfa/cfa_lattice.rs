@@ -216,22 +216,6 @@ pub(crate) struct Gathered {
     pub(crate) distances: Vec<i32>,
 }
 
-impl Gathered {
-    /// How many of the values the nearest `count` take with their ties: the end of the group of
-    /// equal distance that the `count`-th value is in.
-    pub(crate) fn tie_end(&self, count: usize) -> usize {
-        if count >= self.distances.len() {
-            return self.distances.len();
-        }
-        let last = self.distances[count - 1];
-        count
-            + self.distances[count..]
-                .iter()
-                .take_while(|&&distance| distance == last)
-                .count()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,20 +361,6 @@ mod tests {
         assert_eq!(
             lattice.median(&pixels, Vec2us::new(0, 0), None, &mut Gathered::default()),
             60.0
-        );
-    }
-
-    /// The tie end completes the group the count lands in: distances [1, 1, 2, 2, 2, 5] take 3 as
-    /// 5, 2 as 2, 6 as 6, and more than there are as all.
-    #[test]
-    fn the_tie_end_completes_a_group() {
-        let gathered = Gathered {
-            values: vec![0.0; 6],
-            distances: vec![1, 1, 2, 2, 2, 5],
-        };
-        assert_eq!(
-            [3, 2, 6, 9].map(|count| gathered.tie_end(count)),
-            [5, 2, 6, 6]
         );
     }
 

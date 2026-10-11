@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
@@ -50,7 +50,7 @@ pub enum AlignStackError {
     CosmicRay {
         path: PathBuf,
         #[source]
-        source: UnknownAdcStep,
+        source: CosmicRayError,
     },
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
