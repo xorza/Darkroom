@@ -71,24 +71,22 @@ go through the owned map, and the loader's private types folded into `FrameLoad`
 `StoredImage` stays a type of its own: a parked image keeps every flag and its metadata for the
 warp, where a `StoredFrame` keeps what the combine reads.
 
-**Left: PIP-4, CAL-14.** (PIP-10 is done: `align_and_stack_paths`.)
-- **PIP-4.** `keep_cache` works only for `stack()` and `stack_cfa_master` on the spill tier. The
-  loader's RAM branch never opens the cache, so a rerun that fits in RAM decodes every frame again
-  and a `keep_cache` run that fits writes nothing. `calibrate_align_stack`, `align_and_stack` and
-  the drizzle entries ignore the flag. The `IngestConfig::keep_cache` doc promises more.
+**Left: PIP-4's registered and drizzle part (blocked on Q5 in `lumos-stacking-review_QUESTIONS.md`), CAL-14.** (PIP-10 is done: `align_and_stack_paths`. PIP-4 is done for `stack()` and the masters, on every tier.)
+- **PIP-4 (rest).** The registered pipeline and the drizzle entries ignore `keep_cache`; a kept
+  frame holds no `ImageMetadata`, which every light needs (Q5).
 - **CAL-14.** The master-building rule (each role stacked under its preset; flats take the
   flat-dark, else the bias, per frame; then `from_images`) is written twice:
   `calibration_masters::internals::masters_from_files` and `lens/src/astro/nodes/calibration.rs`.
 
 **Design.**
-1. PIP-4: the kept cache is a decode-level memo, looked up before any decode on every tier, its
-   planes mapped whatever the tier. Every entry honours `keep_cache`. RAW runs cache the
-   uncalibrated `CfaImage` decode, which is what the key describes, before the masters apply.
+1. PIP-4 (rest, per Q5): the registered pipeline and the drizzle read a light back from the kept
+   cache before any decode. RAW runs cache the uncalibrated `CfaImage` decode, which is what the
+   key describes, before the masters apply.
 2. CAL-14: `CalibrationMasters::build(CalibrationSet<&[P]>, …)` is the only master builder, with
    a per-role cache hook for `lens`, and `lens` calls it. `stack_cfa_master` becomes private.
 
-**Tests:** `keep_cache` reuse on the RAM tier and in a registered run skips the decode (count
-decodes through a test hook); every other test stays green with unchanged pins.
+**Tests:** `keep_cache` reuse in a registered run skips the decode (count decodes through a test
+hook); every other test stays green with unchanged pins.
 
 **Crates:** lumos, lens, darkroom.
 

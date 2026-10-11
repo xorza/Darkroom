@@ -11,10 +11,12 @@ use crate::error::FrameDimensionMismatch;
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_spill::Carries;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::internals::fits::write_fits;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use common::TempDir;
+use fits_well::image::Image as FitsImage;
 
 fn cache_test_frame<I: StackableImage>(
     cache_dir: &Path,
@@ -182,74 +184,91 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
     assert!(matches!(error, StackError::ImageLoad(_)), "{error:?}");
 }
 
-/// A kept cache serves a second run: frame 1's planes come back from the first run's files, and
-/// frame 0 — always decoded, for the stack's metadata — is committed like the rest, so a run in
-/// which it is not first can reuse it.
+/// A kept cache serves a second run, resident or spilled, whether frame 0 had to be decoded for
+/// the plan (a float TIFF, which has no header to peek) or not (a FITS file): frame 1's planes come
+/// back from the first run's files, and frame 0 — always decoded, for the stack's metadata — is
+/// committed like the rest, so a run in which it is not first can reuse it.
 #[test]
-fn a_kept_disk_cache_is_reused_by_the_next_run() {
+fn a_kept_cache_is_reused_by_the_next_run() {
     let temp_dir = TempDir::new("lumos_cache_kept_run");
     let dims = ImageDimensions::new((4, 3), 1);
-    let paths: Vec<PathBuf> = (0..2)
-        .map(|index| {
-            let path = temp_dir.join(format!("light_{index}.tiff"));
-            LinearImage::from_pixels(dims, vec![0.25 + 0.25 * index as f32; 12])
-                .save(&path)
-                .unwrap();
-            path
-        })
-        .collect();
-    let ingest = IngestConfig {
-        cache_dir: temp_dir.join("cache"),
-        keep_cache: true,
-        ..IngestConfig::default()
-    };
     let config = StackConfig {
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let run = || {
-        load_tiered::<LinearImage, _>(
-            &paths,
-            &config,
-            IngestRun::planned(RunMemory::new(1 << 30, Some(1)), &ingest),
-            None,
-            ProgressCallback::default(),
-        )
-        .unwrap()
-    };
+    for (format, memory_override, spills) in [
+        ("tiff", Some(1), true),
+        ("tiff", None, false),
+        ("fits", Some(1), true),
+        ("fits", None, false),
+    ] {
+        let label = format!("{format}, spilled {spills}");
+        let directory = temp_dir.join(format!("{format}_{spills}"));
+        fs::create_dir_all(&directory).unwrap();
+        let paths: Vec<PathBuf> = (0..2)
+            .map(|index| {
+                let path = directory.join(format!("light_{index}.{format}"));
+                let pixels = vec![0.25 + 0.25 * index as f32; 12];
+                if format == "fits" {
+                    write_fits(&path, &FitsImage::new([4, 3], pixels).unwrap(), None);
+                } else {
+                    LinearImage::from_pixels(dims, pixels).save(&path).unwrap();
+                }
+                path
+            })
+            .collect();
+        let ingest = IngestConfig {
+            cache_dir: directory.join("cache"),
+            keep_cache: true,
+            ..IngestConfig::default()
+        };
+        let run = || {
+            load_tiered::<LinearImage, _>(
+                &paths,
+                &config,
+                IngestRun::planned(RunMemory::new(1 << 30, memory_override), &ingest),
+                None,
+                ProgressCallback::default(),
+            )
+            .unwrap()
+        };
 
-    let first = run();
-    assert!(first.core.tier.spills(), "a one-byte budget spills");
-    drop(first);
-    let directory = kept_directory(&ingest.cache_dir);
-    let key = |path: &Path| {
-        CacheKey::new(
-            CachedSource::of(path).unwrap().identity,
-            DecoderKind::Linear,
-            &LoadContext::default(),
-        )
-    };
-    for path in &paths {
-        assert!(
-            spill_of::<LinearImage>(&directory, path)
-                .committed(key(path))
-                .is_some(),
-            "{} was not committed",
-            path.display()
-        );
-    }
-    for path in &paths {
-        poke(
-            &spill_of::<LinearImage>(&directory, path).channel_path(0),
-            0,
-            0.125,
-        );
-    }
+        let first = run();
+        assert_eq!(first.core.tier.spills(), spills, "{label}");
+        drop(first);
+        let kept = kept_directory(&ingest.cache_dir);
+        let key = |path: &Path| {
+            CacheKey::new(
+                CachedSource::of(path).unwrap().identity,
+                DecoderKind::Linear,
+                &LoadContext::default(),
+            )
+        };
+        for path in &paths {
+            assert!(
+                spill_of::<LinearImage>(&kept, path)
+                    .committed(key(path))
+                    .is_some(),
+                "{label}: {} was not committed",
+                path.display()
+            );
+            poke(
+                &spill_of::<LinearImage>(&kept, path).channel_path(0),
+                0,
+                0.125,
+            );
+        }
 
-    let second = run();
-    assert_eq!(second.frames[0].channels[0].chunk(0, 1), &[0.25]);
-    assert_eq!(second.frames[1].channels[0].chunk(0, 1), &[0.125]);
+        let second = run();
+        assert_eq!(second.frames[0].channels[0].chunk(0, 1), &[0.25], "{label}");
+        assert_eq!(
+            second.frames[1].channels[0].chunk(0, 1),
+            &[0.125],
+            "{label}"
+        );
+        assert!(second.core.metadata.provenance.is_some(), "{label}");
+    }
 }
 
 #[test]

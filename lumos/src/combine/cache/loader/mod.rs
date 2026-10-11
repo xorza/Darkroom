@@ -85,7 +85,10 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     );
 
     let tier = Tier::for_plan(&plan, run.memory, &run.cache_dir)?;
-    let kept = (run.keep_cache && tier.spills())
+    // A decode-level memo: looked up before any decode on every tier, its planes mapped from the
+    // files whatever the tier, since a mapped plane reads as a resident one does.
+    let kept = run
+        .keep_cache
         .then(|| DecodeCache::open(&run.cache_dir))
         .transpose()?;
     let intake = FrameIntake::new(
@@ -106,12 +109,12 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         step,
     };
 
-    // Frame 0 first and alone when it is in hand already, or when the frames spill: it carries
-    // the stack metadata, and on disk a later frame may be read back from the kept cache, which
-    // keeps no metadata. On the resident tier every frame decodes in parallel, frame 0 among them.
+    // Frame 0 carries the stack metadata, which a kept frame does not keep: with a kept cache it is
+    // decoded whatever the cache holds, first and alone, and its decode serves a later run in which
+    // it is not frame 0. Without one every frame decodes in parallel, frame 0 among them.
     let first = match early {
         Some(early) => Some(load.frame(0, Some(early))?),
-        None if tier.spills() => Some(load.frame(0, None)?),
+        None if kept.is_some() => Some(load.frame(0, Some(load.decode(0)?))?),
         None => None,
     };
     let start = usize::from(first.is_some());
@@ -202,6 +205,18 @@ struct FrameLoad<'a, I, P> {
 }
 
 impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
+    /// Frame `index` decoded, through the step when there is one, with its source as it was
+    /// before the decode.
+    fn decode(&self, index: usize) -> Result<Decoded<I>, StackError> {
+        let path = self.paths[index].as_ref();
+        let source = CachedSource::of(path);
+        let mut image = load_image::<I>(path, self.intake.context())?;
+        if let Some(step) = self.step {
+            step.apply(index, &mut image)?;
+        }
+        Ok(Decoded { image, source })
+    }
+
     /// Frame `index` in its tier: with a decode cache, the planes it holds committed for this
     /// source and decoder, or a decode written there and committed; without one, a decode the tier
     /// keeps.
@@ -214,14 +229,9 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
         if let Some(kept) = self.kept.filter(|_| self.step.is_none()) {
             return self.kept_frame(kept, path, index, decoded);
         }
-        let image = if let Some(Decoded { image, .. }) = decoded {
-            image
-        } else {
-            let mut image = load_image::<I>(path, self.intake.context())?;
-            if let Some(step) = self.step {
-                step.apply(index, &mut image)?;
-            }
-            image
+        let image = match decoded {
+            Some(decoded) => decoded.image,
+            None => self.decode(index)?.image,
         };
         let stats = self.intake.admit(index, &image)?;
         let metadata = (index == 0).then(|| image.metadata().clone());
