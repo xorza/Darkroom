@@ -22,7 +22,10 @@ use common::CancelToken;
 
 use crate::calibration_masters::dark_match::DarkMatch;
 use crate::calibration_masters::defect_map::DefectMap;
-use crate::calibration_masters::error::{CalibrationError, MasterBuildError, SubtractionError};
+use crate::calibration_masters::defect_map::defect_summary::DefectSummary;
+use crate::calibration_masters::error::{
+    BundleError, CalibrationError, MasterBuildError, SubtractionError,
+};
 use crate::calibration_masters::light_calibration::{LightCalibration, Subtracted};
 use crate::calibration_masters::master_cache::{MasterCache, MasterInputs, SubtractedFrames};
 use crate::calibration_masters::master_subtraction::{MasterSubtraction, Subtractor};
@@ -55,17 +58,6 @@ use crate::calibration_masters::prepared_flat::PreparedFlat;
 /// `sigma_threshold × σ`, where robust bulk statistics and source resolution determine σ.
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
-
-/// Read-only defect statistics derived from a calibration bundle.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DefectSummary {
-    /// Hot pixels detected from the master dark.
-    pub hot_pixels: usize,
-    /// Cold or dead pixels detected from the master flat.
-    pub cold_pixels: usize,
-    /// Percentage of sensor pixels present in either class.
-    pub percentage: f32,
-}
 
 /// The calibration a light receives: what to subtract, the flat to divide by, and the defects to
 /// repair. Only what [`Self::calibrate`] reads is kept; the flat-dark is spent on the flat.
@@ -261,11 +253,12 @@ impl CalibrationMasters {
 
     /// Defect statistics, or `None` when no dark or flat supplied a defect map.
     pub fn defect_summary(&self) -> Option<DefectSummary> {
-        self.defect_map.as_ref().map(|map| DefectSummary {
-            hot_pixels: map.hot_indices().len(),
-            cold_pixels: map.cold_indices().len(),
-            percentage: map.percentage(),
-        })
+        let map = self.defect_map.as_ref()?;
+        let (_, master) = self
+            .masters()
+            .next()
+            .expect("a defect map comes with the master it was detected on");
+        Some(map.summary(&master.cfa_type))
     }
 
     /// The conditions not compared when the flat-dark was taken from the flat, or from any frame
@@ -374,9 +367,13 @@ impl CalibrationMasters {
     }
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map,
-    /// under `context`: its cancellation, which reads as [`io::ErrorKind::Interrupted`], and its
-    /// memory limit on each master's decode.
-    pub fn load(path: &Path, context: &LoadContext) -> io::Result<Self> {
+    /// under `context`: its cancellation, which reads as [`BundleError::Cancelled`], and its
+    /// memory limit on each master's decode. The file is memory-mapped, not copied into RAM.
+    ///
+    /// # Errors
+    ///
+    /// [`BundleError`], one variant for each way a file can fail to be a bundle of this version.
+    pub fn load(path: &Path, context: &LoadContext) -> Result<Self, BundleError> {
         fits::load(path, context)
     }
 

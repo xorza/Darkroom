@@ -1,4 +1,5 @@
-//! [`CfaLattice`]: the colour of each photosite, and each colour's same-colour neighbours.
+//! [`CfaLattice`]: the colour of each photosite, and each photosite's neighbours under the same
+//! filter.
 
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -19,7 +20,13 @@ struct Tap {
 }
 
 /// A colour filter array as a lattice: the colour of a photosite, and for every phase of the
-/// pattern the same-colour neighbours nearest first, in one flat table.
+/// pattern the neighbours under the same filter nearest first, in one flat table.
+///
+/// The same filter is the same colour, and on a Bayer sensor the same phase too: its two greens,
+/// one in the red rows (Gr) and one in the blue rows (Gb), are read through different neighbours
+/// and amplifier paths and can sit at different levels, so a green taken from the other phase would
+/// carry that imbalance into its repair. A Bayer photosite's neighbours are thus the stride-2
+/// lattice through it, as its red and blue already were.
 ///
 /// Every consumer that needs a photosite's same-colour surroundings reads them here: the defect and
 /// null repair, the cosmic-ray scans, and the deinterleave a 2-periodic pattern allows. A count of
@@ -63,7 +70,11 @@ impl CfaLattice {
                         (origin.x + shift).wrapping_add_signed(dx as isize),
                         (origin.y + shift).wrapping_add_signed(dy as isize),
                     );
-                    if cfa.color_at(position) == colour {
+                    let same_filter = match cfa {
+                        CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
+                        CfaType::Mono | CfaType::XTrans(_) => cfa.color_at(position) == colour,
+                    };
+                    if same_filter {
                         taps.push(Tap {
                             dx,
                             dy,
@@ -122,10 +133,10 @@ impl CfaLattice {
         }
     }
 
-    /// The median of `position`'s nearest same-colour neighbours that `mask` does not name, so a
-    /// defect is never repaired from another: 8 with their ties for mono and Bayer, which for a
-    /// Bayer green are its four diagonal greens at √2 and the four at 2, and 24 with their ties for
-    /// X-Trans. The pixel's own value when none is valid.
+    /// The median of `position`'s nearest neighbours under its filter that `mask` does not name, so
+    /// a defect is never repaired from another: 8 with their ties for mono and Bayer, which on a
+    /// Bayer sensor are the four at 2 and the four at 2√2 of its own phase, and 24 with their ties
+    /// for X-Trans. The pixel's own value when none is valid.
     pub(crate) fn median(
         &self,
         pixels: &Buffer2<f32>,
@@ -237,9 +248,9 @@ mod tests {
         offsets
     }
 
-    /// The nearest eight: mono's are the 8-connected ring; a Bayer red's are the stride-2 ring at
-    /// distances 2 and 2√2; a Bayer green's are its four diagonal greens at √2 and the four at 2,
-    /// not the stride-2 ring, which leaves the nearest four out.
+    /// The nearest eight: mono's are the 8-connected ring; every Bayer photosite's, a green's as a
+    /// red's, are the stride-2 ring of its own phase at distances 2 and 2√2. A green's four diagonal
+    /// greens at √2 are the other phase, and not among them.
     #[test]
     fn the_nearest_eight_are_the_nearest_rings() {
         let ring = |step: i32, diagonal: i32| {
@@ -258,7 +269,8 @@ mod tests {
         assert_eq!(sorted(offsets(&mono, Vec2us::new(3, 3), 8)), ring(1, 1));
         let bayer = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 0), 8)), ring(2, 2));
-        assert_eq!(sorted(offsets(&bayer, Vec2us::new(1, 0), 8)), ring(2, 1));
+        assert_eq!(sorted(offsets(&bayer, Vec2us::new(1, 0), 8)), ring(2, 2));
+        assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
     }
 
     /// Every X-Trans phase takes whole shells of equal distance: no same-colour neighbour outside the
@@ -282,22 +294,26 @@ mod tests {
         }
     }
 
-    /// With each colour held at its own constant, every pixel's same-colour median is its colour's
-    /// value, interior or border: a neighbour of another colour would mix them.
+    /// With each filter held at its own constant — each X-Trans colour, each Bayer phase, so Gr and
+    /// Gb differ — every pixel's median is its filter's value, interior or border: a neighbour under
+    /// another filter, a Gb beside a Gr included, would mix them.
     #[test]
-    fn the_median_reads_only_its_own_colour() {
+    fn the_median_reads_only_its_own_filter() {
         for cfa in [
             CfaType::XTrans(XTRANS_PATTERN),
             CfaType::Bayer(CfaPattern::Gbrg),
         ] {
             let lattice = CfaLattice::new(&cfa);
             let size = Size2us::new(25, 19);
-            let level = |colour: u8| 0.125 * f32::from(colour + 1);
+            let level = |position: Vec2us| match cfa {
+                CfaType::Bayer(_) => 0.125 * (1 + position.x % 2 + 2 * (position.y % 2)) as f32,
+                _ => 0.125 * f32::from(cfa.color_at(position) + 1),
+            };
             let pixels = Buffer2::new(
                 size.width,
                 size.height,
                 (0..size.pixel_count())
-                    .map(|index| level(cfa.color_at(Vec2us::new(index % 25, index / 25))))
+                    .map(|index| level(Vec2us::new(index % 25, index / 25)))
                     .collect(),
             );
             let mut scratch = Gathered::default();
@@ -306,7 +322,7 @@ mod tests {
                     let position = Vec2us::new(x, y);
                     assert_eq!(
                         lattice.median(&pixels, position, None, &mut scratch),
-                        level(cfa.color_at(position)),
+                        level(position),
                         "{cfa:?} at ({x}, {y})"
                     );
                 }
@@ -349,7 +365,9 @@ mod tests {
     }
 
     /// At the corner (0, 0) of a 4 × 4 RGGB frame the red neighbours inside are (2, 0), (0, 2) and
-    /// (2, 2) — the window clips the rest — so the median of 50, 60 and 70 is 60.
+    /// (2, 2) — the window clips the rest — so the median of 50, 60 and 70 is 60. The Gr at (1, 0)
+    /// has its own phase's (3, 0), (1, 2) and (3, 2) inside, at 20, 40 and 30, so its median is 30;
+    /// its diagonal Gb neighbours (0, 1) and (2, 1), at 1000, would make it 40.
     #[test]
     fn the_median_clips_at_the_border() {
         let lattice = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
@@ -358,9 +376,19 @@ mod tests {
         pixels[(2, 0)] = 50.0;
         pixels[(0, 2)] = 60.0;
         pixels[(2, 2)] = 70.0;
+        pixels[(3, 0)] = 20.0;
+        pixels[(1, 2)] = 40.0;
+        pixels[(3, 2)] = 30.0;
+        pixels[(0, 1)] = 1000.0;
+        pixels[(2, 1)] = 1000.0;
+        let mut scratch = Gathered::default();
         assert_eq!(
-            lattice.median(&pixels, Vec2us::new(0, 0), None, &mut Gathered::default()),
+            lattice.median(&pixels, Vec2us::new(0, 0), None, &mut scratch),
             60.0
+        );
+        assert_eq!(
+            lattice.median(&pixels, Vec2us::new(1, 0), None, &mut scratch),
+            30.0
         );
     }
 

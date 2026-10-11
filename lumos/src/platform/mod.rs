@@ -81,8 +81,8 @@ impl MappedFile {
     ///
     /// # Safety
     ///
-    /// Nothing changes the file while it is mapped: a kept frame is written once, under its own
-    /// name, and only replaced by a rename.
+    /// Nothing changes the file while it is mapped: a reader whose files are written whole under
+    /// their names and replaced only by a rename meets this for every file it wrote.
     pub(crate) unsafe fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
         // SAFETY: as this function's contract.

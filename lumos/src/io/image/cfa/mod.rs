@@ -11,6 +11,7 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use std::io;
 use std::path::Path;
 
+use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -91,6 +92,21 @@ impl CfaType {
             CfaType::Mono => 1,
             CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
         }
+    }
+
+    /// How many photosites of each colour, by [`Self::color_at`]'s index, a sensor of `size`
+    /// holds: each phase of the pattern counted over the columns and rows it falls on.
+    pub(crate) fn photosites_per_colour(&self, size: Size2us) -> ArrayVec<usize, 3> {
+        let period = self.period();
+        let mut counts: ArrayVec<usize, 3> = (0..self.num_colors()).map(|_| 0).collect();
+        for y in 0..period {
+            for x in 0..period {
+                let columns = size.width.saturating_sub(x).div_ceil(period);
+                let rows = size.height.saturating_sub(y).div_ceil(period);
+                counts[self.color_at(Vec2us::new(x, y)) as usize] += columns * rows;
+            }
+        }
+        counts
     }
 
     /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters`, `colors` and `cdesc` and
@@ -244,7 +260,7 @@ impl StackableImage for CfaImage {
     }
 
     fn into_parts(self) -> ImageParts {
-        let mut planes = arrayvec::ArrayVec::new();
+        let mut planes = ArrayVec::new();
         planes.push(self.data);
         ImageParts {
             planes,
@@ -314,7 +330,7 @@ impl CfaImage {
     /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
     /// fabrication.
     ///
-    /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
+    /// The same repair a `DefectMap` applies to hot and cold pixels, for the same
     /// reason and through the same neighbour search — mask included, so a null is never repaired
     /// from another null, nor from a value another repair made. Each repaired null is flagged
     /// [`QualityFlags::REPAIRED`] beside its `NO_DATA`, and a null already flagged so is left as

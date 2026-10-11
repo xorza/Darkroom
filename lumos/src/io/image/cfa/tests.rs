@@ -689,6 +689,10 @@ fn each_pattern_names_its_demosaic() {
 /// The colour at every position of two periods, for each pattern, from each source that states it:
 /// the `BAYERPAT` spelling read letter by letter, LibRaw's `filters` word, `CfaPattern`, and
 /// `CfaType`; mono is red-index 0 everywhere and X-Trans is its rows, both wrapping.
+///
+/// The photosites of each colour, counted per phase, match a count of `color_at` over the frame. A
+/// 5 × 3 RGGB has its reds at even columns of even rows, 3 × 2 = 6, its blues at odd of odd, 2 × 1
+/// = 2, and the greens the other 7; a 6 × 6 X-Trans period has 8 reds, 20 greens and 8 blues.
 #[test]
 fn every_pattern_names_the_colour_at_each_position() {
     let colour_of = |letter: u8| match letter {
@@ -721,6 +725,32 @@ fn every_pattern_names_the_colour_at_each_position() {
             assert_eq!(
                 CfaType::XTrans(XTRANS_PATTERN).color_at(pos),
                 XTRANS_PATTERN.rows()[y % 6][x % 6]
+            );
+        }
+    }
+
+    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let xtrans = CfaType::XTrans(XTRANS_PATTERN);
+    assert_eq!(
+        bayer.photosites_per_colour(Size2us::new(5, 3)).as_slice(),
+        [6, 7, 2]
+    );
+    assert_eq!(
+        xtrans.photosites_per_colour(Size2us::new(6, 6)).as_slice(),
+        [8, 20, 8]
+    );
+    for cfa in [CfaType::Mono, bayer, xtrans] {
+        for size in [Size2us::new(1, 1), Size2us::new(5, 3), Size2us::new(7, 13)] {
+            let mut counted = vec![0; cfa.num_colors()];
+            for y in 0..size.height {
+                for x in 0..size.width {
+                    counted[cfa.color_at(Vec2us::new(x, y)) as usize] += 1;
+                }
+            }
+            assert_eq!(
+                cfa.photosites_per_colour(size).as_slice(),
+                counted,
+                "{cfa:?} {size:?}"
             );
         }
     }

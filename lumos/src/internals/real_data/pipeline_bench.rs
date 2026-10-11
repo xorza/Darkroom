@@ -118,11 +118,7 @@ fn bench_full_pipeline() {
     );
 
     if let Some(defects) = masters.defect_summary() {
-        println!(
-            "  Defective pixels: {} ({:.4}%)",
-            defects.hot_pixels + defects.cold_pixels,
-            defects.percentage
-        );
+        println!("  {defects}");
     }
     println!("  Step 1 total: {:?}", step_start.elapsed());
 

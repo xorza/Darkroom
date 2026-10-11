@@ -200,7 +200,7 @@ fn calibrate_snapshot() {
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "1ba75e73554431eb");
+    assert_snapshot("calibration", &snapshot, "c76adc4ec4532692");
 
     let mut snapshot = Snapshot::default();
     let xtrans = make_cfa(

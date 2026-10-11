@@ -5,7 +5,7 @@ mod synthetic;
 
 use crate::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
-use crate::calibration_masters::defect_map::DefectMap;
+use crate::calibration_masters::defect_map::{DefectMap, HotPixels};
 use crate::calibration_masters::error::{CalibrationError, DarkMismatch};
 use crate::calibration_masters::master_cache::{MasterCache, MasterInputs};
 use crate::calibration_masters::master_subtraction::Subtractor;
@@ -35,16 +35,16 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
-    ImageMetadata, MasterRole,
+    BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColourDefects,
+    DefectSummary, DefectTableError, ImageError, ImageMetadata, MasterRole,
 };
 use common::TempDir;
 use fits_well::FitsReader;
+use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
 use std::convert::Infallible;
 use std::fs;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -613,13 +613,14 @@ fn new_constructor() {
         // The flat-dark is spent on the flat and not kept.
         vec!["dark", "flat", "bias", "defects"]
     );
+    let summary = masters.defect_summary().unwrap();
     assert_eq!(
-        masters.defect_summary(),
-        Some(DefectSummary {
-            hot_pixels: 0,
-            cold_pixels: 0,
-            percentage: 0.0,
-        })
+        (
+            summary.hot_pixels,
+            summary.cold_pixels,
+            summary.defective_pixels
+        ),
+        (0, 0, 0)
     );
 }
 
@@ -697,13 +698,14 @@ fn new_no_dark_no_hot_pixels() {
             CalibrationComponent::Defects
         ]
     );
+    let summary = masters.defect_summary().unwrap();
     assert_eq!(
-        masters.defect_summary(),
-        Some(DefectSummary {
-            hot_pixels: 0,
-            cold_pixels: 0,
-            percentage: 0.0,
-        })
+        (
+            summary.hot_pixels,
+            summary.cold_pixels,
+            summary.defective_pixels
+        ),
+        (0, 0, 0)
     );
 }
 
@@ -966,7 +968,7 @@ fn defect_detection_zero_median_no_false_positives() {
         .unwrap();
 
     // The tiny values one ADC step up are not flagged; the genuine outlier at 0.5 is, alone.
-    assert_eq!(defect_map.hot_indices(), [50]);
+    assert_eq!(defect_map.hot().indices, [50]);
 }
 
 /// A hot pixel is repaired from its own colour. The light's red, green and blue sit at 0.5, 0.3 and
@@ -989,14 +991,18 @@ fn calibrate_hot_pixel_correction() {
         dark: Some(cfa_from_plane(dark_pixels, pattern)),
         ..Default::default()
     });
+    // The hot pixel at (2, 2) is red, one of the nine reds of 6 × 6 RGGB.
+    let summary = masters.defect_summary().unwrap();
     assert_eq!(
-        masters.defect_summary(),
-        Some(DefectSummary {
-            hot_pixels: 1,
-            cold_pixels: 0,
-            percentage: 100.0 / (w * h) as f32,
-        })
+        (
+            summary.hot_pixels,
+            summary.cold_pixels,
+            summary.defective_pixels
+        ),
+        (1, 0, 1)
     );
+    assert_eq!(summary.percentage(), 100.0 / (w * h) as f32);
+    assert_eq!(summary.colours[0].percentage(), 100.0 / 9.0);
 
     let baseline = [0.5f32, 0.3, 0.2];
     let mut light_pixels = Buffer2::new_default(w, h);
@@ -1072,6 +1078,18 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         QualityFlags::from_byte(if index == 5 { 6 } else { 0 })
     });
     dark.flags = dark_flags.clone();
+    // Two hot pixels with excesses f32 rounds, and pixel 10 cold as well.
+    masters.defect_map = Some(
+        DefectMap::from_lists(
+            Size2us::new(4, 4),
+            HotPixels {
+                indices: vec![5, 10],
+                excess: vec![0.1, 3.0e-5],
+            },
+            vec![10],
+        )
+        .unwrap(),
+    );
     let prepared_bits = bits(masters.flat.as_ref().unwrap().divisor().data.pixels());
 
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
@@ -1150,7 +1168,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     fs::write(&orphan, &cache_bytes).unwrap();
     rewrite_fits(&orphan, |index, _, _| index != 1);
     let error = CalibrationMasters::load(&orphan, &LoadContext::default()).unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert!(matches!(error, BundleError::Flags(_)), "{error:?}");
     assert!(
         error
             .to_string()
@@ -1160,12 +1178,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     // The caller's context reaches every master's decode: a cancelled one stops the load.
     let cancel = CancelToken::new();
     cancel.cancel();
-    assert_eq!(
-        CalibrationMasters::load(&path, &LoadContext::new(cancel, u64::MAX))
-            .unwrap_err()
-            .kind(),
-        ErrorKind::Interrupted
-    );
+    assert!(matches!(
+        CalibrationMasters::load(&path, &LoadContext::new(cancel, u64::MAX)),
+        Err(BundleError::Cancelled)
+    ));
 
     let mut invalid_version = cache_bytes.clone();
     let version_card = invalid_version
@@ -1176,14 +1192,12 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .iter()
         .rposition(u8::is_ascii_digit)
         .unwrap();
-    invalid_version[version_card + version_digit] = b'0';
+    invalid_version[version_card + version_digit] = b'4';
     fs::write(&path, invalid_version).unwrap();
-    assert_eq!(
-        CalibrationMasters::load(&path, &LoadContext::default())
-            .unwrap_err()
-            .kind(),
-        ErrorKind::InvalidData
-    );
+    assert!(matches!(
+        CalibrationMasters::load(&path, &LoadContext::default()),
+        Err(BundleError::Version { found: 4 })
+    ));
 
     // The bias is stored as it is, 0.1 at every pixel; the dark beside it holds its thermal signal
     // alone, 0.05 − 0.1, and records that it lost the bias.
@@ -1204,11 +1218,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .unwrap();
     invalid_data[pixel_offset] ^= 0x01;
     fs::write(&path, invalid_data).unwrap();
-    assert_eq!(
-        CalibrationMasters::load(&path, &LoadContext::default())
-            .unwrap_err()
-            .kind(),
-        ErrorKind::InvalidData
+    let error = CalibrationMasters::load(&path, &LoadContext::default()).unwrap_err();
+    assert!(
+        matches!(error, BundleError::Checksum { hdu: 4 }),
+        "{error:?}"
     );
 
     assert_eq!(
@@ -1242,6 +1255,75 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         masters.components().collect::<Vec<_>>()
     );
     assert_eq!(loaded.defect_summary(), masters.defect_summary());
+    let (loaded_defects, defects) = (
+        loaded.defect_map.as_ref().unwrap(),
+        masters.defect_map.as_ref().unwrap(),
+    );
+    assert_eq!(loaded_defects.hot(), defects.hot());
+    assert_eq!(loaded_defects.cold_indices(), [10]);
+
+    // Each way a bundle can be malformed, rewritten with fresh checksums so the check behind them
+    // is what refuses it. The HDUs are the primary, the dark, its flags, the flat, the bias and the
+    // defect table, whose rows are 13 bytes — KIND, INDEX (8, big-endian), EXCESS (4) — hot 5 and
+    // 10, then cold 10.
+    let malformed = directory.join("malformed.fits");
+    let refused = |edit: &mut dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool| {
+        fs::write(&malformed, &cache_bytes).unwrap();
+        rewrite_fits(&malformed, edit);
+        CalibrationMasters::load(&malformed, &LoadContext::default()).unwrap_err()
+    };
+    let set = |hdu: usize, key: &'static str, value: &'static str| {
+        refused(&mut |index, header, _| {
+            if index == hdu {
+                header.set(key, value).unwrap();
+            }
+            true
+        })
+    };
+    assert!(matches!(
+        set(0, "LUMOSFMT", "OTHER"),
+        BundleError::NotABundle
+    ));
+    assert!(matches!(
+        set(4, "EXTNAME", "MASTER_FOO"),
+        BundleError::UnknownExtension { extname } if extname == "MASTER_FOO"
+    ));
+    assert!(matches!(
+        set(3, "EXTNAME", "MASTER_BIAS"),
+        BundleError::DuplicateExtension { extname } if extname == "MASTER_BIAS"
+    ));
+    assert!(matches!(
+        refused(&mut |index, _, _| !(1..=3).contains(&index)),
+        BundleError::DefectsWithoutMaster
+    ));
+    let table = |at: usize, bytes: &[u8]| {
+        refused(&mut |index, _, data| {
+            if index == 5 {
+                data[at..at + bytes.len()].copy_from_slice(bytes);
+            }
+            true
+        })
+    };
+    for (error, expected) in [
+        (table(0, &[2]), DefectTableError::Kind { row: 0, kind: 2 }),
+        (
+            table(2 * 13 + 1, &16i64.to_be_bytes()),
+            DefectTableError::Index { row: 2 },
+        ),
+        (
+            table(13 + 9, &(-1.0f32).to_be_bytes()),
+            DefectTableError::Excess { row: 1 },
+        ),
+        (
+            table(2 * 13 + 9, &0.5f32.to_be_bytes()),
+            DefectTableError::Excess { row: 2 },
+        ),
+    ] {
+        assert!(
+            matches!(error, BundleError::DefectTable(found) if found == expected),
+            "{error:?}"
+        );
+    }
 
     let mut actual = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     loaded.calibrate(&mut actual).unwrap();
@@ -1276,8 +1358,17 @@ fn ram_bytes_sums_present_frames_and_defects() {
     // 3 × 8 B.
     let mask_bytes = 8 * 2 * size_of::<u64>();
     assert_eq!(DefectMap::new(Size2us::new(10, 8)).ram_bytes(), mask_bytes);
-    let defects = DefectMap::from_indices(Size2us::new(10, 8), vec![1, 2], vec![7]).unwrap();
-    assert_eq!(defects.ram_bytes(), 3 * size_of::<usize>() + mask_bytes);
+    let defects = DefectMap::from_lists(
+        Size2us::new(10, 8),
+        HotPixels {
+            indices: vec![1, 2],
+            excess: vec![0.5, 0.25],
+        },
+        vec![7],
+    )
+    .unwrap();
+    let list_bytes = 3 * size_of::<usize>() + 2 * size_of::<f32>();
+    assert_eq!(defects.ram_bytes(), list_bytes + mask_bytes);
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
@@ -1291,20 +1382,29 @@ fn ram_bytes_sums_present_frames_and_defects() {
         defect_map: Some(defects),
         imposed: None,
     };
-    // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 24 + 128.
+    // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 32 + 128.
     assert_eq!(
         masters.ram_bytes(),
-        10 * 8 * 4 + 4 * 4 * 4 + 3 * size_of::<usize>() + mask_bytes
+        10 * 8 * 4 + 4 * 4 * 4 + list_bytes + mask_bytes
     );
-    // Three of the 80 pixels: 3.75%.
+    // Three of the 80 pixels of a mono sensor: 3.75%.
+    let summary = masters.defect_summary().unwrap();
     assert_eq!(
-        masters.defect_summary(),
-        Some(DefectSummary {
+        summary,
+        DefectSummary {
             hot_pixels: 2,
             cold_pixels: 1,
-            percentage: 3.75,
-        })
+            defective_pixels: 3,
+            pixels: 80,
+            colours: vec![ColourDefects {
+                hot: 2,
+                cold: 1,
+                defective: 3,
+                photosites: 80,
+            }],
+        }
     );
+    assert_eq!(summary.percentage(), 3.75);
 }
 
 #[test]
