@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| I5 | Master cache key ignores how lumos stacks | Do | B3 |
 | I3 | Pairwise CFA-drizzle normalization fits thin pairs | Do | B4 |
 | Q6 | Cold-read eviction for the spill benches | Do (prerequisite) | B5 |
 | I4, PIP-19, PIP-5 | Spilled reads fault maps the budget never counts | Do | B6 |
@@ -50,40 +49,10 @@ gives PIP-19 its overlap.
 ## Dependency graph
 
 ```
-B3, B4, B9                  independent
+B4, B9                      independent
 B5 → B6 → B8                eviction helper → explicit spill reads → mosaic parking measured
-B7                          independent; after B3 if both are open, as both move sidecar pins
+B7                          independent
 ```
-
----
-
-## B3. A master is keyed by how lumos stacks it (I5)
-
-**Evidence.** `lens/src/astro/nodes/calibration.rs`, `SourceDirectoryCache`, keys a master by
-`MasterInputs`: its frames' names and `FileIdentity`, and the subtracted master's frames. Nothing
-in the key moves when lumos's decode, its decode options (`IngestConfig::fits`), or the master
-stack itself (`stack_cfa_master`, the role presets, `MasterSubtraction`, the null repair) change.
-A master built by an older lumos is reused as current. The kept frame cache's `CacheKey` carries
-the decode version and options; no pin covers the master stack — `calibrate_snapshot` starts
-from masters given as images.
-
-**Solution.**
-1. `internals/characterization`: a `master_snapshot` that stacks a bias, a dark and a flat with
-   the bias taken from each frame, through `stack_cfa_master` on mosaic FITS frames, and pins
-   their planes and flags as `MASTER_PIN`.
-2. `frame_store/cache_key.rs` (or a `master_recipe.rs` beside `master_cache.rs`):
-   `MASTER_VERSION = pins_fingerprint(&[every DECODE_PINS entry, MASTER_PIN])`, derived like
-   `DECODE_VERSION`.
-3. `MasterInputs` gains `recipe: u64`: FNV-1a over `MASTER_VERSION`, the decode options of the
-   ingest's `LoadContext` (the bytes `CacheKey::new` already hashes, factored into one function
-   both call) and the role. `CalibrationMasters::build` fills it; its doc says a cache keys by it.
-4. `lens`: `CachePlace::of` appends `recipe {:016x}` to the key.
-
-**Test.** lumos: two FITS option sets give two recipes and two roles give two recipes (A → X,
-B → Y, `X != Y`); the recipe is stable across two builds. lens: a key changes with the recipe
-alone, the frames unchanged.
-
-**Crates:** lumos, lens, darkroom.
 
 ---
 
