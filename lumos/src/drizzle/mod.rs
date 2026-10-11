@@ -6,7 +6,6 @@ pub(crate) mod deposit;
 pub(crate) mod drizzle_result;
 pub(crate) mod drizzle_shape;
 pub(crate) mod error;
-pub(crate) mod geometry;
 pub(crate) mod stack;
 
 #[cfg(all(test, feature = "bench"))]

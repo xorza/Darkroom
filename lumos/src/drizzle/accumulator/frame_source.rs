@@ -7,25 +7,19 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
+use crate::drizzle::accumulator::drop_quad::DropQuad;
+use crate::drizzle::accumulator::input_map::InputMap;
 use crate::drizzle::deposit::Deposit;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::registration::transform::inverse_warp::InverseWarp;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.
 const JACOBIAN_MIN: f64 = 1e-30;
-
-/// Output pixels between boundary samples when a SIP band's outline is taken back to the input.
-///
-/// A SIP edge bends away from the chord between two samples by at most `stride²/8·|∂²W|`, and a
-/// fitted field's second derivative is far under 1e-2 per pixel, so at this stride the bend is
-/// under 0.1 input pixel — inside the extra pixel [`FrameSource::band_scan`] adds for it.
-const SIP_BOUNDARY_STRIDE: usize = 8;
 
 /// One input pixel's samples, one per channel, and the flags it carries to every output pixel its
 /// drop reaches.
@@ -65,16 +59,6 @@ pub(super) struct Droplet {
     pub(super) weight: f64,
 }
 
-/// One input pixel's drop as the quadrilateral it maps to, for the kernel that clips exactly.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct DropQuad {
-    /// The shrunken drop's corners in output coordinates, wound counterclockwise: BL, BR, TR, TL.
-    pub(super) corners: [DVec2; 4],
-    /// The pixel weight ÷ |signed area of `corners`|: the square kernel spreads it over the area
-    /// the drop maps to, so it deposits the pixel weight in total.
-    pub(super) weight: f64,
-}
-
 /// What became of one input pixel's drop.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Drop<T> {
@@ -85,59 +69,6 @@ pub(super) enum Drop<T> {
     /// The pixel's position could not be inverted through the warp's SIP correction. It deposits
     /// nothing, and the drizzle counts it.
     Unconverged,
-}
-
-/// Input pixels onto the output grid, and output points back onto the input.
-#[derive(Debug)]
-enum InputMap {
-    /// A warp without SIP: one transform each way.
-    Transform {
-        to_output: Transform,
-        to_input: Transform,
-    },
-    /// A warp with SIP — boxed, since it carries two copies of the polynomial and the source is
-    /// built once per frame.
-    Sip(Box<SipMap>),
-}
-
-/// [`InputMap::Sip`]: forward by the warp itself, backward by its Newton inverse, each with the
-/// output grid's own map.
-#[derive(Debug)]
-struct SipMap {
-    warp: WarpTransform,
-    inverse: InverseWarp,
-    grid: Transform,
-}
-
-impl InputMap {
-    /// `grid ∘ warp⁻¹`, the map from input pixels to output pixels.
-    fn new(warp: &WarpTransform, grid: Transform) -> Self {
-        if warp.has_sip() {
-            return Self::Sip(Box::new(SipMap {
-                warp: warp.clone(),
-                inverse: warp.inverse(),
-                grid,
-            }));
-        }
-        let to_output = grid.compose(&warp.transform.inverse());
-        Self::Transform {
-            to_output,
-            to_input: to_output.inverse(),
-        }
-    }
-
-    /// Where input point `p` lands on the output grid, or `None` when the SIP inverse does not
-    /// converge there.
-    #[inline]
-    fn position(&self, p: DVec2) -> Option<DVec2> {
-        match self {
-            Self::Transform { to_output, .. } => Some(to_output.apply(p)),
-            Self::Sip(sip) => sip
-                .inverse
-                .position(p)
-                .map(|position| sip.grid.apply(position)),
-        }
-    }
 }
 
 /// A square drop's corners about its centre, in units of its half side, wound counterclockwise:
@@ -157,12 +88,12 @@ const STRIP_GUARD: f64 = 1e-6;
 /// A band's widened output rectangle taken back onto the input as a closed outline, and how far
 /// from it, in input pixels, a pixel whose drop reaches inside can lie.
 #[derive(Debug, Clone)]
-struct Outline {
-    vertices: Vec<DVec2>,
-    reach: f64,
+pub(super) struct Outline {
+    pub(super) vertices: Vec<DVec2>,
+    pub(super) reach: f64,
     /// Whether its columns bound a scan: a closed-form outline's do, see
     /// [`FrameSource::band_scan`].
-    bounds_columns: bool,
+    pub(super) bounds_columns: bool,
 }
 
 impl Outline {
@@ -401,7 +332,7 @@ impl<'a> FrameSource<'a> {
         let right = output_width as f64 - 1.0 + output_margin;
         let width = self.size.width;
         let height = self.size.height;
-        let Some(outline) = self.outline(low, high, left, right, input_margin) else {
+        let Some(outline) = self.map.outline(low, high, left, right, input_margin) else {
             return BandScan {
                 rows: 0..height,
                 outline: None,
@@ -418,82 +349,6 @@ impl<'a> FrameSource<'a> {
             rows: start..end.min(height).max(start),
             outline: outline.bounds_columns.then_some(outline),
             width,
-        }
-    }
-
-    /// The output rectangle `[left, right] × [low, high]` taken back onto the input, reaching
-    /// `input_margin` beyond, or `None` when no outline bounds it and the whole frame has to be
-    /// scanned.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "an output rectangle's width and height are non-negative, and an empty one saturates to 0"
-    )]
-    fn outline(
-        &self,
-        low: f64,
-        high: f64,
-        left: f64,
-        right: f64,
-        input_margin: f64,
-    ) -> Option<Outline> {
-        match &self.map {
-            InputMap::Transform { to_input, .. } => {
-                let corners = [
-                    DVec2::new(left, low),
-                    DVec2::new(right, low),
-                    DVec2::new(right, high),
-                    DVec2::new(left, high),
-                ];
-                // The corner hull bounds the interior only while the inverse's homogeneous divisor
-                // keeps one sign across the rectangle. That divisor is affine in the output
-                // coordinates, so a sign change between corners means the rectangle straddles the
-                // vanishing line, where the mapped region is unbounded and four corners bound
-                // nothing. Only a homography can do it — every other model divides by a constant 1.
-                // On one side of it a homography maps the rectangle's edges to straight edges.
-                let m = to_input.matrix();
-                let divisor = |p: DVec2| m[6] * p.x + m[7] * p.y + m[8];
-                let reference = divisor(corners[0]);
-                if !corners
-                    .iter()
-                    .all(|&corner| divisor(corner) * reference > 0.0)
-                {
-                    return None;
-                }
-                Some(Outline {
-                    vertices: corners.map(|corner| to_input.apply(corner)).to_vec(),
-                    reach: input_margin,
-                    bounds_columns: true,
-                })
-            }
-            InputMap::Sip(sip) => {
-                // A non-linear map bends straight edges, so the outline is sampled rather than its
-                // corners taken, and one input pixel is added for the bend between samples — see
-                // `SIP_BOUNDARY_STRIDE`. The image of a region's boundary bounds the image of the
-                // region for any map without folds, which a converging inverse guarantees here.
-                let from_grid = sip.grid.inverse();
-                let back = |p: DVec2| sip.warp.apply(from_grid.apply(p));
-                let along = |extent: f64| {
-                    (0..=extent.ceil() as usize)
-                        .step_by(SIP_BOUNDARY_STRIDE)
-                        .map(move |offset| (offset as f64).min(extent))
-                        .chain([extent])
-                };
-                let (width, height) = (right - left, high - low);
-                let bottom = along(width).map(|dx| DVec2::new(left + dx, low));
-                let right_edge = along(height).map(|dy| DVec2::new(right, low + dy));
-                let top = along(width).map(|dx| DVec2::new(right - dx, high));
-                let left_edge = along(height).map(|dy| DVec2::new(left, high - dy));
-                Some(Outline {
-                    vertices: bottom
-                        .chain(right_edge)
-                        .chain(top)
-                        .chain(left_edge)
-                        .map(back)
-                        .collect(),
-                    reach: input_margin + 1.0,
-                    bounds_columns: false,
-                })
-            }
         }
     }
 

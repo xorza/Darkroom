@@ -27,7 +27,6 @@ use crate::math::size2us::Size2us;
 use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::interior_window::InteriorWindow;
-use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
@@ -185,7 +184,7 @@ impl<'a> FrameSampler<'a> {
         x: usize,
         channels: &mut [&mut [f32]],
     ) -> PixelQuality {
-        let index = kernel::nearest_index(self.size, position);
+        let index = position.nearest_index(self.size);
         if self
             .flagged
             .and_then(FlaggedSources::validity)

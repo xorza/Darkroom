@@ -155,6 +155,7 @@ pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
 pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 pub use combine::rejection::rejection_scale::RejectionScale;
+pub use combine::rejection::sigma_bounds::SigmaBounds;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
@@ -179,7 +180,7 @@ pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;
 pub use pipeline::result::{AlignStackResult, AlignmentSummary};
 
-pub use drizzle::accumulator::DrizzleFrame;
+pub use drizzle::accumulator::drizzle_frame::DrizzleFrame;
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use drizzle::drizzle_result::DrizzleResult;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};

@@ -1,6 +1,8 @@
 use std::f64::consts::PI;
 
-use super::*;
+use glam::DVec2;
+
+use crate::drizzle::accumulator::drop_quad::{DropQuad, sgarea};
 
 /// `sgarea`: the signed area between a segment and the x axis, inside the unit square — positive
 /// left to right. Each row is `(from, to, area, derivation)`. Every area is a sum of products of
@@ -71,10 +73,10 @@ fn sgarea_hand_values() {
     }
 }
 
-/// `boxer`: the area a quadrilateral shares with the unit cell whose lower-left corner is given.
+/// `overlap`: the area a quadrilateral shares with the unit cell whose lower-left corner is given.
 /// Each row is `(corner, quad, area, derivation)`; the axis-aligned ones are exact.
 #[test]
-fn boxer_hand_values() {
+fn overlap_hand_values() {
     let square = |x: f64, y: f64, side: f64| {
         [
             DVec2::new(x, y),
@@ -116,7 +118,11 @@ fn boxer_hand_values() {
             "the diamond on the edge midpoints: half the cell",
         ),
     ] {
-        let area = boxer(DVec2::new(corner.0, corner.1), &quad);
+        let area = DropQuad {
+            corners: quad,
+            weight: 1.0,
+        }
+        .overlap(DVec2::new(corner.0, corner.1));
         assert_eq!(area, expected, "{derivation}");
     }
 }
@@ -128,11 +134,15 @@ fn boxer_hand_values() {
 /// With `h² = (2 − √3)/8` the four triangles take `8h²/√3 = 2/√3 − 1`, and the overlap is `2 −
 /// 2/√3`. The clipping is f64 arithmetic on irrational corners: a few ulps of 1.
 #[test]
-fn boxer_of_a_turned_square_is_the_square_less_four_triangles() {
+fn the_overlap_of_a_turned_square_is_the_square_less_four_triangles() {
     let (sin, cos) = (PI / 6.0).sin_cos();
     let quad = [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
         .map(|(dx, dy)| DVec2::new(0.5 + dx * cos - dy * sin, 0.5 + dx * sin + dy * cos));
-    let area = boxer(DVec2::ZERO, &quad);
+    let area = DropQuad {
+        corners: quad,
+        weight: 1.0,
+    }
+    .overlap(DVec2::ZERO);
     let expected = 2.0 - 2.0 / 3f64.sqrt();
     assert!(
         (area - expected).abs() <= 16.0 * f64::EPSILON,

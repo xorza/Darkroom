@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use crate::combine::error::StackError;
 use crate::combine::stack;
-use crate::drizzle::accumulator::DrizzleFrame;
+use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::error::DrizzleError;
 use crate::drizzle::stack::drizzle_stack;

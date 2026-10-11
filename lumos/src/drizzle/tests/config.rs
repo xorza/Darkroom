@@ -13,8 +13,7 @@ fn drizzle_config_presets() {
     let x1_5 = DrizzleConfig::x1_5();
     assert_eq!(x1_5.scale, 1.5);
 
-    let x2 = DrizzleConfig::x2();
-    assert_eq!(x2.scale, 2.0);
+    assert_eq!(DrizzleConfig::default().scale, 2.0);
 
     let x3 = DrizzleConfig::x3();
     assert_eq!(x3.scale, 3.0);
@@ -112,7 +111,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 
 #[test]
 fn drizzle_output_grid_is_the_input_scaled() {
-    let config = DrizzleConfig::x2();
+    let config = DrizzleConfig::default();
     let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
     let dims = acc.finalize().image.dimensions();
     assert_eq!(dims.width(), 200);

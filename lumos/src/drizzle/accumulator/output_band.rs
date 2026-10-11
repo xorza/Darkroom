@@ -6,11 +6,9 @@ use glam::DVec2;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::PlaneSpan;
-use crate::drizzle::accumulator::frame_source::{
-    BandScan, Drop, DropQuad, Fluxes, FrameSource, InputPixel,
-};
+use crate::drizzle::accumulator::drop_quad::DropQuad;
+use crate::drizzle::accumulator::frame_source::{BandScan, Drop, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
-use crate::drizzle::geometry::boxer;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::vec2us::Vec2us;
 
@@ -261,7 +259,7 @@ impl<'a> OutputBand<'a> {
     ///
     /// For each input pixel, transforms all 4 corners of the (pixfrac-shrunken) drop to output
     /// coordinates, then iterates the output pixels in the bounding box and computes the exact
-    /// overlap via `boxer()`.
+    /// overlap via [`DropQuad::overlap`].
     ///
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square`.
     fn distribute_square(
@@ -292,10 +290,10 @@ impl<'a> OutputBand<'a> {
             for oy in rows {
                 let base = band.row_base(oy);
                 for ox in cols.clone() {
-                    // `boxer` clips against the unit square, so it takes the cell's lower-left
+                    // The overlap clips against the unit square, so it takes the cell's lower-left
                     // corner rather than its centre.
                     let corner = DVec2::new(ox as f64 - 0.5, oy as f64 - 0.5);
-                    let overlap = boxer(corner, &drop.corners);
+                    let overlap = drop.overlap(corner);
                     if overlap > 0.0 {
                         band.accumulate(&fluxes, base + ox, (overlap * drop.weight) as f32);
                     }

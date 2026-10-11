@@ -19,6 +19,7 @@
 
 pub(crate) mod dmat3;
 pub(crate) mod error_function;
+pub(crate) mod floor_i32;
 pub(crate) mod fwhm;
 pub(crate) mod size2us;
 pub(crate) mod urect;

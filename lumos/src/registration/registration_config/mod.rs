@@ -17,10 +17,10 @@ pub enum InterpolationMethod {
     Bicubic,
     /// Lanczos-2 (4x4 kernel) - high quality
     Lanczos2,
-    /// Lanczos-3 (6x6 kernel) - highest quality, default
+    /// Lanczos-3 (6×6 taps), the default
     #[default]
     Lanczos3,
-    /// Lanczos-4 (8x8 kernel) - extreme quality
+    /// Lanczos-4 (8×8 taps): a sharper frequency cutoff than Lanczos-3, at more ringing and cost
     Lanczos4,
 }
 
