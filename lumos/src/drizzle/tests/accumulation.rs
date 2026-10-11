@@ -19,7 +19,7 @@ fn a_flat_frame_at_scale_2_covers_every_cell() {
     let size = Size2us::new(100, 100);
     let product = drizzle_one(
         size,
-        DrizzleConfig::x2(),
+        DrizzleConfig::default(),
         constant_image(size, 0.5),
         &Transform::identity(),
         None,
@@ -476,7 +476,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
     let product = |quality| {
         let config = DrizzleConfig {
             min_weight_fraction: 0.5,
-            ..DrizzleConfig::x2()
+            ..DrizzleConfig::default()
         };
         drizzle_images(
             drizzle_frames(vec![image.clone()], &[transform]),
@@ -778,7 +778,7 @@ fn a_band_scan_covers_every_reaching_drop() {
 
 #[test]
 fn drizzle_accumulator_rejects_invalid_frame_inputs() {
-    let config = DrizzleConfig::x2();
+    let config = DrizzleConfig::default();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
 
     let mut frame = DrizzleFrame::new(

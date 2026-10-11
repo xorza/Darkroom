@@ -26,6 +26,7 @@ use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
+use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::trim_config::TrimConfig;
@@ -34,12 +35,12 @@ use crate::error::InvalidConfigField;
 use crate::math::sum;
 
 /// An iteration cap must leave at least one pass to run. Shared by the methods that iterate.
-fn validate_max_iterations(max_iterations: u32) -> Result<(), InvalidConfigField> {
+fn validate_max_passes(max_passes: u32) -> Result<(), InvalidConfigField> {
     InvalidConfigField::check(
-        max_iterations >= 1,
-        "max_iterations",
+        max_passes >= 1,
+        "max_passes",
         "at least 1",
-        f64::from(max_iterations),
+        f64::from(max_passes),
     )
 }
 
@@ -62,29 +63,24 @@ pub enum Rejection {
 
 impl Default for Rejection {
     fn default() -> Self {
-        Self::SigmaClip(SigmaClipConfig::new(2.5, 3))
+        Self::SigmaClip(SigmaClipConfig::default())
     }
 }
 
 impl Rejection {
-    /// Create sigma clipping with default iterations.
+    /// Sigma clipping to `sigma` either side, for at most 3 passes.
     pub const fn sigma_clip(sigma: f32) -> Self {
-        Self::SigmaClip(SigmaClipConfig::new(sigma, 3))
+        Self::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(sigma), 3))
     }
 
-    /// Create asymmetric sigma clipping.
-    pub const fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
-        Self::SigmaClip(SigmaClipConfig::new_asymmetric(sigma_low, sigma_high, 3))
-    }
-
-    /// Create winsorized sigma clipping.
+    /// Winsorized sigma clipping to `sigma` either side.
     pub const fn winsorized(sigma: f32) -> Self {
-        Self::Winsorized(WinsorizedClipConfig::new(sigma))
+        Self::Winsorized(WinsorizedClipConfig::new(SigmaBounds::symmetric(sigma)))
     }
 
-    /// Create linear fit clipping with symmetric thresholds.
+    /// Linear fit clipping to `sigma` either side, for at most 4 passes.
     pub const fn linear_fit(sigma: f32) -> Self {
-        Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
+        Self::LinearFit(LinearFitClipConfig::new(SigmaBounds::symmetric(sigma), 4))
     }
 
     /// Create a trim of the same share from each end.
@@ -131,8 +127,8 @@ impl Rejection {
     const fn passes(&self) -> usize {
         match self {
             Self::None => 0,
-            Self::SigmaClip(config) => config.max_iterations as usize,
-            Self::LinearFit(config) => config.passes(),
+            Self::SigmaClip(config) => config.max_passes as usize,
+            Self::LinearFit(config) => config.max_passes as usize,
             Self::Winsorized(_) | Self::Trim(_) | Self::Gesd(_) => 1,
         }
     }

@@ -26,8 +26,9 @@ pub enum DrizzleKernel {
     /// Gaussian droplet whose FWHM is the drop size, `pixfrac·scale` output pixels, as in
     /// `STScI` drizzle. Smoother output, slight flux redistribution.
     Gaussian,
-    /// Lanczos kernel for high-quality interpolation.
-    /// Best quality but slowest. Only valid at pixfrac=1.0, scale=1.0.
+    /// A Lanczos interpolation of the frame at each output pixel. Only valid at pixfrac = 1 and
+    /// scale = 1, where it resamples rather than drizzles, and the slowest kernel. Its weights go
+    /// negative, so it rings at sharp edges as any Lanczos resampling does.
     Lanczos,
 }
 
@@ -99,11 +100,6 @@ impl DrizzleConfig {
             (input.width as f32 * self.scale).ceil() as usize,
             (input.height as f32 * self.scale).ceil() as usize,
         )
-    }
-
-    /// Create config for 2x super-resolution with default parameters.
-    pub fn x2() -> Self {
-        Self::default()
     }
 
     /// Create config for 1.5x super-resolution.

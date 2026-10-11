@@ -51,7 +51,7 @@ fn nearest_rounds_a_half_up() {
     ] {
         let position = SourcePosition::within(DVec2::new(x, y), size).unwrap();
         assert_eq!(
-            input.pixels()[kernel::nearest_index(size, position)],
+            input.pixels()[position.nearest_index(size)],
             expected,
             "({x}, {y})"
         );
