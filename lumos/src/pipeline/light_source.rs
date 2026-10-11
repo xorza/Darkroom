@@ -24,8 +24,8 @@ use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::StagePlan;
 use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark, ParkedFrame};
-use crate::pipeline::frame_tier::StagePlan;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
@@ -118,7 +118,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             frames = total,
             planning_mb = run.memory.planning() / (1024 * 1024),
             concurrency = plan.decode_concurrency,
-            spilling = stage.tier.spills(),
+            spilling = stage.parking.spills(),
             "Preparing lights and detecting stars"
         );
 
@@ -152,7 +152,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             let result = detector.detect(&image);
             let image = match lights {
                 Lights::Held(_) => PipelineFrame::Resident(image),
-                Lights::Raw(_) => stage.tier.hold(image)?,
+                Lights::Raw(_) => stage.parking.hold(image)?,
             };
             log_detection(done.complete_one(), total, &result);
             Ok(DetectedFrame {
@@ -294,7 +294,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             run.memory.planning(),
         );
         let StagePlan {
-            tier,
+            parking,
             warp_concurrency: workers,
         } = StagePlan::new(&plan, run)?;
         tracing::info!(
@@ -302,7 +302,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             reference,
             planning_mb = run.memory.planning() / (1024 * 1024),
             concurrency = workers,
-            spilling = tier.spills(),
+            spilling = parking.spills(),
             "Preparing, detecting and registering lights in one pass"
         );
         let cancel = &run.context.cancel;
@@ -337,7 +337,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             reference,
             result.stars,
             config,
-            &tier,
+            &parking,
             total,
             &progress,
             cancel,
@@ -399,7 +399,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             dimensions,
             detection,
         }
-        .combine(&tier, config, progress, cancel.clone())
+        .combine(parking, config, progress, cancel.clone())
     }
 
     /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.

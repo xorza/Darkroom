@@ -30,7 +30,7 @@ use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame, DrizzledPlan
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_result::DrizzleResult;
-use crate::drizzle::drizzle_tier::{DrizzleTier, FrameOrigin};
+use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
 use crate::drizzle::error::DrizzleError;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
@@ -265,7 +265,14 @@ fn accumulate<I: StackableImage>(
         drizzle.output_size(input_dims.size()),
         deposit.output_channels(),
     );
-    let tier = DrizzleTier::for_run(input_dims, output, deposit, frame_count, origin, stack, run)?;
+    let tier = DrizzleShape {
+        input: input_dims,
+        output,
+        deposit,
+        frame_count,
+        origin,
+    }
+    .tier(stack, run)?;
 
     let mut stored = Vec::with_capacity(frame_count);
     // Every frame's drops' weight at each output pixel, before any frame weight, in the planes of
@@ -315,13 +322,16 @@ fn accumulate<I: StackableImage>(
             LinearImage::from_planar_channels(output, pixels.into_iter().map(Buffer2::into_vec));
         image.metadata = frame_metadata;
         image.flags = flags;
-        stored.push(tier.store(image, FrameQuality::Drizzled { drops }, source_stats)?);
+        stored.push(
+            tier.store(image, FrameQuality::Drizzled { drops }, source_stats)
+                .map_err(|source| DrizzleError::Stack(source.into()))?,
+        );
         progress.report(index + 1, frame_count, StackingStage::Drizzling);
     }
 
     let mut product = stack_stored_frames(
         stored,
-        tier.cache_tier(),
+        tier,
         output,
         metadata.expect("a frame was drizzled"),
         stack,
