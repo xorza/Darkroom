@@ -8,6 +8,7 @@ use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::FrameStoreError;
 use crate::ingest::error::AdmissionError;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::error::ImageError;
 
 /// Failures from calibrated-image and RAW registered stacking.
@@ -61,6 +62,12 @@ pub enum AlignStackError {
     Admission(AdmissionError),
     #[error(transparent)]
     Stack(StackError),
+}
+
+impl From<Cancelled> for AlignStackError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
+    }
 }
 
 impl From<AdmissionError> for AlignStackError {

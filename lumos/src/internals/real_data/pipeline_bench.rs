@@ -133,7 +133,8 @@ fn bench_full_pipeline() {
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
     let calibrated: Vec<LinearImage> =
-        concurrency::try_par_map_limited(&light_paths, 3, |_index, p| {
+        concurrency::try_par_map_bounded(light_paths.len(), &mut [(); 3], |(), index| {
+            let p = &light_paths[index];
             let mut cfa = load_raw_cfa(p, &LoadContext::default()).unwrap();
             masters.calibrate(&mut cfa).unwrap();
             Ok::<_, ()>(
@@ -164,11 +165,13 @@ fn bench_full_pipeline() {
     let step_start = Instant::now();
 
     let det_config = StarDetectionConfig::precise_ground();
-    let all_stars: Vec<_> = concurrency::try_par_map_limited(&calibrated, 3, |_index, img| {
-        let mut det = StarDetector::from_config(det_config.clone()).unwrap();
-        Ok::<_, ()>(det.detect(img).stars)
-    })
-    .unwrap();
+    let all_stars: Vec<_> =
+        concurrency::try_par_map_bounded(calibrated.len(), &mut [(); 3], |(), index| {
+            let img = &calibrated[index];
+            let mut det = StarDetector::from_config(det_config.clone()).unwrap();
+            Ok::<_, ()>(det.detect(img).stars)
+        })
+        .unwrap();
     for (i, stars) in all_stars.iter().enumerate() {
         println!("  Frame {}: {} stars", i, stars.len());
     }
@@ -190,7 +193,8 @@ fn bench_full_pipeline() {
         .collect();
 
     let warped_frames: Vec<LinearImage> =
-        concurrency::try_par_map_limited(&to_register, 3, |_index, (img, stars)| {
+        concurrency::try_par_map_bounded(to_register.len(), &mut [(); 3], |(), index| {
+            let (img, stars) = to_register[index];
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
             let warp_start = Instant::now();

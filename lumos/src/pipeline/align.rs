@@ -13,7 +13,7 @@ use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::StagePlan;
-use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
+use crate::pipeline::frame_registrar::FrameRegistrar;
 use crate::pipeline::light_source::LightSource;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
@@ -138,17 +138,7 @@ pub(crate) fn register_warp_and_stack(
     let outcomes = concurrency::try_par_map_bounded_owned(
         detected,
         &mut warp_buffers,
-        |buffers, index, detected| {
-            registrar.park(
-                buffers,
-                FrameToPark {
-                    index,
-                    image: detected.image,
-                    stars: &detected.stars,
-                    stats: detected.stats,
-                },
-            )
-        },
+        |buffers, index, detected| registrar.park(buffers, index, detected),
     )?;
     drop(registrar);
     // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks

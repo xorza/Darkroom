@@ -6,12 +6,11 @@ use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::CancelToken;
-
 use crate::combine::cache::loader::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_spill::Carries;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
@@ -23,16 +22,37 @@ fn cache_test_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     index: usize,
 ) -> Result<StoredFrame, StackError> {
-    // No frame 0 admitted: these tests are about one frame's cache files, not the set it belongs to.
-    let cancel = CancelToken::never();
-    FrameDiskCache::<I> {
-        scratch: &RunScratch::create(cache_dir).unwrap(),
+    // A fresh intake per call: these tests are about one frame's cache files, not the set it
+    // belongs to, so no frame 0 is admitted before it.
+    let run = IngestRun::planned(
+        RunMemory::new(1 << 40, None),
+        &IngestConfig::with_cache_dir(cache_dir.to_path_buf()),
+    );
+    let progress = ProgressCallback::default();
+    let intake = FrameIntake::new(
+        IntakePlan {
+            dimensions,
+            frame_count: index + 1,
+            decode_slots: 1,
+            stage: StackingStage::Loading,
+        },
+        &run,
+        &progress,
+    );
+    let tier = Tier::Spilled {
+        scratch: RunScratch::create(cache_dir).unwrap(),
+        chunk_memory: 1 << 30,
+    };
+    let paths = vec![source; index + 1];
+    FrameLoad::<I, &Path> {
+        paths: &paths,
+        tier: &tier,
         kept: Some(&DecodeCache::open(cache_dir).unwrap()),
-        admission: &FrameAdmission::new(dimensions, &cancel),
-        context: &LoadContext::new(CancelToken::never(), u64::MAX),
+        intake: &intake,
         step: None,
     }
-    .frame(source, index, None)
+    .frame(index, None)
+    .map(|loaded| loaded.frame)
 }
 
 /// The directory of the decode cache under `cache_dir`.

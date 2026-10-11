@@ -27,6 +27,8 @@ pub(crate) struct FrameAdmission<'a> {
     dimensions: ImageDimensions,
     cancel: &'a CancelToken,
     first_facts: OnceLock<SetFacts>,
+    /// Measure each frame's spread too: see [`FrameStats::measure_with_spread`].
+    with_spread: bool,
 }
 
 impl<'a> FrameAdmission<'a> {
@@ -35,7 +37,14 @@ impl<'a> FrameAdmission<'a> {
             dimensions,
             cancel,
             first_facts: OnceLock::new(),
+            with_spread: false,
         }
+    }
+
+    /// This admission, measuring each frame's spread beside its other statistics.
+    pub(crate) const fn measuring_spread(mut self) -> Self {
+        self.with_spread = true;
+        self
     }
 
     pub(crate) const fn dimensions(&self) -> ImageDimensions {
@@ -55,7 +64,11 @@ impl<'a> FrameAdmission<'a> {
             cancel: self.cancel,
         }
         .samples(image)?;
-        let stats = FrameStats::measure(image);
+        let stats = if self.with_spread {
+            FrameStats::measure_with_spread(image)
+        } else {
+            FrameStats::measure(image)
+        };
         if index == 0 {
             self.first_facts
                 .set(SetFacts::of_first(&stats.facts))

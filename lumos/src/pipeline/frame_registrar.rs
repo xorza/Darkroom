@@ -4,13 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
@@ -43,15 +42,6 @@ pub(crate) struct ParkedFrame {
     pub(crate) registration: FrameRegistration,
 }
 
-/// What parking one frame needs: its pixels, its stars and its statistics.
-#[derive(Debug)]
-pub(crate) struct FrameToPark<'a> {
-    pub(crate) index: usize,
-    pub(crate) image: PipelineFrame,
-    pub(crate) stars: &'a [Star],
-    pub(crate) stats: FrameStats,
-}
-
 impl<'a> FrameRegistrar<'a> {
     pub(crate) fn new(
         reference: usize,
@@ -81,7 +71,8 @@ impl<'a> FrameRegistrar<'a> {
         }
     }
 
-    /// Register `frame`, warp it into `buffers` and park it, with how it registered; `None` when
+    /// Register light `index`, `frame`, warp it into `buffers` and park it, with how it registered;
+    /// `None` when
     /// the run was cancelled, which the caller turns into `Cancelled` once every worker stops.
     ///
     /// The spill tier hands its buffers back once the frame is on disk, so a worker warps into
@@ -90,16 +81,17 @@ impl<'a> FrameRegistrar<'a> {
     pub(crate) fn park(
         &self,
         buffers: &mut Option<WarpBuffers>,
-        frame: FrameToPark<'_>,
+        index: usize,
+        frame: DetectedFrame,
     ) -> Result<Option<ParkedFrame>, AlignStackError> {
         if self.cancel.is_cancelled() {
             return Ok(None);
         }
-        let FrameToPark {
-            index,
+        let DetectedFrame {
             image,
             stars,
             stats,
+            ..
         } = frame;
         if index == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
@@ -112,7 +104,8 @@ impl<'a> FrameRegistrar<'a> {
         }
 
         let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
-        let registration = match register(&self.reference_stars, stars, &self.config.registration) {
+        let registration = match register(&self.reference_stars, &stars, &self.config.registration)
+        {
             Ok(registration) => registration,
             // A pair that did not match is a frame to drop. An invalid config is not: it fails
             // identically for every pair, so dropping it would spend the whole run to report

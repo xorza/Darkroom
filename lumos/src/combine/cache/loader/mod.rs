@@ -4,45 +4,30 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::FileIdentity;
-use imaginarium::Buffer2;
 
 use crate::calibration_masters::error::SubtractionError;
+use crate::combine::cache::core::CacheCore;
 use crate::combine::config::StackConfig;
 use crate::combine::error::StackError;
-use crate::concurrency;
 use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::run_scratch::RunScratch;
-use crate::ingest::frame_admission::FrameAdmission;
+use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::tier::Tier;
+use crate::ingest::frame_check::FrameCheck;
+use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
 use crate::memory::memory_plan::MemoryPlan;
-
-use crate::frame_store::stackable_image::StackableImage;
-
-use crate::frame_store::stored_frame::StoredFrame;
-use crate::frame_store::tier::Tier;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
-use crate::progress::stage_counter::StageCounter;
-
-use crate::combine::cache::core::CacheCore;
-use crate::ingest::frame_check::FrameCheck;
-
-/// The frames one tier loaded, and frame 0's metadata, which the stack carries.
-#[derive(Debug)]
-struct LoadedFrames {
-    frames: Vec<StoredFrame>,
-    metadata: ImageMetadata,
-}
 
 /// [`load_tiered`] output: the loaded frames plus the assembled [`CacheCore`].
 #[derive(Debug)]
@@ -65,27 +50,21 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 ) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0].as_ref();
-    let IngestRun {
-        memory,
-        context,
-        cache_dir,
-        keep_cache,
-    } = run;
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
-    // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
-    // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (peek, early) = if let Some(peek) = I::peek(first_path, &context) {
+    // the format allows it, so the in-memory path can decode every frame in parallel rather than
+    // decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
+    let (peek, early) = if let Some(peek) = I::peek(first_path, &run.context) {
         (peek, None)
     } else {
         let source = CachedSource::of(first_path);
-        let mut image = load_image::<I>(first_path, &context)?;
+        let mut image = load_image::<I>(first_path, &run.context)?;
         if let Some(step) = step {
             step.apply(0, &mut image)?;
         }
         (
             FramePeek::of_decoded(&image),
-            Some(EarlyDecode { image, source }),
+            Some(Decoded { image, source }),
         )
     };
     let dimensions = peek.dimensions;
@@ -95,41 +74,71 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let plan = MemoryPlan::plan(
         peek.run_shape(paths.len(), config.quality.resident_bytes(dimensions)),
         rayon::current_num_threads(),
-        memory.planning(),
+        run.memory.planning(),
     );
-
     tracing::info!(
         frame_count = paths.len(),
         sample_count = dimensions.sample_count(),
-        planning_mb = memory.planning() / (1024 * 1024),
+        planning_mb = run.memory.planning() / (1024 * 1024),
         use_in_memory = plan.fits_in_ram,
         "Image cache storage decision"
     );
 
-    let tier = Tier::for_plan(&plan, memory, &cache_dir)?;
-    let admission = FrameAdmission::new(dimensions, &context.cancel);
-    let context = context.for_decode_slots(plan.decode_concurrency);
-    let load = TierLoad {
+    let tier = Tier::for_plan(&plan, run.memory, &run.cache_dir)?;
+    let kept = (run.keep_cache && tier.spills())
+        .then(|| DecodeCache::open(&run.cache_dir))
+        .transpose()?;
+    let intake = FrameIntake::new(
+        IntakePlan {
+            dimensions,
+            frame_count: paths.len(),
+            decode_slots: plan.decode_concurrency,
+            stage: StackingStage::Loading,
+        },
+        &run,
+        &progress,
+    );
+    let load = FrameLoad {
         paths,
-        progress: &progress,
-        admission: &admission,
-        concurrency: plan.decode_concurrency,
-        context: &context,
+        tier: &tier,
+        kept: kept.as_ref(),
+        intake: &intake,
         step,
     };
-    let LoadedFrames { frames, metadata } = match &tier {
-        Tier::Resident => load.in_memory(early.map(|early| early.image))?,
-        Tier::Spilled { scratch, .. } => load.to_disk(scratch, &cache_dir, keep_cache, early)?,
+
+    // Frame 0 first and alone when it is in hand already, or when the frames spill: it carries
+    // the stack metadata, and on disk a later frame may be read back from the kept cache, which
+    // keeps no metadata. On the resident tier every frame decodes in parallel, frame 0 among them.
+    let first = match early {
+        Some(early) => Some(load.frame(0, Some(early))?),
+        None if tier.spills() => Some(load.frame(0, None)?),
+        None => None,
     };
+    let start = usize::from(first.is_some());
+    let mut slots = vec![(); plan.decode_concurrency];
+    let rest = intake.map(start..paths.len(), &mut slots, |(), index| {
+        load.frame(index, None)
+    })?;
+    let mut metadata = None;
+    let mut frames = Vec::with_capacity(paths.len());
+    for loaded in first.into_iter().chain(rest) {
+        metadata = metadata.or(loaded.metadata);
+        frames.push(loaded.frame);
+    }
+    tracing::info!(
+        frames = frames.len(),
+        spilled = tier.spills(),
+        "Loaded the frames into their tier"
+    );
 
     Ok(LoadedCache {
         frames,
         core: CacheCore {
             tier,
             dimensions,
-            metadata,
+            metadata: metadata.expect("frame 0 provides metadata"),
             progress,
-            cancel: context.cancel,
+            cancel: run.context.cancel,
         },
     })
 }
@@ -144,20 +153,12 @@ fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I
     }
 }
 
-/// Frame 0 decoded ahead of the tier decision, because its format has no header to peek.
-#[derive(Debug)]
-struct EarlyDecode<I> {
-    image: I,
-    /// The source as it was before the decode, which only the disk tier reads — for its
-    /// source-change check — so only the disk tier fails on it.
-    source: Result<CachedSource, FrameStoreError>,
-}
-
-/// A decoded frame and its source as it was before the decode.
+/// A decoded frame and its source as it was before the decode, which only the kept cache reads —
+/// for its source-change check — so only the kept cache fails on it.
 #[derive(Debug)]
 struct Decoded<I> {
     image: I,
-    source: CachedSource,
+    source: Result<CachedSource, FrameStoreError>,
 }
 
 /// A source file as a kept cache names it: its canonical path, and its identity when it was read.
@@ -182,275 +183,109 @@ impl CachedSource {
     }
 }
 
-/// A decoded frame that passed the per-frame checks, with what was measured on it.
+/// A frame in its tier, with the stack metadata when it is frame 0.
 #[derive(Debug)]
-struct CheckedImage<I> {
-    image: I,
-    stats: FrameStats,
-    quality: FrameQuality<Buffer2<f32>>,
-}
-
-impl<I: StackableImage> CheckedImage<I> {
-    fn admit(image: I, index: usize, admission: &FrameAdmission<'_>) -> Result<Self, StackError> {
-        Ok(Self {
-            stats: admission.admit(index, &image)?,
-            quality: FrameQuality::for_unwarped(&image),
-            image,
-        })
-    }
-
-    fn into_memory_frame(self) -> StoredFrame {
-        StoredFrame::from_memory(self.image, self.quality, self.stats)
-    }
-}
-
-/// A frame loaded into memory, with the stack metadata when it is frame 0.
-#[derive(Debug)]
-struct LoadedMemoryFrame {
+struct LoadedFrame {
     frame: StoredFrame,
     metadata: Option<ImageMetadata>,
 }
 
-/// One frame set's load into its tier: what both tiers read.
+/// One frame set's load into its tier: where each frame goes, and how it is taken in.
 #[derive(Debug)]
-struct TierLoad<'a, I, P> {
+struct FrameLoad<'a, I, P> {
     paths: &'a [P],
-    progress: &'a ProgressCallback,
-    admission: &'a FrameAdmission<'a>,
-    /// How many frames decode at once.
-    concurrency: usize,
-    context: &'a LoadContext,
-    step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
-}
-
-impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
-    /// Load all images into memory and compute per-frame channel statistics.
-    fn in_memory(&self, first: Option<I>) -> Result<LoadedFrames, StackError> {
-        let Self {
-            paths,
-            progress,
-            admission,
-            concurrency,
-            context,
-            step,
-        } = *self;
-        let cancel = &context.cancel;
-
-        // When the header couldn't be peeked the caller pre-loaded frame 0, so the batch starts at
-        // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
-        // supplies the stack metadata either way.
-        let loaded_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
-        let mut metadata = None;
-        let mut frames = Vec::with_capacity(paths.len());
-        if let Some(first_image) = first {
-            metadata = Some(first_image.metadata().clone());
-            frames.push(CheckedImage::admit(first_image, 0, admission)?.into_memory_frame());
-            loaded_count.complete_one();
-        }
-        let start = frames.len();
-        let loaded =
-            concurrency::try_par_map_limited(&paths[start..], concurrency, |offset, path| {
-                let index = offset + start;
-                // Cancelled: stop decoding further frames (the slow phase).
-                if cancel.is_cancelled() {
-                    return Err(StackError::Cancelled);
-                }
-                let mut image = load_image::<I>(path.as_ref(), context)?;
-                if let Some(step) = step {
-                    step.apply(index, &mut image)?;
-                }
-                let loaded = LoadedMemoryFrame {
-                    metadata: (index == 0).then(|| image.metadata().clone()),
-                    frame: CheckedImage::admit(image, index, admission)?.into_memory_frame(),
-                };
-                loaded_count.complete_one();
-                Ok(loaded)
-            })?;
-        for loaded in loaded {
-            metadata = metadata.or(loaded.metadata);
-            frames.push(loaded.frame);
-        }
-
-        tracing::info!("Loaded {} frames into memory", frames.len());
-        Ok(LoadedFrames {
-            frames,
-            metadata: metadata.expect("frame 0 provides metadata"),
-        })
-    }
-
-    /// Load images to `scratch`, or with `keep_cache` to the decode cache under `cache_dir`, each
-    /// channel in a file of its own, memory-mapped back, decoding in parallel.
-    fn to_disk(
-        &self,
-        scratch: &RunScratch,
-        cache_dir: &Path,
-        keep_cache: bool,
-        early: Option<EarlyDecode<I>>,
-    ) -> Result<LoadedFrames, StackError> {
-        let Self {
-            paths,
-            progress,
-            admission,
-            concurrency,
-            context,
-            step,
-        } = *self;
-        let kept = keep_cache
-            .then(|| DecodeCache::open(cache_dir))
-            .transpose()?;
-        let frame_cache = FrameDiskCache {
-            scratch,
-            kept: kept.as_ref(),
-            admission,
-            context,
-            step,
-        };
-
-        // Frame 0 first and alone: it carries the stack metadata, and the facts every later frame is
-        // checked against as it decodes. It is always decoded, since only a decode yields the metadata;
-        // its cache serves a later run in which it is not frame 0.
-        let first_path = paths[0].as_ref();
-        let first = if let Some(early) = early {
-            Decoded {
-                source: early.source?,
-                image: early.image,
-            }
-        } else {
-            let source = CachedSource::of(first_path)?;
-            let mut image = load_image::<I>(first_path, context)?;
-            if let Some(step) = step {
-                step.apply(0, &mut image)?;
-            }
-            Decoded { image, source }
-        };
-        let metadata = first.image.metadata().clone();
-        let first = frame_cache.frame(first_path, 0, Some(first))?;
-        let cached_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
-        cached_count.complete_one();
-
-        let remaining =
-            concurrency::try_par_map_limited(&paths[1..], concurrency, |offset, path| {
-                // Cancelled: stop decoding further frames (the slow phase).
-                if context.cancel.is_cancelled() {
-                    return Err(StackError::Cancelled);
-                }
-                let frame = frame_cache.frame(path.as_ref(), offset + 1, None)?;
-                cached_count.complete_one();
-                Ok(frame)
-            })?;
-
-        let mut frames = Vec::with_capacity(paths.len());
-        frames.push(first);
-        frames.extend(remaining);
-
-        tracing::info!(
-            "Spilled {} frames ({} channels each) to disk under {:?}",
-            frames.len(),
-            admission.dimensions().channels(),
-            cache_dir
-        );
-
-        Ok(LoadedFrames { frames, metadata })
-    }
-}
-
-/// The disk tier's frame store: the run's scratch, the decode cache when `keep_cache` asked for
-/// one, and how a frame gets to either.
-#[derive(Debug)]
-struct FrameDiskCache<'a, I: StackableImage> {
-    scratch: &'a RunScratch,
+    tier: &'a Tier,
+    /// The decode cache, when `keep_cache` asked for one.
     kept: Option<&'a DecodeCache>,
-    admission: &'a FrameAdmission<'a>,
-    context: &'a LoadContext,
+    intake: &'a FrameIntake<'a>,
     step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
 }
 
-impl<I: StackableImage> FrameDiskCache<'_, I> {
-    /// Frame `index` on disk: with a decode cache, the planes it holds committed for this source
-    /// and decoder, or a decode written there and committed; without one, a decode in the run's
-    /// scratch.
+impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
+    /// Frame `index` in its tier: with a decode cache, the planes it holds committed for this
+    /// source and decoder, or a decode written there and committed; without one, a decode the tier
+    /// keeps.
     ///
-    /// `decoded` is a frame already decoded, which is written rather than looked up: the decode a
-    /// lookup would save is already spent. The source's identity is read before the decode and
-    /// again after it, and a frame whose source changed in between is refused rather than cached
-    /// under the identity it had before.
-    ///
-    /// A frame through `step` is not what its source decodes to, so it goes to the run's scratch
-    /// whatever the cache.
-    fn frame(
+    /// `decoded` is a frame already decoded, which is stored rather than looked up: the decode a
+    /// lookup would save is already spent. A frame through `step` is not what its source decodes
+    /// to, so it goes to the tier whatever the cache.
+    fn frame(&self, index: usize, decoded: Option<Decoded<I>>) -> Result<LoadedFrame, StackError> {
+        let path = self.paths[index].as_ref();
+        if let Some(kept) = self.kept.filter(|_| self.step.is_none()) {
+            return self.kept_frame(kept, path, index, decoded);
+        }
+        let image = if let Some(Decoded { image, .. }) = decoded {
+            image
+        } else {
+            let mut image = load_image::<I>(path, self.intake.context())?;
+            if let Some(step) = self.step {
+                step.apply(index, &mut image)?;
+            }
+            image
+        };
+        let stats = self.intake.admit(index, &image)?;
+        let metadata = (index == 0).then(|| image.metadata().clone());
+        let quality = FrameQuality::for_unwarped(&image);
+        let frame = self.tier.store(image, quality, stats)?;
+        self.intake.complete_one();
+        Ok(LoadedFrame { frame, metadata })
+    }
+
+    /// Frame `index` through the decode cache: the planes committed there for its source as it is
+    /// now, or a decode written there and committed. The source's identity is read before the
+    /// decode and again after it, and a frame whose source changed in between is refused rather
+    /// than cached under the identity it had before.
+    fn kept_frame(
         &self,
+        kept: &DecodeCache,
         path: &Path,
         index: usize,
         decoded: Option<Decoded<I>>,
-    ) -> Result<StoredFrame, StackError> {
-        let dimensions = self.admission.dimensions();
-        if let Some(step) = self.step {
-            let image = if let Some(Decoded { image, .. }) = decoded {
-                image
-            } else {
-                let mut image = load_image::<I>(path, self.context)?;
-                step.apply(index, &mut image)?;
-                image
-            };
-            let checked = CheckedImage::admit(image, index, self.admission)?;
-            return StoredFrame::spill(
-                self.scratch,
-                &checked.image,
-                &checked.quality,
-                checked.stats,
-            )
-            .map_err(StackError::from);
-        }
-        let Some(kept) = self.kept else {
-            let image = match decoded {
-                Some(Decoded { image, .. }) => image,
-                None => load_image::<I>(path, self.context)?,
-            };
-            let checked = CheckedImage::admit(image, index, self.admission)?;
-            return StoredFrame::spill(
-                self.scratch,
-                &checked.image,
-                &checked.quality,
-                checked.stats,
-            )
-            .map_err(StackError::from);
-        };
+    ) -> Result<LoadedFrame, StackError> {
+        let dimensions = self.intake.dimensions();
+        let context = self.intake.context();
         let (source, decoded_image) = match decoded {
-            Some(Decoded { image, source }) => (source, Some(image)),
+            Some(Decoded { image, source }) => (source?, Some(image)),
             None => (CachedSource::of(path)?, None),
         };
         let spill = FrameSpill::cached(kept.path(), &source.canonical, I::DECODER);
-        let key = CacheKey::new(source.identity, I::DECODER, self.context);
+        let key = CacheKey::new(source.identity, I::DECODER, context);
 
         if decoded_image.is_none()
             && let Some(frame) = StoredFrame::reuse(&spill, key, dimensions)?
         {
             tracing::debug!(source = %path.display(), "Reusing existing cache files");
-            self.admission
-                .check_facts(index, &frame.source_stats.facts)?;
+            self.intake.check_facts(index, &frame.source_stats.facts)?;
             let check = FrameCheck {
                 index,
-                cancel: &self.context.cancel,
+                cancel: &context.cancel,
             };
             check.stored_samples(&frame.channels, dimensions.pixel_count())?;
             // Mapped from disk, so held to the pairing the combine divides by like any other planes.
             check.stored_quality(&frame, dimensions)?;
-            return Ok(frame);
+            self.intake.complete_one();
+            return Ok(LoadedFrame {
+                frame,
+                metadata: None,
+            });
         }
 
         let image = match decoded_image {
             Some(image) => image,
-            None => load_image::<I>(path, self.context)?,
+            None => load_image::<I>(path, context)?,
         };
-        let checked = CheckedImage::admit(image, index, self.admission)?;
+        let stats = self.intake.admit(index, &image)?;
         if CachedSource::of(path)?.identity != source.identity {
             return Err(FrameStoreError::SourceChanged {
                 path: path.to_path_buf(),
             }
             .into());
         }
-        StoredFrame::cache(&spill, key, &checked.image, &checked.quality, checked.stats)
-            .map_err(StackError::from)
+        let metadata = (index == 0).then(|| image.metadata().clone());
+        let quality = FrameQuality::for_unwarped(&image);
+        let frame = StoredFrame::cache(&spill, key, &image, &quality, stats)?;
+        self.intake.complete_one();
+        Ok(LoadedFrame { frame, metadata })
     }
 }
 

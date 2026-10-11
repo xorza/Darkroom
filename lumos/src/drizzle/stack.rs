@@ -33,8 +33,8 @@ use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
 use crate::drizzle::error::DrizzleError;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stackable_image::StackableImage;
+use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::error::ImageError;
@@ -273,6 +273,23 @@ fn accumulate<I: StackableImage>(
         origin,
     }
     .tier(stack, run)?;
+    // Measured on each frame as it arrives, before its drops are spread: the drizzled pixels
+    // average several, and would understate it. A mosaic's are measured per colour, which its
+    // drizzle makes the channels, with the spread its per-frame normalization scales by.
+    let intake = FrameIntake::new(
+        IntakePlan {
+            dimensions: input_dims,
+            frame_count,
+            decode_slots: 1,
+            stage: StackingStage::Drizzling,
+        },
+        run,
+        progress,
+    );
+    let intake = match deposit {
+        Deposit::Mosaic(_) => intake.measuring_spread(),
+        Deposit::Channels(_) => intake,
+    };
 
     let mut stored = Vec::with_capacity(frame_count);
     // Every frame's drops' weight at each output pixel, before any frame weight, in the planes of
@@ -288,14 +305,7 @@ fn accumulate<I: StackableImage>(
             return Err(DrizzleError::Cancelled);
         }
         let frame = frame?;
-        // Measured on the frame as it arrives, before its drops are spread: the drizzled pixels
-        // average several, and would understate it. A mosaic's are measured per colour, which
-        // its drizzle makes the channels, with the spread its per-frame normalization scales by.
-        let source_stats = match deposit {
-            Deposit::Mosaic(_) => FrameStats::measure_with_spread(&frame.source),
-            Deposit::Channels(_) => FrameStats::measure(&frame.source),
-        }
-        .into_drizzled();
+        let source_stats = intake.admit(index, &frame.source)?.into_drizzled();
         let mut accumulator = DrizzleAccumulator::new(input_dims, deposit, drizzle.clone(), index)?;
         accumulator.add_frame(&frame)?;
         unconverged_points += accumulator.unconverged_points();
@@ -326,7 +336,7 @@ fn accumulate<I: StackableImage>(
             tier.store(image, FrameQuality::Drizzled { drops }, source_stats)
                 .map_err(|source| DrizzleError::Stack(source.into()))?,
         );
-        progress.report(index + 1, frame_count, StackingStage::Drizzling);
+        intake.complete_one();
     }
 
     let mut product = stack_stored_frames(
