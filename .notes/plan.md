@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| I2 | MRS noise reads 0 when the support covers every pixel | Do | B2 |
 | I5 | Master cache key ignores how lumos stacks | Do | B3 |
 | I3 | Pairwise CFA-drizzle normalization fits thin pairs | Do | B4 |
 | Q6 | Cold-read eviction for the spill benches | Do (prerequisite) | B5 |
@@ -51,41 +50,10 @@ gives PIP-19 its overlap.
 ## Dependency graph
 
 ```
-B2, B3, B4, B9              independent
+B3, B4, B9                  independent
 B5 → B6 → B8                eviction helper → explicit spill reads → mosaic parking measured
 B7                          independent; after B3 if both are open, as both move sidecar pins
 ```
-
----
-
-## B2. MRS noise falls back to k-σ when its noise set is too small (I2)
-
-**Evidence.** `math/noise/mrs_noise.rs`, `sigma`: each iteration takes the standard deviation of
-the pixels with `significance < K·σ`. When every analysed pixel is in the support — a small frame
-whose coarse layers reach every pixel from one bright structure — that set is empty,
-`standard_deviation` returns 0, and the loop ends at 0. A 48×48 frame of white noise crossed by one
-bright 32-pixel line reads 0, and noise weighting then refuses it with `NoNoiseToWeigh`. The same
-`sigma` serves `estimate_split`, per gain bin.
-
-**Practice.** PixInsight's noise evaluation (`NoiseEvaluation`, as ImageIntegration uses it)
-accepts an MRS estimate only when the noise set holds at least 1% of the pixels and the iteration
-converged; otherwise it uses the k-σ estimate.
-
-**Solution.** `sigma` returns the MRS figure only when the final noise set holds at least 1% of the
-analysed pixels, and at least 2, and the iteration converged within `MAX_ITERATIONS`. Otherwise it
-returns the k-σ estimate of the first layer, `k_sigma / LAYER_SIGMA[0] / K_SIGMA_RESPONSE`, with
-the k-σ iteration run to `CONVERGENCE` (10⁻⁴) rather than `START_CONVERGENCE`, so it sits at its
-fixed point. `K_SIGMA_RESPONSE = 0.98485`: an iterated 3σ clip of a Gaussian settles where
-`s = √(1 − 2cφ(c)/(2Φ(c) − 1))` with `c = 3s`, solved numerically; derived, not measured, and the
-test cross-checks it. The fallback is logged at debug with the noise-set fraction.
-
-**Test.** In `math/noise/tests.rs`: the issue's 48×48 frame reads its σ within the k-σ estimator's
-standard error (≈ 1/√(2·2304) ≈ 1.5%, so within 5%); `K_SIGMA_RESPONSE` against a Monte-Carlo
-clip of 10⁶ Gaussian samples within 3·10⁻⁴; a frame where MRS converges reads exactly what it reads
-now (`frame_stats` pin unmoved; if a fixture now takes the fallback, the pin moves with that
-reason).
-
-**Crates:** lumos.
 
 ---
 

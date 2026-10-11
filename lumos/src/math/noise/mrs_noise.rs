@@ -49,6 +49,22 @@ const MAX_ITERATIONS: usize = 50;
 /// The k-σ start: its relative accuracy and its iteration cap, as PixInsight's `NoiseKSigma`.
 const START_CONVERGENCE: f64 = 0.01;
 const START_ITERATIONS: usize = 10;
+/// The least share of the analysed pixels an MRS estimate stands on, one in this many, as
+/// PixInsight's noise evaluation requires 1%; below it, or with no convergence, the k-σ estimate
+/// stands instead.
+const MIN_NOISE_SHARE: usize = 100;
+/// The first detail layer's response to unit white noise, exactly: `√(1 − 2h₀ + Σh²)` for the 2-D
+/// B3 kernel, its centre tap `h₀ = (6/16)²` and `Σh² = (70/256)²`. It holds where the kernel lies
+/// inside the frame: within [`FIRST_LAYER_REACH`] of an edge the mirror boundary reads a sample
+/// twice. [`LAYER_SIGMA`] holds the literature's three digits for the MRS start, which only seeds
+/// the iteration.
+const FIRST_LAYER_RESPONSE: f64 = 0.890_796_310_278_758_4;
+/// What an iterated 3σ clip reads for a Gaussian of unit σ: the fixed point of
+/// `s = √(1 − 2cφ(c)/(2Φ(c) − 1))` at `c = 3s`, the variance of a normal truncated at `±c`,
+/// solved by fixed-point iteration.
+const K_SIGMA_RESPONSE: f64 = 0.984_846_186_449_778_8;
+/// How far the first layer's kernel reaches from its pixel: the B3 taps at ±2.
+const FIRST_LAYER_REACH: usize = 2;
 
 const TILE: usize = 256;
 const TILES_PER_AXIS: usize = 4;
@@ -75,7 +91,7 @@ impl MrsNoise {
         size: Size2us,
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> f32 {
-        sigma(&coefficients(plane, size, &excluded)) as f32
+        sigma(&coefficients(plane, size, &excluded), size) as f32
     }
 
     /// The background of `plane` under a flat whose gain at pixel `index` is `gain(index)`: the
@@ -92,7 +108,7 @@ impl MrsNoise {
         for coefficient in coefficients(plane, size, &excluded) {
             binned.push(bins, gain(coefficient.index), coefficient);
         }
-        BackgroundSplit::fit(&binned.measure(|coefficients| sigma(coefficients).powi(2)))
+        BackgroundSplit::fit(&binned.measure(|coefficients| sigma(coefficients, size).powi(2)))
     }
 }
 
@@ -110,27 +126,59 @@ fn coefficients(
         .collect()
 }
 
-/// The noise standard deviation the support iteration settles on over `coefficients`, corrected
-/// for the method's response to white noise; `0` for fewer than two.
-fn sigma(coefficients: &[Coefficients]) -> f64 {
+/// The noise standard deviation the support iteration settles on over `coefficients` of a `size`
+/// image, corrected for the method's response to white noise; `0` for fewer than two. Where the
+/// iteration leaves too few pixels outside the support or does not converge — a small frame whose
+/// coarse layers reach every pixel from one bright structure — the k-σ estimate of the first layer
+/// over the pixels its kernel lies inside the frame at, run to the same convergence and corrected
+/// for its own response; `0` when no two such pixels remain.
+fn sigma(coefficients: &[Coefficients], size: Size2us) -> f64 {
     if coefficients.len() < 2 {
         return 0.0;
     }
-    let mut sigma = k_sigma(coefficients) / LAYER_SIGMA[0];
+    if let Some(sigma) = support_sigma(coefficients) {
+        return sigma / WHITE_NOISE_RESPONSE;
+    }
+    let reach = FIRST_LAYER_REACH;
+    let interior: Vec<Coefficients> = coefficients
+        .iter()
+        .copied()
+        .filter(|c| {
+            let (x, y) = (c.index % size.width, c.index / size.width);
+            (reach..size.width.saturating_sub(reach)).contains(&x)
+                && (reach..size.height.saturating_sub(reach)).contains(&y)
+        })
+        .collect();
+    tracing::debug!(
+        pixels = coefficients.len(),
+        interior = interior.len(),
+        "the multiresolution support leaves too few noise pixels; using the k-σ estimate"
+    );
+    k_sigma(&interior, CONVERGENCE, MAX_ITERATIONS) / FIRST_LAYER_RESPONSE / K_SIGMA_RESPONSE
+}
+
+/// The support iteration's σ, uncorrected; `None` when an iteration leaves fewer than
+/// one in [`MIN_NOISE_SHARE`] of `coefficients`, or two, outside the support, or none converges.
+fn support_sigma(coefficients: &[Coefficients]) -> Option<f64> {
+    let floor = coefficients.len().div_ceil(MIN_NOISE_SHARE).max(2);
+    let mut sigma = k_sigma(coefficients, START_CONVERGENCE, START_ITERATIONS) / LAYER_SIGMA[0];
     for _ in 0..MAX_ITERATIONS {
-        let next = standard_deviation(
+        let next = Deviation::of(
             coefficients
                 .iter()
                 .filter(|c| c.significance < K * sigma)
                 .map(|c| c.detail),
         );
-        let converged = (next - sigma).abs() <= CONVERGENCE * next;
-        sigma = next;
+        if next.count < floor {
+            return None;
+        }
+        let converged = (next.sigma - sigma).abs() <= CONVERGENCE * next.sigma;
+        sigma = next.sigma;
         if converged || sigma == 0.0 {
-            break;
+            return Some(sigma);
         }
     }
-    sigma / WHITE_NOISE_RESPONSE
+    None
 }
 
 /// An analysed tile: the `core` of output pixels within the `region` of the image the transform
@@ -232,17 +280,19 @@ fn tile_coefficients(
     coefficients
 }
 
-/// The k-σ clipped standard deviation of the first detail layer: the starting estimate.
-fn k_sigma(coefficients: &[Coefficients]) -> f64 {
-    let mut sigma = standard_deviation(coefficients.iter().map(|c| c.first_layer));
-    for _ in 0..START_ITERATIONS {
-        let next = standard_deviation(
+/// The k-σ clipped standard deviation of the first detail layer, iterated until it moves by less
+/// than `convergence` of itself or `iterations` run out.
+fn k_sigma(coefficients: &[Coefficients], convergence: f64, iterations: usize) -> f64 {
+    let mut sigma = Deviation::of(coefficients.iter().map(|c| c.first_layer)).sigma;
+    for _ in 0..iterations {
+        let next = Deviation::of(
             coefficients
                 .iter()
                 .map(|c| c.first_layer)
                 .filter(|w| w.abs() < K * sigma),
-        );
-        let converged = (next - sigma).abs() <= START_CONVERGENCE * next;
+        )
+        .sigma;
+        let converged = (next - sigma).abs() <= convergence * next;
         sigma = next;
         if converged || sigma == 0.0 {
             break;
@@ -251,18 +301,76 @@ fn k_sigma(coefficients: &[Coefficients]) -> f64 {
     sigma
 }
 
-/// The sample standard deviation of `values`; `0` for fewer than two.
-fn standard_deviation(values: impl Iterator<Item = f64>) -> f64 {
-    let (mut count, mut mean, mut m2) = (0.0f64, 0.0f64, 0.0f64);
-    for value in values {
-        count += 1.0;
-        let delta = value - mean;
-        mean += delta / count;
-        m2 += delta * (value - mean);
+/// A sample standard deviation and how many values it was taken over.
+#[derive(Debug, Clone, Copy)]
+struct Deviation {
+    sigma: f64,
+    count: usize,
+}
+
+impl Deviation {
+    /// The sample standard deviation of `values`; `0` for fewer than two.
+    fn of(values: impl Iterator<Item = f64>) -> Self {
+        let (mut count, mut mean, mut m2) = (0usize, 0.0f64, 0.0f64);
+        for value in values {
+            count += 1;
+            let delta = value - mean;
+            mean += delta / count as f64;
+            m2 += delta * (value - mean);
+        }
+        let sigma = if count < 2 {
+            0.0
+        } else {
+            (m2 / (count - 1) as f64).sqrt()
+        };
+        Self { sigma, count }
     }
-    if count < 2.0 {
-        0.0
-    } else {
-        (m2 / (count - 1.0)).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use statrs::distribution::{ContinuousCDF, Normal};
+
+    use crate::math::noise::mrs_noise::{FIRST_LAYER_RESPONSE, K, K_SIGMA_RESPONSE};
+
+    /// The first layer's response, `δ − h` for the 2-D B3 kernel `h = b bᵀ` with
+    /// `b = [1, 4, 6, 4, 1]/16`, summed in squares tap by tap rather than by the closed form.
+    #[test]
+    fn the_first_layer_response_is_the_kernels() {
+        let b = [1.0, 4.0, 6.0, 4.0, 1.0].map(|tap: f64| tap / 16.0);
+        let mut energy = 0.0;
+        for (i, row) in b.iter().enumerate() {
+            for (j, column) in b.iter().enumerate() {
+                let delta = if i == 2 && j == 2 { 1.0 } else { 0.0 };
+                energy += (delta - row * column).powi(2);
+            }
+        }
+        assert!((energy.sqrt() - FIRST_LAYER_RESPONSE).abs() < 1e-15);
+    }
+
+    /// The clip's response, against the clip itself run on 200 001 evenly spaced quantiles of a
+    /// unit normal: a sample with no noise, whose clipped σ differs from the continuous one by its
+    /// discretization alone, under 10⁻⁵.
+    #[test]
+    fn the_clip_response_is_a_clipped_normals() {
+        let normal = Normal::standard();
+        let count = 200_001u32;
+        let values: Vec<f64> = (0..count)
+            .map(|i| normal.inverse_cdf((f64::from(i) + 0.5) / f64::from(count)))
+            .collect();
+        let deviation = |bound: f64| {
+            let kept: Vec<f64> = values.iter().copied().filter(|v| v.abs() < bound).collect();
+            let mean = kept.iter().sum::<f64>() / kept.len() as f64;
+            (kept.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (kept.len() - 1) as f64).sqrt()
+        };
+        let mut sigma = deviation(f64::INFINITY);
+        for _ in 0..200 {
+            let next = deviation(K * sigma);
+            if next == sigma {
+                break;
+            }
+            sigma = next;
+        }
+        assert!((sigma - K_SIGMA_RESPONSE).abs() < 1e-5, "{sigma}");
     }
 }
