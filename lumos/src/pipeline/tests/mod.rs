@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::calibration_masters::CalibrationMasters;
+use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
+use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
@@ -499,10 +501,10 @@ fn all_non_reference_frames_dropped_errors() {
 }
 
 #[test]
-fn auto_reference_picks_the_richest_frame() {
+fn auto_reference_passes_over_a_frame_without_enough_stars() {
     let base = base_field();
-    // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
-    // anchor on frame 1.
+    // Frame 0 is a near-blank with fewer stars than registration needs, so Auto chooses among the
+    // other two, whatever its FWHM.
     let dims = base.dimensions();
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
@@ -522,6 +524,49 @@ fn auto_reference_picks_the_richest_frame() {
         result.alignment.dropped(),
         vec![0],
         "the near-blank frame can't register"
+    );
+}
+
+/// A combine error names the input light, not its place among the survivors. Of four lights the
+/// third, a near-blank, fails to register, and the fourth, the field shifted and lowered by 0.5,
+/// has a negative median that a multiplicative normalization cannot divide by: input 3, though it
+/// is the third survivor.
+#[test]
+fn a_combine_error_names_the_input_light() {
+    let base = base_field();
+    let dims = base.dimensions();
+    let blank = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let lowered = LinearImage::from_pixels(
+        dims,
+        shifted(&base, -3.0, 2.0)
+            .channel(0)
+            .pixels()
+            .iter()
+            .map(|value| value - 0.5)
+            .collect(),
+    );
+    let frames = vec![base.clone(), shifted(&base, 4.0, -3.0), blank, lowered];
+    let config = AlignStackConfig {
+        reference: Reference::Index(0),
+        stack: StackConfig {
+            normalization: Normalization::Multiplicative,
+            ..StackConfig::light()
+        },
+        ..AlignStackConfig::default()
+    };
+    let error = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            AlignStackError::Stack(StackError::NonPositiveMedian { index: 3, .. })
+        ),
+        "{error:?}"
     );
 }
 
@@ -635,7 +680,8 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 /// The RAW front end checks each light as it decodes: a light whose dimensions differ from the
 /// first light's header is refused at its own index, an invalid cosmic-ray config before any
 /// light decodes, and parametric cosmic-ray noise on a light
-/// whose decoder recorded no ADC step — a float FITS — names that light. A cosmic-ray pass over
+/// whose decoder recorded no ADC step — a float FITS — names that light. So does a calibration
+/// that refuses one light: a 10 s dark that still holds its bias, against a 20 s second light. A cosmic-ray pass over
 /// X-Trans lights is refused from the first light's header, before any light is decoded: the
 /// second path names no file, and the error is still the first light's.
 #[test]
@@ -701,6 +747,39 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         panic!("expected a cosmic-ray config error")
     };
     assert_eq!(invalid.field, "cosmic-ray niter");
+
+    let mut dark = make_cfa(Size2us::new(32, 32), vec![0.01; 32 * 32], CfaType::Mono);
+    dark.metadata.exposure_time = Some(10.0);
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(dark),
+            ..CalibrationSet::default()
+        },
+        5.0,
+        &CancelToken::never(),
+    )
+    .unwrap();
+    let mut longer = make_cfa(Size2us::new(32, 32), vec![0.1; 32 * 32], CfaType::Mono);
+    longer.metadata.exposure_time = Some(20.0);
+    let longer_path = scratch.path().join("light_longer.fits");
+    save_cfa_fits(&longer_path, &longer).unwrap();
+    let error = calibrate_align_stack(
+        &[paths[0].clone(), longer_path.clone()],
+        &masters,
+        &AlignStackConfig::default(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AlignStackError::Calibration { path, source }
+                if *path == longer_path
+                    && matches!(**source, CalibrationError::DarkMismatch { .. })
+        ),
+        "{error:?}"
+    );
 
     let error = run(&paths[..1], &parametric);
     let AlignStackError::CosmicRay { path, source } = error else {

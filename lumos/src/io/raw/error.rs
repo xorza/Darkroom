@@ -1,7 +1,9 @@
 //! Why a camera RAW file did not decode: what LibRaw refused, and what the file claims that lumos
-//! refuses.
+//! refuses; and why a directory could not be scanned for RAW files.
 
 use std::fmt;
+use std::io;
+use std::path::PathBuf;
 
 use libraw_sys as sys;
 
@@ -180,4 +182,18 @@ pub enum BlackLevelError {
     /// Black is at or above maximum somewhere, leaving no range to normalize into.
     #[error("invalid black level: black {black} ADU reaches the maximum {maximum}")]
     BlackExceedsMaximum { black: f64, maximum: u32 },
+}
+
+/// Why [`raw_files`](crate::raw_files) could not list a directory's RAW files.
+#[derive(Debug, thiserror::Error)]
+pub enum RawScanError {
+    /// The directory could not be opened.
+    #[error("failed to read directory '{}': {source}", path.display())]
+    Directory { path: PathBuf, source: io::Error },
+    /// An entry of the directory could not be read.
+    #[error("failed to read an entry of directory '{}': {source}", path.display())]
+    Entry { path: PathBuf, source: io::Error },
+    /// An entry named as a RAW file could not be examined: a dangling link, say.
+    #[error("failed to read '{}': {source}", path.display())]
+    File { path: PathBuf, source: io::Error },
 }

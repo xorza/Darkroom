@@ -74,3 +74,15 @@ pub struct ConditionMismatch {
     pub reference_index: usize,
     pub reference: f64,
 }
+
+impl ConditionMismatch {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
+        Self {
+            index: inputs[self.index],
+            reference_index: inputs[self.reference_index],
+            ..self
+        }
+    }
+}

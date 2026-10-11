@@ -41,13 +41,17 @@ impl RegisteredSet {
         }
         let total = self.outcomes.len();
         let mut frames = Vec::with_capacity(total);
+        let mut survivors = Vec::with_capacity(total);
         let mut registrations = Vec::with_capacity(total);
         let mut dropped = Vec::new();
         // Ascending without a sort: the outcomes are in input order.
         for (index, outcome) in self.outcomes.into_iter().enumerate() {
             let parked = outcome.expect("only a cancelled run leaves a light unparked");
             match parked.stored {
-                Some(frame) => frames.push(frame),
+                Some(frame) => {
+                    frames.push(frame);
+                    survivors.push(index);
+                }
                 None => dropped.push(index),
             }
             registrations.push(parked.registration);
@@ -75,7 +79,9 @@ impl RegisteredSet {
             &config.stack.for_survivors(&dropped),
             progress,
             cancel,
-        )?;
+        )
+        // The combine numbers the survivors by position; the caller numbers its lights.
+        .map_err(|error| error.renumbered(&survivors))?;
         tracing::info!("Stack complete");
         stacked.report.parked_lights = parked_lights;
 

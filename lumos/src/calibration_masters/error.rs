@@ -179,6 +179,44 @@ pub enum SubtractionError {
     SubtractorConditions { index: usize, source: DarkMismatch },
 }
 
+impl SubtractionError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::SubtractorShape {
+                index,
+                frame,
+                subtractor,
+            } => Self::SubtractorShape {
+                index: inputs[index],
+                frame,
+                subtractor,
+            },
+            Self::SubtractorDomain {
+                index,
+                frame,
+                subtractor,
+            } => Self::SubtractorDomain {
+                index: inputs[index],
+                frame,
+                subtractor,
+            },
+            Self::SubtractedTwice { index, subtractor } => Self::SubtractedTwice {
+                index: inputs[index],
+                subtractor,
+            },
+            Self::SubtractorConditions { index, source } => Self::SubtractorConditions {
+                index: inputs[index],
+                source,
+            },
+            error @ (Self::OverCalibratedSubtractor { .. } | Self::SubtractorForRole { .. }) => {
+                error
+            }
+        }
+    }
+}
+
 /// Why [`CalibrationMasters::build`](crate::CalibrationMasters::build) could not build the masters.
 #[derive(Debug, thiserror::Error)]
 pub enum MasterBuildError<E> {

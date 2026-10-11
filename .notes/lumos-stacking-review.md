@@ -47,7 +47,7 @@ named item.
 ## Dependency graph
 
 ```
-24, 26, 27, 28, PIP-5, PIP-19              independent
+26, 27, 28, PIP-5, PIP-19                  independent
 20 ── 25
 ```
 
@@ -66,46 +66,6 @@ and the drizzle entries ignore `keep_cache`; a kept frame holds no `ImageMetadat
 light needs. Per Q5, they read a light back from the kept cache before any decode, RAW runs
 caching the uncalibrated `CfaImage` decode. **Test:** a rerun of a registered stack with
 `keep_cache` decodes no light (count decodes through a test hook).
-
-**Crates:** lumos, lens, darkroom.
-
----
-
-## Batch 24: Diagnostics and progress — low-medium
-
-**Findings:** PIP-8, PIP-9 / CAL-13, PIP-26, RAW-18, PIP-20.
-
-**Problems.**
-- **PIP-8.** In a registered run only survivors reach `stack_stored_frames`, and combine errors
-  index frames by position (`facts.admit(index, …)`, `NonPositiveMedian { index }`). Once a frame
-  drops, an error names the wrong light. `AlignStackResult` uses input indices everywhere else.
-- **PIP-9 / CAL-13.** `AlignStackError::Calibration(#[from] CalibrationError)` carries no path, so
-  a temperature mismatch on one light of hundreds does not say which. `Load` and `CosmicRay` carry
-  one.
-- **PIP-26.** `lens/src/astro/nodes/stacking.rs` (twice) and `lens/src/astro/nodes/tests.rs` say
-  "unset picks the richest frame", and the test `auto_reference_picks_the_richest_frame` agrees.
-  `Auto` picks the lowest median FWHM among the frames with enough stars (`pipeline/config.rs`,
-  `pipeline/align.rs`).
-- **RAW-18.** `raw_files` (`io/raw/raw_files/mod.rs`) calls `fs::metadata` on every entry before
-  the extension test and aborts on any one error: a dangling `notes.txt` symlink makes the
-  directory unreadable as a light set. Its errors are message strings.
-- **PIP-20.** `progress/stage_counter.rs` runs the user's progress callback under a `Mutex` on
-  rayon workers. A callback that uses rayon can deadlock: a worker blocked in a `join` steals a job
-  that calls `complete_one` on the same thread, and the lock is not reentrant.
-
-**Design:** a stored frame carries its input index, set when it is parked or drizzled, and combine
-errors report it. `AlignStackError::Calibration { path, source }` replaces the blanket `#[from]`.
-`lens` describes `Auto` as "the frame with the lowest median FWHM among those with enough stars",
-and the test is renamed to match. `raw_files` tests the extension first, uses
-`entry.file_type()`, follows a link only for RAW-named entries, and returns a typed error that
-names the entry. Progress counts with an atomic and reports in order through a sequencer that
-never calls out while it holds a lock: the thread whose increment completes a contiguous run
-reports it.
-
-**Tests:** a registered run whose third input drops and whose fourth fails admission names input
-index 3; a calibration error carries the light's path; a dangling `notes.txt` symlink does not
-break a RAW scan, and a dangling `x.cr2` symlink is an error that names it; a progress callback
-that calls `rayon::join` completes (a watchdog thread fails the test after 10 s instead of a hang).
 
 **Crates:** lumos, lens, darkroom.
 
