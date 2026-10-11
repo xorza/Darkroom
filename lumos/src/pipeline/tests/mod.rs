@@ -14,6 +14,7 @@ use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::tier::Tier;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
@@ -22,8 +23,8 @@ use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::frame_tier::{FrameTier, StagePlan};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
@@ -410,7 +411,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         detected,
         &config,
         StagePlan {
-            tier: FrameTier::Ram,
+            parking: FrameParking::new(Tier::Resident),
             warp_concurrency: 1,
         },
         ProgressCallback::default(),
@@ -806,7 +807,7 @@ fn both_front_ends_report_the_same_stages() {
 }
 
 /// The all-RAM and memory-bounded runs must produce the same stack, in two passes and in one.
-/// [`FrameTier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
+/// [`Tier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
 /// spilled one is read back from its memory map, and the combined result has to be bit-identical
 /// either way. A named reference takes each light through one pass, and a found one through two,
 /// and they too agree.

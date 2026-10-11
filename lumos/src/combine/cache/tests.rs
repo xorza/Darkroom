@@ -11,6 +11,7 @@ use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
+use crate::memory::memory_plan::MemoryPlan;
 use crate::memory::run_memory::RunMemory;
 use common::TempDir;
 
@@ -142,7 +143,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), 1);
-    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
+    let core = || CacheCore::plain(Tier::Resident, dimensions);
     let frame = |pixels: usize| {
         let image =
             LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
@@ -203,7 +204,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
     let image = LinearImage::from_pixels(ImageDimensions::new((4, 1), 1), vec![1.0; 4]);
     let stats = FrameStats::measure(&image);
-    let core = CacheCore::plain(CacheTier::Resident, ImageDimensions::new((4, 2), 1));
+    let core = CacheCore::plain(Tier::Resident, ImageDimensions::new((4, 2), 1));
     let _cache = FrameCache::from_stored_frames(
         vec![StoredFrame::from_memory(image, FrameQuality::None, stats)],
         core,
@@ -217,7 +218,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, 1);
-    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
+    let core = || CacheCore::plain(Tier::Resident, dimensions);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
         let stats = FrameStats::measure(&image);
@@ -276,7 +277,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
-    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
+    let core = || CacheCore::plain(Tier::Resident, dimensions);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
             coverage: Buffer2::new(4, 1, support),
@@ -690,7 +691,16 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             .unwrap(),
         ],
         CacheCore::plain(
-            CacheTier::of(true, RunMemory::new(1 << 30, Some(123_456))),
+            Tier::for_plan(
+                &MemoryPlan {
+                    fits_in_ram: false,
+                    decode_concurrency: 1,
+                    warp_concurrency: 1,
+                },
+                RunMemory::new(1 << 30, Some(123_456)),
+                temp_dir.path(),
+            )
+            .unwrap(),
             dims,
         ),
         Normalization::None,

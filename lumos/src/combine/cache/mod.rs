@@ -14,7 +14,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
+use crate::combine::cache::core::{CacheCore, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::cache::frame_weights::FrameWeights;
@@ -34,6 +34,7 @@ use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::tier::Tier;
 use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -200,7 +201,7 @@ impl FrameCache {
             slots,
             frame_norms,
             core: CacheCore {
-                tier: CacheTier::Resident,
+                tier: Tier::Resident,
                 dimensions,
                 metadata,
                 progress,
@@ -707,12 +708,13 @@ impl FrameCache {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::combine::cache::FrameCache;
-    use crate::combine::cache::core::{CacheCore, CacheTier};
+    use crate::combine::cache::core::CacheCore;
     use crate::combine::config::Normalization;
     use crate::frame_store::frame_quality::FrameQuality;
     use crate::frame_store::frame_stats::FrameStats;
     use crate::frame_store::stackable_image::StackableImage;
     use crate::frame_store::stored_frame::StoredFrame;
+    use crate::frame_store::tier::Tier;
 
     impl FrameCache {
         /// A resident cache over already-decoded frames — the shape `from_paths` builds, without
@@ -722,7 +724,7 @@ pub(crate) mod internals {
             images: Vec<I>,
             normalization: Normalization,
         ) -> Self {
-            let mut core = CacheCore::plain(CacheTier::Resident, images[0].dimensions());
+            let mut core = CacheCore::plain(Tier::Resident, images[0].dimensions());
             core.metadata = images[0].metadata().clone();
             let frames = images
                 .into_iter()

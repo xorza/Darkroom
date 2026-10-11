@@ -220,7 +220,10 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     .collect();
                 stack_stored_frames(
                     stored,
-                    CacheTier::of(true, RunMemory::new(memory, None)),
+                    Tier::Spilled {
+                        scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
+                        chunk_memory: RunMemory::new(memory, None).planning(),
+                    },
                     dims,
                     metadata,
                     &config,

@@ -8,8 +8,8 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::frame_tier::FrameTier;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
@@ -26,7 +26,7 @@ pub(crate) struct FrameRegistrar<'a> {
     reference: usize,
     reference_stars: Vec<Star>,
     config: &'a AlignStackConfig,
-    tier: &'a FrameTier,
+    parking: &'a FrameParking,
     cancel: &'a CancelToken,
     /// The frames registered to the reference: every frame but the reference.
     others: usize,
@@ -57,7 +57,7 @@ impl<'a> FrameRegistrar<'a> {
         reference: usize,
         reference_stars: Vec<Star>,
         config: &'a AlignStackConfig,
-        tier: &'a FrameTier,
+        parking: &'a FrameParking,
         frame_count: usize,
         progress: &'a ProgressCallback,
         cancel: &'a CancelToken,
@@ -73,7 +73,7 @@ impl<'a> FrameRegistrar<'a> {
             reference,
             reference_stars,
             config,
-            tier,
+            parking,
             cancel,
             others,
             attempted: AtomicUsize::new(0),
@@ -103,7 +103,7 @@ impl<'a> FrameRegistrar<'a> {
         } = frame;
         if index == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
-            return self.tier.store_reference(image, stats).map(|stored| {
+            return self.parking.store_reference(image, stats).map(|stored| {
                 Some(ParkedFrame {
                     stored: Some(stored),
                     registration: FrameRegistration::Reference,
@@ -149,7 +149,7 @@ impl<'a> FrameRegistrar<'a> {
             .warped(|p| warp.apply(p), image.dimensions().size());
         drop(image);
         self.resolved.complete_one();
-        let stored = self.tier.store(metadata, warped, stats)?;
+        let stored = self.parking.store(metadata, warped, stats)?;
         *buffers = stored.reusable;
         Ok(Some(ParkedFrame {
             stored: Some(stored.frame),

@@ -62,25 +62,19 @@ named item.
 
 ## Batch 20: One ingest stage — medium (design)
 
-**Findings:** PIP-11, PIP-12, PIP-13, PIP-10, PIP-4, CAL-14.
+**Findings:** PIP-11, PIP-13, PIP-10, PIP-4, CAL-14. (PIP-12 is done: one `frame_store::Tier`.)
 
 **Problems.**
 - **PIP-11.** Three decode–admit–store loops. `combine/cache/loader/mod.rs`: peek →
   `MemoryPlan::plan` → `FrameAdmission` → `try_par_map_limited` → RAM, scratch or kept store.
   `pipeline/light_source.rs`: peek → `MemoryPlan::plan` or `single_pass` → `FrameAdmission` →
-  `DetectorPool::try_map` → `FrameTier`. Since Batch 14, `drizzle/stack.rs`: a lazy serial load
-  → drizzle → `DrizzleTier::store`, with its own finiteness check
+  `DetectorPool::try_map` → `FrameParking`. Since Batch 14, `drizzle/stack.rs`: a lazy serial load
+  → drizzle → `Tier::store`, with its own finiteness check
   (`DrizzleError::NonFiniteSample`) in place of `FrameAdmission`. Each fix lands two or three
   times, and admission semantics differ. `ingest/frame_admission.rs` and
   `ingest/frame_step.rs` import
   `combine::cache::{frame_check, set_facts}` and `combine::error::StackError`, while the loader
   imports `ingest`: a cycle.
-- **PIP-12.** The tier decision has five forms: `MemoryPlan::fits_in_ram: bool`;
-  `pipeline/frame_tier.rs` `StagePlan` and `FrameTier::{Ram, Spill { scratch, chunk_memory,
-  parked }}`; `combine/cache/core.rs` `CacheTier::{Resident, Spilled { chunk_memory }}` with
-  `CacheTier::of(spilled: bool, …)`; the loader's `LoadedTier.spilled: bool`; and
-  `drizzle/drizzle_tier.rs` `DrizzleTier::{Ram, Spill { scratch, chunk_memory }}` with
-  `cache_tier()`. Each conversion is a place where `chunk_memory` can disagree.
 - **PIP-13.** Frame carriers multiply: `FrameToPark` duplicates `DetectedFrame`; `StoredImage`
   (channels, flags, metadata) duplicates `StoredFrame`; `Lights::Held` re-implements
   `concurrency::try_par_map_bounded_owned` with `Mutex<Option<_>>` cells; the loader has nine
@@ -104,7 +98,7 @@ named item.
    pass) and `Store` (straight to the combine). `FrameCache::from_paths`, `LightSource` and the
    drizzle entries consume it. The drizzle entries keep one frame in drizzle at a time (each
    drizzle is parallel inside), and their stored size comes from the drizzle output, as
-   `DrizzleTier::for_run` counts it today.
+   `DrizzleShape::tier` counts it today.
 2. Every source peeks before any decode where its format has a header to read: RAW and mosaic
    FITS through `CfaFrameInfo`, linear FITS through `fits_linear_dimensions` (done). A float TIFF
    has none, and its frame 0 is still decoded first.
@@ -112,10 +106,6 @@ named item.
    (`AdmissionError`), converted into `StackError`, `AlignStackError` and `DrizzleError` at each
    boundary. The drizzle entries are admitted like the others, and their own finiteness check
    goes. `ingest` no longer imports `combine`.
-4. One `Tier` enum (`Resident | Spilled { scratch: RunScratch, chunk_memory }`) in
-   `frame_store`, built from the `MemoryPlan` in one place. `CacheTier`, `FrameTier`,
-   `DrizzleTier`, `LoadedTier.spilled` and `CacheTier::of(bool)` go. The parked-light count moves
-   to the run report.
 5. PIP-13: `FrameToPark` becomes `&DetectedFrame` plus an index; `StoredImage` becomes a
    `StoredFrame` with `FrameQuality::None`, its metadata beside it in `PipelineFrame::Spilled`;
    `Lights::Held` uses `try_par_map_bounded_owned`; the loader's private types fold into the

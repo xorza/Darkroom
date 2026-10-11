@@ -12,8 +12,8 @@ use crate::io::image::linear::LinearImage;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::StagePlan;
 use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
-use crate::pipeline::frame_tier::StagePlan;
 use crate::pipeline::light_source::LightSource;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
@@ -87,7 +87,7 @@ pub(crate) fn register_warp_and_stack(
     cancel: CancelToken,
 ) -> Result<AlignStackResult, AlignStackError> {
     let StagePlan {
-        tier,
+        parking,
         warp_concurrency,
     } = stage;
     let total = detected.len();
@@ -126,7 +126,7 @@ pub(crate) fn register_warp_and_stack(
         reference,
         mem::take(&mut detected[reference].stars),
         config,
-        &tier,
+        &parking,
         total,
         &progress,
         &cancel,
@@ -162,7 +162,7 @@ pub(crate) fn register_warp_and_stack(
         dimensions,
         detection,
     }
-    .combine(&tier, config, progress, cancel)
+    .combine(parking, config, progress, cancel)
 }
 
 /// Choose the reference (alignment anchor) index, validating it has enough stars.

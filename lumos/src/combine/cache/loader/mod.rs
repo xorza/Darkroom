@@ -28,17 +28,18 @@ use crate::memory::memory_plan::MemoryPlan;
 use crate::frame_store::stackable_image::StackableImage;
 
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::tier::Tier;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 
-use crate::combine::cache::core::{CacheCore, CacheTier};
+use crate::combine::cache::core::CacheCore;
 use crate::combine::cache::frame_check::FrameCheck;
 
+/// The frames one tier loaded, and frame 0's metadata, which the stack carries.
 #[derive(Debug)]
-struct LoadedTier {
+struct LoadedFrames {
     frames: Vec<StoredFrame>,
-    spilled: bool,
     metadata: ImageMetadata,
 }
 
@@ -104,6 +105,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         "Image cache storage decision"
     );
 
+    let tier = Tier::for_plan(&plan, memory, &cache_dir)?;
     let admission = FrameAdmission::new(dimensions, &context.cancel);
     let context = context.for_decode_slots(plan.decode_concurrency);
     let load = TierLoad {
@@ -114,20 +116,15 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         context: &context,
         step,
     };
-    let LoadedTier {
-        frames,
-        spilled,
-        metadata,
-    } = if plan.fits_in_ram {
-        load.in_memory(early.map(|early| early.image))?
-    } else {
-        load.to_disk(&cache_dir, keep_cache, early)?
+    let LoadedFrames { frames, metadata } = match &tier {
+        Tier::Resident => load.in_memory(early.map(|early| early.image))?,
+        Tier::Spilled { scratch, .. } => load.to_disk(scratch, &cache_dir, keep_cache, early)?,
     };
 
     Ok(LoadedCache {
         frames,
         core: CacheCore {
-            tier: CacheTier::of(spilled, memory),
+            tier,
             dimensions,
             metadata,
             progress,
@@ -227,7 +224,7 @@ struct TierLoad<'a, I, P> {
 
 impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
     /// Load all images into memory and compute per-frame channel statistics.
-    fn in_memory(&self, first: Option<I>) -> Result<LoadedTier, StackError> {
+    fn in_memory(&self, first: Option<I>) -> Result<LoadedFrames, StackError> {
         let Self {
             paths,
             progress,
@@ -274,21 +271,21 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
         }
 
         tracing::info!("Loaded {} frames into memory", frames.len());
-        Ok(LoadedTier {
+        Ok(LoadedFrames {
             frames,
-            spilled: false,
             metadata: metadata.expect("frame 0 provides metadata"),
         })
     }
 
-    /// Load images to disk cache with memory-mapped access, each channel in a file of its own,
-    /// decoding in parallel.
+    /// Load images to `scratch`, or with `keep_cache` to the decode cache under `cache_dir`, each
+    /// channel in a file of its own, memory-mapped back, decoding in parallel.
     fn to_disk(
         &self,
+        scratch: &RunScratch,
         cache_dir: &Path,
         keep_cache: bool,
         early: Option<EarlyDecode<I>>,
-    ) -> Result<LoadedTier, StackError> {
+    ) -> Result<LoadedFrames, StackError> {
         let Self {
             paths,
             progress,
@@ -297,12 +294,11 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             context,
             step,
         } = *self;
-        let scratch = RunScratch::create(cache_dir)?;
         let kept = keep_cache
             .then(|| DecodeCache::open(cache_dir))
             .transpose()?;
         let frame_cache = FrameDiskCache {
-            scratch: &scratch,
+            scratch,
             kept: kept.as_ref(),
             admission,
             context,
@@ -353,11 +349,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> TierLoad<'_, I, P> {
             cache_dir
         );
 
-        Ok(LoadedTier {
-            frames,
-            spilled: true,
-            metadata,
-        })
+        Ok(LoadedFrames { frames, metadata })
     }
 }
 
