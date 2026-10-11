@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| I3 | Pairwise CFA-drizzle normalization fits thin pairs | Do | B4 |
 | Q6 | Cold-read eviction for the spill benches | Do (prerequisite) | B5 |
 | I4, PIP-19, PIP-5 | Spilled reads fault maps the budget never counts | Do | B6 |
 | PIP-4 | Kept cache for the registered pipeline and the drizzle | Do | B7 |
@@ -49,39 +48,10 @@ gives PIP-19 its overlap.
 ## Dependency graph
 
 ```
-B4, B9                      independent
+B9                          independent
 B5 → B6 → B8                eviction helper → explicit spill reads → mosaic parking measured
 B7                          independent
 ```
-
----
-
-## B4. Pairwise normalization only where it is the more precise estimator (I3)
-
-**Evidence.** `combine/normalization/mod.rs`, `pairwise_norms`: a CFA-drizzle pair is fitted over
-whatever its slot's `CommonDomain` holds. One shared pixel is fitted like ten thousand; only an
-empty domain falls back to `per_frame_norms`. The rule decides by "any pixel" where it should
-decide by which estimator gives the smaller error.
-
-**Solution.** Decide for the whole set, as now, by predicted standard error:
-- **Pairwise, `Global`:** the Deming slope's asymptotic variance over the inliers, from the
-  paired moments and the two noise variances `PairedMoments` already holds (Fuller, *Measurement
-  Error Models*, 1987, §1.3), returned beside the gain by `paired_photometric_gain`.
-- **Pairwise, `Multiplicative`:** the median ratio's error from the two medians' errors over the
-  `n` shared samples, `1.2533·σ/√n` each, in relative terms.
-- **Per frame:** `Global` from `spread_variance_error` carried through `√(spread² − σ²)` and the
-  ratio; `Multiplicative` from each frame's medians over all its samples.
-- **Rule:** pairwise for the set when every pair-slot's relative gain error is no larger than the
-  per-frame estimator's for that frame and slot; per frame for every frame otherwise. An empty
-  domain is an infinite pairwise error, so today's fallback is one case of the rule. The log
-  states the estimator and the worst pair's two errors.
-
-**Test.** A set whose pairs share 30 pixels per slot takes per-frame; one whose pairs share
-thousands takes pairwise. The Deming error cross-checks against the empirical spread of fitted
-gains over 200 synthetic pairs within 10%; the test stays under 1 s. The issue's entry is removed
-from `ISSUES.md`.
-
-**Crates:** lumos.
 
 ---
 
