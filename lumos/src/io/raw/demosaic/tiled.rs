@@ -14,9 +14,9 @@ use rayon::prelude::*;
 
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::cancelled::Cancelled;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::memory::footprint::Footprint;
 
 /// How a kernel tiles a frame.
 #[derive(Debug, Clone, Copy)]
@@ -125,27 +125,27 @@ impl OutputPlanes {
     }
 }
 
-/// The output's three planes, and the peak: the caller's input, the output, and the workers'
-/// buffers of `tile_bytes` each. The workers are the pool's, which demosaics running at once
-/// share, so the charge to each is an upper bound.
-pub(crate) fn demosaic_memory(size: Size2us, tile_bytes: usize) -> DemosaicMemory {
+/// The output's three planes, and the peak: the caller's input, the output, and the buffers of
+/// `tile_bytes` each of `workers` holds. Demosaics running at once share the workers, so the charge
+/// to each is an upper bound.
+pub(crate) const fn footprint(size: Size2us, tile_bytes: usize, workers: usize) -> Footprint {
     let plane_bytes = size
         .width
         .saturating_mul(size.height)
         .saturating_mul(size_of::<f32>());
     let output_bytes = plane_bytes.saturating_mul(3);
-    DemosaicMemory {
-        output_bytes,
-        peak_bytes: plane_bytes
+    Footprint {
+        kept: output_bytes,
+        peak: plane_bytes
             .saturating_add(output_bytes)
-            .saturating_add(workspace_bytes(tile_bytes)),
+            .saturating_add(workspace_bytes(tile_bytes, workers)),
     }
 }
 
-/// The tile buffers of every worker of the pool, at most one each: a worker makes its tile for a
-/// run of tiles and drops it before it takes other work.
-pub(crate) fn workspace_bytes(tile_bytes: usize) -> usize {
-    rayon::current_num_threads().saturating_mul(tile_bytes)
+/// The tile buffers of `workers`, at most one each: a worker makes its tile for a run of tiles and
+/// drops it before it takes other work.
+pub(crate) const fn workspace_bytes(tile_bytes: usize, workers: usize) -> usize {
+    workers.saturating_mul(tile_bytes)
 }
 
 /// Demosaic the `size` frame `data`, whose photosite at a point has the colour `color_at` gives,

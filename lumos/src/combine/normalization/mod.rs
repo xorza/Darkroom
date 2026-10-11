@@ -115,7 +115,7 @@ impl FrameNorm {
     /// fitted gain the transient copy. A job never waits on a nested parallel loop, so no more of
     /// them are alive than there are workers. The ratio of medians needs no samples where the
     /// sources' medians describe the pixels combined, so nothing then.
-    pub(crate) fn working_bytes(
+    pub(crate) fn heap_bytes(
         frame_count: usize,
         dimensions: ImageDimensions,
         slots: Slots,
@@ -133,7 +133,7 @@ impl FrameNorm {
             .iter()
             .map(|&count| count * (size_of::<usize>() + size_of::<f32>()))
             .sum();
-        let mask = CommonDomain::mask_bytes(dimensions.pixel_count());
+        let mask = CommonDomain::heap_bytes(dimensions.pixel_count());
         let masks = mask * (1 + slots.mosaic().map_or(0, |_| slots.count()));
         let workers = threads.min(frame_count * slots.count());
         let sample = size_of::<f32>();

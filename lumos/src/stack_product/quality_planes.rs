@@ -54,14 +54,25 @@ impl QualityPlanes {
         1 + self.weight as usize + self.inverse_variance as usize + self.dispersion as usize
     }
 
-    /// Bytes a resident combine holds beside its frames for an output of `dimensions`: the
-    /// per-channel planes, the one coverage plane if coverage was asked for, and the flag byte of
-    /// each pixel. An upper bound for a run whose frames turn out to carry no quality planes, whose
-    /// coverage is a constant, or no flags, which leave the flag plane out.
-    pub(crate) const fn resident_bytes(self, dimensions: ImageDimensions) -> usize {
-        let planes =
-            dimensions.channels() * self.resident_planes_per_channel() + self.coverage as usize;
-        (planes * size_of::<f32>() + 1) * dimensions.pixel_count()
+    /// The bytes a combine's output holds a pixel: these planes for each of `channels`, the
+    /// combined pixels among them, `coverage_planes` coverage planes, and a flag byte when `flags`.
+    pub(crate) const fn pixel_bytes(
+        self,
+        channels: usize,
+        coverage_planes: usize,
+        flags: bool,
+    ) -> usize {
+        (channels * self.resident_planes_per_channel() + coverage_planes) * size_of::<f32>()
+            + flags as usize
+    }
+
+    /// The bytes a combine's output of `dimensions` holds before its frames are seen: one coverage
+    /// plane if asked for, and the flag plane. An upper bound for a run whose frames turn out to
+    /// carry no quality planes, whose coverage is a constant, or no flags, which leave the flag
+    /// plane out.
+    pub(crate) const fn heap_bytes(self, dimensions: ImageDimensions) -> usize {
+        self.pixel_bytes(dimensions.channels(), self.coverage as usize, true)
+            * dimensions.pixel_count()
     }
 
     /// Drop the planes this combine method cannot produce, so the request reaching the reducer

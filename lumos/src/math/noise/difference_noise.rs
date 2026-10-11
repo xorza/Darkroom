@@ -81,10 +81,10 @@ impl DifferenceNoise {
 
     /// The most bytes an estimate over a mosaic of `size` and `cfa_type` holds: every pair of
     /// every colour, as [`Self::estimate_split`] holds them, each with its gain bin.
-    pub(crate) fn peak_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
+    pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
         pair_counts(size, cfa_type, &|_| false)
             .into_iter()
-            .map(BinnedSamples::<f32>::bytes)
+            .map(BinnedSamples::<f32>::heap_bytes)
             .sum()
     }
 }

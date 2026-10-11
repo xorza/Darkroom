@@ -1,6 +1,7 @@
 //! [`RunMemory`]: the memory figure one run sizes against, read once at its entry.
 
 use crate::memory;
+use crate::memory::budget::Budget;
 use crate::platform::SystemMemory;
 
 /// The memory one run sizes against: one system reading, taken at the run's entry and passed to
@@ -32,8 +33,10 @@ impl RunMemory {
         }
     }
 
-    pub(crate) const fn planning(self) -> u64 {
-        self.planning
+    /// What a run fanning out on `workers` plans against: the share of the planning figure
+    /// [`memory_budget`](memory::memory_budget) leaves.
+    pub(crate) fn budget(self, workers: usize) -> Budget {
+        Budget::new(memory::memory_budget(self.planning), workers)
     }
 
     /// What one file's decode may allocate. From the system reading alone: the override says how to
@@ -45,17 +48,18 @@ impl RunMemory {
 
 #[cfg(test)]
 mod tests {
+    use crate::memory::budget::Budget;
     use crate::memory::memory_budget;
     use crate::memory::run_memory::RunMemory;
 
     #[test]
     fn an_override_plans_and_the_system_reading_bounds_the_decode() {
         let plain = RunMemory::new(8_000, None);
-        assert_eq!(plain.planning(), 8_000);
+        assert_eq!(plain.budget(2), Budget::new(memory_budget(8_000), 2));
         assert_eq!(plain.decode_ceiling(), memory_budget(8_000));
 
         let overridden = RunMemory::new(8_000, Some(100));
-        assert_eq!(overridden.planning(), 100);
+        assert_eq!(overridden.budget(2), Budget::new(75, 2));
         assert_eq!(
             overridden.decode_ceiling(),
             6_000,

@@ -418,7 +418,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         &config,
         StagePlan {
             parking: FrameParking::new(Tier::Resident),
-            warp_concurrency: 1,
+            warp_width: 1,
         },
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1118,7 +1118,7 @@ fn both_front_ends_report_the_same_stages() {
 /// and they too agree.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `memory_override`, the input
-/// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
+/// `RunPlan::of` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
 /// other source of nondeterminism, so any difference the assertions find is a real divergence.
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {

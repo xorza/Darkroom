@@ -14,12 +14,12 @@ mod tile;
 use common::CancelToken;
 
 use crate::io::cancelled::Cancelled;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
 use crate::io::raw::demosaic::tiled;
 use crate::io::raw::demosaic::tiled::Tiling;
 use crate::math::size2us::Size2us;
+use crate::memory::footprint::Footprint;
 use crate::simd::{F32x8, Isa, Mask8};
 
 /// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
@@ -44,9 +44,9 @@ pub(crate) const INTERPOLATED_BORDER: usize = 10;
 /// 67 ms at 144, 69 ms at 160, 77 ms at 192 and 105 ms at 256.
 const TILE: usize = 128;
 
-/// The memory a demosaic of a frame of `size` holds — see [`tiled::demosaic_memory`].
-pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
-    tiled::demosaic_memory(size, Tile::bytes())
+/// What a demosaic of a frame of `size` holds on `workers` — see [`tiled::footprint`].
+pub(crate) const fn footprint(size: Size2us, workers: usize) -> Footprint {
+    tiled::footprint(size, Tile::bytes(), workers)
 }
 
 /// Linear interpolation: `(1 - a) * b + a * c`.
@@ -165,9 +165,9 @@ pub(crate) mod internals {
     use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
     use crate::io::raw::demosaic::tiled;
 
-    /// The tile buffers of every worker of the pool — see [`tiled::workspace_bytes`].
-    pub(crate) fn workspace_bytes() -> usize {
-        tiled::workspace_bytes(Tile::bytes())
+    /// The tile buffers of `workers` — see [`tiled::workspace_bytes`].
+    pub(crate) fn workspace_bytes(workers: usize) -> usize {
+        tiled::workspace_bytes(Tile::bytes(), workers)
     }
 }
 

@@ -1,15 +1,18 @@
 //! How much of the machine the pipeline is willing to use, and what that buys.
 //!
-//! One budget ([`memory_budget`]) and everything derived from it: the row chunk a combine reads at
-//! a time ([`ChunkMemoryLayout`](chunk_memory_layout::ChunkMemoryLayout)), how many frames may
-//! decode or warp concurrently, and the resident-vs-spilled tier decision
-//! ([`MemoryPlan`](memory_plan::MemoryPlan)). Every caller sizes its work against this file rather than
-//! against the system's reading directly, through the one [`RunMemory`](run_memory::RunMemory) its
-//! run read at the entry.
+//! One [`Budget`](budget::Budget), read once at a run's entry from its
+//! [`RunMemory`](run_memory::RunMemory), and one rule over it: a run is a list of
+//! [`Stage`](stage::Stage)s, each priced in what it keeps of a frame, holds beside the frames and
+//! adds per unit of work in flight, and [`RunPlan`](run_plan::RunPlan) decides from them whether
+//! the frames stay resident and how wide each stage runs. A frame's way through a stage is priced
+//! as a chain of [`Footprint`](footprint::Footprint)s, each step's from the component that takes
+//! it.
 
-pub(crate) mod chunk_memory_layout;
-pub(crate) mod memory_plan;
+pub(crate) mod budget;
+pub(crate) mod footprint;
 pub(crate) mod run_memory;
+pub(crate) mod run_plan;
+pub(crate) mod stage;
 
 /// Share of available RAM the pipeline will commit, leaving the rest as headroom for allocator
 /// slack, the OS page cache, and whatever else the machine is doing.
@@ -18,27 +21,6 @@ const MEMORY_PERCENT: u64 = 75;
 pub(crate) fn memory_budget(available_memory: u64) -> u64 {
     (u128::from(available_memory) * u128::from(MEMORY_PERCENT) / 100) as u64
 }
-
-/// Frames that may be in flight at once: budget minus what stays resident, divided by the peak
-/// one in-flight frame adds, capped at the worker count and never below one.
-pub(crate) fn load_concurrency(
-    resident_bytes_per_frame: usize,
-    transient_bytes_per_decode: usize,
-    resident_frames: usize,
-    available_memory: u64,
-    max_workers: usize,
-) -> usize {
-    let usable = memory_budget(available_memory);
-    let transient = (transient_bytes_per_decode as u64).max(1);
-    let resident = (resident_bytes_per_frame as u64).saturating_mul(resident_frames as u64);
-    let headroom = usable.saturating_sub(resident);
-    ((headroom / transient).max(1) as usize).min(max_workers.max(1))
-}
-
-/// Quality planes a warped frame carries beside its image: `coverage` and `confidence`, one
-/// image-sized plane each, channel-independent — see `registration::resample::WarpResult` and
-/// `frame_store::FrameQuality`.
-pub(crate) const FRAME_QUALITY_PLANES: usize = 2;
 
 /// Image-sized planes the star detector's pool holds at its high-water mark over every preset: four
 /// f32 planes (the measurement plane, its sky noise, the detection plane and the filter's pass

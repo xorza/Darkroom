@@ -65,14 +65,25 @@ pub(super) struct FitsDecodePlan {
     /// The flag plane the decode builds when the header allows a null or declares a `DATAMAX`.
     flag_plane_bytes: u64,
     pub(super) peak_bytes: u64,
+    /// One chunk of the image as stored, which the reader's buffer holds.
+    native_chunk_bytes: u64,
     pub(super) rows_per_chunk: usize,
 }
 
 impl FitsDecodePlan {
     /// What the decode holds beside the frame it makes, its pixels and its flags: the reader's
-    /// chunk buffers, and a compressed image's tiles.
-    pub(super) const fn beside_frame_bytes(&self) -> u64 {
-        self.peak_bytes - self.decoded_bytes - self.flag_plane_bytes
+    /// chunk buffers, and a compressed image's tiles, while it reads the image; then, while it
+    /// reads each extension of `extensions` bytes in turn, the reader's buffer — which it keeps,
+    /// grown to the largest read so far — and the extension's own copy.
+    pub(super) fn beside_frame_bytes(&self, extensions: &[u64]) -> u64 {
+        let mut buffer = self.native_chunk_bytes;
+        extensions.iter().fold(
+            self.peak_bytes - self.decoded_bytes - self.flag_plane_bytes,
+            |beside, &bytes| {
+                buffer = buffer.max(bytes);
+                beside.max(buffer + bytes)
+            },
+        )
     }
 
     /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
@@ -345,6 +356,7 @@ pub(super) fn preflight_fits_image(
         decoded_bytes,
         flag_plane_bytes,
         peak_bytes,
+        native_chunk_bytes,
         rows_per_chunk,
     })
 }

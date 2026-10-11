@@ -173,7 +173,22 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     // The 120 000 decoded bytes, two stored chunks of the whole 100 rows at 8 bytes a sample, and
     // the flag plane a float image may need for its NaNs, a byte for each of the 10 000 pixels.
     assert_eq!(plan.peak_bytes, 290_000);
-    assert_eq!(plan.beside_frame_bytes(), 160_000, "the two chunks");
+    // Beside the frame: the two chunks of 80 000 B. An extension read after the image holds the
+    // reader's buffer, grown to the larger of the chunk and the extension, and its own copy: a
+    // 10 000 B one 90 000, under the chunks; a 200 000 B one 400 000; a 100 000 B one 200 000,
+    // and a 30 000 B one after it 130 000, the buffer still 100 000.
+    for (extensions, beside) in [
+        (&[][..], 160_000),
+        (&[10_000][..], 160_000),
+        (&[200_000][..], 400_000),
+        (&[100_000, 30_000][..], 200_000),
+    ] {
+        assert_eq!(
+            plan.beside_frame_bytes(extensions),
+            beside,
+            "{extensions:?}"
+        );
+    }
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,

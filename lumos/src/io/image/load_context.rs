@@ -40,11 +40,11 @@ impl LoadContext {
         }
     }
 
-    /// This context for `slots` decodes running at once: each with an equal share of rayon's
+    /// This context for `slots` decodes running at once: each with an equal share of this one's
     /// threads, one at least — see [`Self::decode_threads`].
     pub(crate) fn for_decode_slots(&self, slots: usize) -> Self {
         Self {
-            decode_threads: threads_per_decode(rayon::current_num_threads(), slots),
+            decode_threads: threads_per_decode(self.decode_threads, slots),
             ..self.clone()
         }
     }

@@ -1,4 +1,5 @@
 use crate::combine::config::{Normalization, Weighting};
+use crate::frame_store::tier::CombineBudget;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::memory::run_memory::RunMemory;
@@ -48,9 +49,7 @@ fn cache_test_frame<I: StackableImage>(
     );
     let tier = Tier::Spilled {
         scratch: RunScratch::create(cache_dir).unwrap(),
-        chunk_memory: 1 << 30,
-        overcommit_bytes: 0,
-        beside_bytes: 0,
+        combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
     };
     let paths = vec![source; index + 1];
     FrameLoad::<I, &Path> {

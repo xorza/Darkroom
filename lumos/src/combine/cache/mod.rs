@@ -32,6 +32,7 @@ use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_layout::StoredLayout;
 use crate::frame_store::tier::Tier;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_step::FrameStep;
@@ -39,7 +40,6 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::flat_gain;
 use crate::io::image::flat_gain::{GainGrid, GainRows};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -48,7 +48,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::vec2us::Vec2us;
-use crate::memory::chunk_memory_layout::ChunkMemoryLayout;
+use crate::memory::stage::{Stage, Units};
 use crate::progress::progress_callback::ProgressCallback;
 use crate::run_report::{AtomicFlagCounts, LocalFlagCounts, RunReport};
 use crate::stack_product::StackProduct;
@@ -309,7 +309,7 @@ impl FrameCache {
         let cancel = self.core.cancel.clone();
         let frame_norms = self.frame_norms.as_deref();
         let dimensions = self.core.dimensions;
-        let chunking = self.core.chunk_rows(self.weighted_layout(planes));
+        let chunking = self.core.chunk_rows(self.combine_stage(planes));
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
         let mut output_inverse_variance = planes
             .inverse_variance
@@ -333,7 +333,7 @@ impl FrameCache {
         let scratch_pool = JobScratchPool::<CombineScratch>::default();
         let pixels = self
             .core
-            .process_chunks(&self.frames, chunking.rows, |output_slice, ctx| {
+            .process_chunks(&self.frames, chunking.units, |output_slice, ctx| {
                 let ChunkContext {
                     frames,
                     chunks,
@@ -579,9 +579,7 @@ impl FrameCache {
                 kept_flagged_samples: kept_flagged.totals(),
                 variance_background_only: planes.inverse_variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
-                overcommit_bytes: chunking
-                    .overcommit_bytes
-                    .max(self.core.tier.overcommit_bytes()),
+                overcommit_bytes: chunking.overcommit_bytes,
                 spilled_frames: if self.core.tier.spills() {
                     self.frames.len() as u64
                 } else {
@@ -614,36 +612,25 @@ impl FrameCache {
             .any(|frame| frame.flags.is_some() || !frame.quality.is_none())
     }
 
-    /// What the combine pass holds: a chunk of every channel of every frame, as the chunk-outer walk
-    /// reads them, plus one more plane for each of that frame's quality planes and a byte for its
-    /// flags, against the resident output planes: the coverage planes when any are gathered, and
+    /// The combine as a stage of rows: each row reads every frame's planes as their layouts say,
+    /// beside the output planes held throughout — the coverage planes when any are gathered, and
     /// the flag plane when the combine writes one.
-    fn weighted_layout(&self, planes: QualityPlanes) -> ChunkMemoryLayout {
-        ChunkMemoryLayout {
-            input_bytes: self
-                .frames
-                .iter()
-                .map(|frame| {
-                    // A flat gain grid holds a node per `STEP²` pixels of each channel, 3/4 of a
-                    // byte a pixel at most. Rounded up to a byte it also covers the two node rows
-                    // a planned chunk reads past its own: 64 rows read at most 18 node rows of
-                    // `W/4 + 1.75` nodes, `54W + 378` bytes in colour, under `64W` from 38
-                    // columns. A frame under 64 rows, read whole, is too small to matter.
-                    let gain = frame.flat_gain.as_ref().map_or(0, |gain| {
-                        (gain.channels() * size_of::<f32>())
-                            .div_ceil(flat_gain::STEP * flat_gain::STEP)
-                    });
-                    (frame.channels.len() + frame.quality.count()) * size_of::<f32>()
-                        + usize::from(frame.flags.is_some())
-                        + gain
-                })
-                .sum(),
-            resident_bytes: self.core.dimensions.channels()
-                * planes.resident_planes_per_channel()
-                * size_of::<f32>()
-                + self.coverage_channels(planes) * size_of::<f32>()
-                + usize::from(self.flag_plane()),
-            beside_bytes: 0,
+    fn combine_stage(&self, planes: QualityPlanes) -> Stage {
+        let dimensions = self.core.dimensions;
+        let frame_bytes: usize = self
+            .frames
+            .iter()
+            .map(|frame| StoredLayout::of(frame).pixel_bytes())
+            .sum();
+        Stage {
+            kept: 0,
+            held: planes.pixel_bytes(
+                dimensions.channels(),
+                self.coverage_channels(planes),
+                self.flag_plane(),
+            ) * dimensions.pixel_count(),
+            in_flight: frame_bytes * dimensions.width(),
+            units: Units::Rows(dimensions.height()),
         }
     }
 

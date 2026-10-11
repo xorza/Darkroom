@@ -122,14 +122,14 @@ impl MrsNoise {
     /// share its tiles: [`Self::estimate_split`]'s coefficients, each with its gain bin, the
     /// six planes of every tile in work, the largest first, and the tile list beside them.
     /// [`Self::estimate`] holds no bins and so a byte a coefficient less.
-    pub(crate) fn peak_bytes(size: Size2us, threads: usize) -> usize {
+    pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
         let tiles = tiles(size);
         let analysed: usize = tiles.iter().map(Tile::core_pixels).sum();
         let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
             tiles.iter().map(Tile::region_pixels).collect();
         regions.sort_unstable_by(|a, b| b.cmp(a));
         let in_work: usize = regions.iter().take(threads.max(1)).sum();
-        BinnedSamples::<Coefficients>::bytes(analysed)
+        BinnedSamples::<Coefficients>::heap_bytes(analysed)
             + in_work * TILE_BYTES_PER_PIXEL
             + tiles.len()
                 * (size_of::<Tile>() + size_of::<&mut [Coefficients]>() + size_of::<usize>())

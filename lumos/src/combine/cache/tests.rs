@@ -6,14 +6,15 @@ use crate::combine::rejection::Rejection;
 use crate::frame_store::frame_quality::{DropPlanes, FramePlane, FrameQuality};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::tier::CombineBudget;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::statistics;
-use crate::memory::memory_plan::MemoryPlan;
-use crate::memory::run_memory::RunMemory;
+use crate::memory::budget::Budget;
+use crate::memory::run_plan::RunPlan;
 use common::TempDir;
 
 /// A mono request with the default survivor minimum, no weights and no noise.
@@ -389,7 +390,7 @@ fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
 }
 
 #[test]
-fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
+fn the_combine_stage_counts_active_inputs_and_full_outputs() {
     let dimensions = ImageDimensions::new((2, 1), 3);
     let image = || LinearImage::from_pixels(dimensions, vec![1.0; 6]);
     let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
@@ -419,47 +420,39 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         .expect("frames are valid")
     };
     let cache = frames(false);
+    // A row of the 2 × 1 output reads `input` bytes a pixel of every frame, and the output holds
+    // `output` bytes a pixel throughout.
+    let stage = |input: usize, output: usize| Stage {
+        kept: 0,
+        held: output * 2,
+        in_flight: input * 2,
+        units: Units::Rows(1),
+    };
 
     // Inputs: 3 frames × 3 channels, a chunk of each read for every channel, plus the coverage +
     // confidence pair frames 1 and 2 each carry. Residents: 3 channels × (pixels + weight +
     // variance), the coverage plane the gather writes, the dispersion when asked for, and the flag
     // byte a pixel no frame reached would be flagged in.
     assert_eq!(
-        cache.weighted_layout(QualityPlanes::STANDARD),
-        ChunkMemoryLayout {
-            input_bytes: 13 * 4,
-            resident_bytes: 10 * 4 + 1,
-            beside_bytes: 0,
-        }
+        cache.combine_stage(QualityPlanes::STANDARD),
+        stage(13 * 4, 10 * 4 + 1)
     );
     assert_eq!(
-        cache.weighted_layout(QualityPlanes::ALL),
-        ChunkMemoryLayout {
-            input_bytes: 13 * 4,
-            resident_bytes: 13 * 4 + 1,
-            beside_bytes: 0,
-        }
+        cache.combine_stage(QualityPlanes::ALL),
+        stage(13 * 4, 13 * 4 + 1)
     );
 
     // Declining the quality planes drops their residency, so the same frames buy more rows.
     assert_eq!(
-        cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
-        ChunkMemoryLayout {
-            input_bytes: 13 * 4,
-            resident_bytes: 3 * 4 + 1,
-            beside_bytes: 0,
-        }
+        cache.combine_stage(QualityPlanes::IMAGE_ONLY),
+        stage(13 * 4, 3 * 4 + 1)
     );
 
     // A frame with flags is read a byte a pixel, and the stack's flag plane is the same one byte.
     let flagged = frames(true);
     assert_eq!(
-        flagged.weighted_layout(QualityPlanes::STANDARD),
-        ChunkMemoryLayout {
-            input_bytes: 13 * 4 + 1,
-            resident_bytes: 10 * 4 + 1,
-            beside_bytes: 0,
-        }
+        flagged.combine_stage(QualityPlanes::STANDARD),
+        stage(13 * 4 + 1, 10 * 4 + 1)
     );
 
     // A frame whose source declared a null is a mask of its flags: its three channels and the
@@ -485,12 +478,8 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     )
     .expect("frames are valid");
     assert_eq!(
-        masked.weighted_layout(QualityPlanes::STANDARD),
-        ChunkMemoryLayout {
-            input_bytes: 3 * (3 * 4 + 1),
-            resident_bytes: 10 * 4 + 1,
-            beside_bytes: 0,
-        }
+        masked.combine_stage(QualityPlanes::STANDARD),
+        stage(3 * (3 * 4 + 1), 10 * 4 + 1)
     );
 }
 
@@ -632,7 +621,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         [linear, mosaic]
     };
     for cache in caches(&[1.0, 3.0, 2.0]) {
-        assert_eq!(cache.core.tier.chunk_memory(), None);
+        assert_eq!(cache.core.tier.combine_budget(), None);
         let median = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, _| {
             CombinedSample::value_only(statistics::median_mut(samples.values))
         });
@@ -675,8 +664,8 @@ fn light_and_calibration_frames_combine_through_one_engine() {
 }
 
 /// A frame's plane reads the rows asked for, resident or memory-mapped alike: row 1 of a 4 × 3
-/// ramp is pixels 4..8, and the whole plane is the ramp. A spilled cache sizes its chunks against
-/// the run's planning figure.
+/// ramp is pixels 4..8, and the whole plane is the ramp. A spilled cache budgets its chunks against
+/// the run's budget, here one no frame fits.
 #[test]
 fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
@@ -686,6 +675,13 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let image = LinearImage::from_pixels(dims, ramp.clone());
 
     let resident = FrameCache::from_images(vec![image.clone()], Normalization::None);
+    let budget = Budget::new(10, 1);
+    let frame = Stage {
+        kept: 48,
+        held: 0,
+        in_flight: 0,
+        units: Units::Frames,
+    };
     let spilled = FrameCache::from_stored_frames(
         vec![
             StoredFrame::spill(
@@ -698,14 +694,9 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
         ],
         CacheCore::plain(
             Tier::for_plan(
-                &MemoryPlan {
-                    fits_in_ram: false,
-                    decode_concurrency: 1,
-                    warp_concurrency: 1,
-                    overcommit_bytes: 0,
-                },
+                &RunPlan::of(1, &[frame], budget),
+                budget,
                 0,
-                RunMemory::new(1 << 30, Some(123_456)),
                 temp_dir.path(),
             )
             .unwrap(),
@@ -714,7 +705,10 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
         Normalization::None,
     )
     .unwrap();
-    assert_eq!(spilled.core.tier.chunk_memory(), Some(123_456));
+    assert_eq!(
+        spilled.core.tier.combine_budget(),
+        Some(CombineBudget::new(budget))
+    );
     for cache in [&resident, &spilled] {
         let plane = &cache.frames[0].channels[0];
         assert_eq!(plane.chunk(4, 8), &ramp[4..8]);

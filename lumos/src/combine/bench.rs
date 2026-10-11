@@ -158,7 +158,8 @@ fn bench_spilled_mean_40(b: ::quickbench::Bencher) {
     use crate::frame_store::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::StoredFrame;
-    use crate::frame_store::tier::Tier;
+    use crate::frame_store::tier::{CombineBudget, Tier};
+    use crate::memory::run_memory::RunMemory;
     use crate::stack_product::quality_planes::QualityPlanes;
 
     let directory = TempDir::new("lumos_bench_spilled_mean");
@@ -176,9 +177,7 @@ fn bench_spilled_mean_40(b: ::quickbench::Bencher) {
         CacheCore::plain(
             Tier::Spilled {
                 scratch,
-                chunk_memory: SPILLED_CHUNK_MEMORY,
-                overcommit_bytes: 0,
-                beside_bytes: 0,
+                combine: CombineBudget::new(RunMemory::new(SPILLED_CHUNK_MEMORY, None).budget(1)),
             },
             dimensions,
         ),
@@ -239,7 +238,8 @@ fn spilled_mean_under_a_memory_cap() {
     use crate::frame_store::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::StoredFrame;
-    use crate::frame_store::tier::Tier;
+    use crate::frame_store::tier::{CombineBudget, Tier};
+    use crate::memory::run_memory::RunMemory;
     use crate::stack_product::quality_planes::QualityPlanes;
 
     let read_bytes = || -> u64 {
@@ -271,9 +271,7 @@ fn spilled_mean_under_a_memory_cap() {
         CacheCore::plain(
             Tier::Spilled {
                 scratch,
-                chunk_memory: 128 << 20,
-                overcommit_bytes: 0,
-                beside_bytes: 0,
+                combine: CombineBudget::new(RunMemory::new(128 << 20, None).budget(1)),
             },
             ImageDimensions::new(size, 1),
         ),
