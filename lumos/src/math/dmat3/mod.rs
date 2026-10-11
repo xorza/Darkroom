@@ -138,5 +138,8 @@ impl Index<usize> for DMat3 {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;

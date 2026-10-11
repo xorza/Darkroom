@@ -13,9 +13,6 @@ mod scalar;
 mod simd;
 mod weighted_sums;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::weighted_sums::WeightedSums;
 use crate::simd::{F32_LANES, Kernel};
@@ -27,8 +24,8 @@ use crate::simd::{F32_LANES, Kernel};
 /// One vector's worth of work does not amortize the fold — at 8 elements the kernel ran 0.80x its
 /// fallback, broke even at 10, and only pulled clear at 16 (1.71x). [`weighted_sums()`] has no
 /// such gap and gates at one vector: its scalar loop carries two accumulators and a multiply, which
-/// LLVM vectorizes less well. Set on AVX2 from `bench_sum_f32_crossover`, and held on every Isa
-/// so the two entry points' window below stays one window on every CPU.
+/// LLVM vectorizes less well. Set on AVX2 from the `math/sum` bench of `sum_f32`, and held on every
+/// Isa so the two entry points' window below stays one window on every CPU.
 const SUM_F32_CROSSOVER: usize = 16;
 
 /// Sum f32 values, returning the unrounded f64 total.
@@ -107,6 +104,9 @@ fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedSums {
         scalar::weighted_sums(values, weights)
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 
 #[cfg(test)]
 mod tests;

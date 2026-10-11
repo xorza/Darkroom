@@ -84,5 +84,8 @@ pub(crate) fn solve_in_place(a: &mut [f64], b: &mut [f64], singular_below: f64) 
     Some(())
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;

@@ -3,7 +3,6 @@
 //! `cargo test -p lumos --release --features bench stretching::bench -- --ignored --nocapture`
 
 use crate::internals::prelude::*;
-use crate::internals::synthetic::patterns;
 use quickbench::quick_bench;
 use std::array;
 use std::hint::black_box;
@@ -19,7 +18,7 @@ const H: usize = 2000;
 /// already-stretched master back in), and the `clone` row is what that copy costs.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_rgb(b: ::quickbench::Bencher) {
-    let master = patterns::linear_rgb_master(ImageDimensions::new((W, H), 3));
+    let master = linear_rgb_master(ImageDimensions::new((W, H), 3));
     b.bench_labeled("clone", || black_box(master.clone()));
     let ghs = |b: f32| Stretch {
         method: StretchMethod::Ghs {
@@ -76,4 +75,31 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         stretching::simd::asinh_color_preserve(r, g, bch, black, curve);
         black_box(&planes);
     });
+}
+
+/// A synthetic linear RGB master: a sky gradient down the frame plus a hashed dither, channels
+/// scaled 1, 0.9, 0.8, and every 9973rd pixel — a prime, so the cores do not align to a row — a
+/// star core 1.5 above it, past 1.0 as a real stack's are. Representative enough that no image op
+/// short-circuits on it.
+pub(crate) fn linear_rgb_master(dimensions: ImageDimensions) -> LinearImage {
+    let (width, height) = (dimensions.width(), dimensions.height());
+    let count = width * height;
+    let mut channels = [
+        vec![0.0f32; count],
+        vec![0.0f32; count],
+        vec![0.0f32; count],
+    ];
+    for y in 0..height {
+        for x in 0..width {
+            let index = y * width + x;
+            let sky = 0.02 + (y as f32 / height as f32) * 0.03;
+            let hash = (index as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
+            let noise = (hash - 0.5) * 0.004;
+            let core = if index % 9973 == 0 { 1.5 } else { 0.0 };
+            for (channel, plane) in channels.iter_mut().enumerate() {
+                plane[index] = sky * (1.0 - 0.1 * channel as f32) + noise + core;
+            }
+        }
+    }
+    LinearImage::from_planar_channels(dimensions, channels)
 }

@@ -523,7 +523,7 @@ fn cfa_no_defective_pixels() {
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
-    assert_eq!(defect_map.hot().indices, []);
+    assert_eq!(defect_map.hot().indices, [0usize; 0]);
     assert_eq!(defect_map.summary(&CfaType::Mono).defective_pixels, 0);
 }
 
@@ -570,7 +570,11 @@ fn cold_pixels_detected_from_flat() {
     // The dead pixel (0.0) reads below half its uniform 0.4 neighbourhood (0.5·0.4 = 0.2);
     // every normal pixel reads its full 0.4. A flat yields no hot pixels.
     assert_eq!(defect_map.cold_indices(), [5]);
-    assert_eq!(defect_map.hot().indices, [], "a flat yields no hot pixels");
+    assert_eq!(
+        defect_map.hot().indices,
+        [0usize; 0],
+        "a flat yields no hot pixels"
+    );
 }
 
 /// A clean (uniform) flat must not flag its own pixels as cold — every pixel equals its
@@ -610,7 +614,11 @@ fn cold_detection_survives_vignetting_gradient() {
 
     // Only the dead pixel: not the dim edge (vignetting), not the bright one, not the dust shadow.
     assert_eq!(defect_map.cold_indices(), [dead]);
-    assert_eq!(defect_map.hot().indices, [], "a flat yields no hot pixels");
+    assert_eq!(
+        defect_map.hot().indices,
+        [0usize; 0],
+        "a flat yields no hot pixels"
+    );
 }
 
 /// `detect_hot` + `detect_cold` combine hot pixels (from the dark) and cold pixels (from the
@@ -702,7 +710,7 @@ fn xtrans_cold_pixel_detected() {
     assert_eq!(defect_map.cold_indices(), [dead]);
     assert_eq!(
         defect_map.hot().indices,
-        [],
+        [0usize; 0],
         "detect_cold sets no hot pixels"
     );
 }

@@ -1,10 +1,8 @@
-//! Simple test patterns for benchmarks and tests: gradients, noise, and a synthetic linear master.
+//! Simple test patterns for benchmarks and tests: gradients and noise.
 
 use imaginarium::Buffer2;
 
 use crate::internals::test_rng::TestRng;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -46,31 +44,4 @@ pub(crate) fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     for p in pixels.iter_mut() {
         *p += rng.next_gaussian_f32() * sigma;
     }
-}
-
-/// A synthetic linear RGB master: a sky gradient down the frame plus a hashed dither, channels
-/// scaled 1, 0.9, 0.8, and every 9973rd pixel — a prime, so the cores do not align to a row — a
-/// star core 1.5 above it, past 1.0 as a real stack's are. Representative enough that no image op
-/// short-circuits on it.
-pub(crate) fn linear_rgb_master(dimensions: ImageDimensions) -> LinearImage {
-    let (width, height) = (dimensions.width(), dimensions.height());
-    let count = width * height;
-    let mut channels = [
-        vec![0.0f32; count],
-        vec![0.0f32; count],
-        vec![0.0f32; count],
-    ];
-    for y in 0..height {
-        for x in 0..width {
-            let index = y * width + x;
-            let sky = 0.02 + (y as f32 / height as f32) * 0.03;
-            let hash = (index as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
-            let noise = (hash - 0.5) * 0.004;
-            let core = if index % 9973 == 0 { 1.5 } else { 0.0 };
-            for (channel, plane) in channels.iter_mut().enumerate() {
-                plane[index] = sky * (1.0 - 0.1 * channel as f32) + noise + core;
-            }
-        }
-    }
-    LinearImage::from_planar_channels(dimensions, channels)
 }

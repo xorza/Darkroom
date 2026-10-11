@@ -4,7 +4,7 @@
 use crate::simd::avx2_fma::Avx2Fma;
 #[cfg(target_arch = "aarch64")]
 use crate::simd::neon::Neon;
-#[cfg(any(test, not(target_arch = "aarch64")))]
+#[cfg(any(test, feature = "bench", not(target_arch = "aarch64")))]
 use crate::simd::portable::Portable;
 use crate::simd::{Isa, Kernel};
 
@@ -15,8 +15,8 @@ use crate::simd::{Isa, Kernel};
 /// tier the CPU has, so an Isa cannot be dispatched to without being tested.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Tier {
-    /// Never dispatched on aarch64, where every CPU has NEON; kept there for the tests.
-    #[cfg(any(test, not(target_arch = "aarch64")))]
+    /// Never dispatched on aarch64, where every CPU has NEON; kept there for the tests and benches.
+    #[cfg(any(test, feature = "bench", not(target_arch = "aarch64")))]
     Portable(Portable),
     #[cfg(target_arch = "x86_64")]
     Avx2Fma(Avx2Fma),
@@ -49,7 +49,7 @@ impl Tier {
     #[inline]
     pub(crate) fn run<K: Kernel>(self, kernel: K) -> K::Output {
         match self {
-            #[cfg(any(test, not(target_arch = "aarch64")))]
+            #[cfg(any(test, feature = "bench", not(target_arch = "aarch64")))]
             Self::Portable(isa) => isa.run(kernel),
             #[cfg(target_arch = "x86_64")]
             Self::Avx2Fma(isa) => isa.run(kernel),
@@ -59,7 +59,7 @@ impl Tier {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use std::fmt;
     use std::fmt::{Display, Formatter};
@@ -79,6 +79,10 @@ pub(crate) mod internals {
 
         /// Every tier this CPU runs, narrowest first. Each one it cannot is reported on stderr:
         /// a test has no skipped state, and would otherwise pass without checking it.
+        #[expect(
+            clippy::print_stderr,
+            reason = "a bench, like a test, has no skipped state to report a missing tier in"
+        )]
         pub(crate) fn supported() -> impl Iterator<Item = Tier> {
             let mut tiers = vec![Self::portable()];
             #[cfg(target_arch = "x86_64")]

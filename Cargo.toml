@@ -72,6 +72,7 @@ arrayvec = { version = "0.7", features = ["serde"] }
 static_assertions = "1.1"
 rand_chacha = { version = "0.10" }
 nalgebra = { version = "0.35" }
+criterion = { version = "0.8" }
 statrs = { version = "0.19", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
 winresource = { version = "0.1" }

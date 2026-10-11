@@ -23,6 +23,9 @@ impl FloorI32 for f32 {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests {
     use crate::math::floor_i32::FloorI32;

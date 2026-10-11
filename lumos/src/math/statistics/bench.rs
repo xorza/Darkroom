@@ -1,118 +1,105 @@
-//! Benchmarks for statistical functions.
+//! The order statistics over the sizes they run at: a combine pixel's frames, a star's stamp and a
+//! background tile; and a whole plane's median, by radix and by selection.
 
-use ::quickbench::quick_bench;
 use std::hint::black_box;
-use std::iter;
 
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+
+use crate::bench::fixture::{self, Scale};
 use crate::math::statistics::clipped_stats::ClippedStats;
-use crate::math::statistics::*;
+use crate::math::statistics::median_mad::MedianMad;
+use crate::math::statistics::radix_median::RadixMedian;
+use crate::math::statistics::spread::Spread;
+use crate::math::statistics::{mad_with_scratch, median_fast, median_mut, robust_sigma_f64};
 
-const BENCH_SIZE: usize = 1024;
-const TILE_SIZE: usize = 4096; // 64x64 tile - realistic background estimation size
+/// A combine pixel's frames, a star's stamp, a 64² background tile.
+const LENGTHS: [usize; 3] = [16, 256, 4_096];
+/// A 24 MP plane, the size normalization ranks per frame.
+const PLANE: usize = 24_000_000;
 
-fn make_test_data() -> Vec<f32> {
-    (0..BENCH_SIZE).map(|x| 100.0 + (x % 20) as f32).collect()
-}
+pub(crate) fn benches(c: &mut Criterion) {
+    let mut group = fixture::group(c, "math/statistics", Scale::Sample);
+    for len in LENGTHS {
+        group.throughput(Throughput::Elements(len as u64));
+        group.bench_function(BenchmarkId::new("median_mut", len), |b| {
+            let values = fixture::sky(len, 2);
+            b.iter_batched_ref(
+                || values.clone(),
+                |values| median_mut(black_box(values)),
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new("median_fast", len), |b| {
+            let values = fixture::sky(len, 2);
+            b.iter_batched_ref(
+                || values.clone(),
+                |values| median_fast(black_box(values)),
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new("median_mad", len), |b| {
+            let values = fixture::sky(len, 2);
+            b.iter_batched_ref(
+                || values.clone(),
+                |values| MedianMad::of_mut(black_box(values)),
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new("mad_with_scratch", len), |b| {
+            let values = fixture::sky(len, 2);
+            let median = median_mut(&mut values.clone());
+            let mut scratch = Vec::with_capacity(len);
+            b.iter(|| mad_with_scratch(black_box(&values), median, &mut scratch));
+        });
+        group.bench_function(BenchmarkId::new("robust_sigma_f64", len), |b| {
+            let values: Vec<f64> = fixture::sky(len, 2).into_iter().map(f64::from).collect();
+            let mut scratch = Vec::with_capacity(len);
+            b.iter(|| robust_sigma_f64(black_box(&values), &mut scratch));
+        });
+        group.bench_function(BenchmarkId::new("sigma_clipped", len), |b| {
+            let values = fixture::sky(len, 2);
+            let mut deviations = Vec::with_capacity(len);
+            b.iter_batched_ref(
+                || values.clone(),
+                |values| ClippedStats::sigma_clipped(black_box(values), &mut deviations, 3.0, 5),
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new("spread", len), |b| {
+            let mut sorted = fixture::sky(len, 2);
+            sorted.sort_unstable_by(f32::total_cmp);
+            b.iter(|| Spread::of_sorted(black_box(&sorted)));
+        });
+    }
+    group.finish();
 
-fn make_test_data_with_outliers() -> Vec<f32> {
-    let mut data: Vec<f32> = vec![100.0; BENCH_SIZE - 10];
-    data.extend([1000.0, 2000.0, 3000.0, 4000.0, 5000.0]);
-    data.extend([0.0, 1.0, 2.0, 3.0, 4.0]);
-    data
-}
-
-fn make_tile_data_with_outliers() -> Vec<f32> {
-    // Realistic tile: mostly uniform with ~2% outliers (stars)
-    let mut data: Vec<f32> = vec![100.0; TILE_SIZE - 80];
-    // Add some realistic star pixels (high outliers)
-    data.extend(iter::repeat_n(500.0, 40));
-    data.extend(iter::repeat_n(1000.0, 20));
-    data.extend(iter::repeat_n(2000.0, 10));
-    data.extend(iter::repeat_n(5000.0, 5));
-    // Add some noise (low outliers)
-    data.extend(iter::repeat_n(50.0, 5));
-    data
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_median_f32(b: ::quickbench::Bencher) {
-    let data = make_test_data();
-
-    b.bench(|| {
-        let mut d = data.clone();
-        black_box(median_mut(black_box(&mut d)))
+    let mut group = fixture::group(c, "math/statistics/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(PLANE as u64));
+    group.bench_function(BenchmarkId::new("plane_median/radix", PLANE), |b| {
+        let plane = fixture::sky(PLANE, 3);
+        let mut median = RadixMedian::default();
+        b.iter(|| {
+            let mut high = median.high_pass();
+            for &value in black_box(&plane) {
+                high.add(value);
+            }
+            let mut low = high.finish();
+            for &value in &plane {
+                low.add(value);
+            }
+            low.median()
+        });
     });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_sigma_clipped_median_mad(b: ::quickbench::Bencher) {
-    let data = make_test_data_with_outliers();
-    let mut deviations = Vec::with_capacity(BENCH_SIZE);
-
-    b.bench(|| {
-        let mut d = data.clone();
-        black_box(ClippedStats::sigma_clipped(
-            black_box(&mut d),
-            black_box(&mut deviations),
-            3.0,
-            3,
-        ))
+    // The plane must keep its order, so selecting its median takes a copy of it: the copy is part
+    // of what this way costs.
+    group.bench_function(BenchmarkId::new("plane_median/selection", PLANE), |b| {
+        let plane = fixture::sky(PLANE, 3);
+        let mut copy = Vec::with_capacity(PLANE);
+        b.iter(|| {
+            copy.clear();
+            copy.extend_from_slice(black_box(&plane));
+            median_mut(&mut copy)
+        });
     });
-}
-
-/// Benchmark sigma clipping on realistic 64x64 tile (4096 pixels, 5 iterations)
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_sigma_clipped_tile_4096(b: ::quickbench::Bencher) {
-    let data = make_tile_data_with_outliers();
-    let mut deviations = Vec::with_capacity(TILE_SIZE);
-
-    b.bench(|| {
-        let mut d = data.clone();
-        black_box(ClippedStats::sigma_clipped(
-            black_box(&mut d),
-            black_box(&mut deviations),
-            3.0,
-            5, // 5 iterations like default config
-        ))
-    });
-}
-
-/// A 24 MP plane of sky at 0.1 with ±0.01 of hashed noise: what normalization ranks per plane.
-fn make_plane() -> Vec<f32> {
-    (0..24_000_000u32)
-        .map(|index| {
-            let hash = index.wrapping_mul(0x9E37_79B9).rotate_left(13) ^ index;
-            0.1 + (hash % 2001) as f32 * 1e-5 - 0.01
-        })
-        .collect()
-}
-
-/// A plane's median by copying it and selecting, as normalization did.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 2000)]
-fn bench_plane_median_by_selection(b: ::quickbench::Bencher) {
-    let plane = make_plane();
-    let mut copy = Vec::with_capacity(plane.len());
-    b.bench(|| {
-        copy.clear();
-        copy.extend_from_slice(black_box(&plane));
-        black_box(median_mut(&mut copy))
-    });
-}
-
-/// The same median by two radix passes over the plane, with no copy.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 2000)]
-fn bench_plane_median_by_radix(b: ::quickbench::Bencher) {
-    let plane = make_plane();
-    let mut median = radix_median::RadixMedian::default();
-    b.bench(|| {
-        let mut high = median.high_pass();
-        for &value in black_box(&plane) {
-            high.add(value);
-        }
-        let mut low = high.finish();
-        for &value in &plane {
-            low.add(value);
-        }
-        black_box(low.median())
-    });
+    group.finish();
 }

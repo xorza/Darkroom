@@ -154,8 +154,8 @@ pub(crate) const fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f
     mad.max(center * floor_fraction)
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+
 #[cfg(test)]
 mod tests;
-
-#[cfg(all(test, feature = "bench"))]
-mod bench;
