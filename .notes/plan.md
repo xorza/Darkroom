@@ -9,7 +9,6 @@ otherwise. Line numbers drift, so search for the named item.
 
 | ID | Item | Recommendation | Batch |
 |---|---|---|---|
-| PIP-6 | Park the mosaic instead of the demosaiced frame | Measure | B8 |
 | — | First float-TIFF light decoded twice | Do, low priority | B9 |
 | — | X-Trans cosmic-ray statistic | Defer | — |
 | RAW-10, DMS-6 | RAW buffer vs file open; WB inside the demosaic | Blocked on real data | — |
@@ -41,22 +40,7 @@ otherwise. Line numbers drift, so search for the named item.
 
 ```
 B9                          independent
-B8                          measures cold reads with `StoredPlane::evict` (Linux; `libc`
-                            dev-dependency)
 ```
-
----
-
-## B8. Park the calibrated mosaic, not the demosaiced frame (PIP-6, measure)
-
-**Evidence.** Auto reference + spill parks each demosaiced light, three planes and flags, where
-the calibrated mosaic, one plane and flags, would do, at the cost of a second demosaic.
-
-**Measure (cold reads, `StoredPlane::evict` between passes).** Pipeline bench, Auto + spill, both ways on SSD. Adopt the
-faster. The output is bit identical either way, since the demosaic is deterministic; a test holds
-that.
-
-**Crates:** lumos.
 
 ---
 
