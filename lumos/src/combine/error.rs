@@ -2,17 +2,14 @@
 
 use thiserror::Error;
 
-use crate::calibration_masters::error::DarkMismatch;
+use crate::calibration_masters::error::SubtractionError;
 use crate::calibration_masters::master_role::MasterRole;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
 use crate::frame_store::error::{ConditionMismatch, FrameStoreError};
 use crate::frame_store::frame_quality::FramePlane;
+use crate::ingest::error::AdmissionError;
 use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
-use crate::math::size2us::Size2us;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -67,56 +64,23 @@ pub enum StackError {
         median: f32,
     },
 
-    /// The master a calibration stack subtracts from every frame is of another sensor shape or
-    /// pattern than frame `index`.
+    /// A normalization that scales each frame by its own spread found this one's spread no larger
+    /// than its white noise: the slot holds no signal structure to scale by.
     #[error(
-        "frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}, or of another pattern"
+        "frame {index} has spread {spread} in slot {slot}, no larger than its white noise {noise}; \
+         it holds no signal to scale a normalization by"
     )]
-    SubtractorShape {
+    NoSignalScale {
         index: usize,
-        frame: Size2us,
-        subtractor: Size2us,
+        /// A channel, or a colour of a mosaic.
+        slot: usize,
+        spread: f32,
+        noise: f32,
     },
 
-    /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
-    #[error(
-        "frame {index} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
-    )]
-    SubtractorDomain {
-        index: usize,
-        frame: Box<SampleDomain>,
-        subtractor: Box<SampleDomain>,
-    },
-
-    /// The master a calibration stack would subtract from every frame lost, when it was itself
-    /// stacked, everything its role holds, or more than its role may lose: a bias anything, a dark
-    /// or a flat-dark more than its bias.
-    #[error("the {subtractor} master is calibrated past anything it could subtract")]
-    OverCalibratedSubtractor { subtractor: MasterRole },
-
-    /// The master a calibration stack would subtract holds more than a frame of the stacked role
-    /// may lose before it is combined: a dark or a flat-dark only its bias, a bias nothing, and no
-    /// frame its flat response.
-    #[error(
-        "the {subtractor} master holds more than a {target} frame may lose before it is combined"
-    )]
-    SubtractorForRole {
-        target: MasterRole,
-        subtractor: MasterRole,
-    },
-
-    /// Frame `index` already lost a part of what the subtracted master holds: subtracted again,
-    /// that part would be removed twice.
-    #[error("frame {index} already lost part of what the {subtractor} master holds")]
-    SubtractedTwice {
-        index: usize,
-        subtractor: MasterRole,
-    },
-
-    /// The master holding dark signal that a calibration stack subtracts was taken under other
-    /// conditions than frame `index`.
-    #[error("frame {index} cannot take the subtracted master: {source}")]
-    SubtractorConditions { index: usize, source: DarkMismatch },
+    /// The master a calibration stack subtracts from every frame cannot be taken from them.
+    #[error(transparent)]
+    Subtraction(#[from] SubtractionError),
 
     /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
     /// flat-dark — were not all taken under one: the master would state one frame's conditions and
@@ -139,82 +103,6 @@ pub enum StackError {
     #[error(transparent)]
     ImageLoad(#[from] ImageError),
 
-    #[error(transparent)]
-    DimensionMismatch(#[from] FrameDimensionMismatch),
-
-    /// A frame already in the frame store does not match the geometry the cache was built for.
-    /// Reported as a plane count and sample counts rather than as
-    /// [`ImageDimensions`](crate::ImageDimensions) because a stored plane knows only its length —
-    /// it has no width or height to report.
-    #[error("stored frame {index} has {actual} channel planes, expected {expected}")]
-    StoredFrameChannels {
-        index: usize,
-        expected: usize,
-        actual: usize,
-    },
-
-    #[error("stored frame {index} {plane} holds {actual} samples, expected {expected}")]
-    StoredFramePlaneSamples {
-        index: usize,
-        plane: FramePlane,
-        expected: usize,
-        actual: usize,
-    },
-
-    /// Two frames were decoded into different sample domains, so combining them would average
-    /// values that do not mean the same thing.
-    ///
-    /// Reached when both frames declare a domain and one cannot be expressed in the other's: a
-    /// different stated unit, or a span the decoder had to assume — a `float32` FITS taken as
-    /// already normalized stacked against a `uint16` one divided by 65535. Two declared spans in
-    /// one unit (two RAWs whose `maximum − black` differ) are converted, not refused.
-    #[error(
-        "frame {index} was decoded into sample domain {actual}, but frame {reference_index} used \
-         {expected}; neither can be expressed in the other"
-    )]
-    SampleDomainMismatch {
-        index: usize,
-        actual: Box<SampleDomain>,
-        reference_index: usize,
-        expected: Box<SampleDomain>,
-    },
-
-    /// Two frames store their rows from opposite ends, so they are mirrored views of one field.
-    ///
-    /// The rows are never reordered on decode, so a `BOTTOM-UP` frame and a `TOP-DOWN` one of the
-    /// same target are upside-down relative to each other. Named here rather than left to surface
-    /// as a registration failure with no stated cause.
-    #[error(
-        "frame {index} stores its rows {actual}, but frame {reference_index} stores them \
-         {expected}; the two are mirrored views and cannot be combined"
-    )]
-    RowOrderMismatch {
-        index: usize,
-        actual: RowOrder,
-        reference_index: usize,
-        expected: RowOrder,
-    },
-
-    /// Two frames carry different mosaic patterns, or one is a mosaic and the other is not, so
-    /// the same pixel is a different colour in each.
-    #[error(
-        "frame {index} has CFA pattern {actual:?}, but frame {reference_index} has {expected:?}"
-    )]
-    CfaPatternMismatch {
-        index: usize,
-        actual: Option<CfaType>,
-        reference_index: usize,
-        expected: Option<CfaType>,
-    },
-
-    #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]
-    NonFiniteImageSample {
-        index: usize,
-        channel: usize,
-        pixel: usize,
-        value: f32,
-    },
-
     #[error(
         "{plane} dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
     )]
@@ -227,29 +115,101 @@ pub enum StackError {
         actual_height: usize,
     },
 
-    #[error("{plane} for frame {index} has invalid value {value} at pixel {pixel}")]
-    InvalidWarpPlaneValue {
-        index: usize,
-        plane: FramePlane,
-        pixel: usize,
-        value: f32,
-    },
+    /// A frame failed the checks every frame of a set passes before it is combined.
+    #[error(transparent)]
+    Admission(AdmissionError),
+}
 
-    /// The two frame-quality planes disagree about whether the frame has support at a pixel. A warp
-    /// or a drizzle produces support and confidence together or neither, and the combine gates on
-    /// support — `plane`, the coverage or the drop weight — while dividing the noise by
-    /// confidence, so a pixel supported at zero confidence would enter the statistics with no
-    /// finite noise and one confident at zero support would be dropped despite having data.
-    #[error(
-        "frame {index} has {plane} {support} with confidence {confidence} at pixel {pixel}: a pixel has support and confidence together or neither"
-    )]
-    FrameQualityPairMismatch {
-        index: usize,
-        pixel: usize,
-        plane: FramePlane,
-        support: f32,
-        confidence: f32,
-    },
+impl StackConfigError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::InvalidManualWeight { index, value } => Self::InvalidManualWeight {
+                index: inputs[index],
+                value,
+            },
+            error @ (Self::Field(_)
+            | Self::InvalidManualWeightSum
+            | Self::ManualWeightCountMismatch { .. }
+            | Self::RejectingSmallNFallback) => error,
+        }
+    }
+}
+
+impl StackError {
+    /// The error with each frame index it holds, a position in the list it was raised over, read
+    /// through `inputs` into the caller's own numbering of those frames.
+    pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
+        match self {
+            Self::Config(error) => Self::Config(error.renumbered(inputs)),
+            Self::NonPositiveMedian {
+                index,
+                slot,
+                median,
+            } => Self::NonPositiveMedian {
+                index: inputs[index],
+                slot,
+                median,
+            },
+            Self::NoSignalScale {
+                index,
+                slot,
+                spread,
+                noise,
+            } => Self::NoSignalScale {
+                index: inputs[index],
+                slot,
+                spread,
+                noise,
+            },
+            Self::Subtraction(error) => Self::Subtraction(error.renumbered(inputs)),
+            Self::MasterConditions { role, source } => Self::MasterConditions {
+                role,
+                source: source.renumbered(inputs),
+            },
+            Self::NoNoiseToWeigh { index } => Self::NoNoiseToWeigh {
+                index: inputs[index],
+            },
+            Self::WarpPlaneDimensionMismatch {
+                index,
+                plane,
+                expected_width,
+                expected_height,
+                actual_width,
+                actual_height,
+            } => Self::WarpPlaneDimensionMismatch {
+                index: inputs[index],
+                plane,
+                expected_width,
+                expected_height,
+                actual_width,
+                actual_height,
+            },
+            Self::Admission(error) => Self::Admission(error.renumbered(inputs)),
+            error @ (Self::FrameStore(_)
+            | Self::NoFrames
+            | Self::Cancelled
+            | Self::NoCommonCoverage
+            | Self::ImageLoad(_)) => error,
+        }
+    }
+}
+
+impl From<FrameDimensionMismatch> for StackError {
+    fn from(mismatch: FrameDimensionMismatch) -> Self {
+        Self::Admission(AdmissionError::DimensionMismatch(mismatch))
+    }
+}
+
+/// A frame refused at admission is the run's refusal, a cancel inside the checks the run's cancel.
+impl From<AdmissionError> for StackError {
+    fn from(error: AdmissionError) -> Self {
+        match error {
+            AdmissionError::Cancelled => Self::Cancelled,
+            error => Self::Admission(error),
+        }
+    }
 }
 
 impl From<Cancelled> for StackError {
@@ -266,6 +226,40 @@ mod tests {
 
     use crate::combine::error::*;
     use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::image_provenance::RowOrder;
+
+    /// Survivors 0, 1 and 2 are inputs 0, 3 and 5: a frame index and a reference index both read
+    /// through the list, and an error that names no frame comes back as it was.
+    #[test]
+    fn a_renumbered_error_names_the_callers_frames() {
+        let inputs = [0, 3, 5];
+        let error = StackError::Admission(AdmissionError::RowOrderMismatch {
+            index: 2,
+            actual: RowOrder::BottomUp,
+            reference_index: 1,
+            expected: RowOrder::TopDown,
+        })
+        .renumbered(&inputs);
+        assert!(
+            matches!(
+                error,
+                StackError::Admission(AdmissionError::RowOrderMismatch {
+                    index: 5,
+                    reference_index: 3,
+                    ..
+                })
+            ),
+            "{error:?}"
+        );
+        assert!(matches!(
+            StackError::NoNoiseToWeigh { index: 1 }.renumbered(&inputs),
+            StackError::NoNoiseToWeigh { index: 3 }
+        ));
+        assert!(matches!(
+            StackError::NoCommonCoverage.renumbered(&inputs),
+            StackError::NoCommonCoverage
+        ));
+    }
 
     #[test]
     fn each_plane_carries_its_own_range_and_label() {

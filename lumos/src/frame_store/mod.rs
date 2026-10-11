@@ -19,6 +19,7 @@ pub(crate) mod stored_gain;
 pub(crate) mod stored_image;
 pub(crate) mod stored_plane;
 pub(crate) mod stratified_samples;
+pub(crate) mod tier;
 
 #[cfg(test)]
 mod tests;

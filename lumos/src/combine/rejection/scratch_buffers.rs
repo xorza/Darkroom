@@ -7,14 +7,13 @@ use statrs::distribution::{ContinuousCDF, StudentsT};
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::sorted_samples::SortedSamples;
 
-/// Working state for the GESD test: each removal's statistic, and the critical values by the count
-/// of samples a removal is made from.
+/// Working state for the GESD test: the critical values by the count of samples a removal is made
+/// from.
 ///
 /// A critical value depends only on that count and alpha, not on the pixel, so one table serves
 /// every pixel of a run whatever its coverage. Entries are NaN until a pixel needs them.
 #[derive(Debug, Default)]
 pub(crate) struct GesdScratch {
-    pub(crate) statistics: Vec<f64>,
     critical_values: Vec<f64>,
     alpha: f32,
 }
@@ -22,7 +21,6 @@ pub(crate) struct GesdScratch {
 impl GesdScratch {
     /// Room for the critical values of up to `frame_count` samples, so no pixel allocates.
     fn reserve(&mut self, frame_count: usize) {
-        self.statistics.reserve(frame_count);
         self.critical_values.reserve(frame_count + 1);
     }
 

@@ -2,8 +2,8 @@
 
 use crate::calibration_masters;
 use crate::calibration_masters::dark_match::DarkMatch;
+use crate::calibration_masters::error::SubtractionError;
 use crate::calibration_masters::master_role::MasterRole;
-use crate::combine::error::StackError;
 use crate::frame_store::capture_conditions::CaptureConditions;
 use crate::ingest::frame_step::FrameStep;
 use crate::io::image::calibration_state::CalibrationState;
@@ -13,9 +13,9 @@ use crate::io::image::sample_domain::DomainMap;
 /// A master to take from each frame of a calibration stack, in its role: a flat's flat-dark or
 /// bias, so the multiplicative normalization scales the flat's own signal, or a dark's bias.
 #[derive(Debug, Clone, Copy)]
-pub struct Subtractor<'a> {
-    pub role: MasterRole,
-    pub master: &'a CfaImage,
+pub(crate) struct Subtractor<'a> {
+    pub(crate) role: MasterRole,
+    pub(crate) master: &'a CfaImage,
 }
 
 /// A [`Subtractor`] checked against the role of the frames it is taken from, with the parts it
@@ -36,16 +36,16 @@ impl<'a> MasterSubtraction<'a> {
     pub(crate) const fn new(
         target: MasterRole,
         subtractor: Subtractor<'a>,
-    ) -> Result<Self, StackError> {
+    ) -> Result<Self, SubtractionError> {
         let lost = subtractor.master.metadata.calibration;
         let removes = subtractor.role.signal().without(lost);
         if removes.is_none() || !subtractor.role.may_have_lost().contains(lost) {
-            return Err(StackError::OverCalibratedSubtractor {
+            return Err(SubtractionError::OverCalibratedSubtractor {
                 subtractor: subtractor.role,
             });
         }
         if !target.may_have_lost().contains(removes) {
-            return Err(StackError::SubtractorForRole {
+            return Err(SubtractionError::SubtractorForRole {
                 target,
                 subtractor: subtractor.role,
             });
@@ -58,17 +58,19 @@ impl<'a> MasterSubtraction<'a> {
 }
 
 impl FrameStep<CfaImage> for MasterSubtraction<'_> {
-    fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), StackError> {
+    type Error = SubtractionError;
+
+    fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), SubtractionError> {
         let Subtractor { role, master } = self.subtractor;
         if master.cfa_type != frame.cfa_type || master.size() != frame.size() {
-            return Err(StackError::SubtractorShape {
+            return Err(SubtractionError::SubtractorShape {
                 index,
                 frame: frame.size(),
                 subtractor: master.size(),
             });
         }
         if frame.metadata.calibration.overlaps(self.removes) {
-            return Err(StackError::SubtractedTwice {
+            return Err(SubtractionError::SubtractedTwice {
                 index,
                 subtractor: role,
             });
@@ -84,11 +86,11 @@ impl FrameStep<CfaImage> for MasterSubtraction<'_> {
                 )
             })
             .transpose()
-            .map_err(|source| StackError::SubtractorConditions { index, source })?;
+            .map_err(|source| SubtractionError::SubtractorConditions { index, source })?;
         let map = match (&frame.metadata.domain, &master.metadata.domain) {
             (Some(frame_domain), Some(master_domain)) => master_domain
                 .conversion_to(frame_domain)
-                .ok_or_else(|| StackError::SubtractorDomain {
+                .ok_or_else(|| SubtractionError::SubtractorDomain {
                     index,
                     frame: Box::new(frame_domain.clone()),
                     subtractor: Box::new(master_domain.clone()),
@@ -172,7 +174,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             unscalable.apply(3, &mut frame(0.5, 2.0)),
-            Err(StackError::SubtractorConditions {
+            Err(SubtractionError::SubtractorConditions {
                 index: 3,
                 source: DarkMismatch::Exposure {
                     frame: 2.0,
@@ -194,7 +196,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             error,
-            StackError::SubtractedTwice {
+            SubtractionError::SubtractedTwice {
                 index: 3,
                 subtractor: MasterRole::Bias
             }
@@ -230,14 +232,14 @@ mod tests {
             let error = MasterSubtraction::new(target, Subtractor { role, master }).unwrap_err();
             if over_calibrated {
                 assert!(
-                    matches!(error, StackError::OverCalibratedSubtractor { subtractor } if subtractor == role),
+                    matches!(error, SubtractionError::OverCalibratedSubtractor { subtractor } if subtractor == role),
                     "{target:?} from {role:?}: {error:?}"
                 );
             } else {
                 assert!(
                     matches!(
                         error,
-                        StackError::SubtractorForRole { target: t, subtractor: s }
+                        SubtractionError::SubtractorForRole { target: t, subtractor: s }
                             if t == target && s == role
                     ),
                     "{target:?} from {role:?}: {error:?}"

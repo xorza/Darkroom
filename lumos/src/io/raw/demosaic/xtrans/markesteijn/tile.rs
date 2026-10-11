@@ -5,9 +5,9 @@ use std::ops::Range;
 use crate::math::vec2us::Vec2us;
 
 use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
-use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::io::raw::demosaic::xtrans::markesteijn::{CROP, READ_REACH, TILE};
+use crate::io::raw::demosaic::xtrans::xtrans_image::XTransImage;
 
 /// Half the tile, the width of the green bounds, which hold one entry per pair of columns.
 const HALF_TILE: usize = TILE / 2;
@@ -129,7 +129,7 @@ impl Tile {
             let y = first_row + row;
             for (col, balanced) in line[..cols].iter_mut().enumerate() {
                 let x = first_col + col;
-                let colour = usize::from(xtrans.pattern.color_at(Vec2us::new(x, y)));
+                let colour = xtrans.pattern.color_at(Vec2us::new(x, y)).index();
                 *balanced = xtrans.read(y, x) * xtrans.gains[colour];
             }
         }
@@ -200,7 +200,7 @@ impl Tile {
             let coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + usize::from(hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.colour(row, leftstart + 1) & 1)
             };
             let entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
@@ -242,7 +242,7 @@ impl Tile {
         self.rgb[..plane].fill([0.0; 3]);
         for row in top..mrow {
             for col in left..mcol {
-                let colour = usize::from(hex.colour(row, col));
+                let colour = hex.colour(row, col);
                 self.rgb[Self::at(0, row - top, col - left)][colour] =
                     self.input[Self::input_at(top, left, row, col)];
             }
@@ -284,7 +284,7 @@ impl Tile {
             let mut coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + usize::from(hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.colour(row, leftstart + 1) & 1)
             };
             let bounds_entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
@@ -346,9 +346,9 @@ impl Tile {
             let mut coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + usize::from(hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.colour(row, leftstart + 1) & 1)
             };
-            let mut f = usize::from(hex.colour(row, leftstart));
+            let mut f = hex.colour(row, leftstart);
             if coloffset == 3 {
                 let h = hex.tile(row, leftstart);
                 let mut col = leftstart;
@@ -393,7 +393,7 @@ impl Tile {
         let ts = TILE as isize;
         while row < mrow - 2 {
             let mut col = sgstartcol;
-            let mut h = usize::from(hex.colour(row, col + 1));
+            let mut h = hex.colour(row, col + 1);
             while col < mcol - 2 {
                 let mut rix = Self::at(base, row - top, col - left);
                 let mut diff = [0.0f32; 6];
@@ -474,7 +474,7 @@ impl Tile {
                 ts
             };
             let h = 3 * (c ^ ts ^ 1);
-            let mut f = 2 - usize::from(hex.colour(row, leftstart));
+            let mut f = 2 - hex.colour(row, leftstart);
             if hex.right_shift(row) {
                 let mut col = leftstart;
                 while col < mcol - 3 {
@@ -516,7 +516,7 @@ impl Tile {
         let leftstart = (left + 2..mcol - 2)
             .find(|&col| (col - sgcol) % 3 != 0)
             .unwrap_or(mcol - 2);
-        let coloffsetstart = 2 - usize::from(hex.colour(topstart, leftstart + 1) & 1);
+        let coloffsetstart = 2 - (hex.colour(topstart, leftstart + 1) & 1);
         for row in topstart..mrow - 2 {
             if (row - sgrow) % 3 == 0 {
                 continue;
@@ -737,7 +737,7 @@ impl Tile {
                     }
                 }
                 let (y, x) = (row + top, col + left);
-                let native = usize::from(xtrans.pattern.color_at(Vec2us::new(x, y)));
+                let native = xtrans.pattern.color_at(Vec2us::new(x, y)).index();
                 for (channel, &gain) in xtrans.gains.iter().enumerate() {
                     // SAFETY: as this function's contract.
                     unsafe {
@@ -786,7 +786,7 @@ pub(crate) mod internals {
             for d in 0..4 {
                 for row in 0..TILE {
                     for col in 0..TILE {
-                        let colour = usize::from(hex.colour(place.top + row, place.left + col));
+                        let colour = hex.colour(place.top + row, place.left + col);
                         for (channel, value) in
                             self.rgb[Self::at(d, row, col)].iter_mut().enumerate()
                         {

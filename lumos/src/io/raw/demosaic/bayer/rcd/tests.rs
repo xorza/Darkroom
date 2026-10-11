@@ -1,11 +1,12 @@
 use common::CancelToken;
 
 use crate::internals::test_rng::TestRng;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::raw::demosaic::bayer::bayer_image::BayerImage;
 use crate::io::raw::demosaic::bayer::rcd::tile::Tile;
 use crate::io::raw::demosaic::bayer::rcd::{
     INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
 };
-use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::io::raw::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -216,7 +217,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
             let data: Vec<f32> = (0..size.pixel_count())
                 .map(|index| {
                     let (x, y) = (index % WIDTH, index / WIDTH);
-                    scene(pattern.color_at(Vec2us::new(x, y)), x, y)
+                    scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
                 })
                 .collect();
             let planes = demosaic(
@@ -301,7 +302,7 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
         .map(|_| 0.1 + 0.8 * rng.next_f32())
         .collect();
     for pattern in CfaPattern::ALL {
-        let colour = |index: usize| pattern.color_at(size.point_of(index));
+        let colour = |index: usize| pattern.color_at(size.point_of(index)).index();
         let balanced: Vec<f32> = data
             .iter()
             .enumerate()

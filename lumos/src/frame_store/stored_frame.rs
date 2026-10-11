@@ -8,7 +8,7 @@ use imaginarium::Buffer2;
 use crate::frame_store::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill};
+use crate::frame_store::frame_spill::{Carries, Committed, FrameSpill, PlaneDigests};
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
@@ -142,13 +142,15 @@ impl StoredFrame {
             (None, Some(_)) => Carries::Flags,
             (None, None) => Carries::Channels,
         };
-        spill.commit(key, carries, &frame.source_stats)?;
+        let digests = PlaneDigests::of(&frame.channels, frame.flags.as_ref());
+        spill.commit(key, carries, digests, &frame.source_stats)?;
         Ok(frame)
     }
 
     /// The frame [`Self::cache`] committed to `spill`'s files under `key`, mapped; `None` when
-    /// there is none whole to reuse — no commit under this key, or a plane missing or of another
-    /// size.
+    /// there is none whole to reuse — no commit for this source under this key, or a plane
+    /// missing, of another size, or holding other bytes than it was committed with. The digests
+    /// read every page of the planes, which the checks a reused frame passes read next anyway.
     pub(crate) fn reuse(
         spill: &FrameSpill<'_>,
         key: CacheKey,
@@ -157,6 +159,7 @@ impl StoredFrame {
         let Some(Committed {
             stats: source_stats,
             carries,
+            digests,
         }) = spill.committed(key)
         else {
             return Ok(None);
@@ -166,7 +169,7 @@ impl StoredFrame {
         {
             return Ok(None);
         }
-        let channels = (0..dimensions.channels())
+        let channels: ArrayVec<StoredPlane, 3> = (0..dimensions.channels())
             .map(|channel| StoredPlane::map(&spill.channel_path(channel)))
             .collect::<Result<_, _>>()?;
         let quality = match carries {
@@ -179,6 +182,9 @@ impl StoredFrame {
             .flags()
             .then(|| StoredPlane::map(&spill.flags_path()))
             .transpose()?;
+        if PlaneDigests::of(&channels, flags.as_ref()) != digests {
+            return Ok(None);
+        }
         Ok(Some(Self {
             channels,
             samples: None,

@@ -4,6 +4,7 @@ use crate::io::image::calibration_state::CalibrationState;
 use crate::io::image::cfa::CfaType;
 use fits_well::image::SampleType;
 
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::fits::metadata::{
     SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order, read_metadata,
     read_row_order, write_image_metadata,
@@ -11,7 +12,6 @@ use crate::io::image::fits::metadata::{
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
 fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {

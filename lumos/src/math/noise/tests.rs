@@ -1,6 +1,6 @@
 use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::statistics::MedianMad;
@@ -95,7 +95,7 @@ fn each_bayer_colour_reads_its_own_noise() {
         .map(|index| {
             let (x, y) = (index % 512, index / 512);
             let colour = cfa_type.color_at(Vec2us::new(x, y));
-            0.2 + 0.3 * (x as f32 / 512.0) + sigmas[usize::from(colour)] * rng.next_gaussian_f32()
+            0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
         })
         .collect();
     let estimates = DifferenceNoise::estimate(&mosaic, size, &cfa_type, |_| false);

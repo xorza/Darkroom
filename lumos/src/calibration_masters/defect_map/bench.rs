@@ -1,6 +1,6 @@
 use crate::calibration_masters::defect_map::sampling::collect_color_sample_indices;
 use crate::calibration_masters::defect_map::*;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use ::quickbench::quick_bench;
 use std::hint;
 

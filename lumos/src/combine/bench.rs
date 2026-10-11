@@ -79,7 +79,8 @@ const LARGE_SIZE: Size2us = Size2us::new(256, 256);
 const LARGE_FRAMES: u32 = 300;
 
 /// The rejections whose per-pixel cost grows with the count, at 300 frames: linear fit, which reads
-/// the normal scores of every count a pixel has, and GESD. Each once on a set every frame covers
+/// the normal scores of every count a pixel has, GESD, and winsorized, whose clamp walks the
+/// samples once more for every step it takes. Each once on a set every frame covers
 /// whole, and once on a ragged set, each frame missing a band of columns of its own width, so the
 /// count changes along every row the way a registered stack's edges change it.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 2000)]
@@ -113,6 +114,7 @@ fn bench_stack_300(b: ::quickbench::Bencher) {
         for (label, rejection) in [
             ("linear fit", Rejection::linear_fit(3.0)),
             ("gesd", Rejection::gesd()),
+            ("winsorized", Rejection::winsorized(2.5)),
         ] {
             let config = StackConfig {
                 combine: Combine {

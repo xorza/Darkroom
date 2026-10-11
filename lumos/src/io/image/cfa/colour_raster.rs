@@ -27,7 +27,7 @@ pub(crate) struct ColourRaster {
 
 impl ColourRaster {
     /// The photosites of `colour` of a `cfa_type` mosaic over an image of `size`.
-    pub(crate) fn new(cfa_type: &CfaType, size: Size2us, colour: u8) -> Self {
+    pub(crate) fn new(cfa_type: &CfaType, size: Size2us, colour: usize) -> Self {
         let period = cfa_type.period();
         let columns: ArrayVec<ArrayVec<u8, MAX_PERIOD>, MAX_PERIOD> = (0..period)
             .map(|row| {
@@ -87,9 +87,9 @@ impl ColourRaster {
 #[cfg(test)]
 mod tests {
     use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::cfa::colour_raster::ColourRaster;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
-    use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
+    use crate::io::image::cfa::xtrans_pattern::XTransPattern;
     use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
 

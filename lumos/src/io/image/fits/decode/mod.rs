@@ -17,9 +17,10 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
+use std::fs::File;
 use std::path::Path;
 
-use fits_well::io::SliceReader;
+use fits_well::io::StreamReader;
 
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
@@ -34,6 +35,7 @@ use crate::io::image::fits::gain_extension::GAIN_EXTNAME;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::FitsChecksumProvenance;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
@@ -166,12 +168,12 @@ pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaIma
         .into_cfa(path)
 }
 
-/// The Lumos CFA image in HDU `index` of a file already open in memory, with its flags extension,
+/// The Lumos CFA image in HDU `index` of a file already open, with its flags extension,
 /// under the caller's `context` — its cancellation, memory limit and float scale — with the
 /// checksum state the caller verified for both. Held to the version check every file entry point
 /// applies; an HDU that is not a Lumos CFA image is refused.
 pub(crate) fn read_cfa_hdu(
-    reader: &mut SliceReader<'_>,
+    reader: &mut StreamReader<File>,
     index: usize,
     path: &Path,
     context: &LoadContext,
@@ -248,6 +250,30 @@ pub(crate) fn fits_cfa_frame_info(
         cfa_type,
         decoder_bytes: 0,
     })
+}
+
+/// The dimensions a linear FITS image of `path` decodes to, from its header alone: the same
+/// selection, cube reading and limits [`load_linear_fits`] applies, without reading a sample. A
+/// header that declares a mosaic is refused, as the load refuses it.
+pub(crate) fn fits_linear_dimensions(
+    path: &Path,
+    context: &LoadContext,
+) -> Result<ImageDimensions, ImageError> {
+    let selected = SelectedFits::open(path, context)?;
+    let dimensions = selected.plan.dimensions;
+    let cfa_type = read_cfa_from_headers(
+        selected.header(),
+        dimensions.height(),
+        context.fits.unstated_bayer_pattern,
+    )
+    .map_err(|source| ImageError::fits(path, source))?;
+    if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
+        return Err(ImageError::scientific_rejection(
+            path,
+            "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+        ));
+    }
+    Ok(dimensions)
 }
 
 #[cfg(all(test, feature = "bench"))]

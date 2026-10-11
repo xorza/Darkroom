@@ -4,6 +4,7 @@ use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::frame_store::cache_key::DecoderKind;
+use crate::frame_store::frame_peek::FramePeek;
 use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
@@ -354,6 +355,22 @@ impl StackableImage for LinearImage {
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         LinearImage::from_file(path, context)
+    }
+
+    /// A FITS header answers without a decode; its reader streams the samples, so it holds nothing
+    /// beside the frame. A float TIFF has no header this reads apart from its pixels.
+    fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
+        match InputFormat::of(path).ok()? {
+            InputFormat::Fits => {
+                fits_decode::fits_linear_dimensions(path, context)
+                    .ok()
+                    .map(|dimensions| FramePeek {
+                        dimensions,
+                        decoder_bytes: 0,
+                    })
+            }
+            InputFormat::CameraRaw | InputFormat::Raster(_) => None,
+        }
     }
 
     fn into_parts(self) -> ImageParts {

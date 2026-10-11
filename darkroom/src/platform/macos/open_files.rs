@@ -16,6 +16,7 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::ptr;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Sel};
@@ -64,7 +65,7 @@ pub(crate) fn install(deliver: impl Fn(PathBuf) + 'static) {
     // what the runtime will call this IMP with.
     let added = unsafe {
         ffi::class_addMethod(
-            (class as *const AnyClass).cast_mut(),
+            ptr::from_ref(class).cast_mut(),
             sel!(application:openURLs:),
             std::mem::transmute::<OpenUrls, unsafe extern "C-unwind" fn()>(open_urls),
             c"v@:@@".as_ptr(),

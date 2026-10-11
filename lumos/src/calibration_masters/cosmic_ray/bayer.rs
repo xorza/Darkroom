@@ -12,7 +12,7 @@ use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::calibration_masters::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_lattice::CfaLattice;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -83,7 +83,7 @@ impl<'a> BayerDetector<'a> {
                     continue;
                 }
                 lattice.deinterleave(data, size, phase, plane);
-                let colour = pattern.color_at(phase);
+                let colour = pattern.color_at(phase).index();
                 let local = |index: usize| {
                     let at = plane_size.point_of(index);
                     backgrounds.at(colour, Vec2us::new(2 * at.x + a, 2 * at.y + b))

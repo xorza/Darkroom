@@ -3,8 +3,8 @@
 use thiserror::Error;
 
 use crate::combine::error::StackError;
-use crate::error::{FrameDimensionMismatch, InvalidConfigField};
-use crate::io::image::cfa::CfaType;
+use crate::error::InvalidConfigField;
+use crate::ingest::error::AdmissionError;
 use crate::io::image::error::ImageError;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
@@ -38,29 +38,12 @@ pub enum DrizzleError {
     #[error(transparent)]
     ImageLoad(#[from] ImageError),
 
+    /// A frame failed the checks every frame of a set passes: among them a frame of another
+    /// shape, a frame of another mosaic pattern, whose photosites would reach other channels at
+    /// the same positions, and a sample no drop can carry, whose value would turn every output
+    /// pixel the drop reaches, and its variance, into the same non-finite number.
     #[error(transparent)]
-    DimensionMismatch(#[from] FrameDimensionMismatch),
-
-    /// A sample no drop can carry: its value would turn every output pixel the drop reaches, and
-    /// its variance, into the same non-finite number.
-    #[error(
-        "drizzle frame {index} has non-finite sample {value} in channel {channel} at pixel {pixel}"
-    )]
-    NonFiniteSample {
-        index: usize,
-        channel: usize,
-        pixel: usize,
-        value: f32,
-    },
-
-    /// A frame whose mosaic pattern is not the first frame's: its photosites would reach other
-    /// channels at the same positions. `None` is a frame that is no mosaic.
-    #[error("drizzle frame {index} has mosaic pattern {actual:?}, expected {expected:?}")]
-    PatternMismatch {
-        index: usize,
-        expected: Option<CfaType>,
-        actual: Option<CfaType>,
-    },
+    Admission(AdmissionError),
 
     /// The combine of the drizzled frames failed: its configuration, or storing a frame.
     #[error(transparent)]
@@ -87,9 +70,19 @@ pub enum DrizzleError {
     },
 }
 
+impl From<AdmissionError> for DrizzleError {
+    fn from(error: AdmissionError) -> Self {
+        match error {
+            AdmissionError::Cancelled => Self::Cancelled,
+            error => Self::Admission(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::drizzle::error::*;
+    use crate::error::FrameDimensionMismatch;
     use crate::io::image::image_dimensions::ImageDimensions;
 
     /// The two messages that name drizzle rather than stacking, which is what keeps this error a
@@ -109,7 +102,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            DrizzleError::from(mismatch).to_string(),
+            DrizzleError::from(AdmissionError::from(mismatch)).to_string(),
             "frame 2 is 200x100x3, expected 100x100x3"
         );
     }

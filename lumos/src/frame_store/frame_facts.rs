@@ -10,7 +10,7 @@ use crate::io::image::sample_domain::SampleDomain;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 
 /// What a frame's source said about it. The domain, row order and pattern every frame of a set has
-/// to state alike — see [`SetFacts`](crate::combine::cache::set_facts::SetFacts); the capture
+/// to state alike — see [`SetFacts`](crate::ingest::set_facts::SetFacts); the capture
 /// conditions the set's product states only where every frame shares them, and the conditions a
 /// dark match left uncompared wherever any frame did. Carried with the frame's
 /// statistics because the metadata they come from is dropped for every frame but the first.

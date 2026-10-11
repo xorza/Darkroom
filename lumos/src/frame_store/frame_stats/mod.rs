@@ -13,6 +13,7 @@ use crate::math::noise::background_split::BackgroundSplit;
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::statistics;
+use crate::math::statistics::MedianMad;
 use crate::math::vec2us::Vec2us;
 
 /// Per-frame statistics, per slot: a channel, or a colour of a mosaic, whose one channel holds three
@@ -31,6 +32,10 @@ pub(crate) struct FrameStats {
     /// The level `noise` was measured at, in the same slots: each colour's median of the mosaic,
     /// or each channel's median.
     pub(crate) sky: ArrayVec<f32, 3>,
+    /// Each slot's robust spread over the same pixels as its median: noise and signal together.
+    /// Measured only where a normalization scales frames one by one, which a drizzle of mosaics
+    /// does ([`Self::measure_with_spread`]); `None` elsewhere.
+    pub(crate) spread: Option<ArrayVec<SlotSpread, 3>>,
     pub(crate) quantization_sigma: Option<f32>,
     /// From [`CcdNoise::electrons_per_unit`], when the source states its gain.
     pub(crate) electrons_per_unit: Option<f32>,
@@ -53,6 +58,16 @@ impl FrameStats {
     /// by construction is; and normalization already re-measures over the pixels every frame shares
     /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
+        Self::measured(image, false)
+    }
+
+    /// [`Self::measure`], and each slot's [`spread`](Self::spread) from the samples its median
+    /// already took.
+    pub(crate) fn measure_with_spread(image: &impl StackableImage) -> Self {
+        Self::measured(image, true)
+    }
+
+    fn measured(image: &impl StackableImage, with_spread: bool) -> Self {
         let dimensions = image.dimensions();
         let metadata = image.metadata();
         let facts = FrameFacts::of(image);
@@ -118,24 +133,31 @@ impl FrameStats {
             nulls.is_none_or(|nulls| !nulls.at(index).intersects(QualityFlags::NO_DATA))
         };
         let width = dimensions.width();
-        let medians: ArrayVec<f32, 3> = match mosaic {
+        let levels: Vec<SlotLevel> = match mosaic {
             Some(cfa_type) => (0..cfa_type.num_colors())
                 .into_par_iter()
                 .map(|colour| {
-                    slot_median(image.channel(0), width, |index, position| {
-                        measured(index) && usize::from(cfa_type.color_at(position)) == colour
+                    SlotLevel::of(image.channel(0), width, with_spread, |index, position| {
+                        measured(index) && cfa_type.color_at(position) == colour
                     })
                 })
-                .collect::<Vec<_>>(),
+                .collect(),
             None => (0..dimensions.channels())
                 .into_par_iter()
                 .map(|channel| {
-                    slot_median(image.channel(channel), width, |index, _| measured(index))
+                    SlotLevel::of(image.channel(channel), width, with_spread, |index, _| {
+                        measured(index)
+                    })
                 })
-                .collect::<Vec<_>>(),
-        }
-        .into_iter()
-        .collect();
+                .collect(),
+        };
+        let medians: ArrayVec<f32, 3> = levels.iter().map(|level| level.median).collect();
+        let spread = with_spread.then(|| {
+            levels
+                .iter()
+                .map(|level| level.spread.expect("measured with its spread"))
+                .collect()
+        });
         let sky = match &mosaic_noise {
             Some(mosaic_noise) => ArrayVec::from(mosaic_noise.sky),
             None => medians.clone(),
@@ -145,6 +167,7 @@ impl FrameStats {
             noise,
             read_share,
             sky,
+            spread,
             quantization_sigma: match mosaic_noise {
                 Some(mosaic_noise) => mosaic_noise.quantization_sigma,
                 None => metadata.quantization_sigma,
@@ -183,25 +206,69 @@ impl FrameStats {
     }
 }
 
-/// The median of the samples of `plane`, rows `width` long, whose index and position `keep` names;
-/// 0 when it names none, a frame with nothing measured there, which then contributes at none of
-/// them, so the figure is never read — but the median of nothing would panic.
-fn slot_median(plane: &[f32], width: usize, keep: impl Fn(usize, Vec2us) -> bool) -> f32 {
-    let mut samples: Vec<f32> = plane
-        .chunks(width)
-        .enumerate()
-        .flat_map(|(y, row)| {
-            let keep = &keep;
-            row.iter()
-                .enumerate()
-                .filter(move |&(x, _)| keep(y * width + x, Vec2us::new(x, y)))
-                .map(|(_, &sample)| sample)
-        })
-        .collect();
-    if samples.is_empty() {
-        return 0.0;
+/// One slot's robust spread: `1.4826·MAD`, and how many samples it was taken over, which its
+/// standard error goes as.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SlotSpread {
+    pub(crate) sigma: f32,
+    pub(crate) samples: usize,
+}
+
+/// One slot's level: its median, and its robust spread when asked for.
+#[derive(Debug, Clone, Copy)]
+struct SlotLevel {
+    median: f32,
+    spread: Option<SlotSpread>,
+}
+
+impl SlotLevel {
+    /// The median of the samples of `plane`, rows `width` long, whose index and position `keep`
+    /// names, and with `with_spread` their `1.4826·MAD`. Both 0 when `keep` names none: a frame
+    /// with nothing measured there contributes at none of them, so the figures are never read —
+    /// but the median of nothing would panic.
+    fn of(
+        plane: &[f32],
+        width: usize,
+        with_spread: bool,
+        keep: impl Fn(usize, Vec2us) -> bool,
+    ) -> Self {
+        let mut samples: Vec<f32> = plane
+            .chunks(width)
+            .enumerate()
+            .flat_map(|(y, row)| {
+                let keep = &keep;
+                row.iter()
+                    .enumerate()
+                    .filter(move |&(x, _)| keep(y * width + x, Vec2us::new(x, y)))
+                    .map(|(_, &sample)| sample)
+            })
+            .collect();
+        if samples.is_empty() {
+            return Self {
+                median: 0.0,
+                spread: with_spread.then_some(SlotSpread {
+                    sigma: 0.0,
+                    samples: 0,
+                }),
+            };
+        }
+        if with_spread {
+            let samples_taken = samples.len();
+            let stats = MedianMad::of_mut(&mut samples);
+            Self {
+                median: stats.median,
+                spread: Some(SlotSpread {
+                    sigma: stats.sigma(),
+                    samples: samples_taken,
+                }),
+            }
+        } else {
+            Self {
+                median: statistics::median_mut(&mut samples),
+                spread: None,
+            }
+        }
     }
-    statistics::median_mut(&mut samples)
 }
 
 #[cfg(test)]

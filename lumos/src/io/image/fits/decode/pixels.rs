@@ -16,7 +16,7 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
-use crate::io::image::fits::decode::hdu_sections::{HduSections, SectionRead};
+use crate::io::image::fits::decode::hdu_sections::HduSections;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
 use crate::io::image::fits::decode::selection;
 
@@ -85,14 +85,14 @@ pub(super) fn read_stream_hdu(
 
 /// Decode HDU `hdu` through `sections`, and take its checksum provenance from `checksum` once the
 /// planes are read.
-pub(super) fn read_decoded_hdu<S: SectionRead>(
+pub(super) fn read_decoded_hdu(
     header: &Header,
     plan: &FitsDecodePlan,
     hdu: FitsHduProvenance,
     path: &Path,
     context: &LoadContext,
-    sections: &mut S,
-    checksum: impl FnOnce(&mut S) -> Result<FitsChecksumProvenance, ImageError>,
+    sections: &mut HduSections<'_>,
+    checksum: impl FnOnce(&mut HduSections<'_>) -> Result<FitsChecksumProvenance, ImageError>,
 ) -> Result<DecodedFitsImage, ImageError> {
     tracing::debug!(
         source_bytes = plan.source_bytes,
@@ -366,7 +366,7 @@ fn read_fits_plane(
     plan: &FitsDecodePlan,
     channel: usize,
     context: &LoadContext,
-    sections: &mut impl SectionRead,
+    sections: &mut HduSections<'_>,
 ) -> Result<DecodedPlane, ImageError> {
     let width = plan.dimensions.width();
     let height = plan.dimensions.height();

@@ -51,8 +51,8 @@ mod ingest;
 mod io;
 mod math;
 mod memory;
-mod mount_table;
 mod pipeline;
+mod platform;
 mod progress;
 mod registration;
 mod run_report;
@@ -61,13 +61,19 @@ mod stack_product;
 mod star_detection;
 
 pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
-pub use calibration_masters::defect_map::DefectMap;
-pub use calibration_masters::error::{CalibrationError, DarkMismatch};
+pub use calibration_masters::cosmic_ray::error::CosmicRayError;
+pub use calibration_masters::error::{
+    BundleError, CalibrationError, DarkMismatch, DefectTableError, MasterBuildError,
+    SubtractionError,
+};
+pub use calibration_masters::temperature_difference::TemperatureDifference;
 pub use calibration_masters::temperature_source::TemperatureSource;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::calibration_state::CalibrationState;
+pub use io::image::cfa::cfa_colour::CfaColour;
+pub use io::image::cfa::cfa_pattern::CfaPattern;
+pub use io::image::cfa::xtrans_pattern::{XTransPattern, XTransPatternError};
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::fits::options::{
@@ -92,21 +98,22 @@ pub use io::image::preview_image::{PreviewImage, PreviewPixels};
 pub use io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use io::image::unverified_conditions::UnverifiedConditions;
 pub use io::raw::RAW_EXTENSIONS;
-pub use io::raw::demosaic::bayer::CfaPattern;
 pub use io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-pub use io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
-pub use io::raw::error::{BlackLevelError, LibrawCode, RawError};
+pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 
 pub use calibration_masters::calibration_component::CalibrationComponent;
+pub use calibration_masters::calibration_outcome::CalibrationOutcome;
 pub use calibration_masters::calibration_set::CalibrationSet;
-pub use calibration_masters::master_role::MasterRole;
-pub use calibration_masters::master_subtraction::Subtractor;
-pub use calibration_masters::{
-    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
+pub use calibration_masters::dark_scale::{DarkScale, DarkScaleSource};
+pub use calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
+pub use calibration_masters::master_cache::{
+    CachedMaster, MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
 };
+pub use calibration_masters::master_role::MasterRole;
+pub use calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 
 /// Star detection: the detector, its configuration, and the stars and diagnostics it returns, each
 /// under its own name.
@@ -152,6 +159,7 @@ pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
 pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 pub use combine::rejection::rejection_scale::RejectionScale;
+pub use combine::rejection::sigma_bounds::SigmaBounds;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
@@ -159,6 +167,7 @@ pub use combine::stack::{StackFrame, stack, stack_images};
 pub use frame_store::capture_conditions::CaptureCondition;
 pub use frame_store::error::{ConditionMismatch, FrameStoreError};
 pub use frame_store::frame_quality::FramePlane;
+pub use ingest::error::AdmissionError;
 pub use ingest::ingest_config::IngestConfig;
 pub use progress::progress_callback::ProgressCallback;
 pub use progress::stacking_progress::{StackingProgress, StackingStage};
@@ -168,14 +177,14 @@ pub use stack_product::coverage::Coverage;
 pub use stack_product::quality_map::QualityMap;
 pub use stack_product::quality_planes::QualityPlanes;
 
-pub use pipeline::align::align_and_stack;
+pub use pipeline::align::{align_and_stack, align_and_stack_paths};
 pub use pipeline::calibrate::calibrate_align_stack;
 pub use pipeline::config::{AlignStackConfig, Reference};
 pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;
 pub use pipeline::result::{AlignStackResult, AlignmentSummary};
 
-pub use drizzle::accumulator::DrizzleFrame;
+pub use drizzle::accumulator::drizzle_frame::DrizzleFrame;
 pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
 pub use drizzle::drizzle_result::DrizzleResult;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};

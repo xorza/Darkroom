@@ -1,14 +1,16 @@
 use crate::internals::prelude::*;
 
 use crate::io::image::sample_domain::Pedestal;
-use std::fs::File;
 
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
+use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_transfer, write_fits};
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
@@ -275,6 +277,12 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     );
     let reason = unsupported_reason(load_linear_fits(&zero_path, &load_context()).unwrap_err());
     assert!(reason.contains("must be nonzero"));
+    let reason =
+        unsupported_reason(fits_linear_dimensions(&zero_path, &load_context()).unwrap_err());
+    assert!(
+        reason.contains("must be nonzero"),
+        "the peek refuses what the load refuses"
+    );
 
     let rgb_path = directory.join("rgb.fits");
     let planar = vec![
@@ -283,6 +291,26 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
     let loaded = load_linear_fits(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
+    assert_eq!(
+        fits_linear_dimensions(&rgb_path, &rgb_load_context()).unwrap(),
+        loaded.dimensions(),
+        "the header gives what the decode makes"
+    );
+
+    let mosaic_path = directory.join("mosaic.fits");
+    save_cfa_fits(
+        &mosaic_path,
+        &make_cfa(
+            Size2us::new(2, 2),
+            vec![0.25; 4],
+            CfaType::Bayer(CfaPattern::Rggb),
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        fits_linear_dimensions(&mosaic_path, &load_context()),
+        Err(ImageError::ScientificInputRejected { .. })
+    ));
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(loaded.channel(1).pixels(), &[10.0, 20.0, 30.0, 40.0]);
     assert_eq!(loaded.channel(2).pixels(), &[100.0, 200.0, 300.0, 400.0]);

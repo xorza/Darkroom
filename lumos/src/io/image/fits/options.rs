@@ -1,7 +1,7 @@
 use serde::Serialize;
 
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::sample_domain::Pedestal;
-use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// Selects the image HDU decoded from a FITS container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,7 +38,7 @@ pub enum FitsCubeInterpretation {
 /// The reference readers split three ways on this: PixInsight assumes `[0, 1]` with a configurable
 /// input range, Siril scans the pixel data, and astropy does not normalize at all. Scanning is the
 /// one option ruled out here — a divisor read off each frame's own extrema differs frame to frame,
-/// which is what [`crate::StackError::SampleDomainMismatch`] exists to reject.
+/// which is what [`crate::AdmissionError::SampleDomainMismatch`] exists to reject.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum FitsFloatScale {
     /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are

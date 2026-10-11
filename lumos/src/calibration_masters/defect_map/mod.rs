@@ -4,7 +4,7 @@
 //! robust per-color tiled background, then thresholding against a robust residual scale;
 //! **cold/dead** pixels (abnormally low response) come from the master flat via a
 //! local-neighbourhood ratio test. Both are corrected by replacing the pixel with the median of
-//! its same-color CFA neighbours.
+//! its neighbours under the same filter: the same colour, and on a Bayer sensor the same phase.
 //!
 //! # Hot pixels (from the dark)
 //!
@@ -21,9 +21,9 @@
 //!    normal distribution: 1/Φ⁻¹(0.75) ≈ 1.4826.
 //!
 //! 3. **CFA-aware correction:**
-//!    On raw CFA data, hot pixels are replaced with the median of same-color
-//!    neighbors (e.g., for Bayer, the nearest pixels of the same R/G/B filter).
-//!    This preserves the CFA pattern for subsequent demosaicing.
+//!    On raw CFA data, hot pixels are replaced with the median of their neighbours under the same
+//!    filter — for Bayer, the same phase, so a green in the red rows from greens in the red rows —
+//!    which preserves the CFA pattern for demosaicing and carries no Gr/Gb imbalance into a repair.
 //!
 //! 4. **Broad dark structure:**
 //!    Per-color tile medians are bilinearly interpolated into a smooth dark-current model before
@@ -49,12 +49,14 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
-mod ring_reference;
+pub(crate) mod defect_summary;
+pub(crate) mod ring_reference;
 pub(crate) mod sampling;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
+use crate::calibration_masters::defect_map::defect_summary::{ColourDefects, DefectSummary};
 use crate::calibration_masters::defect_map::ring_reference::RingReference;
 use crate::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::calibration_masters::error::CalibrationError;
@@ -72,13 +74,13 @@ use rayon::prelude::*;
 /// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
 /// dark, and **cold/dead** pixels (abnormally low response) from a master flat.
 ///
-/// Each is detected per CFA color and replaced with the median of same-color neighbors during
-/// correction. The two defects come from *different* masters by necessity: a dark has no
-/// illumination, so dead pixels are invisible in it (they read the same near-zero as a normal
+/// Each is detected per CFA color and replaced with the median of its neighbours under the same
+/// filter during correction. The two defects come from *different* masters by necessity: a dark has
+/// no illumination, so dead pixels are invisible in it (they read the same near-zero as a normal
 /// dark pixel) — they only reveal themselves as dark spots in an illuminated flat.
 #[derive(Debug, Clone)]
-pub struct DefectMap {
-    hot_indices: Vec<usize>,
+pub(crate) struct DefectMap {
+    hot: HotPixels,
     cold_indices: Vec<usize>,
     /// Every defect, hot or cold, once: what a repair keeps out of its neighbours, built when
     /// the lists change rather than for every light corrected.
@@ -88,12 +90,22 @@ pub struct DefectMap {
     dimensions: Size2us,
 }
 
+/// The hot pixels of a dark: each one's flat index, and how far it stands above the dark around it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct HotPixels {
+    pub(crate) indices: Vec<usize>,
+    /// Per index, in the dark's units: its residual over the robust plane through the ring of its
+    /// colour's photosites around it, or over the colour's mesh background where the ring has too
+    /// few — the residual the detection tested. Always positive.
+    pub(crate) excess: Vec<f32>,
+}
+
 impl DefectMap {
     /// An empty map for a sensor of `dimensions`, ready for [`Self::detect_hot`] and
     /// [`Self::detect_cold`].
-    pub fn new(dimensions: Size2us) -> Self {
+    pub(crate) fn new(dimensions: Size2us) -> Self {
         Self {
-            hot_indices: Vec::new(),
+            hot: HotPixels::default(),
             cold_indices: Vec::new(),
             mask: BitBuffer2::new_default(dimensions),
             count: 0,
@@ -102,13 +114,15 @@ impl DefectMap {
     }
 
     /// A map with these defect lists, or `None` when an index lies outside `dimensions`.
-    pub(crate) fn from_indices(
+    pub(crate) fn from_lists(
         dimensions: Size2us,
-        hot_indices: Vec<usize>,
+        hot: HotPixels,
         cold_indices: Vec<usize>,
     ) -> Option<Self> {
+        debug_assert_eq!(hot.indices.len(), hot.excess.len());
         let pixel_count = dimensions.pixel_count();
-        if hot_indices
+        if hot
+            .indices
             .iter()
             .chain(&cold_indices)
             .any(|&index| index >= pixel_count)
@@ -116,32 +130,62 @@ impl DefectMap {
             return None;
         }
         let mut map = Self::new(dimensions);
-        map.hot_indices = hot_indices;
+        map.hot = hot;
         map.cold_indices = cold_indices;
         map.rebuild_mask();
         Some(map)
     }
 
     /// The sensor extent the indices apply to.
-    pub const fn dimensions(&self) -> Size2us {
+    pub(crate) const fn dimensions(&self) -> Size2us {
         self.dimensions
     }
 
-    /// Flat indices of hot pixels — above `median + kσ` in the background-subtracted dark.
-    pub fn hot_indices(&self) -> &[usize] {
-        &self.hot_indices
+    /// The hot pixels — above `median + kσ` in the background-subtracted dark — with their excess.
+    pub(crate) const fn hot(&self) -> &HotPixels {
+        &self.hot
     }
 
     /// Flat indices of cold/dead pixels — below `DEAD_PIXEL_FRACTION` of their same-color
     /// local-neighbourhood median in the flat.
-    pub fn cold_indices(&self) -> &[usize] {
+    pub(crate) fn cold_indices(&self) -> &[usize] {
         &self.cold_indices
     }
 
-    /// Resident RAM held by the map: its hot and cold index lists and its mask.
-    pub const fn ram_bytes(&self) -> usize {
-        (self.hot_indices.len() + self.cold_indices.len()) * size_of::<usize>()
+    /// Resident RAM held by the map: its hot pixels, its cold index list and its mask.
+    pub(crate) const fn ram_bytes(&self) -> usize {
+        self.hot.indices.len() * (size_of::<usize>() + size_of::<f32>())
+            + self.cold_indices.len() * size_of::<usize>()
             + self.mask.words.len() * size_of::<u64>()
+    }
+
+    /// How many pixels the map names, in all and per colour of `cfa`, the filter of the masters it
+    /// was detected on.
+    pub(crate) fn summary(&self, cfa: &CfaType) -> DefectSummary {
+        let mut colours: Vec<ColourDefects> = cfa
+            .photosites_per_colour(self.dimensions)
+            .into_iter()
+            .map(|photosites| ColourDefects {
+                photosites,
+                ..ColourDefects::default()
+            })
+            .collect();
+        let colour_of = |index: usize| cfa.color_at(self.dimensions.point_of(index));
+        for &index in &self.hot.indices {
+            colours[colour_of(index)].hot += 1;
+        }
+        for &index in &self.cold_indices {
+            colours[colour_of(index)].cold += 1;
+        }
+        self.mask
+            .for_each_set(|point| colours[cfa.color_at(point)].defective += 1);
+        DefectSummary {
+            hot_pixels: self.hot.indices.len(),
+            cold_pixels: self.cold_indices.len(),
+            defective_pixels: self.count,
+            pixels: self.dimensions.pixel_count(),
+            colours,
+        }
     }
 
     /// Detect **hot** pixels from a master dark — those whose residual above a smooth per-color
@@ -156,7 +200,7 @@ impl DefectMap {
     ///
     /// Returns [`CalibrationError::Cancelled`] if cancellation is requested before detection
     /// completes.
-    pub fn detect_hot(
+    pub(crate) fn detect_hot(
         mut self,
         dark: &CfaImage,
         sigma_threshold: f32,
@@ -167,7 +211,7 @@ impl DefectMap {
         // the pipeline. Nothing below 1σ is a meaningful defect threshold.
         let sigma_threshold = sigma_threshold.max(MIN_SIGMA_THRESHOLD);
         self.assert_dimensions(dark);
-        self.hot_indices = detect_hot_pixels(dark, sigma_threshold, cancel)?;
+        self.hot = detect_hot_pixels(dark, sigma_threshold, cancel)?;
         self.rebuild_mask();
         Ok(self)
     }
@@ -184,7 +228,7 @@ impl DefectMap {
     ///
     /// Returns [`CalibrationError::Cancelled`] if cancellation is requested before detection
     /// completes.
-    pub fn detect_cold(
+    pub(crate) fn detect_cold(
         mut self,
         flat: &CfaImage,
         cancel: &CancelToken,
@@ -207,20 +251,10 @@ impl DefectMap {
 
     fn rebuild_mask(&mut self) {
         self.mask = BitBuffer2::new_default(self.dimensions);
-        for &index in self.hot_indices.iter().chain(&self.cold_indices) {
+        for &index in self.hot.indices.iter().chain(&self.cold_indices) {
             self.mask.set(index, true);
         }
         self.count = self.mask.count_ones();
-    }
-
-    /// How many pixels are defective, hot or cold; a pixel that is both counts once.
-    pub const fn count(&self) -> usize {
-        self.count
-    }
-
-    /// Percentage of the sensor's pixels that are defective.
-    pub fn percentage(&self) -> f32 {
-        100.0 * self.count as f32 / self.dimensions.pixel_count() as f32
     }
 
     /// Correct defective pixels on raw CFA data by replacing with median of
@@ -231,7 +265,7 @@ impl DefectMap {
     /// # Panics
     ///
     /// If the image is not the map's sensor size.
-    pub fn correct(&self, image: &mut CfaImage) {
+    pub(crate) fn correct(&self, image: &mut CfaImage) {
         self.assert_dimensions(image);
         if self.count == 0 {
             return;
@@ -253,7 +287,7 @@ impl DefectMap {
         let mask = with_nulls.as_ref().unwrap_or(&self.mask);
         let lattice = CfaLattice::new(&image.cfa_type);
         let mut scratch = Gathered::default();
-        for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
+        for &idx in self.hot.indices.iter().chain(&self.cold_indices) {
             image.data[idx] = lattice.median(
                 &image.data,
                 self.dimensions.point_of(idx),
@@ -261,7 +295,7 @@ impl DefectMap {
                 &mut scratch,
             );
         }
-        for indices in [&self.hot_indices, &self.cold_indices] {
+        for indices in [&self.hot.indices, &self.cold_indices] {
             PixelFlags::add_at(
                 &mut image.flags,
                 self.dimensions,
@@ -303,7 +337,7 @@ fn detect_hot_pixels(
     image: &CfaImage,
     sigma_threshold: f32,
     cancel: &CancelToken,
-) -> Result<Vec<usize>, CalibrationError> {
+) -> Result<HotPixels, CalibrationError> {
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
@@ -329,31 +363,36 @@ fn detect_hot_pixels(
     // compact same-color cluster remains an outlier instead of becoming its own local reference.
     // What it calls hot must stand as far above the ring's plane, which follows the structure the
     // tiles cannot.
-    let indices = (0..total)
+    let (indices, excess) = (0..total)
         .into_par_iter()
         .map_init(RingReference::default, |ring, i| {
             if cancel.is_cancelled() {
                 return None;
             }
             let point = size.point_of(i);
-            let color = cfa_type.color_at(point) as usize;
+            let color = cfa_type.color_at(point);
             let ColorStats { median, sigma } = stats[color];
             let local = background.at(color, point);
             let cut = sigma_threshold * sigma.max(local.noise);
-            if data[i] - local.sky <= median + cut {
+            let residual = data[i] - local.sky;
+            if residual <= median + cut {
                 return None;
             }
-            ring.at(data, &cfa_type, point)
-                .is_none_or(|level| data[i] - level > cut)
-                .then_some(i)
+            match ring.at(size, |index| f64::from(data[index]), &cfa_type, point) {
+                Some(level) => {
+                    let excess = data[i] - level;
+                    (excess > cut).then_some((i, excess))
+                }
+                None => Some((i, residual - median)),
+            }
         })
         .flatten()
-        .collect();
+        .unzip();
 
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
-    Ok(indices)
+    Ok(HotPixels { indices, excess })
 }
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
@@ -438,7 +477,7 @@ fn compute_per_color_residual_stats(
     let num_colors = cfa_type.num_colors();
     let mut stats = ArrayVec::new();
 
-    for color in 0..num_colors as u8 {
+    for color in 0..num_colors {
         let mut samples = collect_color_residual_samples(data, cfa_type, color, background);
 
         if samples.is_empty() {

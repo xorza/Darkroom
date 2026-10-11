@@ -37,9 +37,18 @@ rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
 statrs = { workspace = true }
 arrayvec = { workspace = true }
+blake3 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
-blake3 = { workspace = true }
 common = { workspace = true, features = ["internals"] }
 quickbench = { workspace = true }
 image = { workspace = true }

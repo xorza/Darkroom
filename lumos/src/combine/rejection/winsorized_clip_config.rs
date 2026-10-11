@@ -49,16 +49,9 @@ impl Default for WinsorizedClipConfig {
 }
 
 impl WinsorizedClipConfig {
-    pub const fn new(sigma: f32) -> Self {
-        Self {
-            sigma: SigmaBounds::symmetric(sigma),
-        }
-    }
-
-    pub const fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
-        Self {
-            sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
-        }
+    /// One clip to `sigma` about the winsorized centre.
+    pub const fn new(sigma: SigmaBounds) -> Self {
+        Self { sigma }
     }
 
     /// Validate the clip thresholds.

@@ -2,11 +2,13 @@
 
 use std::path::PathBuf;
 
-use crate::calibration_masters::cosmic_ray::error::UnknownAdcStep;
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::FrameStoreError;
+use crate::ingest::error::AdmissionError;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::error::ImageError;
 
 /// Failures from calibrated-image and RAW registered stacking.
@@ -36,8 +38,13 @@ pub enum AlignStackError {
     },
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
-    #[error(transparent)]
-    Calibration(#[from] CalibrationError),
+    #[error("cannot calibrate light frame '{path}': {source}")]
+    Calibration {
+        path: PathBuf,
+        /// Boxed for the reason [`Self::Load`]'s source is.
+        #[source]
+        source: Box<CalibrationError>,
+    },
     /// Both config variants carry the same payload, so neither derives `From` — a bare `?` would
     /// have to guess which config the field came from.
     #[error("invalid star-detection configuration: {0}")]
@@ -46,16 +53,42 @@ pub enum AlignStackError {
     RegistrationConfig(InvalidConfigField),
     #[error("invalid cosmic-ray configuration: {0}")]
     CosmicRayConfig(InvalidConfigField),
+    /// A cosmic-ray pass asked of lights that are already linear: the pass runs on a mosaic
+    /// before its demosaic would smear a hit across pixels, and these lights have none.
+    #[error(
+        "single-frame cosmic-ray rejection runs on mosaic lights before their demosaic; these \
+         lights are already linear, so leave it to stack-time rejection"
+    )]
+    CosmicRayOnLinearLights,
     #[error("cannot reject cosmic rays in light frame '{path}': {source}")]
     CosmicRay {
         path: PathBuf,
         #[source]
-        source: UnknownAdcStep,
+        source: CosmicRayError,
     },
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
+    /// A light failed the checks every frame of the set passes, whether as it was decoded or when
+    /// the survivors were combined.
+    #[error(transparent)]
+    Admission(AdmissionError),
     #[error(transparent)]
     Stack(StackError),
+}
+
+impl From<Cancelled> for AlignStackError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
+    }
+}
+
+impl From<AdmissionError> for AlignStackError {
+    fn from(error: AdmissionError) -> Self {
+        match error {
+            AdmissionError::Cancelled => Self::Cancelled,
+            error => Self::Admission(error),
+        }
+    }
 }
 
 /// A combine failure arrives at the one path a caller matches it on: a cancel, an empty set or a
@@ -66,6 +99,7 @@ impl From<StackError> for AlignStackError {
             StackError::Cancelled => Self::Cancelled,
             StackError::NoFrames => Self::NoFrames,
             StackError::FrameStore(error) => Self::FrameStore(error),
+            StackError::Admission(error) => Self::Admission(error),
             error => Self::Stack(error),
         }
     }

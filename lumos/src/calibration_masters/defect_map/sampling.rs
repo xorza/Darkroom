@@ -28,25 +28,20 @@ struct CfaSamplePhase {
 pub(super) fn collect_color_residual_samples(
     data: &Buffer2<f32>,
     cfa_type: CfaType,
-    target_color: u8,
+    target_color: usize,
     background: &ColourMesh,
 ) -> Vec<f32> {
     let size = Size2us::new(data.width(), data.height());
     collect_color_sample_indices(size, cfa_type, target_color)
         .into_iter()
-        .map(|index| {
-            data[index]
-                - background
-                    .at(usize::from(target_color), size.point_of(index))
-                    .sky
-        })
+        .map(|index| data[index] - background.at(target_color, size.point_of(index)).sky)
         .collect()
 }
 
 pub(super) fn collect_color_sample_indices(
     size: Size2us,
     cfa_type: CfaType,
-    target_color: u8,
+    target_color: usize,
 ) -> Vec<usize> {
     assert!(
         size.width > 0 && size.height > 0,
@@ -153,7 +148,7 @@ pub(crate) mod internals {
     pub(crate) fn collect_color_samples(
         data: &Buffer2<f32>,
         cfa_type: CfaType,
-        target_color: u8,
+        target_color: usize,
     ) -> Vec<f32> {
         collect_color_sample_indices(
             Size2us::new(data.width(), data.height()),

@@ -1,11 +1,11 @@
 //! [`IngestConfig`]: how a run reads its frames and where it parks them.
 
 use std::env;
-use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::platform::UserCache;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
 /// against, and the frame cache every combine reads its frames through.
@@ -19,7 +19,9 @@ pub struct IngestConfig {
     /// `%LOCALAPPDATA%\lumos` on Windows, with `/var/tmp/lumos` or the temporary directory where
     /// there is no home to find.
     pub cache_dir: PathBuf,
-    /// Keep each decoded frame in the decode cache, for a later run on the same files to reuse.
+    /// Keep each decoded frame of a [`stack`](crate::stack) or of a calibration master in the
+    /// decode cache, for a later run on the same files to reuse, whether the run fits in memory or
+    /// spills. The registered pipeline and the drizzle neither read nor write it.
     ///
     /// Off by default: a kept frame costs its whole size on disk until you delete the directory.
     /// A run's own scratch is never kept either way.
@@ -37,36 +39,13 @@ pub struct IngestConfig {
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
-            cache_dir: default_cache_root(&|name| env::var_os(name)),
+            cache_dir: UserCache::root(&|name| env::var_os(name)),
             keep_cache: false,
             memory_override: None,
             fits: FitsLoadOptions::default(),
             xtrans_passes: MarkesteijnPasses::default(),
         }
     }
-}
-
-/// The user cache directory of this platform, `lumos` beneath it, from the environment `var`
-/// reads: a relative `XDG_CACHE_HOME` is ignored, as the XDG specification says.
-fn default_cache_root(var: &dyn Fn(&str) -> Option<OsString>) -> PathBuf {
-    let absolute = |name: &str| {
-        var(name)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    let root = if cfg!(windows) {
-        absolute("LOCALAPPDATA").unwrap_or_else(env::temp_dir)
-    } else if cfg!(target_os = "macos") {
-        absolute("HOME").map_or_else(
-            || PathBuf::from("/var/tmp"),
-            |home| home.join("Library/Caches"),
-        )
-    } else {
-        absolute("XDG_CACHE_HOME")
-            .or_else(|| absolute("HOME").map(|home| home.join(".cache")))
-            .unwrap_or_else(|| PathBuf::from("/var/tmp"))
-    };
-    root.join("lumos")
 }
 
 impl IngestConfig {
@@ -83,41 +62,12 @@ impl IngestConfig {
 mod tests {
     use crate::ingest::ingest_config::*;
 
-    /// The root follows the platform's user cache directory, and falls back to a disk-backed
-    /// directory where the environment names none: on Linux `XDG_CACHE_HOME` when absolute, then
-    /// `~/.cache`, then `/var/tmp`.
+    /// The root is the platform's user cache directory (see `platform::UserCache` and its tests
+    /// on each system), and nothing is kept unless a caller asks, in every build profile.
     #[test]
     fn default_config_spills_under_the_user_cache_directory() {
         let config = IngestConfig::default();
-        assert_eq!(
-            config.cache_dir,
-            default_cache_root(&|name| env::var_os(name))
-        );
-        let root = |vars: &[(&str, &str)]| {
-            default_cache_root(&|name| {
-                vars.iter()
-                    .find(|(key, _)| *key == name)
-                    .map(|(_, value)| OsString::from(value))
-            })
-        };
-        if cfg!(all(unix, not(target_os = "macos"))) {
-            assert_eq!(
-                root(&[("XDG_CACHE_HOME", "/data/cache"), ("HOME", "/home/u")]),
-                PathBuf::from("/data/cache/lumos")
-            );
-            assert_eq!(
-                root(&[("XDG_CACHE_HOME", "relative"), ("HOME", "/home/u")]),
-                PathBuf::from("/home/u/.cache/lumos")
-            );
-            assert_eq!(root(&[]), PathBuf::from("/var/tmp/lumos"));
-        }
-        if cfg!(target_os = "macos") {
-            assert_eq!(
-                root(&[("HOME", "/Users/u")]),
-                PathBuf::from("/Users/u/Library/Caches/lumos")
-            );
-        }
-        // Nothing is kept unless a caller asks, in every build profile.
+        assert_eq!(config.cache_dir, UserCache::root(&|name| env::var_os(name)));
         assert!(!config.keep_cache);
         assert_eq!(config.memory_override, None);
     }

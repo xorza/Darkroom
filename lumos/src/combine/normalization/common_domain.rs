@@ -14,7 +14,6 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::combine::CANCEL_POLL_CHUNK;
 use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::error::StackError;
 use crate::frame_store::stored_frame::StoredFrame;
@@ -55,11 +54,11 @@ impl CommonDomain {
         let mut common_domain = Self::full_mask(pixel_count);
         common_domain
             .words
-            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+            .par_chunks_mut(Cancelled::POLL_CHUNK / WORD_BITS)
             .enumerate()
             .try_for_each(|(span, words)| {
                 Cancelled::check(cancel)?;
-                let base = span * CANCEL_POLL_CHUNK;
+                let base = span * Cancelled::POLL_CHUNK;
                 if base < pixel_count {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
                     for frame in frames {
@@ -90,18 +89,18 @@ impl CommonDomain {
         domain: &Self,
         size: Size2us,
         cfa_type: &CfaType,
-        colour: u8,
+        colour: usize,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();
         let mut valid = domain.valid.clone();
         valid
             .words
-            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+            .par_chunks_mut(Cancelled::POLL_CHUNK / WORD_BITS)
             .enumerate()
             .try_for_each(|(span, words)| {
                 Cancelled::check(cancel)?;
-                let base = span * CANCEL_POLL_CHUNK;
+                let base = span * Cancelled::POLL_CHUNK;
                 if base < pixel_count {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
                     intersect_span(words, end - base, |index| {

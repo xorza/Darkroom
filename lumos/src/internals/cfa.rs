@@ -2,9 +2,9 @@
 
 use imaginarium::Buffer2;
 
+use crate::io::image::cfa::xtrans_pattern::XTransPattern;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
 
 /// A Fujifilm X-Trans colour layout: 8 red, 20 green and 8 blue, every green with as many red as

@@ -3,26 +3,31 @@ mod mem_budget_probe;
 use crate::combine::config::{
     Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
 };
+use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::calibration_masters::CalibrationMasters;
+use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
+use crate::calibration_masters::error::CalibrationError;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::tier::Tier;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
-use crate::pipeline::align::{align_and_stack, register_warp_and_stack};
+use crate::pipeline::align::{align_and_stack, align_and_stack_paths, register_warp_and_stack};
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
+use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::pipeline::frame_tier::{FrameTier, StagePlan};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
@@ -36,7 +41,11 @@ use crate::star_detection::detector::StarDetector;
 use common::TempDir;
 
 use crate::internals::assertions::bits;
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::fits::write_fits;
+use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::image::load_context::LoadContext;
+use fits_well::image::Image as FitsImage;
 
 fn base_field() -> LinearImage {
     star_field(Size2us::new(256, 256), 40, 66666).image
@@ -315,7 +324,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     )
     .unwrap_err();
 
-    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -409,7 +418,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         detected,
         &config,
         StagePlan {
-            tier: FrameTier::Ram,
+            parking: FrameParking::new(Tier::Resident),
             warp_concurrency: 1,
         },
         ProgressCallback::default(),
@@ -492,10 +501,10 @@ fn all_non_reference_frames_dropped_errors() {
 }
 
 #[test]
-fn auto_reference_picks_the_richest_frame() {
+fn auto_reference_passes_over_a_frame_without_enough_stars() {
     let base = base_field();
-    // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
-    // anchor on frame 1.
+    // Frame 0 is a near-blank with fewer stars than registration needs, so Auto chooses among the
+    // other two, whatever its FWHM.
     let dims = base.dimensions();
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
@@ -515,6 +524,49 @@ fn auto_reference_picks_the_richest_frame() {
         result.alignment.dropped(),
         vec![0],
         "the near-blank frame can't register"
+    );
+}
+
+/// A combine error names the input light, not its place among the survivors. Of four lights the
+/// third, a near-blank, fails to register, and the fourth, the field shifted and lowered by 0.5,
+/// has a negative median that a multiplicative normalization cannot divide by: input 3, though it
+/// is the third survivor.
+#[test]
+fn a_combine_error_names_the_input_light() {
+    let base = base_field();
+    let dims = base.dimensions();
+    let blank = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let lowered = LinearImage::from_pixels(
+        dims,
+        shifted(&base, -3.0, 2.0)
+            .channel(0)
+            .pixels()
+            .iter()
+            .map(|value| value - 0.5)
+            .collect(),
+    );
+    let frames = vec![base.clone(), shifted(&base, 4.0, -3.0), blank, lowered];
+    let config = AlignStackConfig {
+        reference: Reference::Index(0),
+        stack: StackConfig {
+            normalization: Normalization::Multiplicative,
+            ..StackConfig::light()
+        },
+        ..AlignStackConfig::default()
+    };
+    let error = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            AlignStackError::Stack(StackError::NonPositiveMedian { index: 3, .. })
+        ),
+        "{error:?}"
     );
 }
 
@@ -587,18 +639,6 @@ fn public_input_errors() {
         "{error:?}"
     );
 
-    let cosmic = AlignStackConfig {
-        cosmic_ray: Some(CosmicRayConfig {
-            niter: 0,
-            ..Default::default()
-        }),
-        ..AlignStackConfig::default()
-    };
-    let AlignStackError::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
-        panic!("expected a cosmic-ray config error")
-    };
-    assert_eq!(invalid.field, "cosmic-ray niter");
-
     let mut pixels = vec![0.1; 16];
     pixels[5] = f32::NAN;
     let error = run(
@@ -608,7 +648,7 @@ fn public_input_errors() {
     assert!(
         matches!(
             error,
-            AlignStackError::Stack(StackError::NonFiniteImageSample {
+            AlignStackError::Admission(AdmissionError::NonFiniteImageSample {
                 index: 1,
                 channel: 0,
                 pixel: 5,
@@ -638,8 +678,12 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 }
 
 /// The RAW front end checks each light as it decodes: a light whose dimensions differ from the
-/// first light's header is refused at its own index, and parametric cosmic-ray noise on a light
-/// whose decoder recorded no ADC step — a float FITS — names that light.
+/// first light's header is refused at its own index, an invalid cosmic-ray config before any light
+/// decodes, and parametric cosmic-ray noise on a light whose decoder recorded no ADC step — a float
+/// FITS — names that light. So does a calibration that refuses one light: a 10 s dark that still
+/// holds its bias, against a 20 s second light. A cosmic-ray pass over X-Trans lights is refused
+/// from the first light's header, before any light is decoded: the second path names no file, and
+/// the error is still the first light's.
 #[test]
 fn the_raw_front_end_checks_each_light_at_decode() {
     let scratch = TempDir::new("lumos_decode_checks");
@@ -666,7 +710,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     };
 
     let error = run(&paths, &AlignStackConfig::default());
-    let AlignStackError::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+    let AlignStackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
@@ -692,11 +736,192 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         }),
         ..AlignStackConfig::default()
     };
+    let invalid = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig {
+            niter: 0,
+            ..Default::default()
+        }),
+        ..AlignStackConfig::default()
+    };
+    let AlignStackError::CosmicRayConfig(invalid) = run(&paths, &invalid) else {
+        panic!("expected a cosmic-ray config error")
+    };
+    assert_eq!(invalid.field, "cosmic-ray niter");
+
+    let mut dark = make_cfa(Size2us::new(32, 32), vec![0.01; 32 * 32], CfaType::Mono);
+    dark.metadata.exposure_time = Some(10.0);
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(dark),
+            ..CalibrationSet::default()
+        },
+        5.0,
+        &CancelToken::never(),
+    )
+    .unwrap();
+    let mut longer = make_cfa(Size2us::new(32, 32), vec![0.1; 32 * 32], CfaType::Mono);
+    longer.metadata.exposure_time = Some(20.0);
+    let longer_path = scratch.path().join("light_longer.fits");
+    save_cfa_fits(&longer_path, &longer).unwrap();
+    let error = calibrate_align_stack(
+        &[paths[0].clone(), longer_path.clone()],
+        &masters,
+        &AlignStackConfig::default(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AlignStackError::Calibration { path, source }
+                if *path == longer_path
+                    && matches!(**source, CalibrationError::DarkMismatch { .. })
+        ),
+        "{error:?}"
+    );
+
     let error = run(&paths[..1], &parametric);
-    let AlignStackError::CosmicRay { path, .. } = error else {
+    let AlignStackError::CosmicRay { path, source } = error else {
         panic!("expected the light without an ADC step to be named, got {error:?}");
     };
-    assert_eq!(path, paths[0]);
+    assert_eq!(
+        (path, source),
+        (paths[0].clone(), CosmicRayError::UnknownAdcStep)
+    );
+
+    let xtrans = scratch.path().join("xtrans_0.fits");
+    let cfa = make_cfa(
+        Size2us::new(36, 36),
+        vec![0.1; 36 * 36],
+        CfaType::XTrans(XTRANS_PATTERN),
+    );
+    save_cfa_fits(&xtrans, &cfa).expect("write synthetic X-Trans light");
+    let cosmic = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig::default()),
+        ..AlignStackConfig::default()
+    };
+    let error = run(
+        &[xtrans.clone(), scratch.path().join("absent.fits")],
+        &cosmic,
+    );
+    let AlignStackError::CosmicRay { path, source } = error else {
+        panic!("expected the X-Trans light to be refused, got {error:?}");
+    };
+    assert_eq!((path, source), (xtrans, CosmicRayError::XTransUnsupported));
+}
+
+/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held:
+/// five dithered 112 × 112 RGB float FITS cubes of one star field, its channels at 1, 0.8 and 0.6
+/// of it, read as RGB. The held run is the reference; the paths run matches it bit for bit resident
+/// and spilled, with the found reference and with it named. The spilled two-pass run parks every
+/// light and reads back every registered frame; the spilled one-pass run parks none. A cosmic-ray
+/// pass, which runs on mosaics alone, is refused for linear lights by both entries.
+#[test]
+fn calibrated_lights_on_disk_stack_as_held_ones_do() {
+    let scratch = TempDir::new("lumos_linear_paths");
+    let base = star_field(Size2us::new(112, 112), 30, 4242).image;
+    let frames = [
+        base.clone(),
+        shifted(&base, 5.0, -3.0),
+        shifted(&base, -4.0, 6.0),
+        shifted(&base, 2.0, 7.0),
+        shifted(&base, -6.0, -2.0),
+    ];
+    let (width, height) = (base.width(), base.height());
+    let paths: Vec<PathBuf> = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            let path = scratch.join(format!("light_{index}.fits"));
+            let planar: Vec<f32> = [1.0f32, 0.8, 0.6]
+                .iter()
+                .flat_map(|&gain| frame.channel(0).pixels().iter().map(move |&v| v * gain))
+                .collect();
+            write_fits(
+                &path,
+                &FitsImage::new([width, height, 3], planar).unwrap(),
+                None,
+            );
+            path
+        })
+        .collect();
+
+    let mut config = AlignStackConfig::default();
+    config.registration.ransac.seed = 0x5EED_0F5E;
+    config.ingest.fits.cube = FitsCubeInterpretation::Rgb;
+    config.ingest.fits.float_scale = FitsFloatScale::Normalized;
+    let context = LoadContext {
+        fits: config.ingest.fits.clone(),
+        ..LoadContext::new(CancelToken::never(), u64::MAX)
+    };
+    let held: Vec<LinearImage> = paths
+        .iter()
+        .map(|path| LinearImage::from_file(path, &context).unwrap())
+        .collect();
+    assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
+    let expected = align_and_stack(
+        held,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+
+    let tier = |memory: u64, cache: &str, reference: Reference| {
+        let mut config = config.clone();
+        config.ingest.memory_override = Some(memory);
+        config.ingest.cache_dir = scratch.join(cache);
+        config.reference = reference;
+        align_and_stack_paths(
+            &paths,
+            &config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+    };
+    let named = Reference::Index(expected.alignment.reference);
+    let report = |result: &AlignStackResult| {
+        (
+            result.product.report.parked_lights,
+            result.product.report.spilled_frames,
+        )
+    };
+    let registered = expected.alignment.registered() as u64;
+    for (memory, cache, reference, parked, spilled) in [
+        (u64::MAX, "ram", Reference::Auto, 0, 0),
+        (1, "spill", Reference::Auto, paths.len() as u64, registered),
+        (u64::MAX, "ram_named", named, 0, 0),
+        (1, "spill_named", named, 0, registered),
+    ] {
+        let result = tier(memory, cache, reference);
+        assert_eq!(report(&result), (parked, spilled), "{cache}");
+        assert_same_stack(&expected, &result, cache);
+    }
+
+    let cosmic = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig::default()),
+        ..config.clone()
+    };
+    assert!(matches!(
+        align_and_stack_paths(
+            &paths,
+            &cosmic,
+            ProgressCallback::default(),
+            CancelToken::never()
+        ),
+        Err(AlignStackError::CosmicRayOnLinearLights)
+    ));
+    assert!(matches!(
+        align_and_stack(
+            vec![base],
+            &cosmic,
+            ProgressCallback::default(),
+            CancelToken::never()
+        ),
+        Err(AlignStackError::CosmicRayOnLinearLights)
+    ));
 }
 
 /// Both front ends report the same stages for the same work, so a progress consumer can read the
@@ -780,7 +1005,7 @@ fn both_front_ends_report_the_same_stages() {
 }
 
 /// The all-RAM and memory-bounded runs must produce the same stack, in two passes and in one.
-/// [`FrameTier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
+/// [`Tier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
 /// spilled one is read back from its memory map, and the combined result has to be bit-identical
 /// either way. A named reference takes each light through one pass, and a found one through two,
 /// and they too agree.

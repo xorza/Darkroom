@@ -1,13 +1,15 @@
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
+use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::math::size2us::Size2us;
 use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, ChunkRows, MIN_CHUNK_ROWS};
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::*;
+use crate::platform::SystemMemory;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 const MIB: u64 = 1024 * 1024;
@@ -17,13 +19,12 @@ const DETECTOR_PLANES: usize = 7;
 const GB: u64 = 1024 * MIB;
 const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
 
-/// The `System` behind this is a process-wide singleton reused across calls, so the second
-/// call must be as good as the first — a stale or half-refreshed instance would show up as a
-/// zero or as a value that stops tracking.
+/// Each reading takes a system of its own, so the second must be as good as the first — a stale
+/// or half-refreshed reading would show up as a zero or as a value that stops tracking.
 #[test]
 fn available_memory_reports_a_plausible_figure_on_every_call() {
-    let first = available_memory();
-    let second = available_memory();
+    let first = SystemMemory::available();
+    let second = SystemMemory::available();
 
     assert!(first > 0, "no available memory reported");
     assert!(second > 0, "second call reported none");
@@ -355,7 +356,7 @@ fn plan(
 
 /// The per-frame figures every plan below is derived from, in planes. A warped frame is its output,
 /// two quality planes and a quarter-plane of flags: 3¼P mono, 5¼P colour. A warp holds the source
-/// beside it: 4¼P and 8¼P. In quarter planes: 13 and 17, 21 and 33. A flat gain grid adds its own
+/// beside it: 4¼P and 8¼P. In quarter planes: 13 and 17; 21 and 33. A flat gain grid adds its own
 /// bytes to both.
 #[test]
 fn a_warp_holds_its_source_beside_the_warped_frame() {

@@ -4,7 +4,6 @@ use std::path::Path;
 
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
-use crate::mount_table::MountTable;
 
 /// The directory under the cache root a kept frame lives in.
 const DIRECTORY: &str = "decode-cache";
@@ -24,11 +23,16 @@ impl DecodeCache {
     /// The cache under `root`, created if missing.
     pub(crate) fn open(root: &Path) -> Result<Self, FrameStoreError> {
         Ok(Self {
-            root: DiskRoot::create(&root.join(DIRECTORY), &MountTable::read())?,
+            root: DiskRoot::create(&root.join(DIRECTORY))?,
         })
     }
 
     pub(crate) fn path(&self) -> &Path {
         self.root.path()
+    }
+
+    /// See [`DiskRoot::ensure_space`].
+    pub(crate) fn ensure_space(&self, needed: u64) -> Result<(), FrameStoreError> {
+        self.root.ensure_space(needed)
     }
 }

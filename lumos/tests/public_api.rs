@@ -263,12 +263,14 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "invalid star-detection configuration: sigma_threshold must be finite and positive, got 0"
     );
 
-    let calibration_error = CalibrationError::AlreadyCalibrated;
-    let pipeline_error: AlignStackError = calibration_error.into();
-    assert!(matches!(
-        pipeline_error,
-        AlignStackError::Calibration(CalibrationError::AlreadyCalibrated)
-    ));
+    let pipeline_error = AlignStackError::Calibration {
+        path: "light_7.cr2".into(),
+        source: Box::new(CalibrationError::AlreadyCalibrated),
+    };
+    assert_eq!(
+        pipeline_error.to_string(),
+        "cannot calibrate light frame 'light_7.cr2': the light frame is already calibrated"
+    );
 
     let registration_error = RegistrationError::InvalidStarField {
         catalog: RegistrationCatalog::Target,

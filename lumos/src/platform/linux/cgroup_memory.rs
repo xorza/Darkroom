@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::mount_table::{Mount, MountTable};
+use crate::platform::linux::mount_table::{Mount, MountTable};
 
 /// The memory limits of this process's control group and every group above it, against their
 /// use; Linux only.
@@ -162,8 +162,8 @@ mod tests {
 
     use common::TempDir;
 
-    use crate::memory::cgroup_memory::CgroupMemory;
-    use crate::mount_table::MountTable;
+    use crate::platform::linux::cgroup_memory::CgroupMemory;
+    use crate::platform::linux::mount_table::MountTable;
 
     /// One level of a fake hierarchy under `root`: `files` written into `path`.
     fn level(root: &Path, path: &str, files: &[(&str, &str)]) {

@@ -7,7 +7,6 @@ use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
 };
-use crate::registration::resample::kernel;
 use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
@@ -220,7 +219,7 @@ impl Oracle<'_> {
             return self.no_data();
         };
         let Some(Stretched { filter, stretch }) = filter else {
-            let index = kernel::nearest_index(self.size(), position);
+            let index = position.nearest_index(self.size());
             let (x, y) = (index % self.size().width, index / self.size().width);
             if !self.valid(x as i64, y as i64) {
                 return self.no_data();

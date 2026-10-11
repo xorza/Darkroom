@@ -6,7 +6,7 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
 use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::index::{NodeIdx, OutputAddr};
+use crate::execution::index::NodeIdx;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
@@ -447,6 +447,8 @@ fn resident_hit_derives_coverage_from_values() {
 #[cfg(debug_assertions)]
 fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use crate::execution::index::OutputAddr;
 
     let snapshot = OutputSnapshot::new(vec![DynamicValue::Unbound]);
     assert!(

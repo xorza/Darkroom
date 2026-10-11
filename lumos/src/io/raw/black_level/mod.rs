@@ -3,6 +3,9 @@
 
 use rayon::prelude::*;
 
+use imaginarium::Buffer2;
+
+use crate::io::image::pixel_flags::{FlagCounts, PixelFlags, QualityFlags};
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::libraw_filter_color;
 use crate::io::raw::sensor_layout::SensorLayout;
@@ -219,8 +222,8 @@ impl BlackLevel {
             })
     }
 
-    /// The visible area of `raw` as `(v − black(x, y)) / span`, in one pass. `channel` names each
-    /// pixel's LibRaw colour channel.
+    /// The visible area of `raw` as `(v − black(x, y)) / span`, and the flags `rule` gives its raw
+    /// values, in one row-parallel pass. `channel` names each pixel's LibRaw colour channel.
     ///
     /// Where every black term is a whole ADU, `v − black` and `span` are integers below 2¹⁶, exact
     /// in f32, and their f64 quotient narrowed to f32 is the correctly rounded one: f64 carries
@@ -228,27 +231,108 @@ impl BlackLevel {
     /// an f32 operand, so the sum, difference and quotient each round in f64 first, a relative
     /// error of a few 2⁻⁵³, and the f32 result can miss the correct rounding where the quotient
     /// lies that close to a halfway point.
-    pub(crate) fn normalize(
+    ///
+    /// A row's black level and saturation level repeat with its column: `channel` with
+    /// `channel_period` — 2 for a Bayer sensor, 6 for X-Trans, 1 for a mono one — and the black
+    /// pattern with its own width. Each row looks both up once per column phase rather than once
+    /// per photosite. The flag plane is allocated zeroed and written only where a photosite holds a
+    /// flag, so a frame that holds none touches none of its pages.
+    pub(crate) fn decode(
         &self,
         raw: &[u16],
         layout: SensorLayout,
         channel: impl Fn(usize, usize) -> usize + Sync,
-    ) -> Vec<f32> {
+        channel_period: usize,
+        rule: FlagRule,
+    ) -> DecodedRaw {
         let span = self.span();
         let active = layout.active;
+        let width = active.width.max(1);
+        let pattern_width = self.repeat.as_ref().map_or(1, |repeat| repeat.size.width);
+        let period = channel_period / gcd(channel_period, pattern_width) * pattern_width;
         let mut pixels = vec![0.0f32; active.pixel_count()];
-        pixels
-            .par_chunks_mut(active.width)
+        let mut flags = vec![0u8; active.pixel_count()];
+        let counts = pixels
+            .par_chunks_mut(width)
+            .zip(flags.par_chunks_mut(width))
             .enumerate()
-            .for_each(|(y, row)| {
+            .map_init(Vec::new, |phases, (y, (row, row_flags))| {
+                phases.clear();
+                phases.extend((0..period.min(row.len())).map(|x| {
+                    let channel = channel(x, y);
+                    PhaseLevels {
+                        black: self.at(channel, x, y),
+                        saturation: rule.saturation[channel],
+                    }
+                }));
                 let start = (layout.margin.y + y) * layout.raw.width + layout.margin.x;
-                for (x, (pixel, &value)) in row.iter_mut().zip(&raw[start..]).enumerate() {
-                    *pixel = ((f64::from(value) - self.at(channel(x, y), x, y)) / span) as f32;
+                let mut counts = FlagCounts::default();
+                let mut phase = 0;
+                for ((pixel, byte), &value) in row.iter_mut().zip(row_flags).zip(&raw[start..]) {
+                    let levels: PhaseLevels = phases[phase];
+                    *pixel = ((f64::from(value) - levels.black) / span) as f32;
+                    let flag = if value == 0 && rule.zero_is_bad {
+                        QualityFlags::NO_DATA
+                    } else if f64::from(value) >= levels.saturation {
+                        QualityFlags::SATURATED
+                    } else {
+                        QualityFlags::default()
+                    };
+                    if flag != QualityFlags::default() {
+                        *byte = flag.byte();
+                        counts.tally(*byte);
+                    }
+                    phase += 1;
+                    if phase == phases.len() {
+                        phase = 0;
+                    }
                 }
-            });
-        pixels
+                counts
+            })
+            .reduce(FlagCounts::default, FlagCounts::merged);
+        DecodedRaw {
+            pixels,
+            flags: PixelFlags::from_counted(
+                Buffer2::new(active.width, active.height, flags),
+                counts,
+            ),
+        }
     }
 }
 
+/// The greatest common divisor of `a` and `b`.
+const fn gcd(mut a: usize, mut b: usize) -> usize {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// The visible area of a raw buffer, normalized, and the flags its raw values settle.
+#[derive(Debug)]
+pub(crate) struct DecodedRaw {
+    pub(crate) pixels: Vec<f32>,
+    pub(crate) flags: Option<PixelFlags>,
+}
+
+/// One column phase of a row: the black level there and the value its channel saturates at.
+#[derive(Debug, Clone, Copy, Default)]
+struct PhaseLevels {
+    black: f64,
+    saturation: f64,
+}
+
+/// What a raw value is flagged before its black is subtracted: a zero, on a camera that reads one
+/// as a dead photosite, has no measurement, and a value at its channel's saturation level is
+/// saturated.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FlagRule {
+    pub(crate) zero_is_bad: bool,
+    /// The raw value at which each LibRaw colour channel saturates, black included.
+    pub(crate) saturation: [f64; 4],
+}
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
 mod tests;

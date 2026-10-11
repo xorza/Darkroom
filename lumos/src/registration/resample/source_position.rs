@@ -2,6 +2,7 @@
 
 use glam::DVec2;
 
+use crate::math::floor_i32::FloorI32;
 use crate::math::size2us::Size2us;
 
 /// A source position as its integer cell and the fraction within that cell.
@@ -30,8 +31,8 @@ impl SourcePosition {
         if !(p.x >= -0.5 && p.y >= -0.5 && p.x <= max_x && p.y <= max_y) {
             return None;
         }
-        let cell_x = floor_inside(p.x);
-        let cell_y = floor_inside(p.y);
+        let cell_x = p.x.floor_i32();
+        let cell_y = p.y.floor_i32();
         Some(Self {
             cell_x,
             cell_y,
@@ -53,15 +54,20 @@ impl SourcePosition {
             fy: y.fraction,
         }
     }
-}
 
-/// `x.floor()` for a coordinate inside a footprint, so within `i32` range: truncation, then one
-/// step down for a negative non-integer. `f64::floor` is a library call on the x86-64 baseline, and
-/// this runs twice per output pixel.
-#[inline]
-fn floor_inside(x: f64) -> i32 {
-    let truncated = x as i32;
-    truncated - i32::from(x < f64::from(truncated))
+    /// The index of the pixel nearest this position in a `size` source, a half rounding up as
+    /// `f32::round` does.
+    #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a position clamped to the pixel-centre grid has non-negative cells"
+    )]
+    pub(super) const fn nearest_index(self, size: Size2us) -> usize {
+        let position = self.clamped_to_centers(size);
+        let x = position.cell_x as usize + (position.fx >= 0.5) as usize;
+        let y = position.cell_y as usize + (position.fy >= 0.5) as usize;
+        y * size.width + x
+    }
 }
 
 /// One axis of [`SourcePosition::clamped_to_centers`].

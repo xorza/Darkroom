@@ -212,7 +212,7 @@ fn stack_lights_node_is_registered() {
     assert!(f.inputs[0].required, "light frames are required");
     assert_eq!(f.inputs[1].data_type, MASTERS_DATA_TYPE);
     assert!(!f.inputs[1].required, "masters are genuinely optional");
-    // Unset picks the richest frame; no sentinel stands in for it.
+    // Unset picks the sharpest frame with enough stars; no sentinel stands in for it.
     assert!(!f.inputs[8].required);
     assert_eq!(f.inputs[8].default_value, None);
 

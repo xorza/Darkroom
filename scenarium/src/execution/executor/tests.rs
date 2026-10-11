@@ -5,7 +5,6 @@
 //! would be asserting on something it never said.
 
 use super::*;
-use crate::containers::column::Idx;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::lambda::internals;
 use crate::graph::identity::NodeId;
@@ -46,6 +45,8 @@ fn increment() -> FuncLambda {
 #[cfg(debug_assertions)]
 fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use crate::containers::column::Idx;
 
     let mut prog = ProgramBuilder::default();
     let node = prog.node().outputs(1).add();

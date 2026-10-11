@@ -1,8 +1,6 @@
 //! [`RingReference`]: the dark level a hot-pixel candidate is held to, from the photosites of its
 //! colour around it.
 
-use imaginarium::Buffer2;
-
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_to_sigma, median_mut};
@@ -32,7 +30,7 @@ const CLIP_SIGMAS: f64 = 3.0;
 /// least-squares plane through those it keeps clips them again, and the plane through what is
 /// left is the level: hot pixels in the ring, a third of it on one side, do not tilt it.
 #[derive(Debug, Default)]
-pub(super) struct RingReference {
+pub(crate) struct RingReference {
     samples: Vec<RingSample>,
     residuals: Vec<f32>,
 }
@@ -54,10 +52,16 @@ struct Plane {
 }
 
 impl RingReference {
-    /// The plane's level at `point`, of its colour under `cfa`; `None` when the frame gives the
-    /// ring too few photosites, or they fix no plane.
-    pub(super) fn at(&mut self, data: &Buffer2<f32>, cfa: &CfaType, point: Vec2us) -> Option<f32> {
-        let size = Size2us::new(data.width(), data.height());
+    /// The plane's level at `point` of a `size` frame whose sample at a flat index `value` reads,
+    /// of its colour under `cfa`; `None` when the frame gives the ring too few photosites, or they
+    /// fix no plane.
+    pub(crate) fn at(
+        &mut self,
+        size: Size2us,
+        value: impl Fn(usize) -> f64,
+        cfa: &CfaType,
+        point: Vec2us,
+    ) -> Option<f32> {
         let colour = cfa.color_at(point);
         self.samples.clear();
         let reach = RING_OUTER as isize;
@@ -77,7 +81,7 @@ impl RingReference {
                     self.samples.push(RingSample {
                         dx: dx as f64,
                         dy: dy as f64,
-                        value: f64::from(data[size.index_of(at)]),
+                        value: value(size.index_of(at)),
                     });
                 }
             }

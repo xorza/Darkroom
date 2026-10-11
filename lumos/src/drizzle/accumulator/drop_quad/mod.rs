@@ -1,11 +1,36 @@
-//! The geometric primitives drizzle distributes flux with.
-//!
-//! The exact polygon-to-pixel overlap the square kernel needs ([`sgarea`] / [`boxer`], ported from
-//! `STScI`'s `cdrizzlebox.c`). The interpolating kernel itself is `math::lanczos`, shared with
-//! `registration::resample`, and the area a drop is magnified by comes from the transform's own
-//! Jacobian.
+//! [`DropQuad`]: one input pixel's drop as the quadrilateral it maps to, and the area it shares
+//! with an output pixel, exactly: the square kernel's polygon clipping, ported from `STScI`'s
+//! `cdrizzlebox.c` (`boxer` and `sgarea`).
 
 use glam::DVec2;
+
+/// One input pixel's drop as the quadrilateral it maps to, for the kernel that clips exactly.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DropQuad {
+    /// The shrunken drop's corners in output coordinates, wound counterclockwise: BL, BR, TR, TL.
+    pub(super) corners: [DVec2; 4],
+    /// The pixel weight ÷ |signed area of `corners`|: the square kernel spreads it over the area
+    /// the drop maps to, so it deposits the pixel weight in total.
+    pub(super) weight: f64,
+}
+
+impl DropQuad {
+    /// The area the drop shares with the output pixel whose lower-left corner is `corner`.
+    ///
+    /// Shifts the quadrilateral so that the cell becomes the unit square `[0,1]×[0,1]`, then sums
+    /// the signed areas of its edges. Output pixels are integer-centred (pixel `o` spans `[o - 0.5,
+    /// o + 0.5]`, as at `STScI`), so a caller passes the cell's corner `o - 0.5`. Port of
+    /// `boxer()`.
+    #[inline]
+    pub(super) fn overlap(&self, corner: DVec2) -> f64 {
+        let shifted = self.corners.map(|vertex| vertex - corner);
+        let mut sum = 0.0;
+        for i in 0..4 {
+            sum += sgarea(shifted[i], shifted[(i + 1) & 3]);
+        }
+        sum.abs()
+    }
+}
 
 const SGAREA_DX_MIN: f64 = 1e-14;
 
@@ -23,7 +48,7 @@ const SGAREA_DX_MIN: f64 = 1e-14;
 /// genuinely vectorial steps are vectors: the endpoint difference, and `det` as the cross product
 /// of the endpoints.
 #[inline]
-pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
+fn sgarea(from: DVec2, to: DVec2) -> f64 {
     let delta = to - from;
     let (dx, dy) = (delta.x, delta.y);
 
@@ -81,21 +106,5 @@ pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
     sgn_dx * (0.5 * (xhi - xtop) * (1.0 + yhi) + xtop - xlo)
 }
 
-/// Compute overlap area between the convex quadrilateral `quad` and a pixel cell.
-///
-/// Shifts the quadrilateral so that the cell with lower-left `corner` becomes the unit square
-/// `[0,1]×[0,1]`, then sums signed areas from each edge via `sgarea()`.
-///
-/// Port of `STScI` `boxer()` from cdrizzlebox.c. Output pixels are integer-center (pixel `o`
-/// spans `[o - 0.5, o + 0.5]`, matching `STScI`), so callers pass the cell's lower-left
-/// corner `o - 0.5`.
-#[inline]
-pub(crate) fn boxer(corner: DVec2, quad: &[DVec2; 4]) -> f64 {
-    let shifted = quad.map(|vertex| vertex - corner);
-
-    let mut sum = 0.0;
-    for i in 0..4 {
-        sum += sgarea(shifted[i], shifted[(i + 1) & 3]);
-    }
-    sum.abs()
-}
+#[cfg(test)]
+mod tests;
