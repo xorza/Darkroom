@@ -3,7 +3,7 @@
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::math::noise::binned_samples::BinnedSamples;
@@ -47,7 +47,7 @@ pub(crate) fn benches(c: &mut Criterion) {
                 binned
             },
             |binned| binned.measure(|run| run.iter().map(|&v| f64::from(v * v)).sum::<f64>()),
-            BatchSize::LargeInput,
+            fixture::in_place(SAMPLES * (size_of::<f32>() + size_of::<u8>())),
         );
     });
     for side in SIDES {
