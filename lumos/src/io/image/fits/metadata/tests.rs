@@ -258,6 +258,83 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     );
 }
 
+/// Each numeric field holds its physical range, read through the whole header path: the value
+/// at the edge it allows is kept, the one just past it is refused, and a refused first alias falls
+/// through to a valid second one (`FOCALLEN = -5`, `FOCAL = 400` → 400).
+#[test]
+fn numeric_keywords_hold_their_ranges() {
+    use crate::io::image::fits::metadata::{MetadataField as Field, read_data_max};
+
+    let read = |header: &Header, field: Field| -> Option<f64> {
+        let metadata = read_metadata(header, SampleType::U16);
+        match field {
+            Field::ExposureTime => metadata.exposure_time,
+            Field::Gain => metadata.gain,
+            Field::Egain => metadata.egain,
+            Field::CcdTemp => metadata.ccd_temp,
+            Field::CameraTemp => metadata.camera_temp,
+            Field::SetTemp => metadata.set_temp,
+            Field::FocalLength => metadata.focal_length,
+            Field::Airmass => metadata.airmass,
+            Field::PixelSizeX => metadata.pixel_size_x,
+            Field::PixelSizeY => metadata.pixel_size_y,
+            Field::DataMax => read_data_max(header),
+            Field::Iso => metadata.iso.map(f64::from),
+            Field::XBinning => metadata.xbinning.map(f64::from),
+            Field::YBinning => metadata.ybinning.map(f64::from),
+            Field::Offset => metadata.offset.map(f64::from),
+            field => panic!("{field:?} is not numeric"),
+        }
+    };
+    let reals = [
+        (Field::ExposureTime, 0.0, -0.001),
+        (Field::Gain, 0.0, -1.0),
+        (Field::Egain, 0.001, 0.0),
+        (Field::CcdTemp, -273.0, -273.15),
+        (Field::CameraTemp, -273.0, -273.15),
+        (Field::SetTemp, -273.0, -273.15),
+        (Field::FocalLength, 0.5, 0.0),
+        (Field::Airmass, 1.0, 0.99),
+        (Field::PixelSizeX, 3.76, 0.0),
+        (Field::PixelSizeY, 3.76, -3.76),
+    ];
+    for (field, kept, refused) in reals {
+        let mut header = Header::new();
+        header.set(field.keywords()[0], kept).unwrap();
+        assert_eq!(read(&header, field), Some(kept), "{field:?} at {kept}");
+        header.set(field.keywords()[0], refused).unwrap();
+        assert_eq!(read(&header, field), None, "{field:?} at {refused}");
+    }
+    let mut header = Header::new();
+    header.set("DATAMAX", -12.5).unwrap();
+    assert_eq!(read(&header, Field::DataMax), Some(-12.5));
+
+    let integers = [
+        (Field::Iso, 1, Some(0)),
+        (Field::XBinning, 1, Some(0)),
+        (Field::YBinning, 1, Some(-2)),
+        (Field::Offset, -5, None),
+    ];
+    for (field, kept, refused) in integers {
+        let mut header = Header::new();
+        header.set(field.keywords()[0], kept).unwrap();
+        assert_eq!(
+            read(&header, field),
+            Some(f64::from(kept)),
+            "{field:?} at {kept}"
+        );
+        if let Some(refused) = refused {
+            header.set(field.keywords()[0], refused).unwrap();
+            assert_eq!(read(&header, field), None, "{field:?} at {refused}");
+        }
+    }
+
+    let mut header = Header::new();
+    header.set("FOCALLEN", -5.0).unwrap();
+    header.set("FOCAL", 400.0).unwrap();
+    assert_eq!(read(&header, Field::FocalLength), Some(400.0));
+}
+
 /// The WCS reference value is taken only from an axis whose type is right ascension or
 /// declination, so a swapped pair reads each from its own axis and a galactic one gives nothing.
 #[test]
