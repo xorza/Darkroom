@@ -289,35 +289,51 @@ fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
 }
 
-/// A sidecar payload behind its layout tag.
-#[derive(Debug, Serialize, Deserialize)]
-struct Sidecar<T> {
-    format: u64,
-    value: T,
+/// The bytes before a sidecar's payload: its layout tag, little-endian, and the blake3 digest of the
+/// payload. The digest makes a file damaged anywhere — a bit flipped, a power loss that left it
+/// short or zeroed — read as absent, where bitcode alone would decode the damage into plausible
+/// values: a commit carries a frame's whole metadata, which no single check could vet.
+const SIDECAR_HEADER: usize = size_of::<u64>() + blake3::OUT_LEN;
+
+/// `value`'s sidecar bytes: the [`SIDECAR_HEADER`], then the value as bitcode.
+fn encode_sidecar<T: Serialize>(value: &T) -> Vec<u8> {
+    // Sidecars hold plain data; a failure here would be a broken derive, not anything the
+    // filesystem or the caller can cause.
+    let payload = common::serialize(value, SerdeFormat::Bitcode)
+        .expect("a sidecar of plain data always serializes");
+    let mut bytes = Vec::with_capacity(SIDECAR_HEADER + payload.len());
+    bytes.extend_from_slice(&SIDECAR_FORMAT.to_le_bytes());
+    bytes.extend_from_slice(blake3::hash(&payload).as_bytes());
+    bytes.extend_from_slice(&payload);
+    bytes
+}
+
+/// The value sidecar `bytes` hold; `None` when they are of another layout, damaged, or do not
+/// decode.
+fn decode_sidecar<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
+    let (format, rest) = bytes.split_first_chunk::<8>()?;
+    let (digest, payload) = rest.split_first_chunk::<{ blake3::OUT_LEN }>()?;
+    if u64::from_le_bytes(*format) != SIDECAR_FORMAT || blake3::hash(payload).as_bytes() != digest {
+        return None;
+    }
+    common::deserialize(payload, SerdeFormat::Bitcode).ok()
 }
 
 fn write_sidecar<T: Serialize>(path: &Path, value: &T) -> Result<(), FrameStoreError> {
-    let sidecar = Sidecar {
-        format: SIDECAR_FORMAT,
-        value,
-    };
-    // Sidecars are plain scalars; a failure here would be a broken derive, not anything the
-    // filesystem or the caller can cause.
-    let bytes = common::serialize(&sidecar, SerdeFormat::Bitcode)
-        .expect("a sidecar of plain scalars always serializes");
-    file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Cache).map_err(|source| {
-        FrameStoreError::WriteFile {
-            path: path.to_path_buf(),
-            source,
-        }
+    file_utils::publish_bytes(
+        path,
+        &encode_sidecar(value),
+        file_utils::PublicationMode::Cache,
+    )
+    .map_err(|source| FrameStoreError::WriteFile {
+        path: path.to_path_buf(),
+        source,
     })
 }
 
-/// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.
+/// Read a sidecar back, or `None` if it is absent, unreadable, damaged, or not this layout.
 fn read_sidecar<T: DeserializeOwned>(path: &Path) -> Option<T> {
-    let bytes = fs::read(path).ok()?;
-    let sidecar: Sidecar<T> = common::deserialize(&bytes, SerdeFormat::Bitcode).ok()?;
-    (sidecar.format == SIDECAR_FORMAT).then_some(sidecar.value)
+    decode_sidecar(&fs::read(path).ok()?)
 }
 
 #[cfg(test)]
@@ -386,7 +402,7 @@ mod tests {
     use imaginarium::Buffer2;
 
     use crate::frame_store::frame_spill::{
-        Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_FORMAT, SIDECAR_PIN, Sidecar,
+        Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN, encode_sidecar,
     };
     use crate::frame_store::frame_stats::{FrameStats, SlotSpread};
     use crate::io::image::calibration_state::CalibrationState;
@@ -608,8 +624,8 @@ mod tests {
     }
 
     /// A commit reads back exactly as written, and only for its own source under its own key; a
-    /// record that is missing, corrupt, in another layout, or holding a sigma that would poison
-    /// every weight derived from it reads as nothing to reuse.
+    /// record that is missing, corrupt, damaged past its digest, in another layout, or holding a
+    /// sigma that would poison every weight derived from it reads as nothing to reuse.
     #[test]
     fn committed_reads_back_only_a_valid_record_under_its_key() {
         let directory = TempDir::new("frame_spill_commit");
@@ -669,16 +685,25 @@ mod tests {
         fs::write(spill.stats_path(), b"bad").unwrap();
         assert!(spill.committed(key).is_none(), "corrupt statistics");
 
-        let stale = common::serialize(
-            &Sidecar {
-                format: SIDECAR_FORMAT ^ 1,
-                value: &valid,
-            },
-            SerdeFormat::Bitcode,
-        )
-        .unwrap();
-        fs::write(spill.stats_path(), stale).unwrap();
+        let mut stale = encode_sidecar(&valid);
+        stale[0] ^= 1;
+        fs::write(spill.stats_path(), &stale).unwrap();
         assert!(spill.committed(key).is_none(), "another layout tag");
+
+        // A damaged commit that would still decode reads as absent: one byte of its payload
+        // flipped, and the file cut short.
+        spill
+            .commit(key, decoded(Carries::Channels), digests(), &valid)
+            .unwrap();
+        let commit = fs::read(spill.commit_path()).unwrap();
+        let mut flipped = commit.clone();
+        *flipped.last_mut().unwrap() ^= 0x10;
+        fs::write(spill.commit_path(), &flipped).unwrap();
+        assert!(spill.committed(key).is_none(), "a flipped byte");
+        fs::write(spill.commit_path(), &commit[..commit.len() - 1]).unwrap();
+        assert!(spill.committed(key).is_none(), "a short file");
+        fs::write(spill.commit_path(), &commit).unwrap();
+        assert!(spill.committed(key).is_some(), "the commit as written");
 
         spill
             .commit(key, decoded(Carries::Channels), digests(), &valid)
