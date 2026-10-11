@@ -1,5 +1,6 @@
 pub(crate) mod calibration_state;
 pub(crate) mod cfa;
+pub(crate) mod difference_noise;
 pub(crate) mod error;
 pub(crate) mod fits;
 pub(crate) mod flat_gain;

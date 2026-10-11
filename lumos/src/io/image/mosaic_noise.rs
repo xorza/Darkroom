@@ -5,8 +5,8 @@ use std::array;
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::cfa::CfaType;
+use crate::io::image::difference_noise::DifferenceNoise;
 use crate::io::image::flat_gain::FlatGain;
-use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
@@ -130,5 +130,26 @@ fn for_each_sample(
                 visit(index, cfa_type.color_at(Vec2us::new(x, y)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
+    use crate::io::image::difference_noise::DifferenceNoise;
+    use crate::io::image::mosaic_noise::MosaicNoise;
+    use crate::math::size2us::Size2us;
+
+    /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
+    /// row, three of each of its two colours: 6 red, 12 green and 6 blue, 24 pairs at 4 bytes and a
+    /// bin byte, 120. Its medians take all 32 photosites at 4 bytes, 128, the larger. At 16 × 4,
+    /// 14 pairs a row: 56 × 5 = 280 against 64 × 4 = 256.
+    #[test]
+    fn the_working_set_is_the_larger_of_the_pairs_and_the_medians() {
+        let rggb = CfaType::Bayer(CfaPattern::Rggb);
+        assert_eq!(DifferenceNoise::heap_bytes(Size2us::new(8, 4), &rggb), 120);
+        assert_eq!(MosaicNoise::heap_bytes(Size2us::new(8, 4), &rggb), 128);
+        assert_eq!(MosaicNoise::heap_bytes(Size2us::new(16, 4), &rggb), 280);
     }
 }

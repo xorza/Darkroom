@@ -17,8 +17,9 @@ use common::CancelToken;
 
 use crate::combine::error::StackError;
 use crate::io::cancelled::Cancelled;
+use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{MedianMad, mad_to_sigma};
 
 /// Pairs further than this many σ above their median on both sides carry the lever arm the gain
 /// is read from: at 5σ the noise in one pair's ratio is under a fifth of the ratio.

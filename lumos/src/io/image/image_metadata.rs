@@ -11,7 +11,7 @@ use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::SATURATION_FRACTION;
-use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::image::sample_type_record::SampleTypeRecord;
 use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::size2us::Size2us;
@@ -158,6 +158,24 @@ impl ImageMetadata {
         SATURATION_FRACTION * self.data_max.map_or(1.0, |max| max as f32)
     }
 
+    /// The ADU one unit of these samples is worth. Only a declared scale says it; an assumed one
+    /// is a guess no gain can be applied through.
+    pub(crate) fn adu_per_unit(&self) -> Option<f64> {
+        self.domain
+            .as_ref()
+            .filter(|domain| domain.origin == ScaleOrigin::Declared)
+            .map(|domain| domain.scale)
+    }
+
+    /// Electrons per unit of these samples: the camera's electrons per ADU times
+    /// [`Self::adu_per_unit`].
+    pub(crate) fn electrons_per_unit(&self) -> Option<f32> {
+        let egain = self
+            .egain
+            .filter(|egain| egain.is_finite() && *egain > 0.0)?;
+        Some((egain * self.adu_per_unit()?) as f32)
+    }
+
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts. A
     /// monochrome sensor's frame is copied straight through, a CFA drizzle interpolates no colour
     /// from another, and a green proxy fills its other photosites from green alone.
@@ -172,5 +190,40 @@ impl ImageMetadata {
                 | DemosaicProvenance::CfaDrizzle
                 | DemosaicProvenance::GreenProxy => false,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::image::image_metadata::ImageMetadata;
+    use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+
+    /// 1.5 e⁻/ADU over a declared scale of 65535 ADU per unit is 98302.5 electrons per unit. An
+    /// assumed scale, a missing domain or a non-positive gain give none.
+    #[test]
+    fn electrons_per_unit_needs_a_gain_and_a_declared_scale() {
+        let domain = |origin| SampleDomain {
+            scale: 65_535.0,
+            origin,
+            pedestal: Pedestal::Removed,
+            unit: None,
+        };
+        let metadata = |egain, domain| ImageMetadata {
+            egain,
+            domain,
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata(Some(1.5), Some(domain(ScaleOrigin::Declared))).electrons_per_unit(),
+            Some(98_302.5)
+        );
+        for (egain, domain) in [
+            (Some(1.5), Some(domain(ScaleOrigin::Assumed))),
+            (Some(1.5), None),
+            (Some(0.0), Some(domain(ScaleOrigin::Declared))),
+            (None, Some(domain(ScaleOrigin::Declared))),
+        ] {
+            assert_eq!(metadata(egain, domain).electrons_per_unit(), None);
+        }
     }
 }

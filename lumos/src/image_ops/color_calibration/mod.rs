@@ -11,7 +11,7 @@ use crate::image_ops::rgb::Rgb;
 use crate::error::InvalidConfigField;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::ClippedStats;
+use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::statistics::subsample::Subsample;
 
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).

@@ -6,8 +6,12 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::math::noise::background_split::{BackgroundSplit, BinnedSamples, GainBins};
+use crate::math::noise::background_split::BackgroundSplit;
+use crate::math::noise::binned_samples::BinnedSamples;
+use crate::math::noise::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
+use crate::math::urect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::math::wavelet::{atrous_smooth, max_scales};
 
 /// The noise standard deviation of an image by Starck & Murtagh's multiresolution-support method
@@ -57,8 +61,8 @@ const MIN_NOISE_SHARE: usize = 100;
 /// The first detail layer's response to unit white noise, exactly: `√(1 − 2h₀ + Σh²)` for the 2-D
 /// B3 kernel, its centre tap `h₀ = (6/16)²` and `Σh² = (70/256)²`. It holds where the kernel lies
 /// inside the frame: within [`FIRST_LAYER_REACH`] of an edge the mirror boundary reads a sample
-/// twice. [`LAYER_SIGMA`] holds the literature's three digits for the MRS start, which only seeds
-/// the iteration.
+/// twice. [`LAYER_SIGMA`] keeps the literature's three digits: the reference thresholds the support
+/// and seeds the iteration with them, and [`WHITE_NOISE_RESPONSE`] was measured with them.
 const FIRST_LAYER_RESPONSE: f64 = 0.890_796_310_278_758_4;
 /// What an iterated 3σ clip reads for a Gaussian of unit σ: the fixed point of
 /// `s = √(1 − 2cφ(c)/(2Φ(c) − 1))` at `c = 3s`, the variance of a normal truncated at `±c`,
@@ -124,9 +128,9 @@ impl MrsNoise {
     /// [`Self::estimate`] holds no bins and so a byte a coefficient less.
     pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
         let tiles = tiles(size);
-        let analysed: usize = tiles.iter().map(Tile::core_pixels).sum();
+        let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
         let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
-            tiles.iter().map(Tile::region_pixels).collect();
+            tiles.iter().map(|tile| tile.region.area()).collect();
         regions.sort_unstable_by(|a, b| b.cmp(a));
         let in_work: usize = regions.iter().take(threads.max(1)).sum();
         BinnedSamples::<Coefficients>::heap_bytes(analysed)
@@ -147,11 +151,12 @@ fn coefficients(
     debug_assert_eq!(plane.len(), size.pixel_count());
     let scales = SCALES.min(max_scales(size));
     let tiles = tiles(size);
-    let mut coefficients = vec![Coefficients::default(); tiles.iter().map(Tile::core_pixels).sum()];
+    let mut coefficients =
+        vec![Coefficients::default(); tiles.iter().map(|tile| tile.core.area()).sum()];
     let mut shares: Vec<&mut [Coefficients]> = Vec::with_capacity(tiles.len());
     let mut rest = coefficients.as_mut_slice();
     for tile in &tiles {
-        let (share, tail) = rest.split_at_mut(tile.core_pixels());
+        let (share, tail) = rest.split_at_mut(tile.core.area());
         shares.push(share);
         rest = tail;
     }
@@ -164,7 +169,7 @@ fn coefficients(
     let (mut start, mut end) = (0, 0);
     for (tile, kept) in tiles.iter().zip(kept) {
         coefficients.copy_within(start..start + kept, end);
-        start += tile.core_pixels();
+        start += tile.core.area();
         end += kept;
     }
     coefficients.truncate(end);
@@ -232,23 +237,11 @@ where
 }
 
 /// An analysed tile: the `core` of output pixels within the `region` of the image the transform
-/// reads, both as `[x0, x1) × [y0, y1)`.
+/// reads.
 #[derive(Debug, Clone, Copy)]
 struct Tile {
-    core: [usize; 4],
-    region: [usize; 4],
-}
-
-impl Tile {
-    const fn core_pixels(&self) -> usize {
-        let [x0, x1, y0, y1] = self.core;
-        (x1 - x0) * (y1 - y0)
-    }
-
-    const fn region_pixels(&self) -> usize {
-        let [x0, x1, y0, y1] = self.region;
-        (x1 - x0) * (y1 - y0)
-    }
+    core: URect,
+    region: URect,
 }
 
 /// Up to [`TILES_PER_AXIS`]² tiles spread evenly over `size`, each core [`TILE`] wide or the whole
@@ -273,13 +266,14 @@ fn tiles(size: Size2us) -> Vec<Tile> {
     rows.iter()
         .flat_map(|&[y0, y1]| {
             columns.iter().map(move |&[x0, x1]| Tile {
-                core: [x0, x1, y0, y1],
-                region: [
-                    x0.saturating_sub(MARGIN),
-                    (x1 + MARGIN).min(size.width),
-                    y0.saturating_sub(MARGIN),
-                    (y1 + MARGIN).min(size.height),
-                ],
+                core: URect::new(Vec2us::new(x0, y0), Vec2us::new(x1, y1)),
+                region: URect::new(
+                    Vec2us::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
+                    Vec2us::new(
+                        (x1 + MARGIN).min(size.width),
+                        (y1 + MARGIN).min(size.height),
+                    ),
+                ),
             })
         })
         .collect()
@@ -295,12 +289,14 @@ fn tile_coefficients(
     excluded: &impl Fn(usize) -> bool,
     share: &mut [Coefficients],
 ) -> usize {
-    debug_assert_eq!(share.len(), tile.core_pixels());
-    let [rx0, rx1, ry0, ry1] = tile.region;
-    let (width, height) = (rx1 - rx0, ry1 - ry0);
-    let mut pixels = Vec::with_capacity(width * height);
-    for y in ry0..ry1 {
-        pixels.extend_from_slice(&plane[y * size.width + rx0..y * size.width + rx1]);
+    debug_assert_eq!(share.len(), tile.core.area());
+    let region = tile.region;
+    let (width, height) = (region.width(), region.height());
+    let mut pixels = Vec::with_capacity(region.area());
+    for y in region.min.y..region.max.y {
+        pixels.extend_from_slice(
+            &plane[y * size.width + region.min.x..y * size.width + region.max.x],
+        );
     }
     let image = Buffer2::new(width, height, pixels);
     let mut smooth = image.clone();
@@ -319,14 +315,14 @@ fn tile_coefficients(
         }
         mem::swap(&mut smooth, &mut next);
     }
-    let [cx0, cx1, cy0, cy1] = tile.core;
+    let core = tile.core;
     let mut kept = 0;
-    for y in cy0..cy1 {
-        for x in cx0..cx1 {
+    for y in core.min.y..core.max.y {
+        for x in core.min.x..core.max.x {
             if excluded(y * size.width + x) {
                 continue;
             }
-            let local = (y - ry0) * width + (x - rx0);
+            let local = (y - region.min.y) * width + (x - region.min.x);
             share[kept] = Coefficients {
                 index: y * size.width + x,
                 first_layer: first_layer[local],

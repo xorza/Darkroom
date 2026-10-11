@@ -1,50 +1,13 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
-use serde::{Deserialize, Serialize};
-
 use crate::math::statistics::float::Float;
-use crate::math::statistics::spread::Spread;
-use crate::math::sum::mean_f32;
-use std::iter;
 
+pub(crate) mod clipped_stats;
 pub(crate) mod float;
+pub(crate) mod median_mad;
 pub(crate) mod radix_median;
 pub(crate) mod spread;
 pub(crate) mod subsample;
-
-/// A distribution's location and spread — what one pass over the values measures.
-///
-/// The spread is always the raw MAD, in the data's own units; [`Self::sigma`] rescales on
-/// demand. Carrying the MAD rather than an already-scaled sigma is what keeps "median and MAD"
-/// and "median and sigma" one type instead of two, and applies the 1.4826 factor exactly once,
-/// where the caller needs Gaussian units.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MedianMad {
-    pub(crate) median: f32,
-    pub(crate) mad: f32,
-}
-
-impl MedianMad {
-    /// Measure both together, in one pass over `data`.
-    ///
-    /// More efficient than computing separately since the median is needed for the MAD.
-    /// Mutates the input buffer.
-    pub(crate) fn of_mut(data: &mut [f32]) -> Self {
-        debug_assert!(!data.is_empty());
-
-        let median = median_mut(data);
-        abs_deviation_inplace(data, median);
-        let mad = median_mut(data);
-
-        Self { median, mad }
-    }
-
-    /// The MAD rescaled to the standard deviation of an equivalent normal distribution.
-    #[inline]
-    pub(crate) fn sigma(self) -> f32 {
-        mad_to_sigma(self.mad)
-    }
-}
 
 /// Replace each value with `|value − median|`, in place.
 ///
@@ -53,7 +16,7 @@ impl MedianMad {
 /// consumes its input, that one preserves it, and a single function doing both would need input
 /// and output to alias.
 #[inline]
-pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
+fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
     for v in values.iter_mut() {
         *v = (*v - median).abs();
     }
@@ -67,7 +30,7 @@ pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
 /// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
 /// round apart. Reaching the `f64` users through `f64::from` on the `f32` constant instead would
 /// spend an `f32` round-trip inside an `f64` computation for nothing.
-pub(crate) const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
+const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
 
 /// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.
 ///
@@ -89,7 +52,7 @@ pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
 
 /// Convert MAD to standard deviation (assuming normal distribution).
 #[inline]
-pub(crate) fn mad_to_sigma(mad: f32) -> f32 {
+pub(crate) const fn mad_to_sigma(mad: f32) -> f32 {
     mad * MAD_TO_SIGMA_F32
 }
 
@@ -140,7 +103,7 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
 /// comment. Every decoded frame satisfies it (the FITS reader rejects non-finite pixels and RAW
 /// decodes from integers), so the check is debug-only and the hot paths pay nothing in release.
 #[inline]
-pub(crate) fn median_fast<F: Float>(data: &mut [F]) -> F {
+fn median_fast<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
     debug_assert!(
         !data.iter().any(|value| value.is_nan()),
@@ -187,198 +150,10 @@ pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut 
 /// collapse any MAD-scaled rejection threshold to zero. Flooring at a fraction of the
 /// center keeps a usable spread estimate. Callers pass the median as `center`.
 #[inline]
-pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
+pub(crate) const fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
 }
 
-/// Scratch space a sigma-clip pass borrows for its per-value deviations.
-///
-/// Exists so one clip implementation serves both buffer kinds: the tiled background walks
-/// thousands of tiles and reuses one heap `Vec`, while the centroid measure loop runs per star
-/// inside a rayon fold and must not allocate at all. Contents are never read before being
-/// written, so an implementation only has to produce a slice of the right length.
-pub(crate) trait DeviationScratch {
-    /// Yield exactly `len` elements to write into.
-    fn sized_to(&mut self, len: usize) -> &mut [f32];
-}
-
-impl DeviationScratch for Vec<f32> {
-    fn sized_to(&mut self, len: usize) -> &mut [f32] {
-        self.resize(len, 0.0);
-        self
-    }
-}
-
-impl<const N: usize> DeviationScratch for arrayvec::ArrayVec<f32, N> {
-    /// Grows to `len` rather than starting from a zeroed `[f32; N]`: the caller sizes `N` to its
-    /// worst case, so a plain array would memset the whole capacity on every call while only
-    /// `len` of it is ever used. Panics when `len > N` — a fixed buffer cannot grow.
-    fn sized_to(&mut self, len: usize) -> &mut [f32] {
-        self.clear();
-        self.extend(iter::repeat_n(0.0f32, len));
-        self.as_mut_slice()
-    }
-}
-
-/// Statistics of the sigma-clip survivors, from [`ClippedStats::sigma_clipped`].
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ClippedStats {
-    pub(crate) median: f32,
-    /// MAD-based sigma of the survivors.
-    pub(crate) sigma: f32,
-    /// Mean of the survivors. With the median it exposes the residual skew of the clipped
-    /// distribution — what SExtractor's Pearson mode estimator corrects for.
-    pub(crate) mean: f32,
-}
-
-impl ClippedStats {
-    const ZERO: ClippedStats = ClippedStats {
-        median: 0.0,
-        sigma: 0.0,
-        mean: 0.0,
-    };
-
-    /// Widen a clip pass's estimate with the mean of the same survivors.
-    fn from_median_mad(location: MedianMad, mean: f32) -> Self {
-        Self {
-            median: location.median,
-            sigma: location.sigma(),
-            mean,
-        }
-    }
-
-    /// Sigma-clipped median, MAD-sigma and mean of `values`, rejecting outliers beyond
-    /// `kappa × sigma` from the median over `iterations` passes.
-    ///
-    /// `values` must be NaN-free — the clip iteration medians with [`median_fast`] — and is
-    /// reordered in place.
-    ///
-    /// `deviations` is borrowed scratch, overwritten in full; only its length matters. Sizing it
-    /// is [`DeviationScratch`]'s job, so a heap caller can reuse one `Vec` across calls and a
-    /// stamp-sized caller can keep its scratch on the stack, without this having to know which.
-    pub(crate) fn sigma_clipped(
-        values: &mut [f32],
-        deviations: &mut impl DeviationScratch,
-        kappa: f32,
-        iterations: usize,
-    ) -> Self {
-        if values.is_empty() {
-            return ClippedStats::ZERO;
-        }
-
-        sigma_clipped_core(values, deviations.sized_to(values.len()), kappa, iterations)
-    }
-}
-
-/// Result of a single sigma-clipping iteration.
-#[derive(Debug)]
-enum ClipResult {
-    /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
-    Converged(MedianMad),
-    /// Values were clipped; continue iterating.
-    Clipped,
-    /// Too few values remain (< 3) to compute meaningful statistics.
-    TooFew,
-}
-
-/// Core sigma-clipping iteration logic shared between Vec and `ArrayVec` versions.
-#[inline]
-fn sigma_clip_iteration(
-    values: &mut [f32],
-    len: &mut usize,
-    deviations: &mut [f32],
-    kappa: f32,
-) -> ClipResult {
-    if *len < 3 {
-        return ClipResult::TooFew;
-    }
-
-    let active = &mut values[..*len];
-
-    // Compute approximate median (fast — partial_cmp, single partition)
-    let median = median_fast(active);
-
-    deviations[..*len].copy_from_slice(active);
-    abs_deviation_inplace(&mut deviations[..*len], median);
-
-    let mad = median_fast(&mut deviations[..*len]);
-    let sigma = mad_to_sigma(mad);
-
-    if sigma <= Spread::resolution(median) {
-        return ClipResult::Converged(MedianMad { median, mad: 0.0 });
-    }
-
-    // Clip values outside threshold, computing deviations on-the-fly.
-    // (The deviations buffer was scrambled by median_fast above,
-    // so we recompute each deviation inline instead of a separate pass.)
-    let threshold = kappa * sigma;
-    let mut write_idx = 0;
-    for i in 0..*len {
-        if (values[i] - median).abs() <= threshold {
-            values[write_idx] = values[i];
-            write_idx += 1;
-        }
-    }
-
-    if write_idx == *len {
-        // Converged - no values clipped
-        return ClipResult::Converged(MedianMad { median, mad });
-    }
-
-    *len = write_idx;
-    ClipResult::Clipped
-}
-
-/// Compute final statistics from remaining values.
-#[inline]
-fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianMad {
-    if values.is_empty() {
-        return MedianMad {
-            median: 0.0,
-            mad: 0.0,
-        };
-    }
-
-    let median = median_mut(values);
-    deviations[..values.len()].copy_from_slice(values);
-    abs_deviation_inplace(&mut deviations[..values.len()], median);
-    let mad = median_mut(&mut deviations[..values.len()]);
-
-    MedianMad { median, mad }
-}
-
-/// Iteratively clip `values`, then measure what survived.
-///
-/// `deviations` must already be `values.len()` long — [`ClippedStats::sigma_clipped`] sizes it
-/// through [`DeviationScratch`], and everything after the sizing lives here.
-fn sigma_clipped_core(
-    values: &mut [f32],
-    deviations: &mut [f32],
-    kappa: f32,
-    iterations: usize,
-) -> ClippedStats {
-    let mut len = values.len();
-
-    let mut converged = None;
-    for _ in 0..iterations {
-        match sigma_clip_iteration(values, &mut len, deviations, kappa) {
-            ClipResult::Converged(location) => {
-                converged = Some(location);
-                break;
-            }
-            ClipResult::TooFew => break,
-            ClipResult::Clipped => {}
-        }
-    }
-
-    // Every exit path leaves the survivors in `values[..len]` (len ≥ 1: at entry values is
-    // non-empty and a clip pass always keeps at least the values at the median).
-    let location = converged
-        .unwrap_or_else(|| compute_final_stats(&mut values[..len], &mut deviations[..len]));
-    ClippedStats::from_median_mad(location, mean_f32(&values[..len]))
-}
-
-/// Compute sigma-clipped median and MAD-based sigma.
 #[cfg(test)]
 mod tests;
 

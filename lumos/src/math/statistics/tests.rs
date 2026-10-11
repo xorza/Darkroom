@@ -3,6 +3,8 @@
 use std::f64::consts::{PI, SQRT_2};
 
 use crate::internals::prelude::*;
+use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::*;
 
 #[derive(Debug)]
@@ -623,7 +625,7 @@ fn sigma_clipped_stats_iterations_improve_result() {
     // MAD = 0.02 (devs: 41×0.02, 40×0.00, 10×0.28, 9×1.18, index 50 = 0.02).
     // sigma = 0.02 * 1.4826 = 0.0297.
     //
-    // 0 iterations (no clipping): compute_final_stats on 100 values.
+    // 0 iterations (no clipping): survivors_location on 100 values.
     //   median_mut(100): avg(values[50], max(values[0..50])) = avg(0.32, 0.32) = 0.32.
     //
     // 3 iterations (with clipping):

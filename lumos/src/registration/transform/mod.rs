@@ -315,7 +315,7 @@ impl Transform {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn apply(&self, p: DVec2) -> DVec2 {
+    pub const fn apply(&self, p: DVec2) -> DVec2 {
         self.matrix.transform_point(p)
     }
 

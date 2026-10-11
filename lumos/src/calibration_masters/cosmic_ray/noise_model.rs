@@ -6,8 +6,6 @@ use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::image::flat_gain::FlatGain;
 use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::sample_domain::ScaleOrigin;
-use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::statistics::spread::Spread;
 use crate::math::vec2us::Vec2us;
 
@@ -24,11 +22,11 @@ impl NoiseModel {
         metadata: &ImageMetadata,
     ) -> Result<Self, CosmicRayError> {
         let electrons_per_unit = match *estimation {
-            NoiseEstimation::Measured => CcdNoise::electrons_per_unit(metadata),
+            NoiseEstimation::Measured => metadata.electrons_per_unit(),
             NoiseEstimation::Gain { electrons_per_adu } => {
-                let adu_per_unit = match &metadata.domain {
-                    Some(domain) if domain.origin == ScaleOrigin::Declared => domain.scale as f32,
-                    _ => {
+                let adu_per_unit = match metadata.adu_per_unit() {
+                    Some(adu_per_unit) => adu_per_unit as f32,
+                    None => {
                         QUANTIZATION_SIGMA_PER_STEP
                             / metadata
                                 .quantization_sigma
@@ -93,7 +91,7 @@ mod tests {
     use super::*;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::io::image::cfa::CfaType;
-    use crate::io::image::sample_domain::{Pedestal, SampleDomain};
+    use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::math::size2us::Size2us;
 
     /// With a gain the source term is `(signal − sky)·g/electrons`: σ 0.5, sky 1, 4 electrons per

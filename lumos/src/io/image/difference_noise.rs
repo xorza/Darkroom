@@ -6,7 +6,8 @@ use arrayvec::ArrayVec;
 
 use crate::io::image::cfa::CfaType;
 use crate::io::image::flat_gain::FlatGain;
-use crate::math::noise::background_split::{BackgroundSplit, BinnedSamples};
+use crate::math::noise::background_split::BackgroundSplit;
+use crate::math::noise::binned_samples::BinnedSamples;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 use crate::math::statistics::{mad_to_sigma, median_mut};
@@ -157,4 +158,38 @@ fn sigma(differences: &mut [f32]) -> f32 {
         *value = (*value - centre).abs();
     }
     mad_to_sigma(median_mut(differences)) / SQRT_2
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::internals::prelude::*;
+    use crate::io::image::cfa::CfaType;
+    use crate::io::image::cfa::cfa_pattern::CfaPattern;
+    use crate::io::image::difference_noise::DifferenceNoise;
+
+    /// Each colour of a Bayer mosaic reads its own noise, through a gradient the differences
+    /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: red and blue keep 32 768 pairs
+    /// each, green 65 536. MAD's standard error is 1.166·σ/√n, so 3 of them is 1.9% of σ for red
+    /// and blue and 1.4% for green; 2% of σ covers all three.
+    #[test]
+    fn each_bayer_colour_reads_its_own_noise() {
+        let size = Size2us::new(512, 512);
+        let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+        let sigmas = [0.01f32, 0.02, 0.03];
+        let mut rng = TestRng::new(9);
+        let mosaic: Vec<f32> = (0..size.pixel_count())
+            .map(|index| {
+                let (x, y) = (index % 512, index / 512);
+                let colour = cfa_type.color_at(Vec2us::new(x, y));
+                0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
+            })
+            .collect();
+        let estimates = DifferenceNoise::estimate(&mosaic, size, &cfa_type, |_| false);
+        for (colour, (&estimate, &sigma)) in estimates.iter().zip(&sigmas).enumerate() {
+            assert!(
+                (estimate - sigma).abs() < 0.02 * sigma,
+                "colour {colour}: {estimate}"
+            );
+        }
+    }
 }

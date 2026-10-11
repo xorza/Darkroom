@@ -64,7 +64,8 @@ use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{MedianMad, mad_to_sigma};
+use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics::median_mad::MedianMad;
 use common::CancelToken;
 use imaginarium::Buffer2;
 

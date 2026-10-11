@@ -1,7 +1,5 @@
 //! [`CcdNoise`]: the CCD equation for one frame's channel or colour.
 
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::sample_domain::ScaleOrigin;
 use crate::math::noise::background_split::BackgroundSplit;
 
 /// The noise variance of a sample at value `x` where a flat multiplied it by `g`, in the frame's
@@ -25,28 +23,16 @@ pub(crate) struct CcdNoise {
 
 impl CcdNoise {
     /// The variance of the background where a flat multiplied the sample by `gain`.
-    pub(crate) fn background_at(self, gain: f32) -> f32 {
+    pub(crate) const fn background_at(self, gain: f32) -> f32 {
         self.background
             .at(gain)
             .max(self.quantization_variance * gain * gain)
-    }
-
-    /// Electrons per unit of an image's samples: the camera's electrons per ADU times the ADU one
-    /// unit is worth. Only a declared scale says what one unit is worth; an assumed one is a guess
-    /// the gain cannot be applied through.
-    pub(crate) fn electrons_per_unit(metadata: &ImageMetadata) -> Option<f32> {
-        let egain = metadata
-            .egain
-            .filter(|egain| egain.is_finite() && *egain > 0.0)?;
-        let domain = metadata.domain.as_ref()?;
-        (domain.origin == ScaleOrigin::Declared).then_some((egain * domain.scale) as f32)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::image::sample_domain::{Pedestal, SampleDomain};
 
     /// The background where a flat multiplied the sample by `g`. Background 1/4 at gain 1, half of
     /// it read noise, all dyadic so exact:
@@ -86,34 +72,5 @@ mod tests {
             ..no_gain
         };
         assert_eq!(silent.background_at(2.0), 0.25);
-    }
-
-    /// 1.5 e⁻/ADU over a declared scale of 65535 ADU per unit is 98302.5 electrons per unit. An
-    /// assumed scale, a missing domain or a non-positive gain give none.
-    #[test]
-    fn electrons_per_unit_needs_a_gain_and_a_declared_scale() {
-        let domain = |origin| SampleDomain {
-            scale: 65_535.0,
-            origin,
-            pedestal: Pedestal::Removed,
-            unit: None,
-        };
-        let metadata = |egain, domain| ImageMetadata {
-            egain,
-            domain,
-            ..Default::default()
-        };
-        assert_eq!(
-            CcdNoise::electrons_per_unit(&metadata(Some(1.5), Some(domain(ScaleOrigin::Declared)))),
-            Some(98_302.5)
-        );
-        for (egain, domain) in [
-            (Some(1.5), Some(domain(ScaleOrigin::Assumed))),
-            (Some(1.5), None),
-            (Some(0.0), Some(domain(ScaleOrigin::Declared))),
-            (None, Some(domain(ScaleOrigin::Declared))),
-        ] {
-            assert_eq!(CcdNoise::electrons_per_unit(&metadata(egain, domain)), None);
-        }
     }
 }

@@ -1,4 +1,5 @@
-use crate::math::noise::background_split::{BackgroundSplit, BinnedSamples, GainBin, GainBins};
+use crate::math::noise::background_split::BackgroundSplit;
+use crate::math::noise::binned_samples::GainBin;
 
 fn bins(points: &[(f64, f64)]) -> Vec<GainBin> {
     points
@@ -53,62 +54,4 @@ fn a_negative_term_falls_back_to_the_better_one_term_fit() {
         }
     );
     assert_eq!(BackgroundSplit::fit(&[]), BackgroundSplit::unflattened(0.0));
-}
-
-/// Sixteen gains 1 to 16 cut into eight bins of two: the bounds are the gains at ranks 2, 4, …, 14,
-/// so 3, 5, …, 15, and a gain falls in the bin whose bound it has not reached.
-#[test]
-fn gain_bins_hold_equal_counts() {
-    let mut gains: Vec<f32> = (1..=16).rev().map(|gain| gain as f32).collect();
-    let bins = GainBins::of(&mut gains);
-    for (gain, bin) in [
-        (1.0, 0),
-        (2.0, 0),
-        (3.0, 1),
-        (14.0, 6),
-        (15.0, 7),
-        (16.0, 7),
-    ] {
-        assert_eq!(bins.bin(gain), bin, "gain {gain}");
-    }
-}
-
-/// Bins under 256 samples merge with their neighbours up in gain: over bounds 3, 5, …, 15, 300
-/// samples at gain 1 fill bin 0 alone; 100 each at gains 3, 5 and 7 fill bins 1 to 3 only together,
-/// 300; and the 50 at gain 15 in bin 7, short at the end, join that run, 350 samples of mean gain
-/// (300 + 500 + 700 + 750)/350 = 2250/350. Each sample is its own gain and they are pushed
-/// interleaved, so a run that sums to its gains holds its own samples and no other: 300 × 1 and
-/// 100 × (3 + 5 + 7) + 50 × 15 = 2250. A hundred samples in all are one run.
-#[test]
-fn short_bins_merge_up_in_gain() {
-    let mut gains: Vec<f32> = (1..=16).map(|gain| gain as f32).collect();
-    let bins = GainBins::of(&mut gains);
-    let mut binned = BinnedSamples::with_capacity(650);
-    let mut left = [
-        (1.0f32, 300),
-        (3.0, 100),
-        (5.0, 100),
-        (7.0, 100),
-        (15.0, 50),
-    ];
-    while left.iter().any(|&(_, count)| count > 0) {
-        for (gain, count) in left.iter_mut().rev().filter(|(_, count)| *count > 0) {
-            binned.push(&bins, *gain, *gain);
-            *count -= 1;
-        }
-    }
-    let measured = binned.measure(|samples| samples.iter().map(|&gain| f64::from(gain)).sum());
-    let runs: Vec<(usize, f64, f64)> = measured
-        .iter()
-        .map(|bin| (bin.samples, bin.gain, bin.variance))
-        .collect();
-    assert_eq!(runs, [(300, 1.0, 300.0), (350, 2250.0 / 350.0, 2250.0)]);
-
-    let mut few = BinnedSamples::with_capacity(100);
-    for _ in 0..100 {
-        few.push(&bins, 1.0, 1.0f32);
-    }
-    let measured = few.measure(|samples| samples.len() as f64);
-    assert_eq!(measured.len(), 1);
-    assert_eq!(measured[0].samples, 100);
 }

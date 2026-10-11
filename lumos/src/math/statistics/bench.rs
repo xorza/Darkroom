@@ -2,7 +2,9 @@
 
 use ::quickbench::quick_bench;
 use std::hint::black_box;
+use std::iter;
 
+use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::statistics::*;
 
 const BENCH_SIZE: usize = 1024;

@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::cfa::CfaType;
-use crate::math::noise::background_split::GainBins;
+use crate::math::noise::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 

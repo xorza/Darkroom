@@ -29,7 +29,8 @@ use crate::io::image::image_provenance::{
 use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::math::statistics::{MedianMad, mad_to_sigma};
+use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::registration::registration_config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::transform::{Transform, WarpTransform};

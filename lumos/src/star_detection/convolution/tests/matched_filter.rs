@@ -11,7 +11,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::internals::visual::{ToneMap, save};
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;

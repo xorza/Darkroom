@@ -37,7 +37,7 @@ use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::io::cancelled::Cancelled;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 

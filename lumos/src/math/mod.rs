@@ -9,6 +9,7 @@
 //! - [`lanczos`]: The windowed-sinc resampling kernel
 //! - [`fwhm`]: FWHM/sigma conversion for Gaussian profiles
 //! - [`error_function`]: `erf` and `erfc`, after fdlibm
+//! - [`floor_i32`]: `floor` to an `i32` without the library call
 //! - [`linear_system`]: Dense `A·x = b` by Gaussian elimination with partial pivoting
 //! - [`lm_controller`]: Levenberg–Marquardt for small dense least-squares problems
 //! - [`lstsq`]: Linear least squares by the SVD, with one rank rule

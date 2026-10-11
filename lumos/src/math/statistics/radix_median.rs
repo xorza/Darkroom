@@ -93,7 +93,7 @@ impl<'a> HighPass<'a> {
         );
         let even = len % 2 == 0;
         let lower_rank = if even { len / 2 - 1 } else { len / 2 };
-        let (lower, below) = bin_of(counts, lower_rank);
+        let Rank { bin: lower, below } = Rank::of(counts, lower_rank);
         let in_bin = counts[lower as usize] as usize;
         let middle = if !even || lower_rank + 1 < below + in_bin {
             counts.fill(0);
@@ -159,7 +159,7 @@ impl LowPass<'_> {
                     len,
                     "the second pass saw other values than the first"
                 );
-                let (low, below) = bin_of(self.counts, rank as usize);
+                let Rank { bin: low, below } = Rank::of(self.counts, rank as usize);
                 let lower = high << 16 | low;
                 if !even {
                     return value(lower);
@@ -191,17 +191,29 @@ impl LowPass<'_> {
     }
 }
 
-/// The bin that holds the value of `rank`, and the count of values in the bins below it.
-fn bin_of(counts: &[u32], rank: usize) -> (u32, usize) {
-    let mut below = 0;
-    for (bin, &count) in counts.iter().enumerate() {
-        let count = count as usize;
-        if rank < below + count {
-            return (bin as u32, below);
+/// Where a rank falls in a histogram: the bin that holds it, and the count of values in the bins
+/// below that one.
+#[derive(Debug, Clone, Copy)]
+struct Rank {
+    bin: u32,
+    below: usize,
+}
+
+impl Rank {
+    fn of(counts: &[u32], rank: usize) -> Self {
+        let mut below = 0;
+        for (bin, &count) in counts.iter().enumerate() {
+            let count = count as usize;
+            if rank < below + count {
+                return Self {
+                    bin: bin as u32,
+                    below,
+                };
+            }
+            below += count;
         }
-        below += count;
+        unreachable!("rank {rank} lies past the {below} values counted")
     }
-    unreachable!("rank {rank} lies past the {below} values counted")
 }
 
 /// The value's bits mapped so unsigned order is [`f32::total_cmp`]'s: a negative value's bits all
