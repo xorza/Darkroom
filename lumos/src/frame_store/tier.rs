@@ -31,17 +31,25 @@ pub(crate) enum Tier {
 
 impl Tier {
     /// Resident when `plan` fits the run in RAM; spilled to a scratch under `cache_dir` otherwise,
-    /// its chunks sized against `memory`'s planning figure.
+    /// its chunks sized against `memory`'s planning figure, when the disk there holds the
+    /// `spill_bytes` the run will write.
+    ///
+    /// # Errors
+    ///
+    /// The scratch cannot be made, or [`FrameStoreError::InsufficientSpace`].
     pub(crate) fn for_plan(
         plan: &MemoryPlan,
+        spill_bytes: u64,
         memory: RunMemory,
         cache_dir: &Path,
     ) -> Result<Self, FrameStoreError> {
         if plan.fits_in_ram {
             return Ok(Self::Resident);
         }
+        let scratch = RunScratch::create(cache_dir)?;
+        scratch.ensure_space(spill_bytes)?;
         Ok(Self::Spilled {
-            scratch: RunScratch::create(cache_dir)?,
+            scratch,
             chunk_memory: memory.planning(),
         })
     }

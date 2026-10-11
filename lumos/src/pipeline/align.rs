@@ -19,7 +19,6 @@ use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::DetectionResult;
 use crate::star_detection::detector::Diagnostics;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
@@ -80,21 +79,6 @@ pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
         preparation: Preparation::Linear,
     }
     .stack(config, &run, progress, cancel)
-}
-
-/// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
-/// the frame resolved into usable stars. Shared so both front ends report the same numbers.
-pub(crate) fn log_detection(frame: usize, total: usize, result: &DetectionResult) {
-    let diagnostics = &result.diagnostics;
-    tracing::info!(
-        frame,
-        total,
-        candidates = diagnostics.candidates_after_filtering,
-        deblended = diagnostics.deblended_components,
-        measured = diagnostics.stars_after_centroid,
-        stars = result.stars.len(),
-        "detected stars"
-    );
 }
 
 /// Register every frame to the chosen reference, warp it, and combine the survivors.

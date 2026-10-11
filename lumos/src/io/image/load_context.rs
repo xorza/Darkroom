@@ -8,6 +8,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::memory;
+use crate::platform::SystemMemory;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
 #[derive(Debug, Clone)]
@@ -68,7 +69,7 @@ impl Default for LoadContext {
     fn default() -> Self {
         Self::new(
             CancelToken::never(),
-            memory::memory_budget(memory::available_memory()),
+            memory::memory_budget(SystemMemory::available()),
         )
     }
 }

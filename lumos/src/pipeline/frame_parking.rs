@@ -25,9 +25,19 @@ pub(crate) struct StagePlan {
 }
 
 impl StagePlan {
-    pub(crate) fn new(plan: &MemoryPlan, run: &IngestRun) -> Result<Self, AlignStackError> {
+    /// The stage of a run `plan` decided, whose spill writes `spill_bytes` when it spills.
+    pub(crate) fn new(
+        plan: &MemoryPlan,
+        spill_bytes: u64,
+        run: &IngestRun,
+    ) -> Result<Self, AlignStackError> {
         Ok(Self {
-            parking: FrameParking::new(Tier::for_plan(plan, run.memory, &run.cache_dir)?),
+            parking: FrameParking::new(Tier::for_plan(
+                plan,
+                spill_bytes,
+                run.memory,
+                &run.cache_dir,
+            )?),
             warp_concurrency: plan.warp_concurrency,
         })
     }

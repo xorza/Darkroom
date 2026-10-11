@@ -698,6 +698,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
                     decode_concurrency: 1,
                     warp_concurrency: 1,
                 },
+                0,
                 RunMemory::new(1 << 30, Some(123_456)),
                 temp_dir.path(),
             )

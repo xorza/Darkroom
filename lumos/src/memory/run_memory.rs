@@ -1,6 +1,7 @@
 //! [`RunMemory`]: the memory figure one run sizes against, read once at its entry.
 
 use crate::memory;
+use crate::platform::SystemMemory;
 
 /// The memory one run sizes against: one system reading, taken at the run's entry and passed to
 /// every stage, so the tier decision, every chunk size and the decode ceiling cannot disagree.
@@ -18,7 +19,7 @@ impl RunMemory {
     /// Read the system once; `memory_override` is
     /// [`IngestConfig::memory_override`](crate::IngestConfig::memory_override).
     pub(crate) fn read(memory_override: Option<u64>) -> Self {
-        Self::new(memory::available_memory(), memory_override)
+        Self::new(SystemMemory::available(), memory_override)
     }
 
     pub(crate) const fn new(system: u64, memory_override: Option<u64>) -> Self {

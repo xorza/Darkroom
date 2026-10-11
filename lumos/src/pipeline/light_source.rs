@@ -21,7 +21,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::memory::{DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES};
-use crate::pipeline::align::{log_detection, register_warp_and_stack};
+use crate::pipeline::align::register_warp_and_stack;
 use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
@@ -35,7 +35,7 @@ use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::{Diagnostics, StarDetector};
+use crate::star_detection::detector::{DetectionResult, Diagnostics, StarDetector};
 use crate::star_detection::star::Star;
 
 /// Where a registered stack's lights come from.
@@ -163,7 +163,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             rayon::current_num_threads(),
             run.memory.planning(),
         );
-        let stage = StagePlan::new(&plan, run)?;
+        let stage = StagePlan::new(&plan, shape.run.spill_bytes(), run)?;
         tracing::info!(
             frames = total,
             planning_mb = run.memory.planning() / (1024 * 1024),
@@ -381,7 +381,7 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
         let StagePlan {
             parking,
             warp_concurrency: workers,
-        } = StagePlan::new(&plan, run)?;
+        } = StagePlan::new(&plan, shape.run.spill_bytes(), run)?;
         tracing::info!(
             frames = total,
             reference,
@@ -523,6 +523,21 @@ impl<P: AsRef<Path> + Sync> LightFiles<'_, P> {
         cfa.demosaic(context.xtrans_passes, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
+}
+
+/// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
+/// the frame resolved into usable stars.
+fn log_detection(frame: usize, total: usize, result: &DetectionResult) {
+    let diagnostics = &result.diagnostics;
+    tracing::info!(
+        frame,
+        total,
+        candidates = diagnostics.candidates_after_filtering,
+        deblended = diagnostics.deblended_components,
+        measured = diagnostics.stars_after_centroid,
+        stars = result.stars.len(),
+        "detected stars"
+    );
 }
 
 /// A linear light as it decodes.
