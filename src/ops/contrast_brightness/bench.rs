@@ -29,7 +29,7 @@ const OP: ContrastBrightness = ContrastBrightness {
 #[cfg(feature = "wgpu")]
 const GPU_ITERATION: Duration = Duration::from_millis(320);
 
-/// `atomic/contrast_brightness/<variant>/<format>`: one row of the standard frame in place,
+/// `atomic/contrast_brightness/cpu/<variant>/<format>`: one row of the standard frame in place,
 /// through the scalar reference and each tier's kernel, on a fresh copy each iteration. Per
 /// pixel, reading the row.
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -40,7 +40,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let bytes = WIDTH * format.byte_count();
         group.throughput(fixture::throughput(WIDTH, format.byte_count()));
         for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
-            let id = BenchmarkId::new(variant.name, fixture::format_id(format));
+            let id = BenchmarkId::new(Backend::Cpu.case(variant.name), fixture::format_id(format));
             group.bench_function(id, |b| {
                 let row = source.get_or_insert_with(|| scene::sky(format, WIDTH, 1, 1));
                 if let Some(kernel) = variant.kernel {

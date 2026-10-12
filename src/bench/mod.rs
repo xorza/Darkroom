@@ -7,11 +7,13 @@
 //! frame, on each backend it has, as a caller pays: an allocation the API makes, and on the GPU
 //! the upload and the readback.
 //!
-//! A case's id is `<kind>/<group>/<case>`, with the same depth across a group; the group is the
-//! operation, named the same at both kinds, and the case its variant (a tier, a backend), then its
-//! input. Each case states its throughput in pixels and in the pixel bytes it reads. A case builds
-//! its input in its own closure, from the scene's fixed seeds, so a filtered run builds only what
-//! it times.
+//! A case's id is `<kind>/<group>/<backend>/<rest…>`, with the same depth across a group: the
+//! group is the operation, named the same at both kinds, and the backend, `cpu` or `gpu`, comes
+//! first in every case, so `'/cpu/'` selects every case that opens no device and `'/gpu/'` every
+//! case that does. The rest is the variant (a tier) where a group has several, then the input.
+//! Each case states its throughput in pixels and in the pixel bytes it reads. A case builds its
+//! input in its own closure, from the scene's fixed seeds, so a filtered run builds only what it
+//! times.
 
 pub(crate) mod fixture;
 pub(crate) mod scene;
@@ -23,7 +25,7 @@ use crate::image;
 use crate::image::conversion;
 use crate::ops::{blend, contrast_brightness, preview, transform};
 
-/// Every case, atomic first. The GPU, when this build has `wgpu`, is probed once here.
+/// Every case, atomic first. The host's adapters are listed once here; no device opens.
 pub fn run(c: &mut Criterion) {
     let backends = Backends::probe();
 

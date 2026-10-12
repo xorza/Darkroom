@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion};
 
-use crate::bench::fixture::{self, Kind, Scale, ScratchDir};
+use crate::bench::fixture::{self, Backend, Kind, Scale, ScratchDir};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
 use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 use crate::common::error::Error;
 use crate::image::Image;
 use crate::image::file_format::FileFormat;
 
-/// `integration/read_file/<file>/<format>` and `integration/save_file/<file>/<format>`:
+/// `integration/read_file/cpu/<file>/<format>` and `integration/save_file/cpu/<file>/<format>`:
 /// `Image::read_file` and `Image::save_file` on the standard frame, in every format the file
 /// stores. The file stays in the page cache, so a read times the decode, not the disk. Per pixel,
 /// in the frame's uncompressed bytes.
@@ -28,7 +28,10 @@ pub(crate) fn integration(c: &mut Criterion) {
         let path = dir.file(&format!("save.{}", extension(file)));
         let mut source = None;
         group.bench_function(
-            BenchmarkId::new(extension(file), fixture::format_id(format)),
+            BenchmarkId::new(
+                Backend::Cpu.case(extension(file)),
+                fixture::format_id(format),
+            ),
             |b| {
                 let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
                 b.iter(|| black_box(&*frame).save_file(&path).unwrap());
@@ -43,7 +46,10 @@ pub(crate) fn integration(c: &mut Criterion) {
         group.throughput(fixture::throughput(pixels, format.byte_count()));
         let mut path = None;
         group.bench_function(
-            BenchmarkId::new(extension(file), fixture::format_id(format)),
+            BenchmarkId::new(
+                Backend::Cpu.case(extension(file)),
+                fixture::format_id(format),
+            ),
             |b| {
                 let path = path.get_or_insert_with(|| {
                     let name = format!("read_{}.{}", fixture::format_id(format), extension(file));

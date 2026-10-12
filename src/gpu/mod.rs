@@ -22,10 +22,7 @@ impl Gpu {
     /// (24 MP of `RGBA_F32` is 384 MB) needs every byte of buffer the adapter allows,
     /// and asking for more than it has would fail the device outright.
     pub fn new() -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all().with_env(),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        let instance = Self::instance();
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -61,12 +58,34 @@ impl Gpu {
             .expect("polling the device");
     }
 
+    /// The instance every device opens through: every backend, narrowed by the environment.
+    fn instance() -> wgpu::Instance {
+        wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all().with_env(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        })
+    }
+
     /// The largest buffer this device binds as storage — the largest image it can process.
     pub(crate) fn max_buffer_bytes(&self) -> u64 {
         let limits = self.device.limits();
         limits
             .max_buffer_size
             .min(limits.max_storage_buffer_binding_size)
+    }
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::gpu::Gpu;
+
+    impl Gpu {
+        /// Whether the host has an adapter [`Gpu::new`] could open, found by listing them
+        /// without opening a device.
+        pub(crate) fn adapter_exists() -> bool {
+            let adapters = Self::instance().enumerate_adapters(wgpu::Backends::all());
+            !pollster::block_on(adapters).is_empty()
+        }
     }
 }
 

@@ -27,7 +27,7 @@ const ALPHA: f32 = 0.5;
 #[cfg(feature = "wgpu")]
 const GPU_ITERATION: Duration = Duration::from_millis(470);
 
-/// `atomic/blend/<variant>/<mode>/<format>`: one row pair of the standard frame in every mode,
+/// `atomic/blend/cpu/<variant>/<mode>/<format>`: one row pair of the standard frame in every mode,
 /// through the scalar reference and each tier's kernel. Per pixel, reading both rows.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Sample);
@@ -43,22 +43,36 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     fixture::variant_id(mode),
                     fixture::format_id(format)
                 );
-                group.bench_function(BenchmarkId::new(variant.name, input), |b| {
-                    let [src, dst] = layers.get_or_insert_with(|| {
-                        [1, 2].map(|seed| scene::sky(format, WIDTH, 1, seed))
-                    });
-                    let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
-                    if let Some(kernel) = variant.kernel {
-                        // SAFETY: a variant holds only kernels of tiers this CPU has.
-                        b.iter(|| unsafe {
-                            kernel(black_box(src), black_box(dst), black_box(&mut *out), params);
+                group.bench_function(
+                    BenchmarkId::new(Backend::Cpu.case(variant.name), input),
+                    |b| {
+                        let [src, dst] = layers.get_or_insert_with(|| {
+                            [1, 2].map(|seed| scene::sky(format, WIDTH, 1, seed))
                         });
-                    } else {
-                        b.iter(|| {
-                            cpu::scalar_row(params, format, black_box(src), black_box(dst), out);
-                        });
-                    }
-                });
+                        let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
+                        if let Some(kernel) = variant.kernel {
+                            // SAFETY: a variant holds only kernels of tiers this CPU has.
+                            b.iter(|| unsafe {
+                                kernel(
+                                    black_box(src),
+                                    black_box(dst),
+                                    black_box(&mut *out),
+                                    params,
+                                );
+                            });
+                        } else {
+                            b.iter(|| {
+                                cpu::scalar_row(
+                                    params,
+                                    format,
+                                    black_box(src),
+                                    black_box(dst),
+                                    out,
+                                );
+                            });
+                        }
+                    },
+                );
             }
         }
     }
