@@ -5,14 +5,14 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion};
 
-use crate::bench::fixture::{self, Kind, Scale, Variant};
+use crate::bench::fixture::{self, Backend, Kind, Scale, Variant};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
 use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 use crate::image::Image;
 use crate::image::conversion::{scalar, simd};
 use crate::image::image_desc::ImageDesc;
 
-/// `atomic/convert/<variant>/<from>/<to>`: one row of the standard frame through the scalar
+/// `atomic/convert/cpu/<variant>/<from>/<to>`: one row of the standard frame through the scalar
 /// reference and each tier's kernel. Per pixel, reading the source row.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "convert", Scale::Sample);
@@ -22,7 +22,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let mut row = Image::new_black(ImageDesc::new(WIDTH, 1, to)).unwrap();
             group.throughput(fixture::throughput(WIDTH, from.byte_count()));
             for variant in Variant::all(|tier| simd::tier_converter(tier, from, to)) {
-                let id = BenchmarkId::new(variant.name, pair_id(from, to));
+                let id = BenchmarkId::new(Backend::Cpu.case(variant.name), pair_id(from, to));
                 group.bench_function(id, |b| {
                     let src = source
                         .get_or_insert_with(|| scene::sky(from, WIDTH, 1, 1))
@@ -50,10 +50,13 @@ pub(crate) fn integration(c: &mut Criterion) {
         let mut source = None;
         for to in pairs_from(from) {
             group.throughput(fixture::throughput(WIDTH * HEIGHT, from.byte_count()));
-            group.bench_function(BenchmarkId::new("cpu", pair_id(from, to)), |b| {
-                let source = source.get_or_insert_with(|| scene::sky(from, WIDTH, HEIGHT, 1));
-                b.iter_with_large_drop(|| black_box(&*source).convert_to(to));
-            });
+            group.bench_function(
+                BenchmarkId::new(Backend::Cpu.id(), pair_id(from, to)),
+                |b| {
+                    let source = source.get_or_insert_with(|| scene::sky(from, WIDTH, HEIGHT, 1));
+                    b.iter_with_large_drop(|| black_box(&*source).convert_to(to));
+                },
+            );
         }
     }
     group.finish();

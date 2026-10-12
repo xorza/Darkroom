@@ -11,6 +11,9 @@ use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode, Throughput};
 
 use crate::common::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
+use std::cell::OnceCell;
+
+#[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
 use crate::simd_tier::SimdTier;
 
@@ -65,6 +68,10 @@ impl Scale {
     const SET_ITERATIONS: u32 = 2;
 
     /// Sets the sampling of the cases `group` registers from here on.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "`Scale::apply` is the one place a group's sampling is set"
+    )]
     pub(crate) fn apply(self, group: &mut BenchmarkGroup<'_, WallTime>) {
         match self {
             Self::Sample => group
@@ -159,15 +166,16 @@ const fn tier_id(tier: SimdTier) -> &'static str {
     }
 }
 
-/// The backends an integration case runs on: the CPU always, the GPU when this build has `wgpu`
-/// and the host an adapter.
+/// The backends a case may run on: the CPU always, the GPU when this build has `wgpu` and the
+/// host an adapter. The device opens in the first GPU case a run selects.
 #[derive(Debug)]
 pub(crate) struct Backends {
+    /// `None` on a host with no adapter; else the device, opened by the first case that asks.
     #[cfg(feature = "wgpu")]
-    gpu: Option<Gpu>,
+    gpu: Option<OnceCell<Gpu>>,
 }
 
-/// One backend an integration case runs on, the variant part of its id.
+/// One backend a case runs on, the first part of its case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Backend {
     Cpu,
@@ -176,8 +184,9 @@ pub(crate) enum Backend {
 }
 
 impl Backends {
-    /// The backends of this build and host. The GPU probe takes a second or two, and a host with
-    /// no adapter says so once on stderr, as its GPU cases are then missing from the run.
+    /// The backends of this build and host, by listing the adapters: no device opens, so a run
+    /// that filters to CPU cases opens none. A host with no adapter says so once on stderr, as
+    /// its GPU cases are then missing from the run.
     #[cfg_attr(
         feature = "wgpu",
         expect(
@@ -189,15 +198,18 @@ impl Backends {
         not(feature = "wgpu"),
         expect(
             clippy::missing_const_for_fn,
-            reason = "only the GPU probe runs code; the body is one shape in every build"
+            reason = "only the adapter listing runs code; the body is one shape in every build"
         )
     )]
     pub(crate) fn probe() -> Self {
         Self {
             #[cfg(feature = "wgpu")]
-            gpu: Gpu::new()
-                .inspect_err(|error| eprintln!("imaginarium benches: no GPU cases, {error}"))
-                .ok(),
+            gpu: if Gpu::adapter_exists() {
+                Some(OnceCell::new())
+            } else {
+                eprintln!("imaginarium benches: no GPU adapter, so no GPU cases");
+                None
+            },
         }
     }
 
@@ -210,23 +222,29 @@ impl Backends {
         vec![Backend::Cpu]
     }
 
-    /// The GPU, which [`Self::all`] lists only when there is one.
+    /// The GPU, opened by the first case that asks; [`Self::all`] lists it only with an adapter.
     #[cfg(feature = "wgpu")]
-    pub(crate) const fn gpu(&self) -> &Gpu {
+    pub(crate) fn gpu(&self) -> &Gpu {
         self.gpu
             .as_ref()
-            .expect("the GPU backend is listed only with a GPU")
+            .expect("the GPU backend is listed only with an adapter")
+            .get_or_init(|| Gpu::new().expect("the adapter the probe listed opens a device"))
     }
 }
 
 impl Backend {
-    /// The variant part of a case's id.
+    /// The backend's part of a case's id.
     pub(crate) const fn id(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
             #[cfg(feature = "wgpu")]
             Self::Gpu => "gpu",
         }
+    }
+
+    /// `rest` under this backend: `cpu/avx2`.
+    pub(crate) fn case(self, rest: &str) -> String {
+        format!("{}/{rest}", self.id())
     }
 }
 

@@ -51,9 +51,10 @@ the crate's own tests call is gated `#[cfg(test)]`. Never
 One target runs every case through `bench::run`; each driver sits in a
 `bench.rs` beside the code it measures, and `src/bench/mod.rs` states the
 rules. `cargo benches` runs them with fixed features (`wgpu`), so a case
-always measures the same build. An id is `<kind>/<group>/<case>`, the case the
-variant (a tier, a backend) then the input: an `atomic` case times one kernel
-on the unit dispatch hands it, for the scalar reference and each tier the CPU
-has; an `integration` case times a public entry point on the 24 MP standard
-frame, on each backend. A filter selects by id: `cargo benches -- --list`,
-`-- '^atomic/convert/'`, `-- --exact integration/preview/cpu/rgb_f32`.
+always measures the same build. An id is `<kind>/<group>/<backend>/<rest…>`:
+an `atomic` case times one kernel on the unit dispatch hands it, for the
+scalar reference and each tier the CPU has; an `integration` case times a
+public entry point on the 24 MP standard frame, on each backend. The backend
+comes first in every case, so `'/cpu/'` opens no device. A filter selects by
+id: `cargo benches -- --list`, `-- '^atomic/convert/'`,
+`-- --exact integration/preview/cpu/rgb_f32`.

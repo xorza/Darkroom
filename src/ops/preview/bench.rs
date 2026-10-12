@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture::{self, Backend, Kind, Scale};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
 use crate::common::color_format::ALL_FORMATS;
 use crate::ops::preview::Preview;
@@ -23,10 +23,13 @@ pub(crate) fn integration(c: &mut Criterion) {
         let pixels = WIDTH * HEIGHT;
         group.throughput(fixture::throughput(pixels, format.byte_count()));
         let mut source = None;
-        group.bench_function(BenchmarkId::new("cpu", fixture::format_id(format)), |b| {
-            let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
-            b.iter_with_large_drop(|| preview.to_rgba8(black_box(frame)));
-        });
+        group.bench_function(
+            BenchmarkId::new(Backend::Cpu.id(), fixture::format_id(format)),
+            |b| {
+                let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                b.iter_with_large_drop(|| preview.to_rgba8(black_box(frame)));
+            },
+        );
     }
     group.finish();
 }

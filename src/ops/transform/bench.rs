@@ -27,7 +27,7 @@ const GPU_ITERATION: Duration = Duration::from_millis(330);
 
 const FILTERS: [FilterMode; 2] = [FilterMode::Nearest, FilterMode::Bilinear];
 
-/// `atomic/transform/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
+/// `atomic/transform/cpu/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
 /// reference and each tier's kernel. The kernel takes the image and fans its rows out on rayon,
 /// as dispatch hands it. Per output pixel, reading the tile.
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -39,7 +39,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         for filter in FILTERS {
             let transform = rotation(TILE, TILE, filter);
             for variant in Variant::all(|tier| cpu::packed_kernel(tier, format, filter)) {
-                let id = BenchmarkId::new(variant.name, case_id(filter, format));
+                let id = BenchmarkId::new(Backend::Cpu.case(variant.name), case_id(filter, format));
                 group.bench_function(id, |b| {
                     let tile = tile.get_or_insert_with(|| scene::sky(format, TILE, TILE, 1));
                     if let Some(kernel) = variant.kernel {
