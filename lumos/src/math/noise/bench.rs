@@ -47,7 +47,7 @@ pub(crate) fn benches(c: &mut Criterion) {
                 binned
             },
             |binned| binned.measure(|run| run.iter().map(|&v| f64::from(v * v)).sum::<f64>()),
-            fixture::in_place(SAMPLES * (size_of::<f32>() + size_of::<u8>())),
+            fixture::fresh_copies(SAMPLES * (size_of::<f32>() + size_of::<u8>())),
         );
     });
     for side in SIDES {

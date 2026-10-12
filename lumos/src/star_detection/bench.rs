@@ -7,13 +7,13 @@ use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::config::Config;
 use crate::star_detection::detection_plane::DetectionPlane;
-use crate::star_detection::detector::stages::filter;
 use crate::star_detection::detector::stages::fwhm;
 use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
+use crate::star_detection::detector::stages::{detect, filter};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 use crate::star_detection::{
-    background, centroid, convolution, deblend, labeling, median_filter, threshold_mask,
+    background, centroid, convolution, labeling, median_filter, threshold_mask,
 };
 
 pub(crate) fn benches(c: &mut Criterion) {
@@ -23,7 +23,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     convolution::simd::bench::benches(c);
     convolution::bench::benches(c);
     labeling::bench::benches(c);
-    deblend::bench::benches(c);
+    detect::bench::benches(c);
     centroid::bench::benches(c);
     filter::bench::benches(c);
 }

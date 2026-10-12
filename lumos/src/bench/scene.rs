@@ -60,7 +60,7 @@ const VIGNETTE: Vignette = Vignette {
 };
 
 /// The lights of the light preset's typical stack.
-const STACKED_LIGHTS: usize = 30;
+pub(crate) const STACKED_LIGHTS: usize = 30;
 
 /// The exposure of a light and of the dark that matches it, in seconds.
 const EXPOSURE_S: f32 = 120.0;
@@ -102,7 +102,8 @@ impl Field {
         }
     }
 
-    const fn stars(self) -> usize {
+    /// The stars the field holds on the standard frame.
+    pub(crate) const fn stars(self) -> usize {
         match self {
             Field::Sparse => 300,
             Field::Typical => 3000,

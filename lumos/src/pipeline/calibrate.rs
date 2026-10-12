@@ -12,7 +12,7 @@ use crate::calibration_masters::temperature_source::TemperatureSource;
 use crate::ingest::ingest_run::IngestRun;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::light_source::{LightFiles, Preparation};
+use crate::pipeline::light_source::{LightFiles, MosaicPreparation, Preparation};
 use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::run_report::RunReport;
@@ -53,11 +53,11 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     let notes = CalibrationNotes::default();
     let mut result = LightFiles::new(
         light_paths,
-        Preparation::Calibrate {
+        Preparation::Calibrate(MosaicPreparation {
             masters,
             cosmic_ray: config.cosmic_ray.as_ref(),
             notes: &notes,
-        },
+        }),
         &run,
     )?
     .stack(config, &run, progress, cancel)?;

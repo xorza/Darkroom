@@ -33,7 +33,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || residual.clone(),
                 |values| matched_filter(values, filter, &mut temp, &mut kernels),
-                fixture::in_place(size_of_val(residual.pixels())),
+                fixture::fresh_copies(size_of_val(residual.pixels())),
             );
         });
     }

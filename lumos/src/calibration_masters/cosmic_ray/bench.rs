@@ -24,7 +24,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || mosaic.clone(),
                 |mosaic| reject_cosmic_rays(mosaic, &config).unwrap(),
-                fixture::in_place(size_of_val(mosaic.data.pixels())),
+                fixture::fresh_copies(size_of_val(mosaic.data.pixels())),
             );
         });
     }

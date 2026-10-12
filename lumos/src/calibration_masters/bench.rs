@@ -21,7 +21,6 @@ pub(crate) fn benches(c: &mut Criterion) {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let mut group = fixture::group(c, "kernel/calibration/apply/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    // Calibration changes the light in place, so each iteration takes a fresh copy of it.
     group.bench_function(BenchmarkId::new("light/rggb", field.name()), |b| {
         let masters = CalibrationMasters::from_images(
             scene::masters(FRAME, cfa_type),
@@ -33,7 +32,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter_batched_ref(
             || light.clone(),
             |light| masters.calibrate(light).unwrap(),
-            fixture::in_place(size_of_val(light.data.pixels())),
+            fixture::fresh_copies(size_of_val(light.data.pixels())),
         );
     });
 }

@@ -28,10 +28,10 @@ planes (coverage, weight, variance/noise) that let a downstream tool
 
 ## Verification
 
-Tests leave out `real-data`:
+Tests leave out `real-data`, and take `bench` for the tests of the benches' inputs:
 
 ```
-cargo test -p lumos --tests --features ml
+cargo test -p lumos --tests --features ml,bench
 ```
 
 Benches live in `bench.rs` files beside the code they measure, compiled only with the `bench`

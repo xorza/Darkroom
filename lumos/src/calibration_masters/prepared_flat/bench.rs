@@ -15,8 +15,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let mut group = fixture::group(c, "kernel/calibration/prepared_flat/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    // The flat with its bias taken out, as `CalibrationMasters::from_images` prepares it. The
-    // preparation consumes it, so each iteration takes a fresh copy.
+    // The flat with its bias taken out, as `CalibrationMasters::from_images` prepares it.
     group.bench_function(BenchmarkId::new("prepare/rggb", "masters"), |b| {
         let CalibrationSet { bias, flat, .. } = scene::masters(FRAME, cfa_type);
         let (bias, mut flat) = (bias.unwrap(), flat.unwrap());
@@ -24,7 +23,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter_batched(
             || flat.clone(),
             |flat| PreparedFlat::new(flat).unwrap(),
-            fixture::in_place(size_of_val(flat.data.pixels())),
+            fixture::fresh_copies(size_of_val(flat.data.pixels())),
         );
     });
 }

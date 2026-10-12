@@ -9,7 +9,7 @@ use common::CancelToken;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
-use crate::bench::scene::{self, Field};
+use crate::bench::scene::{self, Field, STACKED_LIGHTS};
 use crate::combine::config::StackConfig;
 use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::config::DrizzleConfig;
@@ -19,9 +19,6 @@ use crate::math::size2us::Size2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::WarpTransform;
 
-/// The lights of the set.
-const LIGHTS: usize = 30;
-
 /// Each light's side.
 const SIDE: Size2us = Size2us::new(2048, 2048);
 
@@ -29,11 +26,13 @@ pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;
     let frames = OnceCell::new();
     let mut group = fixture::group(c, "stage/drizzle", Scale::Frame);
-    group.throughput(Throughput::Elements((LIGHTS * SIDE.pixel_count()) as u64));
-    let set = format!("{LIGHTS}x{}", field.name());
+    group.throughput(Throughput::Elements(
+        (STACKED_LIGHTS * SIDE.pixel_count()) as u64,
+    ));
+    let set = format!("{STACKED_LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("default", set), |b| {
         let frames: &Vec<DrizzleFrame<LinearImage>> = frames.get_or_init(|| {
-            (0..LIGHTS)
+            (0..STACKED_LIGHTS)
                 .map(|index| {
                     let warp = WarpTransform::new(scene::dither(SIDE, index));
                     DrizzleFrame::new(field.exposure(SIDE, index).image, warp)

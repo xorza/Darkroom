@@ -45,7 +45,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || image.clone(),
                 |image| op.apply(image),
-                fixture::in_place(3 * size_of_val(image.channel(0).pixels())),
+                fixture::fresh_copies(3 * size_of_val(image.channel(0).pixels())),
             );
         });
     }

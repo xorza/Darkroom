@@ -9,15 +9,14 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
 use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::Field;
 use crate::registration::bench::Pair;
-use crate::registration::final_fit::FitModel;
 use crate::registration::spatial::KdTree;
-use crate::registration::transform::TransformType;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let pair = OnceCell::new();
     let pair = || pair.get_or_init(Pair::typical);
-    let count = pair().target.len();
+    let count = Field::Typical.stars();
     let mut group = fixture::group(c, "kernel/registration/spatial", Scale::Sample);
     group.throughput(Throughput::Elements(count as u64));
     group.bench_function(BenchmarkId::new("kd_tree/build", count), |b| {
@@ -25,19 +24,14 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter_batched(
             || points.clone(),
             KdTree::build,
-            fixture::in_place(size_of_val(points.as_slice())),
+            fixture::fresh_copies(size_of_val(points.as_slice())),
         );
     });
     group.bench_function(BenchmarkId::new("kd_tree/nearest", count), |b| {
         let pair = pair();
         let tree = KdTree::build(pair.target.iter().map(|star| star.pos).collect())
             .expect("a catalogue of stars");
-        let warp = pair
-            .fit(FitModel {
-                transform: TransformType::Similarity,
-                sip: None,
-            })
-            .warp;
+        let warp = pair.similarity_warp();
         let queries: Vec<DVec2> = pair.reference.iter().map(|s| warp.apply(s.pos)).collect();
         b.iter(|| {
             for &query in &queries {
