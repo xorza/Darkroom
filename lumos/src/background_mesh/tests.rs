@@ -5,13 +5,17 @@ use crate::math::statistics::mad_to_sigma;
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
-/// Create a `TileGrid` with default test parameters (no mask, default sigma clip iterations)
-fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
+/// Create a `BackgroundMesh` with default test parameters (no mask, default sigma clip iterations)
+fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundMesh {
     compute_grid(pixels, None, tile_size, TEST_SIGMA_CLIP_ITERATIONS, true)
 }
 
-/// Create a `TileGrid` with mask
-fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer2) -> TileGrid {
+/// Create a `BackgroundMesh` with mask
+fn make_grid_with_mask(
+    pixels: &Buffer2<f32>,
+    tile_size: usize,
+    mask: &BitBuffer2,
+) -> BackgroundMesh {
     compute_grid(
         pixels,
         Some(mask),
@@ -26,7 +30,7 @@ fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer
 fn new_uninit_zero_dimension_panics() {
     // A zero-size image is a logic error upstream (ImageDimensions asserts > 0); fail fast
     // with a clear message instead of a bare div_ceil divide-by-zero.
-    TileGrid::new_uninit(Size2us::new(0, 100), 64);
+    BackgroundMesh::new_uninit(Size2us::new(0, 100), 64);
 }
 
 /// The grid's shape, and a flat image's statistics on it. A tile size past the image clamps to

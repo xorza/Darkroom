@@ -231,7 +231,7 @@ fn measure_star_multiple_stars_independent() {
     let candidates = detect_stars_test(
         &measured.residual,
         &measured.sky,
-        &DetectionConfig::default(),
+        &ExtractionConfig::default(),
     );
     let mut positions: Vec<DVec2> = candidates
         .iter()
@@ -414,7 +414,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
-    let sky_at_fit = LocalBackground::measure(
+    let sky_at_fit = StampBackground::measure(
         &measured.residual,
         None,
         star.pos,
@@ -585,11 +585,11 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
         masked.set_at(Vec2us::new(x, 32), true);
         filled[(x, 32)] = 0.02;
     }
-    let all = LocalBackground::measure(&star.residual, None, centre, annulus).unwrap();
-    let without = LocalBackground::measure(&filled, Some(&masked), centre, annulus).unwrap();
+    let all = StampBackground::measure(&star.residual, None, centre, annulus).unwrap();
+    let without = StampBackground::measure(&filled, Some(&masked), centre, annulus).unwrap();
     assert_eq!(without.samples, all.samples - right.count());
     let unfilled =
-        LocalBackground::measure(&star.residual, Some(&masked), centre, annulus).unwrap();
+        StampBackground::measure(&star.residual, Some(&masked), centre, annulus).unwrap();
     assert_eq!(
         (without.offset, without.noise),
         (unfilled.offset, unfilled.noise)

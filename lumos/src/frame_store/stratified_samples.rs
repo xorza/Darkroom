@@ -1,8 +1,8 @@
 //! [`StratifiedSamples`]: the pixels normalization pairs between frames that each cover every
 //! pixel.
 
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::colour_raster::ColourRaster;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::colour_raster::ColourRaster;
 use crate::math::size2us::Size2us;
 
 /// Samples a slot's gain fit runs on, at most: a stratified 65 536 of its measured pixels.

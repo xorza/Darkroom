@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::ingest::error::AdmissionError;
-use crate::io::image::error::ImageError;
+use crate::io::error::ImageError;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
 ///
@@ -83,7 +83,7 @@ impl From<AdmissionError> for DrizzleError {
 mod tests {
     use crate::drizzle::error::*;
     use crate::error::FrameDimensionMismatch;
-    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::image::image_dimensions::ImageDimensions;
 
     /// The two messages that name drizzle rather than stacking, which is what keeps this error a
     /// type of its own — and the shared payloads it reports through, whose wording lives with them.

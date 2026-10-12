@@ -7,9 +7,8 @@ use crate::internals::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, generate_random_stars,
 };
 use crate::registration::final_fit::{FitCatalogs, FitModel};
-use crate::registration::ransac::config::RansacConfig;
-use crate::registration::register;
-use crate::registration::spatial::KdTree;
+use crate::registration::kd_tree::KdTree;
+use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::triangle::voting::{MatchIndices, PointMatch};
@@ -146,7 +145,9 @@ impl Scenario {
     /// is checked over the box the paired reference stars span, where that holds.
     fn check(&self) {
         let catalogs = self.catalogs();
-        let result = register(&catalogs.reference, &catalogs.target, &self.config())
+        let result = self
+            .config()
+            .register(&catalogs.reference, &catalogs.target)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
         let found = result.transform();
         assert_eq!(found.transform_type(), self.model, "{}", self.name);
@@ -600,7 +601,9 @@ fn the_smallest_catalogs_register_and_three_stars_do_not() {
         3,
     );
     let catalogs = three.catalogs();
-    let result = register(&catalogs.reference, &catalogs.target, &three.config());
+    let result = three
+        .config()
+        .register(&catalogs.reference, &catalogs.target);
     assert!(
         matches!(
             result,

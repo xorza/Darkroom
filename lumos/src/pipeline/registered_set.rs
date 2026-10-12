@@ -3,15 +3,15 @@
 use common::CancelToken;
 
 use crate::combine::stack::stack_stored_frames;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::pipeline::config::AlignStackConfig;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::pipeline::align_stack_config::AlignStackConfig;
+use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registrar::ParkedFrame;
-use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::star_detection::detector::Diagnostics;
+use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
 /// Every light's parked frame in input order — `None` only where the run was cancelled — with
 /// what the combine of the survivors and the result need.
@@ -24,7 +24,7 @@ pub(crate) struct RegisteredSet {
     pub(crate) metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     /// Each light's detection funnel, in input order, including the lights that were dropped.
-    pub(crate) detection: Vec<Diagnostics>,
+    pub(crate) detection: Vec<DetectionDiagnostics>,
 }
 
 impl RegisteredSet {

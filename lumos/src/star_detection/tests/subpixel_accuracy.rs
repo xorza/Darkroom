@@ -11,7 +11,7 @@ use crate::internals::synthetic::metrics::{match_catalogs, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::registration::transform::Transform;
-use crate::star_detection::config::Config;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::tests::{
     MATCH_RADIUS, detected_positions, synthetic_config, truth_positions,
 };
@@ -40,7 +40,7 @@ fn shifted_detections(
     camera: &Camera,
     shift: DVec2,
     seed: u64,
-    config: &Config,
+    config: &StarDetectionConfig,
 ) -> Vec<DVec2> {
     let obs = Observation {
         transform: Transform::translation(shift),

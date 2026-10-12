@@ -7,14 +7,14 @@
 
 use common::CancelToken;
 
-use crate::frame_store::frame_quality::{FramePlane, FrameQuality};
-use crate::frame_store::stackable_image::StackableImage;
+use crate::error::Cancelled;
+use crate::frame::frame_quality::{FramePlane, FrameQuality};
+use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::set_facts::SetFacts;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::image_dimensions::ImageDimensions;
 
 /// The checks one frame of a set must pass, reporting their failures against its `index` and
 /// polling `cancel` once per chunk.

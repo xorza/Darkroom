@@ -2,14 +2,14 @@
 
 use std::path::PathBuf;
 
-use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
-use crate::calibration_masters::error::CalibrationError;
+use crate::calibration::cosmic_ray::error::CosmicRayError;
+use crate::calibration::error::CalibrationError;
 use crate::combine::error::StackError;
+use crate::error::Cancelled;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::FrameStoreError;
 use crate::ingest::error::AdmissionError;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::error::ImageError;
+use crate::io::error::ImageError;
 
 /// Failures from calibrated-image and RAW registered stacking.
 #[derive(Debug, thiserror::Error)]

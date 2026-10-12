@@ -24,8 +24,8 @@ fn a_detected_star_measures_as_on_its_true_sky() {
     // A noiseless frame thresholds at its noise floor, 1e-4 of the sky: the σ = 3 star stays above
     // 4 · 1e-5 out to r = 3 · √(2 ln(0.8 / 4e-5)) = 13.3 px, a footprint of π · 13.3² ≈ 560 px —
     // past the default 500.
-    let config = Config {
-        detection: DetectionConfig {
+    let config = StarDetectionConfig {
+        extraction: ExtractionConfig {
             max_area: 1000,
             ..Default::default()
         },
@@ -52,7 +52,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         let estimated = Measured::of(&pixels, &background);
         let exact = Measured::flat(&pixels, SKY, 0.01);
 
-        let candidates = detect_stars_test(&estimated.residual, &estimated.sky, &config.detection);
+        let candidates = detect_stars_test(&estimated.residual, &estimated.sky, &config.extraction);
         assert_eq!(candidates.len(), 1, "σ {sigma} at {truth}");
         let region = &candidates[0];
         let nearest = truth.round();

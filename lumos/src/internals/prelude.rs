@@ -10,11 +10,11 @@
 //! only way to collapse those 907 lines, and because unlike a production re-export it cannot
 //! create a second path to an item that ships — `internals` is `#[cfg(test)]`.
 
+pub(crate) use crate::image::image_dimensions::ImageDimensions;
+pub(crate) use crate::image::linear_image::LinearImage;
 pub(crate) use crate::internals::assertions::assert_close;
 pub(crate) use crate::internals::images::{gray_image, rgb_image};
 pub(crate) use crate::internals::test_rng::TestRng;
-pub(crate) use crate::io::image::image_dimensions::ImageDimensions;
-pub(crate) use crate::io::image::linear::LinearImage;
 pub(crate) use crate::math::size2us::Size2us;
 pub(crate) use crate::math::vec2us::Vec2us;
 pub(crate) use common::CancelToken;

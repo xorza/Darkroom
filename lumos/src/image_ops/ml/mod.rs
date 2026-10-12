@@ -5,13 +5,13 @@
 //! suite) are proprietary and non-redistributable, so the backend is generic and the user points it
 //! at their own legally-obtained `.onnx` file.
 //!
-//! Currently: [`star_removal`] (StarNet-style) and [`denoise`] (DeepSNR-style), both on the shared
-//! ONNX-Runtime [`backend`]. Each is a config type with an `apply`, matching the in-place op
+//! Currently: [`remove_stars`] (StarNet-style) and [`ml_denoise`] (DeepSNR-style), both on the
+//! shared ONNX-Runtime [`backend`]. Each is a config type with an `apply`, matching the in-place op
 //! contract the rest of [`crate::image_ops`] follows.
 
 pub(crate) mod backend;
-pub(crate) mod denoise;
-pub(crate) mod star_removal;
+pub(crate) mod ml_denoise;
+pub(crate) mod remove_stars;
 
 #[cfg(test)]
 mod tests;

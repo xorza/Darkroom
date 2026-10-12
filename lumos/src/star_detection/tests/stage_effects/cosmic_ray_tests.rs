@@ -8,9 +8,9 @@
 use crate::internals::init_tracing;
 use crate::internals::prelude::*;
 use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
-use crate::star_detection::config::Config;
-use crate::star_detection::config::filter_config::FilterConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::filter_config::FilterConfig;
+use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -54,7 +54,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
         lone_rays.len()
     );
 
-    let detect = |config: Config| -> Vec<DVec2> {
+    let detect = |config: StarDetectionConfig| -> Vec<DVec2> {
         StarDetector::from_config(config)
             .unwrap()
             .detect(&frame.image)
@@ -65,7 +65,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     };
     let opened = |max_sharpness| {
         let mut config = synthetic_config();
-        config.detection.min_area = 1;
+        config.extraction.min_area = 1;
         config.filter.max_eccentricity = 1.0;
         config.filter.max_roundness = 2.0;
         config.filter.max_fwhm_deviation = None;

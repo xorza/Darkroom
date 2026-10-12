@@ -97,8 +97,9 @@ mod tests {
     use glam::DVec2;
 
     use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::registration::transform::Transform;
     use crate::registration::transform::inverse_warp::NEWTON_TOLERANCE_PX;
-    use crate::registration::transform::{Transform, WarpTransform};
+    use crate::registration::transform::warp_transform::WarpTransform;
 
     /// A SIP fit of `field` over a grid on `[-extent, extent]²` about the origin, on `transform`.
     fn sip_on(transform: Transform, extent: i32, field: impl Fn(DVec2) -> DVec2) -> WarpTransform {

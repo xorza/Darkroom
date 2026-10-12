@@ -11,34 +11,37 @@ mod snapshot;
 
 use std::path::PathBuf;
 
-use crate::calibration_masters::calibration_set::CalibrationSet;
-use crate::calibration_masters::master_cache::MASTER_PIN;
-use crate::calibration_masters::master_role::MasterRole;
-use crate::calibration_masters::master_subtraction::Subtractor;
-use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master};
-use crate::combine::config::{Normalization, StackConfig, Weighting};
-use crate::combine::stack::{StackFrame, stack_images};
-use crate::frame_store::cache_key::DECODE_PINS;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
+use crate::calibration::calibration_masters::{
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master,
+};
+use crate::calibration::calibration_set::CalibrationSet;
+use crate::calibration::master_cache::MASTER_PIN;
+use crate::calibration::master_role::MasterRole;
+use crate::calibration::master_subtraction::Subtractor;
+use crate::combine::stack::StackFrame;
+use crate::combine::stack_config::{Normalization, StackConfig, Weighting};
+use crate::frame::frame_stats::FrameStats;
+use crate::frame_store::decode_cache::cache_key::DECODE_PINS;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::fits::cfa::save_cfa_fits;
-use crate::io::image::load_context::LoadContext;
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::io::fits::cfa::save_cfa_fits;
+use crate::io::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::{WarpResult, warp};
-use crate::registration::transform::{Transform, WarpTransform};
-use crate::star_detection::config::Config as StarDetectionConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::registration::resample::WarpResult;
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 use common::TempDir;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
@@ -86,11 +89,7 @@ fn dither() -> Transform {
 }
 
 fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
-    warp(
-        image,
-        &WarpTransform::new(transform),
-        RegistrationConfig::default().warp,
-    )
+    WarpTransform::new(transform).warp(image, RegistrationConfig::default().warp)
 }
 
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
@@ -372,7 +371,9 @@ fn register_snapshot() {
     let target = warped(&reference, dither()).image;
     let mut config = RegistrationConfig::default();
     config.ransac.seed = 0x5EED;
-    let result = register(&detect(&reference), &detect(&target), &config).unwrap();
+    let result = config
+        .register(&detect(&reference), &detect(&target))
+        .unwrap();
     let mut snapshot = Snapshot::default();
     snapshot
         .f64s(result.transform().matrix())
@@ -409,16 +410,12 @@ fn combine_snapshot() {
             warped(&reference, transform),
         ));
     }
-    let product = stack_images(
-        frames,
-        &StackConfig {
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
+    let product = (StackConfig {
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_images(frames, ProgressCallback::default(), CancelToken::never())
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);

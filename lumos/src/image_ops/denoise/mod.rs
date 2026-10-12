@@ -20,10 +20,10 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image::linear_image::LinearImage;
+use crate::image::quality_flags::QualityFlags;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;

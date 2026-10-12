@@ -11,16 +11,16 @@
 //! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in
 //!   `image_ops/ml/tests/`.
 
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::path::{Path, PathBuf};
 
 use common::CancelToken;
 
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
+use crate::image::linear_image::LinearImage;
+use crate::io::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
 
-use crate::calibration_masters::internals::masters_from_files;
+use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::io::raw::raw_files;
 use crate::{
     CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NeutralizeBackground, Scnr,

@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::combine::cache::sample_noise::NoiseColumns;
+use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::math::statistics::spread::Spread;

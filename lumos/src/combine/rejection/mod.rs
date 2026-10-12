@@ -20,8 +20,8 @@ pub(crate) mod winsorized_clip_config;
 
 use std::ops::Range;
 
-use crate::combine::cache::sample::{CombinedSample, PixelSamples};
-use crate::combine::cache::sample_noise::NoiseColumns;
+use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};

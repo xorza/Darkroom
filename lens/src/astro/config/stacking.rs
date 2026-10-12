@@ -11,8 +11,8 @@
 //! carry.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::detection::{self, FwhmMode};
 use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
+use lumos::{FwhmMode, StarDetectionConfig};
 
 use crate::astro::config::preset::Preset;
 
@@ -28,14 +28,14 @@ pub(crate) enum DetectionPreset {
 
 impl Preset for DetectionPreset {
     type Knobs = DetectionKnobs;
-    type Config = detection::Config;
+    type Config = StarDetectionConfig;
 
-    fn config(self) -> detection::Config {
+    fn config(self) -> StarDetectionConfig {
         match self {
-            Self::WideField => detection::Config::wide_field(),
-            Self::HighResolution => detection::Config::high_resolution(),
-            Self::CrowdedField => detection::Config::crowded_field(),
-            Self::PreciseGround => detection::Config::precise_ground(),
+            Self::WideField => StarDetectionConfig::wide_field(),
+            Self::HighResolution => StarDetectionConfig::high_resolution(),
+            Self::CrowdedField => StarDetectionConfig::crowded_field(),
+            Self::PreciseGround => StarDetectionConfig::precise_ground(),
         }
     }
 }
@@ -67,7 +67,7 @@ impl Preset for RegistrationPreset {
 }
 
 /// The star-detection knobs the editor offers, drawn from
-/// [`detection::Config`]'s `detection`, `fwhm` and `filter` sub-configs.
+/// [`StarDetectionConfig`]'s `extraction`, `fwhm` and `filter` sub-configs.
 #[derive(Debug, Clone, Introspect)]
 #[config(
     type_id = "4512544e-537c-4c1c-96ad-e596cc88d60d",
@@ -84,35 +84,35 @@ pub(crate) struct DetectionKnobs {
 
 impl Default for DetectionKnobs {
     fn default() -> Self {
-        detection::Config::default().into()
+        StarDetectionConfig::default().into()
     }
 }
 
-impl From<detection::Config> for DetectionKnobs {
-    fn from(config: detection::Config) -> Self {
+impl From<StarDetectionConfig> for DetectionKnobs {
+    fn from(config: StarDetectionConfig) -> Self {
         Self {
-            sigma_threshold: config.detection.sigma_threshold,
+            sigma_threshold: config.extraction.sigma_threshold,
             expected_fwhm: config
                 .fwhm
                 .mode
-                .or(detection::Config::default().fwhm.mode)
+                .or(StarDetectionConfig::default().fwhm.mode)
                 .expect("the default config runs a matched filter")
                 .seed(),
-            min_area: config.detection.min_area,
-            max_area: config.detection.max_area,
+            min_area: config.extraction.min_area,
+            max_area: config.extraction.max_area,
             min_snr: config.filter.min_snr,
             max_eccentricity: config.filter.max_eccentricity,
         }
     }
 }
 
-impl From<DetectionKnobs> for detection::Config {
+impl From<DetectionKnobs> for StarDetectionConfig {
     fn from(knobs: DetectionKnobs) -> Self {
-        let mut config = detection::Config::default();
-        config.detection.sigma_threshold = knobs.sigma_threshold;
+        let mut config = StarDetectionConfig::default();
+        config.extraction.sigma_threshold = knobs.sigma_threshold;
         config.fwhm.mode = Some(FwhmMode::Fixed(knobs.expected_fwhm));
-        config.detection.min_area = knobs.min_area;
-        config.detection.max_area = knobs.max_area;
+        config.extraction.min_area = knobs.min_area;
+        config.extraction.max_area = knobs.max_area;
         config.filter.min_snr = knobs.min_snr;
         config.filter.max_eccentricity = knobs.max_eccentricity;
         config
@@ -278,8 +278,8 @@ impl From<CombineKnobs> for StackConfig {
 
 #[cfg(test)]
 mod tests {
-    use lumos::detection::{self, FwhmMode};
     use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
+    use lumos::{FwhmMode, StarDetectionConfig};
 
     use crate::astro::config::stacking::{
         CombineKnobs, CombineMethodChoice, DetectionKnobs, NormalizationChoice, RegistrationKnobs,
@@ -292,18 +292,18 @@ mod tests {
     /// field carries the wrong number back and the assertion names it.
     #[test]
     fn detection_knobs_write_back_the_fields_they_read() {
-        let mut config = detection::Config::default();
-        config.detection.sigma_threshold = 4.5;
-        config.detection.min_area = 7;
-        config.detection.max_area = 900;
+        let mut config = StarDetectionConfig::default();
+        config.extraction.sigma_threshold = 4.5;
+        config.extraction.min_area = 7;
+        config.extraction.max_area = 900;
         config.fwhm.mode = Some(FwhmMode::Fixed(3.25));
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
 
-        let restored: detection::Config = DetectionKnobs::from(config.clone()).into();
-        assert_eq!(restored.detection.sigma_threshold, 4.5);
-        assert_eq!(restored.detection.min_area, 7);
-        assert_eq!(restored.detection.max_area, 900);
+        let restored: StarDetectionConfig = DetectionKnobs::from(config.clone()).into();
+        assert_eq!(restored.extraction.sigma_threshold, 4.5);
+        assert_eq!(restored.extraction.min_area, 7);
+        assert_eq!(restored.extraction.max_area, 900);
         assert_eq!(restored.fwhm.mode, Some(FwhmMode::Fixed(3.25)));
         assert_eq!(restored.filter.min_snr, 12.5);
         assert_eq!(restored.filter.max_eccentricity, 0.75);

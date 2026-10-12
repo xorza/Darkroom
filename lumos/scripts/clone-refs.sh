@@ -27,13 +27,13 @@ mkdir -p "$DEST"
 CORE=(
   # --- actual native dependencies, pinned to Cargo.lock ---
   "LibRaw|https://github.com/LibRaw/LibRaw|0.20.1|raw: unpack, adjust_bl() black levels, white balance"
-  "cfitsio|https://github.com/HEASARC/cfitsio||io/image/fits: the FITS reference implementation, for the format rules fits-well reads"
+  "cfitsio|https://github.com/HEASARC/cfitsio||io/fits: the FITS reference implementation, for the format rules fits-well reads"
 
   # --- calibration ---
   "ccdproc|https://github.com/astropy/ccdproc||calibration_masters: bias/dark/flat reduction, combine"
 
   # --- demosaic ---
-  "librtprocess|https://github.com/CarVac/librtprocess||raw/demosaic: RCD (Ratio-Corrected) + X-Trans Markesteijn origin"
+  "librtprocess|https://github.com/CarVac/librtprocess||image/cfa/demosaic: RCD (Ratio-Corrected) + X-Trans Markesteijn origin"
 
   # --- star detection / photometry / PSF ---
   "sep|https://github.com/kbarbary/sep||star_detection: SExtractor C lib — background, threshold, multi-threshold deblend"
@@ -58,9 +58,9 @@ CORE=(
 )
 
 EXTRA=(
-  "RawTherapee|https://github.com/Beep6581/RawTherapee||raw/demosaic: RCD/AMaZE/Markesteijn upstream (large)"
+  "RawTherapee|https://github.com/Beep6581/RawTherapee||image/cfa/demosaic: RCD/AMaZE/Markesteijn upstream (large)"
   "opencv|https://github.com/opencv/opencv||registration: findHomography, DLT, RANSAC reference (large)"
-  "astropy|https://github.com/astropy/astropy||io/image/fits + registration: FITS, WCS, SIP polynomials (large)"
+  "astropy|https://github.com/astropy/astropy||io/fits + registration: FITS, WCS, SIP polynomials (large)"
   "drizzlepac|https://github.com/spacetelescope/drizzlepac||drizzle: full DrizzlePac pipeline"
   "DeepSkyStacker|https://github.com/deepskystacker/DSS||stacking/registration: alternate stacking pipeline"
   "kstars|https://github.com/KDE/kstars||all: KStars/Ekos capture+processing suite (large)"

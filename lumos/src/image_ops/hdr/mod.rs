@@ -14,9 +14,9 @@ use common::Introspect;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image::linear_image::LinearImage;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
-use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::sum;
 use crate::math::wavelet::{atrous_smooth, max_scales};

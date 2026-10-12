@@ -3,9 +3,9 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::frame_store::cache_key::DecodeOptions;
-use crate::io::image::fits::options::FitsLoadOptions;
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::frame_store::decode_cache::cache_key::DecodeOptions;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::io::fits::options::FitsLoadOptions;
 use crate::platform::UserCache;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
@@ -22,9 +22,9 @@ pub struct IngestConfig {
     pub cache_dir: PathBuf,
     /// Keep each decoded frame in the decode cache, with its metadata, for a later run on the same
     /// files to reuse, whether the run fits in memory or spills: the frames of a
-    /// [`stack`](crate::stack) and of a calibration master, the lights of a registered stack — a
-    /// RAW light as its uncalibrated mosaic, so other masters reuse it too — and the frames of a
-    /// drizzle.
+    /// [`StackConfig::stack_paths`](crate::StackConfig::stack_paths) and of a calibration master,
+    /// the lights of a registered stack — a RAW light as its uncalibrated mosaic, so other masters
+    /// reuse it too — and the frames of a drizzle.
     ///
     /// Off by default: a kept frame costs its whole size on disk until you delete the directory.
     /// A run's own scratch is never kept either way.

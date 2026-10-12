@@ -18,7 +18,7 @@ use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::pixel_gaussian::PixelGaussian;
 use crate::math::pixel_quadrature::PixelQuadrature;
 use crate::math::size2us::Size2us;
-use crate::star_detection::config::fwhm_config::MatchedFilter;
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use imaginarium::Buffer2;
 
 /// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable

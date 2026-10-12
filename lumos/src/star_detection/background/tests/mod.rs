@@ -6,9 +6,9 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::math::statistics::mad_to_sigma;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
-use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 
 /// The background and noise maps of `pixels` at `tile_size`.
 fn estimate(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundEstimate {

@@ -9,8 +9,8 @@
 use crate::internals::init_tracing;
 use crate::internals::prelude::*;
 use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
-use crate::star_detection::config::detection_config::DetectionConfig;
-use crate::star_detection::detector::stages::detect::internals::detect_stars_test;
+use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
+use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 use crate::star_detection::tests::stage_effects::{background_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
 use imaginarium::Color;
@@ -39,7 +39,7 @@ fn every_isolated_star_is_one_candidate() {
     let candidates = detect_stars_test(
         &background.residual_of(&pixels),
         &background.sky_noise(),
-        &DetectionConfig::default(),
+        &ExtractionConfig::default(),
     );
     let found = peaks(&candidates);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
@@ -99,7 +99,7 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
         pixels.height(),
         pixels.pixels().iter().map(|&v| v * scale).collect(),
     );
-    let config = DetectionConfig::default();
+    let config = ExtractionConfig::default();
     let detect = |pixels: &Buffer2<f32>| {
         let background = background_estimate(pixels);
         let candidates = detect_stars_test(
@@ -148,7 +148,7 @@ fn the_threshold_decides_per_star() {
 
     let mut previous_detected = usize::MAX;
     for k in [3.0f32, 5.0, 10.0, 20.0, 40.0] {
-        let config = DetectionConfig {
+        let config = ExtractionConfig {
             sigma_threshold: k,
             ..Default::default()
         };
@@ -198,7 +198,7 @@ fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
     assert!(lone_rays.len() >= 5, "{} isolated rays", lone_rays.len());
 
     for (min_area, rays_kept) in [(1, true), (4, false)] {
-        let config = DetectionConfig {
+        let config = ExtractionConfig {
             min_area,
             ..Default::default()
         };

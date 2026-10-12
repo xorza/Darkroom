@@ -16,10 +16,10 @@ use std::collections::VecDeque;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
-use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 mod parallel;
 mod property_based;

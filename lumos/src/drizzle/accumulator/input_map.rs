@@ -3,8 +3,9 @@
 use glam::DVec2;
 
 use crate::drizzle::accumulator::frame_source::Outline;
+use crate::registration::transform::Transform;
 use crate::registration::transform::inverse_warp::InverseWarp;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Output pixels between boundary samples when a SIP band's outline is taken back to the input.
 ///

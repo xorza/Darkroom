@@ -6,7 +6,7 @@
 //! and the planner's figure is checked against the pin. That the detector's heap stays the same
 //! from frame to frame is the `memory_budget` integration test's.
 //!
-//! [`StarDetector`]: crate::star_detection::detector::StarDetector
+//! [`StarDetector`]: crate::star_detection::star_detector::StarDetector
 //! [`DetectionResources`]: crate::star_detection::resources::DetectionResources
 
 use rayon::prelude::*;
@@ -14,10 +14,10 @@ use rayon::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
 use crate::memory::DETECTION_WORKING_PLANES;
-use crate::star_detection::config::Config;
-use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::internals::buffer_counts_for;
 use crate::star_detection::resources::internals::BufferCounts;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
+use crate::star_detection::star_detector::internals::buffer_counts_for;
 
 /// The detection working set at its high-water mark over every preset: the buffers the pool holds
 /// at rest once every stage has run and returned its scratch. Because buffers are recycled across
@@ -66,11 +66,11 @@ fn warmed_pool_holds_the_pinned_working_set() {
         .map(|s| star_field(size, 30, 4200 + s).image)
         .collect();
     let presets = [
-        Config::default(),
-        Config::wide_field(),
-        Config::high_resolution(),
-        Config::crowded_field(),
-        Config::precise_ground(),
+        StarDetectionConfig::default(),
+        StarDetectionConfig::wide_field(),
+        StarDetectionConfig::high_resolution(),
+        StarDetectionConfig::crowded_field(),
+        StarDetectionConfig::precise_ground(),
     ];
     let warmed: Vec<BufferCounts> = presets
         .into_par_iter()

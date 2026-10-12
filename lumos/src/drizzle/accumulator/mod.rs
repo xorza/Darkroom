@@ -1,6 +1,5 @@
 //! Pixel distribution and accumulation for drizzle reconstruction.
 
-pub(crate) mod drizzle_frame;
 mod drop_quad;
 pub(crate) mod frame_source;
 mod input_map;
@@ -15,17 +14,18 @@ use rayon::prelude::*;
 use std::slice::ChunksMut;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
-use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::accumulator::frame_source::{BandScan, FrameSource};
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, RadialScratch};
-use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::error::DrizzleError;
-use crate::frame_store::frame_quality::DropPlanes;
-use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::frame::frame_quality::DropPlanes;
+use crate::frame::stackable_image::StackableImage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
@@ -387,11 +387,12 @@ pub(crate) mod bench;
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;
-    use crate::io::image::linear::LinearImage;
-    use crate::registration::transform::{Transform, WarpTransform};
-    use crate::run_report::RunReport;
+    use crate::image::linear_image::LinearImage;
+    use crate::registration::transform::Transform;
+    use crate::registration::transform::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
     use crate::stack_product::quality_map::QualityMap;
+    use crate::stack_product::run_report::RunReport;
 
     impl DrizzleAccumulator {
         /// Add `image` as an otherwise default frame, panicking on the mismatches a fixture must

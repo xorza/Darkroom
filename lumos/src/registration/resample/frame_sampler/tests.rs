@@ -1,8 +1,8 @@
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
-use crate::registration::registration_config::{self, InterpolationMethod};
-use crate::registration::resample;
+use crate::registration::registration_config;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
@@ -12,7 +12,9 @@ use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
@@ -760,9 +762,8 @@ fn a_halved_nyquist_grating_does_not_alias() {
         .collect();
     let image = LinearImage::from_pixels(ImageDimensions::new((64, 64), 1), grating);
     let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
-    let warped = resample::warp(
+    let warped = halving.warp(
         &image,
-        &halving,
         registration_config::internals::warp_params(InterpolationMethod::Lanczos3),
     );
 

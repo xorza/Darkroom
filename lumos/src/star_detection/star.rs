@@ -71,7 +71,7 @@ pub(crate) mod internals {
         /// fields its assertion is about.
         ///
         /// The defaults clear every
-        /// [`FilterConfig`](crate::star_detection::config::filter_config::FilterConfig)
+        /// [`FilterConfig`](crate::star_detection::star_detection_config::filter_config::FilterConfig)
         /// default with room to spare, so any rejection a test observes is the one it asked for.
         pub(crate) const fn at(pos: DVec2) -> Self {
             Self {

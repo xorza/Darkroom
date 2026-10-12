@@ -4,34 +4,35 @@ use std::path::Path;
 
 use common::CancelToken;
 
-use crate::calibration_masters::CalibrationMasters;
-use crate::calibration_masters::cosmic_ray;
-use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::combine::cache::slots::Slots;
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::cosmic_ray;
+use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::calibration::cosmic_ray::reject_cosmic_rays;
+use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SetCoverage};
+use crate::error::Cancelled;
+use crate::frame::frame_peek::FramePeek;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::KeptDecodeError;
-use crate::frame_store::frame_peek::FramePeek;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stackable_image::StackableImage;
 use crate::frame_store::stored_layout::StoredLayout;
+use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
-use crate::io::image::error::ImageError;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
-use crate::io::image::mosaic_noise::MosaicNoise;
+use crate::io::error::ImageError;
+use crate::io::load_context::LoadContext;
+use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::memory::DETECTION_WORKING_PLANES;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
 use crate::pipeline::align::register_warp_and_stack;
+use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
+use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::calibrate::CalibrationNotes;
-use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
@@ -39,12 +40,14 @@ use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registrar::{FrameRegistrar, ParkedFrame};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::{DetectionResult, Diagnostics, StarDetector};
 use crate::star_detection::star::Star;
+use crate::star_detection::star_detector::StarDetector;
+use crate::star_detection::star_detector::detection_result::{
+    DetectionDiagnostics, DetectionResult,
+};
 
 /// Where a registered stack's lights come from.
 #[derive(Debug)]
@@ -137,7 +140,7 @@ struct LightShape {
 struct DetectedSamples {
     image: LinearImage,
     stars: Vec<Star>,
-    diagnostics: Diagnostics,
+    diagnostics: DetectionDiagnostics,
     stats: FrameStats,
 }
 
@@ -180,7 +183,7 @@ impl DetectedSamples {
 #[derive(Debug, Default)]
 struct PassedLight {
     frame: Option<ParkedFrame>,
-    diagnostics: Diagnostics,
+    diagnostics: DetectionDiagnostics,
 }
 
 impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
@@ -603,7 +606,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             DetectedFrame {
                 image: PipelineFrame::Resident(image),
                 stars: Vec::new(),
-                diagnostics: Diagnostics::default(),
+                diagnostics: DetectionDiagnostics::default(),
                 stats,
             },
         )?;
@@ -623,7 +626,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 DetectedFrame {
                     image: PipelineFrame::Resident(image),
                     stars: result.stars,
-                    diagnostics: Diagnostics::default(),
+                    diagnostics: DetectionDiagnostics::default(),
                     stats,
                 },
             )?;
@@ -726,11 +729,11 @@ fn load_error(path: &Path, source: ImageError) -> AlignStackError {
 
 #[cfg(test)]
 mod tests {
-    use crate::combine::config::{Normalization, StackConfig};
-    use crate::frame_store::frame_peek::FramePeek;
-    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::combine::stack_config::{Normalization, StackConfig};
+    use crate::frame::frame_peek::FramePeek;
+    use crate::image::image_dimensions::ImageDimensions;
     use crate::memory::stage::{Stage, Units};
-    use crate::pipeline::config::AlignStackConfig;
+    use crate::pipeline::align_stack_config::AlignStackConfig;
     use crate::pipeline::light_source::LightShape;
     use crate::stack_product::quality_planes::QualityPlanes;
 

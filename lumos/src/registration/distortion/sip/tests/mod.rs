@@ -1,6 +1,7 @@
 use crate::internals::synthetic::distortion::{RadialField, RadialPairs};
 use crate::registration::distortion::sip::*;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// How far an exact fit may miss: a field in the polynomial's span is recovered but for rounding.
 /// Hartley-normalized monomials of a 1000 px grid keep the design's condition number in the

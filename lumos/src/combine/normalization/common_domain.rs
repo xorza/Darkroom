@@ -14,11 +14,11 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::combine::cache::frame_gate::FrameGate;
 use crate::combine::error::StackError;
+use crate::combine::frame_cache::frame_gate::FrameGate;
+use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::CfaType;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 

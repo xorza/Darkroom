@@ -1,18 +1,18 @@
 //! Bounded detector reuse for frame-parallel pipeline stages.
 
 use crate::error::InvalidConfigField;
-use crate::star_detection::config::Config;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 
 /// One [`StarDetector`] per concurrency slot, reused across batches so each batch inherits the
 /// previous one's warmed buffer pools.
 ///
-/// Deliberately not a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool), and the type system
-/// will not stop you: `StarDetector` implements `Default`, so `JobScratchPool<StarDetector>`
-/// compiles — and then quietly hands out detectors built from `Config::default()` instead of the
-/// caller's detection config, because the pool fills gaps with `T::default()`. Building every
-/// slot from `config` up front is also what makes an invalid configuration fail here rather than
-/// from inside the parallel closure.
+/// Deliberately not a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool), and
+/// the type system will not stop you: `StarDetector` implements `Default`, so
+/// `JobScratchPool<StarDetector>` compiles — and then quietly hands out detectors built from
+/// `StarDetectionConfig::default()` instead of the caller's detection config, because the pool
+/// fills gaps with `T::default()`. Building every slot from `config` up front is also what makes an
+/// invalid configuration fail here rather than from inside the parallel closure.
 #[derive(Debug)]
 pub(crate) struct DetectorPool {
     detectors: Vec<StarDetector>,
@@ -22,7 +22,7 @@ impl DetectorPool {
     /// Build `max_concurrent` detectors from one configuration, rejecting an invalid one before
     /// any frame is touched.
     pub(crate) fn from_config(
-        config: &Config,
+        config: &StarDetectionConfig,
         max_concurrent: usize,
     ) -> Result<Self, InvalidConfigField> {
         assert!(max_concurrent > 0, "max_concurrent must be > 0");

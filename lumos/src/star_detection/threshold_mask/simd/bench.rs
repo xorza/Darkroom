@@ -21,7 +21,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         let stages: &Stages = stages.get_or_init(|| Stages::of(Field::Typical));
         let span = FRAME.height / 2 * FRAME.width..(FRAME.height / 2 + 1) * FRAME.width;
         let threshold = ThresholdParams {
-            sigma: stages.config.detection.sigma_threshold,
+            sigma: stages.config.extraction.sigma_threshold,
             min_noise: stages.plane.noise.floor,
         };
         Row {

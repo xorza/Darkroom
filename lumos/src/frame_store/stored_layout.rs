@@ -2,9 +2,9 @@
 
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
-use crate::io::image::flat_gain;
-use crate::io::image::flat_gain::GainGrid;
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::image::flat_gain;
+use crate::image::flat_gain::GainGrid;
+use crate::image::image_dimensions::ImageDimensions;
 
 /// Quality planes a warped frame carries beside its image: `coverage` and `confidence`, one
 /// image-sized plane each, channel-independent — see `registration::resample::WarpResult` and
@@ -83,7 +83,7 @@ impl StoredLayout {
 #[cfg(test)]
 mod tests {
     use crate::frame_store::stored_layout::StoredLayout;
-    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::image::image_dimensions::ImageDimensions;
 
     /// What frames hold, counted by hand. A flat gain grid has a node every 4 pixels from the
     /// first, the last at or past the last pixel, 4 bytes each a channel: 9 × 9 takes 3 × 3 nodes,

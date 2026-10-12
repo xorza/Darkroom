@@ -127,10 +127,10 @@ impl<S: Isa> Profile<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::star_detection::centroid::lm_optimizer::LMModel;
-    use crate::star_detection::centroid::lm_optimizer::internals::ModelStamp;
     use crate::star_detection::centroid::moffat_fit::MoffatFixedBeta;
     use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
+    use crate::star_detection::centroid::profile_problem::LMModel;
+    use crate::star_detection::centroid::profile_problem::internals::ModelStamp;
     use crate::star_detection::centroid::simd::internals::assert_every_tier_matches_portable;
 
     /// Under each `PowStrategy`: 2.5 half-integer, 3 integer, 2.3 general.

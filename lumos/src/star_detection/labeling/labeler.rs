@@ -7,13 +7,13 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::vec2us::Vec2us;
-use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::labeling::run::{
     Run, extract_runs_from_row, merge_runs_with_prev, runs_connected,
 };
 use crate::star_detection::labeling::union_find::UnionFind;
 use crate::star_detection::labeling::{LabelMap, LabelRun};
+use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose
 /// per-strip overhead and boundary stitching outweigh the labeling. An image under this height
@@ -299,9 +299,9 @@ fn stitch_boundary(
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
-    use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::labeler::Labeler;
+    use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
     /// Label `mask` in exactly `num_strips` bands, whatever the thread count — so a test reaches
     /// the stitch across band boundaries on any machine.

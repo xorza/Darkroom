@@ -26,6 +26,7 @@ pub(crate) mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
@@ -34,9 +35,8 @@ use crate::internals::synthetic::fixtures::{
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::star_detection::config::Config;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 
 /// How near a detection must lie to a source to be that source's: one FWHM of the scenarios' 4-px
 /// PSF, past which a centroid is not a measurement of the source.
@@ -78,8 +78,8 @@ fn near(at: DVec2, positions: &[DVec2], radius: f64) -> usize {
 
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
 /// so the measured FWHM stays accurate.
-fn synthetic_config() -> Config {
-    let mut config = Config::default();
+fn synthetic_config() -> StarDetectionConfig {
+    let mut config = StarDetectionConfig::default();
     config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
     config
@@ -91,7 +91,7 @@ fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
 }
 
 /// Detect on `frame.image` with `config` and return the detected star positions.
-fn detected_positions(frame: &SimFrame, config: &Config) -> Vec<DVec2> {
+fn detected_positions(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
     StarDetector::from_config(config.clone())
         .unwrap()
         .detect(&frame.image)

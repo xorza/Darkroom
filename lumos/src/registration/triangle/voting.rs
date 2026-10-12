@@ -7,10 +7,10 @@ use std::f64::consts::SQRT_2;
 
 use glam::DVec2;
 
-use crate::registration::spatial::KdTree;
+use crate::registration::kd_tree::KdTree;
 
-use crate::registration::triangle::TriangleConfig;
 use crate::registration::triangle::geometry::Triangle;
+use crate::registration::triangle::triangle_config::TriangleConfig;
 
 /// A reference star paired with a target star, by index into their respective slices.
 ///

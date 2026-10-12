@@ -3,13 +3,14 @@
 
 use glam::{DMat2, DVec2};
 
-use crate::io::image::pixel_flags::Reach;
+use crate::image::pixel_flags::Reach;
 use crate::math::floor_i32::FloorI32;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::registration_config::InterpolationMethod;
 use crate::registration::resample::source_position::SourcePosition;
-use crate::registration::transform::{TransformType, WarpTransform};
+use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::transform::TransformType;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// The spacing, in output pixels, of the grid a non-affine warp's local scale is read on.

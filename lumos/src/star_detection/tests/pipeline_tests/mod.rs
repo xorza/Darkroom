@@ -11,11 +11,11 @@ use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::observe::SimFrame;
 use crate::internals::visual::report::{DetectionMetrics, save_metrics};
 use crate::internals::visual::{ToneMap, save, save_comparison};
-use crate::star_detection::config::Config;
-use crate::star_detection::config::fwhm_config::FwhmMode;
-use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
+use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
 
 mod challenging_tests;
@@ -55,7 +55,13 @@ const BLEND_REACH: f64 = 2.0 * MATCH_RADIUS;
 ///
 /// σ is the frame's noise map at the star, the noiseless residual the render's clean signal less
 /// the estimated sky. `min_decided` is how many stars the scenario must decide.
-fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_decided: usize) {
+fn run_test(
+    name: &str,
+    prefix: &str,
+    frame: &SimFrame,
+    config: &StarDetectionConfig,
+    min_decided: usize,
+) {
     let pixels = frame.image.channel(0);
     let size = Size2us::new(pixels.width(), pixels.height());
     let truth = &frame.truth.sources;
@@ -99,7 +105,7 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
         .collect();
     let background = background_map::estimate(pixels, &config.background);
     let saturation = frame.image.metadata.saturation_level();
-    let k = config.detection.sigma_threshold;
+    let k = config.extraction.sigma_threshold;
     let sigma_at = |x: usize, y: usize| background.noise[(x, y)].max(background.noise_floor);
     let residual_at =
         |x: usize, y: usize| frame.truth.clean[(x, y)] - background.background[(x, y)];
@@ -131,7 +137,7 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
         }
         Some(FwhmMode::Auto { .. }) => panic!("the grader needs the filter's FWHM fixed"),
     };
-    let edge = config.detection.edge_margin as f64 + RING + 1.0;
+    let edge = config.extraction.edge_margin as f64 + RING + 1.0;
     let island = |star: DVec2| {
         let inside = star.min_element() >= edge
             && star.x <= size.width as f64 - 1.0 - edge

@@ -7,12 +7,12 @@
 //! the bias and the read noise like any other at readout. A noiseless [`Camera::ideal`] collapses
 //! this to the clean image, so the *same* code path produces both the stimulus and its truth.
 
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::noise::{add_dark_current, add_read_noise, apply_shot_noise};
 use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 use glam::DVec2;

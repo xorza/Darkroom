@@ -1,19 +1,20 @@
-use crate::combine::cache::FrameCache;
-use crate::combine::config::{Combine, StackConfig, Weighting};
+use crate::combine::frame_cache::FrameCache;
 use crate::combine::normalization::*;
-use crate::combine::stack::{StackFrame, run_stacking, stack_images};
-use crate::frame_store::capture_conditions::CaptureConditions;
-use crate::frame_store::frame_facts::FrameFacts;
-use crate::frame_store::frame_quality::{DropPlanes, FrameQuality};
-use crate::frame_store::frame_stats::FrameStats;
+use crate::combine::stack::{StackFrame, run_stacking};
+use crate::combine::stack_config::{Combine, StackConfig, Weighting};
+use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame::frame_facts::FrameFacts;
+use crate::frame::frame_quality::{DropPlanes, FrameQuality};
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::cfa::make_cfa;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::math::statistics::mad_to_sigma;
 use crate::progress::progress_callback::ProgressCallback;
 use common::TempDir;
@@ -405,14 +406,14 @@ fn stacked_frames_land_on_the_reference_level() {
             [150.0, 250.0, 350.0],
         ),
     ] {
-        let product = stack_images(
+        let product = (StackConfig {
+            combine: Combine::mean(),
+            normalization,
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
+        })
+        .stack_images(
             frames.into_iter().map(StackFrame::from).collect(),
-            &StackConfig {
-                combine: Combine::mean(),
-                normalization,
-                weighting: Weighting::Equal,
-                ..StackConfig::light()
-            },
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -1375,8 +1376,8 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
 /// two copies of the largest slot's 20 000 B: 5056 + 120 000 + 2 × 302 144 = 729 344.
 #[test]
 fn the_working_set_is_what_the_measurement_holds() {
-    use crate::combine::cache::slots::Slots;
-    use crate::combine::config::Normalization;
+    use crate::combine::frame_cache::slots::Slots;
+    use crate::combine::stack_config::Normalization;
 
     let dimensions = ImageDimensions::new((100, 100), 1);
     let mono = Slots::new(None, 1);

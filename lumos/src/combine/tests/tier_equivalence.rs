@@ -6,18 +6,17 @@
 //! `memory::tests::planned_concurrency_never_overshoots_its_tier_budget`, which sweeps the loader's
 //! plan too; the live heap a run holds is measured by the `memory_budget` integration test.
 //!
-//! [`load_to_disk`]: crate::combine::cache
-//! [`load_in_memory`]: crate::combine::cache
+//! [`load_to_disk`]: crate::combine::frame_cache
+//! [`load_in_memory`]: crate::combine::frame_cache
 
 use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
-use crate::combine::stack::stack;
+use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
+use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
+use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_callback::ProgressCallback;
 use common::TempDir;
@@ -74,15 +73,15 @@ fn disk_and_memory_tiers_produce_identical_masters() {
             cache_dir: dir.join(format!("cache_{tag}")),
             ..IngestConfig::default()
         };
-        stack(
-            &paths,
-            &config,
-            &ingest,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("stack")
-        .image
+        config
+            .stack_paths(
+                &paths,
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("stack")
+            .image
     };
 
     let disk = master(1, "disk");

@@ -9,8 +9,8 @@ use crate::math::size2us::Size2us;
 use crate::star_detection::background::workspace::BackgroundWorkspace;
 use crate::star_detection::convolution::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
-use crate::star_detection::detector::stages::filter::DuplicateScratch;
 use crate::star_detection::labeling::labeler::Labeler;
+use crate::star_detection::star_detector::stages::filter::DuplicateScratch;
 use imaginarium::Buffer2;
 
 /// Reusable buffers and stage workspaces for star detection.

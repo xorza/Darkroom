@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::Pod;
 
+use crate::frame::frame_quality::FramePlane;
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::platform::ScratchFile;

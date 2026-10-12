@@ -2,22 +2,22 @@ use std::io::{Error, ErrorKind};
 
 use common::CancelToken;
 use imaginarium::Buffer2;
-use lumos::detection;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, CalibrationComponent, CalibrationError,
-    CalibrationMasters, CalibrationSet, CfaPattern, Combine, CombineMethod, Coverage,
-    DefectSummary, DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
-    FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
-    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
-    FitsTransferProvenance, FlagCounts, FrameRegistration, FrameStoreError, GesdConfig,
-    ImageDimensions, ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField,
-    LinearFitClipConfig, LinearImage, LoadContext, MarkesteijnPasses, MasterRole, MatchIndices,
-    Normalization, Pedestal, QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog,
-    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, RunReport,
-    SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError,
-    StackError, StackProduct, StarMatch, TransferProvenance, Transform, TransformModel,
-    TransformType, TriangleConfig, TrimConfig, WarpParams, WarpTransform, Weighting,
-    WinsorizedClipConfig,
+    AlignStackError, AlignStackResult, AlignmentSummary, BackgroundConfig, CalibrationComponent,
+    CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern, Combine, CombineMethod,
+    Coverage, DefectSummary, DetectionDiagnostics, DomainMap, DrizzleConfig, DrizzleConfigError,
+    DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig, FitsChecksumPolicy,
+    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
+    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
+    FlagCounts, FrameRegistration, FrameStoreError, FwhmConfig, GesdConfig, ImageDimensions,
+    ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
+    LinearImage, LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, MeasurementConfig,
+    Normalization, Pedestal, QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig,
+    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
+    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig, StarDetector,
+    StarMatch, TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig,
+    TrimConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -154,12 +154,12 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         10
     );
 
-    let detection = detection::Config {
-        background: detection::BackgroundConfig::default(),
-        detection: detection::DetectionConfig::default(),
-        fwhm: detection::FwhmConfig::default(),
-        measurement: detection::MeasurementConfig::default(),
-        filter: detection::FilterConfig::default(),
+    let detection = StarDetectionConfig {
+        background: BackgroundConfig::default(),
+        extraction: ExtractionConfig::default(),
+        fwhm: FwhmConfig::default(),
+        measurement: MeasurementConfig::default(),
+        filter: FilterConfig::default(),
     };
     detection.validate().unwrap();
 
@@ -240,12 +240,12 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "scale must be finite and positive, got 0"
     );
 
-    let detection_error = detection::StarDetector::from_config(detection::Config {
-        detection: detection::DetectionConfig {
+    let detection_error = StarDetector::from_config(StarDetectionConfig {
+        extraction: ExtractionConfig {
             sigma_threshold: 0.0,
             ..Default::default()
         },
-        ..detection::Config::default()
+        ..StarDetectionConfig::default()
     })
     .unwrap_err();
     assert_eq!(
@@ -286,7 +286,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
 #[test]
 fn star_detection_filter_diagnostics_are_one_nested_component() {
-    let quality_filter = detection::QualityFilterDiagnostics {
+    let quality_filter = QualityFilterDiagnostics {
         saturated: 1,
         low_snr: 2,
         high_eccentricity: 3,
@@ -295,7 +295,7 @@ fn star_detection_filter_diagnostics_are_one_nested_component() {
         fwhm_outliers: 6,
         duplicates: 7,
     };
-    let _: detection::Diagnostics = detection::Diagnostics {
+    let _: DetectionDiagnostics = DetectionDiagnostics {
         quality_filter,
         ..Default::default()
     };
@@ -334,10 +334,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,
         report: RunReport {
-            excluded_samples: FlagCounts {
-                saturated: 2,
-                ..FlagCounts::default()
-            },
+            excluded_samples: FlagCounts::default(),
             kept_flagged_samples: FlagCounts::default(),
             variance_background_only: true,
             ..RunReport::default()
@@ -358,7 +355,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
                 FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
             ],
         },
-        detection: vec![detection::Diagnostics::default(); 4],
+        detection: vec![DetectionDiagnostics::default(); 4],
     };
 
     // A uniform coverage is one number until a plane is asked for.

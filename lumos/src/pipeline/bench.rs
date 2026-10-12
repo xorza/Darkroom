@@ -11,23 +11,23 @@ use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::load_context::LoadContext;
-use crate::pipeline::calibrate::{CalibrationNotes, calibrate_align_stack};
-use crate::pipeline::config::AlignStackConfig;
+use crate::io::load_context::LoadContext;
+use crate::pipeline::align_stack_config::AlignStackConfig;
+use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::light_source::MosaicPreparation;
 use crate::platform::MappedFile;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::bench::Pair;
-use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
+use crate::registration::resample::warp_params::WarpParams;
 
 pub(crate) fn benches(c: &mut Criterion) {
     prepare(c);
@@ -126,10 +126,10 @@ fn park(c: &mut Criterion) {
 /// 24 MP lights alone hold, so the run spills them.
 const SPILLED_MACHINE_BYTES: u64 = 4 << 30;
 
-/// `calibrate_align_stack` over a session's raw lights, 16-bit mosaics as the camera writes them,
-/// under the default configuration: each light decoded, calibrated by the session's masters,
-/// demosaiced and detected, then registered to the reference, warped and combined. Resident, and
-/// spilled on the memory of a 4 GiB machine.
+/// `AlignStackConfig::calibrate_align_stack_paths` over a session's raw lights, 16-bit mosaics as
+/// the camera writes them, under the default configuration: each light decoded, calibrated by the
+/// session's masters, demosaiced and detected, then registered to the reference, warped and
+/// combined. Resident, and spilled on the memory of a 4 GiB machine.
 pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
@@ -154,22 +154,20 @@ pub(crate) fn pipeline(c: &mut Criterion) {
                 .unwrap()
             });
             let files = Files::raw_lights(field, cfa_type);
-            let config = AlignStackConfig {
-                ingest: IngestConfig {
-                    memory_override,
-                    ..IngestConfig::with_cache_dir(files.dir().join("cache"))
-                },
-                ..AlignStackConfig::default()
+            let ingest = IngestConfig {
+                memory_override,
+                ..IngestConfig::with_cache_dir(files.dir().join("cache"))
             };
             b.iter(|| {
-                calibrate_align_stack(
-                    &files.paths,
-                    masters,
-                    &config,
-                    ProgressCallback::default(),
-                    CancelToken::never(),
-                )
-                .unwrap()
+                AlignStackConfig::default()
+                    .calibrate_align_stack_paths(
+                        &files.paths,
+                        masters,
+                        &ingest,
+                        ProgressCallback::default(),
+                        CancelToken::never(),
+                    )
+                    .unwrap()
             });
         });
     }

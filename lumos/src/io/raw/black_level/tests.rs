@@ -1,4 +1,4 @@
-use crate::io::image::pixel_flags::QualityFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack};
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::sensor_layout::SensorLayout;

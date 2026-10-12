@@ -1,5 +1,5 @@
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::synthetic::camera::*;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
 
 fn render_one(psf: PsfModel, size: usize, flux: f32, seeing: f32) -> Vec<f32> {
     let mut pixels = Buffer2::new_filled(size, size, 0.0f32);

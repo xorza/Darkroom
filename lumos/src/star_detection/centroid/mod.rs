@@ -10,12 +10,12 @@
 
 mod covariance;
 mod gaussian_fit;
-mod lm_optimizer;
-mod local_background;
 pub(crate) mod measure_grid;
 mod moffat_fit;
+mod profile_problem;
 mod simd;
 pub(crate) mod stamp;
+mod stamp_background;
 mod star_noise;
 mod windowed_centroid;
 
@@ -29,17 +29,17 @@ use crate::math::vec2us::Vec2us;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ};
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
-use crate::star_detection::centroid::local_background::LocalBackground;
 use crate::star_detection::centroid::measure_grid::{MAX_STAMP_RADIUS, MeasureGrid};
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
+use crate::star_detection::centroid::stamp_background::StampBackground;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
-use crate::star_detection::config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
-};
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::roundness::{Roundness, RoundnessStamp};
 use crate::star_detection::star::Star;
+use crate::star_detection::star_detection_config::measurement_config::{
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+};
 
 /// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
@@ -137,7 +137,7 @@ pub(super) fn measure_star(
     let annulus_at = |at: DVec2| match config.local_background {
         LocalBackgroundMethod::GlobalMap => None,
         LocalBackgroundMethod::LocalAnnulus => {
-            LocalBackground::measure(residual, no_data, at, grid.annulus)
+            StampBackground::measure(residual, no_data, at, grid.annulus)
         }
     };
     let start_annulus = annulus_at(start);
@@ -203,7 +203,7 @@ pub(super) fn measure_star(
     if holds_no_data(pos) {
         return None;
     }
-    // `LocalBackground::measure` samples by rounded centre, so the annulus measured at the start
+    // `StampBackground::measure` samples by rounded centre, so the annulus measured at the start
     // stands unless the centre moved to another pixel.
     let annulus_background = if pos.round() == start.round() {
         start_annulus

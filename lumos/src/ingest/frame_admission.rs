@@ -5,13 +5,13 @@ use std::sync::OnceLock;
 use common::CancelToken;
 
 use crate::error::FrameDimensionMismatch;
-use crate::frame_store::frame_facts::FrameFacts;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame::frame_facts::FrameFacts;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::stackable_image::StackableImage;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::set_facts::SetFacts;
-use crate::io::image::image_dimensions::ImageDimensions;
 
 /// The checks every decoded frame of a run passes before it is parked, in one order — its geometry
 /// against the run's, its facts against frame 0's once they are known, then its samples — and the

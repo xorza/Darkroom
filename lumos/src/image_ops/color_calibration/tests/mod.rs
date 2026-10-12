@@ -1,7 +1,8 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
-use crate::image_ops::color_calibration::*;
+use crate::image_ops::color_calibration::neutralize_background::*;
+use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;

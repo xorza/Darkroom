@@ -3,7 +3,7 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::background_mesh::TileGrid;
+use crate::background_mesh::BackgroundMesh;
 use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::tile_stats::TileComponent;
@@ -16,9 +16,9 @@ use crate::star_detection::background::simd;
 use crate::star_detection::background::simd::SegmentRamp;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::background::workspace::InterpolateScratch;
-use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 
 /// Per-pixel background and noise estimates for an image.
@@ -78,7 +78,7 @@ pub(crate) fn noise_floor_for(scale: f32) -> f32 {
 /// does not reproduce a constant sky exactly, and without a margin above that jitter every pixel
 /// clears `bg` and the whole frame labels as one component. The sky carries the frame's magnitude,
 /// so a fraction of it stays above the jitter in any domain.
-fn noise_floor_from(grid: &TileGrid, values: &mut Vec<f32>) -> f32 {
+fn noise_floor_from(grid: &BackgroundMesh, values: &mut Vec<f32>) -> f32 {
     let stats = grid.stats.pixels();
     values.clear();
     values.extend(
@@ -248,7 +248,7 @@ impl BackgroundEstimate {
 /// Interpolate the tile grid into the noise plane, and into the background plane when one is
 /// given.
 fn interpolate_from_grid(
-    grid: &TileGrid,
+    grid: &BackgroundMesh,
     background: Option<&mut Buffer2<f32>>,
     noise: &mut Buffer2<f32>,
     interpolation: &JobScratchPool<InterpolateScratch>,
@@ -306,7 +306,7 @@ fn interpolate_row(
     bg_row: &mut [f32],
     noise_row: &mut [f32],
     y: usize,
-    grid: &TileGrid,
+    grid: &BackgroundMesh,
     scratch: &mut InterpolateScratch,
 ) {
     let fy = y as f32;

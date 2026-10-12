@@ -9,7 +9,6 @@ use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
 use crate::registration::RegistrationConfig;
 use crate::registration::distortion::sip::SipConfig;
-use crate::registration::register;
 use crate::registration::tests::helpers;
 use crate::registration::transform::{Transform, TransformType};
 
@@ -35,17 +34,14 @@ fn register_with_sip_recovers_barrel_distortion() {
         max_rms_error: 10.0,
         ..RegistrationConfig::default()
     };
-    let with_sip = register(
-        &ref_stars,
-        &target_stars,
-        &RegistrationConfig {
-            sip: Some(SipConfig {
-                order: 3,
-                reference_point: Some(field.centre),
-            }),
-            ..base_config.clone()
-        },
-    )
+    let with_sip = (RegistrationConfig {
+        sip: Some(SipConfig {
+            order: 3,
+            reference_point: Some(field.centre),
+        }),
+        ..base_config.clone()
+    })
+    .register(&ref_stars, &target_stars)
     .expect("SIP registration should succeed");
     assert_eq!(
         with_sip.transform().transform_type(),
@@ -61,14 +57,11 @@ fn register_with_sip_recovers_barrel_distortion() {
         }
     }
 
-    let no_sip = register(
-        &ref_stars,
-        &target_stars,
-        &RegistrationConfig {
-            sip: None,
-            ..base_config
-        },
-    )
+    let no_sip = (RegistrationConfig {
+        sip: None,
+        ..base_config
+    })
+    .register(&ref_stars, &target_stars)
     .expect("linear registration should succeed");
     assert!(no_sip.num_inliers() < 120, "{}", no_sip.num_inliers());
     assert!(no_sip.rms_error() > 0.1, "{}", no_sip.rms_error());

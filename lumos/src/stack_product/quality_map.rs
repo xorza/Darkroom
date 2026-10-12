@@ -2,8 +2,8 @@
 
 use imaginarium::Buffer2;
 
-use crate::io::image::linear::LinearImage;
-use crate::io::image::linear_pixels::LinearPixels;
+use crate::image::linear_image::LinearImage;
+use crate::image::linear_pixels::LinearPixels;
 
 /// A quality map that is either common to every image channel or channel-specific.
 #[derive(Debug)]

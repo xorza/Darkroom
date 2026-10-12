@@ -1,4 +1,4 @@
-use crate::background_mesh::TileGrid;
+use crate::background_mesh::BackgroundMesh;
 use crate::background_mesh::tile_stats::{Eligible, TileStats};
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
@@ -18,7 +18,7 @@ pub(crate) struct TileScratch {
 
 #[derive(Debug, Default)]
 pub(crate) struct MeshWorkspace {
-    grid: Option<TileGrid>,
+    grid: Option<BackgroundMesh>,
     median_filter_scratch: Option<Buffer2<TileStats>>,
     spline_values: Vec<f32>,
     spline_d2: Vec<f32>,
@@ -36,7 +36,7 @@ impl MeshWorkspace {
         tile_size: usize,
         sigma_clip_iterations: usize,
         median_filter: bool,
-    ) -> &TileGrid {
+    ) -> &BackgroundMesh {
         self.fill_tile_stats(
             pixels,
             mask,
@@ -67,7 +67,7 @@ impl MeshWorkspace {
         tile_size: usize,
         sigma_clip_iterations: usize,
         median_filter: bool,
-    ) -> &TileGrid {
+    ) -> &BackgroundMesh {
         self.fill_tile_stats(
             pixels,
             mask,
@@ -87,7 +87,7 @@ impl MeshWorkspace {
         tile_size: usize,
         sigma_clip_iterations: usize,
         median_filter: bool,
-    ) -> &TileGrid {
+    ) -> &BackgroundMesh {
         self.fill_tile_stats(
             pixels,
             None,
@@ -116,7 +116,7 @@ impl MeshWorkspace {
             .as_ref()
             .is_none_or(|grid| !grid.matches_layout(dimensions, tile_size))
         {
-            self.grid = Some(TileGrid::new_uninit(dimensions, tile_size));
+            self.grid = Some(BackgroundMesh::new_uninit(dimensions, tile_size));
             self.median_filter_scratch = None;
         }
 
@@ -151,7 +151,7 @@ impl MeshWorkspace {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::background_mesh::TileGrid;
+    use crate::background_mesh::BackgroundMesh;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
@@ -162,7 +162,7 @@ pub(crate) mod internals {
         tile_size: usize,
         sigma_clip_iterations: usize,
         median_filter: bool,
-    ) -> TileGrid {
+    ) -> BackgroundMesh {
         let mut workspace = MeshWorkspace::default();
         workspace.compute(
             pixels,

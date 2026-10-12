@@ -11,9 +11,11 @@ use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm::fwhm_to_sigma;
-use crate::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::star_detection::deblend::region::Region;
-use crate::star_detection::detector::stages::detect::internals::{detect_stars_test, detect_test};
+use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
+use crate::star_detection::star_detector::stages::detect::internals::{
+    detect_stars_test, detect_test,
+};
 use crate::star_detection::tests::stage_effects::{background_estimate, matched_truths};
 
 /// The sky these stage tests detect against: bright enough to matter, quiet enough to detect on.
@@ -32,8 +34,8 @@ fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)], seed: u64) -> Buf
     SkyField::render(size, DETECTION_SKY, sigma, &stars, seed).pixels
 }
 
-fn deblend_config(n_thresholds: usize, min_contrast: f32) -> DetectionConfig {
-    DetectionConfig {
+fn deblend_config(n_thresholds: usize, min_contrast: f32) -> ExtractionConfig {
+    ExtractionConfig {
         deblend: Deblend::MultiThreshold {
             n_thresholds,
             min_contrast,
@@ -162,13 +164,13 @@ fn a_crowded_group_splits_into_every_star() {
     let pixels = field(Size2us::new(256, 256), fwhm_to_sigma(4.0), &stars, 42);
     let background = background_estimate(&pixels);
     for deblend in [
-        DetectionConfig::default().deblend,
+        ExtractionConfig::default().deblend,
         Deblend::MultiThreshold {
             n_thresholds: 32,
             min_contrast: 0.005,
         },
     ] {
-        let config = DetectionConfig {
+        let config = ExtractionConfig {
             deblend,
             ..Default::default()
         };
@@ -224,7 +226,7 @@ fn deblending_does_not_depend_on_the_sky_level() {
     let peaks = |pedestal: f32, deblend: Deblend| {
         let pixels = render(pedestal);
         let bg = background_map::uniform(size, pedestal, 0.01);
-        let config = DetectionConfig {
+        let config = ExtractionConfig {
             deblend,
             min_area: 1,
             ..Default::default()

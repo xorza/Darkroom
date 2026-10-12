@@ -6,21 +6,21 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::urect::URect;
-use crate::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::star_detection::deblend::component::Assignment;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::deblend::local_maxima::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
+use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 
 /// The default config's separation.
 fn default_separation() -> usize {
-    DetectionConfig::default().deblend_min_separation
+    ExtractionConfig::default().deblend_min_separation
 }
 
 /// The default config's prominence.
 fn default_prominence() -> f32 {
-    match DetectionConfig::default().deblend {
+    match ExtractionConfig::default().deblend {
         Deblend::LocalMaxima { min_prominence } => min_prominence,
         Deblend::MultiThreshold { .. } => unreachable!("the default deblends by local maxima"),
     }

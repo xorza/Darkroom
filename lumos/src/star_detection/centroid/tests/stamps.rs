@@ -196,7 +196,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
 fn local_annulus_needs_ten_pixels_in_the_frame() {
     let annulus = |width| {
         let residual = Buffer2::new_filled(width, 5, 0.25f32);
-        LocalBackground::measure(
+        StampBackground::measure(
             &residual,
             None,
             DVec2::splat(1.0),
@@ -227,12 +227,12 @@ fn the_annulus_reads_the_sky_around_the_star() {
     }
     for fwhm in [4.0, 20.0] {
         let grid = MeasureGrid::new(fwhm);
-        let sky = LocalBackground::measure(&residual, None, centre, grid.annulus).unwrap();
+        let sky = StampBackground::measure(&residual, None, centre, grid.annulus).unwrap();
         assert_eq!((sky.offset, sky.noise), (0.25, 0.0), "FWHM {fwhm}");
     }
     let outside = DVec2::splat(-200.0);
     assert!(
-        LocalBackground::measure(&residual, None, outside, MeasureGrid::new(4.0).annulus).is_none()
+        StampBackground::measure(&residual, None, outside, MeasureGrid::new(4.0).annulus).is_none()
     );
 }
 

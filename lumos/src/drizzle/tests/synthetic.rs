@@ -72,10 +72,13 @@ fn star_centroid(image: &Buffer2<f32>) -> DVec2 {
 }
 
 fn drizzle(frames: &DitheredFrames, config: &DrizzleConfig) -> StackProduct {
-    drizzle_images(
+    DrizzleConfig {
+        stack: plain_stack(),
+        ..config.clone()
+    }
+    .drizzle_images(
         drizzle_frames(frames.images.clone(), &frames.transforms),
-        config,
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )

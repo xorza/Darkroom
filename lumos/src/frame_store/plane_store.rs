@@ -1,12 +1,12 @@
 //! [`PlaneStore`]: where a spilled frame's planes are written.
 
+use crate::frame::frame_quality::FramePlane;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::stored_plane::StoredPlane;
 
 /// Somewhere a frame's planes go to disk and come back as memory maps: the
 /// [`DecodeCache`](crate::frame_store::decode_cache::DecodeCache)'s named files through a
-/// [`FrameSpill`](crate::frame_store::frame_spill::FrameSpill), or
+/// [`FrameSpill`](crate::frame_store::decode_cache::frame_spill::FrameSpill), or
 /// [`RunScratch`](crate::frame_store::run_scratch::RunScratch)'s files with no name at all.
 pub(crate) trait PlaneStore {
     fn store_channel(&self, channel: usize, pixels: &[f32])

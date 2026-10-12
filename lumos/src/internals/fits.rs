@@ -9,9 +9,9 @@ use fits_well::header::Header;
 use fits_well::image::Image;
 use fits_well::{FitsReader, FitsWriter};
 
-use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::image::image_provenance::TransferProvenance;
-use crate::io::image::linear::LinearImage;
+use crate::image::image_provenance::TransferProvenance;
+use crate::image::linear_image::LinearImage;
+use crate::io::fits::provenance::FitsTransferProvenance;
 
 /// Write `image` to `path` as a FITS file, with `header`'s cards when given.
 pub(crate) fn write_fits(path: &Path, image: &Image, header: Option<&Header>) {

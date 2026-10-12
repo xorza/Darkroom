@@ -4,7 +4,8 @@ use glam::DVec2;
 
 use crate::math::size2us::Size2us;
 use crate::registration::resample::source_position::SourcePosition;
-use crate::registration::transform::{TransformType, WarpTransform};
+use crate::registration::transform::TransformType;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// The source position of every pixel of one output row, evaluated once and read by every channel,
 /// the quality maps and the validity warp.
@@ -79,7 +80,8 @@ mod tests {
     use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
     use crate::registration::resample::row_positions::RowPositions;
     use crate::registration::resample::source_position::SourcePosition;
-    use crate::registration::transform::{Transform, WarpTransform};
+    use crate::registration::transform::Transform;
+    use crate::registration::transform::warp_transform::WarpTransform;
 
     /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
     /// by `SourcePosition::within`, and positions past the footprint are `None`. A SIP row sums its

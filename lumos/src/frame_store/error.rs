@@ -3,8 +3,8 @@
 use std::io;
 use std::path::PathBuf;
 
-use crate::frame_store::capture_conditions::CaptureCondition;
-use crate::io::image::error::ImageError;
+use crate::frame::capture_conditions::CaptureCondition;
+use crate::io::error::ImageError;
 
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use common::CancelToken;
 
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::image::load_context::LoadContext;
+use crate::io::load_context::LoadContext;
 use crate::memory::budget::Budget;
 use crate::memory::run_memory::RunMemory;
 
@@ -79,7 +79,7 @@ mod tests {
 
     use crate::ingest::ingest_config::IngestConfig;
     use crate::ingest::ingest_run::IngestRun;
-    use crate::io::image::fits::options::FitsNullPolicy;
+    use crate::io::fits::options::FitsNullPolicy;
     use crate::memory::budget::Budget;
     use crate::memory::run_memory::RunMemory;
 

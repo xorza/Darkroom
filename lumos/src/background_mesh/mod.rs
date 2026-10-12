@@ -1,7 +1,8 @@
-//! Shared tiled sky-background mesh estimator (SExtractor/SEP style). A [`TileGrid`] divides the
-//! image into a grid of boxes and computes one robust sky value + noise per box — per-box ±σ-clip
-//! then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew), with a
-//! 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous interpolation.
+//! Shared tiled sky-background mesh estimator (SExtractor/SEP style). A [`BackgroundMesh`] divides
+//! the image into a grid of boxes and computes one robust sky value + noise per box — per-box
+//! ±σ-clip then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew),
+//! with a 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous
+//! interpolation.
 //!
 //! The canonical robust background estimate, reused by `star_detection::background` (full-res
 //! background+noise map for detection), `background_extraction` (tile-centre samples feeding the
@@ -31,7 +32,7 @@ use std::ops::RangeInclusive;
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
-pub(crate) struct TileGrid {
+pub(crate) struct BackgroundMesh {
     pub(crate) stats: Buffer2<TileStats>,
     /// Second derivatives in Y for the natural cubic spline, both planes per tile.
     /// Layout: `tiles_x` * `tiles_y`, row-major (same as stats).
@@ -45,8 +46,8 @@ pub(crate) struct TileGrid {
     measured: Vec<bool>,
 }
 
-impl TileGrid {
-    /// Create an uninitialized `TileGrid` with preallocated buffers.
+impl BackgroundMesh {
+    /// Create an uninitialized `BackgroundMesh` with preallocated buffers.
     ///
     /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
     /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline
@@ -56,7 +57,7 @@ impl TileGrid {
     fn new_uninit(dimensions: Size2us, tile_size: usize) -> Self {
         assert!(
             dimensions.width > 0 && dimensions.height > 0 && tile_size > 0,
-            "TileGrid needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
+            "BackgroundMesh needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
             dimensions.width,
             dimensions.height
         );

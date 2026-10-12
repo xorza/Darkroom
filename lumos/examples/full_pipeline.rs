@@ -2,8 +2,8 @@
 //!
 //! Two public steps:
 //! 1. Build calibration masters from raw dark/flat/bias frames.
-//! 2. [`calibrate_align_stack`] — load each raw light → calibrate → demosaic → detect →
-//!    register → warp → stack, in a single call.
+//! 2. [`AlignStackConfig::calibrate_align_stack_paths`] — load each raw light → calibrate →
+//!    demosaic → detect → register → warp → stack, in a single call.
 //!
 //! Reads `Darks/`, `Flats/`, `Bias/`, `Lights/` subdirectories of raw frames from the bundled
 //! dataset (`test_data/lumos_data`). The stacked master is written to `test_output/`.
@@ -21,7 +21,7 @@ use std::time::Instant;
 use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    NoMasterCache, ProgressCallback, calibrate_align_stack,
+    NoMasterCache, ProgressCallback,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -44,7 +44,8 @@ fn main() {
     tracing::info!(elapsed = elapsed(step), "Step 1 complete: masters ready");
 
     // Step 2 — raw lights → calibrated, registered, stacked master, in one call.
-    // (`calibrate_align_stack` narrates its own load → detect → register → stack phases.)
+    // (`AlignStackConfig::calibrate_align_stack_paths` narrates its own load → detect → register →
+    // stack phases.)
     let light_paths =
         lumos::raw_files(&calibration_dir.join("Lights")).expect("scan raw light frames");
     assert!(!light_paths.is_empty(), "no light frames found in Lights/");
@@ -53,14 +54,15 @@ fn main() {
         "── Step 2/2: calibrate → align → stack ──"
     );
     let step = Instant::now();
-    let result = calibrate_align_stack(
-        &light_paths,
-        &masters,
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("calibrate_align_stack failed");
+    let result = AlignStackConfig::default()
+        .calibrate_align_stack_paths(
+            &light_paths,
+            &masters,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("calibrate_align_stack failed");
     tracing::info!(
         registered = result.alignment.registered(),
         total = light_paths.len(),

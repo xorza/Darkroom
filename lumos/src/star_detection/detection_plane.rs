@@ -7,11 +7,11 @@ use imaginarium::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::matched_filter;
 use crate::star_detection::median_filter::median_filter_3x3;
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// The plane the threshold and both deblenders read, with the noise measured on it: the residual
 /// of the measurement plane, median-filtered when the frame was demosaiced, then matched-filtered

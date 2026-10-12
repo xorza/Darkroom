@@ -1,14 +1,15 @@
 use crate::internals::prelude::*;
 use std::sync::Arc;
 
-use crate::io::image::cfa::CfaType;
-use crate::io::image::flat_gain::FlatGain;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::registration::registration_config::{InterpolationMethod, WarpParams};
-use crate::registration::resample;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flat_gain::FlatGain;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::registration::resample::source_image::SourceImage;
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::resample::{WarpBuffers, WarpResult};
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -46,9 +47,8 @@ fn translated_images_use_border_only_outside_source_footprint() {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
             for method in InterpolationMethod::ALL {
-                let result = resample::warp(
+                let result = transform.warp(
                     &image,
-                    &transform,
                     WarpParams {
                         method,
                         border_value: BORDER,
@@ -133,8 +133,8 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             border_value: BORDER,
             clamping_threshold: None,
         };
-        let masked = resample::warp(&fixture.declared, &transform, params);
-        let plain = resample::warp(&fixture.undeclared, &transform, params);
+        let masked = transform.warp(&fixture.declared, params);
+        let plain = transform.warp(&fixture.undeclared, params);
 
         // Every pixel the frame still supports reads the constant back to rounding: interpolating a
         // flat field over whichever taps survived is that field, so the fill never reaches the
@@ -189,8 +189,8 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
             border_value: 0.0,
             ..Default::default()
         };
-        let masked = resample::warp(&fixture.declared, &transform, params);
-        let plain = resample::warp(&fixture.undeclared, &transform, params);
+        let masked = transform.warp(&fixture.declared, params);
+        let plain = transform.warp(&fixture.undeclared, params);
         (0..dimensions.pixel_count())
             .filter(|&index| masked.coverage.pixels()[index] < plain.coverage.pixels()[index])
             .count()
@@ -221,9 +221,8 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     let mut image = LinearImage::from_pixels(dimensions, vec![3.25; dimensions.pixel_count()]);
     image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
 
-    let result = resample::warp(
+    let result = (WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)))).warp(
         &image,
-        &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
         WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: BORDER,
@@ -251,9 +250,8 @@ fn warp_refuses_a_non_finite_border() {
     // noticed only by a debug assert deep in the combine.
     let image = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![0.5; 16]);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
-    resample::warp(
+    transform.warp(
         &image,
-        &transform,
         WarpParams {
             border_value: f32::NAN,
             ..Default::default()
@@ -295,7 +293,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                         border_value: -7.0,
                         ..Default::default()
                     };
-                    let fresh = resample::warp(image, transform, params);
+                    let fresh = transform.warp(image, params);
 
                     let mut sentinel = WarpBuffers::new(dimensions);
                     for plane in sentinel.pixels.planes_mut() {
@@ -346,13 +344,13 @@ fn an_rgb_warp_is_three_mono_warps() {
             border_value: 0.0,
             ..Default::default()
         };
-        let warped = resample::warp(&rgb, &transform, params);
+        let warped = transform.warp(&rgb, params);
         for channel in 0..3 {
             let mono = LinearImage::from_pixels(
                 ImageDimensions::new((size.width, size.height), 1),
                 rgb.channel(channel).pixels().to_vec(),
             );
-            let alone = resample::warp(&mono, &transform, params);
+            let alone = transform.warp(&mono, params);
             assert_bitwise(
                 warped.image.channel(channel).pixels(),
                 alone.image.channel(0).pixels(),
@@ -419,9 +417,8 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
                 }
             })
         });
-        resample::warp(
+        WarpTransform::new(Transform::translation(shift)).warp(
             &image,
-            &WarpTransform::new(Transform::translation(shift)),
             WarpParams {
                 method: InterpolationMethod::Lanczos3,
                 border_value: 0.0,
@@ -531,11 +528,8 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
         &CfaType::Mono,
         |_| false,
     )));
-    let warped = resample::warp(
-        &image,
-        &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
-        WarpParams::default(),
-    );
+    let warped = (WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))))
+        .warp(&image, WarpParams::default());
     let gain = warped.image.metadata.flat_gain.as_ref().unwrap();
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875)] {
         let at = gain.at(0, x, 4.0);

@@ -5,9 +5,8 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::{add_star_noise, generate_random_stars};
 use crate::registration::distortion::sip::SipConfig;
-use crate::registration::ransac::config::RansacConfig;
-use crate::registration::register;
-use crate::registration::result::RegistrationError;
+use crate::registration::error::RegistrationError;
+use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::{RegistrationConfig, TransformType};
@@ -38,7 +37,9 @@ fn auto_selects_the_simplest_adequate_model() {
 
     // Rigid (rotation + translation, scale exactly 1.0) → Euclidean, NOT Similarity.
     let euclid = map_stars(&ref_stars, &about_centre(DVec2::new(40.0, -25.0), 0.8, 1.0));
-    let result = register(&ref_stars, &euclid, &config).expect("euclidean auto");
+    let result = config
+        .register(&ref_stars, &euclid)
+        .expect("euclidean auto");
     assert_eq!(
         result.transform().transform_type(),
         TransformType::Euclidean,
@@ -51,7 +52,7 @@ fn auto_selects_the_simplest_adequate_model() {
         &ref_stars,
         &about_centre(DVec2::new(30.0, -20.0), 0.5, 1.002),
     );
-    let result = register(&ref_stars, &sim, &config).expect("similarity auto");
+    let result = config.register(&ref_stars, &sim).expect("similarity auto");
     assert_eq!(
         result.transform().transform_type(),
         TransformType::Similarity,
@@ -64,7 +65,7 @@ fn auto_selects_the_simplest_adequate_model() {
         &ref_stars,
         &Transform::affine([1.003, 0.0, 20.0, 0.0, 0.998, -15.0]),
     );
-    let result = register(&ref_stars, &affine, &config).expect("affine auto");
+    let result = config.register(&ref_stars, &affine).expect("affine auto");
     assert_eq!(
         result.transform().transform_type(),
         TransformType::Affine,
@@ -77,7 +78,9 @@ fn auto_selects_the_simplest_adequate_model() {
         &ref_stars,
         &Transform::homography([1.0, 0.0, 25.0, 0.0, 1.0, -18.0, 1e-5, 5e-6]),
     );
-    let result = register(&ref_stars, &homog, &config).expect("homography auto");
+    let result = config
+        .register(&ref_stars, &homog)
+        .expect("homography auto");
     assert_eq!(
         result.transform().transform_type(),
         TransformType::Homography,
@@ -101,7 +104,7 @@ fn a_blend_buys_no_model() {
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
-    let result = register(&ref_stars, &target, &config).expect("registers");
+    let result = config.register(&ref_stars, &target).expect("registers");
     assert_eq!(
         result.transform().transform_type(),
         TransformType::Euclidean
@@ -142,7 +145,7 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
         ..Default::default()
     };
 
-    let relaxed = register(&ref_stars, &target, &config).expect("relaxed gate");
+    let relaxed = config.register(&ref_stars, &target).expect("relaxed gate");
     assert_eq!(
         relaxed.transform().transform_type(),
         TransformType::Euclidean
@@ -153,14 +156,11 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
         "the fixture must leave the Euclidean fit past the strict gate, got {euclidean_rms}"
     );
 
-    let strict = register(
-        &ref_stars,
-        &target,
-        &RegistrationConfig {
-            max_rms_error: 0.15,
-            ..config.clone()
-        },
-    )
+    let strict = (RegistrationConfig {
+        max_rms_error: 0.15,
+        ..config.clone()
+    })
+    .register(&ref_stars, &target)
     .expect("a tight gate must take the model that meets it, not fail on the one GRIC prefers");
     assert_eq!(strict.transform().transform_type(), TransformType::Affine);
     assert!(strict.rms_error() <= 1e-9, "{}", strict.rms_error());
@@ -191,14 +191,11 @@ fn a_model_that_fit_survives_another_failing() {
     };
 
     // The fixture's premise: asked for an affine map specifically, this pair cannot register.
-    let fixed = register(
-        &ref_stars,
-        &target,
-        &RegistrationConfig {
-            transform_type: TransformModel::Fixed(TransformType::Affine),
-            ..config.clone()
-        },
-    );
+    let fixed = (RegistrationConfig {
+        transform_type: TransformModel::Fixed(TransformType::Affine),
+        ..config.clone()
+    })
+    .register(&ref_stars, &target);
     assert!(
         matches!(fixed, Err(RegistrationError::InsufficientSipPoints { .. })),
         "fixture must fail on Affine to test anything, got {:?}",
@@ -206,14 +203,11 @@ fn a_model_that_fit_survives_another_failing() {
     );
 
     // `Auto` meets the same failure, and chooses among the models that fit.
-    let auto = register(
-        &ref_stars,
-        &target,
-        &RegistrationConfig {
-            transform_type: TransformModel::Auto,
-            ..config
-        },
-    )
+    let auto = (RegistrationConfig {
+        transform_type: TransformModel::Auto,
+        ..config
+    })
+    .register(&ref_stars, &target)
     .expect("a failing model must not discard the models that fit");
     assert_ne!(
         auto.transform().transform_type(),
@@ -253,7 +247,7 @@ fn every_model_failing_reports_every_reason() {
         ..Default::default()
     };
 
-    let error = register(&ref_stars, &target, &config).unwrap_err();
+    let error = config.register(&ref_stars, &target).unwrap_err();
     let RegistrationError::EveryModelFailed { failures } = &error else {
         panic!("expected every model reported, got {error}");
     };

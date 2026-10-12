@@ -9,12 +9,10 @@ use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::point_normalization::centroid;
-use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::warp;
 use crate::registration::transform::TransformModel;
-use crate::star_detection::config::Config;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 
 #[test]
 fn register_two_lights() {
@@ -37,7 +35,7 @@ fn register_two_lights() {
     );
 
     // Detect stars with precise Moffat centroids
-    let star_config = Config::precise_ground();
+    let star_config = StarDetectionConfig::precise_ground();
     let mut detector = StarDetector::from_config(star_config).unwrap();
 
     let result1 = detector.detect(&img1);
@@ -64,8 +62,9 @@ fn register_two_lights() {
         ..RegistrationConfig::default()
     };
 
-    let result =
-        register(&result1.stars, &result2.stars, &reg_config).expect("Registration should succeed");
+    let result = reg_config
+        .register(&result1.stars, &result2.stars)
+        .expect("Registration should succeed");
 
     let baseline_rms = result.rms_error();
 
@@ -135,7 +134,7 @@ fn register_two_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
-    let warped = warp(&img2, &result.warp_transform(), reg_config.warp).image;
+    let warped = result.warp_transform().warp(&img2, reg_config.warp).image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(

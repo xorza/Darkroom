@@ -1,6 +1,6 @@
 //! Which ancillary planes a combine is asked to produce.
 
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::image::image_dimensions::ImageDimensions;
 
 /// Which ancillary per-pixel planes a combine should produce.
 ///

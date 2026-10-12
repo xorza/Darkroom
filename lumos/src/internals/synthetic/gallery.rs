@@ -24,6 +24,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 
+use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::artifacts::add_cosmic_rays;
 use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
@@ -32,7 +33,6 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::internals::visual::{self, ToneMap};
-use crate::io::image::cfa::CfaType;
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {

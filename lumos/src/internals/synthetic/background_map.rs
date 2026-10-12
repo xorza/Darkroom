@@ -6,9 +6,11 @@ use crate::math::size2us::Size2us;
 use crate::star_detection::background::background_estimate::{
     BackgroundEstimate, Refinement, noise_floor_for,
 };
-use crate::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement};
 use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::background_config::{
+    BackgroundConfig, BackgroundRefinement,
+};
 use imaginarium::Buffer2;
 
 /// Create a uniform `BackgroundEstimate` with constant background and noise values.

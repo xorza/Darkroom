@@ -1,10 +1,11 @@
-//! The registered pipeline: lights from files through `calibrate_align_stack`, and lights held in
-//! memory through `align_and_stack`.
+//! The registered pipeline: lights from files through
+//! `AlignStackConfig::calibrate_align_stack_paths`, and lights held in memory through
+//! `AlignStackConfig::align_stack_images`.
 
 use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CosmicRayConfig, LinearImage, ProgressCallback,
-    Reference, RunReport, align_and_stack, calibrate_align_stack,
+    Reference, RunReport,
 };
 
 use crate::budget::Budget;
@@ -17,31 +18,29 @@ const STARS: usize = 40;
 /// A budget the lights do not fit in that holds every stage's smallest step.
 const SPILLED: Budget = Budget::kib(4608);
 
-/// `calibrate_align_stack` of `lights` mosaics of `side` under `config` at `budget`, held to it
-/// once every light registered: its report.
+/// `AlignStackConfig::calibrate_align_stack_paths` of `lights` mosaics of `side` under `config` at
+/// `budget`, held to it once every light registered: its report.
 fn mosaics(
     label: &str,
     side: usize,
     lights: usize,
     budget: Budget,
-    config: AlignStackConfig,
+    config: &AlignStackConfig,
 ) -> RunReport {
     let session = Session::new("lumos_budget_registered");
     let paths =
         StarField::new(side, STARS, 0x5EED).expose(session.scratch(), lights, Layout::Mosaic);
-    let config = AlignStackConfig {
-        ingest: session.ingest(budget),
-        ..config
-    };
+    let ingest = session.ingest(budget);
     let run = session.measure(|| {
-        calibrate_align_stack(
-            &paths,
-            &CalibrationMasters::default(),
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
+        config
+            .calibrate_align_stack_paths(
+                &paths,
+                &CalibrationMasters::default(),
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
     });
     let result = run.value;
     assert_eq!(
@@ -72,7 +71,7 @@ fn a_spilled_run_that_finds_its_reference_stays_within_its_budget() {
         SIDE,
         LIGHTS,
         SPILLED,
-        AlignStackConfig::default(),
+        &AlignStackConfig::default(),
     );
     assert_eq!(tiering(&report), (LIGHTS as u64, LIGHTS as u64, 0));
 }
@@ -85,7 +84,7 @@ fn a_spilled_run_with_a_named_reference_stays_within_its_budget() {
         reference: Reference::Index(1),
         ..AlignStackConfig::default()
     };
-    let report = mosaics("named, spilled", SIDE, LIGHTS, SPILLED, config);
+    let report = mosaics("named, spilled", SIDE, LIGHTS, SPILLED, &config);
     assert_eq!(tiering(&report), (0, LIGHTS as u64, 0));
 }
 
@@ -97,7 +96,7 @@ fn a_spilled_run_cleaned_of_cosmic_rays_stays_within_its_budget() {
         cosmic_ray: Some(CosmicRayConfig::default()),
         ..AlignStackConfig::default()
     };
-    let report = mosaics("cosmic rays, spilled", 128, 2, Budget::kib(2624), config);
+    let report = mosaics("cosmic rays, spilled", 128, 2, Budget::kib(2624), &config);
     assert_eq!(tiering(&report), (2, 2, 0));
 }
 
@@ -109,7 +108,7 @@ fn a_resident_run_stays_within_its_budget() {
         SIDE,
         LIGHTS,
         Budget::mib(32),
-        AlignStackConfig::default(),
+        &AlignStackConfig::default(),
     );
     assert_eq!(tiering(&report), (0, 0, 0));
 }
@@ -120,20 +119,18 @@ fn a_resident_run_stays_within_its_budget() {
 fn held_lights_add_no_more_than_the_budget() {
     let session = Session::new("lumos_budget_held");
     let budget = Budget::mib(16);
-    let config = AlignStackConfig {
-        ingest: session.ingest(budget),
-        ..AlignStackConfig::default()
-    };
+    let ingest = session.ingest(budget);
     let field = StarField::new(SIDE, STARS, 0x5EED);
     let lights: Vec<LinearImage> = (0..LIGHTS).map(|index| field.frame(index)).collect();
     let run = session.measure(|| {
-        align_and_stack(
-            lights,
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
+        AlignStackConfig::default()
+            .align_stack_images(
+                lights,
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
     });
     assert_eq!(run.value.alignment.registered(), LIGHTS);
     budget.assert_held("held", run.peak_bytes, &run.value.product.report);

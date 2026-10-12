@@ -1,15 +1,15 @@
 //! [`DrizzleShape`]: what a drizzle run holds, and the tier its drizzled frames live in.
 
-use crate::combine::cache::slots::Slots;
-use crate::combine::config::StackConfig;
+use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SetCoverage};
+use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::frame_store::tier::Tier;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::image::image_dimensions::ImageDimensions;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
@@ -145,10 +145,10 @@ impl DrizzleShape {
 
 #[cfg(test)]
 mod tests {
-    use crate::combine::config::{Normalization, StackConfig};
+    use crate::combine::stack_config::{Normalization, StackConfig};
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
-    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::image::image_dimensions::ImageDimensions;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
 

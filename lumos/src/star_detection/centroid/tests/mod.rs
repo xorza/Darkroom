@@ -18,12 +18,12 @@ use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::centroid::*;
-use crate::star_detection::config::Config;
-use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::config::detection_config::DetectionConfig;
-use crate::star_detection::config::measurement_config::MeasurementConfig;
 use crate::star_detection::deblend::region::Region;
-use crate::star_detection::detector::stages::detect::internals::detect_stars_test;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
+use crate::star_detection::star_detection_config::measurement_config::MeasurementConfig;
+use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 
 /// The FWHM most fixtures here are built at: σ = 2.5 → 2.3548 · 2.5 = 5.887.
 const TEST_EXPECTED_FWHM: f32 = 5.9;

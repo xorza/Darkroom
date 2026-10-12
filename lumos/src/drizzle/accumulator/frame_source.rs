@@ -10,12 +10,14 @@ use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
 use crate::drizzle::accumulator::input_map::InputMap;
 use crate::drizzle::deposit::Deposit;
-use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::frame::stackable_image::StackableImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.
@@ -392,8 +394,8 @@ pub(crate) mod internals {
 
     use crate::drizzle::accumulator::frame_source::FrameSource;
     use crate::drizzle::deposit::Deposit;
-    use crate::io::image::linear::LinearImage;
-    use crate::registration::transform::WarpTransform;
+    use crate::image::linear_image::LinearImage;
+    use crate::registration::transform::warp_transform::WarpTransform;
 
     /// The input rows a band covering `rows` would scan, each with its columns, without running a
     /// drizzle to find out.

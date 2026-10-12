@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
 #[cfg(feature = "real-data")]
-use crate::io::image::linear::LinearImage;
+use crate::image::linear_image::LinearImage;
 use crate::{
     internals::synthetic::observe::ObservedSource,
     internals::visual::comparison::create_comparison_image, math::size2us::Size2us,
