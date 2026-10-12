@@ -580,7 +580,7 @@ fn sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
     let mut heap_scratch: Vec<f32> = Vec::new();
     let heap = ClippedStats::sigma_clipped(&mut heap_values, &mut heap_scratch, 3.0, 3);
 
-    let mut stack_values = base.clone();
+    let mut stack_values = base;
     let mut stack_scratch: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
     let stack = ClippedStats::sigma_clipped(&mut stack_values, &mut stack_scratch, 3.0, 3);
 
@@ -624,7 +624,7 @@ fn sigma_clipped_stats_iterations_improve_result() {
     };
 
     let mut values_0iter = base_values.clone();
-    let mut values_3iter = base_values.clone();
+    let mut values_3iter = base_values;
     let mut deviations: Vec<f32> = vec![];
 
     let ClippedStats {

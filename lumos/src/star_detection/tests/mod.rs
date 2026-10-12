@@ -176,7 +176,7 @@ impl Scenario {
             ),
         };
         let camera = Camera {
-            psf: self.psf.unwrap_or(PsfModel::gaussian(self.fwhm)),
+            psf: self.psf.unwrap_or_else(|| PsfModel::gaussian(self.fwhm)),
             full_well_e: self.full_well_e,
             read_noise_e: self.read_noise_e,
             ..Camera::realistic(self.fwhm)

@@ -533,7 +533,7 @@ impl RuntimeCache {
         mem::swap(&mut self.fs_paths, &mut self.previous_fs_paths);
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
-        let _ = self.identify(program, executing, cancel).await;
+        self.identify(program, executing, cancel).await.ok();
     }
 
     /// Identify every path `nodes` reads, in one off-thread pass: queue, then
@@ -662,10 +662,10 @@ impl RuntimeCache {
     /// under it — however the value came to be resident.
     /// Disk reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
     /// [`DiskStore::blob_target`]) and is answered from the blob header alone.
-    ///
-    /// Takes `&mut self` without mutating anything: the slots hold `Send`-but-not-`Sync`
-    /// node state, so a *shared* cache borrow held across this await would make the whole
-    /// worker future non-`Send`.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "the slots are not `Sync`, so a shared borrow across the await is not `Send`"
+    )]
     pub(crate) async fn probe_reuse(
         &mut self,
         program: &CompiledGraph,
@@ -946,7 +946,7 @@ pub(crate) mod internals {
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
         pub(crate) fn prepare_node_blocking(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
-            let _ = self.prepare_nodes_blocking(program, [node_idx]);
+            self.prepare_nodes_blocking(program, [node_idx]).ok();
         }
 
         /// [`RuntimeCache::prepare`]'s batching on this thread: every node's

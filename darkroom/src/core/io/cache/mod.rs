@@ -37,7 +37,7 @@ pub(crate) fn prepare_cache_root(root: &Path) {
     }
     let gitignore = root.join(".gitignore");
     if !gitignore.exists() {
-        let _ = file_utils::publish_bytes(&gitignore, b"*\n", file_utils::PublicationMode::Cache);
+        file_utils::publish_bytes(&gitignore, b"*\n", file_utils::PublicationMode::Cache).ok();
     }
 }
 

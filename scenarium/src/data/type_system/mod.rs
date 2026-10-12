@@ -76,41 +76,41 @@ impl DataType {
     /// out which literals describe no type of their own and why. The match is
     /// deliberately exhaustive: a new [`ConstValue`] variant must fail to
     /// compile here rather than fall into `Any` unexamined.
-    pub(crate) fn or_const_type(self, value: &ConstValue) -> DataType {
-        if !matches!(self, DataType::Any) {
+    pub(crate) fn or_const_type(self, value: &ConstValue) -> Self {
+        if !matches!(self, Self::Any) {
             return self;
         }
         match value {
-            ConstValue::Float(_) => DataType::Float,
-            ConstValue::Int(_) => DataType::Int,
-            ConstValue::Bool(_) => DataType::Bool,
-            ConstValue::String(_) => DataType::String,
+            ConstValue::Float(_) => Self::Float,
+            ConstValue::Int(_) => Self::Int,
+            ConstValue::Bool(_) => Self::Bool,
+            ConstValue::String(_) => Self::String,
             // Null is typeless by nature — there is no type it could report.
-            ConstValue::Null => DataType::Any,
+            ConstValue::Null => Self::Any,
             // A path literal is a bare string; [`DataType::FsPath`] needs the
             // mode and extension list, which only a declaration carries.
-            ConstValue::FsPath(_) | ConstValue::FsPaths(_) => DataType::Any,
+            ConstValue::FsPath(_) | ConstValue::FsPaths(_) => Self::Any,
             // An enum literal is a variant *name*; [`DataType::Enum`] needs the
             // enum's `TypeId`, which a name cannot supply. The same asymmetry
             // [`Self::default_value`] hits in the other direction.
-            ConstValue::Enum(_) => DataType::Any,
+            ConstValue::Enum(_) => Self::Any,
         }
     }
 
     pub fn default_value(&self) -> Option<ConstValue> {
         Some(match self {
-            DataType::Any => ConstValue::Null,
-            DataType::Float => ConstValue::Float(0.0),
-            DataType::Int => ConstValue::Int(0),
-            DataType::Bool => ConstValue::Bool(false),
-            DataType::String => ConstValue::String(String::new()),
-            DataType::FsPath(config) => match config.mode {
+            Self::Any => ConstValue::Null,
+            Self::Float => ConstValue::Float(0.0),
+            Self::Int => ConstValue::Int(0),
+            Self::Bool => ConstValue::Bool(false),
+            Self::String => ConstValue::String(String::new()),
+            Self::FsPath(config) => match config.mode {
                 FsPathMode::ExistingFiles => ConstValue::FsPaths(Vec::new()),
                 FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
                     ConstValue::FsPath(String::new())
                 }
             },
-            DataType::Custom(_) | DataType::Enum(_) => return None,
+            Self::Custom(_) | Self::Enum(_) => return None,
         })
     }
 
@@ -123,8 +123,8 @@ impl DataType {
     /// is `accepts_const`, which reads the same class
     /// off the value side — so wiring and constants are exactly as permissive
     /// as what executes.
-    pub fn compatible_with(&self, source: &DataType) -> bool {
-        if matches!(self, DataType::Any) || matches!(source, DataType::Any) {
+    pub fn compatible_with(&self, source: &Self) -> bool {
+        if matches!(self, Self::Any) || matches!(source, Self::Any) {
             return true;
         }
         if self.is_numeric_scalar() && source.is_numeric_scalar() {
@@ -139,7 +139,7 @@ impl DataType {
     /// convert freely between them — `Bool` reads as `0`/`1`, `Float` truncates to int, any nonzero
     /// reads as `true`. [`ConstValue::is_numeric_scalar`] is the same class on the value side.
     const fn is_numeric_scalar(&self) -> bool {
-        matches!(self, DataType::Float | DataType::Int | DataType::Bool)
+        matches!(self, Self::Float | Self::Int | Self::Bool)
     }
 
     /// Whether `value` is a well-formed literal for a port declared `self` —
@@ -168,27 +168,27 @@ impl DataType {
         enum_variant: impl FnOnce(TypeId, &str) -> bool,
     ) -> bool {
         match self {
-            DataType::Any => true,
-            DataType::Float | DataType::Int | DataType::Bool => match strictness {
+            Self::Any => true,
+            Self::Float | Self::Int | Self::Bool => match strictness {
                 Strictness::Authored => value.is_numeric_scalar(),
                 Strictness::Declared => matches!(
                     (self, value),
-                    (DataType::Float, ConstValue::Float(_))
-                        | (DataType::Int, ConstValue::Int(_))
-                        | (DataType::Bool, ConstValue::Bool(_))
+                    (Self::Float, ConstValue::Float(_))
+                        | (Self::Int, ConstValue::Int(_))
+                        | (Self::Bool, ConstValue::Bool(_))
                 ),
             },
-            DataType::String => matches!(value, ConstValue::String(_)),
-            DataType::FsPath(config) => match config.mode {
+            Self::String => matches!(value, ConstValue::String(_)),
+            Self::FsPath(config) => match config.mode {
                 FsPathMode::ExistingFiles => matches!(value, ConstValue::FsPaths(_)),
                 FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
                     matches!(value, ConstValue::FsPath(_))
                 }
             },
-            DataType::Enum(type_id) => {
+            Self::Enum(type_id) => {
                 matches!(value, ConstValue::Enum(name) if enum_variant(*type_id, name))
             }
-            DataType::Custom(_) => false,
+            Self::Custom(_) => false,
         }
     }
 }

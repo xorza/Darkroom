@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::ops::Range;
 
-use fits_well::image::BorrowedImage;
+use fits_well::image::Borrowed as FitsBorrowed;
 use fits_well::io::{ChecksumReport, DataChecksum, StreamReader};
 
 /// One image HDU of an open file, read a section at a time into a borrowed view: plain samples
@@ -54,7 +54,7 @@ impl<'r> HduSections<'r> {
     pub(super) fn read_section(
         &mut self,
         ranges: &[Range<usize>],
-    ) -> fits_well::Result<BorrowedImage<'_>> {
+    ) -> fits_well::Result<FitsBorrowed<'_>> {
         match &mut self.sum {
             Some(sum) => {
                 self.reader

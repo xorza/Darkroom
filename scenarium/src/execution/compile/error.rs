@@ -78,9 +78,9 @@ impl Display for PortPool {
     /// Lowercase, so it reads inside the sentences above.
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            PortPool::Input => "input",
-            PortPool::Output => "output",
-            PortPool::Event => "event",
+            Self::Input => "input",
+            Self::Output => "output",
+            Self::Event => "event",
         })
     }
 }

@@ -34,7 +34,7 @@ impl SpecialNode {
     /// behavior), validation (port arity), and the editor (rendering + the node menu).
     pub fn func(self) -> &'static Func {
         match self {
-            SpecialNode::RunSinks => run_sinks_func(),
+            Self::RunSinks => run_sinks_func(),
         }
     }
 }

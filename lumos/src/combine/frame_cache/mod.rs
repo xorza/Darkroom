@@ -133,15 +133,21 @@ impl FrameCache {
         for (index, frame) in frames.iter().enumerate() {
             Cancelled::check(&core.cancel)?;
             facts.admit(index, &frame.source_stats.facts)?;
-            debug_assert!(
-                FrameCheck {
-                    index,
-                    cancel: &CancelToken::never(),
-                }
-                .stored(frame, core.dimensions, &mut SetFacts::default())
-                .is_ok(),
-                "stored frame {index} breaks the pipeline's own frame contract"
-            );
+            #[expect(
+                clippy::debug_assert_with_mut_call,
+                reason = "the facts it writes are a fresh set the check owns"
+            )]
+            {
+                debug_assert!(
+                    FrameCheck {
+                        index,
+                        cancel: &CancelToken::never(),
+                    }
+                    .stored(frame, core.dimensions, &mut SetFacts::default())
+                    .is_ok(),
+                    "stored frame {index} breaks the pipeline's own frame contract"
+                );
+            }
         }
         let slots = Slots::of_frames(&frames, core.dimensions);
         let frame_norms =

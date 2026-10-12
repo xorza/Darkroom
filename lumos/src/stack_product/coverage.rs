@@ -34,10 +34,8 @@ impl Coverage {
     /// it when a plane is genuinely what is wanted.
     pub fn to_plane(&self, channel: usize) -> Buffer2<f32> {
         match self {
-            Coverage::Uniform { value, size } => {
-                Buffer2::new_filled(size.width, size.height, *value)
-            }
-            Coverage::PerPixel(map) => map.channel(channel).clone(),
+            Self::Uniform { value, size } => Buffer2::new_filled(size.width, size.height, *value),
+            Self::PerPixel(map) => map.channel(channel).clone(),
         }
     }
 }
@@ -64,8 +62,8 @@ pub(crate) mod internals {
         /// The measured planes, or `None` when coverage is uniform and no plane exists.
         pub(crate) const fn per_pixel(&self) -> Option<&QualityMap> {
             match self {
-                Coverage::Uniform { .. } => None,
-                Coverage::PerPixel(map) => Some(map),
+                Self::Uniform { .. } => None,
+                Self::PerPixel(map) => Some(map),
             }
         }
 
@@ -75,9 +73,9 @@ pub(crate) mod internals {
         /// For a coverage per channel, which has no one plane to read.
         fn shared(&self, read: impl FnOnce(&Buffer2<f32>) -> &f32) -> &f32 {
             match self {
-                Coverage::Uniform { value, .. } => value,
-                Coverage::PerPixel(QualityMap::Shared(plane)) => read(plane),
-                Coverage::PerPixel(QualityMap::PerChannel(_)) => {
+                Self::Uniform { value, .. } => value,
+                Self::PerPixel(QualityMap::Shared(plane)) => read(plane),
+                Self::PerPixel(QualityMap::PerChannel(_)) => {
                     panic!("a coverage per channel has no one plane to index")
                 }
             }

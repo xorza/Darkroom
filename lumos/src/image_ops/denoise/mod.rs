@@ -50,14 +50,14 @@ impl Threshold {
     #[inline]
     fn apply(self, w: f32, t: f32) -> f32 {
         match self {
-            Threshold::Hard => {
+            Self::Hard => {
                 if w.abs() >= t {
                     w
                 } else {
                     0.0
                 }
             }
-            Threshold::Soft => {
+            Self::Soft => {
                 let shrunk = w.abs() - t;
                 if shrunk > 0.0 {
                     w.signum() * shrunk

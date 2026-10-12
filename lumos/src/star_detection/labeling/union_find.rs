@@ -67,12 +67,14 @@ impl UnionFind {
             // `parent <= label`; only non-roots are rewritten, so it never races `union`'s CAS on a
             // root. A lost exchange leaves the longer path, which is still correct.
             if grandparent != parent {
-                let _ = self.parent_of(current).compare_exchange_weak(
-                    parent,
-                    grandparent,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                );
+                self.parent_of(current)
+                    .compare_exchange_weak(
+                        parent,
+                        grandparent,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .ok();
             }
             current = grandparent;
         }

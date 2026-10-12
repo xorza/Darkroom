@@ -100,8 +100,8 @@ pub(crate) struct ScalarSimd {
 
 impl ScalarSimd {
     /// Outputs whose error is measured against each element's own size, floored at 1.
-    pub(crate) fn new(scalar: Vec<f32>, simd: Vec<f32>) -> ScalarSimd {
-        ScalarSimd {
+    pub(crate) fn new(scalar: Vec<f32>, simd: Vec<f32>) -> Self {
+        Self {
             scalar,
             simd,
             magnitude: Vec::new(),
@@ -114,9 +114,9 @@ impl ScalarSimd {
     /// terms (Higham, *Accuracy and Stability of Numerical Algorithms*, §3.1), however far the
     /// terms cancel. Measured against `Σ|tᵢ|` rather than against the result, the tolerance can be
     /// that bound.
-    pub(crate) fn of_sums(scalar: Vec<f32>, simd: Vec<f32>, magnitude: Vec<f32>) -> ScalarSimd {
+    pub(crate) fn of_sums(scalar: Vec<f32>, simd: Vec<f32>, magnitude: Vec<f32>) -> Self {
         assert_eq!(magnitude.len(), scalar.len(), "one magnitude per element");
-        ScalarSimd {
+        Self {
             scalar,
             simd,
             magnitude,
@@ -125,9 +125,9 @@ impl ScalarSimd {
 
     /// Outputs whose error is measured purely relative to the scalar value, with no absolute
     /// floor: a zero must stay exactly zero.
-    pub(crate) fn relative(scalar: Vec<f32>, simd: Vec<f32>) -> ScalarSimd {
+    pub(crate) fn relative(scalar: Vec<f32>, simd: Vec<f32>) -> Self {
         let magnitude = scalar.iter().map(|value| value.abs()).collect();
-        ScalarSimd::of_sums(scalar, simd, magnitude)
+        Self::of_sums(scalar, simd, magnitude)
     }
 
     fn agree(&self, i: usize, tol: f64) -> bool {

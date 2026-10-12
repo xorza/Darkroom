@@ -239,7 +239,6 @@ impl Rejection {
             values,
             weights,
             noise,
-            ..
         } = samples;
         debug_assert_eq!(values.len(), weights.len());
         if matches!(self, Self::None) || values.len() <= min_survivors {

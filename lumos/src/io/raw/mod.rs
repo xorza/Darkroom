@@ -74,7 +74,7 @@ fn camera_white_balance(
 /// for each of the 8 × 2 positions of its repeating block.
 #[inline(always)]
 pub(crate) const fn libraw_filter_color(filters: u32, row: usize, col: usize) -> usize {
-    ((filters >> (((row << 1 & 0xE) | (col & 1)) << 1)) & 3) as usize
+    ((filters >> ((((row << 1) & 0xE) | (col & 1)) << 1)) & 3) as usize
 }
 
 /// `c_char` is `i8` on some targets and `u8` on others; the byte value is what LibRaw stores.

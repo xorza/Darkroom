@@ -13,7 +13,7 @@ use crate::image::image_dimensions::ImageDimensions;
 /// The mismatches that genuinely aren't this keep a typed variant on their module's error: a stored
 /// plane knows only its length, a pixel-weight map has no channels, and a calibration master is
 /// measured against the sensor rather than against frame 0.
-#[derive(Debug, Clone, Copy, PartialEq, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("frame {index} is {actual}, expected {expected}")]
 pub struct FrameDimensionMismatch {
     /// Position of the offending frame in the input set.

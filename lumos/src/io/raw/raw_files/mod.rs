@@ -37,6 +37,10 @@ pub fn raw_files(dir: &Path) -> Result<Vec<PathBuf>, RawScanError> {
         if !is_raw {
             continue;
         }
+        #[expect(
+            clippy::filetype_is_file,
+            reason = "a raw file is a regular file, and a fifo or a device is not one"
+        )]
         let examined = entry.file_type().and_then(|file_type| {
             if file_type.is_symlink() {
                 fs::metadata(&path).map(|metadata| metadata.is_file())

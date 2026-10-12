@@ -52,7 +52,7 @@ pub(crate) struct ClippedStats {
 }
 
 impl ClippedStats {
-    const ZERO: ClippedStats = ClippedStats {
+    const ZERO: Self = Self {
         median: 0.0,
         sigma: 0.0,
         mean: 0.0,
@@ -83,7 +83,7 @@ impl ClippedStats {
         iterations: usize,
     ) -> Self {
         if values.is_empty() {
-            return ClippedStats::ZERO;
+            return Self::ZERO;
         }
         debug_assert!(
             !values.iter().any(|value| value.is_nan()),

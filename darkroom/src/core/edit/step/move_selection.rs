@@ -44,10 +44,16 @@ impl MoveSelection {
                 moved.pos.to = update.pos.to;
             }
         }
-        debug_assert!(
-            later.next().is_none(),
-            "a later frame of a drag moved a member the drag did not start with"
-        );
+        #[expect(
+            clippy::debug_assert_with_mut_call,
+            reason = "nothing reads `later` after the check"
+        )]
+        {
+            debug_assert!(
+                later.next().is_none(),
+                "a later frame of a drag moved a member the drag did not start with"
+            );
+        }
     }
 }
 

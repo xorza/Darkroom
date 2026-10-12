@@ -123,7 +123,7 @@ pub(crate) fn stack_cfa_master(
     };
     let step = subtraction
         .as_ref()
-        .map(|step| step as &dyn FrameStep<CfaImage, Error = SubtractionError>);
+        .map(|step| -> &dyn FrameStep<CfaImage, Error = SubtractionError> { step });
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
         let cache = FrameCache::from_cfa_paths(paths, &config, run, step, progress)?;
         if role.is_dark() {
@@ -644,7 +644,7 @@ impl CalibrationMasters {
                 map,
                 scale: outcome
                     .dark_scale
-                    .map_or(matched.factor(), |scale| scale.factor),
+                    .map_or_else(|| matched.factor(), |scale| scale.factor),
             }),
             flat: self.flat.as_ref().map(|flat| flat.divisor().data.pixels()),
             imposed: self.imposed.as_ref(),

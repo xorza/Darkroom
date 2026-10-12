@@ -1649,13 +1649,13 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
     let mut light = make_cfa(size, vec![0.5, 0.92, 0.5, 0.5], CfaType::Mono);
     flat.calibrate(&mut light).unwrap();
     assert_eq!(light.data.pixels()[1], 0.92f32 / 0.9);
-    assert_eq!(saturated(&light), [] as [usize; 0]);
+    assert_eq!(saturated(&light), Vec::<usize>::new());
     assert!(light.metadata.saturation_flagged);
 
     let mut decoded = make_cfa(size, vec![0.5, 0.5, 0.97, 0.5], CfaType::Mono);
     decoded.metadata.saturation_flagged = true;
     dark.calibrate(&mut decoded).unwrap();
-    assert_eq!(saturated(&decoded), [] as [usize; 0]);
+    assert_eq!(saturated(&decoded), Vec::<usize>::new());
 }
 
 /// A dark is matched to the light. Lights of 300 s at 0.5, a bias of 0.125 and a dark

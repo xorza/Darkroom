@@ -14,6 +14,11 @@
 //! from the live delegate rather than looked up by name, so nothing here
 //! depends on the private symbol `WinitApplicationDelegate`.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "the IMP the runtime calls is a bare fn pointer, with no user data to carry the sink"
+)]
+
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::ptr;

@@ -12,7 +12,7 @@ use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::internals::calls::Calls;
 use crate::internals::engine::{ReportedRun, RunOutcome, TestEngine};
-use crate::internals::graph::{NodeSpec, TestGraph};
+use crate::internals::test_graph::{NodeSpec, TestGraph};
 use crate::library::Library;
 use crate::{ConstValue, DataType, DynamicValue};
 use common::CancelToken;

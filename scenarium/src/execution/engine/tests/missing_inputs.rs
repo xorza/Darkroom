@@ -94,7 +94,7 @@ async fn optional_bind_to_gated_upstream_is_gated() {
     assert_eq!(run.missing_inputs(), ["Print", "mult", "sum"]);
     assert_eq!(
         run.ran(),
-        [] as [&str; 0],
+        Vec::<&str>::new(),
         "the gated chain never runs, so it never reads sum's absent output — \
          and `get_b`, whose only consumer is gated, is cut with it"
     );

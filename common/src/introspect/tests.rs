@@ -19,15 +19,15 @@ impl IntrospectEnum for Mode {
 
     fn to_variant(&self) -> &'static str {
         match self {
-            Mode::Fast => "fast",
-            Mode::Slow => "slow",
+            Self::Fast => "fast",
+            Self::Slow => "slow",
         }
     }
 
     fn from_variant(name: &str) -> Option<Self> {
         match name {
-            "fast" => Some(Mode::Fast),
-            "slow" => Some(Mode::Slow),
+            "fast" => Some(Self::Fast),
+            "slow" => Some(Self::Slow),
             _ => None,
         }
     }

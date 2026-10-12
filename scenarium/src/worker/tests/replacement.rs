@@ -1,5 +1,5 @@
 use super::*;
-use crate::internals::graph::NodeSpec;
+use crate::internals::test_graph::NodeSpec;
 
 /// A run seeded with an event the *replacing* program no longer holds is
 /// refused, and the worker carries on with the new program.

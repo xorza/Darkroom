@@ -31,12 +31,12 @@ pub(crate) struct Compiled {
 impl Compiled {
     /// Wrap a lowered program, deriving the reverse name map so it cannot drift
     /// from the ids it inverts.
-    pub(super) fn new(program: CompiledGraph, ids: HashMap<String, NodeId>) -> Compiled {
+    pub(super) fn new(program: CompiledGraph, ids: HashMap<String, NodeId>) -> Self {
         let names = ids
             .iter()
             .map(|(name, node_id)| (*node_id, name.clone()))
             .collect();
-        Compiled {
+        Self {
             program,
             ids,
             names,

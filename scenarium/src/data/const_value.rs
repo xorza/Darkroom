@@ -21,16 +21,14 @@ pub enum ConstValue {
 impl PartialEq for ConstValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ConstValue::Null, ConstValue::Null) => true,
-            (ConstValue::Float(left), ConstValue::Float(right)) => {
-                left.to_bits() == right.to_bits()
-            }
-            (ConstValue::Int(left), ConstValue::Int(right)) => left == right,
-            (ConstValue::Bool(left), ConstValue::Bool(right)) => left == right,
-            (ConstValue::String(left), ConstValue::String(right)) => left == right,
-            (ConstValue::FsPath(left), ConstValue::FsPath(right)) => left == right,
-            (ConstValue::FsPaths(left), ConstValue::FsPaths(right)) => left == right,
-            (ConstValue::Enum(left), ConstValue::Enum(right)) => left == right,
+            (Self::Null, Self::Null) => true,
+            (Self::Float(left), Self::Float(right)) => left.to_bits() == right.to_bits(),
+            (Self::Int(left), Self::Int(right)) => left == right,
+            (Self::Bool(left), Self::Bool(right)) => left == right,
+            (Self::String(left), Self::String(right)) => left == right,
+            (Self::FsPath(left), Self::FsPath(right)) => left == right,
+            (Self::FsPaths(left), Self::FsPaths(right)) => left == right,
+            (Self::Enum(left), Self::Enum(right)) => left == right,
             _ => false,
         }
     }
@@ -46,26 +44,23 @@ impl ConstValue {
     /// [`DataType::accepts_const`](crate::DataType) reads this one to hold a
     /// literal to exactly what a runtime read of it would accept.
     pub(crate) const fn is_numeric_scalar(&self) -> bool {
-        matches!(
-            self,
-            ConstValue::Float(_) | ConstValue::Int(_) | ConstValue::Bool(_)
-        )
+        matches!(self, Self::Float(_) | Self::Int(_) | Self::Bool(_))
     }
 
     pub fn as_f64(&self) -> Option<f64> {
         match self {
-            ConstValue::Float(value) => Some(*value),
-            ConstValue::Int(value) => Some(*value as f64),
-            ConstValue::Bool(value) => Some(i64::from(*value) as f64),
+            Self::Float(value) => Some(*value),
+            Self::Int(value) => Some(*value as f64),
+            Self::Bool(value) => Some(i64::from(*value) as f64),
             _ => None,
         }
     }
 
     pub fn as_i64(&self) -> Option<i64> {
         match self {
-            ConstValue::Int(value) => Some(*value),
-            ConstValue::Float(value) => Some(*value as i64),
-            ConstValue::Bool(value) => Some(i64::from(*value)),
+            Self::Int(value) => Some(*value),
+            Self::Float(value) => Some(*value as i64),
+            Self::Bool(value) => Some(i64::from(*value)),
             _ => None,
         }
     }
@@ -81,30 +76,30 @@ impl ConstValue {
     /// as `false`. NaN is not zero and so reads as `true`.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
-            ConstValue::Bool(value) => Some(*value),
-            ConstValue::Int(value) => Some(*value != 0),
-            ConstValue::Float(value) => Some(*value != 0.0),
+            Self::Bool(value) => Some(*value),
+            Self::Int(value) => Some(*value != 0),
+            Self::Float(value) => Some(*value != 0.0),
             _ => None,
         }
     }
 
     pub fn as_string(&self) -> Option<&str> {
         match self {
-            ConstValue::String(value) => Some(value),
+            Self::String(value) => Some(value),
             _ => None,
         }
     }
 
     pub fn as_enum(&self) -> Option<&str> {
         match self {
-            ConstValue::Enum(variant) => Some(variant),
+            Self::Enum(variant) => Some(variant),
             _ => None,
         }
     }
 
     pub fn as_fs_path(&self) -> Option<&str> {
         match self {
-            ConstValue::FsPath(path) => Some(path),
+            Self::FsPath(path) => Some(path),
             _ => None,
         }
     }
@@ -114,8 +109,8 @@ impl ConstValue {
     /// selection never has to special-case the singular form.
     pub fn as_fs_paths(&self) -> Option<&[String]> {
         match self {
-            ConstValue::FsPath(path) => Some(slice::from_ref(path)),
-            ConstValue::FsPaths(paths) => Some(paths),
+            Self::FsPath(path) => Some(slice::from_ref(path)),
+            Self::FsPaths(paths) => Some(paths),
             _ => None,
         }
     }
@@ -167,57 +162,57 @@ impl Display for ValueText<'_> {
 impl Display for ConstValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ConstValue::Null => write!(f, "null"),
-            ConstValue::Float(value) => write!(f, "{value:.4}"),
-            ConstValue::Int(value) => write!(f, "{value}"),
-            ConstValue::Bool(value) => write!(f, "{value}"),
-            ConstValue::String(value) => write!(f, "\"{value}\""),
-            ConstValue::FsPath(path) => write!(f, "\"{path}\""),
-            ConstValue::FsPaths(paths) => write!(f, "{} paths", paths.len()),
-            ConstValue::Enum(variant) => write!(f, "{variant}"),
+            Self::Null => write!(f, "null"),
+            Self::Float(value) => write!(f, "{value:.4}"),
+            Self::Int(value) => write!(f, "{value}"),
+            Self::Bool(value) => write!(f, "{value}"),
+            Self::String(value) => write!(f, "\"{value}\""),
+            Self::FsPath(path) => write!(f, "\"{path}\""),
+            Self::FsPaths(paths) => write!(f, "{} paths", paths.len()),
+            Self::Enum(variant) => write!(f, "{variant}"),
         }
     }
 }
 
 impl From<i64> for ConstValue {
     fn from(value: i64) -> Self {
-        ConstValue::Int(value)
+        Self::Int(value)
     }
 }
 
 impl From<i32> for ConstValue {
     fn from(value: i32) -> Self {
-        ConstValue::Int(i64::from(value))
+        Self::Int(i64::from(value))
     }
 }
 
 impl From<f32> for ConstValue {
     fn from(value: f32) -> Self {
-        ConstValue::Float(f64::from(value))
+        Self::Float(f64::from(value))
     }
 }
 
 impl From<f64> for ConstValue {
     fn from(value: f64) -> Self {
-        ConstValue::Float(value)
+        Self::Float(value)
     }
 }
 
 impl From<&str> for ConstValue {
     fn from(value: &str) -> Self {
-        ConstValue::String(value.to_string())
+        Self::String(value.to_string())
     }
 }
 
 impl From<String> for ConstValue {
     fn from(value: String) -> Self {
-        ConstValue::String(value)
+        Self::String(value)
     }
 }
 
 impl From<bool> for ConstValue {
     fn from(value: bool) -> Self {
-        ConstValue::Bool(value)
+        Self::Bool(value)
     }
 }
 

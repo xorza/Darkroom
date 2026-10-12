@@ -112,7 +112,7 @@ impl MainWindow {
         cx: WindowCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
-        let MainWindow {
+        let Self {
             graph_ui,
             output_types,
             ..
@@ -149,7 +149,7 @@ impl MainWindow {
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
         let chrome = app.theme().colors.chrome_fill;
-        let MainWindow {
+        let Self {
             graph_ui,
             image_viewers,
             dock_ops,

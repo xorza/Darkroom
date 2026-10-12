@@ -18,8 +18,8 @@ struct WatchNode {
 }
 
 impl WatchNode {
-    fn new() -> WatchNode {
-        WatchNode {
+    fn new() -> Self {
+        Self {
             func: fs_watch_library()
                 .by_name("Watch Directory")
                 .unwrap()
@@ -268,7 +268,9 @@ async fn watcher_signals_on_content_change() {
 
     // Absorb any spurious event from creating the directory itself, so the
     // assertion below measures the file write specifically.
-    let _ = timeout(Duration::from_millis(300), signal.notified()).await;
+    timeout(Duration::from_millis(300), signal.notified())
+        .await
+        .ok();
 
     fs::write(dir.join("new.txt"), b"hello").unwrap();
 

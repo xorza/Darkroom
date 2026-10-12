@@ -6,6 +6,13 @@ allowed-wildcard-imports = ["x86_64", "aarch64", "arch"]
 # what a gated field or statement uses instead of a cfg'd import.
 absolute-paths-allowed-crates = ["std", "core", "alloc"]
 
+# State lives on an owner. A `thread_local!` that the outside world forces gets an `expect`
+# saying so. The ban names the `LocalKey` the macro makes: clippy reads a lint level for an
+# item-position macro at the crate root alone, so an `expect` on its module would not apply.
+disallowed-types = [
+    { path = "std::thread::LocalKey", reason = "state lives on an owner and travels by parameter" },
+]
+
 # A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
 # policy every case shares; `Scale::apply` alone calls these.
 disallowed-methods = [

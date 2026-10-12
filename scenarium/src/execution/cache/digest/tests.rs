@@ -265,7 +265,7 @@ fn fs_path_folds_file_identity_and_path() {
         .const_input(ConstValue::FsPath(String::new()))
         .add();
     let real_node = pure(&mut batch, 12, 1)
-        .const_input(ConstValue::FsPath(path.clone()))
+        .const_input(ConstValue::FsPath(path))
         .add();
     let batched = batch.program();
     let mut cache = RuntimeCache::default();

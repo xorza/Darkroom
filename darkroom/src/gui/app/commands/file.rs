@@ -22,10 +22,10 @@ impl FileCommand {
         match self {
             // Both replace the open document, so they clear the
             // unsaved-changes guard before doing anything.
-            FileCommand::New => app.guard_discard(PendingTransition::New),
-            FileCommand::Open => app.guard_discard(PendingTransition::OpenPicked),
-            FileCommand::Save => app.save_current(),
-            FileCommand::SaveAs => app.save_document_as(),
+            Self::New => app.guard_discard(PendingTransition::New),
+            Self::Open => app.guard_discard(PendingTransition::OpenPicked),
+            Self::Save => app.save_current(),
+            Self::SaveAs => app.save_document_as(),
         }
     }
 }

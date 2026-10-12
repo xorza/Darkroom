@@ -66,7 +66,7 @@ impl StarProfile {
     /// Profile value at `(dx, dy)` pixels from the centre, as a fraction of the peak.
     pub(crate) fn shape_at(self, dx: f64, dy: f64) -> f64 {
         match self {
-            StarProfile::Gaussian {
+            Self::Gaussian {
                 sigma_x,
                 sigma_y,
                 angle,
@@ -79,7 +79,7 @@ impl StarProfile {
                     + y_rot * y_rot / (2.0 * sigma_y * sigma_y);
                 (-exponent).exp()
             }
-            StarProfile::Moffat { alpha, beta } => {
+            Self::Moffat { alpha, beta } => {
                 let alpha = f64::from(alpha);
                 (1.0 + (dx * dx + dy * dy) / (alpha * alpha)).powf(-f64::from(beta))
             }
@@ -91,8 +91,8 @@ impl StarProfile {
     /// two closed forms.
     fn pixel_rule(self) -> Option<PixelQuadrature> {
         let analytic = match self {
-            StarProfile::Gaussian { angle: 0.0, .. } => return None,
-            StarProfile::Gaussian {
+            Self::Gaussian { angle: 0.0, .. } => return None,
+            Self::Gaussian {
                 sigma_x,
                 sigma_y,
                 angle,
@@ -110,7 +110,7 @@ impl StarProfile {
                     sigma: 1.0 / a.max(c).sqrt(),
                 }
             }
-            StarProfile::Moffat { alpha, beta } => AnalyticProfile::Moffat {
+            Self::Moffat { alpha, beta } => AnalyticProfile::Moffat {
                 alpha: f64::from(alpha),
                 beta: f64::from(beta),
             },
@@ -127,10 +127,10 @@ impl StarProfile {
     /// comparable floor.
     pub(crate) fn radius(self) -> i32 {
         match self {
-            StarProfile::Gaussian {
+            Self::Gaussian {
                 sigma_x, sigma_y, ..
             } => (4.0 * sigma_x.max(sigma_y)).ceil() as i32,
-            StarProfile::Moffat { alpha, .. } => (8.0 * alpha).ceil() as i32,
+            Self::Moffat { alpha, .. } => (8.0 * alpha).ceil() as i32,
         }
     }
 }

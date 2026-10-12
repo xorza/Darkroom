@@ -96,6 +96,10 @@ impl Float for f32 {
     const HALF: Self = 0.5;
 
     #[inline]
+    #[expect(
+        clippy::use_self,
+        reason = "names the inherent `abs`, which `Self::abs` here reads as this method recursing"
+    )]
     fn abs(self) -> Self {
         f32::abs(self)
     }
@@ -124,7 +128,7 @@ impl Float for f32 {
 
     #[inline]
     fn from_key(key: i32) -> Self {
-        f32::from_bits(total_order_32(key).cast_unsigned())
+        Self::from_bits(total_order_32(key).cast_unsigned())
     }
 }
 
@@ -134,6 +138,10 @@ impl Float for f64 {
     const HALF: Self = 0.5;
 
     #[inline]
+    #[expect(
+        clippy::use_self,
+        reason = "names the inherent `abs`, which `Self::abs` here reads as this method recursing"
+    )]
     fn abs(self) -> Self {
         f64::abs(self)
     }
@@ -162,6 +170,6 @@ impl Float for f64 {
 
     #[inline]
     fn from_key(key: i64) -> Self {
-        f64::from_bits(total_order_64(key).cast_unsigned())
+        Self::from_bits(total_order_64(key).cast_unsigned())
     }
 }

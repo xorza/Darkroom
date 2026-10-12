@@ -215,7 +215,7 @@ impl LowPass<'_> {
                     "the second pass saw other values than the first"
                 );
                 let Rank { bin: low, below } = Rank::of(self.counts, rank as usize);
-                let lower = high << 16 | low;
+                let lower = (high << 16) | low;
                 if !even {
                     return value(lower);
                 }
@@ -225,7 +225,7 @@ impl LowPass<'_> {
                     let next = (low + 1..BINS as u32)
                         .find(|&bin| self.counts[bin as usize] > 0)
                         .expect("the upper middle lies in the same bin");
-                    high << 16 | next
+                    (high << 16) | next
                 };
                 (lower, upper)
             }
@@ -279,7 +279,7 @@ const fn key(value: f32) -> u32 {
     if bits >> 31 == 1 {
         !bits
     } else {
-        bits | 1 << 31
+        bits | (1 << 31)
     }
 }
 

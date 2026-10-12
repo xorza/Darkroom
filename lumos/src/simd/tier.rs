@@ -86,7 +86,7 @@ pub(crate) mod internals {
                 reason = "a bench, like a test, has no skipped state to report a missing tier in"
             )
         )]
-        pub(crate) fn supported() -> impl Iterator<Item = Tier> {
+        pub(crate) fn supported() -> impl Iterator<Item = Self> {
             let mut tiers = vec![Self::portable()];
             #[cfg(target_arch = "x86_64")]
             match Avx2Fma::detect() {

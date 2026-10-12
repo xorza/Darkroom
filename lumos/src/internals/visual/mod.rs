@@ -53,12 +53,12 @@ impl ToneMap {
     /// Map `pixels` into `[0, 1]`.
     fn apply(self, pixels: &[f32]) -> Vec<f32> {
         match self {
-            ToneMap::Clamp => pixels.iter().map(|&p| p.clamp(0.0, 1.0)).collect(),
-            ToneMap::AutoRange => {
+            Self::Clamp => pixels.iter().map(|&p| p.clamp(0.0, 1.0)).collect(),
+            Self::AutoRange => {
                 let Range { lo, span } = Self::range(pixels);
                 pixels.iter().map(|&p| (p - lo) / span).collect()
             }
-            ToneMap::Asinh => {
+            Self::Asinh => {
                 let Range { lo, span } = Self::range(pixels);
                 // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
                 let a = 0.1f32;

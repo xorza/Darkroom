@@ -21,7 +21,7 @@ pub enum OutputDemand {
 
 impl OutputDemand {
     pub const fn is_skip(self) -> bool {
-        matches!(self, OutputDemand::Skip)
+        matches!(self, Self::Skip)
     }
 }
 

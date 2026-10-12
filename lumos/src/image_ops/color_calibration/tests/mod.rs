@@ -86,18 +86,15 @@ fn scnr_additive_mask_hand_computed() {
 /// larger than G: 2ε·G. Red and blue never move.
 #[test]
 fn every_protection_blends_by_its_amount() {
+    type Protection = fn(f32) -> Scnr;
     let (r, g, b) = (0.1f32, 0.6f32, 0.3f32);
-    for (name, scnr, full, half) in [
-        (
-            "average neutral",
-            Scnr::average_neutral as fn(f32) -> Scnr,
-            0.2,
-            0.4,
-        ),
+    let protections: [(&str, Protection, _, _); 4] = [
+        ("average neutral", Scnr::average_neutral, 0.2, 0.4),
         ("maximum neutral", Scnr::maximum_neutral, 0.3, 0.45),
         ("additive mask", Scnr::additive_mask, 0.24, 0.42),
         ("maximum mask", Scnr::maximum_mask, 0.18, 0.39),
-    ] {
+    ];
+    for (name, scnr, full, half) in protections {
         for (amount, expected) in [(0.0f32, 0.6f64), (0.5, half), (1.0, full)] {
             let mut img = rgb(Size2us::new(1, 1), vec![r], vec![g], vec![b]);
             scnr(amount).apply(&mut img).unwrap();

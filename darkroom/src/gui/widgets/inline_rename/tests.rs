@@ -1,7 +1,7 @@
 use super::*;
 use crate::gui::theme::Theme;
 use palantir::Display;
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 
 /// The idle label puts the name flush against its panel's leading edge,
 /// where the editor will draw it. Pixel snapping off keeps the comparison

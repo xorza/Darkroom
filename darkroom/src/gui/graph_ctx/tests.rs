@@ -1,5 +1,5 @@
-use scenarium::internals::graph::NodeSpec;
-use scenarium::internals::graph::TestGraph;
+use scenarium::internals::test_graph::NodeSpec;
+use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
 };

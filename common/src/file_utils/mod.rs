@@ -60,7 +60,7 @@ impl Publication {
 impl Drop for Publication {
     fn drop(&mut self) {
         if !self.temporary.as_os_str().is_empty() {
-            let _ = fs::remove_file(&self.temporary);
+            fs::remove_file(&self.temporary).ok();
         }
     }
 }

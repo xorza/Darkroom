@@ -362,7 +362,7 @@ mod tests {
     use std::iter;
 
     use common::{TempDir, TempFile};
-    use palantir::internals::harness::UiHarness;
+    use palantir::internals::ui_harness::UiHarness;
 
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {

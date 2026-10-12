@@ -106,7 +106,9 @@ pub(crate) fn reject_cosmic_rays(
         &mut MeshWorkspace::default(),
     );
     // Through the checked accessor, then shared: the pixels below are borrowed apart from it.
-    let flat_gain = image.flat_gain().and(image.metadata.flat_gain.clone());
+    let flat_gain = image
+        .flat_gain()
+        .and_then(|_| image.metadata.flat_gain.clone());
     let backgrounds = PixelBackgrounds {
         mesh: &mesh,
         flat_gain: flat_gain.as_deref(),

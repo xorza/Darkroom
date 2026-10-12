@@ -104,6 +104,10 @@ macro_rules! id_type {
 }
 
 #[cfg(test)]
+#[expect(
+    unnameable_types,
+    reason = "`id_type!` makes its type `pub`, and this one lives in the private test module"
+)]
 mod tests {
     use crate::serde::serde_format::SerdeFormat;
     use crate::serde::{deserialize, serialize};

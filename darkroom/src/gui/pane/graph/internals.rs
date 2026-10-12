@@ -8,7 +8,7 @@
 //! frame the app never performs.
 
 use palantir::DockOperation;
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 use palantir::prelude::*;
 use scenarium::NodeId;
 
@@ -66,7 +66,7 @@ impl CanvasHarness {
     /// about measured text or about the surface itself.
     ///
     /// Takes a [`DocFixture`] or anything that converts into one — a
-    /// [`TestGraph`](scenarium::internals::graph::TestGraph) goes straight in.
+    /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
     pub(crate) fn new(fixture: impl Into<DocFixture>) -> Self {
         Self::over(UiHarness::new(SURFACE), fixture)
     }

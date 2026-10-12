@@ -49,8 +49,9 @@ pub(crate) fn init_tracing() {
     // default.
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn"));
-    let _ = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_test_writer()
-        .try_init();
+        .try_init()
+        .ok();
 }

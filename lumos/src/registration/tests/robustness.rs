@@ -224,7 +224,7 @@ fn every_model_recovers_an_exact_transform() {
         )
     };
     run(&[
-        translation.clone(),
+        translation,
         Scenario {
             stars: 60,
             seed: 7,

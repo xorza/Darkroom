@@ -113,7 +113,7 @@ fn clahe_is_color_preserving() {
     let size = Size2us::new(64, 64);
     let i = low_contrast(size);
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
-    let mut img = rgb(size, r.clone(), i.clone(), i.clone());
+    let mut img = rgb(size, r.clone(), i.clone(), i);
     LocalContrast::default().apply(&mut img).unwrap();
     let (ro, go, bo) = (img.channel(0), img.channel(1), img.channel(2));
     assert_eq!(go.pixels(), bo.pixels(), "G and B stay equal");

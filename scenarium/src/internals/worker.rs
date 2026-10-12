@@ -27,7 +27,7 @@ use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Error;
 use crate::graph::identity::NodeId;
 use crate::internals::engine::RunOutcome;
-use crate::internals::graph::TestGraph;
+use crate::internals::test_graph::TestGraph;
 use crate::worker::Worker;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::error::WorkerError;

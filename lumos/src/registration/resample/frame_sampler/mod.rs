@@ -147,12 +147,18 @@ impl<'a> FrameSampler<'a> {
         output: RowOutput<'_, '_>,
     ) {
         debug_assert_eq!(output.channels.len(), self.sources.len());
-        debug_assert!(
-            output
-                .channels
-                .iter()
-                .all(|row| row.len() == positions.len())
-        );
+        #[expect(
+            clippy::debug_assert_with_mut_call,
+            reason = "`iter` only reads the rows, which are mutable for the caller"
+        )]
+        {
+            debug_assert!(
+                output
+                    .channels
+                    .iter()
+                    .all(|row| row.len() == positions.len())
+            );
+        }
         SampleRow {
             sampler: self,
             positions,
@@ -200,7 +206,7 @@ impl<'a> FrameSampler<'a> {
             confidence: 1.0,
             flags: self
                 .flagged
-                .map_or(QualityFlags::default(), |flagged| flagged.carried_at(index)),
+                .map_or_else(QualityFlags::default, |flagged| flagged.carried_at(index)),
         }
     }
 
@@ -220,7 +226,7 @@ impl<'a> FrameSampler<'a> {
     ) -> PixelQuality {
         let near = self
             .flagged
-            .map_or(QualityFlags::default(), |flagged| flagged.near(position));
+            .map_or_else(QualityFlags::default, |flagged| flagged.near(position));
         let x_taps = kernel.taps(position.fx);
         let y_taps = kernel.taps(position.fy);
         if near == QualityFlags::default()

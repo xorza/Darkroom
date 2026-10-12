@@ -240,7 +240,7 @@ fn outlier_tiles_are_rejected_from_the_fit() {
 
     let unrefined = run(ExtractBackground {
         iterations: 0,
-        ..config.clone()
+        ..config
     });
     let unrejecting = run(ExtractBackground {
         rejection_sigma: 1e6,

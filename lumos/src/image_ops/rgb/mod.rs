@@ -10,7 +10,7 @@ pub(crate) struct Rgb {
 
 impl Rgb {
     /// All channels zero (black).
-    pub(crate) const ZERO: Rgb = Rgb {
+    pub(crate) const ZERO: Self = Self {
         r: 0.0,
         g: 0.0,
         b: 0.0,
@@ -24,8 +24,8 @@ impl Rgb {
 
     /// Scale all three channels by `f`.
     #[inline]
-    pub(crate) const fn scale(self, f: f32) -> Rgb {
-        Rgb {
+    pub(crate) const fn scale(self, f: f32) -> Self {
+        Self {
             r: self.r * f,
             g: self.g * f,
             b: self.b * f,
@@ -38,10 +38,10 @@ impl Rgb {
     /// clamped to 0. A pixel with no positive intensity, or a NaN one, has no hue to keep and goes
     /// black.
     #[inline]
-    pub(crate) fn with_intensity(self, target: f32) -> Rgb {
+    pub(crate) fn with_intensity(self, target: f32) -> Self {
         let intensity = self.intensity();
         if intensity.is_nan() || intensity <= 0.0 {
-            return Rgb::ZERO;
+            return Self::ZERO;
         }
         let scaled = self.scale(target / intensity);
         let max = scaled.r.max(scaled.g).max(scaled.b);
@@ -50,7 +50,7 @@ impl Rgb {
         } else {
             scaled
         };
-        Rgb {
+        Self {
             r: capped.r.max(0.0),
             g: capped.g.max(0.0),
             b: capped.b.max(0.0),

@@ -36,7 +36,7 @@ impl Tracked {
             t.current += 1;
             t.peak = t.peak.max(t.current);
         }
-        Tracked { tracker }
+        Self { tracker }
     }
 }
 

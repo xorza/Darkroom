@@ -2,7 +2,7 @@ use super::*;
 use std::sync::Arc;
 
 use imaginarium::ColorFormat;
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 
 use crate::core::document::internals::DocFixture;
 use crate::core::preview::preview_func;

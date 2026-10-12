@@ -85,7 +85,7 @@ impl Badge {
         wid: WidgetId,
         tip: &'static str,
     ) -> Self {
-        Badge {
+        Self {
             glyph: BadgeGlyph::Char(glyph),
             color,
             hover_color: None,
@@ -104,7 +104,7 @@ impl Badge {
         draw: fn(&mut Ui, RgbaF32),
         rest: RgbaF32,
     ) -> Self {
-        Badge {
+        Self {
             glyph: BadgeGlyph::Drawn(draw),
             color: rest,
             hover_color: None,
@@ -126,7 +126,7 @@ impl Badge {
         color: RgbaF32,
         tip: &'static str,
     ) -> Self {
-        Badge {
+        Self {
             glyph: BadgeGlyph::Char(glyph),
             color,
             hover_color: None,
@@ -136,7 +136,7 @@ impl Badge {
     }
 
     pub(crate) fn show(self, ui: &mut Ui) -> bool {
-        let Badge {
+        let Self {
             glyph,
             mut color,
             hover_color,

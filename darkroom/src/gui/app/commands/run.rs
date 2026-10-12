@@ -28,13 +28,13 @@ pub(crate) enum RunCommand {
 impl RunCommand {
     pub(super) fn apply(self, app: &mut App) {
         match self {
-            RunCommand::Once => app.run_graph(),
-            RunCommand::Node(node_id) => app.run_node(node_id),
-            RunCommand::EvictCache(node_id) => app.evict_cache(node_id),
-            RunCommand::FlushCache(node_id) => app.flush_cache(node_id),
-            RunCommand::Cancel => app.runtime.cancel_run(),
-            RunCommand::StartEvents => app.start_events(),
-            RunCommand::StopEvents => app.stop_events(),
+            Self::Once => app.run_graph(),
+            Self::Node(node_id) => app.run_node(node_id),
+            Self::EvictCache(node_id) => app.evict_cache(node_id),
+            Self::FlushCache(node_id) => app.flush_cache(node_id),
+            Self::Cancel => app.runtime.cancel_run(),
+            Self::StartEvents => app.start_events(),
+            Self::StopEvents => app.stop_events(),
         }
     }
 }

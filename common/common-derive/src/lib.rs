@@ -206,7 +206,7 @@ enum Kind {
     Bool,
     Str,
     Enum(Type),
-    Option(Box<Kind>, Type),
+    Option(Box<Self>, Type),
 }
 
 fn classify(ty: &Type) -> syn::Result<Kind> {

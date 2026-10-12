@@ -24,21 +24,21 @@ impl Perturbation {
     /// `(k − 3)/3` for k = 0..7, whose mean square is 4/9.
     pub(crate) fn rms(&self) -> f32 {
         match *self {
-            Perturbation::None => 0.0,
-            Perturbation::Sawtooth { amplitude } => amplitude * 2.0 / 3.0,
-            Perturbation::Gaussian { sigma, .. } => sigma,
+            Self::None => 0.0,
+            Self::Sawtooth { amplitude } => amplitude * 2.0 / 3.0,
+            Self::Gaussian { sigma, .. } => sigma,
         }
     }
 
     pub(crate) fn apply(&self, pixels: &mut Buffer2<f32>) {
         match *self {
-            Perturbation::None => {}
-            Perturbation::Sawtooth { amplitude } => {
+            Self::None => {}
+            Self::Sawtooth { amplitude } => {
                 for (i, p) in pixels.iter_mut().enumerate() {
                     *p += amplitude * ((i % 7) as f32 - 3.0) / 3.0;
                 }
             }
-            Perturbation::Gaussian { sigma, seed } => {
+            Self::Gaussian { sigma, seed } => {
                 patterns::add_gaussian_noise(pixels, sigma, seed);
             }
         }

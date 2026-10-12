@@ -59,7 +59,7 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
         let dimensions = self.dimensions();
         let channels = self
             .cfa_type()
-            .map_or(dimensions.channels(), |cfa| cfa.num_colors());
+            .map_or_else(|| dimensions.channels(), |cfa| cfa.num_colors());
         assert!(
             gain.size() == dimensions.size() && gain.channels() == channels,
             "an image's flat gain covers another image's pixels"

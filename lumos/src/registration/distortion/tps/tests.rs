@@ -1036,9 +1036,9 @@ fn tps_extra_control_point_changes_behavior() {
     let tps_4 = fit_default(&source_4, &target_4);
 
     // Same 4 corners but add center with a different displacement
-    let mut source_5 = source_4.clone();
+    let mut source_5 = source_4;
     source_5.push(DVec2::new(50.0, 50.0));
-    let mut target_5 = target_4.clone();
+    let mut target_5 = target_4;
     target_5.push(DVec2::new(65.0, 63.0)); // (50,50) -> (65,63), not (55,53)
 
     let tps_5 = fit_default(&source_5, &target_5);

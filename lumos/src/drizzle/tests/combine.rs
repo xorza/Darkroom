@@ -2,7 +2,7 @@ use super::*;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
 fn hash_unit(index: usize) -> f32 {
-    (index.wrapping_mul(2_654_435_761) >> 8 & 0xffff) as f32 / 65536.0
+    ((index.wrapping_mul(2_654_435_761) >> 8) & 0xffff) as f32 / 65536.0
 }
 
 /// A frame of `size` whose pixels lie in [1, 2), different for each `seed`.
@@ -156,18 +156,15 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let rejected = DrizzleConfig {
-        stack: stack.clone(),
-        ..config.clone()
-    }
-    .drizzle_images(
-        drizzle_frames(images.clone(), &transforms),
-        &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
+    let rejected = DrizzleConfig { stack, ..config }
+        .drizzle_images(
+            drizzle_frames(images.clone(), &transforms),
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product;
     let plain = drizzle_plain(drizzle_frames(images, &transforms), &config)
         .unwrap()
         .product;

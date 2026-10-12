@@ -45,10 +45,9 @@ fn the_windowed_centroid_converges_and_the_fits_ignore_the_seed() {
                 .expect("the Moffat fit lands")
                 .pos
         };
-        for (model, fit, bias) in [
-            ("Gaussian", &gaussian as &dyn Fn(DVec2) -> DVec2, 1e-5),
-            ("Moffat", &moffat, 1e-3),
-        ] {
+        let fits: [(&str, &dyn Fn(DVec2) -> DVec2, _); 2] =
+            [("Gaussian", &gaussian, 1e-5), ("Moffat", &moffat, 1e-3)];
+        for (model, fit, bias) in fits {
             let (from_centroid, from_pixel) = (fit(windowed), fit(start));
             assert!(
                 (from_centroid - from_pixel).length() < 1e-8,

@@ -60,8 +60,8 @@ const GEOMETRIES: [Geometry; 5] = [
 impl Geometry {
     const fn name(self) -> &'static str {
         match self {
-            Geometry::Turned { name, .. } => name,
-            Geometry::Sip => "sip",
+            Self::Turned { name, .. } => name,
+            Self::Sip => "sip",
         }
     }
 
@@ -69,13 +69,13 @@ impl Geometry {
     /// the turn about the frame's centre.
     fn warp(self) -> WarpTransform {
         match self {
-            Geometry::Turned { degrees, .. } => {
+            Self::Turned { degrees, .. } => {
                 let centre = DVec2::new(FRAME.width as f64, FRAME.height as f64) / 2.0;
                 let placement = Transform::translation(DVec2::new(0.37, -0.29))
                     .compose(&Transform::rotation_around(centre, degrees.to_radians()));
                 WarpTransform::new(placement.inverse())
             }
-            Geometry::Sip => Pair::typical().sip_warp(),
+            Self::Sip => Pair::typical().sip_warp(),
         }
     }
 }

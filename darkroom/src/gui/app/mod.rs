@@ -565,7 +565,7 @@ impl App {
     }
 
     /// Stop the worker's event loop.
-    fn stop_events(&mut self) {
+    fn stop_events(&self) {
         self.runtime.stop_event_loop();
     }
 }

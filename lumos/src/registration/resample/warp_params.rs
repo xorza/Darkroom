@@ -3,7 +3,7 @@
 use crate::error::InvalidConfigField;
 
 /// Interpolation method for image resampling.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum InterpolationMethod {
     /// Nearest neighbor - fastest, lowest quality
     Nearest,

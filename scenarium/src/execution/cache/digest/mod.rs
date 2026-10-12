@@ -130,7 +130,7 @@ pub(super) struct DigestHasher(Hasher);
 
 impl DigestHasher {
     pub(super) fn new() -> Self {
-        DigestHasher(Hasher::new())
+        Self(Hasher::new())
     }
 
     /// Fold raw bytes verbatim (no length prefix) — for fixed-size data: a discriminant

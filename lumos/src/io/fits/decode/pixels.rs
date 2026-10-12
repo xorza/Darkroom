@@ -4,7 +4,7 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::{ImageView, Scaling};
+use fits_well::image::{Scaling, View as FitsView};
 use fits_well::io::StreamReader;
 use rayon::prelude::*;
 
@@ -507,7 +507,7 @@ impl SampleScan {
 /// whose branches keep it scalar: the stored integers' OR, the conversion, and the finite scan of
 /// what it wrote, still in cache.
 fn convert_and_scan(
-    samples: ImageView<'_>,
+    samples: FitsView<'_>,
     scaling: Scaling,
     divisor: f32,
     out: &mut [f32],
@@ -518,12 +518,12 @@ fn convert_and_scan(
         divisor: f64::from(divisor),
     };
     match samples {
-        ImageView::U8(stored) => convert.integers(stored, out, cancel),
-        ImageView::I16(stored) => convert.integers(stored, out, cancel),
-        ImageView::I32(stored) => convert.integers(stored, out, cancel),
-        ImageView::I64(stored) => convert.integers(stored, out, cancel),
-        ImageView::F32(stored) => convert.floats(stored, out, cancel),
-        ImageView::F64(stored) => convert.floats(stored, out, cancel),
+        FitsView::U8(stored) => convert.integers(stored, out, cancel),
+        FitsView::I16(stored) => convert.integers(stored, out, cancel),
+        FitsView::I32(stored) => convert.integers(stored, out, cancel),
+        FitsView::I64(stored) => convert.integers(stored, out, cancel),
+        FitsView::F32(stored) => convert.floats(stored, out, cancel),
+        FitsView::F64(stored) => convert.floats(stored, out, cancel),
     }
 }
 
@@ -659,7 +659,7 @@ mod tests {
     use crate::io::fits::decode::pixels::{
         ChunkScan, FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, convert_and_scan, fill_nulls,
     };
-    use fits_well::image::{ImageView, Scaling};
+    use fits_well::image::{Scaling, View as FitsView};
 
     const IDENTITY: Scaling = Scaling {
         bscale: 1.0,
@@ -668,7 +668,7 @@ mod tests {
     };
 
     /// `samples` through [`convert_and_scan`], with the converted samples beside the scan.
-    fn convert(samples: ImageView<'_>, scaling: Scaling, divisor: f32) -> (Vec<f32>, ChunkScan) {
+    fn convert(samples: FitsView<'_>, scaling: Scaling, divisor: f32) -> (Vec<f32>, ChunkScan) {
         let mut out = vec![0.0; samples.len()];
         let scan =
             convert_and_scan(samples, scaling, divisor, &mut out, &CancelToken::never()).unwrap();
@@ -681,7 +681,7 @@ mod tests {
         cancel.cancel();
         assert_eq!(
             convert_and_scan(
-                ImageView::F32(&[1.0, 2.0]),
+                FitsView::F32(&[1.0, 2.0]),
                 IDENTITY,
                 1.0,
                 &mut [0.0; 2],
@@ -697,7 +697,7 @@ mod tests {
         // The float-FITS path. Nothing is out of range to this pass — a negative calibration
         // residual and an undivided ADU value are both legitimate.
         let pixels = [-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
-        let (out, scan) = convert(ImageView::F32(&pixels), IDENTITY, 1.0);
+        let (out, scan) = convert(FitsView::F32(&pixels), IDENTITY, 1.0);
         assert_eq!(scan.nulls, None);
         assert_eq!(scan.scan.maximum, 65_535.0);
         assert_eq!(
@@ -716,7 +716,7 @@ mod tests {
             ..IDENTITY
         };
         let (unsigned, scan) = convert(
-            ImageView::I16(&[-32_768, -16_384, 0, 32_767]),
+            FitsView::I16(&[-32_768, -16_384, 0, 32_767]),
             unsigned_convention,
             65_535.0,
         );
@@ -739,7 +739,7 @@ mod tests {
 
         // The same divisor puts a signed frame on [-0.5, 0.5] around its own zero: the scale is
         // applied without an offset, so a negative sample stays negative.
-        let (signed, _) = convert(ImageView::I16(&[-32_768, 0, 32_767]), IDENTITY, 65_535.0);
+        let (signed, _) = convert(FitsView::I16(&[-32_768, 0, 32_767]), IDENTITY, 65_535.0);
         assert_eq!(
             signed,
             [
@@ -757,12 +757,12 @@ mod tests {
     #[test]
     fn a_stored_integer_past_the_f32_mantissa_rounds_once() {
         let raw = (1i32 << 24) + 1;
-        let (out, _) = convert(ImageView::I32(&[raw]), IDENTITY, 65_535.0);
+        let (out, _) = convert(FitsView::I32(&[raw]), IDENTITY, 65_535.0);
         assert_eq!(out[0], (f64::from(raw) / 65_535.0) as f32);
         assert_ne!(out[0], (raw as f32) / 65_535.0);
 
         let (_, scan) = convert(
-            ImageView::I32(&[(1 << 24) + 16, (1 << 24) + 48]),
+            FitsView::I32(&[(1 << 24) + 16, (1 << 24) + 48]),
             IDENTITY,
             1.0,
         );
@@ -777,7 +777,7 @@ mod tests {
             blank: Some(-1),
             ..IDENTITY
         };
-        let (out, scan) = convert(ImageView::I16(&[4, -1, 8]), scaling, 1.0);
+        let (out, scan) = convert(FitsView::I16(&[4, -1, 8]), scaling, 1.0);
         assert!(out[1].is_nan());
         assert_eq!([out[0], out[2]], [4.0, 8.0]);
         assert_eq!(
@@ -794,7 +794,7 @@ mod tests {
     fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
         // The divide runs before the finite test, so a divisor small enough to push a finite
         // sample past f32::MAX is caught by the same pass instead of reaching the image.
-        let (_, scan) = convert(ImageView::F32(&[1.0e30, 0.0]), IDENTITY, 1.0e-30);
+        let (_, scan) = convert(FitsView::F32(&[1.0e30, 0.0]), IDENTITY, 1.0e-30);
         assert_eq!(
             scan.nulls,
             Some(NullSummary {
@@ -809,7 +809,7 @@ mod tests {
         // Nulls survive the divide, which is what lets the test run after it rather than before:
         // a NaN or ±inf divided by any span is still one, and is still counted here.
         let pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
-        let (_, scan) = convert(ImageView::F32(&pixels), IDENTITY, 65_535.0);
+        let (_, scan) = convert(FitsView::F32(&pixels), IDENTITY, 65_535.0);
         assert_eq!(
             scan.nulls,
             Some(NullSummary {

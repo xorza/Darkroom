@@ -203,7 +203,12 @@ impl Library {
         // `entry` directly; every *other* enum a func declares was already
         // gated when that type registered.
         match entry.variants() {
-            Some(variants) => {
+            Some(variants) =>
+            {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "the order changes only which func an assert names first"
+                )]
                 for func in self.funcs.values() {
                     assert_enum_defaults(func, |declared| {
                         (declared == type_id).then_some(variants)
@@ -215,7 +220,12 @@ impl Library {
             // custom type", and deferred registration makes the first one
             // legitimate — so `add` cannot refuse a func that declares this
             // id as an enum, and the custom registration has to.
-            None => {
+            None =>
+            {
+                #[expect(
+                    clippy::iter_over_hash_type,
+                    reason = "the order changes only which func an assert names first"
+                )]
                 for func in self.funcs.values() {
                     assert!(
                         !declared_enum_types(func).any(|declared| declared == type_id),
@@ -281,11 +291,15 @@ impl Library {
         &self.codecs
     }
 
-    pub fn merge<T: Into<Library>>(&mut self, other: T) {
+    pub fn merge<T: Into<Self>>(&mut self, other: T) {
         let other = other.into();
         for func in other.funcs.into_values() {
             self.add(func);
         }
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each registration is keyed, so the order changes nothing"
+        )]
         for (type_id, entry) in other.types {
             self.register_type(type_id, entry);
         }
@@ -363,7 +377,7 @@ where
     It: IntoIterator<Item = Func>,
 {
     fn from(iter: It) -> Self {
-        let mut library = Library::default();
+        let mut library = Self::default();
         for func in iter {
             library.add(func);
         }

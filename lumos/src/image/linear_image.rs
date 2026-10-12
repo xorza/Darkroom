@@ -96,7 +96,7 @@ impl LinearImage {
         } else {
             ColorProvenance::Unspecified
         };
-        let mut image = LinearImage::from(&decoded);
+        let mut image = Self::from(&decoded);
         image.metadata.provenance = Some(ImageProvenance {
             container: SourceContainer::from(format),
             decoder: DecoderProvenance::Imaginarium,
@@ -120,7 +120,7 @@ impl LinearImage {
 
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
     pub fn from_pixels(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
-        LinearImage {
+        Self {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_interleaved(dimensions, pixels),
             flags: None,
@@ -132,7 +132,7 @@ impl LinearImage {
         dimensions: ImageDimensions,
         channels: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
-        LinearImage {
+        Self {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_planar_channels(dimensions, channels),
             flags: None,
@@ -224,7 +224,7 @@ impl LinearImage {
     /// If `image` is not one of those two formats. Callers check the format themselves — the
     /// ops live on `LinearImage`, so there is no shared gate to name.
     pub(crate) fn from_f32_image(image: &Image) -> Self {
-        LinearImage {
+        Self {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
             flags: None,
@@ -342,7 +342,7 @@ impl StackableImage for LinearImage {
     }
 
     fn channel(&self, c: usize) -> &[f32] {
-        LinearImage::channel(self, c)
+        Self::channel(self, c)
     }
 
     fn metadata(&self) -> &ImageMetadata {
@@ -354,7 +354,7 @@ impl StackableImage for LinearImage {
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        LinearImage::from_file(path, context)
+        Self::from_file(path, context)
     }
 
     /// A FITS header answers without a decode, the reader's chunk buffers with it. A float TIFF
@@ -377,13 +377,8 @@ impl StackableImage for LinearImage {
         let ImageParts { planes, flags } = parts;
         let first = &planes[0];
         let dimensions = ImageDimensions::new((first.width(), first.height()), planes.len());
-        let mut image = Self::from_planar_channels(
-            dimensions,
-            planes
-                .into_iter()
-                .map(Buffer2::into_vec)
-                .collect::<Vec<_>>(),
-        );
+        let mut image =
+            Self::from_planar_channels(dimensions, planes.into_iter().map(Buffer2::into_vec));
         image.metadata = metadata;
         image.flags = flags;
         image
@@ -412,7 +407,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
 
 impl From<&LinearImage> for Image {
     fn from(linear: &LinearImage) -> Self {
-        Image::from(&linear.pixels)
+        Self::from(&linear.pixels)
     }
 }
 
@@ -435,7 +430,7 @@ impl From<&Image> for LinearImage {
 
 impl From<LinearImage> for Image {
     fn from(linear: LinearImage) -> Self {
-        Image::from(&linear)
+        Self::from(&linear)
     }
 }
 

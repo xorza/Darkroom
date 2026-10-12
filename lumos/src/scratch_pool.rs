@@ -61,7 +61,7 @@ impl<T: Default + Clone + Send> Scratch for Buffer2<T> {
     type Shape = Size2us;
 
     fn build(shape: Size2us) -> Self {
-        Buffer2::new_default(shape.width, shape.height)
+        Self::new_default(shape.width, shape.height)
     }
 
     fn fit(&mut self, shape: Size2us) {
@@ -119,6 +119,10 @@ impl<T: Scratch> ScratchPool<T> {
 
     /// Serve `shape` from now on. A change drops every free value, and every value still leased is
     /// dropped when it returns.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "only the pool's owner reshapes it, never a lease"
+    )]
     pub(crate) fn reshape(&mut self, shape: T::Shape) {
         let stale = {
             let mut shelf = lock(&self.shelf);
@@ -133,6 +137,10 @@ impl<T: Scratch> ScratchPool<T> {
     }
 
     /// Drop every free value. Values still leased return as usual.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "only the pool's owner clears it, never a lease"
+    )]
     pub(crate) fn clear(&mut self) {
         let free = mem::take(&mut lock(&self.shelf).free);
         drop(free);

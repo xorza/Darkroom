@@ -97,26 +97,26 @@ impl Field {
     /// The bench parameter that names the field.
     pub(crate) const fn name(self) -> &'static str {
         match self {
-            Field::Sparse => "sparse",
-            Field::Typical => "typical",
-            Field::Dense => "dense",
+            Self::Sparse => "sparse",
+            Self::Typical => "typical",
+            Self::Dense => "dense",
         }
     }
 
     /// The stars the field holds on the standard frame.
     pub(crate) const fn stars(self) -> usize {
         match self {
-            Field::Sparse => 300,
-            Field::Typical => 3000,
-            Field::Dense => 20_000,
+            Self::Sparse => 300,
+            Self::Typical => 3000,
+            Self::Dense => 20_000,
         }
     }
 
     const fn seed(self) -> u64 {
         match self {
-            Field::Sparse => 0x5_9A45,
-            Field::Typical => 0x7_1C41,
-            Field::Dense => 0xD_E45E,
+            Self::Sparse => 0x5_9A45,
+            Self::Typical => 0x7_1C41,
+            Self::Dense => 0xD_E45E,
         }
     }
 
@@ -124,10 +124,10 @@ impl Field {
     pub(crate) fn scene(self, size: Size2us) -> Scene {
         let (stars, seed) = (at_density(self.stars(), size), self.seed());
         match self {
-            Field::Sparse | Field::Typical => {
+            Self::Sparse | Self::Typical => {
                 Scene::random_field(size, stars, FLUX, sky(1.0), 16.0, seed)
             }
-            Field::Dense => Scene::cluster(size, stars, FLUX, sky(1.0), seed),
+            Self::Dense => Scene::cluster(size, stars, FLUX, sky(1.0), seed),
         }
     }
 
@@ -282,7 +282,7 @@ impl Field {
             size.width,
             at_density(COSMIC_RAYS, size),
             (0.3, 1.0),
-            self.seed() ^ 0xC05 ^ (index as u64) << 16,
+            self.seed() ^ 0xC05 ^ ((index as u64) << 16),
         );
         for pixel in pixels {
             *pixel = pixel.min(1.0);
@@ -322,7 +322,7 @@ pub(crate) fn master_frames(
         };
         let observation = Observation {
             exposure_s,
-            ..Observation::reference(SENSOR_SEED ^ seed ^ (index as u64) << 8)
+            ..Observation::reference(SENSOR_SEED ^ seed ^ ((index as u64) << 8))
         };
         let frame = render(&scene, &sensor(size, cfa_type, Readout::Raw), &observation);
         let mut master = mosaic(frame, cfa_type);

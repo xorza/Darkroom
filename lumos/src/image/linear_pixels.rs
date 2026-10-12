@@ -106,14 +106,14 @@ impl LinearPixels {
 
     pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
         match self {
-            LinearPixels::L(plane) => {
+            Self::L(plane) => {
                 assert!(
                     channel == 0,
                     "Grayscale image only has channel 0, got {channel}"
                 );
                 plane
             }
-            LinearPixels::Rgb(planes) => {
+            Self::Rgb(planes) => {
                 assert!(channel < 3, "RGB image has channels 0-2, got {channel}");
                 &planes[channel]
             }
@@ -122,14 +122,14 @@ impl LinearPixels {
 
     pub(crate) fn channel_mut(&mut self, channel: usize) -> &mut Buffer2<f32> {
         match self {
-            LinearPixels::L(plane) => {
+            Self::L(plane) => {
                 assert!(
                     channel == 0,
                     "Grayscale image only has channel 0, got {channel}"
                 );
                 plane
             }
-            LinearPixels::Rgb(planes) => {
+            Self::Rgb(planes) => {
                 assert!(channel < 3, "RGB image has channels 0-2, got {channel}");
                 &mut planes[channel]
             }
@@ -138,8 +138,8 @@ impl LinearPixels {
 
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
         match self {
-            LinearPixels::L(plane) => slice::from_mut(plane).iter_mut(),
-            LinearPixels::Rgb(planes) => planes.iter_mut(),
+            Self::L(plane) => slice::from_mut(plane).iter_mut(),
+            Self::Rgb(planes) => planes.iter_mut(),
         }
     }
 
@@ -150,15 +150,15 @@ impl LinearPixels {
     /// On a grayscale image, which has no three planes; callers gate on the `Rgb` variant.
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
         match self {
-            LinearPixels::L(_) => panic!("Expected Rgb variant, got L"),
-            LinearPixels::Rgb([r, g, b]) => [r.pixels_mut(), g.pixels_mut(), b.pixels_mut()],
+            Self::L(_) => panic!("Expected Rgb variant, got L"),
+            Self::Rgb([r, g, b]) => [r.pixels_mut(), g.pixels_mut(), b.pixels_mut()],
         }
     }
 
     pub(crate) const fn channel_count(&self) -> usize {
         match self {
-            LinearPixels::L(_) => 1,
-            LinearPixels::Rgb(_) => 3,
+            Self::L(_) => 1,
+            Self::Rgb(_) => 3,
         }
     }
 
@@ -169,15 +169,15 @@ impl LinearPixels {
 
     pub(crate) fn into_l(self) -> Buffer2<f32> {
         match self {
-            LinearPixels::L(plane) => plane,
-            LinearPixels::Rgb(_) => panic!("Expected L variant, got Rgb"),
+            Self::L(plane) => plane,
+            Self::Rgb(_) => panic!("Expected L variant, got Rgb"),
         }
     }
 
     pub(crate) fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         match self {
-            LinearPixels::L(plane) => arrayvec::ArrayVec::from_iter([plane]),
-            LinearPixels::Rgb(planes) => arrayvec::ArrayVec::from_iter(planes),
+            Self::L(plane) => arrayvec::ArrayVec::from_iter([plane]),
+            Self::Rgb(planes) => arrayvec::ArrayVec::from_iter(planes),
         }
     }
 }
@@ -185,7 +185,7 @@ impl LinearPixels {
 impl From<Buffer2<f32>> for LinearPixels {
     fn from(plane: Buffer2<f32>) -> Self {
         ImageDimensions::validate((plane.width(), plane.height()), 1);
-        LinearPixels::L(plane)
+        Self::L(plane)
     }
 }
 
@@ -198,15 +198,15 @@ impl From<[Buffer2<f32>; 3]> for LinearPixels {
             assert_eq!(plane.width(), width, "all RGB planes must share width");
             assert_eq!(plane.height(), height, "all RGB planes must share height");
         }
-        LinearPixels::Rgb(planes)
+        Self::Rgb(planes)
     }
 }
 
 impl From<&LinearPixels> for Image {
     fn from(pixels: &LinearPixels) -> Self {
         match pixels {
-            LinearPixels::L(plane) => Image::from([plane]),
-            LinearPixels::Rgb(planes) => Image::from(planes.each_ref()),
+            LinearPixels::L(plane) => Self::from([plane]),
+            LinearPixels::Rgb(planes) => Self::from(planes.each_ref()),
         }
     }
 }

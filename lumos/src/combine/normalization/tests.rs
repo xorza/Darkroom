@@ -989,9 +989,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
     let rgb = |frame| {
         LinearImage::from_planar_channels(
             ImageDimensions::new(size, 3),
-            (0..3)
-                .map(|channel| pixels(frame, channel))
-                .collect::<Vec<_>>(),
+            (0..3).map(|channel| pixels(frame, channel)),
         )
     };
     let store = |image: &LinearImage| {

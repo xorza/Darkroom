@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Image, ImageData, Scaling};
+use fits_well::image::{Bitpix, Data as FitsData, Image, Scaling};
 use fits_well::io::{Hdu, HduKind};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -145,11 +145,11 @@ impl FlagsExtension {
     /// image's NaNs: either file was not the one Lumos wrote.
     pub(crate) fn join(
         path: &Path,
-        stored: ImageData,
+        stored: FitsData,
         size: Size2us,
         decoded: Option<&PixelFlags>,
     ) -> Result<Option<PixelFlags>, ImageError> {
-        let ImageData::U8(mut bytes) = stored else {
+        let FitsData::U8(mut bytes) = stored else {
             unreachable!("`check` admitted only BITPIX = 8");
         };
         debug_assert_eq!(bytes.len(), size.pixel_count());
@@ -195,7 +195,7 @@ fn bit_keyword(flag: QualityFlags) -> String {
 mod tests {
     use std::path::Path;
 
-    use fits_well::image::ImageData;
+    use fits_well::image::Data as FitsData;
 
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
@@ -219,7 +219,7 @@ mod tests {
         });
         let joined = FlagsExtension::join(
             path,
-            ImageData::U8(vec![0, 1, 6, 0, 24, 32]),
+            FitsData::U8(vec![0, 1, 6, 0, 24, 32]),
             size,
             decoded.as_ref(),
         )
@@ -229,13 +229,12 @@ mod tests {
         assert_eq!(joined.count(QualityFlags::SATURATED), 2);
 
         assert!(
-            FlagsExtension::join(path, ImageData::U8(vec![0; 6]), size, None)
+            FlagsExtension::join(path, FitsData::U8(vec![0; 6]), size, None)
                 .unwrap()
                 .is_none()
         );
-        let error =
-            FlagsExtension::join(path, ImageData::U8(vec![0, 0, 0, 0, 0x80, 0]), size, None)
-                .unwrap_err();
+        let error = FlagsExtension::join(path, FitsData::U8(vec![0, 0, 0, 0, 0x80, 0]), size, None)
+            .unwrap_err();
         assert!(
             matches!(&error, ImageError::FitsUnsupported { reason, .. }
                 if reason == "LUMFLAGS at (1, 1): byte 0x80 holds a bit no flag has"),

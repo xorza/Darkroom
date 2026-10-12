@@ -38,14 +38,14 @@ impl BackgroundField {
     pub(crate) fn render(&self, size: Size2us) -> Vec<f32> {
         let mut pixels = vec![0.0f32; size.pixel_count()];
         match self {
-            BackgroundField::Uniform { level } => add_uniform_background(&mut pixels, *level),
-            BackgroundField::Gradient { start, end, angle } => {
+            Self::Uniform { level } => add_uniform_background(&mut pixels, *level),
+            Self::Gradient { start, end, angle } => {
                 add_gradient_background(&mut pixels, size, *start, *end, *angle);
             }
-            BackgroundField::Vignette(vignette) => {
+            Self::Vignette(vignette) => {
                 add_vignette_background(&mut pixels, size, *vignette);
             }
-            BackgroundField::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
+            Self::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
         }
         pixels
     }
@@ -92,7 +92,7 @@ impl Scene {
         flux: f32,
         background: BackgroundField,
     ) -> Self {
-        Scene {
+        Self {
             size,
             sources: vec![TrueSource { pos, flux }],
             background,
@@ -122,7 +122,7 @@ impl Scene {
                 flux: flux_dist.sample(&mut rng),
             });
         }
-        Scene {
+        Self {
             size,
             sources,
             background,
@@ -176,7 +176,7 @@ impl Scene {
                 flux: flux_dist.sample(&mut rng),
             });
         }
-        Scene {
+        Self {
             size,
             sources,
             background,

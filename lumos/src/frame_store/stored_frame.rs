@@ -150,7 +150,7 @@ impl StoredFrame {
     ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
         let size = image.dimensions().size();
         let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
-        let slots = mosaic.map_or(image.dimensions().channels(), |cfa| cfa.num_colors());
+        let slots = mosaic.map_or_else(|| image.dimensions().channels(), |cfa| cfa.num_colors());
         (0..slots)
             .map(|slot| {
                 let plane = image.channel(if mosaic.is_some() { 0 } else { slot });

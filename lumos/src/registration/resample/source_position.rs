@@ -81,20 +81,20 @@ impl ClampedAxis {
     /// Inside the footprint the cell is at least −1 and at most `length − 1`, so the two clamps
     /// are the rim on either side.
     #[inline]
-    const fn of(cell: i32, fraction: f32, length: usize) -> ClampedAxis {
+    const fn of(cell: i32, fraction: f32, length: usize) -> Self {
         let last = length as i32 - 1;
         if cell < 0 {
-            ClampedAxis {
+            Self {
                 cell: 0,
                 fraction: 0.0,
             }
         } else if cell >= last {
-            ClampedAxis {
+            Self {
                 cell: last,
                 fraction: 0.0,
             }
         } else {
-            ClampedAxis { cell, fraction }
+            Self { cell, fraction }
         }
     }
 }

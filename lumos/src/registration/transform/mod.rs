@@ -56,21 +56,21 @@ impl TransformType {
     /// for an affine map and 8 for a homography.
     pub(crate) const fn parameter_count(self) -> usize {
         match self {
-            TransformType::Translation => 2,
-            TransformType::Euclidean => 3,
-            TransformType::Similarity => 4,
-            TransformType::Affine => 6,
-            TransformType::Homography => 8,
+            Self::Translation => 2,
+            Self::Euclidean => 3,
+            Self::Similarity => 4,
+            Self::Affine => 6,
+            Self::Homography => 8,
         }
     }
 
     /// Minimum number of point correspondences required to estimate this transform.
     pub const fn min_points(&self) -> usize {
         match self {
-            TransformType::Translation => 1,
-            TransformType::Euclidean | TransformType::Similarity => 2,
-            TransformType::Affine => 3,
-            TransformType::Homography => 4,
+            Self::Translation => 1,
+            Self::Euclidean | Self::Similarity => 2,
+            Self::Affine => 3,
+            Self::Homography => 4,
         }
     }
 }

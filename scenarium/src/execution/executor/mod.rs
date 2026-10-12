@@ -72,7 +72,7 @@ impl NodeOutcome {
     /// The run error the node carries — a failed run, or a node skipped for an error.
     const fn error(&self) -> Option<&RunError> {
         match self {
-            NodeOutcome::Failed { error, .. } | NodeOutcome::Skipped { error } => Some(error),
+            Self::Failed { error, .. } | Self::Skipped { error } => Some(error),
             _ => None,
         }
     }

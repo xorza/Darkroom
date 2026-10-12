@@ -101,7 +101,7 @@ impl StackableImage for CfaImage {
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        CfaImage::from_file(path, context)
+        Self::from_file(path, context)
     }
 
     fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
@@ -237,7 +237,9 @@ impl CfaImage {
         let width = self.data.width();
         let height = self.data.height();
         // Through the checked accessor, then shared: the grid is the flat's, not this frame's.
-        let flat_gain = self.flat_gain().and(self.metadata.flat_gain.clone());
+        let flat_gain = self
+            .flat_gain()
+            .and_then(|_| self.metadata.flat_gain.clone());
         let mut metadata = self.metadata;
         let cfa_type = self.cfa_type;
         if let Some(provenance) = &mut metadata.provenance {
@@ -421,14 +423,14 @@ impl CfaImage {
     /// This is intentional: the f32 pipeline preserves negatives, and stacking
     /// averages them out correctly. Clamping to zero would introduce a positive
     /// bias in the stacked result.
-    pub fn subtract(&mut self, dark: &CfaImage, map: DomainMap) {
+    pub fn subtract(&mut self, dark: &Self, map: DomainMap) {
         self.subtract_scaled(dark, map, 1.0);
     }
 
     /// [`Self::subtract`] with `dark`'s signal scaled by `scale` first, as a bias-removed dark is
     /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not
     /// signal.
-    pub(crate) fn subtract_scaled(&mut self, dark: &CfaImage, map: DomainMap, scale: f64) {
+    pub(crate) fn subtract_scaled(&mut self, dark: &Self, map: DomainMap, scale: f64) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
@@ -462,7 +464,7 @@ impl CfaImage {
 
     /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
     /// measurement — a fill, or a saturated bound: the calibrated value there is not one either.
-    pub(crate) fn take_master_flags(&mut self, master: &CfaImage) {
+    pub(crate) fn take_master_flags(&mut self, master: &Self) {
         let Some(flags) = master.flags.as_ref().filter(|flags| {
             flags.contains(QualityFlags::NO_DATA) || flags.contains(QualityFlags::SATURATED)
         }) else {

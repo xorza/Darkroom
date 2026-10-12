@@ -34,7 +34,7 @@ fn neutralize_then_stretch_removes_green() {
     );
 
     // Neutralize in the linear domain → background goes neutral (all channels to a common level).
-    let mut img = image.clone();
+    let mut img = image;
     NeutralizeBackground.apply(&mut img).unwrap();
     let after = channel_backgrounds(&img);
     let spread_after = spread(after);

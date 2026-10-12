@@ -204,7 +204,7 @@ impl GlyphShape {
     /// Paint into the `size`-sided square at `inset` within the `hit`-sided box.
     fn draw(self, ui: &mut Ui, size: f32, inset: f32, hit: f32, fill: RgbaF32) {
         match self {
-            GlyphShape::Circle { outline } => {
+            Self::Circle { outline } => {
                 let rect = Rect::new(inset, inset, size, size);
                 let radius = size * 0.5;
                 // The ring paints *before* the fill — an annulus strictly
@@ -223,7 +223,7 @@ impl GlyphShape {
                 }
                 filled_rect(ui, rect, radius, fill);
             }
-            GlyphShape::Arrow { turn } => {
+            Self::Arrow { turn } => {
                 // Vertices are inset by the corner radius — the SDF rounds by
                 // *dilating* (`sdf - radius`), so the rounded result grows back
                 // out to the glyph box instead of past it. `turn` rotates the
