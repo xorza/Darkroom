@@ -29,7 +29,9 @@ use crate::math::{
     dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, noise, pixel_quadrature,
     statistics, sum, wavelet,
 };
-use crate::{background_mesh, bit_buffer2, registration, star_detection};
+use crate::registration::resample;
+use crate::star_detection::detector;
+use crate::{background_mesh, bit_buffer2, pipeline, registration, star_detection};
 
 /// The kernel tier: one operation on the unit production gives it.
 pub fn kernel(c: &mut Criterion) {
@@ -61,4 +63,12 @@ pub fn kernel(c: &mut Criterion) {
     sample::bench::benches(c);
     normalization::bench::benches(c);
     accumulator::bench::benches(c);
+}
+
+/// The stage tier: one pipeline stage on a 24 MP frame or a set of them.
+pub fn stage(c: &mut Criterion) {
+    detector::bench::benches(c);
+    registration::bench::stage(c);
+    resample::bench::benches(c);
+    pipeline::bench::benches(c);
 }

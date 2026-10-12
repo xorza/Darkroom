@@ -77,6 +77,8 @@ const SENSOR_SEED: u64 = 0x5E_4502;
 /// The content of a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Field {
+    /// 300 stars on a sky with a gradient: a field at high galactic latitude.
+    Sparse,
     /// 3000 stars on a sky with a gradient: a field at moderate galactic latitude.
     Typical,
     /// A globular cluster of 20 000 stars on the same sky: four in five in a core whose σ is 12% of
@@ -88,6 +90,7 @@ impl Field {
     /// The bench parameter that names the field.
     pub(crate) const fn name(self) -> &'static str {
         match self {
+            Field::Sparse => "sparse",
             Field::Typical => "typical",
             Field::Dense => "dense",
         }
@@ -95,6 +98,7 @@ impl Field {
 
     const fn stars(self) -> usize {
         match self {
+            Field::Sparse => 300,
             Field::Typical => 3000,
             Field::Dense => 20_000,
         }
@@ -102,6 +106,7 @@ impl Field {
 
     const fn seed(self) -> u64 {
         match self {
+            Field::Sparse => 0x5_9A45,
             Field::Typical => 0x7_1C41,
             Field::Dense => 0xD_E45E,
         }
@@ -111,7 +116,9 @@ impl Field {
     pub(crate) fn scene(self, size: Size2us) -> Scene {
         let (stars, seed) = (at_density(self.stars(), size), self.seed());
         match self {
-            Field::Typical => Scene::random_field(size, stars, FLUX, sky(1.0), 16.0, seed),
+            Field::Sparse | Field::Typical => {
+                Scene::random_field(size, stars, FLUX, sky(1.0), 16.0, seed)
+            }
             Field::Dense => Scene::cluster(size, stars, FLUX, sky(1.0), seed),
         }
     }
@@ -326,9 +333,9 @@ mod tests {
     use crate::math::vec2us::Vec2us;
     use crate::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 
-    /// 600 × 400 is a hundredth of the frame: 3000 / 100 = 30 stars, 20 000 / 100 = 200 in the
-    /// cluster, 200 / 100 = 2 cosmic rays,
-    /// and, rounded up, ⌈240 / 100⌉ = 3 hot pixels and ⌈24 / 100⌉ = 1 dead one.
+    /// 600 × 400 is a hundredth of the frame: 3000 / 100 = 30 stars, 300 / 100 = 3 sparse ones,
+    /// 20 000 / 100 = 200 in the cluster, 200 / 100 = 2 cosmic rays, and, rounded up,
+    /// ⌈240 / 100⌉ = 3 hot pixels and ⌈24 / 100⌉ = 1 dead one.
     const SMALL: Size2us = Size2us::new(600, 400);
 
     const RGGB: CfaType = CfaType::Bayer(CfaPattern::Rggb);
@@ -337,6 +344,7 @@ mod tests {
     fn a_field_keeps_its_density_on_a_smaller_frame() {
         assert_eq!(at_density(COSMIC_RAYS, SMALL), 2);
         assert_eq!(at_density(Field::Typical.stars(), FRAME), 3000);
+        assert_eq!(Field::Sparse.scene(SMALL).sources.len(), 3);
         assert_eq!(at_density(Field::Dense.stars(), FRAME), 20_000);
         assert_eq!(Field::Dense.scene(SMALL).sources.len(), 200);
         let SensorDefects { hot, dead } = defects(SMALL);

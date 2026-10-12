@@ -69,11 +69,11 @@ impl Stages {
         }
     }
 
-    /// The configuration a user picks for `field`: the default for a typical field, the
-    /// crowded-field preset for a cluster.
+    /// The configuration a user picks for `field`: the default for a sparse or a typical field,
+    /// the crowded-field preset for a cluster.
     pub(crate) fn config(field: Field) -> Config {
         match field {
-            Field::Typical => Config::default(),
+            Field::Sparse | Field::Typical => Config::default(),
             Field::Dense => Config::crowded_field(),
         }
     }
