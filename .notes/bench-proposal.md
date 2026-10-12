@@ -8,7 +8,8 @@ Done in this order; each is deleted when it is committed. An item that builds a 
 the quickbench benches that section 5 maps to it, and adds the `bench::scene` entries (3.2) it is
 the first to need; the `Pipeline` scale comes with the `pipeline` tier.
 
-4. `kernel/frame_store`.
+4. `kernel/frame_store`: only `spill/read/cold` is left, blocked on
+   [a question](bench-proposal_QUESTIONS.md).
 5. `kernel/detection`.
 6. `kernel/registration`.
 7. `kernel/combine`.

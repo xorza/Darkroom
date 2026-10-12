@@ -294,5 +294,7 @@ impl SlotLevel {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
