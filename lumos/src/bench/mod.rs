@@ -21,6 +21,7 @@ use criterion::Criterion;
 use crate::calibration_masters::{self, cosmic_ray, defect_map, prepared_flat};
 use crate::combine::cache::sample;
 use crate::combine::{normalization, rejection};
+use crate::drizzle::accumulator;
 use crate::frame_store::{self, frame_stats};
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::raw::{self, demosaic};
@@ -59,4 +60,5 @@ pub fn kernel(c: &mut Criterion) {
     rejection::bench::benches(c);
     sample::bench::benches(c);
     normalization::bench::benches(c);
+    accumulator::bench::benches(c);
 }

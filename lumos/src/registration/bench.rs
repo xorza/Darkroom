@@ -7,16 +7,18 @@ use glam::DVec2;
 use crate::bench::scene::{FRAME, Field};
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::test_rng::TestRng;
-use crate::registration::final_fit::{FinalFit, FitCatalogs, FitModel};
+use crate::registration::distortion::sip::SipConfig;
+use crate::registration::final_fit::{FinalFit, FitCatalogs, FitModel, SipModel};
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::row_positions;
 use crate::registration::spatial::KdTree;
-use crate::registration::transform::{Transform, TransformType};
+use crate::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::registration::triangle::matching;
 use crate::registration::triangle::voting::PointMatch;
 use crate::registration::{
-    estimate_and_refine, final_fit, median_fwhm, ransac, spatial, triangle, tuning,
+    bounding_box_centre, estimate_and_refine, final_fit, median_fwhm, ransac, spatial, triangle,
+    tuning,
 };
 use crate::star_detection::star::Star;
 
@@ -39,13 +41,13 @@ const POSITION_SIGMA: f64 = 0.05;
 /// is, and the lens's radial distortion moving the frame's corners by about a pixel. Each position
 /// is off by its measurement error.
 #[derive(Debug)]
-pub(super) struct Pair {
+pub(crate) struct Pair {
     pub(super) reference: Vec<Star>,
     pub(super) target: Vec<Star>,
 }
 
 impl Pair {
-    pub(super) fn typical() -> Self {
+    pub(crate) fn typical() -> Self {
         let mut sources = Field::Typical.scene(FRAME).sources;
         sources.sort_by(|a, b| b.flux.total_cmp(&a.flux));
         let centre = DVec2::new(FRAME.width as f64, FRAME.height as f64) / 2.0;
@@ -116,6 +118,20 @@ impl Pair {
             )
             .expect("the pair registers")
             .transform
+    }
+
+    /// The warp `register` fits to the pair with the SIP correction the precise presets add: the
+    /// dither and the lens together.
+    pub(crate) fn sip_warp(&self) -> WarpTransform {
+        let sip = SipModel {
+            order: SipConfig::default().order,
+            origin: bounding_box_centre(&self.reference),
+        };
+        self.fit(FitModel {
+            transform: TransformType::Similarity,
+            sip: Some(sip),
+        })
+        .warp
     }
 
     /// `model` fitted as `register` fits it under the default configuration: RANSAC on the

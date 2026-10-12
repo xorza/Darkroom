@@ -10,7 +10,6 @@ the first to need; the `Pipeline` scale comes with the `pipeline` tier.
 
 4. `kernel/frame_store`: only `spill/read/cold` is left, blocked on
    [a question](bench-proposal_QUESTIONS.md).
-8. `kernel/drizzle`.
 9. The `stage` tier.
 10. The `pipeline` tier.
 11. quickbench removed from `lumos`: the dev-dependency, any bench left, every real-data bench
