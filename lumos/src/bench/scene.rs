@@ -15,7 +15,9 @@ use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::registration::transform::Transform;
 use crate::{CalibrationSet, MasterRole};
+use glam::DVec2;
 use imaginarium::Buffer2;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.
@@ -153,12 +155,23 @@ impl Field {
     /// or fades by up to 8% and the transparency falls by up to 9%, as over a night, and the noise
     /// is the exposure's own.
     pub(crate) fn aligned(self, size: Size2us, index: usize) -> SimFrame {
+        self.sequence(size, index, Transform::identity())
+    }
+
+    /// Exposure `index` of the sequence [`Self::aligned`] gives, as the sensor saw it: placed by
+    /// [`dither`].
+    pub(crate) fn exposure(self, size: Size2us, index: usize) -> SimFrame {
+        self.sequence(size, index, dither(size, index))
+    }
+
+    fn sequence(self, size: Size2us, index: usize, transform: Transform) -> SimFrame {
         let mut scene = self.scene(size);
         scene.background = sky(exposure_sky(index));
         for source in &mut scene.sources {
             source.flux *= exposure_transparency(index);
         }
         let observation = Observation {
+            transform,
             exposure_s: EXPOSURE_S,
             ..Observation::reference(self.seed() ^ index as u64)
         };
@@ -234,6 +247,27 @@ pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option
         flat: expose(MasterRole::Flat, 3, FLAT_LEVEL, 1.0),
         flat_dark: None,
     }
+}
+
+/// Where exposure `index` of a sequence on a frame of `size` lies: the field's frame to the
+/// sensor's. Exposure 0 is the reference; every other is dithered by up to 5 px each way and
+/// turned by up to 0.2° about the frame's centre, along the golden-ratio sequence that spreads a
+/// dither pattern evenly.
+pub(crate) fn dither(size: Size2us, index: usize) -> Transform {
+    if index == 0 {
+        return Transform::identity();
+    }
+    let spread = |step: f64| 2.0 * (index as f64 * step).fract() - 1.0;
+    let golden = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let centre = DVec2::new(size.width as f64, size.height as f64) / 2.0;
+    Transform::translation(DVec2::new(
+        5.0 * spread(golden),
+        5.0 * spread(golden * golden),
+    ))
+    .compose(&Transform::rotation_around(
+        centre,
+        0.2_f64.to_radians() * spread(golden / 2.0),
+    ))
 }
 
 /// The sky's level in exposure `index`, against the field's frame: a cycle of five through 0.92,
@@ -363,6 +397,18 @@ mod tests {
         // 3 mod 4 = 3, so sky (92 + 8) / 100 = 1 and transparency (100 − 9) / 100 = 0.91.
         assert_eq!((exposure_sky(1), exposure_transparency(1)), (1.0, 0.91));
         assert_eq!((exposure_sky(0), exposure_transparency(0)), (0.92, 1.0));
+        // The dither puts exposure 1's stars where its transform takes them.
+        let dithered = Field::Typical.exposure(SMALL, 1);
+        let placement = dither(SMALL, 1);
+        assert_ne!(placement.apply(DVec2::ZERO), DVec2::ZERO);
+        for (dithered, source) in dithered
+            .truth
+            .sources
+            .iter()
+            .zip(&Field::Typical.scene(SMALL).sources)
+        {
+            assert_eq!(dithered.pos, placement.apply(source.pos));
+        }
         let first = Field::Typical.aligned(SMALL, 0);
         let second = Field::Typical.aligned(SMALL, 1);
         for (first, second) in first.truth.sources.iter().zip(&second.truth.sources) {
