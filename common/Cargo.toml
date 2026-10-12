@@ -8,8 +8,6 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 workspace = true
 
 [features]
-# Exposes test-only helpers (e.g. `TempDir`) to
-# downstream crates' test targets without putting them in the released surface.
 internals = []
 introspect-derive = ["dep:common-derive"]
 

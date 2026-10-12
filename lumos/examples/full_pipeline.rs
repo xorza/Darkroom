@@ -9,7 +9,7 @@
 //! dataset (`test_data/lumos_data`). The stacked master is written to `test_output/`.
 //!
 //! ```bash
-//! cargo run --release --example full_pipeline
+//! cargo run --profile release-dev --example full_pipeline
 //! ```
 
 #![expect(clippy::print_stdout, reason = "an example reports to the terminal")]

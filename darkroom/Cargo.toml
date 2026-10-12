@@ -10,7 +10,7 @@ workspace = true
 [lib]
 bench = false
 
-# Documented through the library; the binary only parses the command line.
+# Its docs would collide with the library's, of the same name.
 [[bin]]
 name = "darkroom"
 path = "src/main.rs"
@@ -28,8 +28,6 @@ common = { workspace = true }
 lens = { workspace = true }
 imaginarium = { workspace = true }
 
-# Decodes the baked-in window-icon PNG to RGBA at startup (see `load_icon`
-# in `main.rs`). Already in the workspace graph via imaginarium.
 image = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
@@ -39,8 +37,7 @@ sysinfo = { workspace = true }
 rfd = { workspace = true }
 zip = { workspace = true }
 tokio = { workspace = true }
-# Referenced by `common`'s `id_type!` expansion (e.g. `TabGroupId`), not by
-# any path written here.
+# Named by `common`'s `id_type!` expansion, not by a path written here.
 uuid = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
@@ -55,13 +52,7 @@ scenarium = { workspace = true, features = ["internals"] }
 static_assertions = { workspace = true }
 
 [features]
-# What only tests and benches build: the bench drivers `benches/darkroom.rs` runs. Every test and
-# bench build turns it on through the self dev-dependency.
 internals = ["dep:criterion", "palantir/internals"]
-# Forward palantir's tracy backend so `cargo run -p darkroom --features
-# profile-with-tracy` captures the GUI library's zones. The editor
-# declares none of its own yet, so a capture shows frame / layout /
-# render phases with the app's own work as the gap between them.
 profile-with-tracy = ["palantir/profile-with-tracy"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -69,15 +60,11 @@ objc2 = { workspace = true }
 objc2-app-kit = { workspace = true }
 objc2-foundation = { workspace = true }
 
-# Embeds `assets/icons/darkroom.ico` into the .exe as a Win32 resource so
-# Explorer / taskbar show the app icon. No-op off Windows (see build.rs).
+# Embeds the app icon in the .exe; a no-op off Windows.
 [target.'cfg(windows)'.build-dependencies]
 winresource = { workspace = true }
 
-# `cargo bundle --release -p darkroom` reads this to build darkroom.app
-# (macOS) / a .deb (Linux). The .icns lands in Contents/Resources and is
-# referenced from the generated Info.plist. Regenerate icons with
-# scripts/generate-icons.sh.
+# Regenerate the icons with scripts/generate-icons.sh.
 [package.metadata.bundle]
 name = "darkroom"
 identifier = "com.cssodessa.darkroom"
