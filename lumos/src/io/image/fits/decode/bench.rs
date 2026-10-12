@@ -21,8 +21,8 @@ pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = fixture::group(c, "kernel/io/fits/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    // A mono camera's 16-bit frame, a calibrated or stacked frame in 32-bit float, and a colour
-    // camera's 16-bit mosaic, which loads as a CFA image.
+    // A mono camera's 16-bit light, a calibrated or stacked frame in 32-bit float, and a colour
+    // camera's 16-bit light, which loads as a CFA image.
     group.bench_function(BenchmarkId::new("decode/u16", field.name()), |b| {
         let file = FitsFile::write(Format::U16, field, FRAME);
         b.iter_with_large_drop(|| load_linear_fits(&file.path, &LoadContext::default()).unwrap());
@@ -62,8 +62,8 @@ impl FitsFile {
         let shape = vec![size.width, size.height];
         match format {
             Format::U16 => {
-                let frame = field.render(size);
-                let samples = quantize(frame.image.channel(0).pixels());
+                let light = field.light(size, CfaType::Mono);
+                let samples = quantize(light.data.pixels());
                 write_fits(&path, &Image::from_u16(shape, &samples).unwrap(), None);
             }
             Format::F32 => {
@@ -72,8 +72,8 @@ impl FitsFile {
                 write_fits(&path, &Image::new(shape, samples).unwrap(), None);
             }
             Format::CfaU16 => {
-                let mosaic = field.mosaic(size, CfaType::Bayer(CfaPattern::Rggb));
-                let samples = quantize(mosaic.data.pixels());
+                let light = field.light(size, CfaType::Bayer(CfaPattern::Rggb));
+                let samples = quantize(light.data.pixels());
                 let mut header = Header::new();
                 header.set("BAYERPAT", "RGGB").unwrap();
                 write_fits(
@@ -108,7 +108,8 @@ mod tests {
         let field = Field::Typical;
         let render = field.render(size);
         let render = render.image.channel(0).pixels();
-        let mosaic = field.mosaic(size, CfaType::Bayer(CfaPattern::Rggb));
+        let mono = field.light(size, CfaType::Mono);
+        let mosaic = field.light(size, CfaType::Bayer(CfaPattern::Rggb));
         let within_half_step = |loaded: &[f32], expected: &[f32]| {
             assert_eq!(loaded.len(), expected.len());
             for (&loaded, &expected) in loaded.iter().zip(expected) {
@@ -119,7 +120,7 @@ mod tests {
 
         let u16 = FitsFile::write(Format::U16, field, size);
         let loaded = load_linear_fits(&u16.path, &LoadContext::default()).unwrap();
-        within_half_step(loaded.channel(0).pixels(), render);
+        within_half_step(loaded.channel(0).pixels(), mono.data.pixels());
 
         let f32 = FitsFile::write(Format::F32, field, size);
         let loaded = load_linear_fits(&f32.path, &LoadContext::default()).unwrap();

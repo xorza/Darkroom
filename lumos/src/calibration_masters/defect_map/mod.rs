@@ -507,8 +507,7 @@ fn compute_per_color_residual_stats(
     stats
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

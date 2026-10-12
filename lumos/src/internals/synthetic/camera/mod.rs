@@ -1,4 +1,4 @@
-//! The instrument + sensor model: PSF, charge capacity & noise, flat field, sensor
+//! The instrument + sensor model: PSF, charge capacity & noise, colour filters, flat field, sensor
 //! defects, and bias. A [`Camera`] turns true sky flux into raw sensor pixels.
 //!
 //! Pixel values are normalized flux where `1.0` == sensor full well; `full_well_e` is the
@@ -7,10 +7,10 @@
 
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::io::image::cfa::CfaType;
 use crate::math::fwhm::fwhm_beta_to_alpha;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 use std::f32::consts::PI;
@@ -91,37 +91,37 @@ impl PsfModel {
     }
 }
 
-/// A multiplicative flat field (sensor response): optional radial vignette × per-channel gain.
+/// A multiplicative flat field (sensor response): optional radial vignette × per-colour gain.
 #[derive(Debug, Clone)]
 pub(crate) struct FlatField {
     /// Radial vignette multiplier, or `None` for a flat 1.0 response.
     pub(crate) vignette: Option<Vignette>,
-    /// Per-RGB-channel multiplicative gain (1.0 == no shift). Mono uses index 0.
-    pub(crate) channel_gain: [f32; 3],
+    /// The gain of each colour's filter, in [`CfaType::color_at`]'s slots (1.0 == no shift). A
+    /// mono sensor uses slot 0.
+    pub(crate) colour_gain: [f32; 3],
 }
 
 impl Default for FlatField {
     fn default() -> Self {
         Self {
             vignette: None,
-            channel_gain: [1.0; 3],
+            colour_gain: [1.0; 3],
         }
     }
 }
 
 impl FlatField {
-    /// Render the flat-field response map for `channel` into a fresh `size`-sized buffer.
-    pub(crate) fn render(&self, size: Size2us, channel: usize) -> Vec<f32> {
-        let gain = self.channel_gain[channel];
-        let mut flat = vec![gain; size.pixel_count()];
-        if let Some(vignette) = self.vignette {
-            for y in 0..size.height {
-                for x in 0..size.width {
-                    flat[size.index_of(Vec2us::new(x, y))] = gain * vignette.at(size, x, y);
-                }
-            }
-        }
-        flat
+    /// The response of every photosite of a `size` sensor behind `cfa_type`'s filters: its
+    /// colour's gain times the vignette.
+    pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Vec<f32> {
+        (0..size.pixel_count())
+            .map(|index| {
+                let pos = size.point_of(index);
+                let gain = self.colour_gain[cfa_type.color_at(pos)];
+                self.vignette
+                    .map_or(gain, |vignette| gain * vignette.at(size, pos.x, pos.y))
+            })
+            .collect()
     }
 }
 
@@ -158,6 +158,8 @@ pub(crate) struct Camera {
     pub(crate) dark_current_e_per_s: f32,
     /// Saturation clip level in normalized units (typically 1.0).
     pub(crate) saturation: f32,
+    /// The colour filters over the photosites: `Mono` for none.
+    pub(crate) cfa_type: CfaType,
     pub(crate) flat: FlatField,
     pub(crate) defects: SensorDefects,
     pub(crate) bias: BiasField,
@@ -176,6 +178,7 @@ impl Camera {
             read_noise_e: 0.0,
             dark_current_e_per_s: 0.0,
             saturation: 1.0,
+            cfa_type: CfaType::Mono,
             flat: FlatField::default(),
             defects: SensorDefects::default(),
             bias: BiasField::default(),
@@ -191,6 +194,7 @@ impl Camera {
             read_noise_e: 3.0,
             dark_current_e_per_s: 0.05,
             saturation: 1.0,
+            cfa_type: CfaType::Mono,
             flat: FlatField::default(),
             defects: SensorDefects::default(),
             bias: BiasField::default(),

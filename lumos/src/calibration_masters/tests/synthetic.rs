@@ -33,7 +33,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
         }),
         ..FlatField::default()
     }
-    .render(size, 0);
+    .render(size, &CfaType::Mono);
     let light_px: Vec<f32> = flat.iter().map(|&f| bias + dark + f * sky).collect();
     // Vignetted before calibration: the centre reads 0.07 + 0.3, a corner 0.07 + 0.7·0.3.
     assert_eq!(light_px[32 * 64 + 32], bias + dark + sky);

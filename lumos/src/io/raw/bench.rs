@@ -4,7 +4,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
-use crate::bench::scene::{FRAME, Field};
+use crate::bench::scene::{BIAS, FRAME, Field};
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack};
@@ -33,7 +33,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = fixture::group(c, "kernel/io/raw/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    // The decode of the standard frame's RGGB mosaic from its raw buffer, masked margins included.
+    // The decode of the standard frame's RGGB light from its raw buffer, masked margins included.
     group.bench_function(BenchmarkId::new("decode/rggb", field.name()), |b| {
         let sensor = RawSensor::of(field, FRAME);
         b.iter_with_large_drop(|| sensor.decode());
@@ -49,11 +49,12 @@ struct RawSensor {
 }
 
 impl RawSensor {
-    /// `field`'s RGGB mosaic over an `active` area, quantized to the levels above, with a masked
-    /// margin of 16 columns and 12 rows each side at the black level.
+    /// `field`'s RGGB light over an `active` area, quantized to the levels above, with a masked
+    /// margin of 16 columns and 12 rows each side at the black level. The black level is the
+    /// light's bias, so a sample sits `sample − BIAS` of the span above it.
     #[expect(
         clippy::cast_sign_loss,
-        reason = "a mosaic's samples are in [0, 1], so a level is between the black and the white point"
+        reason = "a light reads its bias less a few read-noise σ at the least, so a level is above zero"
     )]
     fn of(field: Field, active: Size2us) -> Self {
         let layout = SensorLayout {
@@ -77,7 +78,7 @@ impl RawSensor {
             masked: [0; 8],
         })
         .unwrap();
-        let mosaic = field.mosaic(active, CfaType::Bayer(CfaPattern::Rggb));
+        let light = field.light(active, CfaType::Bayer(CfaPattern::Rggb));
         let span = black.span();
         let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
             .map(|index| {
@@ -85,10 +86,10 @@ impl RawSensor {
                 u16::try_from(BLACK + CHANNEL_BLACK[libraw_filter_color(RGGB, y, x)]).unwrap()
             })
             .collect();
-        for (index, &sample) in mosaic.data.pixels().iter().enumerate() {
+        for (index, &sample) in light.data.pixels().iter().enumerate() {
             let (x, y) = (index % active.width, index / active.width);
-            let level =
-                black.of_channel(libraw_filter_color(RGGB, y, x)) + f64::from(sample) * span;
+            let level = black.of_channel(libraw_filter_color(RGGB, y, x))
+                + (f64::from(sample) - f64::from(BIAS)) * span;
             let (raw_x, raw_y) = (layout.margin.x + x, layout.margin.y + y);
             raw[raw_y * layout.raw.width + raw_x] = level.round().min(f64::from(WHITE)) as u16;
         }
@@ -113,24 +114,26 @@ impl RawSensor {
 mod tests {
     use super::*;
 
-    /// The decode gives the mosaic back to within half an ADU, `0.5 / span`, wherever the
-    /// quantization did not clip it at the white point. The span is 16 383 − 512 = 15 871, and the
-    /// raw buffer the 60 × 40 area with 16 columns and 12 rows of margin each side: 92 × 64.
+    /// The decode gives the light back less its bias, to within half an ADU, `0.5 / span`,
+    /// wherever the quantization did not clip it at the white point. The span is 16 383 − 512 =
+    /// 15 871, and the raw buffer the 60 × 40 area with 16 columns and 12 rows of margin each side:
+    /// 92 × 64.
     #[test]
-    fn the_decode_gives_back_the_mosaic() {
+    fn the_decode_gives_back_the_light_less_its_bias() {
         let active = Size2us::new(60, 40);
         let sensor = RawSensor::of(Field::Typical, active);
         assert_eq!(sensor.raw.len(), 92 * 64);
         let span = sensor.black.span();
         assert_eq!(span, 15_871.0);
-        let mosaic = Field::Typical.mosaic(active, CfaType::Bayer(CfaPattern::Rggb));
+        let light = Field::Typical.light(active, CfaType::Bayer(CfaPattern::Rggb));
         let decoded = sensor.decode();
         assert_eq!(decoded.pixels.len(), active.pixel_count());
         let headroom =
             f64::from(u32::from(WHITE) - BLACK - CHANNEL_BLACK.into_iter().max().unwrap());
-        for (&decoded, &sample) in decoded.pixels.iter().zip(mosaic.data.pixels()) {
-            if f64::from(sample) * span < headroom {
-                let error = (f64::from(decoded) - f64::from(sample)).abs();
+        for (&decoded, &sample) in decoded.pixels.iter().zip(light.data.pixels()) {
+            let above_black = f64::from(sample) - f64::from(BIAS);
+            if above_black * span < headroom {
+                let error = (f64::from(decoded) - above_black).abs();
                 assert!(error <= 0.5 / span + 1e-7, "{decoded} for {sample}");
             }
         }
