@@ -25,7 +25,7 @@ mod frame_sampler;
 mod interior_window;
 mod kernel;
 mod ringing_clamp;
-mod row_positions;
+pub(super) mod row_positions;
 pub(crate) mod source_image;
 mod source_position;
 mod tap_window;
