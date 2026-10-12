@@ -9,9 +9,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::FRAME;
 use crate::registration::bench::Pair;
-use crate::registration::bounding_box_centre;
-use crate::registration::distortion::sip::SipConfig;
-use crate::registration::final_fit::{FitModel, SipModel};
+use crate::registration::final_fit::FitModel;
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::transform::TransformType;
 
@@ -19,18 +17,23 @@ pub(crate) fn benches(c: &mut Criterion) {
     let pair = OnceCell::new();
     let mut group = fixture::group(c, "kernel/registration/row_positions", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
-    for (name, transform, with_sip) in [
-        ("affine", TransformType::Similarity, false),
-        ("homography", TransformType::Homography, false),
-        ("sip", TransformType::Similarity, true),
+    for (name, transform) in [
+        ("affine", Some(TransformType::Similarity)),
+        ("homography", Some(TransformType::Homography)),
+        ("sip", None),
     ] {
         group.bench_function(BenchmarkId::new(name, FRAME.width), |b| {
             let pair: &Pair = pair.get_or_init(Pair::typical);
-            let sip = with_sip.then(|| SipModel {
-                order: SipConfig::default().order,
-                origin: bounding_box_centre(&pair.reference),
-            });
-            let warp = pair.fit(FitModel { transform, sip }).warp;
+            let warp = transform.map_or_else(
+                || pair.sip_warp(),
+                |transform| {
+                    pair.fit(FitModel {
+                        transform,
+                        sip: None,
+                    })
+                    .warp
+                },
+            );
             let mut positions = RowPositions::default();
             b.iter(|| positions.fill(FRAME.height / 2, FRAME.width, &warp, FRAME));
         });

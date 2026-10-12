@@ -31,10 +31,8 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
-use crate::drizzle::accumulator::DrizzleAccumulator;
 use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
-use crate::drizzle::deposit::Deposit;
 use crate::drizzle::stack::drizzle_images;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::progress::progress_callback::ProgressCallback;
@@ -52,17 +50,6 @@ const FIELD: Size2us = Size2us::new(1000, 1000);
 /// Cheapest first: the sweep is half a minute of saturated multi-thread work and the tail runs at a
 /// lower clock than the head, so the rows where a fixed overhead is the largest share are the ones
 /// measured coolest.
-const KERNELS: [(DrizzleKernel, f32); 6] = [
-    (DrizzleKernel::Point, 0.8),
-    (DrizzleKernel::Turbo, 0.8),
-    (DrizzleKernel::Square, 0.8),
-    (DrizzleKernel::Square, 1.0),
-    (DrizzleKernel::Gaussian, 0.8),
-    (DrizzleKernel::Lanczos, 1.0),
-];
-
-/// How the frames lie on the reference: a field rotation in degrees, and whether a SIP field
-/// bends it.
 #[derive(Debug, Clone, Copy)]
 struct Geometry {
     degrees: f64,
@@ -202,42 +189,6 @@ fn drizzle(
 }
 
 /// Every frame of `frames` scattered into one accumulator: the scatter alone, with no combine.
-fn scatter(frames: &[DrizzleFrame<LinearImage>], config: &DrizzleConfig) -> usize {
-    let mut accumulator = DrizzleAccumulator::new(
-        ImageDimensions::new(FIELD, 1),
-        Deposit::Channels(1),
-        config.clone(),
-        0,
-    )
-    .expect("bench config must be valid");
-    for frame in frames {
-        accumulator
-            .add_frame(frame)
-            .expect("bench fixture must drizzle");
-    }
-    accumulator.unconverged_points()
-}
-
-/// Every kernel on every geometry, the scatter alone.
-///
-/// One sweep rather than a benchmark per combination: the kernel and the field geometry are the two
-/// axes the scatter's cost turns on, and reading either off needs the other held fixed in the same
-/// process — the run-to-run drift on this machine is far wider than the differences being measured.
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_drizzle_kernels(b: ::quickbench::Bencher) {
-    let base = star_field(FIELD, 250, 5).image;
-    for (kernel, pixfrac) in KERNELS {
-        let config = kernel_config(kernel, pixfrac);
-        for (label, geometry) in GEOMETRIES {
-            let frames = dithered_set(&base, geometry);
-            b.bench_labeled(&format!("{kernel:?}-p{pixfrac}/{label}"), || {
-                black_box(scatter(&frames, &config))
-            });
-        }
-    }
-}
-
-/// What the combine's quality planes cost a drizzle, on the default kernel.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_drizzle_quality_planes(b: ::quickbench::Bencher) {
     let frames = dithered_set(&star_field(FIELD, 250, 5).image, GEOMETRIES[0].1);
