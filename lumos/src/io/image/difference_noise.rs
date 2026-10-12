@@ -37,11 +37,24 @@ impl DifferenceNoise {
         cfa_type: &CfaType,
         excluded: impl Fn(usize) -> bool,
     ) -> ArrayVec<f32, 3> {
-        let mut differences: ArrayVec<Vec<f32>, 3> = pair_counts(size, cfa_type, &excluded)
-            .into_iter()
-            .map(Vec::with_capacity)
-            .collect();
-        for_each_pair(size, cfa_type, &excluded, |pair| {
+        Self::estimate_sampled(mosaic, size, cfa_type, excluded, MAX_STATISTIC_SAMPLES)
+    }
+
+    /// [`Self::estimate`] over the pairs of the rows that keep each colour to at most about
+    /// `per_colour` pairs.
+    fn estimate_sampled(
+        mosaic: &[f32],
+        size: Size2us,
+        cfa_type: &CfaType,
+        excluded: impl Fn(usize) -> bool,
+        per_colour: usize,
+    ) -> ArrayVec<f32, 3> {
+        let mut differences: ArrayVec<Vec<f32>, 3> =
+            pair_counts(size, cfa_type, &excluded, per_colour)
+                .into_iter()
+                .map(Vec::with_capacity)
+                .collect();
+        for_each_pair(size, cfa_type, &excluded, per_colour, |pair| {
             differences[pair.colour].push(pair.difference(mosaic, size));
         });
         differences.iter_mut().map(|colour| sigma(colour)).collect()
@@ -58,11 +71,11 @@ impl DifferenceNoise {
         gain: &FlatGain,
     ) -> ArrayVec<BackgroundSplit, 3> {
         let mut binned: ArrayVec<BinnedSamples<Vec<f32>>, 3> =
-            pair_counts(size, cfa_type, &excluded)
+            pair_counts(size, cfa_type, &excluded, MAX_STATISTIC_SAMPLES)
                 .into_iter()
                 .map(BinnedSamples::with_capacity)
                 .collect();
-        for_each_pair(size, cfa_type, &excluded, |pair| {
+        for_each_pair(size, cfa_type, &excluded, MAX_STATISTIC_SAMPLES, |pair| {
             let colour = pair.colour;
             let y = pair.y as f32;
             let at = f32::midpoint(
@@ -84,7 +97,7 @@ impl DifferenceNoise {
     /// The most bytes an estimate over a mosaic of `size` and `cfa_type` holds: every pair of
     /// every colour, as [`Self::estimate_split`] holds them, each with its gain bin.
     pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
-        pair_counts(size, cfa_type, &|_| false)
+        pair_counts(size, cfa_type, &|_| false, MAX_STATISTIC_SAMPLES)
             .into_iter()
             .map(BinnedSamples::<Vec<f32>>::heap_bytes)
             .sum()
@@ -107,27 +120,30 @@ impl Pair {
     }
 }
 
-/// How many pairs of each colour [`for_each_pair`] visits under `excluded`.
+/// How many pairs of each colour [`for_each_pair`] visits under `excluded` and `per_colour`.
 fn pair_counts(
     size: Size2us,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
+    per_colour: usize,
 ) -> ArrayVec<usize, 3> {
     let mut counts: ArrayVec<usize, 3> = (0..cfa_type.num_colors()).map(|_| 0).collect();
-    for_each_pair(size, cfa_type, excluded, |pair| counts[pair.colour] += 1);
+    for_each_pair(size, cfa_type, excluded, per_colour, |pair| {
+        counts[pair.colour] += 1;
+    });
     counts
 }
 
-/// Every pair of every `row_step`-th row of a `size` mosaic, so each colour keeps at most about
-/// `MAX_STATISTIC_SAMPLES`; pairs touching a pixel `excluded` names are skipped.
+/// Every pair of the rows [`CfaType::sampled_rows`] takes of a `size` mosaic for `per_colour`
+/// samples a colour; pairs touching a pixel `excluded` names are skipped.
 fn for_each_pair(
     size: Size2us,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
+    per_colour: usize,
     mut visit: impl FnMut(Pair),
 ) {
-    let row_step = (size.pixel_count() / (cfa_type.num_colors() * MAX_STATISTIC_SAMPLES)).max(1);
-    for y in (0..size.height).step_by(row_step) {
+    for y in cfa_type.sampled_rows(size, per_colour) {
         for x in 0..size.width {
             let colour = cfa_type.color_at(Vec2us::new(x, y));
             let Some(neighbour) = (x + 1..(x + 1 + MAX_REACH).min(size.width))
@@ -167,11 +183,14 @@ mod tests {
     use crate::io::image::cfa::CfaType;
     use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::difference_noise::DifferenceNoise;
+    use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 
     /// Each colour of a Bayer mosaic reads its own noise, through a gradient the differences
-    /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: red and blue keep 32 768 pairs
-    /// each, green 65 536. MAD's standard error is 1.166·σ/√n, so 3 of them is 1.9% of σ for red
-    /// and blue and 1.4% for green; 2% of σ covers all three.
+    /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: every row holds 255 pairs of
+    /// each of its two colours, so red and blue keep 256 · 255 = 65 280 pairs each, green 130 560.
+    /// At 43 690 samples a colour the rows step by ⌊262 144 / 131 070⌋ = 2 periods, half the rows,
+    /// where a step of 2 single rows would read no blue row at all: 32 640 pairs of red and blue.
+    /// MAD's standard error is 1.166·σ/√n, so 3 of them is at most 1.94% of σ; 2% covers both.
     #[test]
     fn each_bayer_colour_reads_its_own_noise() {
         let size = Size2us::new(512, 512);
@@ -185,12 +204,15 @@ mod tests {
                 0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
             })
             .collect();
-        let estimates = DifferenceNoise::estimate(&mosaic, size, &cfa_type, |_| false);
-        for (colour, (&estimate, &sigma)) in estimates.iter().zip(&sigmas).enumerate() {
-            assert!(
-                (estimate - sigma).abs() < 0.02 * sigma,
-                "colour {colour}: {estimate}"
-            );
+        for per_colour in [MAX_STATISTIC_SAMPLES, 43_690] {
+            let estimates =
+                DifferenceNoise::estimate_sampled(&mosaic, size, &cfa_type, |_| false, per_colour);
+            for (colour, (&estimate, &sigma)) in estimates.iter().zip(&sigmas).enumerate() {
+                assert!(
+                    (estimate - sigma).abs() < 0.02 * sigma,
+                    "{per_colour} a colour, colour {colour}: {estimate}"
+                );
+            }
         }
     }
 }

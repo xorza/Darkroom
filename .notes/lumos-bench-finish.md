@@ -1,34 +1,12 @@
 # lumos benches: finish the inventory
 
 Scope: the work the bench inventory left, and the open issues in `.notes/ISSUES.md`. The bench
-rules are the ones `lumos/src/bench/mod.rs` states. Decisions already taken: `libc` may become an
-optional Linux dependency for the cold reads (item 2), and the mosaic subsampling defect is fixed
-before the drizzle bench is added (items 1 and 6).
+rules are the ones `lumos/src/bench/mod.rs` states. Decision already taken: `libc` may become an
+optional Linux dependency for the cold reads (item 2).
 
 ## Items
 
 Done in this order; each is deleted when it is committed.
-
-1. **The mosaic subsampling visits every row of the pattern.** `DifferenceNoise::for_each_pair`
-   (`lumos/src/io/image/difference_noise.rs`) and `MosaicNoise::for_each_sample`
-   (`lumos/src/io/image/mosaic_noise.rs`) each visit every `row_step`-th row, with
-   `row_step = pixel_count / (3 · MAX_STATISTIC_SAMPLES)`. When `row_step` shares a factor with
-   `CfaType::period()`, whole rows of the pattern are never visited. At 6000 × 4000 `row_step` is 8,
-   so a Bayer mosaic is read only on its even rows, and blue under RGGB measures noise 0 and sky 0.
-   The noise `CfaImage::demosaic` stores in each light's metadata and `FrameStats::measure` of a
-   mosaic both read these values.
-   - Subsample bands of whole pattern periods: visit row `y` when `(y / period) % row_step == 0`.
-     Each pattern row is then visited equally, and the share of rows visited is the same as now.
-   - Write the selection once, as a method on `CfaType` that takes the size and the per-colour cap,
-     and use it in both functions, `pair_counts` and `sample_counts` included, so the heap figures
-     stay exact.
-   - The private sampling functions take the cap, and `estimate`, `estimate_split` and `measure`
-     pass `MAX_STATISTIC_SAMPLES`, so a test reaches an even step at a small size.
-   - Tests: the method at a small size and a cap whose step is even, for Bayer and for X-Trans,
-     with the visited rows listed by hand; and the noise and the sky of an RGGB mosaic whose blue
-     photosites have their own level and noise, at a cap that makes the old step even, the blue
-     sky and σ as built. Keep each test under 1 s in a debug build.
-   - Delete the issue from `.notes/ISSUES.md`.
 
 2. **The page eviction compiles for the benches.** The eviction is `#[cfg(test)]` in
    `lumos/src/platform/mod.rs` (`MappedFile::evict`), `platform/linux/mod.rs`, `platform/macos.rs`,
@@ -60,7 +38,7 @@ Done in this order; each is deleted when it is committed.
    `spilled` bench with every spilled frame evicted after the setup writes it, so the combine reads
    the disk. Registered only where `MappedFile::EVICTS` holds. Update the module doc.
 
-6. **`pipeline/drizzle/rggb/12xtypical`**, after item 1.
+6. **`pipeline/drizzle/rggb/12xtypical`**.
    - `bench::scene`: `Field::mosaic_exposure(size, cfa_type, index)`, exposure `index` of the
      sequence calibrated and dithered, with its cosmic-ray hits:
      `self.hit(size, cfa_type, Readout::Calibrated, Shot::Sequence { index, aligned: false })`.
