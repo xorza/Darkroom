@@ -36,37 +36,35 @@ pub(crate) fn benches(c: &mut Criterion) {
             BatchSize::PerIteration,
         );
     });
-    // Every page of the frame in the page cache, as it is when the frames fit the memory the
-    // system has left. One frame takes one of the combine's reader threads.
-    group.bench_function(BenchmarkId::new("read/warm", field.name()), |b| {
-        let warped = Warped::of(field);
-        let frame = warped.spill(warped.stats.clone());
-        let frames = slice::from_ref(&frame);
-        let mut copy = ChunkCopy::new(frames, CHUNK_ROWS * FRAME.width);
-        b.iter(|| read(&mut copy, frames));
-    });
-    // Every page of the frame on the disk, as when the frames outgrow the memory the system has
-    // left: the frame's pages are dropped from the page cache before each pass.
-    if MappedFile::EVICTS {
-        group.bench_function(BenchmarkId::new("read/cold", field.name()), |b| {
+    // Warm: every page of the frame in the page cache, as it is when the frames fit the memory the
+    // system has left. Cold: every page on the disk, as when the frames outgrow it, the frame's
+    // pages dropped from the page cache before each pass. One frame takes one of the combine's
+    // reader threads.
+    for (variant, cold) in [("read/warm", false), ("read/cold", true)] {
+        if cold && !MappedFile::EVICTS {
+            continue;
+        }
+        group.bench_function(BenchmarkId::new(variant, field.name()), |b| {
             let warped = Warped::of(field);
             let frame = warped.spill(warped.stats.clone());
             let frames = slice::from_ref(&frame);
             let mut copy = ChunkCopy::new(frames, CHUNK_ROWS * FRAME.width);
-            b.iter_batched(
-                || assert!(frame.evict(), "the frame's pages leave the page cache"),
-                |()| read(&mut copy, frames),
-                BatchSize::PerIteration,
-            );
+            let mut read = || {
+                for start in (0..FRAME.height).step_by(CHUNK_ROWS) {
+                    let end = (start + CHUNK_ROWS).min(FRAME.height);
+                    copy.fill(frames, start * FRAME.width..end * FRAME.width);
+                }
+            };
+            if cold {
+                b.iter_batched(
+                    || assert!(frame.evict(), "the frame's pages leave the page cache"),
+                    |()| read(),
+                    BatchSize::PerIteration,
+                );
+            } else {
+                b.iter(read);
+            }
         });
-    }
-}
-
-/// Every row of `frames` copied out a chunk of [`CHUNK_ROWS`] at a time, as the combine reads them.
-fn read(copy: &mut ChunkCopy, frames: &[StoredFrame]) {
-    for start in (0..FRAME.height).step_by(CHUNK_ROWS) {
-        let end = (start + CHUNK_ROWS).min(FRAME.height);
-        copy.fill(frames, start * FRAME.width..end * FRAME.width);
     }
 }
 

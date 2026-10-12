@@ -111,7 +111,7 @@ impl StoredImage {
     }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use crate::frame_store::stored_image::StoredImage;
     use crate::frame_store::stored_plane::StoredPlane;
@@ -125,5 +125,45 @@ pub(crate) mod internals {
                 .iter()
                 .fold(flags, |all, plane| plane.evict() & all)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::TempDir;
+
+    use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::stored_image::StoredImage;
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::linear::LinearImage;
+    use crate::io::image::pixel_flags::PixelFlags;
+    use crate::math::size2us::Size2us;
+    use crate::platform::MappedFile;
+
+    /// A parked image leaves the page cache whole where the system evicts, its flags with its
+    /// channels, and loads back as it was spilled.
+    #[test]
+    fn an_evicted_image_leaves_every_plane_on_the_disk() {
+        let directory = TempDir::new("stored_image_evict");
+        let scratch = RunScratch::create(directory.path()).unwrap();
+        let size = Size2us::new(512, 512);
+        let mut image = LinearImage::from_planar_channels(
+            ImageDimensions::new(size, 3),
+            [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
+        );
+        let bytes: Vec<u8> = (0..size.pixel_count())
+            .map(|index| (index % 2) as u8)
+            .collect();
+        image.flags = Some(PixelFlags::from_bytes(size, &bytes));
+        let parked = StoredImage::spill(&scratch, &image).unwrap();
+        assert_eq!(parked.evict(), MappedFile::EVICTS);
+        let loaded = parked.load();
+        for channel in 0..3 {
+            assert_eq!(
+                loaded.channel(channel).pixels(),
+                image.channel(channel).pixels()
+            );
+        }
+        assert_eq!(loaded.flags.unwrap().bytes(), bytes);
     }
 }

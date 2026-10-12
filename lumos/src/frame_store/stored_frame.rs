@@ -304,7 +304,8 @@ mod tests {
 
     /// A spilled frame with quality planes leaves the page cache whole where the system evicts:
     /// its three channels and its coverage and confidence, 512² × 4 bytes = 1 MiB each, every page
-    /// out by `mincore`, and its channels read back as written.
+    /// out by the `mincore` count each plane's eviction ends with, and its channels read back as
+    /// written.
     #[test]
     fn an_evicted_frame_leaves_every_plane_on_the_disk() {
         let directory = TempDir::new("stored_frame_evict");
@@ -323,11 +324,6 @@ mod tests {
         let frame = StoredFrame::spill(&scratch, &image, &quality, stats).unwrap();
         assert_eq!(frame.planes().count(), 5);
         assert_eq!(frame.evict(), MappedFile::EVICTS);
-        if MappedFile::EVICTS {
-            for plane in frame.planes() {
-                assert_eq!(plane.resident_share(), Some(0.0));
-            }
-        }
         for (channel, level) in frame.channels.iter().zip([0.25, 0.5, 0.75]) {
             let read = channel.chunk(0, size.pixel_count());
             assert!(read.iter().all(|&value| value == level));
