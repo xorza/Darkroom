@@ -22,7 +22,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched(
                 || design.clone(),
                 |design| Lstsq::new(black_box(design)),
-                fixture::in_place(design.len() * size_of::<f64>()),
+                fixture::fresh_copies(design.len() * size_of::<f64>()),
             );
         });
         group.bench_function(BenchmarkId::new("solve", &shape), |b| {

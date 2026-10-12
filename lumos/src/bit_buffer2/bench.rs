@@ -24,7 +24,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter_batched_ref(
             || mask.clone(),
             |mask| mask.dilate(mask_dilation, &mut scratch),
-            fixture::in_place(size_of_val(mask.words.as_slice())),
+            fixture::fresh_copies(size_of_val(mask.words.as_slice())),
         );
     });
 }

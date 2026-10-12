@@ -87,9 +87,17 @@ pub(crate) fn benches(c: &mut Criterion) {
     }
     let star = Star::WIDE;
     let annulus = MeasureGrid::new(star.fwhm).annulus;
-    group.throughput(Throughput::Elements(
-        (annulus.outer * annulus.outer - annulus.inner * annulus.inner) as u64,
-    ));
+    // The pixels whose centre lies between the radii, as `LocalBackground::measure` takes them.
+    let side = 0..=2 * annulus.outer;
+    let radii = annulus.inner.pow(2)..=annulus.outer.pow(2);
+    let pixels = side
+        .clone()
+        .flat_map(|y| side.clone().map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            radii.contains(&(x.abs_diff(annulus.outer).pow(2) + y.abs_diff(annulus.outer).pow(2)))
+        })
+        .count();
+    group.throughput(Throughput::Elements(pixels as u64));
     group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
         let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
         let at = measured.centre();

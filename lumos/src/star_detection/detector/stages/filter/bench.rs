@@ -13,10 +13,11 @@ use crate::star_detection::star::Star;
 pub(crate) fn benches(c: &mut Criterion) {
     let mut group = fixture::group(c, "kernel/detection/filter", Scale::Sample);
     for field in [Field::Typical, Field::Dense] {
-        let sources = field.scene(FRAME).sources;
-        group.throughput(Throughput::Elements(sources.len() as u64));
+        group.throughput(Throughput::Elements(field.stars() as u64));
         group.bench_function(BenchmarkId::new("remove_duplicates", field.name()), |b| {
-            let mut stars: Vec<Star> = sources
+            let mut stars: Vec<Star> = field
+                .scene(FRAME)
+                .sources
                 .iter()
                 .map(|source| Star::at(source.pos).with_flux(source.flux))
                 .collect();
@@ -26,7 +27,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || stars.clone(),
                 |stars| scratch.remove_duplicates(stars, min_separation),
-                fixture::in_place(size_of_val(stars.as_slice())),
+                fixture::fresh_copies(size_of_val(stars.as_slice())),
             );
         });
     }

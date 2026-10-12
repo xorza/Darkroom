@@ -27,7 +27,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     let mut group = fixture::group(c, "stage/warp", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for method in InterpolationMethod::ALL {
-        let id = format!("{}/mono", format!("{method:?}").to_lowercase());
+        let id = format!("{}/mono", name(method));
         group.bench_function(BenchmarkId::new(id, field.name()), |b| {
             let light = field.render(FRAME).image;
             warp(b, &light, &similarity(), method);
@@ -40,10 +40,11 @@ pub(crate) fn benches(c: &mut Criterion) {
             .expect("never cancelled")
     };
     let method = InterpolationMethod::default();
-    group.bench_function(BenchmarkId::new("lanczos3/rgb", field.name()), |b| {
+    let id = |variant: &str| BenchmarkId::new(format!("{}/{variant}", name(method)), field.name());
+    group.bench_function(id("rgb"), |b| {
         warp(b, &rgb(), &similarity(), method);
     });
-    group.bench_function(BenchmarkId::new("lanczos3/rgb_sip", field.name()), |b| {
+    group.bench_function(id("rgb_sip"), |b| {
         warp(
             b,
             &rgb(),
@@ -51,6 +52,18 @@ pub(crate) fn benches(c: &mut Criterion) {
             method,
         );
     });
+}
+
+/// The bench id's name for `method`.
+const fn name(method: InterpolationMethod) -> &'static str {
+    match method {
+        InterpolationMethod::Nearest => "nearest",
+        InterpolationMethod::Bilinear => "bilinear",
+        InterpolationMethod::Bicubic => "bicubic",
+        InterpolationMethod::Lanczos2 => "lanczos2",
+        InterpolationMethod::Lanczos3 => "lanczos3",
+        InterpolationMethod::Lanczos4 => "lanczos4",
+    }
 }
 
 fn warp(

@@ -9,7 +9,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
-use crate::bench::scene::Field;
+use crate::bench::scene::{Field, STACKED_LIGHTS};
 use crate::combine::cache::sample::PixelSamples;
 use crate::combine::cache::sample_noise::NoiseColumns;
 use crate::combine::config::DEFAULT_MIN_SURVIVORS;
@@ -29,21 +29,26 @@ const FULL_WELL_E: f32 = 50_000.0;
 /// The read noise, in electrons.
 const READ_NOISE_E: f32 = 3.0;
 
+/// Every rejection the configuration offers, at the settings a user starts from, and its name.
+pub(crate) fn rejections() -> [(&'static str, Rejection); 6] {
+    [
+        ("none", Rejection::None),
+        ("sigma_clip", Rejection::sigma_clip(2.5)),
+        ("winsorized", Rejection::winsorized(3.0)),
+        (
+            "linear_fit",
+            Rejection::LinearFit(LinearFitClipConfig::default()),
+        ),
+        ("trim", Rejection::Trim(TrimConfig::default())),
+        ("gesd", Rejection::gesd()),
+    ]
+}
+
 pub(crate) fn benches(c: &mut Criterion) {
     let mut group = fixture::group(c, "kernel/combine/rejection", Scale::Sample);
-    for frames in [30, 300] {
+    for frames in [STACKED_LIGHTS, 300] {
         group.throughput(Throughput::Elements((BLOCK.pixel_count() * frames) as u64));
-        for (name, rejection) in [
-            ("none", Rejection::None),
-            ("sigma_clip", Rejection::sigma_clip(2.5)),
-            ("winsorized", Rejection::winsorized(3.0)),
-            (
-                "linear_fit",
-                Rejection::LinearFit(LinearFitClipConfig::default()),
-            ),
-            ("trim", Rejection::Trim(TrimConfig::default())),
-            ("gesd", Rejection::gesd()),
-        ] {
+        for (name, rejection) in rejections() {
             group.bench_function(BenchmarkId::new(name, frames), |b| {
                 let block = Block::of(frames);
                 let mut scratch = ScratchBuffers::default();

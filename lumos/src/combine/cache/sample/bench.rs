@@ -7,12 +7,13 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::STACKED_LIGHTS;
 use crate::combine::cache::sample::CombinedSample;
 use crate::combine::rejection::bench::{BLOCK, Block};
 use crate::math::sum;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let frames = 30;
+    let frames = STACKED_LIGHTS;
     let mut group = fixture::group(c, "kernel/combine/sample", Scale::Sample);
     group.throughput(Throughput::Elements((BLOCK.pixel_count() * frames) as u64));
     group.bench_function(BenchmarkId::new("from_survivors", frames), |b| {

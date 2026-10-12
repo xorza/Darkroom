@@ -2,6 +2,7 @@
 //! on the spill tier; and the pipeline itself, from a session's light files to the stack.
 
 use std::cell::OnceCell;
+use std::path::Path;
 
 use common::{CancelToken, TempDir};
 use criterion::{BenchmarkId, Criterion, Throughput};
@@ -10,7 +11,6 @@ use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
@@ -18,8 +18,9 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::load_context::LoadContext;
-use crate::pipeline::calibrate::calibrate_align_stack;
+use crate::pipeline::calibrate::{CalibrationNotes, calibrate_align_stack};
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::light_source::MosaicPreparation;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::bench::Pair;
 use crate::registration::registration_config::WarpParams;
@@ -31,9 +32,9 @@ pub(crate) fn benches(c: &mut Criterion) {
     park(c);
 }
 
-/// A decoded light prepared as a run of RAW or mosaic lights prepares each: calibrated by its
-/// masters, cleaned of cosmic rays where the configuration asks it, and demosaiced. The default
-/// configuration leaves cosmic rays in.
+/// A decoded light prepared as a run of RAW or mosaic lights prepares each, through
+/// `MosaicPreparation::prepare`: calibrated by its masters, cleaned of cosmic rays where the
+/// configuration asks it, and demosaiced. The default configuration leaves cosmic rays in.
 fn prepare(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
@@ -53,18 +54,22 @@ fn prepare(c: &mut Criterion) {
                 )
                 .unwrap()
             });
+            let notes = CalibrationNotes::default();
+            let preparation = MosaicPreparation {
+                masters,
+                cosmic_ray: cosmic_ray.as_ref(),
+                notes: &notes,
+            };
             let light = field.light(FRAME, cfa_type);
-            let passes = LoadContext::default().xtrans_passes;
+            let context = LoadContext::default();
             b.iter_batched(
                 || light.clone(),
-                |mut light| {
-                    masters.calibrate(&mut light).unwrap();
-                    if let Some(config) = &cosmic_ray {
-                        reject_cosmic_rays(&mut light, config).unwrap();
-                    }
-                    light.demosaic(passes, &CancelToken::never()).unwrap()
+                |light| {
+                    preparation
+                        .prepare(light, Path::new("light.fits"), &context)
+                        .unwrap()
                 },
-                fixture::in_place(size_of_val(light.data.pixels())),
+                fixture::fresh_copies(size_of_val(light.data.pixels())),
             );
         });
     }
