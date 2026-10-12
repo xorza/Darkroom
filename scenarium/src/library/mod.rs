@@ -371,7 +371,7 @@ where
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::graph::func::Func;
     use crate::graph::identity::FuncId;

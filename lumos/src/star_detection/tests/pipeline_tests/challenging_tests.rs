@@ -50,7 +50,7 @@ fn uniform_tracking_error() {
     init_tracing();
     let frame = Scenario {
         num_stars: 30,
-        psf: Some(PsfModel::Elliptical {
+        psf: Some(PsfModel::Gaussian {
             fwhm: 4.0,
             eccentricity: 0.5,
             angle: 0.5,
@@ -260,7 +260,7 @@ fn combined_challenges() {
         num_stars: 50,
         flux: (7.0, 200.0),
         placement: Placement::Cluster,
-        psf: Some(PsfModel::Elliptical {
+        psf: Some(PsfModel::Gaussian {
             fwhm: 4.0,
             eccentricity: 0.4,
             angle: 0.3,

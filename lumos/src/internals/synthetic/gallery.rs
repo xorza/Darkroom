@@ -168,8 +168,8 @@ fn gallery_psf_models() {
     let size = Size2us::new(64, 64);
     let dark = BackgroundField::Uniform { level: 0.0 };
     let cases: [(&str, PsfModel); 6] = [
-        ("psf/gaussian_fwhm3", PsfModel::Gaussian { fwhm: 3.0 }),
-        ("psf/gaussian_fwhm6", PsfModel::Gaussian { fwhm: 6.0 }),
+        ("psf/gaussian_fwhm3", PsfModel::gaussian(3.0)),
+        ("psf/gaussian_fwhm6", PsfModel::gaussian(6.0)),
         (
             "psf/moffat_b25",
             PsfModel::Moffat {
@@ -186,7 +186,7 @@ fn gallery_psf_models() {
         ),
         (
             "psf/elliptical_e05",
-            PsfModel::Elliptical {
+            PsfModel::Gaussian {
                 fwhm: 4.0,
                 eccentricity: 0.5,
                 angle: 0.0,
@@ -194,7 +194,7 @@ fn gallery_psf_models() {
         ),
         (
             "psf/elliptical_e07_rot",
-            PsfModel::Elliptical {
+            PsfModel::Gaussian {
                 fwhm: 4.0,
                 eccentricity: 0.7,
                 angle: FRAC_PI_4,
@@ -387,7 +387,7 @@ fn gallery_scenes() {
 
     // Tracking error: an elliptical PSF across the whole field.
     let elliptical = Camera {
-        psf: PsfModel::Elliptical {
+        psf: PsfModel::Gaussian {
             fwhm: 3.5,
             eccentricity: 0.6,
             angle: 0.5,

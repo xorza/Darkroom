@@ -307,22 +307,23 @@ fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) ->
 /// `WarpTransform`'s tests) — for every method, on a field whose correction reaches past 0.1 px.
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
-    use crate::internals::synthetic::distortion::{RadialField, RadialPairs};
+    use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
     use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let size = Size2us::new(128, 128);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
     let field = RadialField {
         transform,
-        start: 10,
-        step: 11,
-        extent: 109,
         ..RadialField::new(DVec2::new(64.0, 64.0), 3e-6)
     };
     let RadialPairs {
         reference: ref_points,
         target: target_points,
-    } = field.pairs();
+    } = field.pairs(Grid {
+        start: 10,
+        step: 11,
+        extent: 109,
+    });
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(field.centre),

@@ -594,6 +594,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bitcode",
+ "common",
  "common-derive",
  "glam 0.34.1",
  "ron",
@@ -1729,6 +1730,7 @@ dependencies = [
  "imaginarium",
  "libc",
  "libraw-sys",
+ "lumos",
  "memmap2",
  "nalgebra",
  "ort",
@@ -2626,9 +2628,12 @@ version = "0.8.0"
 dependencies = [
  "arboard",
  "bytemuck",
+ "clap",
  "cosmic-text",
+ "criterion",
  "etagere",
  "fixedbitset",
+ "gethostname",
  "glam 0.34.1",
  "half",
  "padding-struct",
@@ -3264,6 +3269,7 @@ dependencies = [
  "common",
  "hashbrown 0.17.1",
  "ron",
+ "scenarium",
  "serde",
  "strum",
  "thiserror 2.0.21",

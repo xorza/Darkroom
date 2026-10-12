@@ -16,12 +16,25 @@
 //! a config type make it introspectable, instead of a consumer restating every
 //! field in a mirror type it has to keep in step by hand.
 //!
-//! ```ignore
-//! #[derive(Default, Introspect)]
-//! #[config(type_id = "0e6f…")]
-//! struct Knobs { tile_size: usize, #[config(label = "σ")] sigma: f32 }
-//! let fields = Knobs::fields();              // [{name:"tile_size", kind:Int, ..}, ..]
-//! let knobs = Knobs::from_fields(&values)?;  // checked typed rebuild
+//! ```
+//! use common::{FieldValue, Introspect};
+//!
+//! #[derive(Debug, Default, Introspect)]
+//! #[config(type_id = "93915123-fe82-4a79-9d1e-82311ad263bd")]
+//! struct Knobs {
+//!     tile_size: usize,
+//!     #[config(label = "σ")]
+//!     sigma: f32,
+//! }
+//!
+//! let fields = Knobs::fields();
+//! assert_eq!(fields[0].name, "tile_size");
+//! assert_eq!(fields[1].label, "σ");
+//! // A checked, typed rebuild from per-field values, here each field's default.
+//! let values: Vec<FieldValue> = fields.iter().map(|field| field.default.clone()).collect();
+//! let knobs = Knobs::from_fields(&values)?;
+//! assert_eq!(knobs.tile_size, 0);
+//! # Ok::<(), common::IntrospectError>(())
 //! ```
 
 use std::fmt;

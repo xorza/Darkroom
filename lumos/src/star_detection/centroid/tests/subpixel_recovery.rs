@@ -30,7 +30,7 @@ fn noisy_stars_land_within_their_reported_sigma() {
     ];
     let mut pixels = Buffer2::new_filled(256, 256, SKY);
     for &(centre, amplitude) in &stars {
-        SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::Gaussian { sigma })
+        SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::gaussian(sigma))
             .add_exact(&mut pixels);
     }
     patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 42);
@@ -88,9 +88,7 @@ fn the_position_sigma_matches_the_scatter() {
     let clean = SyntheticStar::new(
         truth.as_vec2(),
         0.3,
-        StarProfile::Gaussian {
-            sigma: fwhm_to_sigma(fwhm),
-        },
+        StarProfile::gaussian(fwhm_to_sigma(fwhm)),
     )
     .stamp(Size2us::new(32, 32), 0.1);
     let grid = MeasureGrid::new(fwhm);

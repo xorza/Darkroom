@@ -21,11 +21,8 @@ pub(super) fn create_deleted(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-/// Nothing: the map keeps an unlinked file alive by itself.
-pub(super) fn hold_for_map(file: File) -> Option<File> {
-    drop(file);
-    None
-}
+/// No: the map keeps an unlinked file alive by itself.
+pub(super) const SCRATCH_MAP_NEEDS_HANDLE: bool = false;
 
 /// The map is read front to back. A hint: a kernel that refuses it reads the same bytes, so its
 /// refusal is not an error.

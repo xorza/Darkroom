@@ -176,7 +176,6 @@ pub(crate) fn assert_simd_matches_scalar(
     }
 }
 
-#[cfg(test)]
 mod tests {
     use std::cell::Cell;
 

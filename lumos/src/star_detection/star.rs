@@ -52,7 +52,7 @@ impl Star {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 #[cfg_attr(
     not(test),
     expect(

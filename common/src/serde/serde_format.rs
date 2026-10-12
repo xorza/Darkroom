@@ -7,7 +7,7 @@ pub enum SerdeFormat {
     Bitcode,
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::serde::serde_format::SerdeFormat;
 

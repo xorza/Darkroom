@@ -87,7 +87,7 @@ impl<T: Pod> StoredPlane<T> {
     }
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use bytemuck::Pod;
 
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn an_evicted_plane_reads_from_the_disk() {
         let directory = TempDir::new("stored_plane_evict");
-        let scratch = RunScratch::create(directory.path()).unwrap();
+        let scratch = RunScratch::create_evictable(directory.path()).unwrap();
         let samples = 1 << 20;
         let plane = scratch.store(&vec![0.5f32; samples]).unwrap();
         let written = plane.resident_share();

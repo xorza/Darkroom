@@ -11,7 +11,7 @@ mod simd;
 pub(crate) mod sky_noise;
 pub(crate) mod workspace;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

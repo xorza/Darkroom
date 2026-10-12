@@ -82,7 +82,7 @@ impl Debug for FuncLambda {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::io;
 

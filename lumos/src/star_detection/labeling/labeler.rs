@@ -290,7 +290,7 @@ fn stitch_boundary(
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
     use crate::bit_buffer2::BitBuffer2;

@@ -312,7 +312,7 @@ fn matched_filter_peaks_at_the_star() {
     SyntheticStar::new(
         Vec2::new(cx as f32, cy as f32),
         0.3,
-        StarProfile::Gaussian { sigma },
+        StarProfile::gaussian(sigma),
     )
     .add_to(&mut residual);
     patterns::add_gaussian_noise(residual.pixels_mut(), 0.03, 7);

@@ -33,16 +33,12 @@ const PIXEL_MEAN_TOLERANCE: f64 = 1e-12;
 /// The analytic shape of a star profile, parameterized by peak amplitude.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StarProfile {
-    /// Circular Gaussian: `exp(-r² / 2σ²)`.
+    /// Gaussian `exp(−½(x′²/σx² + y′²/σy²))` in its own axes `x′`, `y′`: round where the two σ
+    /// agree ([`Self::gaussian`]), elongated as tracking error leaves a star where they differ.
     Gaussian {
-        /// Standard deviation in pixels (FWHM = 2.355σ).
-        sigma: f32,
-    },
-    /// Elliptical Gaussian — simulates tracking error.
-    Elliptical {
-        /// Sigma along the profile's own x axis, before the `angle` rotation.
+        /// Sigma along the profile's own x axis, before the `angle` rotation, in pixels.
         sigma_x: f32,
-        /// Sigma along the profile's own y axis, before the `angle` rotation.
+        /// Sigma along the profile's own y axis, before the `angle` rotation, in pixels.
         sigma_y: f32,
         /// Rotation of those axes, in radians. Zero leaves them axis-aligned.
         angle: f32,
@@ -58,14 +54,19 @@ pub(crate) enum StarProfile {
 }
 
 impl StarProfile {
+    /// The round Gaussian of standard deviation `sigma`, in pixels (FWHM = 2.355σ).
+    pub(crate) const fn gaussian(sigma: f32) -> Self {
+        Self::Gaussian {
+            sigma_x: sigma,
+            sigma_y: sigma,
+            angle: 0.0,
+        }
+    }
+
     /// Profile value at `(dx, dy)` pixels from the centre, as a fraction of the peak.
     pub(crate) fn shape_at(self, dx: f64, dy: f64) -> f64 {
         match self {
-            StarProfile::Gaussian { sigma } => {
-                let sigma = f64::from(sigma);
-                (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp()
-            }
-            StarProfile::Elliptical {
+            StarProfile::Gaussian {
                 sigma_x,
                 sigma_y,
                 angle,
@@ -90,10 +91,8 @@ impl StarProfile {
     /// two closed forms.
     fn pixel_rule(self) -> Option<PixelQuadrature> {
         let analytic = match self {
-            StarProfile::Gaussian { .. } | StarProfile::Elliptical { angle: 0.0, .. } => {
-                return None;
-            }
-            StarProfile::Elliptical {
+            StarProfile::Gaussian { angle: 0.0, .. } => return None,
+            StarProfile::Gaussian {
                 sigma_x,
                 sigma_y,
                 angle,
@@ -128,8 +127,7 @@ impl StarProfile {
     /// comparable floor.
     pub(crate) fn radius(self) -> i32 {
         match self {
-            StarProfile::Gaussian { sigma } => (4.0 * sigma).ceil() as i32,
-            StarProfile::Elliptical {
+            StarProfile::Gaussian {
                 sigma_x, sigma_y, ..
             } => (4.0 * sigma_x.max(sigma_y)).ceil() as i32,
             StarProfile::Moffat { alpha, .. } => (8.0 * alpha).ceil() as i32,
@@ -234,15 +232,9 @@ impl StarPixels {
         let dy = y as f64 - f64::from(self.star.center.y);
         let mean = match (self.rule, self.star.profile) {
             (Some(rule), profile) => rule.integrate(dx, dy, |x, y| profile.shape_at(x, y)),
-            (None, StarProfile::Gaussian { sigma }) => {
-                let gaussian = PixelGaussian {
-                    sigma: f64::from(sigma),
-                };
-                gaussian.mean_at(dx) * gaussian.mean_at(dy)
-            }
             (
                 None,
-                StarProfile::Elliptical {
+                StarProfile::Gaussian {
                     sigma_x, sigma_y, ..
                 },
             ) => {
@@ -266,7 +258,7 @@ mod tests {
     use crate::math::fwhm::{fwhm_beta_to_alpha, fwhm_to_sigma};
     use std::f32::consts::FRAC_PI_2;
 
-    const GAUSSIAN_2: StarProfile = StarProfile::Gaussian { sigma: 2.0 };
+    const GAUSSIAN_2: StarProfile = StarProfile::gaussian(2.0);
 
     #[test]
     fn gaussian_peaks_at_its_centre_and_vanishes_at_the_corner() {
@@ -323,7 +315,7 @@ mod tests {
 
     #[test]
     fn elliptical_is_elongated_along_its_wider_axis_and_rotates_with_angle() {
-        let wide = StarProfile::Elliptical {
+        let wide = StarProfile::Gaussian {
             sigma_x: 4.0,
             sigma_y: 2.0,
             angle: 0.0,
@@ -336,7 +328,7 @@ mod tests {
         let turned = SyntheticStar::new(
             Vec2::splat(32.0),
             1.0,
-            StarProfile::Elliptical {
+            StarProfile::Gaussian {
                 sigma_x: 4.0,
                 sigma_y: 2.0,
                 angle: FRAC_PI_2,
@@ -354,11 +346,11 @@ mod tests {
     fn the_quadrature_and_the_closed_form_agree() {
         for sigma in [0.6f32, 2.0] {
             let centre = Vec2::new(8.3, 7.6);
-            let closed = SyntheticStar::new(centre, 1.0, StarProfile::Gaussian { sigma }).pixels();
+            let closed = SyntheticStar::new(centre, 1.0, StarProfile::gaussian(sigma)).pixels();
             let turned = SyntheticStar::new(
                 centre,
                 1.0,
-                StarProfile::Elliptical {
+                StarProfile::Gaussian {
                     sigma_x: sigma,
                     sigma_y: sigma,
                     angle: 1.0,
@@ -392,9 +384,7 @@ mod tests {
         let gaussian = SyntheticStar::new(
             Vec2::splat(32.0),
             1.0,
-            StarProfile::Gaussian {
-                sigma: fwhm_to_sigma(fwhm),
-            },
+            StarProfile::gaussian(fwhm_to_sigma(fwhm)),
         );
 
         // Equal FWHM means they cross at the half-maximum point...
@@ -413,9 +403,7 @@ mod tests {
             alpha: fwhm_beta_to_alpha(4.0, beta),
             beta,
         };
-        let gaussian = StarProfile::Gaussian {
-            sigma: fwhm_to_sigma(4.0),
-        };
+        let gaussian = StarProfile::gaussian(fwhm_to_sigma(4.0));
         assert!(moffat.radius() > gaussian.radius());
     }
 }

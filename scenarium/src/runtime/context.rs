@@ -89,7 +89,7 @@ impl ContextManager {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::graph::identity::NodeId;
     use crate::runtime::context::ContextManager;

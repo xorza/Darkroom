@@ -37,14 +37,6 @@ pub(crate) struct DetectionResources {
 }
 
 impl DetectionResources {
-    pub(crate) fn new(dimensions: Size2us) -> Self {
-        Self {
-            floats: ScratchPool::new(dimensions),
-            bitmasks: ScratchPool::new(dimensions),
-            ..Self::default()
-        }
-    }
-
     /// The dimensions every plane is leased at.
     pub(crate) fn dimensions(&self) -> Size2us {
         self.floats.shape()
@@ -74,10 +66,13 @@ impl DetectionResources {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use crate::math::size2us::Size2us;
+    use crate::scratch_pool::ScratchPool;
     use crate::star_detection::resources::DetectionResources;
 
+    #[cfg(test)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct BufferCounts {
         pub floats: usize,
@@ -85,7 +80,18 @@ pub(crate) mod internals {
     }
 
     impl DetectionResources {
+        /// Resources for frames of `dimensions`, for a stage a test or a bench runs on its own; a
+        /// detector reshapes its own per frame.
+        pub(crate) fn new(dimensions: Size2us) -> Self {
+            Self {
+                floats: ScratchPool::new(dimensions),
+                bitmasks: ScratchPool::new(dimensions),
+                ..Self::default()
+            }
+        }
+
         /// The planes the pools hold free.
+        #[cfg(test)]
         pub(crate) fn buffer_counts(&self) -> BufferCounts {
             BufferCounts {
                 floats: self.floats.pooled(),

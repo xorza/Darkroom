@@ -23,6 +23,9 @@ pub(crate) struct RunScratch {
     /// The next file's number. Two runs over one root count alike and pass over each other's
     /// names, which the exclusive create finds taken.
     next: AtomicU64,
+    /// Whether each map keeps its file's handle, for a bench of cold reads to evict its pages; a
+    /// run's scratch never does, so it holds no handle per plane.
+    evictable: bool,
 }
 
 impl RunScratch {
@@ -31,6 +34,7 @@ impl RunScratch {
         Ok(Self {
             root: DiskRoot::create(root)?,
             next: AtomicU64::new(0),
+            evictable: false,
         })
     }
 
@@ -48,10 +52,12 @@ impl RunScratch {
         };
         file.write_all(bytemuck::cast_slice(pixels))
             .map_err(write_error)?;
-        let mapped = file.map().map_err(|source| FrameStoreError::MemoryMap {
-            path: self.root.path().to_path_buf(),
-            source,
-        })?;
+        let mapped = file
+            .map(self.evictable)
+            .map_err(|source| FrameStoreError::MemoryMap {
+                path: self.root.path().to_path_buf(),
+                source,
+            })?;
         Ok(StoredPlane::mapped(mapped))
     }
 
@@ -100,5 +106,23 @@ impl PlaneStore for RunScratch {
 
     fn store_gain(&self, _channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
         self.store(nodes)
+    }
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use std::path::Path;
+
+    use crate::frame_store::error::FrameStoreError;
+    use crate::frame_store::run_scratch::RunScratch;
+
+    impl RunScratch {
+        /// [`RunScratch::create`] whose planes a bench of cold reads can evict.
+        pub(crate) fn create_evictable(root: &Path) -> Result<Self, FrameStoreError> {
+            Ok(Self {
+                evictable: true,
+                ..Self::create(root)?
+            })
+        }
     }
 }

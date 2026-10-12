@@ -1,4 +1,10 @@
 use super::*;
+
+/// The 50 px grid over `[0, 1000]²` that the fits of a field and a linear part sample.
+const STEP_50: Grid = Grid {
+    step: 50,
+    ..Grid::DEFAULT
+};
 use crate::math::size2us::Size2us;
 use crate::registration::ransac::transforms::estimate_transform;
 use std::f64::consts::PI;
@@ -69,7 +75,7 @@ fn coincident_points_fit_nothing() {
 #[test]
 fn max_correction_is_the_corner_correction() {
     let size = Size2us::new(1000, 1000);
-    let barrel = fit_field(&barrel(), 3);
+    let barrel = fit_field(&barrel(), Grid::DEFAULT, 3);
     let corner = 25.0 * 2f64.sqrt();
     assert!((barrel.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
     let flat = fit_field(
@@ -77,6 +83,7 @@ fn max_correction_is_the_corner_correction() {
             k: 0.0,
             ..super::barrel()
         },
+        Grid::DEFAULT,
         2,
     );
     assert_eq!(flat.max_grid_correction(size, 50.0), 0.0);
@@ -120,11 +127,10 @@ fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
     for (name, transform, bound) in cases {
         let field = RadialField {
             transform,
-            step: 50,
             ..barrel()
         };
-        let RadialPairs { reference, target } = field.pairs();
-        let warp = WarpTransform::with_sip(transform, fit_field(&field, 3));
+        let RadialPairs { reference, target } = field.pairs(STEP_50);
+        let warp = WarpTransform::with_sip(transform, fit_field(&field, STEP_50, 3));
         let worst = reference
             .iter()
             .zip(&target)
@@ -162,10 +168,9 @@ fn each_linear_part_and_its_correction_fit_together() {
     for (model, truth) in cases {
         let field = RadialField {
             transform: truth,
-            step: 50,
             ..barrel()
         };
-        let RadialPairs { reference, target } = field.pairs();
+        let RadialPairs { reference, target } = field.pairs(STEP_50);
         let weights: Vec<f64> = (0..reference.len()).map(|i| 1.0 + (i % 4) as f64).collect();
         let pairs = SipPairs {
             reference: &reference,
@@ -189,10 +194,9 @@ fn each_linear_part_and_its_correction_fit_together() {
 
     let RadialPairs { reference, target } = RadialField {
         transform: cases[3].1,
-        step: 50,
         ..barrel()
     }
-    .pairs();
+    .pairs(STEP_50);
     let first = estimate_transform(&reference, &target, TransformType::Affine).unwrap();
     let off = (first.apply(DVec2::ZERO) - cases[3].1.apply(DVec2::ZERO)).length();
     assert!(

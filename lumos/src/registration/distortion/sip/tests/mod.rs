@@ -1,4 +1,4 @@
-use crate::internals::synthetic::distortion::{RadialField, RadialPairs};
+use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
 use crate::registration::distortion::sip::*;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -20,10 +20,10 @@ fn rms(residuals: &[f64]) -> f64 {
     (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt()
 }
 
-/// An order-`order` fit of `field` under its own transform, about its own centre, every pair
-/// weighed alike.
-fn fit_field(field: &RadialField, order: usize) -> SipPolynomial {
-    let RadialPairs { reference, target } = field.pairs();
+/// An order-`order` fit of `field` sampled on `grid`, under its own transform, about its own
+/// centre, every pair weighed alike.
+fn fit_field(field: &RadialField, grid: Grid, order: usize) -> SipPolynomial {
+    let RadialPairs { reference, target } = field.pairs(grid);
     SipPolynomial::fitted_under(&field.transform, &reference, &target, order, field.centre)
 }
 

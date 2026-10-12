@@ -36,7 +36,7 @@ pub(crate) mod ml;
 pub(crate) mod rgb;
 pub(crate) mod stretch;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

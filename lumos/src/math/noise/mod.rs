@@ -9,7 +9,7 @@ pub(crate) mod gain_bins;
 pub(crate) mod mosaic_noise;
 pub(crate) mod mrs_noise;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 
 #[cfg(test)]

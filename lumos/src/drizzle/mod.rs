@@ -9,7 +9,7 @@ pub(crate) mod drizzle_shape;
 pub(crate) mod error;
 pub(crate) mod stack;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

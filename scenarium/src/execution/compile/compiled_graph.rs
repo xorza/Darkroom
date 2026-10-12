@@ -217,7 +217,7 @@ impl CompiledGraph {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};

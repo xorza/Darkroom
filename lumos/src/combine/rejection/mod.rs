@@ -296,7 +296,7 @@ fn nearest(sorted: &[f32], window: Range<usize>, centre: f32, count: usize) -> R
     start..end
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

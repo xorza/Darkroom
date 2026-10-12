@@ -124,7 +124,7 @@ impl Lights {
 
     /// Every light written to a fresh scratch under `dir`, and the spilled tier that holds it.
     fn spilled(&self, dir: &TempDir) -> Spilled {
-        let scratch = RunScratch::create(dir.path()).unwrap();
+        let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let frames = self
             .images
             .iter()

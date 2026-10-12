@@ -259,7 +259,6 @@ fn compare_channels(
     }
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
 

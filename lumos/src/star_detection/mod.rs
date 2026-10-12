@@ -67,7 +67,7 @@ pub(crate) mod star_detection_config;
 pub(crate) mod star_detector;
 mod threshold_mask;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

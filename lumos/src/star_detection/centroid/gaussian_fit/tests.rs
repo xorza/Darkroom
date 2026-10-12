@@ -55,11 +55,9 @@ impl RecoveryCase {
     /// `Elliptical`.
     fn profile(&self) -> StarProfile {
         if self.sigma.x == self.sigma.y {
-            StarProfile::Gaussian {
-                sigma: self.sigma.x,
-            }
+            StarProfile::gaussian(self.sigma.x)
         } else {
-            StarProfile::Elliptical {
+            StarProfile::Gaussian {
                 sigma_x: self.sigma.x,
                 sigma_y: self.sigma.y,
                 angle: 0.0,
@@ -552,10 +550,8 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
         let size = Size2us::new(case.side, case.side);
         let truth = centre(case.side);
         let pixels = match case.sigma {
-            Some(sigma) => {
-                SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
-                    .stamp(size, 0.1)
-            }
+            Some(sigma) => SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::gaussian(sigma))
+                .stamp(size, 0.1),
             None => Buffer2::new_filled(case.side, case.side, 0.1),
         };
         let fit = GaussianFit::new(&pixels, case.seed, &StampGrid::new(case.radius), 0.1, None);
@@ -584,9 +580,8 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
 fn gaussian_fit_rms_residual() {
     let n: f64 = 17.0 * 17.0;
     for noise in [0.0f32, 0.05] {
-        let mut pixels =
-            SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::Gaussian { sigma: 2.5 })
-                .stamp(Size2us::new(21, 21), 0.1);
+        let mut pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(2.5))
+            .stamp(Size2us::new(21, 21), 0.1);
         patterns::add_gaussian_noise(&mut pixels, noise, 11111);
         let fit =
             GaussianFit::new(&pixels, DVec2::splat(10.0), &StampGrid::new(8), 0.1, None).unwrap();
@@ -679,7 +674,7 @@ fn gaussian_fit_converges_as_fast_on_a_round_star() {
         let pixels = SyntheticStar::new(
             Vec2::new(15.0, 15.0),
             0.8,
-            StarProfile::Elliptical {
+            StarProfile::Gaussian {
                 sigma_x,
                 sigma_y,
                 angle: FRAC_PI_4,

@@ -59,17 +59,15 @@ impl ScratchFile {
         self.file.write_all(bytes)
     }
 
-    /// The file mapped back, with what keeps it alive for the map's life.
-    pub(crate) fn map(self) -> io::Result<MappedFile> {
+    /// The file mapped back, with what keeps it alive for the map's life; its handle kept open
+    /// for [`MappedFile::evict`] too when `evictable`.
+    pub(crate) fn map(self, evictable: bool) -> io::Result<MappedFile> {
         // SAFETY: a scratch file has no name, so nothing but this handle can change it.
         let map = unsafe { Mmap::map(&self.file) }?;
-        #[cfg(any(test, feature = "bench"))]
-        let evictable = self.file.try_clone()?;
         Ok(MappedFile::new(
             map,
-            files::hold_for_map(self.file),
-            #[cfg(any(test, feature = "bench"))]
-            evictable,
+            self.file,
+            files::SCRATCH_MAP_NEEDS_HANDLE || evictable,
         ))
     }
 }
@@ -78,13 +76,11 @@ impl ScratchFile {
 #[derive(Debug)]
 pub(crate) struct MappedFile {
     map: Mmap,
-    /// The handle a scratch file needs held while it is mapped: Windows deletes it when its last
-    /// handle closes. `None` where the map keeps the file alive by itself.
-    _held: Option<File>,
-    /// The file under the map, for [`Self::evict`]: a page cache is dropped by file, not by
-    /// mapping. Held in test and bench builds only, so a run holds no handle per plane.
-    #[cfg(any(test, feature = "bench"))]
-    evictable: File,
+    /// The file under the map, held open where the map needs it — Windows deletes a scratch file
+    /// when its last handle closes — and for a scratch a bench of cold reads opens to evict, as a
+    /// page cache is dropped by file, not by mapping. `None` elsewhere, so a run holds no handle
+    /// per plane.
+    _handle: Option<File>,
 }
 
 impl MappedFile {
@@ -98,32 +94,15 @@ impl MappedFile {
         let file = File::open(path)?;
         // SAFETY: as this function's contract.
         let map = unsafe { Mmap::map(&file) }?;
-        Ok(Self::new(
-            map,
-            None,
-            #[cfg(any(test, feature = "bench"))]
-            file,
-        ))
+        Ok(Self::new(map, file, false))
     }
 
-    #[cfg_attr(
-        windows,
-        expect(
-            clippy::missing_const_for_fn,
-            reason = "const where the advice is a no-op, as on Windows, not on Unix"
-        )
-    )]
-    fn new(
-        map: Mmap,
-        held: Option<File>,
-        #[cfg(any(test, feature = "bench"))] evictable: File,
-    ) -> Self {
+    /// `file` mapped as `map`, its handle kept while the map lives when `keep_handle`.
+    fn new(map: Mmap, file: File, keep_handle: bool) -> Self {
         files::advise_sequential(&map);
         Self {
             map,
-            _held: held,
-            #[cfg(any(test, feature = "bench"))]
-            evictable,
+            _handle: keep_handle.then_some(file),
         }
     }
 
@@ -192,7 +171,7 @@ impl FileSystem {
     }
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::platform::{MappedFile, os};
 
@@ -205,12 +184,39 @@ pub(crate) mod internals {
         /// bench of cold reads does between passes. `false` when a page stays, as on tmpfs, or
         /// where the system offers no way, as macOS and Windows here: the next read may come from
         /// memory.
+        ///
+        /// # Panics
+        ///
+        /// For a map not opened to evict: its handle is gone (see
+        /// `RunScratch::create_evictable`).
+        #[expect(
+            clippy::used_underscore_binding,
+            reason = "the handle lives for the map's life; an eviction is the one read of it"
+        )]
+        #[cfg_attr(
+            not(target_os = "linux"),
+            expect(
+                clippy::missing_const_for_fn,
+                reason = "const only where the system offers no eviction and the call does nothing"
+            )
+        )]
         pub(crate) fn evict(&self) -> bool {
-            os::internals::evict(&self.map, &self.evictable)
+            let file = self
+                ._handle
+                .as_ref()
+                .expect("a map opened to evict keeps its file's handle");
+            os::internals::evict(&self.map, file)
         }
 
         /// The share of the file's pages in memory; `None` where the system does not say.
         #[cfg(test)]
+        #[cfg_attr(
+            not(target_os = "linux"),
+            expect(
+                clippy::missing_const_for_fn,
+                reason = "const only where the system does not say and the call does nothing"
+            )
+        )]
         pub(crate) fn resident_share(&self) -> Option<f64> {
             os::internals::resident_share(&self.map)
         }

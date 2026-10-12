@@ -39,7 +39,7 @@ fn local_vs_multi_threshold_single_star() {
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,
-            StarProfile::Gaussian { sigma: 3.0 },
+            StarProfile::gaussian(3.0),
         )],
     );
 
@@ -88,7 +88,7 @@ fn iter_pixels_count() {
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,
-            StarProfile::Gaussian { sigma: 3.0 },
+            StarProfile::gaussian(3.0),
         )],
     );
 

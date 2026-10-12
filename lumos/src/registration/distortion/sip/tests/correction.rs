@@ -3,7 +3,7 @@ use super::*;
 /// At the reference point every SIP monomial is zero, so the correction is exactly nothing.
 #[test]
 fn correct_at_reference_point_is_identity() {
-    let sip = fit_field(&barrel(), 3);
+    let sip = fit_field(&barrel(), Grid::DEFAULT, 3);
     assert_eq!(sip.correct(barrel().centre), barrel().centre);
 }
 
@@ -15,21 +15,29 @@ fn correct_at_reference_point_is_identity() {
 fn an_order_3_fit_recovers_a_cubic_field() {
     let pincushion = RadialField::new(DVec2::new(512.0, 384.0), -5e-8);
     let fields = [
-        barrel(),
-        pincushion,
-        RadialField {
-            transform: Transform::translation(DVec2::new(10.0, 5.0)),
-            start: 100,
-            extent: 900,
-            ..barrel()
-        },
-        RadialField {
-            transform: Transform::similarity(DVec2::new(30.0, -20.0), 0.2, 1.02),
-            ..pincushion
-        },
+        (barrel(), Grid::DEFAULT),
+        (pincushion, Grid::DEFAULT),
+        (
+            RadialField {
+                transform: Transform::translation(DVec2::new(10.0, 5.0)),
+                ..barrel()
+            },
+            Grid {
+                start: 100,
+                extent: 900,
+                ..Grid::DEFAULT
+            },
+        ),
+        (
+            RadialField {
+                transform: Transform::similarity(DVec2::new(30.0, -20.0), 0.2, 1.02),
+                ..pincushion
+            },
+            Grid::DEFAULT,
+        ),
     ];
-    for field in fields {
-        let sip = fit_field(&field, 3);
+    for (field, grid) in fields {
+        let sip = fit_field(&field, grid, 3);
         for p in [
             DVec2::new(700.0, 300.0),
             DVec2::new(123.4, 876.5),
@@ -47,12 +55,13 @@ fn an_order_3_fit_recovers_a_cubic_field() {
 /// to the rounding of each fit.
 #[test]
 fn the_fit_is_linear_in_the_field() {
-    let one = fit_field(&barrel(), 3);
+    let one = fit_field(&barrel(), Grid::DEFAULT, 3);
     let negated = fit_field(
         &RadialField {
             k: -1e-7,
             ..barrel()
         },
+        Grid::DEFAULT,
         3,
     );
     let fivefold = fit_field(
@@ -60,6 +69,7 @@ fn the_fit_is_linear_in_the_field() {
             k: 5e-7,
             ..barrel()
         },
+        Grid::DEFAULT,
         3,
     );
     for p in [DVec2::new(800.0, 200.0), DVec2::new(0.0, 0.0)] {
@@ -81,9 +91,10 @@ fn the_fit_is_linear_in_the_field() {
 #[test]
 fn jacobian_is_the_derivative_of_correct() {
     let sip = fit_field(
-        &RadialField {
+        &barrel(),
+        Grid {
             step: 50,
-            ..barrel()
+            ..Grid::DEFAULT
         },
         5,
     );

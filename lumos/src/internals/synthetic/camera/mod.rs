@@ -18,26 +18,32 @@ use std::f32::consts::PI;
 /// Point-spread function the camera convolves every point source with.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PsfModel {
-    /// Circular Gaussian, `fwhm` in pixels.
-    Gaussian { fwhm: f32 },
-    /// Moffat profile (extended atmospheric wings), `fwhm` in pixels, shape `beta`.
-    Moffat { fwhm: f32, beta: f32 },
-    /// Elliptical Gaussian (tracking error): round-equivalent `fwhm`, `eccentricity`
-    /// ∈ [0, 1), major-axis `angle` in radians.
-    Elliptical {
+    /// Gaussian of round-equivalent `fwhm` in pixels, elongated by `eccentricity` ∈ [0, 1) along
+    /// a major axis at `angle` radians, as tracking error leaves a star; round at eccentricity 0
+    /// ([`Self::gaussian`]).
+    Gaussian {
         fwhm: f32,
         eccentricity: f32,
         angle: f32,
     },
+    /// Moffat profile (extended atmospheric wings), `fwhm` in pixels, shape `beta`.
+    Moffat { fwhm: f32, beta: f32 },
 }
 
 impl PsfModel {
+    /// The round Gaussian of `fwhm` pixels.
+    pub(crate) const fn gaussian(fwhm: f32) -> Self {
+        Self::Gaussian {
+            fwhm,
+            eccentricity: 0.0,
+            angle: 0.0,
+        }
+    }
+
     /// The round-equivalent FWHM (in pixels) a detector should recover.
     pub(crate) const fn fwhm(&self) -> f32 {
         match self {
-            PsfModel::Gaussian { fwhm }
-            | PsfModel::Moffat { fwhm, .. }
-            | PsfModel::Elliptical { fwhm, .. } => *fwhm,
+            PsfModel::Gaussian { fwhm, .. } | PsfModel::Moffat { fwhm, .. } => *fwhm,
         }
     }
 
@@ -53,13 +59,6 @@ impl PsfModel {
         seeing_scale: f32,
     ) {
         let (profile, amplitude) = match *self {
-            PsfModel::Gaussian { fwhm } => {
-                let sigma = fwhm_to_sigma(fwhm * seeing_scale);
-                (
-                    StarProfile::Gaussian { sigma },
-                    flux / (2.0 * PI * sigma * sigma),
-                )
-            }
             PsfModel::Moffat { fwhm, beta } => {
                 let alpha = fwhm_beta_to_alpha(fwhm * seeing_scale, beta);
                 (
@@ -67,7 +66,7 @@ impl PsfModel {
                     flux * (beta - 1.0) / (PI * alpha * alpha),
                 )
             }
-            PsfModel::Elliptical {
+            PsfModel::Gaussian {
                 fwhm,
                 eccentricity,
                 angle,
@@ -78,7 +77,7 @@ impl PsfModel {
                 let sigma_major = sigma / one_minus_e2.sqrt().sqrt();
                 let sigma_minor = sigma_major * one_minus_e2.sqrt();
                 (
-                    StarProfile::Elliptical {
+                    StarProfile::Gaussian {
                         sigma_x: sigma_major,
                         sigma_y: sigma_minor,
                         angle,
@@ -173,7 +172,7 @@ impl Camera {
     /// bias). Rendering a scene through it yields the clean ground-truth image.
     pub(crate) fn ideal(fwhm: f32) -> Self {
         Self {
-            psf: PsfModel::Gaussian { fwhm },
+            psf: PsfModel::gaussian(fwhm),
             full_well_e: 50_000.0,
             read_noise_e: 0.0,
             dark_current_e_per_s: 0.0,
@@ -189,7 +188,7 @@ impl Camera {
     /// A representative cooled-CMOS camera: 50 ke⁻ well, 3 e⁻ read noise, low dark current.
     pub(crate) fn realistic(fwhm: f32) -> Self {
         Self {
-            psf: PsfModel::Gaussian { fwhm },
+            psf: PsfModel::gaussian(fwhm),
             full_well_e: 50_000.0,
             read_noise_e: 3.0,
             dark_current_e_per_s: 0.05,

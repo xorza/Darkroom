@@ -39,7 +39,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         let stamp = star.stamp();
         group.throughput(Throughput::Elements((stamp * stamp) as u64));
         group.bench_function(BenchmarkId::new("moments", star.name()), |b| {
-            let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+            let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
             b.iter(|| {
                 WindowedCentroid::measure(
                     black_box(&measured.residual),
@@ -50,7 +50,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             });
         });
         group.bench_function(BenchmarkId::new("gaussian_fit", star.name()), |b| {
-            let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+            let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
             let at = measured.centre();
             let fit = || {
                 GaussianFit::new(
@@ -99,7 +99,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         .count();
     group.throughput(Throughput::Elements(pixels as u64));
     group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
-        let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+        let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
         let at = measured.centre();
         let measure = || StampBackground::measure(black_box(&measured.residual), None, at, annulus);
         assert!(measure().is_some(), "the annulus lies inside the frame");

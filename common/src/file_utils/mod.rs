@@ -227,7 +227,7 @@ fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {
     }
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub mod internals {
     use std::fs;
     use std::path::{Path, PathBuf};

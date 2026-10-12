@@ -76,9 +76,6 @@ pub(super) struct MonoDetector<'a> {
     scratch: MonoScratch,
     /// The window medians' per-job scratch, reused by every pass.
     windows: ScratchPool<WindowScratch>,
-    /// Recompute every row on every pass: the oracle the update of changed rows is held to.
-    #[cfg(test)]
-    full_recompute: bool,
 }
 
 impl<'a> MonoDetector<'a> {
@@ -88,8 +85,6 @@ impl<'a> MonoDetector<'a> {
             noise,
             scratch: MonoScratch::default(),
             windows: ScratchPool::default(),
-            #[cfg(test)]
-            full_recompute: false,
         }
     }
 
@@ -117,6 +112,20 @@ impl<'a> MonoDetector<'a> {
         local: &(dyn Fn(usize) -> PixelBackground + Sync),
         kept_out: Option<&KeptOut>,
         found: &mut BitBuffer2,
+    ) -> usize {
+        self.reject_with(data, size, local, kept_out, found, false)
+    }
+
+    /// [`Self::reject`], every row recomputed on every pass when `all_rows`: the oracle the update
+    /// of changed rows is held to.
+    fn reject_with(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        local: &(dyn Fn(usize) -> PixelBackground + Sync),
+        kept_out: Option<&KeptOut>,
+        found: &mut BitBuffer2,
+        all_rows: bool,
     ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
         if size.width < 3 || size.height < 3 {
@@ -223,8 +232,7 @@ impl<'a> MonoDetector<'a> {
                     })
                     .collect(),
             );
-            #[cfg(test)]
-            if self.full_recompute {
+            if all_rows {
                 changed = None;
             }
         }
@@ -541,10 +549,8 @@ pub(crate) mod internals {
             },
             flat_gain: 1.0,
         };
-        let mut detector = MonoDetector::new(config, noise);
-        detector.full_recompute = full;
         let mut found = BitBuffer2::new_default(size);
-        detector.reject(data, size, &local, None, &mut found);
+        MonoDetector::new(config, noise).reject_with(data, size, &local, None, &mut found, full);
         found
     }
 

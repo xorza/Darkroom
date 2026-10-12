@@ -16,8 +16,7 @@ fn windowed_centroid_limits() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
     let star = Measured::flat(
-        &SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(size, 0.1),
+        &SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1),
         0.1,
         0.01,
     );
@@ -75,12 +74,8 @@ fn compute_star_of_a_clean_star() {
     let centre = DVec2::splat(32.0);
     let npix = (2 * TEST_STAMP_RADIUS + 1) as f32;
     let reference = |amplitude: f32| {
-        let pixels = SyntheticStar::new(
-            centre.as_vec2(),
-            amplitude,
-            StarProfile::Gaussian { sigma: 2.5 },
-        )
-        .stamp(size, 0.1);
+        let pixels = SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::gaussian(2.5))
+            .stamp(size, 0.1);
         Measured::flat(&pixels, 0.1, 0.01)
             .compute(centre, TEST_STAMP_RADIUS)
             .expect("a star")
@@ -128,8 +123,8 @@ fn compute_star_of_a_clean_star() {
 #[test]
 fn snr_halves_when_the_noise_doubles() {
     let size = Size2us::new(64, 64);
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(size, 0.1);
+    let pixels =
+        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);
     let snr = |noise: f32| {
         Measured::flat(&pixels, 0.1, noise)
             .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
@@ -146,8 +141,7 @@ fn a_bright_sky_changes_nothing() {
     let size = Size2us::new(64, 64);
     let measure = |sky: f32| {
         let pixels =
-            SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-                .stamp(size, sky);
+            SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5)).stamp(size, sky);
         Measured::flat(&pixels, sky, 0.01)
             .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
             .unwrap()
@@ -172,8 +166,8 @@ fn a_bright_sky_changes_nothing() {
 fn the_windowed_centroid_reports_its_propagated_noise() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
-    let clean = SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(size, 0.1);
+    let clean =
+        SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);
     let noise = 0.05f32;
     let mut noisy = clean.clone();
     patterns::add_gaussian_noise(&mut noisy, noise, 21);
@@ -225,8 +219,7 @@ fn the_windowed_centroid_reports_its_propagated_noise() {
 fn measure_star_multiple_stars_independent() {
     let mut pixels = Buffer2::new_filled(128, 128, 0.1f32);
     for (centre, amplitude) in [(Vec2::splat(40.0), 0.8), (Vec2::splat(90.0), 0.6)] {
-        SyntheticStar::new(centre, amplitude, StarProfile::Gaussian { sigma: 2.5 })
-            .add_to(&mut pixels);
+        SyntheticStar::new(centre, amplitude, StarProfile::gaussian(2.5)).add_to(&mut pixels);
     }
     let measured = Measured::flat(&pixels, 0.1, 0.01);
     let candidates = detect_stars_test(
@@ -274,13 +267,12 @@ fn measure_star_multiple_stars_independent() {
 /// and its `roundness2` −0.331 491 21, to 1e-6 as in `fitting`.
 #[test]
 fn a_one_sided_tail_moves_sround() {
-    let mut pixels =
-        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(64, 64), 0.1);
+    let mut pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5))
+        .stamp(Size2us::new(64, 64), 0.1);
     SyntheticStar::new(
         Vec2::new(36.0, 32.0),
         0.3,
-        StarProfile::Elliptical {
+        StarProfile::Gaussian {
             sigma_x: 2.0,
             sigma_y: 1.0,
             angle: 0.0,
@@ -311,7 +303,7 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
     let width = 64;
     let height = 64;
     let pos = DVec2::splat(32.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::gaussian(2.5))
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.05, 0.01);
     let residual = bg.residual_of(&pixels);
@@ -381,8 +373,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     // ~0.02 — several percent of this star's flux once summed over the stamp.
     let sky = |x: usize| 0.1 + 0.02 * x as f32;
     let mut pixels =
-        SyntheticStar::new(Vec2::splat(32.0), 1.0, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(size, 0.0);
+        SyntheticStar::new(Vec2::splat(32.0), 1.0, StarProfile::gaussian(2.5)).stamp(size, 0.0);
     let mut sky_plane = Buffer2::new_filled(size.width, size.height, 0.0f32);
     for y in 0..size.height {
         for x in 0..size.width {
@@ -539,8 +530,8 @@ fn empty_sky_stamps_measure_no_signal() {
 fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     let size = Size2us::new(80, 80);
     let centre = DVec2::splat(32.0);
-    let pixels = SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(size, 0.1);
+    let pixels =
+        SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1);
     let star = Measured::flat(&pixels, 0.1, 0.01);
     let region = star.region_at(centre);
     let config = MeasurementConfig {

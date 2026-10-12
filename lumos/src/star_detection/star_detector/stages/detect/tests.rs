@@ -46,21 +46,9 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
     } = make_test_component(
         Size2us::new(48, 24),
         &[
-            SyntheticStar::new(
-                Vec2::new(12.0, 12.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 3.0 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(24.0, 12.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 3.0 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(36.0, 12.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 3.0 },
-            ),
+            SyntheticStar::new(Vec2::new(12.0, 12.0), 1.0, StarProfile::gaussian(3.0)),
+            SyntheticStar::new(Vec2::new(24.0, 12.0), 1.0, StarProfile::gaussian(3.0)),
+            SyntheticStar::new(Vec2::new(36.0, 12.0), 1.0, StarProfile::gaussian(3.0)),
         ],
     );
 
@@ -94,7 +82,7 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         &[SyntheticStar::new(
             Vec2::new(16.0, 16.0),
             1.0,
-            StarProfile::Gaussian { sigma: 3.0 },
+            StarProfile::gaussian(3.0),
         )],
     );
 
@@ -127,7 +115,7 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             &[SyntheticStar::new(
                 Vec2::new(16.0, 16.0),
                 1.0,
-                StarProfile::Gaussian { sigma: 3.0 },
+                StarProfile::gaussian(3.0),
             )],
         );
         let config = ExtractionConfig {

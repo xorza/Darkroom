@@ -307,7 +307,7 @@ fn finish_unless_cancelled(
     Ok(cache.finish_product(combined, planes, quantization_sigma))
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

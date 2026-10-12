@@ -505,7 +505,7 @@ fn score_hypothesis(
     -total_loss
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

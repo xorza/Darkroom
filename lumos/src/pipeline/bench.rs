@@ -92,7 +92,7 @@ fn park(c: &mut Criterion) {
         }
         group.bench_function(BenchmarkId::new(variant, field.name()), |b| {
             let dir = TempDir::new("lumos-bench-park");
-            let scratch = RunScratch::create(dir.path()).unwrap();
+            let scratch = RunScratch::create_evictable(dir.path()).unwrap();
             let light = field.render(FRAME).image;
             let parked = StoredImage::spill(&scratch, &light).unwrap();
             let flags = parked.flags();

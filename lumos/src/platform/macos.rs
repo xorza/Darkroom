@@ -37,7 +37,7 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
     None
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::fs::File;
 

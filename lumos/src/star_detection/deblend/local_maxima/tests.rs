@@ -31,7 +31,7 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
     let stars: Vec<SyntheticStar> = stars
         .iter()
         .map(|&(x, y, amplitude)| {
-            SyntheticStar::new(Vec2::new(x, y), amplitude, StarProfile::Gaussian { sigma })
+            SyntheticStar::new(Vec2::new(x, y), amplitude, StarProfile::gaussian(sigma))
         })
         .collect();
     make_test_component(size, &stars)

@@ -11,11 +11,10 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-# Compiles `internals`, the synthetic data and helpers the tests use, for the benches outside
-# `cfg(test)`. Not part of the supported surface.
-internals = ["common/internals"]
+# What only tests and benches build: the synthetic data and helpers, and the benches. Every test
+# and bench build turns it on through the self dev-dependency. Not part of the supported surface.
 # `libc` drops a spilled frame's pages from the page cache, for the benches of cold reads on Linux.
-bench = ["internals", "dep:criterion", "dep:libc"]
+internals = ["common/internals", "dep:criterion", "dep:libc"]
 
 [dependencies]
 common = { workspace = true, features = ["introspect-derive"] }
@@ -57,6 +56,7 @@ windows = { workspace = true, features = [
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
 image = { workspace = true }
+lumos = { workspace = true, features = ["internals"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
@@ -68,4 +68,4 @@ bench = false
 [[bench]]
 name = "lumos"
 harness = false
-required-features = ["bench"]
+required-features = ["internals"]

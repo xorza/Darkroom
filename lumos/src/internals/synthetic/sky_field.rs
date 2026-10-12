@@ -52,7 +52,7 @@ impl SkyField {
     ) -> Self {
         let mut pixels = Buffer2::new_filled(size.width, size.height, sky.level);
         for &(center, peak) in stars {
-            SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(&mut pixels);
+            SyntheticStar::new(center, peak, StarProfile::gaussian(sigma)).add_to(&mut pixels);
         }
         if sky.noise > 0.0 {
             patterns::add_gaussian_noise(pixels.pixels_mut(), sky.noise, seed);

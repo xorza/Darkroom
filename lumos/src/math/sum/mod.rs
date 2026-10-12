@@ -105,7 +105,7 @@ fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedSums {
     }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 
 #[cfg(test)]

@@ -215,8 +215,8 @@ pub use image_ops::ml::ml_denoise::MlDenoise;
 #[cfg(feature = "ml")]
 pub use image_ops::ml::remove_stars::{RemoveStars, StarRemovalResult};
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub mod bench;
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 mod internals;

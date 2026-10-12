@@ -5,18 +5,32 @@ use glam::DVec2;
 
 use crate::registration::transform::Transform;
 
-/// `p ↦ T(p + d·k·|d|² + d·k4·|d|⁴)` with `d = p − centre`, sampled on the grid
-/// `start, start + step, …, extent` on each axis. An order-3 SIP holds the `k` term exactly; the
-/// `k4` term needs order 5.
+/// `p ↦ T(p + d·k·|d|² + d·k4·|d|⁴)` with `d = p − centre`. An order-3 SIP holds the `k` term
+/// exactly; the `k4` term needs order 5.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RadialField {
     pub(crate) centre: DVec2,
     pub(crate) k: f64,
     pub(crate) k4: f64,
     pub(crate) transform: Transform,
+}
+
+/// The reference points a test samples a [`RadialField`] at: `start, start + step, …, extent` on
+/// each axis.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Grid {
     pub(crate) start: usize,
     pub(crate) step: usize,
     pub(crate) extent: usize,
+}
+
+impl Grid {
+    /// Every 100 px over `[0, 1000]²`.
+    pub(crate) const DEFAULT: Self = Self {
+        start: 0,
+        step: 100,
+        extent: 1000,
+    };
 }
 
 /// A field's reference grid and the targets it maps them to, paired by index.
@@ -27,16 +41,13 @@ pub(crate) struct RadialPairs {
 }
 
 impl RadialField {
-    /// The cubic field `d·k·|d|²` about `centre` alone, on a 100 px grid over `[0, 1000]²`.
+    /// The cubic field `d·k·|d|²` about `centre` alone.
     pub(crate) const fn new(centre: DVec2, k: f64) -> Self {
         Self {
             centre,
             k,
             k4: 0.0,
             transform: Transform::identity(),
-            start: 0,
-            step: 100,
-            extent: 1000,
         }
     }
 
@@ -52,10 +63,11 @@ impl RadialField {
         self.transform.apply(p + self.displacement(p))
     }
 
-    pub(crate) fn pairs(&self) -> RadialPairs {
+    /// The points of `grid` and where the field puts each.
+    pub(crate) fn pairs(&self, grid: Grid) -> RadialPairs {
         let mut reference = Vec::new();
-        for y in (self.start..=self.extent).step_by(self.step) {
-            for x in (self.start..=self.extent).step_by(self.step) {
+        for y in (grid.start..=grid.extent).step_by(grid.step) {
+            for x in (grid.start..=grid.extent).step_by(grid.step) {
                 reference.push(DVec2::new(x as f64, y as f64));
             }
         }
