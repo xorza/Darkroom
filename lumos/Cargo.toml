@@ -14,7 +14,8 @@ ml = ["dep:ort"]
 # Compiles `internals`, the synthetic data and helpers the tests use, for the benches outside
 # `cfg(test)`. Not part of the supported surface.
 internals = ["common/internals"]
-bench = ["internals", "dep:criterion"]
+# `libc` drops a spilled frame's pages from the page cache, for the benches of cold reads on Linux.
+bench = ["internals", "dep:criterion", "dep:libc"]
 
 [dependencies]
 common = { workspace = true, features = ["introspect-derive"] }
@@ -40,6 +41,9 @@ statrs = { workspace = true }
 arrayvec = { workspace = true }
 blake3 = { workspace = true }
 criterion = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

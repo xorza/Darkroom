@@ -2,6 +2,8 @@
 //! end under the light preset: the reads, each light's statistics, the normalization and the
 //! combine.
 
+use std::time::Duration;
+
 use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
@@ -15,7 +17,9 @@ use crate::progress::progress_callback::ProgressCallback;
 
 pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "pipeline/stack", Scale::Pipeline);
+    // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(2110);
+    let mut group = fixture::group(c, "pipeline/stack", Scale::Set { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("fits_mono", set), |b| {

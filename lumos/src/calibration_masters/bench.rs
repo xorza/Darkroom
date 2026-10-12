@@ -2,6 +2,8 @@
 //! and the defects repaired, as every light of the session is; and the masters built from a
 //! session's frames, end to end.
 
+use std::time::Duration;
+
 use common::{CancelToken, TempDir};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
@@ -42,7 +44,9 @@ pub(crate) fn benches(c: &mut Criterion) {
 /// flat, the defects detected and the flat prepared.
 pub(crate) fn pipeline(c: &mut Criterion) {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
-    let mut group = fixture::group(c, "pipeline/masters", Scale::Pipeline);
+    // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(6620);
+    let mut group = fixture::group(c, "pipeline/masters", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (3 * LIGHTS * FRAME.pixel_count()) as u64,
     ));

@@ -91,6 +91,20 @@ impl CfaType {
         }
     }
 
+    /// The rows of a `size` mosaic a statistic samples so each colour keeps at most about
+    /// `per_colour` samples: whole periods of the pattern's rows, one period in every `step`. A
+    /// step over single rows would skip whole rows of the pattern wherever it shares a factor with
+    /// the period, and with them every photosite of a colour only those rows hold.
+    pub(crate) fn sampled_rows(
+        &self,
+        size: Size2us,
+        per_colour: usize,
+    ) -> impl Iterator<Item = usize> + use<> {
+        let period = self.period();
+        let step = (size.pixel_count() / (self.num_colors() * per_colour)).max(1);
+        (0..size.height).filter(move |y| (y / period).is_multiple_of(step))
+    }
+
     /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
     pub const fn num_colors(&self) -> usize {
         match self {

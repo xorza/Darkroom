@@ -3,9 +3,10 @@
 
 use std::cell::OnceCell;
 use std::path::Path;
+use std::time::Duration;
 
 use common::{CancelToken, TempDir};
-use criterion::{BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
@@ -21,6 +22,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::pipeline::calibrate::{CalibrationNotes, calibrate_align_stack};
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::light_source::MosaicPreparation;
+use crate::platform::MappedFile;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::bench::Pair;
 use crate::registration::registration_config::WarpParams;
@@ -77,32 +79,47 @@ fn prepare(c: &mut Criterion) {
 
 /// A calibrated light parked on the spill tier between its detection and its registration, then
 /// warped straight from its maps into the warp's buffers, as a run that spills parks every light
-/// while it chooses the reference: every page of the light in the page cache.
+/// while it chooses the reference: every page of the light in the page cache, and, where the system
+/// can drop a file's pages, every page on the disk, as when the parked lights outgrow the memory.
 fn park(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = fixture::group(c, "stage/park", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    group.bench_function(BenchmarkId::new("warp_from_map/warm", field.name()), |b| {
-        let dir = TempDir::new("lumos-bench-park");
-        let scratch = RunScratch::create(dir.path()).unwrap();
-        let light = field.render(FRAME).image;
-        let parked = StoredImage::spill(&scratch, &light).unwrap();
-        let flags = parked.flags();
-        let source = SourceImage {
-            dimensions: parked.dimensions,
-            planes: parked
-                .planes()
-                .map(|pixels| SourcePlane {
-                    pixels,
-                    width: FRAME.width,
-                })
-                .collect(),
-            flags: flags.as_ref(),
-        };
-        let warp = Pair::typical().similarity_warp();
-        let mut buffers = WarpBuffers::new(parked.dimensions);
-        b.iter(|| buffers.warp_into(&source, &warp, WarpParams::default()));
-    });
+    for (variant, cold) in [("warp_from_map/warm", false), ("warp_from_map/cold", true)] {
+        if cold && !MappedFile::EVICTS {
+            continue;
+        }
+        group.bench_function(BenchmarkId::new(variant, field.name()), |b| {
+            let dir = TempDir::new("lumos-bench-park");
+            let scratch = RunScratch::create(dir.path()).unwrap();
+            let light = field.render(FRAME).image;
+            let parked = StoredImage::spill(&scratch, &light).unwrap();
+            let flags = parked.flags();
+            let source = SourceImage {
+                dimensions: parked.dimensions,
+                planes: parked
+                    .planes()
+                    .map(|pixels| SourcePlane {
+                        pixels,
+                        width: FRAME.width,
+                    })
+                    .collect(),
+                flags: flags.as_ref(),
+            };
+            let warp = Pair::typical().similarity_warp();
+            let mut buffers = WarpBuffers::new(parked.dimensions);
+            let mut warp_parked = || buffers.warp_into(&source, &warp, WarpParams::default());
+            if cold {
+                b.iter_batched(
+                    || assert!(parked.evict(), "the light's pages leave the page cache"),
+                    |()| warp_parked(),
+                    BatchSize::PerIteration,
+                );
+            } else {
+                b.iter(warp_parked);
+            }
+        });
+    }
 }
 
 /// The memory override the spilled run plans against: under the 3.5 GB that twelve demosaiced
@@ -117,7 +134,13 @@ pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let masters = OnceCell::new();
-    let mut group = fixture::group(c, "pipeline/calibrate_align_stack", Scale::Pipeline);
+    // The slowest bench's iteration, `rggb/spilled`'s median on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(18_340);
+    let mut group = fixture::group(
+        c,
+        "pipeline/calibrate_align_stack",
+        Scale::Set { iteration },
+    );
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     for (tier, memory_override) in [("resident", None), ("spilled", Some(SPILLED_MACHINE_BYTES))] {

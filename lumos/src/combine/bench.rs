@@ -1,9 +1,11 @@
 //! A set of 30 aligned lights combined into the stacked product with its standard quality planes,
 //! as `stack_stored_frames` combines the frames a run stores: under the light preset with the
 //! frames resident, and spilled on the memory of an 8 GiB machine, which a 30-frame 24 MP set
-//! does not fit; and under every rejection the configuration offers, resident.
+//! does not fit, read from the page cache and, where the system can drop a file's pages, from the
+//! disk; and under every rejection the configuration offers, resident.
 
 use std::cell::OnceCell;
+use std::time::Duration;
 
 use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -21,6 +23,7 @@ use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::memory::run_memory::RunMemory;
+use crate::platform::MappedFile;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::stack_product::StackProduct;
 
@@ -32,7 +35,10 @@ pub(crate) fn benches(c: &mut Criterion) {
     let lights = OnceCell::new();
     let lights = || lights.get_or_init(|| Lights::of(field));
     let set = format!("{STACKED_LIGHTS}x{}", field.name());
-    let mut group = fixture::group(c, "stage/combine", Scale::Frame);
+    // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a Ryzen 7 6800U,
+    // x86-64-v3.
+    let iteration = Duration::from_millis(2550);
+    let mut group = fixture::group(c, "stage/combine", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * FRAME.pixel_count()) as u64,
     ));
@@ -44,15 +50,31 @@ pub(crate) fn benches(c: &mut Criterion) {
             BatchSize::PerIteration,
         );
     });
-    group.bench_function(BenchmarkId::new("light_preset/spilled", &set), |b| {
-        let lights = lights();
-        let dir = TempDir::new("lumos-bench-combine");
-        b.iter_batched(
-            || lights.spilled(&dir),
-            |Spilled { frames, tier }| lights.combine(frames, tier, &StackConfig::light()),
-            BatchSize::PerIteration,
-        );
-    });
+    for (variant, cold) in [
+        ("light_preset/spilled", false),
+        ("light_preset/spilled_cold", true),
+    ] {
+        if cold && !MappedFile::EVICTS {
+            continue;
+        }
+        group.bench_function(BenchmarkId::new(variant, &set), |b| {
+            let lights = lights();
+            let dir = TempDir::new("lumos-bench-combine");
+            b.iter_batched(
+                || {
+                    let spilled = lights.spilled(&dir);
+                    if cold {
+                        for frame in &spilled.frames {
+                            assert!(frame.evict(), "the light's pages leave the page cache");
+                        }
+                    }
+                    spilled
+                },
+                |Spilled { frames, tier }| lights.combine(frames, tier, &StackConfig::light()),
+                BatchSize::PerIteration,
+            );
+        });
+    }
     for (name, rejection) in rejection::bench::rejections() {
         let config = StackConfig {
             combine: Combine {

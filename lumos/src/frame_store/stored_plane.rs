@@ -87,7 +87,7 @@ impl<T: Pod> StoredPlane<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use bytemuck::Pod;
 
@@ -95,7 +95,9 @@ pub(crate) mod internals {
 
     impl<T: Pod> StoredPlane<T> {
         /// Drop a mapped plane's pages from the page cache, so its next read comes from the disk;
-        /// `false` for a resident plane, or where the system offers no way.
+        /// `false` for a resident plane, or when a page stays: see [`MappedFile::evict`].
+        ///
+        /// [`MappedFile::evict`]: crate::platform::MappedFile::evict
         pub(crate) fn evict(&self) -> bool {
             match self {
                 Self::Memory(_) => false,
@@ -105,6 +107,7 @@ pub(crate) mod internals {
 
         /// The share of a mapped plane's pages in memory; `None` for a resident plane, or where
         /// the system does not say.
+        #[cfg(test)]
         pub(crate) fn resident_share(&self) -> Option<f64> {
             match self {
                 Self::Memory(_) => None,

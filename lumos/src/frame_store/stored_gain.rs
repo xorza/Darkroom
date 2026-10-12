@@ -65,3 +65,16 @@ impl StoredGain {
         )
     }
 }
+
+#[cfg(any(test, feature = "bench"))]
+pub(crate) mod internals {
+    use crate::frame_store::stored_gain::StoredGain;
+    use crate::frame_store::stored_plane::StoredPlane;
+
+    impl StoredGain {
+        /// The gain's node planes, one per channel.
+        pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
+            self.planes.iter()
+        }
+    }
+}

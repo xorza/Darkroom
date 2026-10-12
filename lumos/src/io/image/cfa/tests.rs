@@ -745,6 +745,18 @@ fn every_pattern_names_the_colour_at_each_position() {
         xtrans.photosites_per_colour(Size2us::new(6, 6)).as_slice(),
         [8, 20, 8]
     );
+    // An 8 × 8 Bayer frame at 10 samples a colour steps by ⌊64 / 30⌋ = 2 periods, a 24 × 24
+    // X-Trans one at 48 by ⌊576 / 144⌋ = 4: whole periods of rows, never single rows, so every row
+    // of the pattern is sampled. A mono frame's period is a row, and its one colour at 30 samples
+    // steps by ⌊64 / 30⌋ = 2.
+    let rows = |cfa: CfaType, side: usize, per_colour: usize| -> Vec<usize> {
+        cfa.sampled_rows(Size2us::new(side, side), per_colour)
+            .collect()
+    };
+    assert_eq!(rows(bayer, 8, 10), [0, 1, 4, 5]);
+    assert_eq!(rows(xtrans, 24, 48), [0, 1, 2, 3, 4, 5]);
+    assert_eq!(rows(CfaType::Mono, 8, 30), [0, 2, 4, 6]);
+    assert_eq!(rows(bayer, 8, 64), (0..8).collect::<Vec<_>>());
     for cfa in [CfaType::Mono, bayer, xtrans] {
         for size in [Size2us::new(1, 1), Size2us::new(5, 3), Size2us::new(7, 13)] {
             let mut counted = vec![0; cfa.num_colors()];
