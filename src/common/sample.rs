@@ -108,6 +108,10 @@ impl Sample for u16 {
 impl Sample for f32 {
     const TYPE: SampleType = SampleType::F32;
     const FULL_SCALE: Self = 1.0;
+    #[expect(
+        clippy::use_self,
+        reason = "the trait fixes this constant to `f32` in every impl"
+    )]
     const FULL_SCALE_F32: f32 = 1.0;
 
     #[inline]

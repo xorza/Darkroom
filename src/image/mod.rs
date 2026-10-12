@@ -48,15 +48,15 @@ impl Image {
         self.pixels.bytes_mut()
     }
 
-    pub fn new_black(desc: ImageDesc) -> Result<Image> {
+    pub fn new_black(desc: ImageDesc) -> Result<Self> {
         desc.validate()?;
         let pixels = ImagePixels::new_zeroed(desc.color_format, desc.width, desc.height);
-        Ok(Image { pixels })
+        Ok(Self { pixels })
     }
 
     /// An image over `bytes`, which must hold exactly the descriptor's pixels. A `u8` format
     /// keeps the allocation.
-    pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> Result<Image> {
+    pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> Result<Self> {
         desc.validate()?;
         if bytes.len() != desc.size_in_bytes() {
             return Err(Error::SizeMismatch(format!(
@@ -66,7 +66,7 @@ impl Image {
             )));
         }
         let pixels = ImagePixels::from_bytes(desc.color_format, desc.width, desc.height, bytes);
-        Ok(Image { pixels })
+        Ok(Self { pixels })
     }
 
     /// An image over typed channel values, `T` being the format's sample type: the allocation
@@ -74,7 +74,7 @@ impl Image {
     ///
     /// # Panics
     /// If `T` is not the format's sample type.
-    pub(crate) fn from_samples<T: Sample>(desc: ImageDesc, samples: Vec<T>) -> Result<Image> {
+    pub(crate) fn from_samples<T: Sample>(desc: ImageDesc, samples: Vec<T>) -> Result<Self> {
         desc.validate()?;
         let expected = desc.width * desc.height * desc.color_format.channel_count.count();
         if samples.len() != expected {
@@ -84,10 +84,10 @@ impl Image {
             )));
         }
         let pixels = ImagePixels::from_samples(desc.color_format, desc.width, desc.height, samples);
-        Ok(Image { pixels })
+        Ok(Self { pixels })
     }
 
-    pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Image> {
+    pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Self> {
         let filename = filename.as_ref();
         match FileFormat::from_path(filename)? {
             FileFormat::Png | FileFormat::Jpeg => io::load_png_jpeg(filename),
@@ -106,7 +106,7 @@ impl Image {
 
     /// This image in `color_format`: itself when the format already matches.
     #[must_use]
-    pub fn convert(self, color_format: ColorFormat) -> Image {
+    pub fn convert(self, color_format: ColorFormat) -> Self {
         if self.desc().color_format == color_format {
             return self;
         }
@@ -118,12 +118,12 @@ impl Image {
     /// a CPU borrow of an `ImageBuffer`) skips the source deep-copy that `convert`'s
     /// `self` receiver would force. The same format is a full copy.
     #[must_use]
-    pub fn convert_to(&self, color_format: ColorFormat) -> Image {
+    pub fn convert_to(&self, color_format: ColorFormat) -> Self {
         let source = self.desc();
         if source.color_format == color_format {
             return self.clone();
         }
-        let mut result = Image {
+        let mut result = Self {
             pixels: ImagePixels::new_zeroed(color_format, source.width, source.height),
         };
         convert_image(self, &mut result);
@@ -142,7 +142,7 @@ impl Image {
             pixels.width() > 0 && pixels.height() > 0,
             "an image needs at least one pixel"
         );
-        Image {
+        Self {
             pixels: T::wrap(pixels),
         }
     }

@@ -66,7 +66,7 @@ pub(super) fn packed_kernel(
 
     Some(match (format.sample_type, format.channel_count) {
         (_, ChannelCount::L) => return None,
-        (SampleType::U8, ChannelCount::Rgb) => simd::apply_packed::<u8, 3> as PackedKernel,
+        (SampleType::U8, ChannelCount::Rgb) => simd::apply_packed::<u8, 3>,
         (SampleType::U8, ChannelCount::Rgba) => simd::apply_packed::<u8, 4>,
         (SampleType::U16, ChannelCount::Rgb) => simd::apply_packed::<u16, 3>,
         (SampleType::U16, ChannelCount::Rgba) => simd::apply_packed::<u16, 4>,

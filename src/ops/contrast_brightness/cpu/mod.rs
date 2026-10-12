@@ -57,11 +57,11 @@ pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKerne
     Some(kernel)
 }
 
-/// SAFETY: the returned kernels require AVX2; callers must have verified it.
+/// The kernels need AVX2, which the caller verified.
 #[cfg(target_arch = "x86_64")]
 fn avx2_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => avx2::u8_flat as RowKernel,
+        (SampleType::U8, false) => avx2::u8_flat,
         (SampleType::U8, true) => avx2::u8_rgba,
         (SampleType::U16, false) => avx2::u16_flat,
         (SampleType::U16, true) => avx2::u16_rgba,
@@ -70,11 +70,11 @@ fn avx2_kernel(format: ColorFormat) -> RowKernel {
     }
 }
 
-/// SAFETY: the returned kernels require SSE4.1; callers must have verified it.
+/// The kernels need SSE4.1, which the caller verified.
 #[cfg(target_arch = "x86_64")]
 fn sse41_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => sse41::u8_flat as RowKernel,
+        (SampleType::U8, false) => sse41::u8_flat,
         (SampleType::U8, true) => sse41::u8_rgba,
         (SampleType::U16, false) => sse41::u16_flat,
         (SampleType::U16, true) => sse41::u16_rgba,
@@ -83,11 +83,11 @@ fn sse41_kernel(format: ColorFormat) -> RowKernel {
     }
 }
 
-/// SAFETY: NEON is baseline on aarch64, so these are always callable.
+/// The kernels need NEON, which is baseline on aarch64.
 #[cfg(target_arch = "aarch64")]
 fn neon_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => neon::u8_flat as RowKernel,
+        (SampleType::U8, false) => neon::u8_flat,
         (SampleType::U8, true) => neon::u8_rgba,
         (SampleType::U16, false) => neon::u16_flat,
         (SampleType::U16, true) => neon::u16_rgba,

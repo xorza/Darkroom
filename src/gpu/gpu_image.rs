@@ -126,8 +126,11 @@ impl GpuImage {
         &self.buffer
     }
 
-    /// The buffer, for binding as a shader's output. `&mut self` keeps a shader from
-    /// writing an image the caller only lent.
+    /// The buffer, for binding as a shader's output.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "`&mut self` keeps a shader from writing an image the caller only lent"
+    )]
     pub(crate) const fn write_buffer(&mut self) -> &wgpu::Buffer {
         &self.buffer
     }
@@ -161,7 +164,7 @@ impl Download {
         staging
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| {
-                let _ = sender.send(result);
+                sender.send(result).ok();
             });
         Self { staging, mapped }
     }

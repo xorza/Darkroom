@@ -64,9 +64,9 @@ pub(crate) fn tier_converter(
     from: ColorFormat,
     to: ColorFormat,
 ) -> Option<RowConvertFn> {
-    let kernel = match (tier, from, to) {
+    let kernel: RowConvertFn = match (tier, from, to) {
         (SimdTier::Avx2, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
-            avx::convert_rgba_to_rgb_row_avx2 as RowConvertFn
+            avx::convert_rgba_to_rgb_row_avx2
         }
         (SimdTier::Ssse3, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
             sse::convert_rgba_to_rgb_row_ssse3
@@ -98,10 +98,8 @@ pub(crate) fn tier_converter(
     from: ColorFormat,
     to: ColorFormat,
 ) -> Option<RowConvertFn> {
-    let kernel = match (from, to) {
-        (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
-            neon::convert_rgba_to_rgb_row_neon as RowConvertFn
-        }
+    let kernel: RowConvertFn = match (from, to) {
+        (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => neon::convert_rgba_to_rgb_row_neon,
         (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => neon::convert_rgb_to_rgba_row_neon,
         (ColorFormat::RGBA_U8, ColorFormat::L_U8) => neon::convert_rgba_to_l_row_neon,
         (ColorFormat::RGB_U8, ColorFormat::L_U8) => neon::convert_rgb_to_l_row_neon,
@@ -132,8 +130,8 @@ fn element_converter(tier: SimdTier, from: ColorFormat, to: ColorFormat) -> Opti
         return None;
     }
     #[cfg(target_arch = "x86_64")]
-    let kernel = match (tier, from.sample_type, to.sample_type) {
-        (SimdTier::Avx2, F32, U8) => avx::convert_f32_to_u8_row_avx2 as RowConvertFn,
+    let kernel: RowConvertFn = match (tier, from.sample_type, to.sample_type) {
+        (SimdTier::Avx2, F32, U8) => avx::convert_f32_to_u8_row_avx2,
         (SimdTier::Avx2, U8, F32) => avx::convert_u8_to_f32_row_avx2,
         (SimdTier::Avx2, U8, U16) => avx::convert_u8_to_u16_row_avx2,
         (SimdTier::Avx2, U16, U8) => avx::convert_u16_to_u8_row_avx2,
@@ -148,8 +146,8 @@ fn element_converter(tier: SimdTier, from: ColorFormat, to: ColorFormat) -> Opti
         _ => return None,
     };
     #[cfg(target_arch = "aarch64")]
-    let kernel = match (tier, from.sample_type, to.sample_type) {
-        (SimdTier::Neon, F32, U8) => neon::convert_f32_to_u8_row_neon as RowConvertFn,
+    let kernel: RowConvertFn = match (tier, from.sample_type, to.sample_type) {
+        (SimdTier::Neon, F32, U8) => neon::convert_f32_to_u8_row_neon,
         (SimdTier::Neon, U8, F32) => neon::convert_u8_to_f32_row_neon,
         (SimdTier::Neon, U8, U16) => neon::convert_u8_to_u16_row_neon,
         (SimdTier::Neon, U16, U8) => neon::convert_u16_to_u8_row_neon,

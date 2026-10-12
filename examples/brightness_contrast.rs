@@ -19,13 +19,13 @@ fn main() {
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 
-    // CPU: the op is in-place, so adjust a copy of the input.
-    let mut output = input.clone();
-    ContrastBrightness::new(1.5, 0.1).apply_cpu(&mut output);
-    save_image(&output, "contrast_brightness_cpu.png");
-
     #[cfg(feature = "wgpu")]
     on_gpu(&input);
+
+    // CPU: the op is in place, so the input becomes the output.
+    let mut output = input;
+    ContrastBrightness::new(1.5, 0.1).apply_cpu(&mut output);
+    save_image(&output, "contrast_brightness_cpu.png");
 }
 
 /// Residency is the caller's to manage: upload, run, download. The shader reads and writes through
