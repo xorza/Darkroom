@@ -14,8 +14,6 @@ the first to need.
    [a question](bench-proposal_QUESTIONS.md).
 10. The `pipeline` tier: only `pipeline/drizzle/rggb` is left, blocked on
     [a question](bench-proposal_QUESTIONS.md).
-11. quickbench removed from `lumos`: the dev-dependency, any bench left, every real-data bench
-    (3.3), and the AGENTS.md text.
 
 ## 1. Audit of the current inventory
 
