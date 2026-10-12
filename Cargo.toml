@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2024"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
-# One lint set for every crate of the Darkroom workspace, copied here because a submodule does
-# not inherit it. Warn, not deny: the verification chain runs clippy with `-D warnings`, and a
-# build in the middle of an edit keeps working. Every suppression in code is
-# `#[expect(.., reason = "..")]`.
+# The Darkroom workspace's lint set, copied as a submodule does not inherit it. Warn, not deny:
+# the verification chain runs clippy with `-D warnings`.
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 elided_lifetimes_in_paths = "warn"
@@ -21,50 +19,32 @@ unused_qualifications = "warn"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# Documentation is reviewed, not linted, for these.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 must_use_candidate = "allow"
-# `assert!(x.is_empty())` reads plainer than a comparison with an empty array.
 assert_is_empty = "allow"
-# `usize -> f32/f64` in numeric code: a hit says nothing unless the value passes 2^24, and the
-# code cannot show that.
+# A hit says nothing unless a `usize` passes 2^24, which the code cannot show.
 cast_precision_loss = "allow"
-# `f64 -> f32` narrowing is the design of the f32 pipelines.
 cast_possible_truncation = "allow"
-# Math code names things `x`, `y`, `dx`, `dy`, `cx`.
 similar_names = "allow"
 many_single_char_names = "allow"
-# Size is a review question, not a lint.
 too_many_lines = "allow"
-# `#[inline(always)]` on `#[target_feature]` SIMD helpers is deliberate.
 inline_always = "allow"
-# Exact comparison is deliberate: sample-domain scales, sentinels, tests of exact values.
 float_cmp = "allow"
 # Every pointer cast feeds an unaligned load (`_mm_loadu_*`).
 cast_ptr_alignment = "allow"
-# `u32 -> i32` wraps only above 2^31, and `cast_possible_truncation`, allowed above, already
-# admits the wider `usize -> i32`.
+# `cast_possible_truncation`, allowed, already admits the wider `usize -> i32`.
 cast_possible_wrap = "allow"
-# Backticks in docs are reviewed, not linted: every proper noun was one more exception to list.
 doc_markdown = "allow"
-# Digit grouping is style only, and it hides the `RRGGBB` pattern of a hex colour.
 unreadable_literal = "allow"
-# State and config structs carry independent flags; the enum or bitflags it asks for fits neither.
 struct_excessive_bools = "allow"
-# The `use super::*` the gated `internals` and `tests` modules open with is the house style.
 wildcard_imports = "allow"
-# `Instant - Duration` and `Duration - Duration` already panic on underflow; the
-# `checked_sub(..).unwrap()` it asks for panics the same way, only longer.
+# The subtraction already panics on underflow, as `checked_sub(..).unwrap()` would.
 unchecked_time_subtraction = "allow"
-# A suffix every field shares is usually a unit or an encoding (`_ns`, `_q`), and a field named
-# after its struct (`Window::window`) is often the plainest name it has.
+# A shared suffix is usually a unit (`_ns`), and `Window::window` is often the plainest name.
 struct_field_names = "allow"
-# Arms with equal bodies often stay apart on purpose: a guard, a fallback, or bindings of
-# different types that no `|` pattern can join.
+# Equal arms stay apart for a guard, a fallback, or bindings no `|` pattern can join.
 match_same_arms = "allow"
-# A method is the house home for what works on a type, even when the body reads no field
-# (a pipeline's `draw`) or reads one only under `cfg(test)`.
 unused_self = "allow"
 absolute_paths = "warn"
 allow_attributes = "warn"
@@ -86,7 +66,6 @@ lossy_float_literal = "warn"
 manual_let_else = "warn"
 map_unwrap_or = "warn"
 match_wildcard_for_single_variants = "warn"
-# `const fn` by default: every fn that can be one is.
 missing_const_for_fn = "warn"
 missing_fields_in_debug = "warn"
 needless_pass_by_value = "warn"
@@ -112,9 +91,6 @@ unescaped_backticks = "warn"
 [features]
 default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
-# What only benches build: the colocated `bench.rs` drivers and the `bench`
-# facade `benches/imaginarium.rs` runs. Not part of the supported surface. Every
-# test and bench build turns it on through the self dev-dependency.
 internals = ["dep:criterion"]
 
 [dependencies]
@@ -151,14 +127,36 @@ required-features = ["internals"]
 [package.metadata.cargo-machete]
 ignored = ["strum"]
 
-# `bench` inherits this whole.
-[profile.release]
+# The same profiles in every workspace root here: Cargo reads them from the root alone.
+[profile.dev]
+opt-level = 1
 debug = "line-tables-only"
-split-debuginfo = "off"
 
-# Dependencies optimized in dev and test builds; this crate itself stays unoptimized.
 [profile.dev.package."*"]
 opt-level = 3
+
+# `objc2` debug assertions allocate on every Metal message send.
+[profile.dev.package.objc2]
+debug-assertions = false
+
+# Full debug info, which `darkroom/packaging` splits out of the shipped binary.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = "full"
+split-debuginfo = "off"
+
+[profile.bench]
+debug = "line-tables-only"
+strip = "none"
+
+[profile.release-dev]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
+debug = "line-tables-only"
 
 [dev-dependencies]
 imaginarium = { path = ".", default-features = false, features = ["internals"] }
