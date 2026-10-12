@@ -27,7 +27,7 @@ pub(crate) fn benches(c: &mut Criterion) {
                 axis_ratio,
                 angle,
             };
-            let residual = &stages.frame.measure;
+            let residual: &Buffer2<f32> = &stages.frame.measure;
             let mut temp = Buffer2::new_default(FRAME.width, FRAME.height);
             let mut kernels = FilterKernels::default();
             b.iter_batched_ref(

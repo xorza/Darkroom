@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use crate::scratch_pool::Pooled;
 use std::f32::consts::PI;
 
 /// The windowed centroid against what it must return. A star centred on the start stays put: its
@@ -392,8 +393,8 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let measured = Measured::of(
         &pixels,
         &BackgroundEstimate {
-            background: sky_plane,
-            noise: Buffer2::new_filled(size.width, size.height, 0.01),
+            background: Pooled::loose(sky_plane, size),
+            noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, 0.01), size),
             noise_floor: 1e-6,
         },
     );

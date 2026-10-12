@@ -39,7 +39,6 @@
 
 mod background_mesh;
 mod bit_buffer2;
-mod buffer_pool;
 mod calibration;
 mod combine;
 mod concurrency;
@@ -57,6 +56,7 @@ mod pipeline;
 mod platform;
 mod progress;
 mod registration;
+mod scratch_pool;
 
 mod simd;
 mod stack_product;

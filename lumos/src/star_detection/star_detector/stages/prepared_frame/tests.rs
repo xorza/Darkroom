@@ -7,7 +7,7 @@ use crate::internals::prelude::*;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
-fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buffer2<f32> {
+fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Pooled<Buffer2<f32>> {
     let mut plane = pool.acquire_f32();
     combine_channels(image, &mut plane);
     plane
@@ -337,7 +337,7 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     let plane = frame.detection_plane(Some(4.0), &config, &mut pool);
     let detected = DetectResult::from_plane(
         &plane,
-        frame.no_data.as_ref(),
+        frame.no_data.as_deref(),
         &config.extraction,
         &mut pool,
     );

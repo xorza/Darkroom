@@ -3,6 +3,7 @@
 //! Provides utilities to create `BackgroundEstimate` instances for benchmarks and tests.
 
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::{
     BackgroundEstimate, Refinement, noise_floor_for,
 };
@@ -15,13 +16,12 @@ use imaginarium::Buffer2;
 
 /// Create a uniform `BackgroundEstimate` with constant background and noise values.
 pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(size.width, size.height);
-    let mut noise_buf = Buffer2::new_default(size.width, size.height);
-    bg_buf.fill(background);
-    noise_buf.fill(noise);
     BackgroundEstimate {
-        background: bg_buf,
-        noise: noise_buf,
+        background: Pooled::loose(
+            Buffer2::new_filled(size.width, size.height, background),
+            size,
+        ),
+        noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, noise), size),
         // The map is uniform, so the frame's typical σ is `noise` itself and the estimator's
         // median-tile-σ derivation reduces to exactly this.
         noise_floor: noise_floor_for(noise),
@@ -67,7 +67,6 @@ pub(crate) fn estimate_in(
         config,
         pool,
     );
-    pool.release_bit(refined.sources);
     refined.estimate
 }
 

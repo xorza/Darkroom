@@ -17,7 +17,6 @@ use crate::memory::DETECTION_WORKING_PLANES;
 use crate::star_detection::resources::internals::BufferCounts;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use crate::star_detection::star_detector::internals::buffer_counts_for;
 
 /// The detection working set at its high-water mark over every preset: the buffers the pool holds
 /// at rest once every stage has run and returned its scratch. Because buffers are recycled across
@@ -79,7 +78,7 @@ fn warmed_pool_holds_the_pinned_working_set() {
             for frame in &frames {
                 detector.detect(frame);
             }
-            buffer_counts_for(&detector).expect("resources are populated after the first detect")
+            detector.buffer_counts()
         })
         .collect();
     let peak = warmed.iter().fold(

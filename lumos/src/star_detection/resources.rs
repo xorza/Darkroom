@@ -3,9 +3,9 @@
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::buffer_pool::BufferPool;
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::background::workspace::BackgroundWorkspace;
 use crate::star_detection::convolution::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
@@ -13,31 +13,18 @@ use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star_detector::stages::filter::DuplicateScratch;
 use imaginarium::Buffer2;
 
-/// Reusable buffers and stage workspaces for star detection.
+/// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
+/// frame after the first allocates nothing.
 ///
-/// Buffers are stored and reused across multiple `detect()` calls to avoid
-/// allocation overhead. All buffers in the pool have the same dimensions.
-///
-/// This recycles planes between the *sequential* stages of one detection, which is why
-/// `acquire_*`/`release_*` take `&mut self` — unlike
-/// [`JobScratchPool`] it never hands scratch to concurrent
-/// jobs. A stage acquires its planes, is free to work them across rayon workers itself, and
-/// releases them before the next stage runs.
-///
-/// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
-/// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
-///
-/// The two accessor pairs stay written out rather than collapsing into one generic
-/// `acquire::<B>()` over [`BufferPool`]: the pools differ only in element type, so selecting one
-/// generically would need a trait mapping the type back to its field, and a turbofish at each of
-/// the ~35 call sites, to save four one-line methods.
-#[derive(Debug)]
+/// Every plane is leased at the frame's dimensions and goes back to its pool when the lease drops,
+/// so a stage keeps its planes in its own structs for as long as later stages read them. Contents
+/// of a leased plane are **unspecified**: overwrite before reading.
+#[derive(Debug, Default)]
 pub(crate) struct DetectionResources {
-    pub(crate) dimensions: Size2us,
     /// Grayscale, scratch, background, noise — anything one f32 plane wide.
-    floats: BufferPool<Buffer2<f32>>,
+    floats: ScratchPool<Buffer2<f32>>,
     /// Threshold masks, dilation scratch.
-    bitmasks: BufferPool<BitBuffer2>,
+    bitmasks: ScratchPool<BitBuffer2>,
     pub(crate) labeler: Labeler,
     pub(crate) background: BackgroundWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
@@ -51,63 +38,45 @@ pub(crate) struct DetectionResources {
 }
 
 impl DetectionResources {
-    /// Create resources for the given image dimensions.
     pub(crate) fn new(dimensions: Size2us) -> Self {
         Self {
-            dimensions,
-            floats: BufferPool::default(),
-            bitmasks: BufferPool::default(),
-            labeler: Labeler::default(),
-            background: BackgroundWorkspace::default(),
-            deblend: JobScratchPool::default(),
-            values: Vec::new(),
-            deviations: Vec::new(),
-            duplicates: DuplicateScratch::default(),
-            kernels: FilterKernels::default(),
+            floats: ScratchPool::new(dimensions),
+            bitmasks: ScratchPool::new(dimensions),
+            ..Self::default()
         }
     }
 
-    /// Acquire an f32 buffer from the pool, or allocate a new one.
-    pub(crate) fn acquire_f32(&mut self) -> Buffer2<f32> {
-        self.floats.acquire(self.dimensions)
+    /// The dimensions every plane is leased at.
+    pub(crate) fn dimensions(&self) -> Size2us {
+        self.floats.shape()
     }
 
-    /// Return an f32 buffer to the pool for reuse. It must have the pool's dimensions.
-    pub(crate) fn release_f32(&mut self, buffer: Buffer2<f32>) {
-        self.floats.release(buffer, self.dimensions);
+    pub(crate) fn acquire_f32(&self) -> Pooled<Buffer2<f32>> {
+        self.floats.acquire()
     }
 
-    /// Acquire a `BitBuffer2` from the pool, or allocate a new one.
-    pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
-        self.bitmasks.acquire(self.dimensions)
+    pub(crate) fn acquire_bit(&self) -> Pooled<BitBuffer2> {
+        self.bitmasks.acquire()
     }
 
-    /// Return a `BitBuffer2` to the pool for reuse. It must have the pool's dimensions.
-    pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
-        self.bitmasks.release(buffer, self.dimensions);
-    }
-
-    /// Clear all pooled buffers, freeing memory.
-    pub(crate) fn clear(&mut self) {
-        self.floats.clear();
-        self.bitmasks.clear();
+    /// Serve frames of `dimensions`. A change drops the planes, and the workspaces whose size
+    /// follows the frame's: the labeler, the background mesh and the deblenders. The per-tile and
+    /// per-star vectors, the duplicate scratch and the filter kernels follow the star and tile
+    /// counts, and stay.
+    pub(crate) fn reshape(&mut self, dimensions: Size2us) {
+        if self.dimensions() == dimensions {
+            return;
+        }
+        self.floats.reshape(dimensions);
+        self.bitmasks.reshape(dimensions);
         self.labeler = Labeler::default();
         self.background.clear();
         self.deblend = JobScratchPool::default();
-    }
-
-    /// Reset the pool for new dimensions, clearing all buffers.
-    pub(crate) fn reset(&mut self, dimensions: Size2us) {
-        if self.dimensions != dimensions {
-            self.clear();
-            self.dimensions = dimensions;
-        }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::buffer_pool::internals::pooled_count;
     use crate::star_detection::resources::DetectionResources;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,12 +85,13 @@ pub(crate) mod internals {
         pub bitmasks: usize,
     }
 
-    /// The pools' occupancy, for readers outside this module — `dimensions` is already
-    /// `pub(crate)` and needs no accessor, but the pools themselves are private.
-    pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
-        BufferCounts {
-            floats: pooled_count(&resources.floats),
-            bitmasks: pooled_count(&resources.bitmasks),
+    impl DetectionResources {
+        /// The planes the pools hold free.
+        pub(crate) fn buffer_counts(&self) -> BufferCounts {
+            BufferCounts {
+                floats: self.floats.pooled(),
+                bitmasks: self.bitmasks.pooled(),
+            }
         }
     }
 }
@@ -131,109 +101,51 @@ mod tests {
     use crate::math::size2us::Size2us;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::resources::internals::BufferCounts;
-    use crate::star_detection::resources::internals::buffer_counts;
-    use imaginarium::Buffer2;
 
-    #[test]
-    fn pool_creation() {
-        let pool = DetectionResources::new(Size2us::new(100, 50));
-        assert_eq!(pool.dimensions, Size2us::new(100, 50));
-        // Nothing is pooled up front, so the first acquire of each kind allocates.
-        assert_eq!(
-            buffer_counts(&pool),
-            BufferCounts {
-                floats: 0,
-                bitmasks: 0,
-            }
-        );
+    const fn counts(floats: usize, bitmasks: usize) -> BufferCounts {
+        BufferCounts { floats, bitmasks }
     }
 
-    /// Each kind of buffer: an acquire from an empty pool allocates, a release pools it, the next
-    /// acquire hands back that same allocation, and one past it allocates again — the counts after
-    /// every step, the reuse by address.
+    /// Each kind of plane is leased at the resources' dimensions from a pool of its own: nothing
+    /// is built up front, a dropped lease goes back to its kind's pool only, and the next lease of
+    /// that kind is the same allocation.
     #[test]
-    fn acquire_reuses_what_release_returned() {
-        let counts = |floats, bitmasks| BufferCounts { floats, bitmasks };
-        let mut pool = DetectionResources::new(Size2us::new(64, 32));
+    fn planes_lease_at_the_frame_dimensions_from_one_pool_per_kind() {
+        let resources = DetectionResources::new(Size2us::new(64, 32));
+        assert_eq!(resources.dimensions(), Size2us::new(64, 32));
+        assert_eq!(resources.buffer_counts(), counts(0, 0));
 
-        let first = pool.acquire_f32();
-        assert_eq!((first.width(), first.height()), (64, 32));
-        let address = first.as_ptr();
-        pool.release_f32(first);
-        assert_eq!(buffer_counts(&pool), counts(1, 0));
-        let again = pool.acquire_f32();
-        assert_eq!(again.as_ptr(), address);
-        let fresh = pool.acquire_f32();
-        assert_ne!(fresh.as_ptr(), address);
-        assert_eq!(buffer_counts(&pool), counts(0, 0));
-        pool.release_f32(again);
-        pool.release_f32(fresh);
-        assert_eq!(buffer_counts(&pool), counts(2, 0));
+        let plane = resources.acquire_f32();
+        assert_eq!((plane.width(), plane.height()), (64, 32));
+        let address = plane.as_ptr();
+        drop(plane);
+        assert_eq!(resources.buffer_counts(), counts(1, 0));
+        assert_eq!(resources.acquire_f32().as_ptr(), address);
 
-        let first = pool.acquire_bit();
-        assert_eq!(first.size, Size2us::new(64, 32));
-        let address = first.words.as_ptr();
-        pool.release_bit(first);
-        assert_eq!(buffer_counts(&pool), counts(2, 1));
-        let again = pool.acquire_bit();
-        assert_eq!(again.words.as_ptr(), address);
-        let fresh = pool.acquire_bit();
-        assert_ne!(fresh.words.as_ptr(), address);
-        pool.release_bit(again);
-        pool.release_bit(fresh);
-        assert_eq!(buffer_counts(&pool), counts(2, 2));
+        let mask = resources.acquire_bit();
+        assert_eq!(mask.size, Size2us::new(64, 32));
+        let address = mask.words.as_ptr();
+        drop(mask);
+        assert_eq!(resources.buffer_counts(), counts(1, 1));
+        assert_eq!(resources.acquire_bit().words.as_ptr(), address);
     }
 
+    /// The same dimensions keep every plane; new ones drop them, and a plane leased before the
+    /// change is not shelved when it drops after it.
     #[test]
-    fn pool_clear() {
-        let mut pool = DetectionResources::new(Size2us::new(64, 64));
+    fn reshape_drops_the_planes_on_a_change_of_dimensions() {
+        let mut resources = DetectionResources::new(Size2us::new(64, 64));
+        drop((resources.acquire_f32(), resources.acquire_bit()));
+        let outstanding = resources.acquire_f32();
 
-        let buf1 = pool.acquire_f32();
-        let buf2 = pool.acquire_bit();
+        resources.reshape(Size2us::new(64, 64));
+        assert_eq!(resources.buffer_counts(), counts(0, 1));
 
-        pool.release_f32(buf1);
-        pool.release_bit(buf2);
-        assert_eq!(
-            buffer_counts(&pool),
-            BufferCounts {
-                floats: 1,
-                bitmasks: 1,
-            }
-        );
-
-        pool.clear();
-        assert_eq!(
-            buffer_counts(&pool),
-            BufferCounts {
-                floats: 0,
-                bitmasks: 0,
-            }
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "assertion")]
-    fn release_f32_wrong_dimensions_panics() {
-        // A mismatched buffer must be rejected even in release builds: downstream kernels index
-        // off the pool's declared dimensions, so a silently accepted mismatch would be a wrong
-        // image.
-        let mut pool = DetectionResources::new(Size2us::new(64, 64));
-        let wrong_size = Buffer2::new_default(32, 32);
-        pool.release_f32(wrong_size);
-    }
-
-    #[test]
-    fn pool_reset() {
-        let mut pool = DetectionResources::new(Size2us::new(64, 64));
-
-        let buf = pool.acquire_f32();
-        pool.release_f32(buf);
-
-        pool.reset(Size2us::new(64, 64));
-        assert_eq!(buffer_counts(&pool).floats, 1);
-
-        pool.reset(Size2us::new(128, 128));
-        assert_eq!(pool.dimensions, Size2us::new(128, 128));
-        assert_eq!(buffer_counts(&pool).floats, 0);
+        resources.reshape(Size2us::new(128, 64));
+        assert_eq!(resources.dimensions(), Size2us::new(128, 64));
+        assert_eq!(resources.buffer_counts(), counts(0, 0));
+        drop(outstanding);
+        assert_eq!(resources.buffer_counts(), counts(0, 0));
+        assert_eq!(resources.acquire_f32().width(), 128);
     }
 }

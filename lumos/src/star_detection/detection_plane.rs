@@ -5,6 +5,7 @@ use std::mem;
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::convolution::matched_filter;
@@ -24,7 +25,7 @@ use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 /// of sky it states. SEP thresholds the filtered values, and photutils deblends the convolved data.
 #[derive(Debug)]
 pub(crate) struct DetectionPlane {
-    pub(crate) values: Buffer2<f32>,
+    pub(crate) values: Pooled<Buffer2<f32>>,
     pub(crate) noise: SkyNoise,
 }
 
@@ -42,7 +43,7 @@ pub(crate) struct PlaneFilters<'a> {
 impl DetectionPlane {
     /// Filter `residual`, a plane from `resources` that the plane takes over, and measure its noise.
     pub(crate) fn from_residual(
-        mut residual: Buffer2<f32>,
+        mut residual: Pooled<Buffer2<f32>>,
         filters: PlaneFilters<'_>,
         background: &BackgroundConfig,
         resources: &mut DetectionResources,
@@ -51,22 +52,15 @@ impl DetectionPlane {
             let mut filtered = resources.acquire_f32();
             median_filter_3x3(&residual, &mut filtered);
             mem::swap(&mut residual, &mut filtered);
-            resources.release_f32(filtered);
         }
         if let Some(filter) = filters.matched {
             let mut temp = resources.acquire_f32();
             matched_filter(&mut residual, filter, &mut temp, &mut resources.kernels);
-            resources.release_f32(temp);
         }
         let noise = BackgroundEstimate::noise_of(&residual, filters.mask, background, resources);
         Self {
             values: residual,
             noise,
         }
-    }
-
-    pub(crate) fn release_to_pool(self, resources: &mut DetectionResources) {
-        resources.release_f32(self.values);
-        self.noise.release_to_pool(resources);
     }
 }
