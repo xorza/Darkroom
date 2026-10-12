@@ -57,10 +57,11 @@ impl DifferenceNoise {
         excluded: impl Fn(usize) -> bool,
         gain: &FlatGain,
     ) -> ArrayVec<BackgroundSplit, 3> {
-        let mut binned: ArrayVec<BinnedSamples<f32>, 3> = pair_counts(size, cfa_type, &excluded)
-            .into_iter()
-            .map(BinnedSamples::with_capacity)
-            .collect();
+        let mut binned: ArrayVec<BinnedSamples<Vec<f32>>, 3> =
+            pair_counts(size, cfa_type, &excluded)
+                .into_iter()
+                .map(BinnedSamples::with_capacity)
+                .collect();
         for_each_pair(size, cfa_type, &excluded, |pair| {
             let colour = pair.colour;
             let y = pair.y as f32;
@@ -85,7 +86,7 @@ impl DifferenceNoise {
     pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
         pair_counts(size, cfa_type, &|_| false)
             .into_iter()
-            .map(BinnedSamples::<f32>::heap_bytes)
+            .map(BinnedSamples::<Vec<f32>>::heap_bytes)
             .sum()
     }
 }

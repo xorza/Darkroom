@@ -225,6 +225,25 @@ impl BitBuffer2 {
         })
     }
 
+    /// Zero every row's padding bits, which [`Self::fill`] and [`Self::new_filled`] set with the
+    /// rest: what makes [`Self::padding_is_clear`] hold for a reader that scans the words whole.
+    pub(crate) fn clear_padding(&mut self) {
+        if self.size.width == 0 {
+            return;
+        }
+        let words_per_row = self.words_per_row();
+        let full_words_per_row = self.size.width / BITS_PER_WORD;
+        let bits_in_last_word = self.size.width % BITS_PER_WORD;
+        for row in self.words.chunks_exact_mut(words_per_row) {
+            let mut padding_words = full_words_per_row;
+            if bits_in_last_word != 0 {
+                row[full_words_per_row] &= (1u64 << bits_in_last_word) - 1;
+                padding_words += 1;
+            }
+            row[padding_words..].fill(0);
+        }
+    }
+
     /// Fill the mask by testing every pixel, accumulating a whole word before storing it.
     ///
     /// `predicate` takes the linear pixel index, the same one [`Self::get`] takes. This exists so

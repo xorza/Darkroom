@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::math::statistics::{abs_deviation_inplace, mad_to_sigma, median_mut};
+use crate::math::statistics::{
+    abs_deviation_inplace, mad_to_sigma, median_mut, median_of_magnitudes,
+};
 
 /// A distribution's location and spread — what one pass over the values measures.
 ///
@@ -26,7 +28,7 @@ impl MedianMad {
 
         let median = median_mut(data);
         abs_deviation_inplace(data, median);
-        let mad = median_mut(data);
+        let mad = median_of_magnitudes(data);
 
         Self { median, mad }
     }

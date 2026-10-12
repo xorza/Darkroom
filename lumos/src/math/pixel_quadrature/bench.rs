@@ -1,17 +1,19 @@
-//! A profile integrated over every pixel of a star's stamp, at the orders the fits pick, and the
-//! rules built at those orders.
+//! A profile integrated over every pixel of a star's stamp, at the orders the fits pick, the rules
+//! built at those orders, and the search for the order a profile needs.
 
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
-use crate::math::pixel_quadrature::PixelQuadrature;
+use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 
 /// The orders the f32 tolerance picks at the narrowest Gaussian and Moffat the fits admit, and
 /// the highest.
 const ORDERS: [usize; 3] = [7, 11, 16];
 const STAMP: usize = 15;
+/// The f32 pixel-mean tolerance the star fits integrate to.
+const TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let mut group = fixture::group(c, "math/pixel_quadrature", Scale::Sample);
@@ -41,6 +43,23 @@ pub(crate) fn benches(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("gauss_legendre", order), |b| {
             b.iter(|| PixelQuadrature::gauss_legendre(black_box(order)));
         });
+    }
+    group.throughput(Throughput::Elements(1));
+    for (variant, profile) in [
+        ("gaussian_0.5", AnalyticProfile::Gaussian { sigma: 0.5 }),
+        ("gaussian_2", AnalyticProfile::Gaussian { sigma: 2.0 }),
+        (
+            "moffat_1.5_2.5",
+            AnalyticProfile::Moffat {
+                alpha: 1.5,
+                beta: 2.5,
+            },
+        ),
+    ] {
+        group.bench_function(
+            BenchmarkId::new(format!("sufficient_order/{variant}"), 1),
+            |b| b.iter(|| PixelQuadrature::sufficient_order(black_box(profile), TOLERANCE)),
+        );
     }
     group.finish();
 }
