@@ -12,4 +12,4 @@ Done in this order; each is deleted when it is committed.
    dev-dependency; `imaginarium/Cargo.toml` has none, and darkroom has no `quickbench` submodule
    any more. Remove the line. `imaginarium` is a submodule, a repository of its own: commit the
    edit there, and leave its push and the gitlink bump in darkroom to the user. Delete the issue
-   from `.notes/ISSUES.md`.
+   from `.notes/ISSUES.md`. Blocked on [a question](lumos-bench-finish_QUESTIONS.md).
