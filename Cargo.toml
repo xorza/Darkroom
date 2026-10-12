@@ -2,7 +2,7 @@
 name = "imaginarium"
 version = "0.1.0"
 edition = "2024"
-exclude = ["AGENTS.md", "CLAUDE.md"]
+exclude = ["AGENTS.md", "CLAUDE.md", "x.py"]
 
 # The Darkroom workspace's lint set, copied as a submodule does not inherit it. Warn, not deny:
 # the verification chain runs clippy with `-D warnings`.
@@ -158,6 +158,11 @@ required-features = ["internals"]
 
 [package.metadata.cargo-machete]
 ignored = ["strum"]
+
+# The second lint set is the CPU-only build. Benches always measure the GPU build.
+[package.metadata.x]
+lint = ["--all-features", ""]
+bench = "--features wgpu"
 
 # The same profiles in every workspace root here: Cargo reads them from the root alone.
 [profile.dev]

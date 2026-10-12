@@ -17,19 +17,35 @@ Pre-alpha: rename, re-sign and rewrite callers freely; no compat shims.
 
 ## Verification
 
+`x.py` at the root runs every check (`python x.py` on Windows). `gate` runs,
+on the packages the working tree changed: rustfmt in place, clippy on every
+target per lint set, plain clippy for the build that ships, rustdoc with
+private items under `-D warnings`, the tests per test set, and the doc tests.
+It stops after the first step that fails. Each cargo call prints one line, a
+failure adds only its diagnostics or failed tests, and the full output is in
+`target/x/last/`.
+
 ```
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --tests --all-features
-cargo clippy --all-targets -- -D warnings
-cargo clippy -- -D warnings
+./x.py gate                        # the changed packages
+./x.py gate -p <pkg>               # named packages; --workspace for every one
+./x.py test -p <pkg> -- <filter>   # one step: fmt, lint, doc, test, nextest, doctest
+./x.py test --lib                  # or --test <name>, in place of the set's targets
+./x.py bench -- <filter>           # --smoke runs each case once, --no-run prints the binary
+./x.py watch                       # rebuilds on change, so the cache stays warm
 ```
 
-The fourth line is the CPU-only leg; the first gate on `not(feature = "wgpu")`
-adds `cargo test --tests`. The last lints the build that ships: every other
-target turns `internals` on through the self dev-dependency. A change to bench
-code adds `cargo benches -- --test`, which runs each case once.
-`.cargo/config.toml` builds x86-64 for x86-64-v3, the CPU darkroom builds for.
+Check through `x.py`, not cargo: each call is one package with fixed flags,
+so every run reuses the build `watch` keeps warm, and another flag set builds
+another copy of the crate. A package's feature sets are in its `Cargo.toml`,
+under `[package.metadata.x]`. `x.py` is one file, the same in darkroom and
+in each submodule: a change to it is copied to the others.
+
+The second lint set is the CPU-only leg; the first gate on
+`not(feature = "wgpu")` adds `""` to the test sets. The plain clippy lints the
+build that ships: every other target turns `internals` on through the self
+dev-dependency. A change to bench code adds `./x.py bench --smoke`, which runs
+each case once. `.cargo/config.toml` builds x86-64 for x86-64-v3, the CPU
+darkroom builds for.
 
 `neon.rs` files and the aarch64 arms of the dispatch tables are aarch64-only,
 so the x86 chain never compiles them. A change to one adds
@@ -50,11 +66,11 @@ the crate's own tests call is gated `#[cfg(test)]`. Never
 
 One target runs every case through `bench::run`; each driver sits in a
 `bench.rs` beside the code it measures, and `src/bench/mod.rs` states the
-rules. `cargo benches` runs them with fixed features (`wgpu`), so a case
+rules. `./x.py bench` runs them with fixed features (`wgpu`), so a case
 always measures the same build. An id is `<kind>/<group>/<backend>/<rest…>`:
 an `atomic` case times one kernel on the unit dispatch hands it, for the
 scalar reference and each tier the CPU has; an `integration` case times a
 public entry point on the 24 MP standard frame, on each backend. The backend
 comes first in every case, so `'/cpu/'` opens no device. A filter selects by
-id: `cargo benches -- --list`, `-- '^atomic/convert/'`,
+id: `./x.py bench -- --list`, `-- '^atomic/convert/'`,
 `-- --exact integration/preview/cpu/rgb_f32`.
