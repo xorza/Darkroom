@@ -18,7 +18,7 @@ const SAMPLES: usize = 1_000_000;
 const GAINS: usize = 4_096;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/noise", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/noise", Scale::Sample);
     group.throughput(Throughput::Elements(GAINS as u64));
     group.bench_function(BenchmarkId::new("gain_bin", GAINS), |b| {
         let bins = GainBins::of(&mut vignette(GAINS));
@@ -32,7 +32,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     });
     group.finish();
 
-    let mut group = fixture::group(c, "math/noise/frame", Scale::Frame);
+    let mut group = fixture::group(c, "kernel/math/noise/frame", Scale::Frame);
     group.throughput(Throughput::Elements(SAMPLES as u64));
     group.bench_function(BenchmarkId::new("binned_measure", SAMPLES), |b| {
         let samples = fixture::sky(SAMPLES, 4);

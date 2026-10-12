@@ -28,7 +28,7 @@ pub(crate) struct RadialPairs {
 
 impl RadialField {
     /// The cubic field `d·k·|d|²` about `centre` alone, on a 100 px grid over `[0, 1000]²`.
-    pub(crate) fn new(centre: DVec2, k: f64) -> Self {
+    pub(crate) const fn new(centre: DVec2, k: f64) -> Self {
         Self {
             centre,
             k,

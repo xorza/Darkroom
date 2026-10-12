@@ -214,5 +214,5 @@ pub use image_ops::ml::star_removal::{RemoveStars, StarRemovalResult};
 #[cfg(feature = "bench")]
 pub mod bench;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
 mod internals;

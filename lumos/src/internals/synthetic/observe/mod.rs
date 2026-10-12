@@ -13,7 +13,6 @@ use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 use glam::DVec2;
@@ -34,7 +33,7 @@ pub(crate) struct Observation {
 
 impl Observation {
     /// A reference exposure: identity transform, 1 s, nominal seeing.
-    pub(crate) fn reference(seed: u64) -> Self {
+    pub(crate) const fn reference(seed: u64) -> Self {
         Self {
             transform: Transform::identity(),
             exposure_s: 1.0,

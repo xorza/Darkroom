@@ -12,7 +12,7 @@ use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 const READS: usize = 4_096;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/lanczos", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/lanczos", Scale::Sample);
     group.throughput(Throughput::Elements(READS as u64));
     for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
         group.bench_function(

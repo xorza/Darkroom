@@ -3,6 +3,7 @@ use crate::internals::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::observe::*;
 use crate::internals::synthetic::scene::BackgroundField;
+use crate::math::size2us::Size2us;
 
 /// Where the brightest pixel is.
 #[derive(Debug)]

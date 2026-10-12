@@ -6,5 +6,5 @@
 use criterion::{criterion_group, criterion_main};
 use lumos::bench;
 
-criterion_group!(math, bench::math);
-criterion_main!(math);
+criterion_group!(kernel, bench::kernel);
+criterion_main!(kernel);

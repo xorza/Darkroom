@@ -1,11 +1,16 @@
-//! The criterion benches, one entry for each area, which `benches/lumos.rs` runs.
+//! The criterion benches, one entry for each tier, which `benches/lumos.rs` runs.
+//!
+//! Three tiers, and every bench is in one: `kernel`, one operation on the unit production gives
+//! it (a tile, a stamp, a row, a pixel's stack of frames); `stage`, one pipeline stage on a 24 MP
+//! frame or a set of them; `pipeline`, a public entry point run end to end from files.
 //!
 //! Every bench has one shape. A group is one module at one `fixture::Scale`, named
-//! `<area>/<module>`, with `/frame` added for the frame-sized one. A bench is one operation,
-//! its id `<operation>/<variant>` and its parameter the input size (a length, a side, a count or
-//! a matrix shape), and its throughput the elements one iteration processes. A bench builds its input inside its `bench_function`
-//! closure, so a filter that skips it skips its setup too, and an operation that changes its
-//! input in place takes a fresh copy through `iter_batched_ref`, outside the timing.
+//! `<tier>/<area>/<module>`, with `/frame` added for a frame-sized group of the kernel tier. A
+//! bench is one operation, its id `<operation>/<variant>` and its parameter the input (a length, a
+//! side, a count, a matrix shape or a scene), and its throughput the elements one iteration
+//! processes. A bench builds its input inside its `bench_function` closure, so a filter that skips
+//! it skips its setup too, and an operation that changes its input in place takes a fresh copy
+//! through `iter_batched_ref`, outside the timing.
 
 pub(crate) mod fixture;
 
@@ -16,8 +21,8 @@ use crate::math::{
     statistics, sum, wavelet,
 };
 
-/// Every hot path of `math`.
-pub fn math(c: &mut Criterion) {
+/// The kernel tier: one operation on the unit production gives it.
+pub fn kernel(c: &mut Criterion) {
     sum::bench::benches(c);
     statistics::bench::benches(c);
     noise::bench::benches(c);
