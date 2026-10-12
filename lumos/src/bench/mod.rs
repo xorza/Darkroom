@@ -6,6 +6,7 @@
 //!
 //! Every bench has one shape. A group is one module at one `fixture::Scale`, named
 //! `<tier>/<area>/<module>`, with `/frame` added for a frame-sized group of the kernel tier. A
+//! group over a set of frames takes `Scale::Set` with its slowest bench's measured iteration. A
 //! bench is one operation, its id `<operation>/<variant>` and its parameter the input (a length, a
 //! side, a count, a matrix shape or a scene), and its throughput the elements one iteration
 //! processes. A bench builds its input inside its `bench_function` closure, so a filter that skips
@@ -86,4 +87,5 @@ pub fn pipeline(c: &mut Criterion) {
     stack::bench::pipeline(c);
     calibration_masters::bench::pipeline(c);
     pipeline::bench::pipeline(c);
+    drizzle::bench::pipeline(c);
 }

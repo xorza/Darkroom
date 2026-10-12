@@ -37,7 +37,9 @@ impl MosaicNoise {
     /// `cfa_type`: the larger of the pairs its noise is measured over and the samples its medians
     /// are, which it holds one after the other.
     pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
-        let medians: usize = sample_counts(size, cfa_type, &|_| false).iter().sum();
+        let medians: usize = sample_counts(size, cfa_type, &|_| false, MAX_STATISTIC_SAMPLES)
+            .iter()
+            .sum();
         DifferenceNoise::heap_bytes(size, cfa_type).max(medians * size_of::<f32>())
     }
 
@@ -75,23 +77,23 @@ impl MosaicNoise {
         Self {
             sigma,
             read_share,
-            sky: colour_medians(mosaic, size, cfa_type, excluded),
+            sky: colour_medians(mosaic, size, cfa_type, excluded, MAX_STATISTIC_SAMPLES),
             quantization_sigma,
         }
     }
 }
 
-/// The median of each colour of a mosaic, over every `row_step`-th row so each colour keeps at
-/// most about [`MAX_STATISTIC_SAMPLES`] samples, skipping the pixels `excluded` names. A colour
-/// with no sample reads 0.
+/// The median of each colour of a mosaic, over the rows that keep each colour to at most about
+/// `per_colour` samples, skipping the pixels `excluded` names. A colour with no sample reads 0.
 fn colour_medians(
     mosaic: &[f32],
     size: Size2us,
     cfa_type: &CfaType,
     excluded: impl Fn(usize) -> bool,
+    per_colour: usize,
 ) -> [f32; 3] {
-    let mut samples = sample_counts(size, cfa_type, &excluded).map(Vec::with_capacity);
-    for_each_sample(size, cfa_type, &excluded, |index, colour| {
+    let mut samples = sample_counts(size, cfa_type, &excluded, per_colour).map(Vec::with_capacity);
+    for_each_sample(size, cfa_type, &excluded, per_colour, |index, colour| {
         samples[colour].push(mosaic[index]);
     });
     samples.map(|mut colour| {
@@ -103,27 +105,30 @@ fn colour_medians(
     })
 }
 
-/// How many samples of each colour [`colour_medians`] takes under `excluded`.
+/// How many samples of each colour [`colour_medians`] takes under `excluded` and `per_colour`.
 fn sample_counts(
     size: Size2us,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
+    per_colour: usize,
 ) -> [usize; 3] {
     let mut counts = [0; 3];
-    for_each_sample(size, cfa_type, excluded, |_, colour| counts[colour] += 1);
+    for_each_sample(size, cfa_type, excluded, per_colour, |_, colour| {
+        counts[colour] += 1;
+    });
     counts
 }
 
-/// The index and colour of every photosite of every `row_step`-th row that `excluded` does not
-/// name.
+/// The index and colour of every photosite that `excluded` does not name, in the rows
+/// [`CfaType::sampled_rows`] takes for `per_colour` samples a colour.
 fn for_each_sample(
     size: Size2us,
     cfa_type: &CfaType,
     excluded: &impl Fn(usize) -> bool,
+    per_colour: usize,
     mut visit: impl FnMut(usize, usize),
 ) {
-    let row_step = (size.pixel_count() / (3 * MAX_STATISTIC_SAMPLES)).max(1);
-    for y in (0..size.height).step_by(row_step) {
+    for y in cfa_type.sampled_rows(size, per_colour) {
         for x in 0..size.width {
             let index = y * size.width + x;
             if !excluded(index) {
@@ -138,7 +143,7 @@ mod tests {
     use crate::io::image::cfa::CfaType;
     use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::io::image::difference_noise::DifferenceNoise;
-    use crate::io::image::mosaic_noise::MosaicNoise;
+    use crate::io::image::mosaic_noise::{MosaicNoise, colour_medians, sample_counts};
     use crate::math::size2us::Size2us;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
@@ -151,5 +156,24 @@ mod tests {
         assert_eq!(DifferenceNoise::heap_bytes(Size2us::new(8, 4), &rggb), 120);
         assert_eq!(MosaicNoise::heap_bytes(Size2us::new(8, 4), &rggb), 128);
         assert_eq!(MosaicNoise::heap_bytes(Size2us::new(16, 4), &rggb), 280);
+    }
+
+    /// Each colour's median is its own level when the rows are sampled. At 682 samples a colour a
+    /// 64 × 64 RGGB mosaic steps by ⌊4096 / 2046⌋ = 2 periods, so it reads rows 0, 1, 4, 5, …: 16
+    /// red rows and 16 blue ones of 32 photosites, 512 each, and 1024 green. A step of 2 single
+    /// rows would read only the even rows, and no blue photosite.
+    #[test]
+    fn a_sampled_mosaic_keeps_every_colour() {
+        let size = Size2us::new(64, 64);
+        let rggb = CfaType::Bayer(CfaPattern::Rggb);
+        let levels = [0.2, 0.1, 0.05];
+        let mosaic: Vec<f32> = (0..size.pixel_count())
+            .map(|index| levels[rggb.color_at(size.point_of(index))])
+            .collect();
+        assert_eq!(
+            sample_counts(size, &rggb, &|_| false, 682),
+            [512, 1024, 512]
+        );
+        assert_eq!(colour_medians(&mosaic, size, &rggb, |_| false, 682), levels);
     }
 }

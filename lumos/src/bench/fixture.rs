@@ -16,9 +16,20 @@ pub(crate) enum Scale {
     Sample,
     /// A whole frame or plane: milliseconds an iteration, so fewer and longer samples.
     Frame,
-    /// A run over a set of files: seconds an iteration, so one iteration a sample.
-    Pipeline,
+    /// A set of frames, in memory or in files: seconds an iteration, sampled flat at the fewest
+    /// samples criterion takes, two iterations each. `iteration` is the group's slowest bench as
+    /// measured, which sets the measurement time.
+    Set { iteration: Duration },
 }
+
+/// The samples of a [`Scale::Set`] group: the fewest criterion takes.
+const SET_SAMPLES: u32 = 10;
+
+/// The iterations each sample of a [`Scale::Set`] group takes at the group's measured iteration.
+/// Criterion's flat sampling warns of a sample of one iteration, which it takes wherever the
+/// measurement time is at most the samples times the iteration: at two, only a bench that runs at
+/// twice the measured iteration or slower takes one.
+const SET_ITERATIONS: u32 = 2;
 
 /// The group `name`, sampled as `scale` says.
 pub(crate) fn group<'a>(
@@ -36,11 +47,11 @@ pub(crate) fn group<'a>(
             .sample_size(10)
             .warm_up_time(Duration::from_secs(1))
             .measurement_time(Duration::from_secs(3)),
-        Scale::Pipeline => group
-            .sample_size(10)
+        Scale::Set { iteration } => group
+            .sample_size(SET_SAMPLES as usize)
             .sampling_mode(SamplingMode::Flat)
             .warm_up_time(Duration::from_secs(1))
-            .measurement_time(Duration::from_secs(10)),
+            .measurement_time(iteration * SET_SAMPLES * SET_ITERATIONS),
     };
     group
 }

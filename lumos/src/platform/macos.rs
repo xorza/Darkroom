@@ -37,16 +37,22 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
     None
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
+    use std::fs::File;
+
     use memmap2::Mmap;
 
-    /// Nothing: this system offers no call that drops a file's pages from its cache here.
-    pub(crate) const fn evict(_map: &Mmap) -> bool {
+    /// This system offers no call that drops a file's pages from its cache here.
+    pub(crate) const EVICTS: bool = false;
+
+    /// Nothing: see [`EVICTS`].
+    pub(crate) const fn evict(_map: &Mmap, _file: &File) -> bool {
         false
     }
 
     /// `None`: not read on this system.
+    #[cfg(test)]
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
     }
