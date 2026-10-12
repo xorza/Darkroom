@@ -182,8 +182,6 @@ impl<T: Scratch> Pooled<T> {
     /// The value, leaving the pool for good: what a warp filled becomes the frame it parks.
     pub(crate) fn into_inner(self) -> T {
         let mut lease = ManuallyDrop::new(self);
-        // SAFETY: `lease` is never dropped, so `value` is taken exactly once, here, and `shelf` is
-        // read out of it exactly once, so its count is released by the drop below.
         let (value, shelf) = unsafe {
             (
                 ManuallyDrop::take(&mut lease.value),
@@ -214,7 +212,6 @@ impl<T: Scratch> Drop for Pooled<T> {
     /// indexed as an image it is not. Release assert on it, once per lease, except while unwinding,
     /// where a second panic would abort.
     fn drop(&mut self) {
-        // SAFETY: `value` is taken exactly once, here, and the lease is never read after its drop.
         let value = unsafe { ManuallyDrop::take(&mut self.value) };
         if !value.has_shape(self.shape) {
             assert!(

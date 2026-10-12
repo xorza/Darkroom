@@ -153,8 +153,6 @@ pub(crate) fn demosaic(
         |position| bayer.pattern.color_at(position).index(),
         tiling,
         || Tile::new(bayer.pattern),
-        // SAFETY: the driver hands each place's own part to this tile alone, which writes no
-        // other.
         |tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
         cancel,
     )

@@ -189,7 +189,6 @@ impl WarpBuffers {
                         confidence_row: &mut [f32]| {
             scratch.positions.fill(y, width, warp_transform, size);
             let positions = scratch.positions.positions();
-            // SAFETY: each output row is written by exactly one call, at its own offset.
             let flags = flag_rows
                 .map(|rows| unsafe { slice::from_raw_parts_mut(rows.get().add(y * width), width) });
             sampler.sample_row(

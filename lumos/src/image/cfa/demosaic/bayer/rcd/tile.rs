@@ -209,8 +209,6 @@ impl Tile {
                         }
                     }
                 }
-                // SAFETY: the caller hands over the frame's planes and the region this tile alone
-                // owns, which this row's part lies in.
                 unsafe {
                     out.write_row(channel, index + border, &self.line[border..width - border]);
                 }

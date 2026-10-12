@@ -59,7 +59,6 @@ impl LiveHeap {
     }
 }
 
-// SAFETY: every call goes to `System` unchanged; the counters only observe it.
 unsafe impl GlobalAlloc for LiveHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.grew(layout.size());
