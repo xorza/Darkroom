@@ -15,7 +15,6 @@ use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::common::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::{FilterMode, Transform};
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::simd_tier::SimdTier;
 
 /// A SIMD kernel: the packed RGB/RGBA bilinear specialization of [`apply_typed`]
@@ -24,18 +23,31 @@ use crate::simd_tier::SimdTier;
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
 /// [`packed_kernel`] at a supported [`SimdTier`] is what establishes that.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-type PackedKernel = unsafe fn(&Transform, &Image, &mut Image);
+pub(super) type PackedKernel = unsafe fn(&Transform, &Image, &mut Image);
 
-/// The SIMD kernel `tier` has for `format` under `filter`, or `None` when the
-/// tier or the combination has no vector path — callers then take the scalar
-/// reference.
+/// No arch kernels: [`SimdTier`] has no value here.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub(super) fn packed_kernel(
+    tier: SimdTier,
+    _format: ColorFormat,
+    _filter: FilterMode,
+) -> Option<PackedKernel> {
+    match tier {}
+}
+
+/// The SIMD kernel compiled for `tier` itself for `format` under `filter`, or
+/// `None` when the tier or the combination has no vector path — callers then
+/// take the scalar reference.
 ///
 /// RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
 /// (cross-checked). L stays scalar (gather-bound — SIMD measured slower), and
 /// nearest is a near-memcpy the scalar path already nails.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn packed_kernel(tier: SimdTier, format: ColorFormat, filter: FilterMode) -> Option<PackedKernel> {
+pub(super) fn packed_kernel(
+    tier: SimdTier,
+    format: ColorFormat,
+    filter: FilterMode,
+) -> Option<PackedKernel> {
     #[cfg(target_arch = "aarch64")]
     use crate::ops::transform::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
@@ -46,7 +58,7 @@ fn packed_kernel(tier: SimdTier, format: ColorFormat, filter: FilterMode) -> Opt
     }
 
     #[cfg(target_arch = "x86_64")]
-    if tier < SimdTier::Sse41 {
+    if tier != SimdTier::Sse41 {
         return None;
     }
     #[cfg(target_arch = "aarch64")]
@@ -81,11 +93,8 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
         "input/output color format mismatch"
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) =
-        SimdTier::widest().and_then(|tier| packed_kernel(tier, format, transform.filter))
-    {
-        // SAFETY: the kernel is the widest supported tier's.
+    if let Some(kernel) = SimdTier::dispatch(|tier| packed_kernel(tier, format, transform.filter)) {
+        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { kernel(transform, input, output) };
         return;
     }
@@ -95,7 +104,7 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
 
 /// The scalar reference, picking the storage type and channel count the format
 /// stores pixels in. Split out so the tests can reach it past SIMD dispatch.
-fn apply_scalar(transform: &Transform, input: &Image, output: &mut Image) {
+pub(super) fn apply_scalar(transform: &Transform, input: &Image, output: &mut Image) {
     let format = input.desc().color_format;
     match (format.sample_type, format.channel_count) {
         (SampleType::U8, ChannelCount::L) => apply_typed::<u8, 1>(transform, input, output),

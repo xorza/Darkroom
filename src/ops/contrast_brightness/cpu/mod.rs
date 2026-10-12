@@ -13,18 +13,22 @@ use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel applying [`ChannelAffine`] to a row in place, over `count`
 /// items: channel values for the flat kernels, whole pixels for the
 /// alpha-preserving ones.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
+pub(super) type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
 
-/// The SIMD row kernel `tier` has for `format`, or `None` below SSE4.1 —
-/// callers then fall back to the scalar path. The FMA tier runs the AVX2
-/// kernels, which fuse nothing.
+/// No arch kernels: [`SimdTier`] has no value here.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub(super) fn row_kernel(tier: SimdTier, _format: ColorFormat) -> Option<RowKernel> {
+    match tier {}
+}
+
+/// The SIMD row kernel compiled for `tier` itself for `format`, or `None` when
+/// that tier has none. The FMA tier has none: dispatch walks down to the AVX2
+/// kernels, which fuse nothing, and below SSE4.1 to the scalar path.
 ///
 /// `L` and `RGB` have no channel to protect, so they take a flat kernel that
 /// walks the row as one contiguous channel array and never pays for pixel
@@ -37,12 +41,12 @@ type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
         reason = "NEON is baseline; it is x86_64 that has tiers without the kernels"
     )
 )]
-fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
+pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "x86_64")]
     let kernel = match tier {
-        SimdTier::Avx2 | SimdTier::Avx2Fma => avx2_kernel(format),
+        SimdTier::Avx2 => avx2_kernel(format),
         SimdTier::Sse41 => sse41_kernel(format),
-        SimdTier::Sse2 | SimdTier::Ssse3 => return None,
+        SimdTier::Sse2 | SimdTier::Ssse3 | SimdTier::Avx2Fma => return None,
     };
 
     #[cfg(target_arch = "aarch64")]
@@ -102,9 +106,8 @@ fn neon_kernel(format: ColorFormat) -> RowKernel {
 pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
     let format = image.desc().color_format;
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = SimdTier::widest().and_then(|tier| row_kernel(tier, format)) {
-        // SAFETY: the kernel is the widest supported tier's.
+    if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
+        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { apply_kernel(kernel, params, image) };
         return;
     }
@@ -112,21 +115,42 @@ pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
     apply_scalar(params, image);
 }
 
-/// The scalar path, picking the storage type the format stores channels in.
-/// Split out so the tests and benches can reach the reference past the SIMD
-/// dispatch.
+/// The scalar path, one row at a time through [`scalar_row`]. Split out so the
+/// tests can reach the reference past the SIMD dispatch.
 pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut Image) {
-    match image.desc().color_format.sample_type {
-        SampleType::U8 => apply_typed::<u8>(params, image),
-        SampleType::U16 => apply_typed::<u16>(params, image),
-        SampleType::F32 => apply_typed::<f32>(params, image),
+    let format = image.desc().color_format;
+    let affine = ChannelAffine::new(params, format);
+    let stride = image.desc().row_bytes();
+
+    image
+        .bytes_mut()
+        .par_chunks_mut(stride)
+        .for_each(|row| scalar_row(affine, format, row));
+}
+
+/// The scalar reference over one packed row of `format` in place, through
+/// [`ChannelAffine::apply`]. Taken when the CPU offers no SIMD kernel for the
+/// format, and cross-checked against the SIMD kernels by the tests.
+pub(super) fn scalar_row(affine: ChannelAffine, format: ColorFormat, row: &mut [u8]) {
+    match format.sample_type {
+        SampleType::U8 => typed_row::<u8>(affine, format, row),
+        SampleType::U16 => typed_row::<u16>(affine, format, row),
+        SampleType::F32 => typed_row::<f32>(affine, format, row),
+    }
+}
+
+fn typed_row<T: Sample>(affine: ChannelAffine, format: ColorFormat, row: &mut [u8]) {
+    let row: &mut [T] = bytemuck::cast_slice_mut(row);
+    if format.has_alpha() {
+        affine.apply_rgba(row);
+    } else {
+        affine.apply_all(row);
     }
 }
 
 /// How many items a kernel is asked to walk per row: channel values for the
 /// flat kernels, whole pixels for the alpha-preserving ones.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-const fn kernel_count(desc: ImageDesc) -> usize {
+pub(super) const fn kernel_count(desc: ImageDesc) -> usize {
     if desc.color_format.has_alpha() {
         desc.width
     } else {
@@ -138,7 +162,6 @@ const fn kernel_count(desc: ImageDesc) -> usize {
 ///
 /// # Safety
 /// The running CPU must support the feature `kernel` was compiled for.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 unsafe fn apply_kernel(kernel: RowKernel, params: ContrastBrightness, image: &mut Image) {
     let format = image.desc().color_format;
     let affine = ChannelAffine::new(params, format);
@@ -148,30 +171,6 @@ unsafe fn apply_kernel(kernel: RowKernel, params: ContrastBrightness, image: &mu
     image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
         // SAFETY: forwarded from this function's own contract.
         unsafe { kernel(row, count, affine) };
-    });
-}
-
-/// The scalar reference: per-element in-place adjustment through
-/// [`ChannelAffine::apply`]. Taken when the CPU offers no SIMD kernel for
-/// the format, and cross-checked against the SIMD kernels by the tests.
-pub(super) fn apply_typed<T>(params: ContrastBrightness, image: &mut Image)
-where
-    T: Sample,
-{
-    let format = image.desc().color_format;
-    debug_assert_eq!(format.sample_type, T::TYPE);
-
-    let affine = ChannelAffine::new(params, format);
-    let stride = image.desc().row_bytes();
-    let has_alpha = format.has_alpha();
-
-    image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
-        let row: &mut [T] = bytemuck::cast_slice_mut(row);
-        if has_alpha {
-            affine.apply_rgba(row);
-        } else {
-            affine.apply_all(row);
-        }
     });
 }
 

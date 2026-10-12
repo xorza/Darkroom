@@ -112,10 +112,9 @@ unescaped_backticks = "warn"
 [features]
 default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
-# What only tests and benches build: the shared test fixtures, and the colocated
-# `bench.rs` drivers with the `bench` facade they are reached through. Not part
-# of the supported surface. Every test and bench build turns it on through the
-# self dev-dependency.
+# What only benches build: the colocated `bench.rs` drivers and the `bench`
+# facade `benches/imaginarium.rs` runs. Not part of the supported surface. Every
+# test and bench build turns it on through the self dev-dependency.
 internals = ["dep:criterion"]
 
 [dependencies]
@@ -141,23 +140,11 @@ required-features = ["wgpu"]
 name = "pipeline"
 required-features = ["wgpu"]
 
-[[bench]]
-name = "contrast_brightness"
-harness = false
-required-features = ["internals"]
+[lib]
+bench = false
 
 [[bench]]
-name = "transform"
-harness = false
-required-features = ["internals"]
-
-[[bench]]
-name = "preview"
-harness = false
-required-features = ["internals"]
-
-[[bench]]
-name = "conversion"
+name = "imaginarium"
 harness = false
 required-features = ["internals"]
 

@@ -10,8 +10,9 @@ use std::sync::OnceLock;
 ///
 /// On one arch the tiers form a chain, narrowest first, and a tier counts as supported only when
 /// every narrower one is too, so `tier >= SimdTier::Sse41` asks whether an SSE4.1 kernel may run.
-/// Dispatch takes [`Self::widest`]. A test runs every supported tier, because on a wide CPU only
-/// a test reaches the narrower kernels.
+/// A kernel table gives each tier only the kernels compiled for that tier, and [`Self::dispatch`]
+/// walks down from [`Self::widest`] to the first tier with one. A test runs every supported tier,
+/// because on a wide CPU only a test reaches the narrower kernels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SimdTier {
     /// The `x86_64` baseline.
@@ -73,6 +74,22 @@ impl SimdTier {
     #[inline]
     pub fn is_supported(self) -> bool {
         Self::widest().is_some_and(|widest| self <= widest)
+    }
+
+    /// The kernel `table` gives the widest tier the running CPU has, or the next narrower tier
+    /// that has one.
+    pub(crate) fn dispatch<K>(table: impl Fn(Self) -> Option<K>) -> Option<K> {
+        Self::widest()?.at_or_below(table)
+    }
+
+    /// The kernel `table` gives this tier, or the next narrower tier that has one: what
+    /// [`Self::dispatch`] picks on a CPU whose widest tier is this one.
+    pub(crate) fn at_or_below<K>(self, table: impl Fn(Self) -> Option<K>) -> Option<K> {
+        Self::ALL
+            .into_iter()
+            .rev()
+            .filter(|&tier| tier <= self)
+            .find_map(table)
     }
 
     /// The last tier of the chain whose features, and every narrower tier's, the CPU has.

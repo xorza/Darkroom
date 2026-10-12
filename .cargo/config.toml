@@ -1,0 +1,11 @@
+[alias]
+# Every bench case, with the GPU backend, so a case always measures the same build: `cargo benches
+# -- --list`, `-- '^atomic/'`, `-- --exact integration/preview/cpu/rgb_f32`.
+benches = "bench --bench imaginarium --features wgpu"
+
+# x86-64-v3 (Haswell, 2013; Excavator, 2015): the CPU darkroom builds this crate for, so tests and
+# benches here build the code it ships. An optimization only: the kernels keep their runtime
+# dispatch, and the tests still run every tier the host has. `cfg`-scoped rather than `[build]` so
+# non-x86 targets aren't handed a CPU they aren't.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v3"]

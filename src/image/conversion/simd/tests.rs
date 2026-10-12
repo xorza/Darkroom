@@ -106,25 +106,48 @@ fn first_difference(expected: &[u8], actual: &[u8]) -> usize {
         .unwrap_or(expected.len())
 }
 
-/// Dispatch picks a kernel for the pairs each tier vectorizes, and none for the rest: the sweep
-/// above covers exactly these. Counted per arch from the tables.
+/// Each tier has kernels for exactly the pairs compiled for it, and dispatch on a CPU whose widest
+/// tier is that one finds a kernel for every pair a tier up to it vectorizes. Counted per arch
+/// from the tables.
 #[test]
 fn every_vectorized_pair_has_a_kernel_at_its_tiers() {
-    let count = |tier: SimdTier| {
+    let pairs = || {
         ALL_FORMATS
             .into_iter()
             .flat_map(|from| ALL_FORMATS.map(|to| (from, to)))
-            .filter(|&(from, to)| from != to && tier_converter(tier, from, to).is_some())
+            .filter(|&(from, to)| from != to)
+    };
+    let own = |tier: SimdTier| {
+        pairs()
+            .filter(|&(from, to)| tier_converter(tier, from, to).is_some())
             .count()
     };
-    // Five element pairs × three channel counts, plus f32 → u16 from SSE4.1 on; the six u8
-    // channel shuffles from SSSE3 on.
+    let dispatched = |tier: SimdTier| {
+        pairs()
+            .filter(|&(from, to)| {
+                tier.at_or_below(|tier| tier_converter(tier, from, to))
+                    .is_some()
+            })
+            .count()
+    };
+    // SSE2: five element pairs × three channel counts. SSSE3: the six u8 channel shuffles.
+    // SSE4.1: f32 → u16 × three. AVX2: all six element pairs × three, and RGBA → RGB u8.
     #[cfg(target_arch = "x86_64")]
-    assert_eq!(
-        SimdTier::ALL.map(count),
-        [15, 15 + 6, 18 + 6, 18 + 6, 18 + 6],
-        "SSE2, SSSE3, SSE4.1, AVX2, AVX2+FMA"
-    );
+    {
+        assert_eq!(
+            SimdTier::ALL.map(own),
+            [15, 6, 3, 18 + 1, 0],
+            "SSE2, SSSE3, SSE4.1, AVX2, AVX2+FMA"
+        );
+        assert_eq!(
+            SimdTier::ALL.map(dispatched),
+            [15, 15 + 6, 18 + 6, 18 + 6, 18 + 6],
+            "SSE2, SSSE3, SSE4.1, AVX2, AVX2+FMA"
+        );
+    }
     #[cfg(target_arch = "aarch64")]
-    assert_eq!(SimdTier::ALL.map(count), [18 + 6]);
+    {
+        assert_eq!(SimdTier::ALL.map(own), [18 + 6]);
+        assert_eq!(SimdTier::ALL.map(dispatched), [18 + 6]);
+    }
 }
