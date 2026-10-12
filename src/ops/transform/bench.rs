@@ -43,7 +43,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 group.bench_function(id, |b| {
                     let tile = tile.get_or_insert_with(|| scene::sky(format, TILE, TILE, 1));
                     if let Some(kernel) = variant.kernel {
-                        // SAFETY: a variant holds only kernels of tiers this CPU has.
                         b.iter(|| unsafe {
                             kernel(&transform, black_box(tile), black_box(&mut output));
                         });

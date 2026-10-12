@@ -21,7 +21,6 @@ struct Splat {
 
 impl Splat {
     fn new(affine: ChannelAffine) -> Self {
-        // SAFETY: NEON is baseline on aarch64.
         unsafe {
             Self {
                 scale: vdupq_n_f32(affine.scale),
@@ -80,7 +79,6 @@ pub(super) unsafe fn u8_flat(row: &mut [u8], count: usize, affine: ChannelAffine
 
     let (chunks, tail) = row.as_chunks_mut::<16>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 16 bytes, the width of one load and store.
         unsafe {
             let values = vld1q_u8(chunk.as_ptr());
             vst1q_u8(chunk.as_mut_ptr(), splat.apply_u8x16(values));
@@ -97,7 +95,6 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<64>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 64 bytes — 16 RGBA pixels, one `vld4q`.
         unsafe {
             let pixels = vld4q_u8(chunk.as_ptr());
             let out = uint8x16x4_t(
@@ -120,7 +117,6 @@ pub(super) unsafe fn u16_flat(row: &mut [u8], count: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<8>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly eight `u16` — one load and store.
         unsafe {
             let values = vld1q_u16(chunk.as_ptr());
             vst1q_u16(chunk.as_mut_ptr(), splat.apply_u16x8(values));
@@ -137,7 +133,6 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     let (chunks, tail) = row.as_chunks_mut::<32>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 32 `u16` — eight RGBA pixels, one `vld4q`.
         unsafe {
             let pixels = vld4q_u16(chunk.as_ptr());
             let out = uint16x8x4_t(
@@ -160,7 +155,6 @@ pub(super) unsafe fn f32_flat(row: &mut [u8], count: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<4>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly four `f32` — one load and store.
         unsafe {
             let values = vld1q_f32(chunk.as_ptr());
             vst1q_f32(chunk.as_mut_ptr(), splat.apply_f32(values));
@@ -177,7 +171,6 @@ pub(super) unsafe fn f32_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     let (chunks, tail) = row.as_chunks_mut::<16>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 16 `f32` — four RGBA pixels, one `vld4q`.
         unsafe {
             let pixels = vld4q_f32(chunk.as_ptr());
             let out = float32x4x4_t(

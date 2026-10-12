@@ -140,8 +140,6 @@ pub(super) unsafe fn rgba_u8_row(
     let (out_quads, out_tail) = out_row.as_chunks_mut::<16>();
 
     for ((src, dst), out) in src_quads.iter().zip(dst_quads).zip(out_quads) {
-        // SAFETY: every chunk is exactly 16 bytes — four RGBA pixels, the width
-        // of one load and one store.
         unsafe {
             let src = _mm_loadu_si128(src.as_ptr().cast());
             let dst = _mm_loadu_si128(dst.as_ptr().cast());
@@ -182,8 +180,6 @@ pub(super) unsafe fn rgba_f32_row(
     debug_assert!(rest.is_empty(), "an RGBA row is a whole number of pixels");
 
     for ((src, dst), out) in src_pixels.iter().zip(dst_pixels).zip(out_pixels) {
-        // SAFETY: every chunk is exactly four `f32` — one RGBA pixel, the width
-        // of one load and one store.
         unsafe {
             let src = _mm_loadu_ps(src.as_ptr());
             let dst = _mm_loadu_ps(dst.as_ptr());

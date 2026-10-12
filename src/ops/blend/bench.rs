@@ -51,7 +51,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         });
                         let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
                         if let Some(kernel) = variant.kernel {
-                            // SAFETY: a variant holds only kernels of tiers this CPU has.
                             b.iter(|| unsafe {
                                 kernel(
                                     black_box(src),

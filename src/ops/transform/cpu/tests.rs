@@ -171,7 +171,6 @@ fn simd_matches_scalar_reference() {
         let mut simd = Image::new_black(input.desc()).unwrap();
 
         apply_scalar(&transform, &input, &mut scalar);
-        // SAFETY: only supported tiers are swept.
         unsafe { kernel(&transform, &input, &mut simd) };
 
         assert!(

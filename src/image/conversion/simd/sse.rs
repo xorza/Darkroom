@@ -19,7 +19,6 @@ use crate::image::conversion::simd::ElementRow;
 #[inline]
 #[target_feature(enable = "sse2")]
 fn load(bytes: &[u8; 16]) -> __m128i {
-    // SAFETY: the argument is exactly the 16 bytes the load reads.
     unsafe { _mm_loadu_si128(bytes.as_ptr().cast()) }
 }
 
@@ -27,7 +26,6 @@ fn load(bytes: &[u8; 16]) -> __m128i {
 #[inline]
 #[target_feature(enable = "sse2")]
 fn store(bytes: &mut [u8; 16], value: __m128i) {
-    // SAFETY: the argument is exactly the 16 bytes the store writes.
     unsafe { _mm_storeu_si128(bytes.as_mut_ptr().cast(), value) }
 }
 
@@ -35,7 +33,6 @@ fn store(bytes: &mut [u8; 16], value: __m128i) {
 #[inline]
 #[target_feature(enable = "sse2")]
 fn load_ps(values: &[f32; 4]) -> __m128 {
-    // SAFETY: the argument is exactly the four floats the load reads.
     unsafe { _mm_loadu_ps(values.as_ptr()) }
 }
 
@@ -43,7 +40,6 @@ fn load_ps(values: &[f32; 4]) -> __m128 {
 #[inline]
 #[target_feature(enable = "sse2")]
 fn store_ps(values: &mut [f32; 4], value: __m128) {
-    // SAFETY: the argument is exactly the four floats the store writes.
     unsafe { _mm_storeu_ps(values.as_mut_ptr(), value) }
 }
 

@@ -160,11 +160,9 @@ fn read_tap<T: NeonPacked, const N: usize>(
     y: i32,
 ) -> float32x4_t {
     let Some(pixel) = pixel_index(w, h, x, y) else {
-        // SAFETY: NEON is baseline on aarch64.
         return unsafe { vdupq_n_f32(0.0) };
     };
     let base = pixel * N;
-    // SAFETY: the bounds check above guarantees `base + N <= pixels.len()`.
     unsafe { T::load::<N>(pixels, base) }
 }
 
@@ -207,7 +205,6 @@ pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
                 let c11 = read_tap::<T, N>(in_pixels, in_w, in_h, x0 + 1, y0 + 1);
 
                 let v = mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
-                // SAFETY: `x < out_w` ⇒ `x*N + N <= out_row.len()`.
                 unsafe { T::store::<N>(out_row, x * N, v) };
             }
         });

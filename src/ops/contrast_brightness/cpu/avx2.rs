@@ -97,7 +97,6 @@ pub(super) unsafe fn u8_flat(row: &mut [u8], count: usize, affine: ChannelAffine
 
     let (chunks, tail) = row.as_chunks_mut::<32>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 32 bytes, the width of one load and store.
         unsafe {
             let out = splat.apply_u8x32(chunk.as_ptr());
             _mm256_storeu_si256(chunk.as_mut_ptr().cast(), out);
@@ -117,7 +116,6 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<32>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 32 bytes — eight RGBA pixels.
         unsafe {
             let original = _mm256_loadu_si256(chunk.as_ptr().cast());
             let out = splat.apply_u8x32(chunk.as_ptr());
@@ -137,7 +135,6 @@ pub(super) unsafe fn u16_flat(row: &mut [u8], count: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<16>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 16 `u16` — 32 bytes, one load and store.
         unsafe {
             let out = splat.apply_u16x16(chunk.as_ptr());
             _mm256_storeu_si256(chunk.as_mut_ptr().cast(), out);
@@ -155,7 +152,6 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     let (chunks, tail) = row.as_chunks_mut::<16>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly 16 `u16` — four RGBA pixels.
         unsafe {
             let original = _mm256_loadu_si256(chunk.as_ptr().cast());
             let out = splat.apply_u16x16(chunk.as_ptr());
@@ -177,7 +173,6 @@ pub(super) unsafe fn f32_flat(row: &mut [u8], count: usize, affine: ChannelAffin
 
     let (chunks, tail) = row.as_chunks_mut::<8>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly eight `f32` — one load and store.
         unsafe {
             let values = _mm256_loadu_ps(chunk.as_ptr());
             _mm256_storeu_ps(chunk.as_mut_ptr(), splat.apply_f32(values));
@@ -195,7 +190,6 @@ pub(super) unsafe fn f32_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     let (chunks, tail) = row.as_chunks_mut::<8>();
     for chunk in chunks {
-        // SAFETY: `chunk` is exactly eight `f32` — two RGBA pixels.
         unsafe {
             let values = _mm256_loadu_ps(chunk.as_ptr());
             // Lanes 3 and 7 are the two alphas; take those from the original.

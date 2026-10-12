@@ -32,7 +32,6 @@ struct Splat {
 
 impl Splat {
     fn new(alpha: f32, max: f32) -> Self {
-        // SAFETY: NEON is baseline on aarch64.
         unsafe {
             Self {
                 alpha: vdupq_n_f32(alpha),
@@ -164,8 +163,6 @@ pub(super) unsafe fn rgba_u8_row(
     let (out_quads, out_tail) = out_row.as_chunks_mut::<16>();
 
     for ((src, dst), out) in src_quads.iter().zip(dst_quads).zip(out_quads) {
-        // SAFETY: every chunk is exactly 16 bytes — four RGBA pixels, the width
-        // of one load and one store.
         unsafe {
             let src = splat.normalize(vld1q_u8(src.as_ptr()));
             let dst = splat.normalize(vld1q_u8(dst.as_ptr()));
@@ -203,8 +200,6 @@ pub(super) unsafe fn rgba_f32_row(
     debug_assert!(rest.is_empty(), "an RGBA row is a whole number of pixels");
 
     for ((src, dst), out) in src_pixels.iter().zip(dst_pixels).zip(out_pixels) {
-        // SAFETY: every chunk is exactly four `f32` — one RGBA pixel, the width
-        // of one load and one store.
         unsafe {
             let src = vld1q_f32(src.as_ptr());
             let dst = vld1q_f32(dst.as_ptr());

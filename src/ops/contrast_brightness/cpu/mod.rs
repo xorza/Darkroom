@@ -107,7 +107,6 @@ pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
     let format = image.desc().color_format;
 
     if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
-        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { apply_kernel(kernel, params, image) };
         return;
     }
@@ -169,7 +168,6 @@ unsafe fn apply_kernel(kernel: RowKernel, params: ContrastBrightness, image: &mu
     let stride = image.desc().row_bytes();
 
     image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
-        // SAFETY: forwarded from this function's own contract.
         unsafe { kernel(row, count, affine) };
     });
 }
