@@ -1,7 +1,9 @@
 //! The registration benches: the entry `crate::bench` runs them by, and the input they share, a
 //! typical field's star catalogue in two exposures.
 
-use criterion::Criterion;
+use criterion::{BenchmarkId, Criterion, Throughput};
+
+use crate::bench::fixture::{self, Scale};
 use glam::DVec2;
 
 use crate::bench::scene::{FRAME, Field};
@@ -17,10 +19,24 @@ use crate::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::registration::triangle::matching;
 use crate::registration::triangle::voting::PointMatch;
 use crate::registration::{
-    bounding_box_centre, estimate_and_refine, final_fit, median_fwhm, ransac, spatial, triangle,
-    tuning,
+    bounding_box_centre, estimate_and_refine, final_fit, median_fwhm, ransac, register, spatial,
+    triangle, tuning,
 };
 use crate::star_detection::star::Star;
+
+/// Two star catalogues registered, as `register` takes every light's against the reference's:
+/// the default configuration, whose `Auto` model fits every transform up to a homography and keeps
+/// the one the geometric robust information criterion picks.
+pub(crate) fn stage(c: &mut Criterion) {
+    let field = Field::Typical;
+    let mut group = fixture::group(c, "stage/register", Scale::Frame);
+    group.throughput(Throughput::Elements(field.scene(FRAME).sources.len() as u64));
+    group.bench_function(BenchmarkId::new("pair", field.name()), |b| {
+        let pair = Pair::typical();
+        let config = RegistrationConfig::default();
+        b.iter(|| register(&pair.reference, &pair.target, &config).expect("the pair registers"));
+    });
+}
 
 pub(crate) fn benches(c: &mut Criterion) {
     spatial::bench::benches(c);
@@ -118,6 +134,15 @@ impl Pair {
             )
             .expect("the pair registers")
             .transform
+    }
+
+    /// The similarity `register` fits to the pair: the dither, with the lens left in its residuals.
+    pub(crate) fn similarity_warp(&self) -> WarpTransform {
+        self.fit(FitModel {
+            transform: TransformType::Similarity,
+            sip: None,
+        })
+        .warp
     }
 
     /// The warp `register` fits to the pair with the SIP correction the precise presets add: the

@@ -7,4 +7,5 @@ use criterion::{criterion_group, criterion_main};
 use lumos::bench;
 
 criterion_group!(kernel, bench::kernel);
-criterion_main!(kernel);
+criterion_group!(stage, bench::stage);
+criterion_main!(kernel, stage);
