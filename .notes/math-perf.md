@@ -28,14 +28,14 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `lstsq/solve/2000x15` | 2.34 | 2.24 | A solve now applies the reflections to its right-hand side. Every caller factors once and solves once: factor and solve together are 0.32 of before at 2000×15. |
 | `noise/frame/binned_measure/1000000` | 0.88 | | The bins measured in parallel. |
 | `noise/gain_bin/4096` | 0.29 | 0.60 | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
-| `statistics/median_mut/16` | 0.55 | 0.77 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
-| `statistics/median_mut/4096` | 0.82 | 1.06 | Same. On arm64 the integer selection is no faster than the float one, so the sign check is a cost there. |
-| `statistics/median_mad/16` | 0.64 | 0.76 | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
-| `statistics/median_mad/4096` | 0.81 | 1.05 | Same. |
-| `statistics/mad_with_scratch/4096` | 0.81 | 1.06 | Median of magnitudes. |
-| `statistics/robust_sigma_f64/4096` | 0.84 | 1.16 | Both medians on keys. |
-| `statistics/sigma_clipped/16` | 0.89 | 0.99 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
-| `statistics/sigma_clipped/4096` | 0.96 | 0.90 | Same. |
+| `statistics/median_mut/16` | 0.52 | 0.74 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
+| `statistics/median_mut/4096` | 0.78 | 0.91 | Same, and the even count's lower middle by a fold with `Ord::max`: `Iterator::max` compiled to a scalar loop, ten times the fold's time on arm64. |
+| `statistics/median_mad/16` | 0.62 | 0.74 | Same, and the MAD selects the deviations' bits directly: a value with its sign bit clear is its own key. |
+| `statistics/median_mad/4096` | 0.77 | 0.89 | Same. |
+| `statistics/mad_with_scratch/4096` | 0.76 | 0.89 | Median of magnitudes. |
+| `statistics/robust_sigma_f64/4096` | 0.78 | 0.95 | Both medians on keys. |
+| `statistics/sigma_clipped/16` | 0.85 | 1.00 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
+| `statistics/sigma_clipped/4096` | 0.93 | 0.82 | Same. |
 | `statistics/spread/16` | 0.72 | 0.95 | The MAD of a sorted window by a binary search over how many of its middle rank each side of the centre gives, the deviations two ascending runs: as many steps as the length has bits, where the merge took half the window. Same bits. |
 | `statistics/spread/256` | 0.37 | 0.29 | Same. |
 | `pixel_quadrature/sufficient_order/gaussian_0.5/1` | 0.48 | 0.42 | The orders bisected, as the bound falls with the order; each order's golden-section search ends at the first ρ whose bound is within the tolerance, which the least it would end on is at most. Same orders. The star fits run it twice a star. |
