@@ -579,7 +579,7 @@ impl Graph {
 impl Binding {
     /// A data binding wired to producer `node_id`'s output port `port_idx`.
     pub const fn bind(node_id: NodeId, port_idx: usize) -> Self {
-        Binding::Bind(OutputPort::new(node_id, port_idx))
+        Self::Bind(OutputPort::new(node_id, port_idx))
     }
 
     /// Whether this edge — the binding on `port` — touches `node_id` from
@@ -587,19 +587,19 @@ impl Binding {
     /// finds the wiring it has to take with it, and how the record it
     /// produced proves it took only that.
     pub(crate) fn touches(&self, port: InputPort, node_id: NodeId) -> bool {
-        port.node_id == node_id || matches!(self, Binding::Bind(src) if src.node_id == node_id)
+        port.node_id == node_id || matches!(self, Self::Bind(src) if src.node_id == node_id)
     }
 }
 
 impl From<OutputPort> for Binding {
     fn from(value: OutputPort) -> Self {
-        Binding::Bind(value)
+        Self::Bind(value)
     }
 }
 
 impl From<ConstValue> for Binding {
     fn from(value: ConstValue) -> Self {
-        Binding::Const(value)
+        Self::Const(value)
     }
 }
 
@@ -629,8 +629,8 @@ pub(crate) mod internals {
         ///
         /// Test-only: production replays a stored step against a graph the step
         /// was taken from, so nothing there needs a second copy of one.
-        pub(crate) fn clone_verbatim(&self) -> Graph {
-            Graph {
+        pub(crate) fn clone_verbatim(&self) -> Self {
+            Self {
                 nodes: self.nodes.clone(),
                 bindings: self.bindings.clone(),
                 subscriptions: self.subscriptions.clone(),

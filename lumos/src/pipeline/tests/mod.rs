@@ -1269,7 +1269,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // no calibrated light is parked before its registration, as the two-pass run parks every one.
     let one_pass = AlignStackConfig {
         reference: Reference::Index(ram.alignment.reference),
-        ..config.clone()
+        ..config
     };
     let ram_one_pass = run(&one_pass, &ram_ingest);
     let streaming_one_pass = run(&one_pass, &streaming_ingest);

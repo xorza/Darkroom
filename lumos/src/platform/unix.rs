@@ -27,7 +27,7 @@ pub(super) const SCRATCH_MAP_NEEDS_HANDLE: bool = false;
 /// The map is read front to back. A hint: a kernel that refuses it reads the same bytes, so its
 /// refusal is not an error.
 pub(super) fn advise_sequential(map: &Mmap) {
-    let _ = map.advise(Advice::Sequential);
+    map.advise(Advice::Sequential).ok();
 }
 
 /// The free space of the listed disk whose mount point is on the device `path` is on. The device,

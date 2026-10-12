@@ -34,23 +34,23 @@ impl CfaType {
     #[inline(always)]
     pub const fn color_at(&self, pos: Vec2us) -> usize {
         match self {
-            CfaType::Mono => 0,
-            CfaType::Bayer(pattern) => pattern.color_at(pos).index(),
-            CfaType::XTrans(pattern) => pattern.color_at(pos).index(),
+            Self::Mono => 0,
+            Self::Bayer(pattern) => pattern.color_at(pos).index(),
+            Self::XTrans(pattern) => pattern.color_at(pos).index(),
         }
     }
 
     /// Whether the pattern is a mosaic of colours: Bayer or X-Trans, not mono.
     pub(crate) const fn is_mosaic(&self) -> bool {
-        matches!(self, CfaType::Bayer(_) | CfaType::XTrans(_))
+        matches!(self, Self::Bayer(_) | Self::XTrans(_))
     }
 
     /// The pattern's period on each axis: `color_at` repeats every `period` pixels.
     pub(crate) const fn period(&self) -> usize {
         match self {
-            CfaType::Mono => 1,
-            CfaType::Bayer(_) => 2,
-            CfaType::XTrans(_) => 6,
+            Self::Mono => 1,
+            Self::Bayer(_) => 2,
+            Self::XTrans(_) => 6,
         }
     }
 
@@ -71,8 +71,8 @@ impl CfaType {
     /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
     pub const fn num_colors(&self) -> usize {
         match self {
-            CfaType::Mono => 1,
-            CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
+            Self::Mono => 1,
+            Self::Bayer(_) | Self::XTrans(_) => 3,
         }
     }
 

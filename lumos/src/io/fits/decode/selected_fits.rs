@@ -8,7 +8,7 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 use fits_well::FitsReader;
 use fits_well::header::Header;
-use fits_well::image::ImageData;
+use fits_well::image::Data as FitsData;
 use fits_well::io::StreamReader;
 
 use crate::io::error::ImageError;
@@ -160,7 +160,7 @@ fn read_extension(
     index: usize,
     section: &[Range<usize>],
     path: &Path,
-) -> Result<ImageData, ImageError> {
+) -> Result<FitsData, ImageError> {
     let fits = |source| ImageError::fits(path, source);
     let mut sum = reader.begin_data_checksum(index).map_err(fits)?;
     let stored = reader

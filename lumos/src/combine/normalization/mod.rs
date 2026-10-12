@@ -176,7 +176,7 @@ impl FrameNorm {
                 .then(|| {
                     to_domain
                         .iter()
-                        .map(|map| FrameNorm {
+                        .map(|map| Self {
                             slots: (0..slots.count())
                                 .map(|_| SlotNorm {
                                     gain: map.gain as f32,

@@ -62,7 +62,7 @@ impl ConsumerCone {
     /// Counting sort rather than a comparison sort: the key is a dense index,
     /// so one pass tallies each node's readers and a second places them.
     fn reverse(&mut self, program: &CompiledGraph) {
-        let ConsumerCone {
+        let Self {
             readers,
             starts,
             filled,
@@ -100,7 +100,7 @@ impl ConsumerCone {
     /// Breadth of the cone, from the reversed edges [`reverse`](Self::reverse)
     /// just laid down.
     fn walk(&mut self, seeds: impl IntoIterator<Item = NodeIdx>) {
-        let ConsumerCone {
+        let Self {
             readers,
             starts,
             pending,

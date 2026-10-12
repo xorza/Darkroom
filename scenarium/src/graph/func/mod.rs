@@ -196,8 +196,8 @@ impl OutputType {
     /// fallback the editor shows before resolving the wire.
     pub fn declared(&self) -> DataType {
         match self {
-            OutputType::Fixed(ty) => ty.clone(),
-            OutputType::Wildcard { .. } => DataType::Any,
+            Self::Fixed(ty) => ty.clone(),
+            Self::Wildcard { .. } => DataType::Any,
         }
     }
 }
@@ -666,7 +666,7 @@ mod tests {
     fn a_variant_label_is_its_display_else_its_name() {
         let plain = ValueVariant::new("auto_stf", ConstValue::Int(1));
         assert_eq!(plain.label(), "auto_stf");
-        let friendly = plain.clone().display("Auto STF");
+        let friendly = plain.display("Auto STF");
         assert_eq!(friendly.label(), "Auto STF");
         assert_eq!(
             friendly.name, "auto_stf",

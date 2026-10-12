@@ -1,13 +1,13 @@
 //! Test fixtures, available only to in-tree tests and the downstream
 //! `internals` dev feature.
 //!
-//! [`graph`] is the harness: a graph and its library built together and
+//! [`test_graph`] is the harness: a graph and its library built together and
 //! addressed by name, which is what a fixture reaches for. [`calls`] is the
 //! counter its counted bodies are built on.
 //!
 //! What is left in this file is [`stub_func`] and [`stub_event`], the
 //! do-nothing bodies the harness deliberately cannot supply:
-//! [`NodeSpec`](graph::NodeSpec) names ports `in0`/`out0` by position, so a
+//! [`NodeSpec`](test_graph::NodeSpec) names ports `in0`/`out0` by position, so a
 //! test about how an editor *renders* a port has to state its own [`Func`] —
 //! and a `Func` cannot be built without an implementation.
 
@@ -17,9 +17,9 @@ pub mod calls;
 #[cfg(test)]
 pub(crate) mod engine;
 pub mod func_invoker;
-pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;
+pub mod test_graph;
 #[cfg(test)]
 pub(crate) mod worker;
 

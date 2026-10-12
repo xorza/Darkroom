@@ -66,7 +66,7 @@ impl StampBackground {
         let mut deviations: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
         let samples = values.len();
         let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
-        Some(StampBackground {
+        Some(Self {
             offset: stats.median,
             noise: stats.sigma,
             samples,

@@ -25,18 +25,16 @@ impl AnyState {
     where
         T: Any + Send,
     {
-        self.boxed
-            .as_ref()
-            .and_then(|boxed| boxed.downcast_ref::<T>())
+        let boxed = self.boxed.as_ref()?;
+        boxed.downcast_ref::<T>()
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
     where
         T: Any + Send,
     {
-        self.boxed
-            .as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
+        let boxed = self.boxed.as_mut()?;
+        boxed.downcast_mut::<T>()
     }
 
     pub fn set<T>(&mut self, value: T)

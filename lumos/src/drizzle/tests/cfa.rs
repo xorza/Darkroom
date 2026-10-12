@@ -195,7 +195,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     };
     let product = DrizzleConfig {
         stack: StackConfig::light(),
-        ..config.clone()
+        ..config
     }
     .drizzle_cfa_images(
         frames,
@@ -286,8 +286,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
                 normalization,
                 weighting: Weighting::Equal,
                 ..StackConfig::light()
-            }
-            .clone(),
+            },
             ..config.clone()
         }
         .drizzle_cfa_images(
@@ -341,7 +340,7 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     };
     let error = DrizzleConfig {
         stack: plain_stack(),
-        ..(kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)).clone()
+        ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
     }
     .drizzle_cfa_images(
         vec![frame(CfaPattern::Rggb), frame(CfaPattern::Bggr)],

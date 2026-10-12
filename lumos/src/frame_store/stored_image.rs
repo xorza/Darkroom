@@ -61,10 +61,8 @@ impl StoredImage {
     /// The image read back into RAM: its channels, flags and metadata, each plane copied out of
     /// its map front to back.
     pub(crate) fn load(&self) -> LinearImage {
-        let mut image = LinearImage::from_planar_channels(
-            self.dimensions,
-            self.planes().map(<[f32]>::to_vec).collect::<Vec<_>>(),
-        );
+        let mut image =
+            LinearImage::from_planar_channels(self.dimensions, self.planes().map(<[f32]>::to_vec));
         image.metadata = self.metadata.clone();
         image.flags = self.flags();
         image

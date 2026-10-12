@@ -10,6 +10,11 @@
 //! record path, not residency: a frame that reuses its buffers performs none,
 //! and one that rebuilds them performs one per buffer however small each is.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "a global allocator has no owner to carry its counters"
+)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -52,11 +57,13 @@ unsafe impl GlobalAlloc for CountingAllocator {
 /// must never panic.
 #[inline]
 fn track() {
-    let _ = IN_AUDIT.try_with(|in_audit| {
-        if in_audit.get() {
-            let _ = ALLOCS.try_with(|allocs| allocs.set(allocs.get() + 1));
-        }
-    });
+    IN_AUDIT
+        .try_with(|in_audit| {
+            if in_audit.get() {
+                ALLOCS.try_with(|allocs| allocs.set(allocs.get() + 1)).ok();
+            }
+        })
+        .ok();
 }
 
 /// Heap allocations this thread performs while `body` runs.

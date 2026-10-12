@@ -2,15 +2,22 @@
 //! generates the bindings for the target being built.
 
 #![no_std]
-#![allow(
-    non_camel_case_types,
-    non_snake_case,
-    non_upper_case_globals,
-    reason = "the names are LibRaw's, from its C headers"
+#![expect(
+    clippy::allow_attributes,
+    reason = "the lints the bindings trip change with the bindgen version and the target, so an \
+              `expect` there goes unfulfilled on some build"
 )]
-#![allow(clippy::all, reason = "the crate is bindgen output and nothing else")]
 
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+#[allow(
+    warnings,
+    clippy::all,
+    reason = "bindgen output, named after LibRaw's C headers"
+)]
+mod bindings {
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+
+pub use bindings::*;
 
 // Linked for LibRaw's deflate DNG decoder, which `build.rs` compiles against its headers; no Rust
 // here calls it.

@@ -217,13 +217,14 @@ where
         self.evict_cache().await;
         self.flush_cache().await;
 
-        let mut ran = false;
-        if let Some(run) = PendingRun::take(&mut self.intent, transition)
+        let ran = if let Some(run) = PendingRun::take(&mut self.intent, transition)
             && !self.engine.is_empty()
         {
             self.execute(run).await;
-            ran = true;
-        }
+            true
+        } else {
+            false
+        };
         // A stopped loop with no follow-up run really is idle; a rebuild's
         // stop is not — its `execute` reports `Executing` directly, without
         // a transient `Idle` flashing in between.
@@ -232,7 +233,7 @@ where
         }
 
         for reply in self.intent.syncs.drain(..) {
-            let _ = reply.send(());
+            reply.send(()).ok();
         }
     }
 

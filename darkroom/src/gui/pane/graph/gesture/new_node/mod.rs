@@ -101,8 +101,8 @@ impl NewNodeUi {
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
-        let mut just_opened = false;
-        if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
+        let just_opened = if (pending_source.is_some()
+            || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.world_pos = graph_ctx.viewport().to_world(local);
@@ -112,8 +112,10 @@ impl NewNodeUi {
             // definitions once, and focus the search field this frame so
             // the user can type straight away.
             self.search.text.clear();
-            just_opened = true;
-        }
+            true
+        } else {
+            false
+        };
 
         // Everything below is per-open work — the height arithmetic reads
         // the display and a last-frame rect — so nothing but an open palette

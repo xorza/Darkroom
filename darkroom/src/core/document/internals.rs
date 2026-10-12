@@ -6,7 +6,7 @@
 //! harness both start by building one.
 
 use glam::Vec2;
-use scenarium::internals::graph::TestGraph;
+use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
     DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind,
     internals,

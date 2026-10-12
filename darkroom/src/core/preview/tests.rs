@@ -1,6 +1,6 @@
 use super::*;
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnyState};
+use scenarium::{AnyState, ConstValue, ContextManager, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
@@ -43,7 +43,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
                 state: &mut AnyState::default(),
                 event_state: &SharedAnyState::default(),
                 inputs: &mut inputs,
-                demand: &[] as &[OutputDemand],
+                demand: &[],
                 outputs: &mut [],
             })
             .await

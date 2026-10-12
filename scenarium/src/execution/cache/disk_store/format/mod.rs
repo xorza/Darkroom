@@ -509,8 +509,9 @@ async fn read_string(
         .map_err(|_| CodecFormatError::Frame("cached string does not fit in memory".into()))?;
     let mut bytes = vec![0; byte_len];
     reader.read_exact(&mut bytes).await?;
-    String::from_utf8(bytes)
-        .map_err(|_| CodecFormatError::Frame("cached string is not valid UTF-8".into()))
+    String::from_utf8(bytes).map_err(|error| {
+        CodecFormatError::Frame(format!("cached string is not valid UTF-8: {error}"))
+    })
 }
 
 async fn read_strings(
@@ -545,10 +546,9 @@ async fn read_strings(
             .map_err(|_| CodecFormatError::Frame("cached path does not fit in memory".into()))?;
         let mut bytes = vec![0; byte_len];
         reader.read_exact(&mut bytes).await?;
-        values.push(
-            String::from_utf8(bytes)
-                .map_err(|_| CodecFormatError::Frame("cached path is not valid UTF-8".into()))?,
-        );
+        values.push(String::from_utf8(bytes).map_err(|error| {
+            CodecFormatError::Frame(format!("cached path is not valid UTF-8: {error}"))
+        })?);
     }
     require_payload_len(payload_len, expected_len)?;
     Ok(values)

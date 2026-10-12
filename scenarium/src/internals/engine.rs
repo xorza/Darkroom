@@ -31,7 +31,7 @@ use crate::execution::schedule::NodeState;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
-use crate::internals::graph::TestGraph;
+use crate::internals::test_graph::TestGraph;
 use crate::worker::run_summary::RunSummary;
 use crate::{DynamicValue, RamUsage};
 
@@ -73,7 +73,7 @@ impl TestEngine {
     /// addresses the very slots the blobs were written under without a fixture
     /// having to restate its topology (and keep the two statements in step).
     pub(crate) fn reopen(self) -> Self {
-        let TestEngine {
+        let Self {
             graph, disk_root, ..
         } = self;
         let mut reopened = Self::over(graph);
@@ -264,7 +264,7 @@ impl TestEngine {
         seeds: RunSeeds,
         cancel: CancelToken,
     ) -> Result<RunOutcome> {
-        let TestEngine {
+        let Self {
             graph,
             engine,
             outcome,
@@ -333,11 +333,8 @@ impl TestEngine {
     /// This node's input `port` read as an integer — `None` for a port
     /// nothing fed, and for a value no scalar coercion reaches.
     pub(crate) fn input_i64(&self, name: &str, port: usize) -> Option<i64> {
-        self.inputs(name)
-            .get(port)
-            .cloned()
-            .flatten()
-            .and_then(|value| value.as_i64())
+        let value = self.inputs(name).get(port).cloned().flatten()?;
+        value.as_i64()
     }
 
     /// This node's output `port` read as an integer.
@@ -346,7 +343,8 @@ impl TestEngine {
     /// `Arc<dyn CustomValue>` — so a scalar assertion goes through the same
     /// coercion a consuming lambda would.
     pub(crate) fn output_i64(&self, name: &str, port: usize) -> Option<i64> {
-        self.output(name, port).and_then(|value| value.as_i64())
+        let value = self.output(name, port)?;
+        value.as_i64()
     }
 }
 
@@ -479,7 +477,8 @@ impl RunOutcome {
     }
 
     pub(crate) fn status(&self, name: &str) -> Option<&NodeExecutionStatus> {
-        self.row(name).and_then(|row| row.status.as_ref())
+        let row = self.row(name)?;
+        row.status.as_ref()
     }
 
     pub(crate) fn error(&self, name: &str) -> Option<&RunError> {
@@ -598,7 +597,7 @@ struct NameMap {
 
 impl NameMap {
     /// Named as the fixture named them, like
-    /// [`Compiled`](crate::internals::graph::compiled::Compiled): an instance node carries its func's
+    /// [`Compiled`](crate::internals::test_graph::compiled::Compiled): an instance node carries its func's
     /// name, not its own.
     fn of(graph: &TestGraph) -> Self {
         Self {

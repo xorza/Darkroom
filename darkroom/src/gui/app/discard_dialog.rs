@@ -149,7 +149,7 @@ fn dont_ask_wid() -> WidgetId {
 
 #[cfg(test)]
 mod tests {
-    use palantir::internals::harness::UiHarness;
+    use palantir::internals::ui_harness::UiHarness;
 
     use super::*;
 

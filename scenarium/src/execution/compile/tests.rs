@@ -6,10 +6,10 @@ use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
 use crate::internals;
-use crate::internals::graph::NodeSpec;
-use crate::internals::graph::TestGraph;
-use crate::internals::graph::compiled::Compiled;
 use crate::internals::program::ProgramBuilder;
+use crate::internals::test_graph::NodeSpec;
+use crate::internals::test_graph::TestGraph;
+use crate::internals::test_graph::compiled::Compiled;
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber

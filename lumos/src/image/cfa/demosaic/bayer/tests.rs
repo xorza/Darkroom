@@ -437,15 +437,14 @@ fn rcd_is_the_same_on_every_bayer_phase() {
 /// would mix in a quarter of the other side, 0.15 here.
 #[test]
 fn rcd_interpolates_along_an_edge() {
+    type Axis = fn(Vec2us) -> usize;
     fn side(coordinate: usize) -> f32 {
         if coordinate < 16 { 0.8 } else { 0.2 }
     }
     let size = Size2us::new(32, 32);
+    let axes: [(&str, Axis); 2] = [("horizontal", |pos| pos.y), ("vertical", |pos| pos.x)];
     for pattern in CfaPattern::ALL {
-        for (name, across) in [
-            ("horizontal", (|pos: Vec2us| pos.y) as fn(Vec2us) -> usize),
-            ("vertical", |pos: Vec2us| pos.x),
-        ] {
+        for (name, across) in axes {
             let data = mosaic(size, pattern, |pos, _| side(across(pos)));
             let planes = demosaic(&data, size, pattern);
             for index in 0..size.pixel_count() {

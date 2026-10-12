@@ -20,7 +20,7 @@ pub(crate) struct Blob(pub(crate) Vec<u8>);
 impl Blob {
     /// `bytes` as a wire value.
     pub(crate) fn value(bytes: impl Into<Vec<u8>>) -> DynamicValue {
-        DynamicValue::from_custom(Blob(bytes.into()))
+        DynamicValue::from_custom(Self(bytes.into()))
     }
 }
 

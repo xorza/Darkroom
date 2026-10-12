@@ -152,8 +152,8 @@ impl Libraw {
         let written = unsafe {
             sys::libraw_lumos_camera_clock(self.handle.as_ptr(), text.as_mut_ptr(), text.len())
         };
-        // SAFETY: the shim wrote a NUL-terminated string into `text` when it answered.
         (written != 0).then(|| {
+            // SAFETY: the shim wrote a NUL-terminated string into `text` when it answered.
             unsafe { CStr::from_ptr(text.as_ptr()) }
                 .to_string_lossy()
                 .into_owned()
@@ -284,6 +284,10 @@ impl ProcessedImage<'_> {
         // The samples run past the one-byte `data` field the header declares, so they are reached
         // through a pointer to the allocation rather than a reference to the field.
         // SAFETY: LibRaw allocated `data_size` bytes from `data` on, 16-bit aligned.
+        #[expect(
+            clippy::cast_ptr_alignment,
+            reason = "LibRaw aligns its 16-bit samples, as the assert below checks"
+        )]
         let data = unsafe { (&raw const (*self.image.as_ptr()).data).cast::<u16>() };
         debug_assert!(data.is_aligned(), "LibRaw aligns its 16-bit samples");
         // SAFETY: `len` samples fit the `data_size` bytes checked above, alive as long as `self`.

@@ -78,8 +78,8 @@ impl FwhmSource {
     /// The FWHM the detector ran with, or `None` when matched filtering was off.
     pub const fn value(&self) -> Option<f32> {
         match self {
-            FwhmSource::Disabled => None,
-            FwhmSource::Configured(fwhm) | FwhmSource::Estimated { fwhm, .. } => Some(*fwhm),
+            Self::Disabled => None,
+            Self::Configured(fwhm) | Self::Estimated { fwhm, .. } => Some(*fwhm),
         }
     }
 }

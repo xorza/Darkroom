@@ -55,13 +55,13 @@ impl CacheMode {
     /// Whether a current reproducible value is retained in RAM and reused across runs
     /// (`Ram`/`Both`). The other modes drop the RAM copy after each run.
     pub const fn caches_in_ram(self) -> bool {
-        matches!(self, CacheMode::Ram | CacheMode::Both)
+        matches!(self, Self::Ram | Self::Both)
     }
 
     /// Whether the node's value is persisted to the disk store
     /// (`Disk`/`Both`), so it survives a reload.
     pub const fn persists_to_disk(self) -> bool {
-        matches!(self, CacheMode::Disk | CacheMode::Both)
+        matches!(self, Self::Disk | Self::Both)
     }
 
     /// Compose a mode from the two storage bits — the inverse of
@@ -69,10 +69,10 @@ impl CacheMode {
     /// used by the editor's two independent cache toggles.
     pub const fn from_bits(ram: bool, disk: bool) -> Self {
         match (ram, disk) {
-            (false, false) => CacheMode::None,
-            (true, false) => CacheMode::Ram,
-            (false, true) => CacheMode::Disk,
-            (true, true) => CacheMode::Both,
+            (false, false) => Self::None,
+            (true, false) => Self::Ram,
+            (false, true) => Self::Disk,
+            (true, true) => Self::Both,
         }
     }
 }
@@ -153,7 +153,7 @@ impl Node {
             }
             NodeKind::Func(_) => (String::new(), CacheMode::None),
         };
-        Node {
+        Self {
             kind,
             name,
             cache,
@@ -167,7 +167,7 @@ impl From<&Func> for Node {
     /// A bare func instance copying the func's `default_cache_mode` into its
     /// `cache`. Default input bindings are seeded by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
-        Node {
+        Self {
             kind: NodeKind::Func(func.id),
             name: func.name.clone(),
             cache: func.default_cache_mode,

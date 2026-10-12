@@ -30,7 +30,7 @@ impl StratifiedSamples {
         let colour = mosaic.map(|cfa_type| ColourRaster::new(cfa_type, size, slot));
         let pixels = colour
             .as_ref()
-            .map_or(size.pixel_count(), ColourRaster::count);
+            .map_or_else(|| size.pixel_count(), ColourRaster::count);
         Self {
             colour,
             pixels,

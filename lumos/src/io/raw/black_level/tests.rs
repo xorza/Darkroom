@@ -178,7 +178,7 @@ fn the_masked_mean_replaces_its_truncation() {
     elsewhere[1] += 1;
     assert_eq!(from(&elsewhere).common, 2048.0);
     // A 1×1 pattern of 0 on top of the same channels: a pattern says the black came from no mask.
-    let mut patterned = cblack.clone();
+    let mut patterned = cblack;
     patterned[4] = 1;
     patterned[5] = 1;
     let patterned = from(&patterned);

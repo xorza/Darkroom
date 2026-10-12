@@ -70,7 +70,7 @@ pub(crate) mod internals {
             return true;
         }
         // A failed call leaves pages in memory, which the count after reports.
-        let _ = file.sync_data();
+        file.sync_data().ok();
         let start = map.as_ptr().cast::<c_void>().cast_mut();
         // SAFETY: the range is the map's own, a shared read-only map of a file, whose pages the
         // next touch reads back from the file unchanged.

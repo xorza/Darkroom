@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn every_run_time_fits_the_reserved_width() {
         use glam::UVec2;
-        use palantir::internals::harness::UiHarness;
+        use palantir::internals::ui_harness::UiHarness;
         use palantir::{Configure, RgbaF32, Text, WidgetId};
 
         use crate::gui::pane::graph::node::header::{RUN_TIME_MIN_WIDTH, run_time_style};

@@ -60,26 +60,28 @@ impl PreparedFrame {
 
         let mut background =
             BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources);
-        let mut sources = None;
-        if let BackgroundRefinement::Iterative(refinement) = config.background.refinement {
-            // The sources are found at the FWHM the configuration starts from.
-            let refined = background.refine(
-                &plane,
-                refinement,
-                PlaneFilters {
-                    median: demosaiced,
-                    matched: config
-                        .fwhm
-                        .mode
-                        .map(|mode| config.fwhm.filter_at(mode.seed())),
-                    mask: no_data.as_deref(),
-                },
-                &config.background,
-                resources,
-            );
-            background = refined.estimate;
-            sources = Some(refined.sources);
-        }
+        let sources =
+            if let BackgroundRefinement::Iterative(refinement) = config.background.refinement {
+                // The sources are found at the FWHM the configuration starts from.
+                let refined = background.refine(
+                    &plane,
+                    refinement,
+                    PlaneFilters {
+                        median: demosaiced,
+                        matched: config
+                            .fwhm
+                            .mode
+                            .map(|mode| config.fwhm.filter_at(mode.seed())),
+                        mask: no_data.as_deref(),
+                    },
+                    &config.background,
+                    resources,
+                );
+                background = refined.estimate;
+                Some(refined.sources)
+            } else {
+                None
+            };
 
         // Saturation is a property of the recorded values, read before anything combines them.
         let mut saturation = resources.acquire_bit();

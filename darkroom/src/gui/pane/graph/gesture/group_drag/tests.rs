@@ -110,7 +110,7 @@ fn moved(intents: &[GraphIntent]) -> Option<(&[DragStart], Vec2)> {
     intents.iter().find_map(|intent| match intent {
         GraphIntent::MoveSelection {
             members, offset, ..
-        } => Some((&members[..], *offset)),
+        } => Some((&**members, *offset)),
         _ => None,
     })
 }

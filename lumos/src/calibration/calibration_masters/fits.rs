@@ -15,7 +15,7 @@ use common::file_utils;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
-use fits_well::table::{ColumnData, TableBuilder, WriteColumn};
+use fits_well::table::{Builder as TableBuilder, ColumnData, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
 use crate::calibration::calibration_component::CalibrationComponent;

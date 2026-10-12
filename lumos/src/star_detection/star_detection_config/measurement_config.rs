@@ -33,7 +33,7 @@ pub enum CentroidMethod {
 impl CentroidMethod {
     /// Validate the centroid method configuration.
     pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
-        if let CentroidMethod::MoffatFit { beta } = self {
+        if let Self::MoffatFit { beta } = self {
             // At β ≤ 1 the profile's flux diverges: no PSF has it.
             InvalidConfigField::finite("Moffat beta", "finite and in (1, 10]", beta, |value| {
                 value > 1.0 && value <= 10.0

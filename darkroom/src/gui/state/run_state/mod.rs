@@ -302,6 +302,10 @@ impl RunState {
                 .expect("worker reported results before installing a compiled graph"),
         );
         self.cache_ram = update.cache_ram;
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each node is reset alone, so the order changes nothing"
+        )]
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
@@ -416,6 +420,10 @@ impl RunState {
     /// the current run's value anyway.
     fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
         runtime.drain_previews(&mut self.published);
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "each preview lands under its own node, so the order changes nothing"
+        )]
         for (node_id, value) in self.published.drain() {
             // The gate's borrow ends with the condition, so the store can be
             // written in the body without cloning the compile to release it.

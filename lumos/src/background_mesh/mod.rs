@@ -352,13 +352,13 @@ struct Reflection {
 
 impl Reflection {
     /// The neighbour `delta` from `index` on an axis whose last tile is `last` ≥ 1.
-    const fn of(index: usize, delta: isize, last: usize) -> Reflection {
+    const fn of(index: usize, delta: isize, last: usize) -> Self {
         let (pivot, mirror) = match index.checked_add_signed(delta) {
             Some(neighbour) if neighbour <= last => (neighbour, neighbour),
             Some(_) => (last, last - 1),
             None => (0, 1),
         };
-        Reflection { pivot, mirror }
+        Self { pivot, mirror }
     }
 }
 

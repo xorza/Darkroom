@@ -27,7 +27,7 @@ impl Calls {
     /// Count one call by hand, for a body the combinators below have no shape
     /// for — a lambda writing a `Custom` value, which [`compute`] cannot.
     ///
-    /// [`compute`]: crate::internals::graph::NodeSpec::compute
+    /// [`compute`]: crate::internals::test_graph::NodeSpec::compute
     pub fn bump(&self) {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
@@ -49,7 +49,7 @@ impl Calls {
     ///
     /// [`NodeSpec::counted`] is this plus the declaration that carries it.
     ///
-    /// [`NodeSpec::counted`]: crate::internals::graph::NodeSpec::counted
+    /// [`NodeSpec::counted`]: crate::internals::test_graph::NodeSpec::counted
     pub fn returning(
         &self,
         value: impl Into<ConstValue>,

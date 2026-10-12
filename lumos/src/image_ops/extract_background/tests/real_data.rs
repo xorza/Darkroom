@@ -52,7 +52,7 @@ fn extract_flattens_background_on_stretched_master() {
 
     // Model and subtract the smooth background per channel, then re-neutralize so the now-flattened
     // background sits at a viewable level (subtraction pulls it toward zero).
-    let mut extracted = img.clone();
+    let mut extracted = img;
     ExtractBackground::default().apply(&mut extracted).unwrap();
     NeutralizeBackground.apply(&mut extracted).unwrap();
     visual::save_linear(&extracted, "bg_extraction/extracted");

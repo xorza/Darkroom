@@ -183,7 +183,7 @@ impl WirePass<'_, '_> {
     /// Recording the hit stays with the caller — only it knows the domain key
     /// to hand `probe.mark_broken_*`.
     pub(crate) fn draw_wire(
-        &mut self,
+        &self,
         ui: &mut Ui,
         wire: &Wire,
         endpoint_hover: bool,

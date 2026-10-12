@@ -112,17 +112,14 @@ impl NodeState {
     pub(crate) fn is_runnable(self) -> bool {
         debug_assert_ne!(
             self,
-            NodeState::Unvisited,
+            Self::Unvisited,
             "only a settled node is asked whether it runs"
         );
-        !matches!(
-            self,
-            NodeState::Unvisited | NodeState::Disabled | NodeState::MissingInputs
-        )
+        !matches!(self, Self::Unvisited | Self::Disabled | Self::MissingInputs)
     }
 
     pub(crate) fn missing_required_inputs(self) -> bool {
-        self == NodeState::MissingInputs
+        self == Self::MissingInputs
     }
 
     /// Clear this node to run, reporting whether it was this call that did it.
@@ -134,7 +131,7 @@ impl NodeState {
     fn promote_to_run(&mut self) -> bool {
         let cleared = self.is_runnable();
         if cleared {
-            *self = NodeState::Run;
+            *self = Self::Run;
         }
         cleared
     }
@@ -236,11 +233,11 @@ impl RootFlags {
     /// persisted counterpart. Every output is demanded from the lambda and
     /// delivered to the host, and the seed overrides the node's `disabled` flag
     /// for this run, while its cache mode remains the sole RAM-retention policy.
-    pub(crate) const SEEDED: Self = Self(Self::PLAIN.0 | 1 << 1);
+    pub(crate) const SEEDED: Self = Self(Self::PLAIN.0 | (1 << 1));
     /// An event-owning root that must execute successfully to initialize the
     /// shared state its event lambdas consume. Unlike ordinary roots, these
     /// bypass cache reuse for the event-loop bootstrap run.
-    pub(crate) const EVENT_SOURCE: Self = Self(Self::PLAIN.0 | 1 << 2);
+    pub(crate) const EVENT_SOURCE: Self = Self(Self::PLAIN.0 | (1 << 2));
 
     pub(crate) const fn is_root(self) -> bool {
         self.0 & Self::PLAIN.0 != 0
@@ -554,7 +551,7 @@ impl RunSchedule {
         // Destructured so the sweep can read the schedule and the seed sets
         // while writing the state and output columns — disjoint fields of the
         // one buffer.
-        let RunSchedule {
+        let Self {
             process_order,
             states,
             roots,

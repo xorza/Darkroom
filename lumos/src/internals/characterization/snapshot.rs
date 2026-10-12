@@ -8,26 +8,26 @@ use blake3::Hasher;
 pub(crate) struct Snapshot(Hasher);
 
 impl Snapshot {
-    pub(crate) fn f32s(&mut self, values: &[f32]) -> &mut Snapshot {
+    pub(crate) fn f32s(&mut self, values: &[f32]) -> &mut Self {
         for value in values {
             self.0.update(&value.to_bits().to_le_bytes());
         }
         self
     }
 
-    pub(crate) fn f64s(&mut self, values: &[f64]) -> &mut Snapshot {
+    pub(crate) fn f64s(&mut self, values: &[f64]) -> &mut Self {
         for value in values {
             self.0.update(&value.to_bits().to_le_bytes());
         }
         self
     }
 
-    pub(crate) fn bytes(&mut self, values: &[u8]) -> &mut Snapshot {
+    pub(crate) fn bytes(&mut self, values: &[u8]) -> &mut Self {
         self.0.update(values);
         self
     }
 
-    pub(crate) fn count(&mut self, count: usize) -> &mut Snapshot {
+    pub(crate) fn count(&mut self, count: usize) -> &mut Self {
         self.0.update(&(count as u64).to_le_bytes());
         self
     }

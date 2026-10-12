@@ -120,7 +120,7 @@ fn rendered_skies_are_recovered() {
         for (suffix, image) in [
             ("input", pixels.pixels()),
             ("background", background.background.pixels()),
-            ("subtracted", &residual[..]),
+            ("subtracted", &*residual),
         ] {
             save(
                 image,
@@ -140,7 +140,7 @@ fn rendered_skies_are_recovered() {
         );
         let model_bound = case
             .model_error
-            .unwrap_or(8.0 * f32::EPSILON * largest(&mut truth.iter().copied()));
+            .unwrap_or_else(|| 8.0 * f32::EPSILON * largest(&mut truth.iter().copied()));
         assert!(
             model <= model_bound,
             "{}: the bare sky's estimate is {model} off the truth, past {model_bound}",

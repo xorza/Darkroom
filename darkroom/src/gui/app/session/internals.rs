@@ -18,7 +18,7 @@
 
 use glam::UVec2;
 use palantir::Ui;
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 use scenarium::Library;
 
 use crate::core::document::internals::DocFixture;

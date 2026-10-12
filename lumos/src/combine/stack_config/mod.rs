@@ -98,7 +98,7 @@ pub enum Weighting {
 }
 
 /// Frame normalization method applied before stacking.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Normalization {
     /// No normalization.
     None,

@@ -70,16 +70,16 @@ impl CfaPattern {
         let is_blue = |c: usize| c == 2;
 
         if is_red(c00) && is_green(c01) && is_green(c10) && is_blue(c11) {
-            return Some(CfaPattern::Rggb);
+            return Some(Self::Rggb);
         }
         if is_blue(c00) && is_green(c01) && is_green(c10) && is_red(c11) {
-            return Some(CfaPattern::Bggr);
+            return Some(Self::Bggr);
         }
         if is_green(c00) && is_red(c01) && is_blue(c10) && is_green(c11) {
-            return Some(CfaPattern::Grbg);
+            return Some(Self::Grbg);
         }
         if is_green(c00) && is_blue(c01) && is_red(c10) && is_green(c11) {
-            return Some(CfaPattern::Gbrg);
+            return Some(Self::Gbrg);
         }
 
         None
@@ -94,10 +94,10 @@ impl CfaPattern {
     #[must_use]
     pub const fn flip_vertical(self) -> Self {
         match self {
-            CfaPattern::Rggb => CfaPattern::Gbrg,
-            CfaPattern::Gbrg => CfaPattern::Rggb,
-            CfaPattern::Bggr => CfaPattern::Grbg,
-            CfaPattern::Grbg => CfaPattern::Bggr,
+            Self::Rggb => Self::Gbrg,
+            Self::Gbrg => Self::Rggb,
+            Self::Bggr => Self::Grbg,
+            Self::Grbg => Self::Bggr,
         }
     }
 
@@ -106,10 +106,10 @@ impl CfaPattern {
     #[must_use]
     pub const fn flip_horizontal(self) -> Self {
         match self {
-            CfaPattern::Rggb => CfaPattern::Grbg,
-            CfaPattern::Grbg => CfaPattern::Rggb,
-            CfaPattern::Bggr => CfaPattern::Gbrg,
-            CfaPattern::Gbrg => CfaPattern::Bggr,
+            Self::Rggb => Self::Grbg,
+            Self::Grbg => Self::Rggb,
+            Self::Bggr => Self::Gbrg,
+            Self::Gbrg => Self::Bggr,
         }
     }
 
@@ -119,10 +119,10 @@ impl CfaPattern {
         use CfaColour::{Blue, Green, Red};
         let phase = ((pos.y & 1) << 1) | (pos.x & 1);
         match self {
-            CfaPattern::Rggb => [Red, Green, Green, Blue][phase],
-            CfaPattern::Bggr => [Blue, Green, Green, Red][phase],
-            CfaPattern::Grbg => [Green, Red, Blue, Green][phase],
-            CfaPattern::Gbrg => [Green, Blue, Red, Green][phase],
+            Self::Rggb => [Red, Green, Green, Blue][phase],
+            Self::Bggr => [Blue, Green, Green, Red][phase],
+            Self::Grbg => [Green, Red, Blue, Green][phase],
+            Self::Gbrg => [Green, Blue, Red, Green][phase],
         }
     }
 }

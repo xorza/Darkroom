@@ -429,7 +429,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
 
     let stacked = combine(
         vec![frame(1.0, Some(1)), frame(2.0, None), frame(3.0, None)],
-        &config.clone(),
+        &config,
     )
     .unwrap();
 
@@ -455,7 +455,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
             frame(2.0, Some(3)),
             frame(3.0, Some(3)),
         ],
-        &config.clone(),
+        &config,
     )
     .unwrap();
     assert_eq!(stacked.image.channel(0).pixels(), &[2.0, 2.0, 2.0, 0.0]);
@@ -530,11 +530,7 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
         ..StackConfig::light()
     };
 
-    let stacked = combine(
-        vec![StackFrame::from(low), StackFrame::from(high)],
-        &config.clone(),
-    )
-    .unwrap();
+    let stacked = combine(vec![StackFrame::from(low), StackFrame::from(high)], &config).unwrap();
     assert_eq!(
         stacked.image.channel(0).pixels(),
         &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
@@ -1090,7 +1086,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
                 1.0,
             ),
         ],
-        &config.clone(),
+        &config,
     )
     .unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[20.0, 10.0]);

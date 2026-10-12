@@ -98,9 +98,10 @@ impl FitModel {
 
     /// The pairs the model needs: the transform's minimal sample, or the SIP fit's floor.
     fn required_pairs(self) -> usize {
-        self.sip.map_or(self.transform.min_points(), |sip| {
-            SipPolynomial::required_points(sip.order).max(self.transform.min_points())
-        })
+        self.sip.map_or_else(
+            || self.transform.min_points(),
+            |sip| SipPolynomial::required_points(sip.order).max(self.transform.min_points()),
+        )
     }
 }
 

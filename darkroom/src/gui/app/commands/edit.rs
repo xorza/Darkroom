@@ -20,7 +20,7 @@ impl EditCommand {
     #[must_use]
     pub(super) fn apply(self, app: &mut App) -> Relayout {
         match self {
-            EditCommand::PickInputPath(pick) => app.pick_input_path(&pick),
+            Self::PickInputPath(pick) => app.pick_input_path(&pick),
         }
     }
 }

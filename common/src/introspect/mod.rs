@@ -185,7 +185,7 @@ pub enum FieldKind {
         variants: &'static [&'static str],
     },
     /// An optional field of the inner kind (not required).
-    Option(&'static FieldKind),
+    Option(&'static Self),
 }
 
 /// A numeric field value that cannot be represented by its declared Rust type.
@@ -267,8 +267,8 @@ impl IntrospectFloat for f32 {
     }
 
     fn from_field_value(field: &'static str, value: f64) -> Result<Self, IntrospectError> {
-        if value.is_finite() && value >= f64::from(f32::MIN) && value <= f64::from(f32::MAX) {
-            Ok(value as f32)
+        if value.is_finite() && value >= f64::from(Self::MIN) && value <= f64::from(Self::MAX) {
+            Ok(value as Self)
         } else {
             Err(IntrospectError::float(field, value, Self::KIND))
         }

@@ -40,7 +40,7 @@ pub(crate) struct GraphCtxFixture {
 
 impl GraphCtxFixture {
     /// Takes a [`DocFixture`] or anything that converts into one — a
-    /// [`TestGraph`](scenarium::internals::graph::TestGraph) goes straight in.
+    /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
     pub(crate) fn over(fixture: impl Into<DocFixture>) -> Self {
         let DocFixture { doc, library } = fixture.into();
         Self {

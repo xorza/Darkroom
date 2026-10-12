@@ -433,10 +433,10 @@ impl GraphUI {
         // a band is in flight, else the committed set.
         // The preview is kept out of the document, so a band in flight
         // changes what paints without recording an edit.
-        let selected = self
-            .selection_ui
-            .preview()
-            .map_or(Selection::Committed(graph_ctx.selected()), Selection::swept);
+        let selected = self.selection_ui.preview().map_or_else(
+            || Selection::Committed(graph_ctx.selected()),
+            Selection::swept,
+        );
 
         // What the node draw sees but cannot act on: the inspect chip and the
         // body clicks, both of which drive `Inspectors` — held shared below so
@@ -555,7 +555,7 @@ pub(crate) mod internals;
 #[cfg(test)]
 mod tests {
     use palantir::DockOperation;
-    use palantir::internals::harness::UiHarness;
+    use palantir::internals::ui_harness::UiHarness;
     use scenarium::{Binding, InputPort};
     use std::sync::Arc;
 

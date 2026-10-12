@@ -11,7 +11,7 @@ use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
 use crate::internals;
-use crate::internals::graph::{NodeSpec, TestGraph};
+use crate::internals::test_graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode};
 use common::{SerdeFormat, deserialize, serialize};
 use std::panic;

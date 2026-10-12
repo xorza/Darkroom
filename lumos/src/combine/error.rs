@@ -313,7 +313,7 @@ mod tests {
     fn a_load_failure_states_the_path_once_and_stays_typed() {
         let path = PathBuf::from("/path/to/image.fits");
         let error = StackError::from(ImageError::Io {
-            path: path.clone(),
+            path,
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
         });
 

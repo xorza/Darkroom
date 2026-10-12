@@ -3,7 +3,7 @@ use std::path::Path;
 use fits_well::FitsError;
 use fits_well::header::Header;
 use fits_well::image::Scaling;
-use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
+use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::error::ImageError;
@@ -29,7 +29,7 @@ const FLOAT_ADU_DIVISOR: f32 = 65_535.0;
 pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
     kind: HduKind,
-    image: ImageMetadata<'a>,
+    image: FitsMetadata<'a>,
     source_bytes: u64,
 }
 
@@ -416,14 +416,18 @@ pub(super) fn dimensions_from_shape(
     let (width, height, channels) = match shape {
         [width, height] | [width, height, 1] => (*width, *height, 1),
         [width, height, 3] if cube == FitsCubeInterpretation::Rgb => (*width, *height, 3),
-        [_, _, 3] => Err(ImageError::fits_unsupported(
-            path,
-            "three-plane FITS cube requires FitsCubeInterpretation::Rgb",
-        ))?,
-        [_, _, channels] => Err(ImageError::fits_unsupported(
-            path,
-            format!("Unsupported channel count (NAXIS3): {channels}"),
-        ))?,
+        [_, _, 3] => {
+            return Err(ImageError::fits_unsupported(
+                path,
+                "three-plane FITS cube requires FitsCubeInterpretation::Rgb",
+            ));
+        }
+        [_, _, channels] => {
+            return Err(ImageError::fits_unsupported(
+                path,
+                format!("Unsupported channel count (NAXIS3): {channels}"),
+            ));
+        }
         _ => {
             return Err(ImageError::fits_unsupported(
                 path,
@@ -452,7 +456,7 @@ pub(super) fn dimensions_from_shape(
 #[cfg(test)]
 pub(super) mod internals {
     use fits_well::header::Header;
-    use fits_well::image::{Bitpix, ImageMetadata};
+    use fits_well::image::{Bitpix, Metadata as FitsMetadata};
     use fits_well::io::HduKind;
 
     use crate::io::fits::decode::plan::FitsHduDescription;
@@ -469,7 +473,7 @@ pub(super) mod internals {
         FitsHduDescription {
             header,
             kind,
-            image: ImageMetadata {
+            image: FitsMetadata {
                 shape,
                 bitpix,
                 scaling: header.scaling().unwrap(),

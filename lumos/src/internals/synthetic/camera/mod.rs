@@ -43,7 +43,7 @@ impl PsfModel {
     /// The round-equivalent FWHM (in pixels) a detector should recover.
     pub(crate) const fn fwhm(&self) -> f32 {
         match self {
-            PsfModel::Gaussian { fwhm, .. } | PsfModel::Moffat { fwhm, .. } => *fwhm,
+            Self::Gaussian { fwhm, .. } | Self::Moffat { fwhm, .. } => *fwhm,
         }
     }
 
@@ -59,14 +59,14 @@ impl PsfModel {
         seeing_scale: f32,
     ) {
         let (profile, amplitude) = match *self {
-            PsfModel::Moffat { fwhm, beta } => {
+            Self::Moffat { fwhm, beta } => {
                 let alpha = fwhm_beta_to_alpha(fwhm * seeing_scale, beta);
                 (
                     StarProfile::Moffat { alpha, beta },
                     flux * (beta - 1.0) / (PI * alpha * alpha),
                 )
             }
-            PsfModel::Gaussian {
+            Self::Gaussian {
                 fwhm,
                 eccentricity,
                 angle,

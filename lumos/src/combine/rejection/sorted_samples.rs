@@ -33,7 +33,7 @@ impl SortedSamples {
             values
                 .iter()
                 .enumerate()
-                .map(|(position, &value)| u64::from(order_key(value)) << 32 | position as u64),
+                .map(|(position, &value)| (u64::from(order_key(value)) << 32) | position as u64),
         );
         self.keys.sort_unstable();
         self.values.clear();
@@ -76,7 +76,7 @@ impl SortedSamples {
         keep: impl Fn(f32, u32) -> bool,
     ) -> Range<usize> {
         let pack =
-            |value: f32, position: u32| u64::from(value.to_bits()) << 32 | u64::from(position);
+            |value: f32, position: u32| (u64::from(value.to_bits()) << 32) | u64::from(position);
         self.keys.clear();
         let mut low = 0;
         for index in window.clone() {
@@ -115,7 +115,7 @@ const fn order_key(value: f32) -> u32 {
     if bits >> 31 == 1 {
         !bits
     } else {
-        bits | 1 << 31
+        bits | (1 << 31)
     }
 }
 

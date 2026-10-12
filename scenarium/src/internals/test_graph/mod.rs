@@ -242,7 +242,7 @@ impl TestGraph {
     /// Put every node on one cache mode — how a test states "nothing is
     /// retained here" without listing the graph.
     pub fn cache_all(&mut self, mode: CacheMode) {
-        for node_id in self.ids.values().copied().collect::<Vec<_>>() {
+        for &node_id in self.ids.values() {
             self.graph
                 .find_mut(node_id)
                 .expect("a named node is in the graph")
@@ -310,6 +310,10 @@ impl TestGraph {
 
     /// [`never`](Self::never) on every node — "nothing here runs at all".
     pub fn never_all(&mut self) {
+        #[expect(
+            clippy::needless_collect,
+            reason = "`never` borrows the whole fixture, so the names cannot stay borrowed"
+        )]
         for name in self.ids.keys().cloned().collect::<Vec<_>>() {
             self.never(&name);
         }
@@ -616,8 +620,8 @@ mod internals {
     use crate::execution::compile::error::CompileError;
     use crate::graph::identity::{EventPort, NodeId, OutputPort};
     use crate::graph::output_types::OutputTypes;
-    use crate::internals::graph::TestGraph;
-    use crate::internals::graph::compiled::Compiled;
+    use crate::internals::test_graph::TestGraph;
+    use crate::internals::test_graph::compiled::Compiled;
 
     impl TestGraph {
         /// Every node the fixture named, under that name — which, for an

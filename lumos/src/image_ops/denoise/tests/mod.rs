@@ -251,7 +251,7 @@ fn a_zero_variance_plane_leaves_the_image() {
         }
         .apply_with_variance(&mut image, &variance)
         .unwrap();
-        assert_eq!(image.channel(0).pixels(), &pixels[..], "{threshold:?}");
+        assert_eq!(image.channel(0).pixels(), &*pixels, "{threshold:?}");
     }
 }
 

@@ -58,20 +58,20 @@ impl AppCommand {
     #[must_use]
     pub(super) fn apply(self, app: &mut App) -> Relayout {
         match self {
-            AppCommand::File(c) => {
+            Self::File(c) => {
                 c.apply(app);
                 Relayout::NotNeeded
             }
-            AppCommand::Run(c) => {
+            Self::Run(c) => {
                 c.apply(app);
                 Relayout::NotNeeded
             }
-            AppCommand::Prefs(c) => {
+            Self::Prefs(c) => {
                 c.apply(app);
                 Relayout::NotNeeded
             }
-            AppCommand::Edit(c) => c.apply(app),
-            AppCommand::Quit => {
+            Self::Edit(c) => c.apply(app),
+            Self::Quit => {
                 app.guard_discard(PendingTransition::Quit);
                 Relayout::NotNeeded
             }

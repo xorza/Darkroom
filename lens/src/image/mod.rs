@@ -66,9 +66,9 @@ impl Image {
     /// when the value is their last holder and copied when it is not,
     /// repacked from planes either way if that is what they are.
     pub(crate) fn take_interleaved(value: DynamicValue) -> imaginarium::Image {
-        match value.into_custom::<Image>() {
+        match value.into_custom::<Self>() {
             Ok(image) => image.into_interleaved(),
-            Err(value) => value.required_custom::<Image>().interleaved().into_owned(),
+            Err(value) => value.required_custom::<Self>().interleaved().into_owned(),
         }
     }
 
@@ -76,9 +76,9 @@ impl Image {
     /// already-planar last holder is moved untouched, the case an all-astro
     /// chain hits at every node.
     pub(crate) fn take_planar(value: DynamicValue) -> LinearImage {
-        match value.into_custom::<Image>() {
+        match value.into_custom::<Self>() {
             Ok(image) => image.into_planar(),
-            Err(value) => value.required_custom::<Image>().planar().into_owned(),
+            Err(value) => value.required_custom::<Self>().planar().into_owned(),
         }
     }
 

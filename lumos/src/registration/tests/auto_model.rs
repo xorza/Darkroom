@@ -158,7 +158,7 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
 
     let strict = (RegistrationConfig {
         max_rms_error: 0.15,
-        ..config.clone()
+        ..config
     })
     .register(&ref_stars, &target)
     .expect("a tight gate must take the model that meets it, not fail on the one GRIC prefers");

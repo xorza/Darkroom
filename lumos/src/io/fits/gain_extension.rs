@@ -6,7 +6,7 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Image, ImageData, Scaling};
+use fits_well::image::{Bitpix, Data as FitsData, Image, Scaling};
 use fits_well::io::{Hdu, HduKind};
 use imaginarium::Buffer2;
 
@@ -126,10 +126,10 @@ impl GainExtension {
     /// Refused when a node is not a finite gain above zero: no flat multiplies by that.
     pub(crate) fn decode(
         path: &Path,
-        stored: ImageData,
+        stored: FitsData,
         size: Size2us,
     ) -> Result<FlatGain, ImageError> {
-        let ImageData::F32(nodes) = stored else {
+        let FitsData::F32(nodes) = stored else {
             unreachable!("`check` admitted only BITPIX = -32");
         };
         let grid = GainGrid::of(size);

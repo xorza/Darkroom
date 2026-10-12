@@ -1,7 +1,7 @@
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 use scenarium::NodeId;
-use scenarium::internals::graph::NodeSpec;
-use scenarium::internals::graph::TestGraph;
+use scenarium::internals::test_graph::NodeSpec;
+use scenarium::internals::test_graph::TestGraph;
 
 use super::*;
 use crate::core::document::internals::DocFixture;

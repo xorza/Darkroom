@@ -161,7 +161,7 @@ fn from_image_no_stride_padding() {
     assert_eq!(linear.width(), 3);
     assert_eq!(linear.height(), 2);
     assert_eq!(linear.channels(), 1);
-    assert_eq!(linear.channel(0).pixels(), &pixels[..]);
+    assert_eq!(linear.channel(0).pixels(), &*pixels);
 }
 
 /// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and colour.

@@ -97,7 +97,7 @@ impl Triangle {
     }
 
     /// Check if two triangles are similar within tolerance.
-    pub(super) fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool {
+    pub(super) fn is_similar(&self, other: &Self, tolerance: f64) -> bool {
         let dr0 = (self.ratios.0 - other.ratios.0).abs();
         let dr1 = (self.ratios.1 - other.ratios.1).abs();
         dr0 < tolerance && dr1 < tolerance

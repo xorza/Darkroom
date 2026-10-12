@@ -95,7 +95,7 @@ impl From<StarDetectionConfig> for DetectionKnobs {
             expected_fwhm: config
                 .fwhm
                 .mode
-                .or(StarDetectionConfig::default().fwhm.mode)
+                .or_else(|| StarDetectionConfig::default().fwhm.mode)
                 .expect("the default config runs a matched filter")
                 .seed(),
             min_area: config.extraction.min_area,
@@ -108,7 +108,7 @@ impl From<StarDetectionConfig> for DetectionKnobs {
 
 impl From<DetectionKnobs> for StarDetectionConfig {
     fn from(knobs: DetectionKnobs) -> Self {
-        let mut config = StarDetectionConfig::default();
+        let mut config = Self::default();
         config.extraction.sigma_threshold = knobs.sigma_threshold;
         config.fwhm.mode = Some(FwhmMode::Fixed(knobs.expected_fwhm));
         config.extraction.min_area = knobs.min_area;
@@ -157,7 +157,7 @@ impl From<RegistrationConfig> for RegistrationKnobs {
 
 impl From<RegistrationKnobs> for RegistrationConfig {
     fn from(knobs: RegistrationKnobs) -> Self {
-        let mut config = RegistrationConfig::default();
+        let mut config = Self::default();
         config.matching.max_stars = knobs.max_stars;
         config.matching.min_matches = knobs.min_matches;
         config.matching.triangle.ratio_tolerance = knobs.ratio_tolerance;
@@ -300,7 +300,7 @@ mod tests {
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
 
-        let restored: StarDetectionConfig = DetectionKnobs::from(config.clone()).into();
+        let restored: StarDetectionConfig = DetectionKnobs::from(config).into();
         assert_eq!(restored.extraction.sigma_threshold, 4.5);
         assert_eq!(restored.extraction.min_area, 7);
         assert_eq!(restored.extraction.max_area, 900);
@@ -318,7 +318,7 @@ mod tests {
         config.ransac.max_iterations = 1500;
         config.max_rms_error = 0.75;
 
-        let restored: RegistrationConfig = RegistrationKnobs::from(config.clone()).into();
+        let restored: RegistrationConfig = RegistrationKnobs::from(config).into();
         assert_eq!(restored.matching.max_stars, 250);
         assert_eq!(restored.matching.min_matches, 9);
         assert_eq!(restored.matching.triangle.ratio_tolerance, 0.125);

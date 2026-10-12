@@ -51,8 +51,8 @@ impl InFlight {
     /// latched.
     fn node(self) -> NodeId {
         match self {
-            InFlight::FromEmitter(drag) => drag.node(),
-            InFlight::FromSubscriber(drag) => drag.node(),
+            Self::FromEmitter(drag) => drag.node(),
+            Self::FromSubscriber(drag) => drag.node(),
         }
     }
 }

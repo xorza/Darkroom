@@ -94,7 +94,7 @@ impl From<LinearImage> for PreviewImage {
 impl From<PreviewImage> for Image {
     fn from(preview: PreviewImage) -> Self {
         match preview.pixels {
-            PreviewPixels::Planes(linear) => Image::from(&linear),
+            PreviewPixels::Planes(linear) => Self::from(&linear),
             PreviewPixels::Interleaved(image) => image,
         }
     }

@@ -40,8 +40,8 @@ impl MlModelKind {
 impl PrefsCommand {
     pub(super) fn apply(self, app: &mut App) {
         match self {
-            PrefsCommand::Changed => app.apply_preferences(),
-            PrefsCommand::PickMlModel(kind) => app.pick_ml_model(kind),
+            Self::Changed => app.apply_preferences(),
+            Self::PickMlModel(kind) => app.pick_ml_model(kind),
         }
     }
 }

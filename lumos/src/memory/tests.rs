@@ -533,7 +533,7 @@ fn a_plan_never_overshoots_its_budget() {
                                 }
                                 _ => stage.in_flight,
                             } as u64;
-                            if let Units::Frames = stage.units {
+                            if stage.units == Units::Frames {
                                 assert!(width >= 1 && width <= workers.min(frames));
                             }
                             let projected = set + stage.held as u64 + width as u64 * per_unit;

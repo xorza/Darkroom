@@ -8,7 +8,7 @@ fn form_triangles_from_neighbors_single_triangle() {
         DVec2::new(1.0, 0.0),
         DVec2::new(0.5, 0.866),
     ];
-    let tree = KdTree::build(points.clone()).unwrap();
+    let tree = KdTree::build(points).unwrap();
 
     let triangles = form_triangles_from_neighbors(&tree, 3);
     assert_eq!(triangles.len(), 1);
@@ -24,7 +24,7 @@ fn form_triangles_from_neighbors_square() {
         DVec2::new(1.0, 1.0),
         DVec2::new(0.0, 1.0),
     ];
-    let tree = KdTree::build(points.clone()).unwrap();
+    let tree = KdTree::build(points).unwrap();
 
     let triangles = form_triangles_from_neighbors(&tree, 3);
 
@@ -41,7 +41,7 @@ fn form_triangles_from_neighbors_square() {
 #[test]
 fn form_triangles_from_neighbors_too_few_points() {
     let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
-    let tree = KdTree::build(points.clone()).unwrap();
+    let tree = KdTree::build(points).unwrap();
     let triangles = form_triangles_from_neighbors(&tree, 3);
     assert!(triangles.is_empty());
 }

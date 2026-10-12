@@ -20,8 +20,8 @@ pub enum RegistrationCatalog {
 impl Display for RegistrationCatalog {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            RegistrationCatalog::Reference => f.write_str("reference"),
-            RegistrationCatalog::Target => f.write_str("target"),
+            Self::Reference => f.write_str("reference"),
+            Self::Target => f.write_str("target"),
         }
     }
 }
@@ -38,8 +38,8 @@ pub enum RansacFailureReason {
 impl Display for RansacFailureReason {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            RansacFailureReason::TooFewMatches => write!(f, "too few matches to sample"),
-            RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
+            Self::TooFewMatches => write!(f, "too few matches to sample"),
+            Self::NoInliersFound => write!(f, "no inliers found"),
         }
     }
 }

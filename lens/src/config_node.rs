@@ -97,7 +97,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
                 .map(|(kind, input)| field_value(kind, input))
                 .collect();
             let config = T::from_fields(&values).map_err(InvokeError::external)?;
-            outputs[0] = DynamicValue::from_custom(ConfigValue(config));
+            outputs[0] = DynamicValue::from_custom(Self(config));
             Ok(())
         });
         let mut func = Func::new(node_id, node_name, lambda)

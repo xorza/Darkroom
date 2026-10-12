@@ -257,7 +257,7 @@ pub(super) mod internals {
         /// folds a path can be pinned to a constant — no test controls a
         /// real file's mtime.
         pub(crate) fn file(len: u64, mtime_ns: i128) -> Self {
-            FsPathId::File(FileIdentity {
+            Self::File(FileIdentity {
                 len,
                 mtime_ns,
                 file_id: None,

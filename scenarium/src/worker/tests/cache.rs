@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution::cache::disk_store::DiskStore;
-use crate::internals::graph::NodeSpec;
+use crate::internals::test_graph::NodeSpec;
 use std::fs;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the

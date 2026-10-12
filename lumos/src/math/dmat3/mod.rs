@@ -46,10 +46,10 @@ impl DMat3 {
 
     /// Matrix multiplication: `self * rhs`.
     #[inline]
-    pub(crate) const fn mul_mat(&self, rhs: &DMat3) -> DMat3 {
+    pub(crate) const fn mul_mat(&self, rhs: &Self) -> Self {
         let a = &self.data;
         let b = &rhs.data;
-        DMat3 {
+        Self {
             data: [
                 a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
                 a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
@@ -79,7 +79,7 @@ impl DMat3 {
     /// det = 1e-15, singular) but is capped at the absolute `1e-12` above unit scale: 2D
     /// homogeneous transforms legitimately carry translations of ~1e4–1e10 px that inflate the
     /// element magnitude without inflating the determinant.
-    pub(crate) fn inverse(&self) -> Option<DMat3> {
+    pub(crate) fn inverse(&self) -> Option<Self> {
         let det = self.determinant();
         let scale = self.data.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         if det.abs() <= 1e-12 * scale.powi(3).min(1.0) {
@@ -87,7 +87,7 @@ impl DMat3 {
         }
         let inv_det = 1.0 / det;
         let d = &self.data;
-        Some(DMat3 {
+        Some(Self {
             data: [
                 (d[4] * d[8] - d[5] * d[7]) * inv_det,
                 (d[2] * d[7] - d[1] * d[8]) * inv_det,

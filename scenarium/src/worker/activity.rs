@@ -12,16 +12,10 @@ pub enum WorkerActivity {
 
 impl WorkerActivity {
     pub const fn is_executing(self) -> bool {
-        matches!(
-            self,
-            WorkerActivity::Executing | WorkerActivity::ExecutingEventLoop
-        )
+        matches!(self, Self::Executing | Self::ExecutingEventLoop)
     }
 
     pub const fn event_loop_active(self) -> bool {
-        matches!(
-            self,
-            WorkerActivity::EventLoop | WorkerActivity::ExecutingEventLoop
-        )
+        matches!(self, Self::EventLoop | Self::ExecutingEventLoop)
     }
 }

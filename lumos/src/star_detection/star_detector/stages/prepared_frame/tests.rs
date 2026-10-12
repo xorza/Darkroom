@@ -7,7 +7,7 @@ use crate::internals::prelude::*;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
-fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Pooled<Buffer2<f32>> {
+fn prepare(image: &LinearImage, pool: &DetectionResources) -> Pooled<Buffer2<f32>> {
     let mut plane = pool.acquire_f32();
     combine_channels(image, &mut plane);
     plane
@@ -27,8 +27,8 @@ fn prepare_uniform() {
     let data = vec![0.5f32; 64 * 64];
     let image = LinearImage::from_pixels(dim, data);
 
-    let mut pool = DetectionResources::new(Size2us::new(64, 64));
-    let result = prepare(&image, &mut pool);
+    let pool = DetectionResources::new(Size2us::new(64, 64));
+    let result = prepare(&image, &pool);
 
     assert_eq!(result.width(), 64);
     assert_eq!(result.height(), 64);
@@ -48,8 +48,8 @@ fn prepare_with_star() {
     let dim = ImageDimensions::new((width, height), 1);
     let image = LinearImage::from_pixels(dim, data);
 
-    let mut pool = DetectionResources::new(Size2us::new(width, height));
-    let result = prepare(&image, &mut pool);
+    let pool = DetectionResources::new(Size2us::new(width, height));
+    let result = prepare(&image, &pool);
 
     // Star pixel should be preserved (no CFA, no defects)
     assert!((result[(32, 32)] - 0.9).abs() < 1e-6);
@@ -178,8 +178,8 @@ fn prepare_rgb_equal_noise_is_mean() {
     let b = channel_with_mad(0.70, 0.02);
     let image = LinearImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
 
-    let mut pool = DetectionResources::new(Size2us::new(4, 4));
-    let out = prepare(&image, &mut pool);
+    let pool = DetectionResources::new(Size2us::new(4, 4));
+    let out = prepare(&image, &pool);
 
     for (i, &out_v) in out.pixels().iter().enumerate() {
         let expected = (r[i] + g[i] + b[i]) / 3.0;
@@ -201,8 +201,8 @@ fn prepare_rgb_red_star_survives() {
     let b = channel_with_mad(0.10, 0.01);
     let image = LinearImage::from_planar_channels(dims, vec![r, g, b]);
 
-    let mut pool = DetectionResources::new(Size2us::new(4, 4));
-    let out = prepare(&image, &mut pool);
+    let pool = DetectionResources::new(Size2us::new(4, 4));
+    let out = prepare(&image, &pool);
 
     // A 4 × 4 frame is too small for the noise estimate, which reads 0 in every channel, so the
     // weights are equal and the star pixel is the mean (0.90 + 0.09 + 0.09)/3 = 0.36, to the

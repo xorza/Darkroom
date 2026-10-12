@@ -28,8 +28,8 @@ pub(crate) enum PortKind {
 impl PortKind {
     pub(crate) const fn opposite(self) -> Self {
         match self {
-            PortKind::Input => PortKind::Output,
-            PortKind::Output => PortKind::Input,
+            Self::Input => Self::Output,
+            Self::Output => Self::Input,
         }
     }
 }

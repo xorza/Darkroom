@@ -48,8 +48,8 @@ impl StoredContent {
     /// be handled by one and silently fall through the other.
     pub(crate) const fn image(&self) -> Option<&PreviewImage> {
         match self {
-            StoredContent::Image(image) => Some(image),
-            StoredContent::Text(_) | StoredContent::Error(_) => None,
+            Self::Image(image) => Some(image),
+            Self::Text(_) | Self::Error(_) => None,
         }
     }
 
@@ -59,9 +59,9 @@ impl StoredContent {
     /// image never also has a message to show.
     pub(crate) const fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
-            StoredContent::Text(text) => Some(PreviewMessage::Text(text.as_str())),
-            StoredContent::Error(error) => Some(PreviewMessage::Failure(error)),
-            StoredContent::Image(_) => None,
+            Self::Text(text) => Some(PreviewMessage::Text(text.as_str())),
+            Self::Error(error) => Some(PreviewMessage::Failure(error)),
+            Self::Image(_) => None,
         }
     }
 }

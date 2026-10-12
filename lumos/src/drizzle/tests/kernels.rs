@@ -105,9 +105,8 @@ fn two_frames_combine_to_their_weighted_mean() {
             stack: StackConfig {
                 weighting: Weighting::Manual(vec![1.0, 3.0]),
                 ..plain_stack()
-            }
-            .clone(),
-            ..usual_config(kernel).clone()
+            },
+            ..usual_config(kernel)
         }
         .drizzle_images(
             drizzle_frames(
@@ -356,7 +355,7 @@ fn unit_sampling_copies_the_input() {
             &Transform::identity(),
             None,
         );
-        assert_eq!(product.image.channel(0).pixels(), &pixels[..], "{kernel:?}");
+        assert_eq!(product.image.channel(0).pixels(), &*pixels, "{kernel:?}");
         assert!(
             weight_plane(&product).pixels().iter().all(|&w| w == 1.0),
             "{kernel:?}"

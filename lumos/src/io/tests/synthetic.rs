@@ -239,7 +239,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let declaring_path = write_with_header(&dir, "float32_datamax_overridden", &image, &declaring);
     let forced =
         load_linear_fits(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
-    assert_eq!(forced.channel(0).pixels(), &pixels[..]);
+    assert_eq!(forced.channel(0).pixels(), &*pixels);
 
     // A scale that would invert or erase the samples is rejected rather than applied.
     for bad in [0.0, -1.0, f32::NAN] {
@@ -308,7 +308,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         ..LoadContext::default()
     };
     let bare = load_linear_fits(&bare_path, &normalized_options).unwrap();
-    assert_eq!(bare.channel(0).pixels(), &pixels[..]);
+    assert_eq!(bare.channel(0).pixels(), &*pixels);
 
     // DATAMAX ≈ 1: a normalized frame saying so. Left alone — and refused when its samples
     // contradict it.
@@ -321,7 +321,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let normalized_path =
         write_with_header(&dir, "float32_datamax_1", &unit_image, &normalized_header);
     let normalized = load_linear_fits(&normalized_path, &LoadContext::default()).unwrap();
-    assert_eq!(normalized.channel(0).pixels(), &unit_pixels[..]);
+    assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
     assert_eq!(normalized.metadata.data_max, Some(1.0));
 
     // DATAMAX = 65535: a saturation level far above unity, so the samples are ADU and divide by
@@ -342,7 +342,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable
     // — both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
-    let bare_domain = bare.metadata.domain.clone().unwrap();
+    let bare_domain = bare.metadata.domain.unwrap();
     let adu_domain = adu.metadata.domain.clone().unwrap();
     assert_eq!(bare_domain.scale, 1.0);
     assert_eq!(adu_domain.scale, 65_535.0);

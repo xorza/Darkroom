@@ -51,7 +51,7 @@ fn drizzle_paths_refuses_before_decoding() {
     };
     let result = DrizzleConfig {
         stack: plain_stack(),
-        ..invalid.clone()
+        ..invalid
     }
     .drizzle_paths(
         vec![DrizzleFrame::new(
@@ -498,9 +498,8 @@ fn weight_and_inverse_variance_maps() {
             stack: StackConfig {
                 weighting: Weighting::Manual(frame_weights.clone()),
                 ..plain_stack()
-            }
-            .clone(),
-            ..(kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)).clone()
+            },
+            ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
         }
         .drizzle_images(
             drizzle_frames(images, &transforms),
@@ -540,9 +539,8 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
             stack: StackConfig {
                 quality,
                 ..plain_stack()
-            }
-            .clone(),
-            ..config.clone()
+            },
+            ..config
         }
         .drizzle_images(
             drizzle_frames(vec![image.clone()], &[transform]),
@@ -624,9 +622,8 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
         stack: StackConfig {
             weighting: Weighting::Manual(vec![1.0, 3.0]),
             ..plain_stack()
-        }
-        .clone(),
-        ..config.clone()
+        },
+        ..config
     }
     .drizzle_images(
         drizzle_frames(

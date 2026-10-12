@@ -24,10 +24,10 @@ impl RamUsage {
 }
 
 impl Add for RamUsage {
-    type Output = RamUsage;
+    type Output = Self;
 
-    fn add(self, rhs: RamUsage) -> Self::Output {
-        RamUsage {
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
             cpu: self.cpu + rhs.cpu,
             gpu: self.gpu + rhs.gpu,
         }
@@ -35,7 +35,7 @@ impl Add for RamUsage {
 }
 
 impl AddAssign for RamUsage {
-    fn add_assign(&mut self, rhs: RamUsage) {
+    fn add_assign(&mut self, rhs: Self) {
         self.cpu += rhs.cpu;
         self.gpu += rhs.gpu;
     }
@@ -62,9 +62,9 @@ pub enum DynamicValue {
 impl Debug for DynamicValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            DynamicValue::Unbound => write!(f, "Unbound"),
-            DynamicValue::Static(value) => write!(f, "{value:?}"),
-            DynamicValue::Custom(data) => f
+            Self::Unbound => write!(f, "Unbound"),
+            Self::Static(value) => write!(f, "{value:?}"),
+            Self::Custom(data) => f
                 .debug_struct("Custom")
                 .field("type_id", &data.type_id())
                 .finish_non_exhaustive(),
@@ -74,12 +74,12 @@ impl Debug for DynamicValue {
 
 impl DynamicValue {
     pub fn from_custom<T: CustomValue>(value: T) -> Self {
-        DynamicValue::Custom(Arc::new(value))
+        Self::Custom(Arc::new(value))
     }
 
     pub const fn as_static(&self) -> Option<&ConstValue> {
         match self {
-            DynamicValue::Static(value) => Some(value),
+            Self::Static(value) => Some(value),
             _ => None,
         }
     }
@@ -114,23 +114,23 @@ impl DynamicValue {
 
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
-            DynamicValue::Custom(data) => data.as_any().downcast_ref::<T>(),
+            Self::Custom(data) => data.as_any().downcast_ref::<T>(),
             _ => None,
         }
     }
 
     pub fn into_custom<T: CustomValue>(self) -> Result<T, Self> {
-        let DynamicValue::Custom(data) = self else {
+        let Self::Custom(data) = self else {
             return Err(self);
         };
         if data.as_any().downcast_ref::<T>().is_none() {
-            return Err(DynamicValue::Custom(data));
+            return Err(Self::Custom(data));
         }
         let typed = data
             .into_any()
             .downcast::<T>()
             .expect("custom type checked before downcast");
-        Arc::try_unwrap(typed).map_err(|shared| DynamicValue::Custom(shared))
+        Arc::try_unwrap(typed).map_err(|shared| Self::Custom(shared))
     }
 
     /// The value of a required input declared `Float` (or any scalar the
@@ -215,15 +215,15 @@ impl DynamicValue {
 
     pub fn to_value_string(&self) -> String {
         match self {
-            DynamicValue::Unbound => String::new(),
-            DynamicValue::Static(value) => value.to_value_string(),
-            DynamicValue::Custom(data) => data.to_string(),
+            Self::Unbound => String::new(),
+            Self::Static(value) => value.to_value_string(),
+            Self::Custom(data) => data.to_string(),
         }
     }
 
     pub fn ram_usage(&self) -> RamUsage {
         match self {
-            DynamicValue::Custom(data) => data.ram_bytes(),
+            Self::Custom(data) => data.ram_bytes(),
             _ => RamUsage::default(),
         }
     }
@@ -232,22 +232,22 @@ impl DynamicValue {
 impl Display for DynamicValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            DynamicValue::Unbound => write!(f, "-"),
-            DynamicValue::Static(value) => write!(f, "{value}"),
-            DynamicValue::Custom(data) => write!(f, "{data}"),
+            Self::Unbound => write!(f, "-"),
+            Self::Static(value) => write!(f, "{value}"),
+            Self::Custom(data) => write!(f, "{data}"),
         }
     }
 }
 
 impl From<&ConstValue> for DynamicValue {
     fn from(value: &ConstValue) -> Self {
-        DynamicValue::Static(value.clone())
+        Self::Static(value.clone())
     }
 }
 
 impl From<ConstValue> for DynamicValue {
     fn from(value: ConstValue) -> Self {
-        DynamicValue::Static(value)
+        Self::Static(value)
     }
 }
 
@@ -267,7 +267,7 @@ dynamic_from_static!(i64, i32, f32, f64, String, bool);
 
 impl From<&str> for DynamicValue {
     fn from(value: &str) -> Self {
-        DynamicValue::Static(value.into())
+        Self::Static(value.into())
     }
 }
 
@@ -291,7 +291,7 @@ mod tests {
         type Err = ();
 
         fn from_str(name: &str) -> Result<Self, ()> {
-            (name == "auto").then_some(Pick::Auto).ok_or(())
+            (name == "auto").then_some(Self::Auto).ok_or(())
         }
     }
 

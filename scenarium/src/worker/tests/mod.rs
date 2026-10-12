@@ -16,7 +16,7 @@ use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::{EventPort, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals::calls::Calls;
-use crate::internals::graph::TestGraph;
+use crate::internals::test_graph::TestGraph;
 use crate::internals::worker::PATIENCE;
 use crate::internals::worker::TestWorker;
 use crate::worker::Worker;

@@ -79,10 +79,10 @@ impl Default for ScnrKnobs {
 impl From<ScnrKnobs> for Scnr {
     fn from(knobs: ScnrKnobs) -> Self {
         match knobs.method {
-            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(knobs.amount),
-            ScnrMethodChoice::AdditiveMask => Scnr::additive_mask(knobs.amount),
-            ScnrMethodChoice::MaximumNeutral => Scnr::maximum_neutral(knobs.amount),
-            ScnrMethodChoice::MaximumMask => Scnr::maximum_mask(knobs.amount),
+            ScnrMethodChoice::AverageNeutral => Self::average_neutral(knobs.amount),
+            ScnrMethodChoice::AdditiveMask => Self::additive_mask(knobs.amount),
+            ScnrMethodChoice::MaximumNeutral => Self::maximum_neutral(knobs.amount),
+            ScnrMethodChoice::MaximumMask => Self::maximum_mask(knobs.amount),
         }
     }
 }
@@ -148,7 +148,7 @@ impl From<StretchKnobs> for Stretch {
                 target_background: knobs.target_background,
             },
         };
-        Stretch {
+        Self {
             method,
             color: knobs.color,
         }

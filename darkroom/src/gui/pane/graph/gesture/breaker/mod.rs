@@ -54,7 +54,7 @@ impl BreakerUI {
     /// undo step already detaches every incoming edge and pin, so emitting
     /// both would log a redundant history entry. The context's Esc — resolved
     /// once by the canvas — drops the scribble without emitting.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
+    pub(crate) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back

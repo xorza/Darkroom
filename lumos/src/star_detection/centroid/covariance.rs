@@ -51,8 +51,8 @@ impl Cov2 {
     /// box, which adds the box's variance 1/12 on each axis and nothing across them. Exact for
     /// unweighted moments. Through the Gaussian window, the box's kurtosis leaves `1/(480·σ²)` px²
     /// on each axis to first order: 0.0009 at σ 1.5.
-    pub(super) fn less_pixel(self) -> Option<Cov2> {
-        let less = Cov2 {
+    pub(super) fn less_pixel(self) -> Option<Self> {
+        let less = Self {
             xx: self.xx - PIXEL_VARIANCE,
             yy: self.yy - PIXEL_VARIANCE,
             xy: self.xy,
@@ -61,13 +61,13 @@ impl Cov2 {
     }
 
     /// Inverse of the symmetric matrix, or `None` if (near-)singular.
-    pub(super) const fn inverse(self) -> Option<Cov2> {
+    pub(super) const fn inverse(self) -> Option<Self> {
         let det = self.det();
         if det.abs() < 1e-12 {
             return None;
         }
         let inv = 1.0 / det;
-        Some(Cov2 {
+        Some(Self {
             xx: self.yy * inv,
             yy: self.xx * inv,
             xy: -self.xy * inv,
@@ -113,7 +113,7 @@ impl Cov2 {
         let pos_y = pos.y;
 
         let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
-        let mut best: Option<Cov2> = None;
+        let mut best: Option<Self> = None;
 
         let stamp_size = 2 * stamp_radius + 1;
         // Column offsets survive every iteration; their exponentials do not, because `inv_two_sw`
@@ -163,7 +163,7 @@ impl Cov2 {
             if w_sum < f64::EPSILON {
                 break;
             }
-            let obs = Cov2 {
+            let obs = Self {
                 xx: mxx / w_sum,
                 yy: myy / w_sum,
                 xy: mxy / w_sum,
@@ -172,7 +172,7 @@ impl Cov2 {
             // Deconvolve the circular window: C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹
             let Some(obs_inv) = obs.inverse() else { break };
             let inv_sw = 1.0 / sigma_w_sq;
-            let decon_inv = Cov2 {
+            let decon_inv = Self {
                 xx: obs_inv.xx - inv_sw,
                 yy: obs_inv.yy - inv_sw,
                 xy: obs_inv.xy,

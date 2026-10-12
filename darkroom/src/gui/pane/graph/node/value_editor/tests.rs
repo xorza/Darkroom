@@ -1,6 +1,6 @@
 use super::*;
 
-use palantir::internals::harness::UiHarness;
+use palantir::internals::ui_harness::UiHarness;
 
 use crate::gui::theme::Theme;
 

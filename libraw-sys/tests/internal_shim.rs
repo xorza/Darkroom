@@ -35,11 +35,11 @@ fn zero_is_bad_follows_the_open_flags() {
             assert_eq!(sys::libraw_lumos_is_floating_point(raw), 0);
             let (mut enc_type, mut image_levels) = (-1, -1);
             assert_eq!(
-                sys::libraw_lumos_crx_coding(raw, &mut enc_type, &mut image_levels),
+                sys::libraw_lumos_crx_coding(raw, &raw mut enc_type, &raw mut image_levels),
                 0
             );
             assert_eq!((enc_type, image_levels), (-1, -1), "nothing written");
-            let mut clock = [0 as core::ffi::c_char; 20];
+            let mut clock: [core::ffi::c_char; 20] = [0; 20];
             assert_eq!(
                 sys::libraw_lumos_camera_clock(raw, clock.as_mut_ptr(), clock.len()),
                 0,

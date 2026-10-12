@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use scenarium::internals::graph::{NodeSpec, TestGraph};
+use scenarium::internals::test_graph::{NodeSpec, TestGraph};
 use scenarium::{Binding, ConstValue, DataType, InputPort, Library, OutputPort};
 
 use crate::core::document::internals::DocFixture;

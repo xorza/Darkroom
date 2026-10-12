@@ -48,7 +48,8 @@ impl<I: Idx> IdxSet<I> {
 
     pub(crate) fn contains(&self, index: I) -> bool {
         debug_assert!(index.idx() < self.len, "index out of range");
-        self.words[index.idx() / u64::BITS as usize] >> (index.idx() % u64::BITS as usize) & 1 != 0
+        (self.words[index.idx() / u64::BITS as usize] >> (index.idx() % u64::BITS as usize)) & 1
+            != 0
     }
 
     /// Ascending set indices. Empty words are skipped whole, so a one-node
@@ -60,7 +61,7 @@ impl<I: Idx> IdxSet<I> {
             .filter(|&(_, &word)| word != 0)
             .flat_map(|(w, &word)| {
                 (0..u64::BITS)
-                    .filter(move |bit| word >> bit & 1 != 0)
+                    .filter(move |bit| (word >> bit) & 1 != 0)
                     .map(move |bit| I::from_idx(w * u64::BITS as usize + bit as usize))
             })
     }

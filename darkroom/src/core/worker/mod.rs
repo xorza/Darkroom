@@ -58,7 +58,7 @@ impl WorkerBridge {
     }
 
     fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
-        let _ = tx.send(report);
+        tx.send(report).ok();
         (wake)();
     }
 
