@@ -9,13 +9,17 @@
 //! bench is one operation, its id `<operation>/<variant>` and its parameter the input (a length, a
 //! side, a count, a matrix shape or a scene), and its throughput the elements one iteration
 //! processes. A bench builds its input inside its `bench_function` closure, so a filter that skips
-//! it skips its setup too, and an operation that changes its input in place takes a fresh copy
-//! through `iter_batched_ref`, outside the timing.
+//! it skips its setup too. Nothing but the operation is timed: one that changes its input in place
+//! takes a fresh copy through `iter_batched_ref`, one that consumes it a fresh copy through
+//! `iter_batched`, and one that returns a frame drops it through `iter_with_large_drop`.
 
 pub(crate) mod fixture;
+pub(crate) mod scene;
 
 use criterion::Criterion;
 
+use crate::io::image::fits::decode as fits_decode;
+use crate::io::raw::{self, demosaic};
 use crate::math::{
     dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, noise, pixel_quadrature,
     statistics, sum, wavelet,
@@ -34,4 +38,7 @@ pub fn kernel(c: &mut Criterion) {
     linear_system::bench::benches(c);
     lm_controller::bench::benches(c);
     lstsq::bench::benches(c);
+    raw::bench::benches(c);
+    demosaic::bench::benches(c);
+    fits_decode::bench::benches(c);
 }
