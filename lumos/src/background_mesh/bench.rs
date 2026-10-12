@@ -7,7 +7,6 @@ use crate::background_mesh::tile_stats::TileStats;
 use crate::background_mesh::workspace::TileScratch;
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::Field;
-use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::background_config::BackgroundConfig;
@@ -20,21 +19,12 @@ pub(crate) fn benches(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("tile_stats", format!("tile_{side}")),
         |b| {
-            let frame = Field::Typical.render(Size2us::new(4 * side, 4 * side));
-            let pixels = frame.image.channel(0);
-            let star = frame
-                .truth
-                .sources
-                .first()
-                .expect("a frame of 16 tiles holds a star");
-            #[expect(clippy::cast_sign_loss, reason = "a star lies inside the frame")]
-            let corner = |at: f64| ((at as usize / side) * side).min(3 * side);
-            let min = Vec2us::new(corner(star.pos.x), corner(star.pos.y));
-            let tile = URect::new(min, min + Vec2us::new(side, side));
+            let pixels = Field::Typical.tile(side);
+            let tile = URect::new(Vec2us::new(0, 0), Vec2us::new(side, side));
             let mut scratch = TileScratch::default();
             b.iter(|| {
                 TileStats::compute(
-                    pixels,
+                    &pixels,
                     None,
                     None,
                     tile,

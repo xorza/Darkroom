@@ -10,7 +10,6 @@ the first to need; the `Pipeline` scale comes with the `pipeline` tier.
 
 4. `kernel/frame_store`: only `spill/read/cold` is left, blocked on
    [a question](bench-proposal_QUESTIONS.md).
-7. `kernel/combine`.
 8. `kernel/drizzle`.
 9. The `stage` tier.
 10. The `pipeline` tier.

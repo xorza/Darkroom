@@ -16,6 +16,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::{CalibrationSet, MasterRole};
+use imaginarium::Buffer2;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.
 pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
@@ -27,12 +28,15 @@ const WHITE_BALANCE: [f32; 4] = [2.13, 1.0, 1.71, 1.0];
 /// [`WHITE_BALANCE`], so the balanced demosaic gives grey back for grey.
 const FILTER_GAIN: [f32; 3] = [1.0 / 2.13, 1.0, 1.0 / 1.71];
 
-/// The sky of every field: a gradient, as light pollution or the moon lays one.
-const SKY: BackgroundField = BackgroundField::Gradient {
-    start: 0.08,
-    end: 0.12,
-    angle: 0.6,
-};
+/// The sky of every field, `level` times the first exposure's: a gradient, as light pollution or
+/// the moon lays one.
+const fn sky(level: f32) -> BackgroundField {
+    BackgroundField::Gradient {
+        start: 0.08 * level,
+        end: 0.12 * level,
+        angle: 0.6,
+    }
+}
 
 /// The range of the stars' total fluxes, drawn log-uniform. At the FWHM below, 0.5 peaks at 0.036,
 /// 25σ over the sky's noise of 0.0014, and 12 at 0.87, just under saturation with the sky.
@@ -107,14 +111,55 @@ impl Field {
     pub(crate) fn scene(self, size: Size2us) -> Scene {
         let (stars, seed) = (at_density(self.stars(), size), self.seed());
         match self {
-            Field::Typical => Scene::random_field(size, stars, FLUX, SKY, 16.0, seed),
-            Field::Dense => Scene::cluster(size, stars, FLUX, SKY, seed),
+            Field::Typical => Scene::random_field(size, stars, FLUX, sky(1.0), 16.0, seed),
+            Field::Dense => Scene::cluster(size, stars, FLUX, sky(1.0), seed),
         }
     }
 
     /// The field calibrated, on a mono sensor of `size`.
     pub(crate) fn render(self, size: Size2us) -> SimFrame {
         self.expose(size, CfaType::Mono, Readout::Calibrated)
+    }
+
+    /// A `side` × `side` tile of the field that holds a star, cut from a calibrated mono frame of
+    /// 4 × 4 such tiles.
+    pub(crate) fn tile(self, side: usize) -> Buffer2<f32> {
+        let frame = self.render(Size2us::new(4 * side, 4 * side));
+        let star = frame
+            .truth
+            .sources
+            .first()
+            .expect("a frame of 16 tiles holds a star")
+            .pos;
+        #[expect(clippy::cast_sign_loss, reason = "a star lies inside the frame")]
+        let corner = |at: f64| (at as usize / side * side).min(3 * side);
+        let (left, top) = (corner(star.x), corner(star.y));
+        let plane = frame.image.channel(0);
+        let pixels = (0..side * side)
+            .map(|index| plane[(left + index % side, top + index / side)])
+            .collect();
+        Buffer2::new(side, side, pixels)
+    }
+
+    /// Exposure `index` of a sequence on the field, calibrated, on a mono sensor of `size`, as the
+    /// warp leaves it: aligned to the field's frame. From exposure to exposure the sky brightens
+    /// or fades by up to 8% and the transparency falls by up to 9%, as over a night, and the noise
+    /// is the exposure's own.
+    pub(crate) fn aligned(self, size: Size2us, index: usize) -> SimFrame {
+        let mut scene = self.scene(size);
+        scene.background = sky(exposure_sky(index));
+        for source in &mut scene.sources {
+            source.flux *= exposure_transparency(index);
+        }
+        let observation = Observation {
+            exposure_s: EXPOSURE_S,
+            ..Observation::reference(self.seed() ^ index as u64)
+        };
+        render(
+            &scene,
+            &sensor(size, CfaType::Mono, Readout::Calibrated),
+            &observation,
+        )
     }
 
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray
@@ -182,6 +227,18 @@ pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option
         flat: expose(MasterRole::Flat, 3, FLAT_LEVEL, 1.0),
         flat_dark: None,
     }
+}
+
+/// The sky's level in exposure `index`, against the field's frame: a cycle of five through 0.92,
+/// 0.96, 1, 1.04 and 1.08, each the nearest f32 to its percentage.
+fn exposure_sky(index: usize) -> f32 {
+    (92 + 4 * (index * 7 % 5)) as f32 / 100.0
+}
+
+/// The share of the stars' light that reaches the sensor in exposure `index`: a cycle of four
+/// through 1, 0.97, 0.94 and 0.91, each the nearest f32 to its percentage.
+fn exposure_transparency(index: usize) -> f32 {
+    (100 - 3 * (index * 3 % 4)) as f32 / 100.0
 }
 
 /// How much of the sensor a frame shows.
@@ -286,6 +343,29 @@ mod tests {
         assert_eq!((hot.len(), dead.len()), (3, 1));
         let frame = Field::Typical.render(SMALL);
         assert_eq!(frame.truth.sources.len(), 30);
+        // The faintest star, of flux 0.5, peaks at 0.036 over the sky, 25σ of its 0.0014 noise.
+        let mut tile = Field::Typical.tile(64).into_vec();
+        assert_eq!(tile.len(), 64 * 64);
+        let peak = tile.iter().copied().fold(f32::MIN, f32::max);
+        assert!(
+            peak - median_mut(&mut tile) > 10.0 * 0.0014,
+            "no star in the tile"
+        );
+        // Exposure 0: sky (92 + 4·0) / 100 = 0.92, transparency 1. Exposure 1: 7 mod 5 = 2 and
+        // 3 mod 4 = 3, so sky (92 + 8) / 100 = 1 and transparency (100 − 9) / 100 = 0.91.
+        assert_eq!((exposure_sky(1), exposure_transparency(1)), (1.0, 0.91));
+        assert_eq!((exposure_sky(0), exposure_transparency(0)), (0.92, 1.0));
+        let first = Field::Typical.aligned(SMALL, 0);
+        let second = Field::Typical.aligned(SMALL, 1);
+        for (first, second) in first.truth.sources.iter().zip(&second.truth.sources) {
+            assert_eq!((first.pos, second.flux), (second.pos, first.flux * 0.91));
+        }
+        let level = |frame: &SimFrame| median_mut(&mut frame.image.channel(0).pixels().to_vec());
+        let ratio = level(&second) / level(&first);
+        assert!(
+            (ratio / (1.0 / 0.92) - 1.0).abs() < 0.005,
+            "sky ratio {ratio}"
+        );
         assert_eq!(frame.image.channel(0).pixels().len(), 600 * 400);
         assert_eq!(frame.image.metadata.camera_white_balance, None);
         let mosaic = Field::Typical.mosaic(SMALL, RGGB);
