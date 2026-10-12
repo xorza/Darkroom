@@ -5,6 +5,7 @@
 //! to end.
 
 use std::cell::OnceCell;
+use std::time::Duration;
 
 use common::CancelToken;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -30,7 +31,9 @@ const SIDE: Size2us = Size2us::new(2048, 2048);
 pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;
     let frames = OnceCell::new();
-    let mut group = fixture::group(c, "stage/drizzle", Scale::Frame);
+    // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(7200);
+    let mut group = fixture::group(c, "stage/drizzle", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * SIDE.pixel_count()) as u64,
     ));
@@ -68,7 +71,9 @@ pub(crate) fn benches(c: &mut Criterion) {
 pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
-    let mut group = fixture::group(c, "pipeline/drizzle", Scale::Pipeline);
+    // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(64_730);
+    let mut group = fixture::group(c, "pipeline/drizzle", Scale::Set { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("rggb", set), |b| {

@@ -3,6 +3,7 @@
 
 use std::cell::OnceCell;
 use std::path::Path;
+use std::time::Duration;
 
 use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -133,7 +134,13 @@ pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let masters = OnceCell::new();
-    let mut group = fixture::group(c, "pipeline/calibrate_align_stack", Scale::Pipeline);
+    // The slowest bench's iteration, `rggb/spilled`'s median on a Ryzen 7 6800U, x86-64-v3.
+    let iteration = Duration::from_millis(18_340);
+    let mut group = fixture::group(
+        c,
+        "pipeline/calibrate_align_stack",
+        Scale::Set { iteration },
+    );
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     for (tier, memory_override) in [("resident", None), ("spilled", Some(SPILLED_MACHINE_BYTES))] {

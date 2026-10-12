@@ -7,18 +7,6 @@ rules are the ones `lumos/src/bench/mod.rs` states.
 
 Done in this order; each is deleted when it is committed.
 
-7. **The sampling of seconds-long iterations.** `stage/combine` (1.96 s an iteration) and
-   `stage/drizzle` (6.91 s) are sampled at `Scale::Frame`, whose 3 s window holds neither, so
-   criterion warns "Unable to complete 10 samples" on every run; the `pipeline` groups take longer
-   still at `Scale::Pipeline`'s 10 s. Measured on the Linux laptop, x86-64-v3.
-   - Rename `Scale::Pipeline` to `Scale::Set`, "a set of frames, in memory or in files: seconds an
-     iteration", and sample every set group with it: `stage/combine`, `stage/drizzle` and the
-     `pipeline` tier.
-   - Find the established way criterion benches of seconds an iteration are sampled without the
-     warning, and apply it. If it is a measurement time per group, derive it from each group's
-     measured iteration and say on the group where the figure comes from.
-   - Update `Scale`'s docs and `lumos/src/bench/mod.rs` where they name the scales.
-
 8. **The `imaginarium` README names a quickbench dev-dependency that does not exist.**
    `imaginarium/README.md:15` says the benchmark harness lives in `../quickbench/` as a
    dev-dependency; `imaginarium/Cargo.toml` has none, and darkroom has no `quickbench` submodule

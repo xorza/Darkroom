@@ -5,6 +5,7 @@
 //! disk; and under every rejection the configuration offers, resident.
 
 use std::cell::OnceCell;
+use std::time::Duration;
 
 use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -34,7 +35,10 @@ pub(crate) fn benches(c: &mut Criterion) {
     let lights = OnceCell::new();
     let lights = || lights.get_or_init(|| Lights::of(field));
     let set = format!("{STACKED_LIGHTS}x{}", field.name());
-    let mut group = fixture::group(c, "stage/combine", Scale::Frame);
+    // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a Ryzen 7 6800U,
+    // x86-64-v3.
+    let iteration = Duration::from_millis(2550);
+    let mut group = fixture::group(c, "stage/combine", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * FRAME.pixel_count()) as u64,
     ));
