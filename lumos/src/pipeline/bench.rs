@@ -1,11 +1,12 @@
-//! The pipeline's stages between a light's decode and its stack: its preparation, and its
-//! parking on the spill tier.
+//! The pipeline's stages between a light's decode and its stack, its preparation and its parking
+//! on the spill tier; and the pipeline itself, from a session's light files to the stack.
 
 use std::cell::OnceCell;
 
 use common::{CancelToken, TempDir};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
+use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
@@ -13,10 +14,13 @@ use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::io::image::load_context::LoadContext;
+use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::AlignStackConfig;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::bench::Pair;
 use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::WarpBuffers;
@@ -94,4 +98,51 @@ fn park(c: &mut Criterion) {
         let mut buffers = WarpBuffers::new(parked.dimensions);
         b.iter(|| buffers.warp_into(&source, &warp, WarpParams::default()));
     });
+}
+
+/// The memory override the spilled run plans against: under the 3.5 GB that twelve demosaiced
+/// 24 MP lights alone hold, so the run spills them.
+const SPILLED_MACHINE_BYTES: u64 = 4 << 30;
+
+/// `calibrate_align_stack` over a session's raw lights, 16-bit mosaics as the camera writes them,
+/// under the default configuration: each light decoded, calibrated by the session's masters,
+/// demosaiced and detected, then registered to the reference, warped and combined. Resident, and
+/// spilled on the memory of a 4 GiB machine.
+pub(crate) fn pipeline(c: &mut Criterion) {
+    let field = Field::Typical;
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let masters = OnceCell::new();
+    let mut group = fixture::group(c, "pipeline/calibrate_align_stack", Scale::Pipeline);
+    group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
+    let set = format!("{LIGHTS}x{}", field.name());
+    for (tier, memory_override) in [("resident", None), ("spilled", Some(SPILLED_MACHINE_BYTES))] {
+        group.bench_function(BenchmarkId::new(format!("rggb/{tier}"), &set), |b| {
+            let masters: &CalibrationMasters = masters.get_or_init(|| {
+                CalibrationMasters::from_images(
+                    scene::masters(FRAME, cfa_type),
+                    DEFAULT_SIGMA_THRESHOLD,
+                    &CancelToken::never(),
+                )
+                .unwrap()
+            });
+            let files = Files::raw_lights(field, cfa_type);
+            let config = AlignStackConfig {
+                ingest: IngestConfig {
+                    memory_override,
+                    ..IngestConfig::with_cache_dir(files.dir().join("cache"))
+                },
+                ..AlignStackConfig::default()
+            };
+            b.iter(|| {
+                calibrate_align_stack(
+                    &files.paths,
+                    masters,
+                    &config,
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+                .unwrap()
+            });
+        });
+    }
 }

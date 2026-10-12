@@ -6,13 +6,14 @@ Status: proposal, every decision in section 6 taken; no code written. Scope: eve
 
 Done in this order; each is deleted when it is committed. An item that builds a group also removes
 the quickbench benches that section 5 maps to it, and adds the `bench::scene` entries (3.2) it is
-the first to need; the `Pipeline` scale comes with the `pipeline` tier.
+the first to need.
 
 4. `kernel/frame_store`: only `spill/read/cold` is left, blocked on
    [a question](bench-proposal_QUESTIONS.md).
 9. The `stage` tier: only `stage/park/warp_from_map/cold` is left, blocked on
    [a question](bench-proposal_QUESTIONS.md).
-10. The `pipeline` tier.
+10. The `pipeline` tier: only `pipeline/drizzle/rggb` is left, blocked on
+    [a question](bench-proposal_QUESTIONS.md).
 11. quickbench removed from `lumos`: the dev-dependency, any bench left, every real-data bench
     (3.3), and the AGENTS.md text.
 
