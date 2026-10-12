@@ -7,7 +7,7 @@ use arrayvec::ArrayVec;
 use crate::math::statistics::float::{Float, OrderKeys};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{mad_to_sigma, median_of_keys, median_of_magnitudes};
+use crate::math::statistics::{mad_to_sigma, median_of_magnitudes, median_of_partitioned_keys};
 use crate::math::sum::mean_f32;
 
 /// Scratch space a sigma-clip pass borrows for its per-value deviations.
@@ -98,21 +98,25 @@ impl ClippedStats {
 enum ClipPass {
     /// No value was clipped, or the spread is below what the data can resolve: the final location.
     Converged(MedianMad),
-    /// The survivors, now `kept` long at the front.
-    Clipped { kept: usize },
+    /// The survivors, now `kept` long at the front, the first `left` of them none above any after.
+    Clipped { kept: usize, left: usize },
 }
 
-/// One pass over the values `keys` stand for, at least 3, each read by `decode`: their median and
-/// MAD, then every value beyond `kappa` σ of the median dropped, the survivors' keys closed up at
-/// the front.
+/// One pass over the values `keys` stand for, at least 3, each read by `decode`, the keys before
+/// `boundary` none above any after: their median and MAD, then every value beyond `kappa` σ of the
+/// median dropped, the survivors' keys closed up at the front.
+///
+/// The median leaves the keys partitioned at the middle, and the survivors keep their order, so the
+/// next pass's median is searched for on one side of the survivors of the middle's left.
 fn clip_pass(
     keys: &mut [i32],
+    boundary: usize,
     deviations: &mut [f32],
     kappa: f32,
     decode: impl Fn(i32) -> f32 + Copy,
 ) -> ClipPass {
     debug_assert!(keys.len() >= 3 && deviations.len() == keys.len());
-    let median = median_of_keys::<f32>(keys);
+    let median = median_of_partitioned_keys::<f32>(keys, boundary);
     fill_deviations(keys, median, deviations, decode);
     let mad = median_of_magnitudes(deviations);
     let sigma = mad_to_sigma(mad);
@@ -124,7 +128,11 @@ fn clip_pass(
     // written and the survivors' count alone moves, so no branch hangs on a value.
     let threshold = kappa * sigma;
     let mut kept = 0;
+    let mut left = 0;
     for i in 0..keys.len() {
+        if i == keys.len() / 2 {
+            left = kept;
+        }
         let key = keys[i];
         keys[kept] = key;
         kept += usize::from((decode(key) - median).abs() <= threshold);
@@ -132,18 +140,19 @@ fn clip_pass(
     if kept == keys.len() {
         ClipPass::Converged(MedianMad { median, mad })
     } else {
-        ClipPass::Clipped { kept }
+        ClipPass::Clipped { kept, left }
     }
 }
 
 /// The median and MAD of the values `keys` stand for, under the total order, through `deviations`.
 fn survivors_location(
     keys: &mut [i32],
+    boundary: usize,
     deviations: &mut [f32],
     decode: impl Fn(i32) -> f32 + Copy,
 ) -> MedianMad {
     debug_assert!(!keys.is_empty() && deviations.len() == keys.len());
-    let median = median_of_keys::<f32>(keys);
+    let median = median_of_partitioned_keys::<f32>(keys, boundary);
     fill_deviations(keys, median, deviations, decode);
     MedianMad {
         median,
@@ -173,19 +182,25 @@ fn clip(
     iterations: usize,
     decode: impl Fn(i32) -> f32 + Copy,
 ) -> Survivors {
-    let mut len = keys.len();
+    let (mut len, mut boundary) = (keys.len(), 0);
     for _ in 0..iterations {
         if len < 3 {
             break;
         }
-        match clip_pass(&mut keys[..len], &mut deviations[..len], kappa, decode) {
+        match clip_pass(
+            &mut keys[..len],
+            boundary,
+            &mut deviations[..len],
+            kappa,
+            decode,
+        ) {
             ClipPass::Converged(location) => return Survivors { location, len },
-            ClipPass::Clipped { kept } => len = kept,
+            ClipPass::Clipped { kept, left } => (len, boundary) = (kept, left),
         }
     }
     // A pass keeps at least the values at the median, so `len` stays at least 1.
     Survivors {
-        location: survivors_location(&mut keys[..len], &mut deviations[..len], decode),
+        location: survivors_location(&mut keys[..len], boundary, &mut deviations[..len], decode),
         len,
     }
 }

@@ -34,8 +34,8 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `statistics/median_mad/4096` | 0.77 | 0.89 | Same. |
 | `statistics/mad_with_scratch/4096` | 0.76 | 0.89 | Median of magnitudes. |
 | `statistics/robust_sigma_f64/4096` | 0.78 | 0.95 | Both medians on keys. |
-| `statistics/sigma_clipped/16` | 0.85 | 1.00 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
-| `statistics/sigma_clipped/4096` | 0.93 | 0.82 | Same. |
+| `statistics/sigma_clipped/16` | 0.88 | 1.00 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits; a pass after the first searches for its median on one side only, as the one before left the keys partitioned at its middle and the survivors keep their order. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
+| `statistics/sigma_clipped/4096` | 0.75 | 0.82 | Same. |
 | `statistics/spread/16` | 0.72 | 0.95 | The MAD of a sorted window by a binary search over how many of its middle rank each side of the centre gives, the deviations two ascending runs: as many steps as the length has bits, where the merge took half the window. Same bits. |
 | `statistics/spread/256` | 0.37 | 0.29 | Same. |
 | `pixel_quadrature/sufficient_order/gaussian_0.5/1` | 0.48 | 0.42 | The orders bisected, as the bound falls with the order; each order's golden-section search ends at the first ρ whose bound is within the tolerance, which the least it would end on is at most. Same orders. The star fits run it twice a star. |

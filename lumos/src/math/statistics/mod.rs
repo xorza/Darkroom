@@ -86,14 +86,29 @@ pub(crate) fn median_of_magnitudes<F: Float>(magnitudes: &mut [F]) -> F {
 /// middle ones of an even count.
 #[inline]
 fn median_of_keys<F: Float>(keys: &mut [F::Key]) -> F {
+    median_of_partitioned_keys::<F>(keys, 0)
+}
+
+/// [`median_of_keys`] of keys none of which before `boundary` is above one after it: the upper
+/// middle lies on one side, and only that side is searched. Leaves the keys partitioned at the
+/// upper middle, `len / 2`, as a selection over all of them does.
+#[inline]
+fn median_of_partitioned_keys<F: Float>(keys: &mut [F::Key], boundary: usize) -> F {
     let len = keys.len();
-    let (lower_part, upper, _) = keys.select_nth_unstable(len / 2);
-    let upper = F::from_key(*upper);
+    let middle = len / 2;
+    let (start, end) = if middle < boundary {
+        (0, boundary)
+    } else {
+        (boundary, len)
+    };
+    keys[start..end].select_nth_unstable(middle - start);
+    let upper = F::from_key(keys[middle]);
     if len % 2 == 1 {
         return upper;
     }
     // A fold from the first key, not `Iterator::max`, which compiles to a scalar loop: the fold
     // vectorizes, ten times as fast on arm64 and twice on x86.
+    let lower_part = &keys[..middle];
     let lower = F::from_key(lower_part.iter().copied().fold(lower_part[0], Ord::max));
     (lower + upper) * F::HALF
 }
