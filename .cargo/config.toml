@@ -1,7 +1,7 @@
 [alias]
-# Every bench case of the workspace, which only lumos has: `cargo benches -- --list`,
-# `-- '^atomic/'`, `-- --exact atomic/math/sum/sum_f32/scalar/1`.
-benches = "bench -p lumos"
+# Every bench case of the workspace, in the two crates that have them: `cargo benches -- --list`,
+# `-- '^atomic/'`, `-- --exact integration/editor_frame/cpu/pan`, `--bench darkroom`.
+benches = "bench -p lumos -p darkroom"
 
 # x86-64-v3 (Haswell, 2013; Excavator, 2015): AVX2, FMA, BMI2 and F16C are static, so palantir's
 # f16 conversions inline instead of taking a runtime feature check. An optimization only: code

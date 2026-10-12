@@ -7,20 +7,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 
-mod core;
-mod gui;
-mod platform;
-
 use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
-use common::is_debug;
-use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
-
-use crate::core::io::preferences::Preferences;
-use crate::gui::MAIN_WINDOW;
-use crate::gui::app::App;
 
 /// darkroom — node-graph editor.
 #[derive(Parser, Debug)]
@@ -33,103 +23,22 @@ struct Cli {
 }
 
 fn main() {
-    init_tracing();
+    darkroom::init_tracing();
 
     let Cli { document } = Cli::parse();
-    if let Err(error) = run_gui(document) {
+    if let Err(error) = darkroom::run(document) {
         tracing::error!("darkroom: {error}");
         process::exit(1);
     }
 }
 
-/// Launch the Palantir desktop editor on `document` (the command-line
-/// argument, if there was one). The winit event loop owns the main thread, so
-/// this doesn't return until the window closes.
-fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
-    // Load preferences here, before the window exists, so a saved size /
-    // position seeds the window at creation (`App::new` runs after the
-    // first window is already up, too late to size it). Reuse the same
-    // instance for the app so we don't read the file twice.
-    let preferences = Preferences::load();
-    // Reverse-DNS, and exactly the basename of
-    // `packaging/linux/com.cssodessa.darkroom.desktop` — that equality is what
-    // ties the window to its launcher entry, so the shell groups the two and
-    // takes the taskbar icon from the entry. Wayland windows carry no identity
-    // at all without it.
-    let mut window = WindowConfig::new("Darkroom").with_app_id("com.cssodessa.darkroom");
-    if let Some(icon) = load_icon() {
-        window = window.with_icon(icon);
-    }
-    if let Ok(Preferences {
-        window: Some(w), ..
-    }) = &preferences
-    {
-        window = window.with_inner_size(w.size).with_maximized(w.maximized);
-        if let Some(pos) = w.position {
-            window = window.with_position(pos);
-        }
-    }
-    let host = WinitHost::builder(MAIN_WINDOW)
-        .window(window)
-        .build(move |ui, handle| {
-            let mut overlay = ui.debug_overlay();
-            overlay.damage_rect = is_debug();
-            // The `settle n/m` half of this readout is how a gesture's
-            // record-pass cost gets read in the running editor — drag a
-            // node and watch whether both halves advance together.
-            overlay.frame_stats = is_debug();
-            ui.set_debug_overlay(overlay);
-
-            App::new(ui, handle, preferences, document)
-        })?;
-
-    // Between `build` and `run` because that is the only window that works on
-    // macOS; every other platform has nothing to do here.
-    platform::route_opened_documents(host.handle());
-    host.run()
-}
-
-/// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
-/// taskbar. Honored on Windows and Linux; macOS ignores per-window icons —
-/// its Dock icon comes from the `.app` bundle (`[package.metadata.bundle]`
-/// in `Cargo.toml`). Returns `None` if the embedded asset ever fails to
-/// decode, degrading to the platform default rather than blocking startup.
-fn load_icon() -> Option<Image> {
-    static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
-    let rgba = image::load_from_memory(ICON_PNG)
-        .inspect_err(|e| tracing::warn!("window icon decode failed: {e}"))
-        .ok()?
-        .to_rgba8();
-    let (w, h) = rgba.dimensions();
-    Image::from_srgba8(UVec2::new(w, h), rgba.into_raw())
-        .inspect_err(|e| tracing::warn!("window icon rejected: {e}"))
-        .ok()
-}
-
-/// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
-/// `info`). `try_init` is a no-op if a subscriber is already installed.
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
-}
-
-#[cfg(test)]
-#[expect(
-    unsafe_code,
-    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
-)]
-mod alloc_audit;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
 
-    #[test]
-    fn load_icon_decodes_embedded_png() {
-        let icon = load_icon().expect("the embedded icon decodes");
-        assert_eq!(icon.size(), UVec2::new(256, 256));
-    }
+    use clap::Parser;
+
+    use crate::Cli;
 
     #[test]
     fn bare_invocation_parses() {

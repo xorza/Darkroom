@@ -222,6 +222,8 @@ impl Session {
     }
 }
 
+#[cfg(feature = "internals")]
+pub(crate) mod bench;
 #[cfg(test)]
 pub(crate) mod internals;
 

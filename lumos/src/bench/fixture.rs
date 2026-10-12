@@ -60,6 +60,10 @@ impl Scale {
     const SET_ITERATIONS: u32 = 2;
 
     /// Sets the sampling of the benches `group` registers from here on.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "`Scale::apply` is the one place a group's sampling is set"
+    )]
     pub(crate) fn apply(self, group: &mut BenchmarkGroup<'_, WallTime>) {
         match self {
             Self::Sample => group

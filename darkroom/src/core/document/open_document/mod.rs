@@ -330,7 +330,7 @@ impl OpenDocument {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::core::document::Document;
     use crate::core::document::open_document::OpenDocument;
@@ -347,6 +347,7 @@ pub(crate) mod internals {
         }
 
         /// Whether an undo would take an entry back.
+        #[cfg(test)]
         pub(crate) fn can_undo(&self) -> bool {
             self.history.can_undo()
         }
