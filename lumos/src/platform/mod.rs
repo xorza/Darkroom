@@ -63,7 +63,14 @@ impl ScratchFile {
     pub(crate) fn map(self) -> io::Result<MappedFile> {
         // SAFETY: a scratch file has no name, so nothing but this handle can change it.
         let map = unsafe { Mmap::map(&self.file) }?;
-        Ok(MappedFile::new(map, files::hold_for_map(self.file)))
+        #[cfg(any(test, feature = "bench"))]
+        let evictable = self.file.try_clone()?;
+        Ok(MappedFile::new(
+            map,
+            files::hold_for_map(self.file),
+            #[cfg(any(test, feature = "bench"))]
+            evictable,
+        ))
     }
 }
 
@@ -74,6 +81,10 @@ pub(crate) struct MappedFile {
     /// The handle a scratch file needs held while it is mapped: Windows deletes it when its last
     /// handle closes. `None` where the map keeps the file alive by itself.
     _held: Option<File>,
+    /// The file under the map, for [`Self::evict`]: a page cache is dropped by file, not by
+    /// mapping. Held in test and bench builds only, so a run holds no handle per plane.
+    #[cfg(any(test, feature = "bench"))]
+    evictable: File,
 }
 
 impl MappedFile {
@@ -87,7 +98,12 @@ impl MappedFile {
         let file = File::open(path)?;
         // SAFETY: as this function's contract.
         let map = unsafe { Mmap::map(&file) }?;
-        Ok(Self::new(map, None))
+        Ok(Self::new(
+            map,
+            None,
+            #[cfg(any(test, feature = "bench"))]
+            file,
+        ))
     }
 
     #[cfg_attr(
@@ -97,9 +113,18 @@ impl MappedFile {
             reason = "const where the advice is a no-op, as on Windows, not on Unix"
         )
     )]
-    fn new(map: Mmap, held: Option<File>) -> Self {
+    fn new(
+        map: Mmap,
+        held: Option<File>,
+        #[cfg(any(test, feature = "bench"))] evictable: File,
+    ) -> Self {
         files::advise_sequential(&map);
-        Self { map, _held: held }
+        Self {
+            map,
+            _held: held,
+            #[cfg(any(test, feature = "bench"))]
+            evictable,
+        }
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {
@@ -167,19 +192,24 @@ impl FileSystem {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use crate::platform::{MappedFile, os};
 
     impl MappedFile {
+        /// Whether [`Self::evict`] can drop a file's pages on this system: on Linux, not on macOS
+        /// or Windows here. A bench of cold reads runs only where it can.
+        pub(crate) const EVICTS: bool = os::internals::EVICTS;
+
         /// Drop the file's pages from the page cache, so the next read comes from the disk: what a
         /// bench of cold reads does between passes. `false` where the system offers no way, as
         /// macOS and Windows here, and the next read may come from memory.
         pub(crate) fn evict(&self) -> bool {
-            os::internals::evict(&self.map)
+            os::internals::evict(&self.map, &self.evictable)
         }
 
         /// The share of the file's pages in memory; `None` where the system does not say.
+        #[cfg(test)]
         pub(crate) fn resident_share(&self) -> Option<f64> {
             os::internals::resident_share(&self.map)
         }

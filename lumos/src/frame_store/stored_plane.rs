@@ -87,7 +87,7 @@ impl<T: Pod> StoredPlane<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use bytemuck::Pod;
 
@@ -105,6 +105,7 @@ pub(crate) mod internals {
 
         /// The share of a mapped plane's pages in memory; `None` for a resident plane, or where
         /// the system does not say.
+        #[cfg(test)]
         pub(crate) fn resident_share(&self) -> Option<f64> {
             match self {
                 Self::Memory(_) => None,

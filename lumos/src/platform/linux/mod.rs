@@ -40,39 +40,48 @@ fn memory_backed_in(mounts: &MountTable, path: &Path) -> Option<String> {
         .map(|mount| mount.filesystem.clone())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use std::ffi::c_void;
+    use std::fs::File;
+    use std::os::fd::AsRawFd;
 
     use memmap2::Mmap;
 
+    /// [`evict`] drops a file's pages by `POSIX_FADV_DONTNEED`.
+    pub(crate) const EVICTS: bool = true;
+
     /// The page size, in bytes.
+    #[cfg(test)]
     fn page_size() -> usize {
         // SAFETY: `sysconf` reads a constant of the system.
         let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         usize::try_from(size).expect("the page size is positive")
     }
 
-    /// Drop `map`'s pages from the page cache: each page is faulted in first, since
-    /// `MADV_PAGEOUT` (Linux 5.4) reclaims only the pages this mapping holds, and a file written
-    /// through `write` keeps its pages in the cache unmapped; `msync` cleans them, so the reclaim
-    /// writes nothing. Whether the kernel took both calls.
-    pub(crate) fn evict(map: &Mmap) -> bool {
+    /// Drop the pages of `file`, which `map` maps, from the page cache, as `vmtouch -e` does:
+    /// `fdatasync` cleans them, `MADV_DONTNEED` takes them out of this process's map, which reads
+    /// the file again on its next touch, and `POSIX_FADV_DONTNEED` drops every clean page no map
+    /// holds, draining each CPU's batch of pages not yet on the LRU first. `MADV_PAGEOUT` alone
+    /// misses the pages still in such a batch, and a file just written holds many. Whether the
+    /// kernel took every call.
+    pub(crate) fn evict(map: &Mmap, file: &File) -> bool {
         if map.is_empty() {
             return true;
         }
-        for offset in (0..map.len()).step_by(page_size()) {
-            std::hint::black_box(map[offset]);
-        }
+        let synced = file.sync_data().is_ok();
         let start = map.as_ptr().cast::<c_void>().cast_mut();
-        // SAFETY: the range is the map's own, and neither call changes what it reads.
-        unsafe {
-            libc::msync(start, map.len(), libc::MS_SYNC) == 0
-                && libc::madvise(start, map.len(), libc::MADV_PAGEOUT) == 0
-        }
+        // SAFETY: the range is the map's own, a shared read-only map of a file, whose pages the
+        // next touch reads back from the file unchanged.
+        let unmapped = unsafe { libc::madvise(start, map.len(), libc::MADV_DONTNEED) } == 0;
+        // SAFETY: the descriptor is the open file's own.
+        let dropped =
+            unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) } == 0;
+        synced && unmapped && dropped
     }
 
     /// The share of `map`'s pages in memory, by `mincore`; `None` when the call fails.
+    #[cfg(test)]
     pub(crate) fn resident_share(map: &Mmap) -> Option<f64> {
         let pages = map.len().div_ceil(page_size());
         if pages == 0 {
