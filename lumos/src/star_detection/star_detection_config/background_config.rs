@@ -1,5 +1,7 @@
 //! Background estimation and refinement settings.
 
+use std::num::NonZeroUsize;
+
 use crate::error::InvalidConfigField;
 
 /// Strategy for refining background estimation.
@@ -13,17 +15,20 @@ pub enum BackgroundRefinement {
     /// Iterative refinement with source masking.
     /// Detects sources above threshold, masks them, and re-estimates background.
     /// Best for crowded fields.
-    Iterative {
-        /// Number of refinement iterations. Usually 1-2 is sufficient.
-        iterations: usize,
-        /// Radius of the disk the source mask is dilated by before the sky is re-estimated
-        /// around it.
-        mask_dilation: usize,
-        /// The level, in the detection plane's own σ, above which a pixel is masked as a source.
-        /// Lower than the detection threshold, so a source's faint wings are masked too: photutils
-        /// masks at 2σ on the convolved data.
-        mask_sigma: f32,
-    },
+    Iterative(IterativeRefinement),
+}
+
+/// The parameters of [`BackgroundRefinement::Iterative`].
+#[derive(Debug, Clone, Copy)]
+pub struct IterativeRefinement {
+    /// Number of refinement iterations, at most 10. Usually 1-2 is sufficient.
+    pub iterations: NonZeroUsize,
+    /// Radius of the disk the source mask is dilated by before the sky is re-estimated around it.
+    pub mask_dilation: usize,
+    /// The level, in the detection plane's own σ, above which a pixel is masked as a source. Lower
+    /// than the detection threshold, so a source's faint wings are masked too: photutils masks at
+    /// 2σ on the convolved data.
+    pub mask_sigma: f32,
 }
 
 impl BackgroundRefinement {
@@ -31,16 +36,16 @@ impl BackgroundRefinement {
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
             Self::None => Ok(()),
-            Self::Iterative {
+            Self::Iterative(IterativeRefinement {
                 iterations,
                 mask_dilation,
                 mask_sigma,
-            } => {
+            }) => {
                 InvalidConfigField::check(
-                    (1..=10).contains(iterations),
+                    iterations.get() <= 10,
                     "background refinement iterations",
-                    "between 1 and 10",
-                    *iterations as f64,
+                    "at most 10",
+                    iterations.get() as f64,
                 )?;
                 InvalidConfigField::check(
                     *mask_dilation <= 50,

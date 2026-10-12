@@ -2,13 +2,17 @@
 
 mod synthetic_skies;
 
+use std::num::NonZeroUsize;
+
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::math::statistics::mad_to_sigma;
-use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
+use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::background_config::{
+    BackgroundConfig, IterativeRefinement,
+};
 
 /// The background and noise maps of `pixels` at `tile_size`.
 fn estimate(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundEstimate {
@@ -247,8 +251,8 @@ fn refine_masks_the_stars_and_their_halos_out() {
         BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
             .refine(
                 &pixels,
-                Refinement {
-                    iterations,
+                IterativeRefinement {
+                    iterations: NonZeroUsize::new(iterations).unwrap(),
                     mask_dilation,
                     mask_sigma: 4.0,
                 },

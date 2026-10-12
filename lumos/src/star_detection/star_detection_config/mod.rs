@@ -3,6 +3,8 @@
 //! This module defines the composed [`StarDetectionConfig`] and stage-specific configuration types
 //! used by the star detection pipeline.
 
+use std::num::NonZeroUsize;
+
 use crate::error::InvalidConfigField;
 
 pub(crate) mod background_config;
@@ -12,7 +14,7 @@ pub(crate) mod fwhm_config;
 pub(crate) mod measurement_config;
 
 use crate::star_detection::star_detection_config::background_config::{
-    BackgroundConfig, BackgroundRefinement,
+    BackgroundConfig, BackgroundRefinement, IterativeRefinement,
 };
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
@@ -127,11 +129,11 @@ impl StarDetectionConfig {
     pub fn crowded_field() -> Self {
         Self {
             background: BackgroundConfig {
-                refinement: BackgroundRefinement::Iterative {
-                    iterations: 2,
+                refinement: BackgroundRefinement::Iterative(IterativeRefinement {
+                    iterations: NonZeroUsize::new(2).unwrap(),
                     mask_dilation: 3,
                     mask_sigma: 2.0,
-                },
+                }),
                 ..Default::default()
             },
             extraction: ExtractionConfig {
@@ -164,11 +166,11 @@ impl StarDetectionConfig {
             background: BackgroundConfig {
                 tile_size: 128,
                 sigma_clip_iterations: 3,
-                refinement: BackgroundRefinement::Iterative {
-                    iterations: 3,
+                refinement: BackgroundRefinement::Iterative(IterativeRefinement {
+                    iterations: NonZeroUsize::new(3).unwrap(),
                     mask_dilation: 5,
                     mask_sigma: 2.0,
-                },
+                }),
             },
             extraction: ExtractionConfig {
                 sigma_threshold: 3.0,

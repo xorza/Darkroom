@@ -10,7 +10,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
+use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
 use crate::star_detection::resources::DetectionResources;
@@ -61,20 +61,11 @@ impl PreparedFrame {
         let mut background =
             BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources);
         let mut sources = None;
-        if let BackgroundRefinement::Iterative {
-            iterations,
-            mask_dilation,
-            mask_sigma,
-        } = config.background.refinement
-        {
+        if let BackgroundRefinement::Iterative(refinement) = config.background.refinement {
             // The sources are found at the FWHM the configuration starts from.
             let refined = background.refine(
                 &plane,
-                Refinement {
-                    iterations,
-                    mask_dilation,
-                    mask_sigma,
-                },
+                refinement,
                 PlaneFilters {
                     median: demosaiced,
                     matched: config
