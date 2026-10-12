@@ -50,11 +50,8 @@ impl Session {
         let heap = HEAP.exclusive();
         let image =
             LinearImage::from_planar_channels(ImageDimensions::new((8, 8), 1), [vec![0.0; 64]]);
-        lumos::warp(
-            &image,
-            &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
-            WarpParams::default(),
-        );
+        (WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))))
+            .warp(&image, WarpParams::default());
         Self {
             _heap: heap,
             pool: rayon::ThreadPoolBuilder::new()

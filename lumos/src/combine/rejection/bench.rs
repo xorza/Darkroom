@@ -10,13 +10,13 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
-use crate::combine::cache::sample::PixelSamples;
-use crate::combine::cache::sample_noise::NoiseColumns;
-use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::frame_cache::sample::PixelSamples;
+use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::rejection::trim_config::TrimConfig;
+use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 

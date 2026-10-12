@@ -2,14 +2,14 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::linear::LinearImage;
 use crate::memory::run_plan::RunPlan;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
@@ -182,12 +182,13 @@ mod tests {
     use crate::memory::run_memory::RunMemory;
     use common::TempDir;
 
-    use crate::combine::cache::frame_gate::FrameGate;
-    use crate::frame_store::frame_stats::FrameStats;
+    use crate::combine::frame_cache::frame_gate::FrameGate;
+    use crate::frame::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::tier::Tier;
+    use crate::image::pixel_flags::PixelFlags;
+    use crate::image::quality_flags::QualityFlags;
     use crate::internals::prelude::*;
-    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
     use crate::pipeline::frame_parking::FrameParking;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 

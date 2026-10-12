@@ -1,49 +1,49 @@
-use crate::combine::config::{
+use crate::combine::stack_config::{
     Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
 };
 use crate::ingest::error::AdmissionError;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::calibration_masters::CalibrationMasters;
-use crate::calibration_masters::calibration_set::CalibrationSet;
-use crate::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-use crate::calibration_masters::cosmic_ray::error::CosmicRayError;
-use crate::calibration_masters::error::CalibrationError;
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::calibration_set::CalibrationSet;
+use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
+use crate::calibration::cosmic_ray::error::CosmicRayError;
+use crate::calibration::error::CalibrationError;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::error::FrameDimensionMismatch;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::DecodeCache;
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::tier::Tier;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::fits::cfa::save_cfa_fits;
-use crate::pipeline::align::{align_and_stack, align_and_stack_paths, register_warp_and_stack};
-use crate::pipeline::calibrate::calibrate_align_stack;
-use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::io::fits::cfa::save_cfa_fits;
+use crate::pipeline::align::register_warp_and_stack;
+use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
+use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registration::FrameRegistration;
 use crate::pipeline::pipeline_frame::PipelineFrame;
-use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::{StackingProgress, StackingStage};
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::warp;
-use crate::registration::transform::{Transform, TransformModel, TransformType, WarpTransform};
-use crate::star_detection::config::Config as StarDetectionConfig;
-use crate::star_detection::config::detection_config::DetectionConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::{Transform, TransformModel, TransformType};
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
+use crate::star_detection::star_detector::StarDetector;
 use common::TempDir;
 
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::write_fits;
-use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
-use crate::io::image::load_context::LoadContext;
+use crate::io::fits::options::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::load_context::LoadContext;
 use fits_well::image::Image as FitsImage;
 
 fn base_field() -> LinearImage {
@@ -53,12 +53,9 @@ fn base_field() -> LinearImage {
 /// Warp `base` by a pure translation to fake a dithered exposure.
 fn shifted(base: &LinearImage, dx: f64, dy: f64) -> LinearImage {
     let t = Transform::translation(DVec2::new(dx, dy));
-    warp(
-        base,
-        &WarpTransform::new(t),
-        RegistrationConfig::default().warp,
-    )
-    .image
+    WarpTransform::new(t)
+        .warp(base, RegistrationConfig::default().warp)
+        .image
 }
 
 #[test]
@@ -84,7 +81,14 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
                 .push((report.stage, report.current, report.total));
         }
     });
-    let result = align_and_stack(frames, &config, progress, CancelToken::never()).expect("stack");
+    let result = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            progress,
+            CancelToken::never(),
+        )
+        .expect("stack");
 
     assert_eq!(result.alignment.reference, 0);
     assert_eq!(
@@ -213,13 +217,14 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let result = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("stack");
+    let result = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack");
 
     assert_eq!(
         result.alignment.dropped(),
@@ -249,13 +254,14 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         blank(),
         shifted(&base, -4.0, 6.0),
     ];
-    let result = align_and_stack(
-        frames,
-        &weighted,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("manual weights follow the survivors");
+    let result = weighted
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("manual weights follow the survivors");
     assert_eq!(result.alignment.dropped(), vec![1, 3]);
     for frame in [1, 3] {
         assert!(
@@ -290,13 +296,14 @@ fn stacked_master_inherits_reference_frame_metadata() {
         reference: Reference::Index(1),
         ..Default::default()
     };
-    let result = align_and_stack(
-        vec![f0, f1, f2],
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("stack");
+    let result = config
+        .align_stack_images(
+            vec![f0, f1, f2],
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack");
 
     assert_eq!(result.alignment.reference, 1);
     assert_eq!(result.product.image.metadata.exposure_time, None);
@@ -315,13 +322,14 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     let odd = LinearImage::from_pixels(ImageDimensions::new((128, 128), 1), vec![0.1; 128 * 128]);
     let odder = LinearImage::from_pixels(ImageDimensions::new((64, 64), 1), vec![0.1; 64 * 64]);
 
-    let error = align_and_stack(
-        vec![base, odd, odder],
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = AlignStackConfig::default()
+        .align_stack_images(
+            vec![base, odd, odder],
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
 
     let AlignStackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
         index,
@@ -361,13 +369,14 @@ fn an_invalid_registration_config_is_reported_as_one() {
         "premise: this registration config must be invalid"
     );
 
-    let error = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(error, AlignStackError::RegistrationConfig(_)),
         "expected the config to be blamed, got {error:?}"
@@ -455,13 +464,14 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
         ..Default::default()
     };
 
-    let error = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             error,
@@ -486,13 +496,14 @@ fn all_non_reference_frames_dropped_errors() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let err = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(err, AlignStackError::AllFramesDropped { count: 2 }),
         "all non-reference frames dropped → AllFramesDropped {{ count: 2 }}, got {err:?}"
@@ -508,13 +519,14 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
 
-    let result = align_and_stack(
-        frames,
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("stack");
+    let result = AlignStackConfig::default()
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack");
     assert_ne!(
         result.alignment.reference, 0,
         "Auto must not anchor on the near-blank frame"
@@ -553,13 +565,14 @@ fn a_combine_error_names_the_input_light() {
         },
         ..AlignStackConfig::default()
     };
-    let error = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = config
+        .align_stack_images(
+            frames,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             error,
@@ -571,18 +584,19 @@ fn a_combine_error_names_the_input_light() {
 
 #[test]
 fn public_input_errors() {
-    let err = align_and_stack(
-        Vec::new(),
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let err = AlignStackConfig::default()
+        .align_stack_images(
+            Vec::new(),
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(matches!(err, AlignStackError::NoFrames));
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
-            detection: DetectionConfig {
+            extraction: ExtractionConfig {
                 sigma_threshold: 0.0,
                 ..Default::default()
             },
@@ -591,13 +605,14 @@ fn public_input_errors() {
         ..AlignStackConfig::default()
     };
     let image = LinearImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
-    let error = align_and_stack(
-        vec![image],
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = config
+        .align_stack_images(
+            vec![image],
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     let AlignStackError::DetectionConfig(invalid) = error else {
         panic!("expected a detection config error, got {error:?}")
     };
@@ -608,13 +623,14 @@ fn public_input_errors() {
     let dims = ImageDimensions::new((4, 4), 1);
     let flat = || LinearImage::from_pixels(dims, vec![0.1; 16]);
     let run = |lights: Vec<LinearImage>, config: &AlignStackConfig| {
-        align_and_stack(
-            lights,
-            config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap_err()
+        config
+            .align_stack_images(
+                lights,
+                &IngestConfig::default(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap_err()
     };
     let manual = AlignStackConfig {
         stack: StackConfig {
@@ -658,11 +674,11 @@ fn public_input_errors() {
     );
 }
 
-/// Persist `image` as a single-channel (`CfaType::Mono`) Lumos CFA FITS light — the cheapest
-/// input `calibrate_align_stack` accepts, since the mono demosaic is a passthrough and the frame
-/// reaches detection unchanged. `date_obs` is distinct per frame so the stacked master's metadata
-/// identifies which frame it was inherited from; the 10 s exposure every frame shares is what the
-/// master states.
+/// Persist `image` as a single-channel (`CfaType::Mono`) Lumos CFA FITS light — the cheapest input
+/// `AlignStackConfig::calibrate_align_stack_paths` accepts, since the mono demosaic is a
+/// passthrough and the frame reaches detection unchanged. `date_obs` is distinct per frame so the
+/// stacked master's metadata identifies which frame it was inherited from; the 10 s exposure every
+/// frame shares is what the master states.
 fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> PathBuf {
     let path = directory.join(format!("light_{index}.fits"));
     let mut cfa = make_cfa(
@@ -698,14 +714,15 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         write_mono_cfa_light(scratch.path(), 2, &flat(16)),
     ];
     let run = |paths: &[PathBuf], config: &AlignStackConfig| {
-        calibrate_align_stack(
-            paths,
-            &CalibrationMasters::default(),
-            config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap_err()
+        config
+            .calibrate_align_stack_paths(
+                paths,
+                &CalibrationMasters::default(),
+                &IngestConfig::default(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap_err()
     };
 
     let error = run(&paths, &AlignStackConfig::default());
@@ -762,14 +779,15 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     longer.metadata.exposure_time = Some(20.0);
     let longer_path = scratch.path().join("light_longer.fits");
     save_cfa_fits(&longer_path, &longer).unwrap();
-    let error = calibrate_align_stack(
-        &[paths[0].clone(), longer_path.clone()],
-        &masters,
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let error = AlignStackConfig::default()
+        .calibrate_align_stack_paths(
+            &[paths[0].clone(), longer_path.clone()],
+            &masters,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
     assert!(
         matches!(
             &error,
@@ -817,6 +835,7 @@ struct LinearLights {
     base: LinearImage,
     paths: Vec<PathBuf>,
     config: AlignStackConfig,
+    ingest: IngestConfig,
     context: LoadContext,
 }
 
@@ -851,16 +870,18 @@ impl LinearLights {
             .collect();
         let mut config = AlignStackConfig::default();
         config.registration.ransac.seed = 0x5EED_0F5E;
-        config.ingest.fits.cube = FitsCubeInterpretation::Rgb;
-        config.ingest.fits.float_scale = FitsFloatScale::Normalized;
+        let mut ingest = IngestConfig::default();
+        ingest.fits.cube = FitsCubeInterpretation::Rgb;
+        ingest.fits.float_scale = FitsFloatScale::Normalized;
         let context = LoadContext {
-            fits: config.ingest.fits.clone(),
+            fits: ingest.fits.clone(),
             ..LoadContext::new(CancelToken::never(), u64::MAX)
         };
         Self {
             base,
             paths,
             config,
+            ingest,
             context,
         }
     }
@@ -875,23 +896,25 @@ fn kept_lights_are_read_back_by_the_next_run() {
     let LinearLights {
         base,
         paths,
-        mut config,
+        config,
+        mut ingest,
         context,
     } = LinearLights::write(&scratch);
     let width = base.width();
-    config.ingest.keep_cache = true;
-    config.ingest.cache_dir = scratch.join("kept");
+    ingest.keep_cache = true;
+    ingest.cache_dir = scratch.join("kept");
     let run = || {
-        align_and_stack_paths(
-            &paths,
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
+        config
+            .align_stack_paths(
+                &paths,
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
     };
     let first = run();
-    let decode_cache = DecodeCache::open(&config.ingest.cache_dir).unwrap();
+    let decode_cache = DecodeCache::open(&ingest.cache_dir).unwrap();
     for path in &paths {
         let kept_light: LinearImage = decode_cache.decode(path, &context).unwrap();
         let decoded = LinearImage::from_file(path, &context).unwrap();
@@ -923,10 +946,10 @@ fn kept_lights_are_read_back_by_the_next_run() {
     );
 }
 
-/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held,
-/// with the found reference. The spilled two-pass run parks every light and reads back every
-/// registered frame. A cosmic-ray pass, which runs on mosaics alone, is refused for linear lights
-/// by both entries.
+/// Calibrated lights on disk stack through `AlignStackConfig::align_stack_paths` as they do decoded
+/// and held, with the found reference. The spilled two-pass run parks every light and reads back
+/// every registered frame. A cosmic-ray pass, which runs on mosaics alone, is refused for linear
+/// lights by both entries.
 #[test]
 fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() {
     let scratch = TempDir::new("lumos_linear_paths_found");
@@ -937,6 +960,7 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() 
         base,
         paths,
         config,
+        ingest,
         ..
     } = lights;
     let cosmic = AlignStackConfig {
@@ -944,18 +968,18 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() 
         ..config
     };
     assert!(matches!(
-        align_and_stack_paths(
+        cosmic.align_stack_paths(
             &paths,
-            &cosmic,
+            &ingest,
             ProgressCallback::default(),
             CancelToken::never()
         ),
         Err(AlignStackError::CosmicRayOnLinearLights)
     ));
     assert!(matches!(
-        align_and_stack(
+        cosmic.align_stack_images(
             vec![base],
-            &cosmic,
+            &ingest,
             ProgressCallback::default(),
             CancelToken::never()
         ),
@@ -963,8 +987,8 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() 
     ));
 }
 
-/// Calibrated lights on disk stack through `align_and_stack_paths` as they do decoded and held,
-/// with the held run's reference named. The spilled one-pass run parks no light.
+/// Calibrated lights on disk stack through `AlignStackConfig::align_stack_paths` as they do decoded
+/// and held, with the held run's reference named. The spilled one-pass run parks no light.
 #[test]
 fn calibrated_lights_on_disk_stack_as_held_ones_do_around_a_named_reference() {
     let scratch = TempDir::new("lumos_linear_paths_named");
@@ -972,9 +996,9 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_a_named_reference() {
     assert_tiers_stack_as_held(&lights, &scratch, Reference::Index);
 }
 
-/// The held run of `lights`, read as RGB, registers every light, and `align_and_stack_paths`
-/// matches it bit for bit resident and spilled, under the reference `reference` makes of the held
-/// run's.
+/// The held run of `lights`, read as RGB, registers every light, and
+/// `AlignStackConfig::align_stack_paths` matches it bit for bit resident and spilled, under the
+/// reference `reference` makes of the held run's.
 fn assert_tiers_stack_as_held(
     lights: &LinearLights,
     scratch: &TempDir,
@@ -983,6 +1007,7 @@ fn assert_tiers_stack_as_held(
     let LinearLights {
         paths,
         config,
+        ingest,
         context,
         ..
     } = lights;
@@ -991,13 +1016,14 @@ fn assert_tiers_stack_as_held(
         .map(|path| LinearImage::from_file(path, context).unwrap())
         .collect();
     assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
-    let expected = align_and_stack(
-        held,
-        config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
+    let expected = config
+        .align_stack_images(
+            held,
+            ingest,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
     let registered = expected.alignment.registered();
     assert_eq!(registered, paths.len(), "every light registers");
 
@@ -1010,17 +1036,23 @@ fn assert_tiers_stack_as_held(
         (u64::MAX, "ram", 0, 0),
         (1, "spill", parked_when_spilled, registered as u64),
     ] {
-        let mut config = config.clone();
-        config.ingest.memory_override = Some(memory);
-        config.ingest.cache_dir = scratch.join(cache);
-        config.reference = reference;
-        let result = align_and_stack_paths(
-            paths,
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap();
+        let config = AlignStackConfig {
+            reference,
+            ..config.clone()
+        };
+        let ingest = IngestConfig {
+            memory_override: Some(memory),
+            cache_dir: scratch.join(cache),
+            ..ingest.clone()
+        };
+        let result = config
+            .align_stack_paths(
+                paths,
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap();
         let report = &result.product.report;
         assert_eq!(
             (report.parked_lights, report.spilled_frames),
@@ -1082,23 +1114,25 @@ fn both_front_ends_report_the_same_stages() {
         .enumerate()
         .map(|(index, frame)| write_mono_cfa_light(scratch.path(), index, frame))
         .collect();
-    calibrate_align_stack(
-        &paths,
-        &CalibrationMasters::default(),
-        &config,
-        raw_progress,
-        CancelToken::never(),
-    )
-    .expect("raw-path stack");
+    config
+        .calibrate_align_stack_paths(
+            &paths,
+            &CalibrationMasters::default(),
+            &IngestConfig::default(),
+            raw_progress,
+            CancelToken::never(),
+        )
+        .expect("raw-path stack");
 
     let (decoded_reports, decoded_progress) = recorder();
-    align_and_stack(
-        frames.to_vec(),
-        &config,
-        decoded_progress,
-        CancelToken::never(),
-    )
-    .expect("decoded-path stack");
+    config
+        .align_stack_images(
+            frames.to_vec(),
+            &IngestConfig::default(),
+            decoded_progress,
+            CancelToken::never(),
+        )
+        .expect("decoded-path stack");
 
     assert_eq!(
         stages(&raw_reports),
@@ -1163,27 +1197,29 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = 0x5EED_0F5E;
 
-    let mut ram_config = config.clone();
-    ram_config.ingest.memory_override = Some(u64::MAX);
-    ram_config.ingest.cache_dir = scratch.join("ram_cache");
-
-    let mut streaming_config = config;
-    streaming_config.ingest.memory_override = Some(1);
-    streaming_config.ingest.cache_dir = scratch.join("streaming_cache");
+    let ram_ingest = IngestConfig {
+        memory_override: Some(u64::MAX),
+        ..IngestConfig::with_cache_dir(scratch.join("ram_cache"))
+    };
+    let streaming_ingest = IngestConfig {
+        memory_override: Some(1),
+        ..IngestConfig::with_cache_dir(scratch.join("streaming_cache"))
+    };
 
     let masters = CalibrationMasters::default();
-    let run = |config: &AlignStackConfig| {
-        calibrate_align_stack(
-            &paths,
-            &masters,
-            config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("stack the lights")
+    let run = |config: &AlignStackConfig, ingest: &IngestConfig| {
+        config
+            .calibrate_align_stack_paths(
+                &paths,
+                &masters,
+                ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("stack the lights")
     };
-    let ram = run(&ram_config);
-    let streaming = run(&streaming_config);
+    let ram = run(&config, &ram_ingest);
+    let streaming = run(&config, &streaming_ingest);
 
     // Premise: the two budgets must straddle the tier boundary. The report says which frames went
     // to disk, which is what proves this test exercised two code paths rather than the same one
@@ -1201,8 +1237,8 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         (paths.len() as u64, ram.alignment.registered() as u64),
         "streaming tier did not park every light and read back every registered frame"
     );
-    for config in [&ram_config, &streaming_config] {
-        let root = &config.ingest.cache_dir;
+    for ingest in [&ram_ingest, &streaming_ingest] {
+        let root = &ingest.cache_dir;
         assert!(
             !root.exists() || std::fs::read_dir(root).unwrap().next().is_none(),
             "{} kept a file",
@@ -1231,13 +1267,12 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // Naming the reference the automatic choice found takes each light through one pass, on both
     // tiers, and the stack is the same. The spilled one-pass run writes each light once, warped:
     // no calibrated light is parked before its registration, as the two-pass run parks every one.
-    let one_pass = |config: &AlignStackConfig| {
-        let mut config = config.clone();
-        config.reference = Reference::Index(ram.alignment.reference);
-        run(&config)
+    let one_pass = AlignStackConfig {
+        reference: Reference::Index(ram.alignment.reference),
+        ..config.clone()
     };
-    let ram_one_pass = one_pass(&ram_config);
-    let streaming_one_pass = one_pass(&streaming_config);
+    let ram_one_pass = run(&one_pass, &ram_ingest);
+    let streaming_one_pass = run(&one_pass, &streaming_ingest);
     assert_eq!(
         report(&streaming_one_pass),
         (0, ram.alignment.registered() as u64)
@@ -1267,13 +1302,14 @@ fn two_default_runs_stack_bit_for_bit() {
         ]
     };
     let run = || {
-        align_and_stack(
-            frames(),
-            &AlignStackConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("stack")
+        AlignStackConfig::default()
+            .align_stack_images(
+                frames(),
+                &IngestConfig::default(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("stack")
     };
     assert_same_stack(&run(), &run(), "second run");
 }
@@ -1356,14 +1392,15 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
     let frame = real_data::raw_light(&lights[0]);
 
-    let result = calibrate_align_stack(
-        lights,
-        &masters,
-        &AlignStackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("calibrate_align_stack");
+    let result = AlignStackConfig::default()
+        .calibrate_align_stack_paths(
+            lights,
+            &masters,
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("calibrate_align_stack_paths");
 
     // Three lights of one field a few minutes apart all register, and the stack has a light's
     // geometry and only finite samples.

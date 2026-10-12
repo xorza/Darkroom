@@ -6,8 +6,8 @@
 
 use std::ops::Range;
 
-use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::union_find::UnionFind;
+use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]

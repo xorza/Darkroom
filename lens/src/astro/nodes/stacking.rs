@@ -2,8 +2,7 @@
 
 use lumos::ProgressCallback;
 use lumos::{
-    AlignStackConfig, CalibrationMasters, LinearImage, QualityPlanes, Reference,
-    calibrate_align_stack,
+    AlignStackConfig, CalibrationMasters, IngestConfig, LinearImage, QualityPlanes, Reference,
 };
 use scenarium::async_lambda;
 use scenarium::{
@@ -81,13 +80,7 @@ pub(crate) fn register(library: &mut Library) {
                     let masters = masters_value
                         .as_custom::<Masters>()
                         .map_or(&empty, |masters| &masters.masters);
-                    calibrate_align_stack(
-                        &lights,
-                        masters,
-                        &config,
-                        ProgressCallback::default(),
-                        cancel,
-                    )
+                    config.calibrate_align_stack_paths(&lights, masters, &IngestConfig::default(), ProgressCallback::default(), cancel)
                 })
                 .await?;
 

@@ -5,8 +5,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{BIAS, FRAME, Field};
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack};
 use crate::io::raw::libraw_filter_color;
 use crate::io::raw::sensor_layout::SensorLayout;

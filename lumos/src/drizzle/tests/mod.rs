@@ -7,23 +7,24 @@ mod kernels;
 mod square;
 mod synthetic;
 
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 
-use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
+use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::DrizzleAccumulator;
-use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
 use crate::drizzle::accumulator::frame_source::internals::band_scan;
-use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::deposit::Deposit;
+use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::error::FrameDimensionMismatch;
-use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::image::pixel_flags::PixelFlags;
+use crate::io::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
@@ -63,17 +64,21 @@ fn drizzle_plain(
     frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
 ) -> Result<DrizzleResult, DrizzleError> {
-    drizzle_images(
+    DrizzleConfig {
+        stack: plain_stack(),
+        ..config.clone()
+    }
+    .drizzle_images(
         frames,
-        config,
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
 }
 
 /// A drizzle config for `kernel`. `min_weight_fraction` is 0 everywhere in these tests so nothing
-/// is dropped for thin coverage, and `fill_value` is 0 unless a case overrides it by struct update.
+/// is dropped for thin coverage, `fill_value` is 0 unless a case overrides it by struct update, and
+/// the frames combine under [`plain_stack`].
 fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConfig {
     DrizzleConfig {
         scale,
@@ -81,7 +86,7 @@ fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConf
         kernel,
         fill_value: 0.0,
         min_weight_fraction: 0.0,
-        ..Default::default()
+        stack: plain_stack(),
     }
 }
 

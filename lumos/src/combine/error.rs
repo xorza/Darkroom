@@ -2,14 +2,14 @@
 
 use thiserror::Error;
 
-use crate::calibration_masters::error::SubtractionError;
-use crate::calibration_masters::master_role::MasterRole;
+use crate::calibration::error::SubtractionError;
+use crate::calibration::master_role::MasterRole;
+use crate::error::Cancelled;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::frame::frame_quality::FramePlane;
 use crate::frame_store::error::{ConditionMismatch, FrameStoreError};
-use crate::frame_store::frame_quality::FramePlane;
 use crate::ingest::error::AdmissionError;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::error::ImageError;
+use crate::io::error::ImageError;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -225,8 +225,8 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::combine::error::*;
-    use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::image::image_provenance::RowOrder;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::image_provenance::RowOrder;
 
     /// Survivors 0, 1 and 2 are inputs 0, 3 and 5: a frame index and a reference index both read
     /// through the list, and an error that names no frame comes back as it was.

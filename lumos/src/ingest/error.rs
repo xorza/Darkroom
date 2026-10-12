@@ -2,12 +2,12 @@
 
 use thiserror::Error;
 
+use crate::error::Cancelled;
 use crate::error::FrameDimensionMismatch;
-use crate::frame_store::frame_quality::FramePlane;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
+use crate::frame::frame_quality::FramePlane;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_provenance::RowOrder;
+use crate::image::sample_domain::SampleDomain;
 
 /// Why frame `index` of a set failed the checks every frame passes before it is combined: its
 /// geometry, the facts it must state alike with the others, its samples and its quality planes.

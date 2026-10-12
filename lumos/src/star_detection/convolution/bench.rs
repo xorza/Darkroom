@@ -10,8 +10,8 @@ use imaginarium::Buffer2;
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench::Stages;
-use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::{FilterKernels, matched_filter};
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;

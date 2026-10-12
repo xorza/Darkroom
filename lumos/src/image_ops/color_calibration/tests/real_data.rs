@@ -5,7 +5,7 @@
 use crate::image_ops::rgb::Rgb;
 use crate::internals::visual;
 
-use crate::image_ops::color_calibration::channel_backgrounds;
+use crate::image_ops::color_calibration::neutralize_background::channel_backgrounds;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::{NeutralizeBackground, Scnr, Stretch};

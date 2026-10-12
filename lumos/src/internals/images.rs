@@ -5,8 +5,8 @@
 //! `Buffer2::new_filled` / `new` / `new_default`, which are already named constructors doing
 //! three different things — wrapping them here would add a name without removing a choice.
 
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 

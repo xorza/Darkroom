@@ -5,20 +5,23 @@ use std::fmt::Debug;
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
-use crate::frame_store::cache_key::CacheKey;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::stackable_image::{ImageParts, StackableImage};
+use crate::frame_store::decode_cache::cache_key::CacheKey;
+use crate::frame_store::decode_cache::frame_spill::{
+    Carries, Committed, Decoded, FrameSpill, PlaneDigests,
+};
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::{Carries, Committed, Decoded, FrameSpill, PlaneDigests};
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
-use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::StratifiedSamples;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
 /// if a warp produced one or its source declared pixels with no measurement, its flags when its
@@ -252,7 +255,7 @@ impl StoredFrame {
 pub(crate) mod internals {
     use arrayvec::ArrayVec;
 
-    use crate::frame_store::frame_quality::FrameQuality;
+    use crate::frame::frame_quality::FrameQuality;
     use crate::frame_store::stored_frame::StoredFrame;
     use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_plane::StoredPlane;
@@ -293,12 +296,12 @@ mod tests {
     use common::TempDir;
     use imaginarium::Buffer2;
 
-    use crate::frame_store::frame_quality::FrameQuality;
-    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame::frame_quality::FrameQuality;
+    use crate::frame::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::StoredFrame;
-    use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::image::linear::LinearImage;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
     use crate::math::size2us::Size2us;
     use crate::platform::MappedFile;
 

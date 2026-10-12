@@ -7,12 +7,11 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::registration::register;
 use crate::registration::tests::helpers::{self, max_deviation};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::{RegistrationConfig, TransformType};
-use crate::star_detection::config::Config as DetConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 
 /// A scene of `stars` over `size`, its reference frame and the frame `truth` maps it to.
 #[derive(Debug)]
@@ -76,7 +75,8 @@ impl Rendered {
             matching: helpers::matching_config(6, self.min_matches),
             ..Default::default()
         };
-        let result = register(&reference_stars, &target_stars, &config)
+        let result = config
+            .register(&reference_stars, &target_stars)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
 
         let sigma =
@@ -112,10 +112,10 @@ impl Rendered {
 
 /// A detector for the synthetic frames: no FWHM prior, a 5 SNR floor and a 3σ threshold.
 fn detector() -> StarDetector {
-    let mut config = DetConfig::default();
+    let mut config = StarDetectionConfig::default();
     config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
-    config.detection.sigma_threshold = 3.0;
+    config.extraction.sigma_threshold = 3.0;
     StarDetector::from_config(config).unwrap()
 }
 

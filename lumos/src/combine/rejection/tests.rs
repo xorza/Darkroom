@@ -2,9 +2,9 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
-use crate::combine::config::DEFAULT_MIN_SURVIVORS;
 use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::*;
+use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::internals::invariance::Affine;
 use crate::internals::prelude::*;
 use std::f64::consts::TAU;

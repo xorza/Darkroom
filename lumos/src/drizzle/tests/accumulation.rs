@@ -32,11 +32,14 @@ fn a_flat_frame_at_scale_2_covers_every_cell() {
 /// No frames is `NoFrames`, and an invalid config is refused before the first frame is decoded:
 /// the path here does not exist, so a decode would have reported `ImageLoad` instead.
 #[test]
-fn drizzle_stack_refuses_before_decoding() {
-    let result = drizzle_stack(
+fn drizzle_paths_refuses_before_decoding() {
+    let result = DrizzleConfig {
+        stack: plain_stack(),
+        ..DrizzleConfig::default()
+    }
+    .drizzle_paths(
         Vec::<DrizzleFrame<PathBuf>>::new(),
-        &DrizzleConfig::default(),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -46,13 +49,16 @@ fn drizzle_stack_refuses_before_decoding() {
         pixfrac: 0.0,
         ..DrizzleConfig::default()
     };
-    let result = drizzle_stack(
+    let result = DrizzleConfig {
+        stack: plain_stack(),
+        ..invalid.clone()
+    }
+    .drizzle_paths(
         vec![DrizzleFrame::new(
             PathBuf::from("does-not-exist.tiff"),
             warp_of(Transform::identity()),
         )],
-        &invalid,
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -63,8 +69,8 @@ fn drizzle_stack_refuses_before_decoding() {
 /// `keep_cache` reads them back from the decode cache on the next run; a file that does not load is
 /// `ImageLoad`; and the run's token governs the decode — a cancelled run reports `Cancelled`.
 #[test]
-fn drizzle_stack_loads_its_frames_under_the_run_token() {
-    let scratch = TempDir::new("lumos_drizzle_stack");
+fn drizzle_paths_loads_its_frames_under_the_run_token() {
+    let scratch = TempDir::new("lumos_drizzle_paths");
     let size = Size2us::new(16, 12);
     let transforms = [
         Transform::identity(),
@@ -97,26 +103,26 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         .iter()
         .map(|path| LinearImage::from_file(path, &LoadContext::default()).unwrap())
         .collect();
-    let in_memory = drizzle_images(
-        drizzle_frames(loaded, &transforms),
-        &config,
-        &plain_stack(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
+    let in_memory = config
+        .drizzle_images(
+            drizzle_frames(loaded, &transforms),
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product;
     let cancelled = CancelToken::new();
     cancelled.cancel();
-    let from_paths = drizzle_stack(
-        frames(&paths),
-        &config,
-        &plain_stack(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
+    let from_paths = config
+        .drizzle_paths(
+            frames(&paths),
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .product;
     assert_eq!(
         from_paths.image.channel(0).pixels(),
         in_memory.image.channel(0).pixels()
@@ -124,25 +130,26 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
 
     // Kept, the frames are written on the first run and read back by the next: a kept frame edited
     // on disk moves the second, which it would not if that run decoded the source.
-    let mut kept = config.clone();
-    kept.ingest.keep_cache = true;
-    kept.ingest.cache_dir = scratch.join("kept");
+    let kept = IngestConfig {
+        keep_cache: true,
+        ..IngestConfig::with_cache_dir(scratch.join("kept"))
+    };
     let run_kept = || {
-        drizzle_stack(
-            frames(&paths),
-            &kept,
-            &plain_stack(),
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
-        .product
+        config
+            .drizzle_paths(
+                frames(&paths),
+                &kept,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
+            .product
     };
     assert_eq!(
         run_kept().image.channel(0).pixels(),
         in_memory.image.channel(0).pixels()
     );
-    DecodeCache::open(&kept.ingest.cache_dir)
+    DecodeCache::open(&kept.cache_dir)
         .unwrap()
         .edit_kept::<LinearImage>(&paths[1], &LoadContext::default(), |plane| {
             for sample in plane.iter_mut() {
@@ -157,22 +164,20 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
 
     let missing = [paths[0].clone(), scratch.join("missing.tiff")];
     assert!(matches!(
-        drizzle_stack(
+        config.drizzle_paths(
             frames(&missing),
-            &config,
-            &plain_stack(),
+            &IngestConfig::default(),
             ProgressCallback::default(),
-            CancelToken::never(),
+            CancelToken::never()
         ),
         Err(DrizzleError::ImageLoad(_))
     ));
     assert!(matches!(
-        drizzle_stack(
+        config.drizzle_paths(
             frames(&paths),
-            &config,
-            &plain_stack(),
+            &IngestConfig::default(),
             ProgressCallback::default(),
-            cancelled,
+            cancelled
         ),
         Err(DrizzleError::Cancelled)
     ));
@@ -180,10 +185,13 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
 
 #[test]
 fn drizzle_images_empty() {
-    let result = drizzle_images(
+    let result = DrizzleConfig {
+        stack: plain_stack(),
+        ..DrizzleConfig::default()
+    }
+    .drizzle_images(
         Vec::new(),
-        &DrizzleConfig::default(),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -206,10 +214,13 @@ fn drizzle_admits_each_frame_before_it_deposits() {
             WarpTransform::new(Transform::identity()),
         ),
     ];
-    let error = drizzle_images(
+    let error = DrizzleConfig {
+        stack: plain_stack(),
+        ..DrizzleConfig::default()
+    }
+    .drizzle_images(
         frames,
-        &DrizzleConfig::default(),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -243,10 +254,13 @@ fn drizzle_stops_between_frames_when_cancelled() {
         })
         .collect();
 
-    let result = drizzle_images(
+    let result = DrizzleConfig {
+        stack: plain_stack(),
+        ..DrizzleConfig::default()
+    }
+    .drizzle_images(
         frames,
-        &DrizzleConfig::default(),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         cancel,
     );
@@ -265,12 +279,15 @@ fn drizzle_stops_between_frames_when_cancelled() {
         })
         .collect();
     assert!(
-        drizzle_images(
+        DrizzleConfig {
+            stack: plain_stack(),
+            ..DrizzleConfig::default()
+        }
+        .drizzle_images(
             frames,
-            &DrizzleConfig::default(),
-            &plain_stack(),
+            &IngestConfig::default(),
             ProgressCallback::default(),
-            CancelToken::never(),
+            CancelToken::never()
         )
         .is_ok()
     );
@@ -315,14 +332,14 @@ fn a_sip_warp_drizzles_through_its_inverse() {
             .collect(),
     );
 
-    let from_images = drizzle_images(
-        vec![DrizzleFrame::new(image.clone(), warp.clone())],
-        &config,
-        &plain_stack(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
+    let from_images = config
+        .drizzle_images(
+            vec![DrizzleFrame::new(image.clone(), warp.clone())],
+            &IngestConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
     acc.add_frame(&DrizzleFrame::new(image, warp.clone()))
         .unwrap();
@@ -402,10 +419,13 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
 fn drizzle_images_dimension_mismatch() {
     let a = constant_image(Size2us::new(20, 20), 0.5);
     let b = constant_image(Size2us::new(10, 10), 0.5);
-    let result = drizzle_images(
+    let result = DrizzleConfig {
+        stack: plain_stack(),
+        ..DrizzleConfig::default()
+    }
+    .drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
-        &DrizzleConfig::default(),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     );
@@ -474,13 +494,17 @@ fn weight_and_inverse_variance_maps() {
             })
             .collect();
         let transforms = vec![Transform::identity(); images.len()];
-        let product = drizzle_images(
-            drizzle_frames(images, &transforms),
-            &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
-            &StackConfig {
+        let product = DrizzleConfig {
+            stack: StackConfig {
                 weighting: Weighting::Manual(frame_weights.clone()),
                 ..plain_stack()
-            },
+            }
+            .clone(),
+            ..(kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)).clone()
+        }
+        .drizzle_images(
+            drizzle_frames(images, &transforms),
+            &IngestConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -512,13 +536,17 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
             min_weight_fraction: 0.5,
             ..DrizzleConfig::default()
         };
-        drizzle_images(
-            drizzle_frames(vec![image.clone()], &[transform]),
-            &config,
-            &StackConfig {
+        DrizzleConfig {
+            stack: StackConfig {
                 quality,
                 ..plain_stack()
-            },
+            }
+            .clone(),
+            ..config.clone()
+        }
+        .drizzle_images(
+            drizzle_frames(vec![image.clone()], &[transform]),
+            &IngestConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -592,7 +620,15 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
         min_weight_fraction: 0.0,
         ..Default::default()
     };
-    let product = drizzle_images(
+    let product = DrizzleConfig {
+        stack: StackConfig {
+            weighting: Weighting::Manual(vec![1.0, 3.0]),
+            ..plain_stack()
+        }
+        .clone(),
+        ..config.clone()
+    }
+    .drizzle_images(
         drizzle_frames(
             vec![
                 constant_image(Size2us::new(side, side), 1.0),
@@ -603,11 +639,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
                 Transform::translation(DVec2::new(overlap_from as f64, 0.0)),
             ],
         ),
-        &config,
-        &StackConfig {
-            weighting: Weighting::Manual(vec![1.0, 3.0]),
-            ..plain_stack()
-        },
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )

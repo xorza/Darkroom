@@ -1,12 +1,12 @@
 //! Tests for triangle matching module.
 
 use crate::internals::prelude::*;
-use crate::registration::spatial::KdTree;
-use crate::registration::triangle::TriangleConfig;
+use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::geometry::{Orientation, Triangle};
 use crate::registration::triangle::matching::{
     form_triangles_from_neighbors, form_triangles_kdtree, match_triangles,
 };
+use crate::registration::triangle::triangle_config::TriangleConfig;
 use crate::registration::triangle::voting::{
     PointMatch, VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };

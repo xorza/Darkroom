@@ -1,4 +1,4 @@
-use crate::image_ops::ml::star_removal::RemoveStars;
+use crate::image_ops::ml::remove_stars::RemoveStars;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::real_data::ml_support::onnx_weights;

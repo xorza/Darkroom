@@ -2,10 +2,10 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
+use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 

@@ -6,22 +6,20 @@
 use std::f32::consts::SQRT_2;
 
 use super::*;
-use crate::drizzle::stack::drizzle_cfa_images;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::ingest::error::AdmissionError;
-use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::{TransformModel, TransformType};
-use crate::star_detection::config::Config as DetConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::StarDetector;
 use common::TempDir;
 
 /// The known scene: colour `colour`'s value at reference pixel `(x, y)`, distinct in every
@@ -88,18 +86,18 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
             .collect();
         let config = DrizzleConfig {
             fill_value: FILL,
-            ingest: ingest.clone(),
+            stack: plain_stack(),
             ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
         };
-        let product = drizzle_cfa_images(
-            frames,
-            &config,
-            &plain_stack(),
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
-        .product;
+        let product = config
+            .drizzle_cfa_images(
+                frames,
+                ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
+            .product;
         assert_eq!(
             product.report.spilled_frames,
             if ingest.memory_override.is_some() {
@@ -195,10 +193,13 @@ fn the_light_preset_combines_a_cfa_drizzle() {
         fill_value: -1.0,
         ..kernel_config(DrizzleKernel::Square, 1.0, 1.0)
     };
-    let product = drizzle_cfa_images(
+    let product = DrizzleConfig {
+        stack: StackConfig::light(),
+        ..config.clone()
+    }
+    .drizzle_cfa_images(
         frames,
-        &config,
-        &StackConfig::light(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -280,14 +281,18 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
         ..kernel_config(DrizzleKernel::Square, 2.0, 0.8)
     };
     let drizzle = |frames: Vec<DrizzleFrame<CfaImage>>, normalization| {
-        drizzle_cfa_images(
-            frames,
-            &config,
-            &StackConfig {
+        DrizzleConfig {
+            stack: StackConfig {
                 normalization,
                 weighting: Weighting::Equal,
                 ..StackConfig::light()
-            },
+            }
+            .clone(),
+            ..config.clone()
+        }
+        .drizzle_cfa_images(
+            frames,
+            &IngestConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -334,10 +339,13 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
             warp_of(Transform::identity()),
         )
     };
-    let error = drizzle_cfa_images(
+    let error = DrizzleConfig {
+        stack: plain_stack(),
+        ..(kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)).clone()
+    }
+    .drizzle_cfa_images(
         vec![frame(CfaPattern::Rggb), frame(CfaPattern::Bggr)],
-        &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
-        &plain_stack(),
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -403,10 +411,10 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
         make_cfa(size, pixels, rggb)
     };
 
-    let mut config = DetConfig::default();
+    let mut config = StarDetectionConfig::default();
     config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
-    config.detection.sigma_threshold = 3.0;
+    config.extraction.sigma_threshold = 3.0;
     let mut detector = StarDetector::from_config(config).unwrap();
     let registration = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Translation),
@@ -417,7 +425,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             detector.detect(&reference).stars,
             detector.detect(&target).stars,
         ];
-        let result = register(&stars[0], &stars[1], &registration).unwrap();
+        let result = registration.register(&stars[0], &stars[1]).unwrap();
         (
             result.transform().apply(DVec2::ZERO),
             result.num_inliers(),

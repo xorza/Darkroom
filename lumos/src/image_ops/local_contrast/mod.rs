@@ -11,8 +11,8 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
-use crate::io::image::linear::LinearImage;
 
 /// Histogram resolution for the per-tile mappings.
 const N_BINS: usize = 256;

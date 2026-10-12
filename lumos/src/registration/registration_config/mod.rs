@@ -1,85 +1,15 @@
 //! Configuration for the registration module.
 
 use crate::error::InvalidConfigField;
+use crate::registration;
 use crate::registration::distortion::sip::SipConfig;
-use crate::registration::ransac::config::RansacConfig;
+use crate::registration::error::RegistrationError;
+use crate::registration::ransac::ransac_config::RansacConfig;
+use crate::registration::registration_result::RegistrationResult;
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::{TransformModel, TransformType};
-use crate::registration::triangle::TriangleConfig;
-
-/// Interpolation method for image resampling.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum InterpolationMethod {
-    /// Nearest neighbor - fastest, lowest quality
-    Nearest,
-    /// Bilinear interpolation - fast, reasonable quality
-    Bilinear,
-    /// Bicubic interpolation - good quality
-    Bicubic,
-    /// Lanczos-2 (4x4 kernel) - high quality
-    Lanczos2,
-    /// Lanczos-3 (6×6 taps), the default
-    #[default]
-    Lanczos3,
-    /// Lanczos-4 (8×8 taps): a sharper frequency cutoff than Lanczos-3, at more ringing and cost
-    Lanczos4,
-}
-
-impl InterpolationMethod {
-    /// Every method, from the cheapest to the widest kernel.
-    pub const ALL: [Self; 6] = [
-        Self::Nearest,
-        Self::Bilinear,
-        Self::Bicubic,
-        Self::Lanczos2,
-        Self::Lanczos3,
-        Self::Lanczos4,
-    ];
-}
-
-/// PixInsight's default ringing clamp threshold (PCL's `__PCL_LANCZOS_CLAMPING_THRESHOLD`).
-const DEFAULT_CLAMPING_THRESHOLD: f32 = 0.3;
-
-/// Configuration for inverse-mapped image resampling.
-#[derive(Debug, Clone, Copy)]
-pub struct WarpParams {
-    /// Resampling kernel.
-    pub method: InterpolationMethod,
-    /// Fill for source positions outside the closed source pixel footprint.
-    ///
-    /// Positions inside the footprint with partial kernel support are reconstructed from real
-    /// source pixels only.
-    pub border_value: f32,
-    /// The ringing clamp of a kernel with negative lobes (Bicubic and the Lanczos family), as
-    /// PixInsight's: where the negative lobes take more than this share of what the positive lobes
-    /// carry, their weight is cut back smoothly, and to nothing once they would cancel it. In
-    /// `[0, 1]`, lower clamps harder; `None` turns the clamp off. Default 0.3.
-    pub clamping_threshold: Option<f32>,
-}
-
-impl Default for WarpParams {
-    fn default() -> Self {
-        Self {
-            method: InterpolationMethod::default(),
-            border_value: 0.0,
-            clamping_threshold: Some(DEFAULT_CLAMPING_THRESHOLD),
-        }
-    }
-}
-
-impl WarpParams {
-    fn validate(self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite_only("warp border_value", self.border_value)?;
-        if let Some(threshold) = self.clamping_threshold {
-            InvalidConfigField::check(
-                (0.0..=1.0).contains(&threshold),
-                "warp clamping_threshold",
-                "between 0 and 1",
-                f64::from(threshold),
-            )?;
-        }
-        Ok(())
-    }
-}
+use crate::registration::triangle::triangle_config::TriangleConfig;
+use crate::star_detection::star::Star;
 
 /// Configuration for the star-matching stage.
 #[derive(Debug, Clone)]
@@ -161,15 +91,14 @@ impl RegistrationMatchingConfig {
 /// # Example
 ///
 /// ```no_run
-/// use lumos::detection::Star;
-/// use lumos::{RegistrationConfig, register};
+/// use lumos::{RegistrationConfig, Star};
 ///
 /// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), lumos::RegistrationError> {
 /// // Use defaults
-/// let result = register(ref_stars, target_stars, &RegistrationConfig::default())?;
+/// let result = RegistrationConfig::default().register(ref_stars, target_stars)?;
 ///
 /// // Use a preset
-/// let result = register(ref_stars, target_stars, &RegistrationConfig::wide_field())?;
+/// let result = RegistrationConfig::wide_field().register(ref_stars, target_stars)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -214,6 +143,56 @@ impl Default for RegistrationConfig {
 }
 
 impl RegistrationConfig {
+    /// Register two sets of star positions.
+    ///
+    /// This is the main entry point for image registration. It finds the geometric
+    /// transformation that maps reference star positions to target star positions.
+    ///
+    /// Stars should be sorted by brightness (flux) in descending order for best results.
+    ///
+    /// The RANSAC `max_sigma` parameter is automatically derived from the median FWHM
+    /// of the input stars, providing optimal noise tolerance for the seeing conditions.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError::InvalidConfig`] if the config fails validation (see
+    /// [`Self::validate`]), and the matching/accuracy failures below. A caller that runs this per
+    /// frame pair must treat `InvalidConfig` apart from the rest: every other variant describes one
+    /// pair, and is a frame to drop, but an invalid config fails every pair identically and is the
+    /// run's own fault.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use lumos::{RegistrationConfig, Star, TransformModel, TransformType};
+    ///
+    /// # fn example(
+    /// #     ref_stars: &[Star],
+    /// #     target_stars: &[Star],
+    /// # ) -> Result<(), lumos::RegistrationError> {
+    /// // With defaults
+    /// let result = RegistrationConfig::default().register(ref_stars, target_stars)?;
+    ///
+    /// // With custom config
+    /// let config = RegistrationConfig {
+    ///     transform_type: TransformModel::Fixed(TransformType::Similarity),
+    ///     ..RegistrationConfig::default()
+    /// };
+    /// let result = config.register(ref_stars, target_stars)?;
+    ///
+    /// println!("Matched {} stars", result.num_inliers());
+    /// println!("RMS error: {:.2} pixels", result.rms_error());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn register(
+        &self,
+        ref_stars: &[Star],
+        target_stars: &[Star],
+    ) -> Result<RegistrationResult, RegistrationError> {
+        registration::register(ref_stars, target_stars, self)
+    }
+
     /// Fast configuration: fewer iterations, lower quality, faster.
     pub fn fast() -> Self {
         Self {
@@ -354,7 +333,7 @@ impl RegistrationConfig {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::registration::registration_config::{InterpolationMethod, WarpParams};
+    use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 
     pub(crate) fn warp_params(method: InterpolationMethod) -> WarpParams {
         WarpParams {

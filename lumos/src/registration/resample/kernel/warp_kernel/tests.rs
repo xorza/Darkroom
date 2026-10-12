@@ -1,13 +1,14 @@
 use glam::DVec2;
 
-use crate::io::image::pixel_flags::Reach;
+use crate::image::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
 use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{
     Filter, TapAxis, TapRange, WarpKernel, largest_singular_value,
 };
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;
 use crate::simd::{Isa, Kernel};
 

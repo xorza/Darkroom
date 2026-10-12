@@ -6,15 +6,14 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::detection::Star;
-//! use lumos::{LinearImage, RegistrationConfig, register, warp};
+//! use lumos::{LinearImage, RegistrationConfig, Star};
 //!
 //! # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
 //! # -> Result<(), lumos::RegistrationError> {
 //! let config = RegistrationConfig::default();
 //!
 //! // Register stars from two images
-//! let result = register(ref_stars, target_stars, &config)?;
+//! let result = config.register(ref_stars, target_stars)?;
 //! println!(
 //!     "Matched {} stars, RMS = {:.2}px",
 //!     result.num_inliers(),
@@ -22,7 +21,7 @@
 //! );
 //!
 //! // Reproject the target onto the reference's grid, into a new image
-//! let aligned = warp(target_image, &result.warp_transform(), config.warp);
+//! let aligned = result.warp_transform().warp(target_image, config.warp);
 //! # Ok(())
 //! # }
 //! ```
@@ -47,14 +46,15 @@
 //! - [`RegistrationConfig::mosaic()`] — Allows larger rotations and scale differences
 
 pub(crate) mod distortion;
+pub(crate) mod error;
 mod final_fit;
+mod kd_tree;
 mod point_normalization;
 mod point_pairs;
 pub(crate) mod ransac;
 pub(crate) mod registration_config;
+pub(crate) mod registration_result;
 pub(crate) mod resample;
-pub(crate) mod result;
-mod spatial;
 pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
@@ -64,58 +64,19 @@ use std::time::Instant;
 use glam::DVec2;
 
 use crate::math::statistics::median_mut;
+use crate::registration::error::{FailedModel, RegistrationCatalog, RegistrationError};
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitCatalogs, FitModel, SipModel};
+use crate::registration::kd_tree::KdTree;
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::result::{
-    FailedModel, RegistrationCatalog, RegistrationError, RegistrationResult,
-};
-use crate::registration::spatial::KdTree;
+use crate::registration::registration_result::RegistrationResult;
 use crate::registration::transform::{TransformModel, TransformType};
 use crate::registration::triangle::matching;
 use crate::registration::triangle::voting::{MatchIndices, PointMatch};
 use crate::star_detection::star::Star;
 
-/// Register two sets of star positions.
-///
-/// This is the main entry point for image registration. It finds the geometric
-/// transformation that maps reference star positions to target star positions.
-///
-/// Stars should be sorted by brightness (flux) in descending order for best results.
-///
-/// The RANSAC `max_sigma` parameter is automatically derived from the median FWHM
-/// of the input stars, providing optimal noise tolerance for the seeing conditions.
-///
-/// # Errors
-///
-/// [`RegistrationError::InvalidConfig`] if `config` fails validation (see [`RegistrationConfig::validate`]),
-/// and the matching/accuracy failures below. A caller that runs this per frame pair must treat
-/// `InvalidConfig` apart from the rest: every other variant describes one pair, and is a frame to
-/// drop, but an invalid config fails every pair identically and is the run's own fault.
-///
-/// # Example
-///
-/// ```no_run
-/// use lumos::detection::Star;
-/// use lumos::{RegistrationConfig, TransformModel, TransformType, register};
-///
-/// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), lumos::RegistrationError> {
-/// // With defaults
-/// let result = register(ref_stars, target_stars, &RegistrationConfig::default())?;
-///
-/// // With custom config
-/// let config = RegistrationConfig {
-///     transform_type: TransformModel::Fixed(TransformType::Similarity),
-///     ..RegistrationConfig::default()
-/// };
-/// let result = register(ref_stars, target_stars, &config)?;
-///
-/// println!("Matched {} stars", result.num_inliers());
-/// println!("RMS error: {:.2} pixels", result.rms_error());
-/// # Ok(())
-/// # }
-/// ```
-pub fn register(
+/// The body of [`RegistrationConfig::register`].
+pub(crate) fn register(
     ref_stars: &[Star],
     target_stars: &[Star],
     config: &RegistrationConfig,
@@ -335,9 +296,9 @@ fn select_by_gric(
         ) {
             Ok(fit) => fitted.push((model, fit)),
             // An invalid config fails identically on every model and is the run's own fault rather
-            // than the pair's — `align_and_stack` keys a whole-run abort on that distinction, so it
-            // must not be buried in a per-model report. `register` validates first, so this
-            // guards the ordering rather than a reachable path.
+            // than the pair's — `AlignStackConfig::align_stack_images` keys a whole-run abort on
+            // that distinction, so it must not be buried in a per-model report. `register`
+            // validates first, so this guards the ordering rather than a reachable path.
             Err(error @ RegistrationError::InvalidConfig(_)) => return Err(error),
             Err(error) => {
                 tracing::debug!(model = ?transform, %error, "Auto candidate failed");

@@ -16,7 +16,7 @@
 use common::CancelToken;
 
 use crate::combine::error::StackError;
-use crate::io::cancelled::Cancelled;
+use crate::error::Cancelled;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;

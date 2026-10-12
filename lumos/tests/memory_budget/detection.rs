@@ -1,7 +1,7 @@
 //! Star detection, which plans nothing and must hold the same heap however many frames one
 //! detector is given.
 
-use lumos::detection::{Config, StarDetector};
+use lumos::{StarDetectionConfig, StarDetector};
 
 use crate::session::Session;
 use crate::star_field::StarField;
@@ -15,7 +15,7 @@ const STARS: usize = 6;
 /// kept per frame beyond that would raise the fourth frame's peak. On one worker: the deblender
 /// keeps a warm scratch for each of its jobs that ran at once, so on more its heap follows the
 /// schedule rather than the frame count.
-fn holds_the_same_heap_for_any_frame_count(config: &Config) {
+fn holds_the_same_heap_for_any_frame_count(config: &StarDetectionConfig) {
     let session = Session::on_workers("lumos_budget_detection", 1);
     let frame = StarField::new(SIDE, STARS, 0xDE7E).frame(0);
     let peak = |frames: usize| {
@@ -35,25 +35,25 @@ fn holds_the_same_heap_for_any_frame_count(config: &Config) {
 /// FWHM estimate's extra detection, the multi-threshold deblender.
 #[test]
 fn the_default_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&Config::default());
+    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::default());
 }
 
 #[test]
 fn a_wide_field_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&Config::wide_field());
+    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::wide_field());
 }
 
 #[test]
 fn a_high_resolution_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&Config::high_resolution());
+    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::high_resolution());
 }
 
 #[test]
 fn a_crowded_field_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&Config::crowded_field());
+    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::crowded_field());
 }
 
 #[test]
 fn a_precise_ground_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&Config::precise_ground());
+    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::precise_ground());
 }

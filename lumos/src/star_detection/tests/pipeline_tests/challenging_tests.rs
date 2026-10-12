@@ -6,7 +6,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::PsfModel;
 use crate::internals::synthetic::scene::BackgroundField;
-use crate::star_detection::config::Config;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::tests::pipeline_tests::run_test;
 use crate::star_detection::tests::{Placement, Scenario};
 
@@ -23,7 +23,7 @@ fn crowded_cluster() {
         "crowded_cluster",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         6,
     );
 }
@@ -36,7 +36,13 @@ fn very_dense() {
         ..Default::default()
     }
     .frame();
-    run_test("very_dense", "challenging", &frame, &Config::default(), 1);
+    run_test(
+        "very_dense",
+        "challenging",
+        &frame,
+        &StarDetectionConfig::default(),
+        1,
+    );
 }
 
 #[test]
@@ -56,7 +62,7 @@ fn uniform_tracking_error() {
         "uniform_tracking",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         11,
     );
 }
@@ -70,7 +76,13 @@ fn cosmic_rays() {
         ..Default::default()
     }
     .frame();
-    run_test("cosmic_rays", "challenging", &frame, &Config::default(), 9);
+    run_test(
+        "cosmic_rays",
+        "challenging",
+        &frame,
+        &StarDetectionConfig::default(),
+        9,
+    );
 }
 
 #[test]
@@ -86,7 +98,7 @@ fn bayer_pattern() {
         "bayer_pattern",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         10,
     );
 }
@@ -105,7 +117,7 @@ fn saturated_stars() {
         "saturated_stars",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         8,
     );
 }
@@ -127,7 +139,7 @@ fn gradient_background() {
         "gradient_background",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         11,
     );
 }
@@ -149,7 +161,7 @@ fn vignette_background() {
         "vignette_background",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         0,
     );
 }
@@ -174,7 +186,7 @@ fn nebula_background() {
         "nebula_background",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         0,
     );
 }
@@ -188,7 +200,13 @@ fn edge_stars() {
         ..Default::default()
     }
     .frame();
-    run_test("edge_stars", "challenging", &frame, &Config::default(), 10);
+    run_test(
+        "edge_stars",
+        "challenging",
+        &frame,
+        &StarDetectionConfig::default(),
+        10,
+    );
 }
 
 #[test]
@@ -203,14 +221,14 @@ fn faint_in_noise() {
         ..Default::default()
     }
     .frame();
-    let mut detection_config = Config::default();
-    detection_config.filter.min_snr = 3.0;
-    detection_config.detection.sigma_threshold = 2.5;
+    let mut extraction_config = StarDetectionConfig::default();
+    extraction_config.filter.min_snr = 3.0;
+    extraction_config.extraction.sigma_threshold = 2.5;
     run_test(
         "faint_in_noise",
         "challenging",
         &frame,
-        &detection_config,
+        &extraction_config,
         8,
     );
 }
@@ -228,10 +246,10 @@ fn very_low_snr() {
         ..Default::default()
     }
     .frame();
-    let mut detection_config = Config::default();
-    detection_config.filter.min_snr = 2.5;
-    detection_config.detection.sigma_threshold = 2.0;
-    run_test("very_low_snr", "challenging", &frame, &detection_config, 1);
+    let mut extraction_config = StarDetectionConfig::default();
+    extraction_config.filter.min_snr = 2.5;
+    extraction_config.extraction.sigma_threshold = 2.0;
+    run_test("very_low_snr", "challenging", &frame, &extraction_config, 1);
 }
 
 #[test]
@@ -261,7 +279,7 @@ fn combined_challenges() {
         "combined_challenges",
         "challenging",
         &frame,
-        &Config::default(),
+        &StarDetectionConfig::default(),
         4,
     );
 }

@@ -19,7 +19,7 @@ use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
+use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
@@ -225,7 +225,7 @@ mod internals {
 
     use crate::math::lm_controller::LmFit;
     use crate::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFit};
-    use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
+    use crate::star_detection::centroid::profile_problem::internals::{ModelJacobian, ModelSample};
 
     impl ModelJacobian<7> for Gaussian2D {
         /// `∂f/∂x0 = A·E·(a·dx + b·dy)`, `∂f/∂y0 = A·E·(b·dx + c·dy)`, `∂f/∂A = E`,

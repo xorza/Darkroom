@@ -11,7 +11,7 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{astrometric_rms, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{
     MATCH_RADIUS, Placement, Scenario, detected_positions, synthetic_config, truth_positions,
 };

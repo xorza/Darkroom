@@ -101,16 +101,20 @@ fn a_constant_reads_back_wherever_weight_landed() {
 fn two_frames_combine_to_their_weighted_mean() {
     let size = Size2us::new(12, 12);
     for kernel in DrizzleKernel::ALL {
-        let product = drizzle_images(
+        let product = DrizzleConfig {
+            stack: StackConfig {
+                weighting: Weighting::Manual(vec![1.0, 3.0]),
+                ..plain_stack()
+            }
+            .clone(),
+            ..usual_config(kernel).clone()
+        }
+        .drizzle_images(
             drizzle_frames(
                 vec![constant_image(size, 2.0), constant_image(size, 6.0)],
                 &[Transform::identity(); 2],
             ),
-            &usual_config(kernel),
-            &StackConfig {
-                weighting: Weighting::Manual(vec![1.0, 3.0]),
-                ..plain_stack()
-            },
+            &IngestConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )

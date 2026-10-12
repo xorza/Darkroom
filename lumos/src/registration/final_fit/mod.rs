@@ -17,9 +17,10 @@ use glam::DVec2;
 use crate::math::statistics::{CHI2_99_2DOF, median_mut};
 use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
-use crate::registration::result::StarMatch;
-use crate::registration::spatial::KdTree;
-use crate::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::registration::kd_tree::KdTree;
+use crate::registration::registration_result::StarMatch;
+use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::voting::MatchIndices;
 use crate::star_detection::star::Star;
 

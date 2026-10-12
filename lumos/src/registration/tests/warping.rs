@@ -4,9 +4,11 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
-use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
-use crate::registration::resample::{self, internals};
-use crate::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::registration::registration_config;
+use crate::registration::resample::internals;
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::{Transform, TransformType};
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -240,7 +242,7 @@ fn interpolation_quality_ordering() {
 
 #[test]
 fn warp_preserves_output_metadata() {
-    use crate::io::image::image_metadata::ImageMetadata;
+    use crate::image::image_metadata::ImageMetadata;
 
     let pixels = star_field(Size2us::new(256, 256), 30, 11111)
         .image
@@ -261,7 +263,9 @@ fn warp_preserves_output_metadata() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = resample::warp(&image, &WarpTransform::new(transform), warp_config).image;
+    let warped = WarpTransform::new(transform)
+        .warp(&image, warp_config)
+        .image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
@@ -340,7 +344,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
     );
     for method in InterpolationMethod::ALL {
         let params = registration_config::internals::warp_params(method);
-        let warped = resample::warp(&image, &warp_transform, params).image;
+        let warped = warp_transform.warp(&image, params).image;
         let mut plane = Buffer2::new_default(size.width, size.height);
         internals::warp_plane(&pixels, &mut plane, &warp_transform, params);
         for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
@@ -376,7 +380,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), config);
+    let result = WarpTransform::new(transform).warp(&image, config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -420,7 +424,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), config);
+    let result = WarpTransform::new(transform).warp(&image, config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();

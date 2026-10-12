@@ -10,13 +10,13 @@ use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::combine::cache::slots::Slots;
-use crate::combine::config::Normalization;
+use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::combine::stack_config::Normalization;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::image::image_dimensions::ImageDimensions;
 
 /// The dither between the two lights, in pixels: the margin the second leaves uncovered.
 const DITHER: [usize; 2] = [11, 7];

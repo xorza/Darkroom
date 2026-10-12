@@ -33,17 +33,16 @@
 //! # Example
 //!
 //! ```no_run
-//! use lumos::detection::{self, StarDetector};
-//! use lumos::{InvalidConfigField, LinearImage};
+//! use lumos::{InvalidConfigField, LinearImage, StarDetectionConfig, StarDetector};
 //!
 //! # fn example(image: &LinearImage) -> Result<(), InvalidConfigField> {
 //! // Use a preset configuration
-//! let config = detection::Config::wide_field();
+//! let config = StarDetectionConfig::wide_field();
 //!
 //! // Or customize from defaults
-//! let mut config = detection::Config::default();
+//! let mut config = StarDetectionConfig::default();
 //! config.filter.min_snr = 15.0;
-//! config.detection.sigma_threshold = 3.0;
+//! config.extraction.sigma_threshold = 3.0;
 //!
 //! // Detect stars
 //! let mut detector = StarDetector::from_config(config)?;
@@ -56,16 +55,16 @@
 
 pub(crate) mod background;
 mod centroid;
-pub(crate) mod config;
 mod convolution;
 mod deblend;
 pub(crate) mod detection_plane;
-pub(crate) mod detector;
 mod labeling;
 mod median_filter;
 pub(crate) mod resources;
 pub(crate) mod roundness;
 pub(crate) mod star;
+pub(crate) mod star_detection_config;
+pub(crate) mod star_detector;
 mod threshold_mask;
 
 #[cfg(feature = "bench")]

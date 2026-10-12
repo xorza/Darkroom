@@ -2,7 +2,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::io::image::linear::LinearImage;
+use crate::image::linear_image::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stack_product::quality_map::QualityMap;
 

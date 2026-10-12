@@ -7,7 +7,7 @@
 //! needs no per-pixel accounting of which frames survived.
 
 use crate::combine::normalization::FrameNorm;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::frame::frame_stats::FrameStats;
 
 /// Every input frame's declared quantization σ, in frame order.
 ///
@@ -55,10 +55,10 @@ mod tests {
 
     use crate::combine::normalization::{FrameNorm, SlotNorm};
     use crate::combine::stack::quantization::SourceSigmas;
-    use crate::frame_store::capture_conditions::CaptureConditions;
-    use crate::frame_store::frame_facts::FrameFacts;
-    use crate::frame_store::frame_stats::FrameStats;
-    use crate::io::image::unverified_conditions::UnverifiedConditions;
+    use crate::frame::capture_conditions::CaptureConditions;
+    use crate::frame::frame_facts::FrameFacts;
+    use crate::frame::frame_stats::FrameStats;
+    use crate::frame::unverified_conditions::UnverifiedConditions;
     use crate::math::statistics::mad_to_sigma;
 
     fn stats(quantization_sigma: Option<f32>) -> FrameStats {

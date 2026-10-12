@@ -1,7 +1,7 @@
 //! [`FrameRegistration`]: how one light registered to the alignment reference.
 
-use crate::registration::result::RegistrationError;
-use crate::registration::transform::WarpTransform;
+use crate::registration::error::RegistrationError;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// How one light registered to the alignment reference.
 #[derive(Debug, Clone)]

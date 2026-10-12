@@ -1,5 +1,5 @@
 use crate::internals::prelude::*;
-use crate::io::image::mosaic_noise::MosaicNoise;
+use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::{
     Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, OpError, Scnr, Stretch,
 };

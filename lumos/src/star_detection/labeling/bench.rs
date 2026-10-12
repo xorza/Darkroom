@@ -14,7 +14,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     for field in [Field::Typical, Field::Dense] {
         group.bench_function(BenchmarkId::new("label", field.name()), |b| {
             let stages = Stages::of(field);
-            let connectivity = stages.config.detection.connectivity;
+            let connectivity = stages.config.extraction.connectivity;
             let mut labeler = Labeler::default();
             b.iter(|| {
                 let map = labeler.label(&stages.mask, connectivity);

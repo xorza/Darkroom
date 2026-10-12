@@ -83,8 +83,8 @@ impl<S: Isa> LaneProfile<S, 7> for Profile<S> {
 mod tests {
     use crate::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
-    use crate::star_detection::centroid::lm_optimizer::LMModel;
-    use crate::star_detection::centroid::lm_optimizer::internals::ModelStamp;
+    use crate::star_detection::centroid::profile_problem::LMModel;
+    use crate::star_detection::centroid::profile_problem::internals::ModelStamp;
     use crate::star_detection::centroid::simd::internals::assert_every_tier_matches_portable;
 
     #[test]

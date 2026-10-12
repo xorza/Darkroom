@@ -16,7 +16,7 @@
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{MAX_ORDER, PixelQuadrature};
 use crate::simd::{F64_LANES, F64x4, Isa, Kernel};
-use crate::star_detection::centroid::lm_optimizer::FitData;
+use crate::star_detection::centroid::profile_problem::FitData;
 
 /// One vector of a stamp's samples: positions and values.
 #[derive(Debug, Clone, Copy)]
@@ -296,7 +296,7 @@ pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
     use crate::math::pixel_quadrature::PixelQuadrature;
     use crate::simd::tier::Tier;
-    use crate::star_detection::centroid::lm_optimizer::FitData;
+    use crate::star_detection::centroid::profile_problem::FitData;
     use crate::star_detection::centroid::simd::{BatchModel, Chi2Kernel, NormalEquationsKernel};
 
     /// Every entry's bits, Hessian then gradient then χ².

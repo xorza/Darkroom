@@ -4,11 +4,11 @@ use std::path::Path;
 
 use imaginarium::Buffer2;
 
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stackable_image::StackableImage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;

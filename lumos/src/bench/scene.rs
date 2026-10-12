@@ -6,15 +6,16 @@
 //! calibrated frame is a light as calibration leaves it: the filters' colour balance and the hot
 //! pixels stay, the bias, the dark current and the vignette are gone.
 
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::add_cosmic_rays;
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::camera::{Camera, SensorDefects};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::internals::test_rng::TestRng;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
 use crate::{CalibrationSet, MasterRole};
@@ -447,9 +448,9 @@ mod tests {
     use common::CancelToken;
 
     use super::*;
-    use crate::calibration_masters::defect_map::DefectMap;
+    use crate::calibration::defect_map::DefectMap;
+    use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::internals::synthetic::camera::FlatField;
-    use crate::io::image::cfa::cfa_pattern::CfaPattern;
     use crate::math::statistics::median_mut;
     use crate::math::vec2us::Vec2us;
     use crate::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};

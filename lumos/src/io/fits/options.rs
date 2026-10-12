@@ -1,0 +1,139 @@
+use serde::Serialize;
+
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::sample_domain::Pedestal;
+
+/// Selects the image HDU decoded from a FITS container.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum FitsHduSelector {
+    /// Accept the file only when it contains exactly one image-bearing HDU.
+    Auto,
+    /// Select a zero-based HDU index.
+    Index(usize),
+    /// Select an image extension by case-insensitive `EXTNAME` and optional `EXTVER`.
+    Name {
+        /// Extension name to match.
+        extname: String,
+        /// Extension version to match; a missing FITS `EXTVER` is version 1.
+        extver: Option<i64>,
+    },
+}
+
+/// Declares how a three-plane FITS image is interpreted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FitsCubeInterpretation {
+    /// Reject three-plane data because shape alone does not establish color semantics.
+    Reject,
+    /// Interpret planes 0, 1, and 2 as red, green, and blue.
+    Rgb,
+}
+
+/// How a floating-point FITS image's sample scale is decided.
+///
+/// An integer `BITPIX` fixes what one sample is worth — the decoder divides by
+/// `|BSCALE| × (2^bits − 1)` and the frame lands in the pipeline's `[0, 1]` domain. `BITPIX = -32`
+/// and `-64` declare no such span, so a float HDU is the one input whose scale the header may not
+/// settle, and it is the caller who knows.
+///
+/// The reference readers split three ways on this: PixInsight assumes `[0, 1]` with a configurable
+/// input range, Siril scans the pixel data, and astropy does not normalize at all. Scanning is the
+/// one option ruled out here — a divisor read off each frame's own extrema differs frame to frame,
+/// which is what [`crate::AdmissionError::SampleDomainMismatch`] exists to reject.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum FitsFloatScale {
+    /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are
+    /// ADU and they are divided by the 16-bit full scale; anything else — a `DATAMAX` of about 1,
+    /// or none at all — is taken as already normalized.
+    Auto,
+    /// Take the samples as already normalized, whatever `DATAMAX` says. For a file whose declared
+    /// saturation level describes the sensor rather than the samples.
+    Normalized,
+    /// Divide by an explicit full scale: what one normalized unit is worth in the file's own units.
+    /// The answer for an ADU frame carrying no `DATAMAX`, which no header rule can identify.
+    FullScale(f32),
+}
+
+/// What a FITS image's null pixels do to the load.
+///
+/// A null is not corruption: FITS 4.0 §6.3 and the NOST floating-point agreement make IEEE NaN the
+/// undefined-value flag for a floating-point `BITPIX`, and the `BLANK` keyword's value the flag for
+/// an integer one. A conforming file with a mosaic edge, a coverage gap, or a masked bad pixel
+/// carries them by design, and cfitsio, astropy and Siril all read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FitsNullPolicy {
+    /// Carry them: the samples are replaced with a finite fill and their positions recorded, so the
+    /// file opens and the missing pixels stay identifiable.
+    Mask,
+    /// Fail the load, naming how many there are and where the first one is.
+    Reject,
+}
+
+/// Controls checksum validation for the selected FITS HDU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FitsChecksumPolicy {
+    /// Do not compute `DATASUM` or `CHECKSUM`.
+    Ignore,
+    /// Verify either checksum when present and reject invalid values.
+    VerifyIfPresent,
+    /// Require both `DATASUM` and `CHECKSUM` to be present and valid.
+    RequireValid,
+}
+
+/// FITS-specific selection and validation policy.
+///
+/// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f32`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FitsLoadOptions {
+    /// Image HDU selection policy.
+    pub hdu: FitsHduSelector,
+    /// Three-plane cube interpretation.
+    pub cube: FitsCubeInterpretation,
+    /// Checksum validation policy.
+    pub checksum: FitsChecksumPolicy,
+    /// How a floating-point HDU's sample scale is decided.
+    pub float_scale: FitsFloatScale,
+    /// What null pixels do to the load.
+    pub nulls: FitsNullPolicy,
+    /// The Bayer phase of a frame whose `BAYERPAT` says only `'TRUE'` — mosaiced, phase unstated —
+    /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
+    /// four.
+    pub unstated_bayer_pattern: Option<CfaPattern>,
+    /// The pedestal a frame's values carry, in its physical units, when the header records none.
+    /// Only a lumos-written file records one; a third-party file usually keeps the camera offset in
+    /// the data and says nothing, so the default is [`Pedestal::Unknown`], which calibration then
+    /// refuses to relate to a frame whose pedestal is known.
+    pub pedestal: Pedestal,
+}
+
+impl Default for FitsLoadOptions {
+    fn default() -> Self {
+        Self {
+            hdu: FitsHduSelector::Auto,
+            cube: FitsCubeInterpretation::Reject,
+            checksum: FitsChecksumPolicy::VerifyIfPresent,
+            float_scale: FitsFloatScale::Auto,
+            // Reading a file that conforms to the standard is not opt-in behaviour. The other
+            // defaults here refuse *ambiguity* — a cube whose colour semantics nothing establishes,
+            // a float scale no header settles; a null is unambiguous, and refusing it refuses data
+            // the standard defines.
+            nulls: FitsNullPolicy::Mask,
+            unstated_bayer_pattern: None,
+            pedestal: Pedestal::Unknown,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::fits::options::{
+        FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
+    };
+
+    #[test]
+    fn scientific_fits_defaults_require_unambiguous_image_semantics() {
+        let options = FitsLoadOptions::default();
+        assert_eq!(options.hdu, FitsHduSelector::Auto);
+        assert_eq!(options.cube, FitsCubeInterpretation::Reject);
+        assert_eq!(options.checksum, FitsChecksumPolicy::VerifyIfPresent);
+    }
+}

@@ -88,13 +88,13 @@ pub(crate) mod internals {
     use crate::math::size2us::Size2us;
     use crate::math::urect::URect;
     use crate::math::vec2us::Vec2us;
-    use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::deblend::component::Component;
     use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
     use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
     use crate::star_detection::deblend::region::Region;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
+    use crate::star_detection::star_detection_config::extraction_config::Connectivity;
     use glam::Vec2;
 
     /// Rendered stars and the one label covering every pixel they light above 0.001.

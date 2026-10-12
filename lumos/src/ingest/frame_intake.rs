@@ -4,15 +4,15 @@
 use std::ops::Range;
 
 use crate::concurrency;
-use crate::frame_store::frame_facts::FrameFacts;
-use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::error::Cancelled;
+use crate::frame::frame_facts::FrameFacts;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::stackable_image::StackableImage;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::cancelled::Cancelled;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::load_context::LoadContext;
+use crate::io::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;

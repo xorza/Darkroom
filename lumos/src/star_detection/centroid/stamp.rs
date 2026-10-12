@@ -12,7 +12,7 @@ use imaginarium::Buffer2;
 
 use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
+use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::{MAX_STAMP_PIXELS, stamp_centre};
 

@@ -1,5 +1,4 @@
 mod black_level;
-pub(crate) mod demosaic;
 pub(crate) mod error;
 mod libraw;
 mod raw_decoder;
@@ -12,11 +11,12 @@ use std::ffi;
 use std::fs;
 use std::path::Path;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
-use crate::io::image::error::ImageError;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
+use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::io::error::ImageError;
+use crate::io::load_context::LoadContext;
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::Libraw;
 use crate::io::raw::raw_decoder::RawDecoder;
@@ -189,9 +189,9 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
 pub(crate) mod internals {
     use std::path::Path;
 
-    use crate::io::image::error::ImageError;
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::load_context::LoadContext;
+    use crate::image::linear_image::LinearImage;
+    use crate::io::error::ImageError;
+    use crate::io::load_context::LoadContext;
     use crate::io::raw::open_raw;
 
     /// Load a raw file through libraw's own demosaic at quality `user_qual`, the reference ours is

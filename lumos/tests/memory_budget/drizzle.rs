@@ -1,11 +1,8 @@
-//! Frames drizzled onto a finer grid and combined: `drizzle_stack` of linear files.
+//! Frames drizzled onto a finer grid and combined: `DrizzleConfig::drizzle_paths` of linear files.
 
 use common::CancelToken;
 use glam::DVec2;
-use lumos::{
-    DrizzleConfig, DrizzleFrame, ProgressCallback, StackConfig, Transform, WarpTransform,
-    drizzle_stack,
-};
+use lumos::{DrizzleConfig, DrizzleFrame, ProgressCallback, Transform, WarpTransform};
 
 use crate::budget::Budget;
 use crate::session::Session;
@@ -38,18 +35,18 @@ fn a_spilled_drizzle_stays_within_its_budget() {
     let budget = Budget::mib(3);
     let drizzle = DrizzleConfig {
         scale: 2.0,
-        ingest: session.ingest(budget),
         ..DrizzleConfig::default()
     };
+    let ingest = session.ingest(budget);
     let run = session.measure(|| {
-        drizzle_stack(
-            frames,
-            &drizzle,
-            &StackConfig::light(),
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
+        drizzle
+            .drizzle_paths(
+                frames,
+                &ingest,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
     });
     let report = &run.value.product.report;
     assert_eq!(report.spilled_frames, FRAMES as u64);

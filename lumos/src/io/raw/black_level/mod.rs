@@ -5,7 +5,9 @@ use rayon::prelude::*;
 
 use imaginarium::Buffer2;
 
-use crate::io::image::pixel_flags::{FlagCounts, PixelFlags, QualityFlags};
+use crate::image::flag_counts::FlagCounts;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::libraw_filter_color;
 use crate::io::raw::sensor_layout::SensorLayout;
@@ -280,7 +282,7 @@ impl BlackLevel {
                     };
                     if flag != QualityFlags::default() {
                         *byte = flag.byte();
-                        counts.tally(*byte);
+                        counts.tally(QualityFlags::from_byte(*byte));
                     }
                     phase += 1;
                     if phase == phases.len() {

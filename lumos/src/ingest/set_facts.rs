@@ -1,10 +1,10 @@
 //! [`SetFacts`]: what every frame of a stack has to state alike.
 
-use crate::frame_store::frame_facts::FrameFacts;
+use crate::frame::frame_facts::FrameFacts;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_provenance::RowOrder;
+use crate::image::sample_domain::SampleDomain;
 use crate::ingest::error::AdmissionError;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
 
 /// The facts a frame set must agree on — sample domain, row order and CFA pattern — each held by
 /// the first frame that states it, and checked in that order.

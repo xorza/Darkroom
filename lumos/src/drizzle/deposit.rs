@@ -1,7 +1,7 @@
 //! [`Deposit`]: which output channels a drizzled frame's samples reach, and under which weights.
 
-use crate::frame_store::stackable_image::StackableImage;
-use crate::io::image::cfa::CfaType;
+use crate::frame::stackable_image::StackableImage;
+use crate::image::cfa::cfa_type::CfaType;
 
 /// How a frame's samples reach the output channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

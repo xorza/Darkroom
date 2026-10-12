@@ -7,7 +7,7 @@ use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::bench::Stages;
-use crate::star_detection::config::background_config::BackgroundRefinement;
+use crate::star_detection::star_detection_config::background_config::BackgroundRefinement;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;

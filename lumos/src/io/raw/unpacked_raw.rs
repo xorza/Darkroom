@@ -8,18 +8,20 @@ use std::time::Instant;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
-use crate::io::image::error::ImageError;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::image_provenance::{
+use crate::error::Cancelled;
+use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::SATURATION_FRACTION;
-use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::linear_image::LinearImage;
+use crate::image::quality_flags::SATURATION_FRACTION;
+use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::io::error::ImageError;
+use crate::io::load_context::LoadContext;
 use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack};
 use crate::io::raw::error::RawError;
@@ -221,7 +223,7 @@ impl UnpackedRaw {
     }
 
     /// The active area of `raw` normalized, and the flags its raw values themselves settle:
-    /// [`QualityFlags`](crate::io::image::pixel_flags::QualityFlags)`::SATURATED` at each
+    /// [`QualityFlags`](crate::image::quality_flags::QualityFlags)`::SATURATED` at each
     /// channel's saturation level, and `NO_DATA` on the zeros of a `zero_is_bad` camera; no flags
     /// when no photosite carries either.
     ///

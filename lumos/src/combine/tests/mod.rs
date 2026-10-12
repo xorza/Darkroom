@@ -8,8 +8,8 @@
 
 mod tier_equivalence;
 
-use crate::combine::config::{Combine, Normalization, StackConfig, Weighting};
-use crate::combine::stack::{StackFrame, stack_images};
+use crate::combine::stack::StackFrame;
+use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
 use crate::internals::prelude::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
@@ -56,14 +56,10 @@ fn frame_set(scene: &Scene, camera: &Camera, n: usize, base_seed: u64) -> FrameS
 
 fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
-    stack_images(
-        frames,
-        config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("stack")
-    .image
+    config
+        .stack_images(frames, ProgressCallback::default(), CancelToken::never())
+        .expect("stack")
+        .image
 }
 
 /// Overwrite one pixel of one frame with a bright cosmic-ray-like spike.

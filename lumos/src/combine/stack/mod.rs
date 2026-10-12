@@ -1,28 +1,27 @@
-//! Unified stacking entry point.
-//!
-//! Provides `stack()` (from paths) and `stack_images()` (in-memory) as the main API
-//! for image stacking operations; both take a [`ProgressCallback`].
+//! The body of the stacking entries: [`StackConfig::stack_paths`] from files and
+//! [`StackConfig::stack_images`] from frames in memory, and the one combine every stack goes
+//! through.
 
 mod quantization;
 
 use std::path::Path;
 
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::linear::LinearImage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::linear_image::LinearImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::combine::cache::core::CacheCore;
-use crate::combine::cache::frame_weights::FrameWeights;
-use crate::combine::cache::sample::CombinedSample;
-use crate::combine::cache::sample_noise::SampleNoise;
-use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
-use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{StackConfigError, StackError};
+use crate::combine::frame_cache::core::CacheCore;
+use crate::combine::frame_cache::frame_weights::FrameWeights;
+use crate::combine::frame_cache::sample::CombinedSample;
+use crate::combine::frame_cache::sample_noise::SampleNoise;
+use crate::combine::frame_cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::stack::quantization::SourceSigmas;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::combine::stack_config::{CombineMethod, StackConfig, Weighting};
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::tier::Tier;
 use crate::ingest::ingest_config::IngestConfig;
@@ -33,8 +32,8 @@ use crate::registration::resample::WarpResult;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
 
-/// One input frame for [`stack_images`], with the per-pixel frame quality a registered frame
-/// carries.
+/// One input frame for [`StackConfig::stack_images`], with the per-pixel frame quality a registered
+/// frame carries.
 ///
 /// Its coverage plane gates whether a warped sample has meaningful source support; its confidence
 /// plane is an independent inverse-variance multiplier. A frame with no frame quality has full
@@ -74,53 +73,8 @@ impl From<LinearImage> for StackFrame {
     }
 }
 
-/// Stack multiple images from disk into a single result.
-///
-/// This is the main entry point for stacking frames stored as files. To stack frames already held
-/// in memory, use [`stack_images`].
-///
-/// # Arguments
-///
-/// * `paths` - Paths to input images
-/// * `config` - Stacking configuration
-/// * `ingest` - How the frames are decoded, the memory the run plans against, and where it spills
-///
-/// # Returns
-///
-/// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its per-channel weight map describes the surviving samples; `variance` is available for
-/// mean output and absent for median output.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - No paths are provided
-/// - The configuration is invalid or its manual-weight count doesn't match the paths
-/// - Image loading fails
-/// - Image dimensions don't match
-/// - A decoded image contains a non-finite sample
-/// - Cache directory creation fails (for disk-backed storage)
-///
-/// # Examples
-///
-/// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
-///
-/// ```no_run
-/// use common::CancelToken;
-/// use lumos::{Combine, IngestConfig, ProgressCallback, StackConfig, stack};
-///
-/// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
-/// let ingest = IngestConfig::default();
-/// let config = StackConfig::light();
-/// let result = stack(&paths, &config, &ingest, ProgressCallback::default(), CancelToken::never())?;
-/// let median = StackConfig {
-///     combine: Combine::median(),
-///     ..StackConfig::light()
-/// };
-/// let result = stack(&paths, &median, &ingest, ProgressCallback::default(), CancelToken::never())?;
-/// # Ok::<(), lumos::StackError>(())
-/// ```
-pub fn stack<P: AsRef<Path> + Sync>(
+/// The body of [`StackConfig::stack_paths`].
+pub(crate) fn stack_paths<P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
     ingest: &IngestConfig,
@@ -134,22 +88,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
     })
 }
 
-/// Stack frames already held in memory into a single result.
-///
-/// The in-memory counterpart to [`stack`]: skips the disk round-trip when the caller already
-/// owns the decoded frames (e.g. straight off calibration or warping). The frames are consumed.
-/// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
-///
-/// Each [`StackFrame`] may carry per-pixel `coverage` and `confidence`. Coverage gates inclusion;
-/// confidence divides the sample's noise variance, for rejection and the variance plane, and does
-/// not weight the mean. Frames without either plane use full support and unit
-/// confidence. Plain `LinearImage`s convert via `.into()` and [`StackFrame::registered`] converts a
-/// source image plus its [`WarpResult`] without remeasuring noise after interpolation.
-///
-/// Returns an error when the configuration is invalid, manual-weight count doesn't match the frame
-/// count, an image contains a non-finite sample, image/quality-plane dimensions differ, or
-/// normalization is requested for registered frames with no common valid support.
-pub fn stack_images(
+/// The body of [`StackConfig::stack_images`].
+pub(crate) fn stack_images(
     frames: Vec<StackFrame>,
     config: &StackConfig,
     progress: ProgressCallback,
@@ -250,7 +190,7 @@ const fn validate_manual_weights(
 /// Warn when manual frame weights were given but the resolved combine is a median, which has no
 /// weighted form here — the weights would be silently dropped. Fires both for an explicit `Median`
 /// and for a method downgraded to its small-N fallback (see
-/// [`SmallN::resolve`](crate::combine::config::SmallN::resolve)). Noise weighting is a role's
+/// [`SmallN::resolve`](crate::combine::stack_config::SmallN::resolve)). Noise weighting is a role's
 /// policy rather than a request, as [`StackConfig::light`] carries it whatever the method, so a
 /// median that leaves it unused says nothing.
 fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {

@@ -156,10 +156,13 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let rejected = drizzle_images(
+    let rejected = DrizzleConfig {
+        stack: stack.clone(),
+        ..config.clone()
+    }
+    .drizzle_images(
         drizzle_frames(images.clone(), &transforms),
-        &config,
-        &stack,
+        &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )

@@ -1,6 +1,6 @@
 //! [`KernelPlan`]: what a drizzle kernel needs beyond the frame, resolved once per run.
 
-use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lanczos::lanczos_lut::LanczosOrder;
 

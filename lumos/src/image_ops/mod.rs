@@ -2,7 +2,7 @@
 //! `Buffer2<f32>` per channel, the same storage stacking and star detection use.
 //!
 //! - ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
-//!   [`crate::image_ops::background_extraction`]'s surface fit) take their plane straight from the
+//!   [`crate::image_ops::extract_background`]'s surface fit) take their plane straight from the
 //!   image and need no adapter at all;
 //! - per-pixel ops read the planes in step through the image's own parallel maps: `map_samples`
 //!   for work that treats every sample alike, `map_rgb` for work that needs a whole pixel at once
@@ -25,16 +25,16 @@
 //! shape but report `MlError`: their failures are a missing model or an image smaller
 //! than one tile, neither of which is a config range that `InvalidConfigField` describes.
 
-pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;
 pub(crate) mod error;
+pub(crate) mod extract_background;
 pub(crate) mod hdr;
 pub(crate) mod local_contrast;
 #[cfg(feature = "ml")]
 pub(crate) mod ml;
 pub(crate) mod rgb;
-pub(crate) mod stretching;
+pub(crate) mod stretch;
 
 #[cfg(feature = "bench")]
 pub(crate) mod bench;

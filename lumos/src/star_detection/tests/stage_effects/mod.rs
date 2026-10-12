@@ -11,8 +11,8 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::deblend::region::Region;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::near;
 
 mod cosmic_ray_tests;

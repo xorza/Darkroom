@@ -20,20 +20,22 @@ pub(crate) mod scene;
 
 use criterion::Criterion;
 
-use crate::calibration_masters::{self, cosmic_ray, defect_map, prepared_flat};
-use crate::combine::cache::sample;
+use crate::calibration::{self, cosmic_ray, defect_map, prepared_flat};
+use crate::combine::frame_cache::sample;
 use crate::combine::stack;
 use crate::combine::{normalization, rejection};
 use crate::drizzle::accumulator;
-use crate::frame_store::{self, frame_stats};
-use crate::io::image::fits::decode as fits_decode;
-use crate::io::raw::{self, demosaic};
+use crate::frame::frame_stats;
+use crate::frame_store;
+use crate::image::cfa::demosaic;
+use crate::io::fits::decode as fits_decode;
+use crate::io::raw;
 use crate::math::{
     dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, noise, pixel_quadrature,
     statistics, sum, wavelet,
 };
 use crate::registration::resample;
-use crate::star_detection::detector;
+use crate::star_detection::star_detector;
 use crate::{
     background_mesh, bit_buffer2, combine, drizzle, image_ops, pipeline, registration,
     star_detection,
@@ -55,7 +57,7 @@ pub fn kernel(c: &mut Criterion) {
     raw::bench::benches(c);
     demosaic::bench::benches(c);
     fits_decode::bench::benches(c);
-    calibration_masters::bench::benches(c);
+    calibration::bench::benches(c);
     defect_map::bench::benches(c);
     cosmic_ray::bench::benches(c);
     prepared_flat::bench::benches(c);
@@ -73,7 +75,7 @@ pub fn kernel(c: &mut Criterion) {
 
 /// The stage tier: one pipeline stage on a 24 MP frame or a set of them.
 pub fn stage(c: &mut Criterion) {
-    detector::bench::benches(c);
+    star_detector::bench::benches(c);
     registration::bench::stage(c);
     resample::bench::benches(c);
     pipeline::bench::benches(c);
@@ -85,7 +87,7 @@ pub fn stage(c: &mut Criterion) {
 /// The pipeline tier: a public entry point end to end, from the files of a session.
 pub fn pipeline(c: &mut Criterion) {
     stack::bench::pipeline(c);
-    calibration_masters::bench::pipeline(c);
+    calibration::bench::pipeline(c);
     pipeline::bench::pipeline(c);
     drizzle::bench::pipeline(c);
 }

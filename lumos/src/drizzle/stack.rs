@@ -1,5 +1,5 @@
-//! Drizzle entry points: from paths, or from frames already in memory, of demosaiced or mono
-//! frames or of calibrated mosaics.
+//! The body of the drizzle entries of [`DrizzleConfig`]: from paths, or from frames already in
+//! memory, of demosaiced or mono frames or of calibrated mosaics.
 //!
 //! Each frame is drizzled onto the output grid on its own, as Siril does: its drops' weighted mean,
 //! their summed weight and their Kish size, the noise factor of the mean. The drizzled frames then
@@ -23,29 +23,30 @@ use arrayvec::ArrayVec;
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::combine::config::StackConfig;
 use crate::combine::error::StackError;
 use crate::combine::stack::stack_stored_frames;
-use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
+use crate::combine::stack_config::StackConfig;
 use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzledPlanes};
-use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::deposit::Deposit;
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
 use crate::drizzle::error::DrizzleError;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::KeptDecodeError;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::image_provenance::DemosaicProvenance;
+use crate::image::linear_image::LinearImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::error::ImageError;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::image_provenance::DemosaicProvenance;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
+use crate::io::error::ImageError;
+use crate::io::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 
@@ -84,123 +85,17 @@ fn load_drizzle_frame<I: StackableImage, P: AsRef<Path>>(
     })
 }
 
-/// Drizzle images from disk with per-frame warps, and combine them under `stack`.
-///
-/// Streams frames one at a time (only one input image is resident at a time). To drizzle frames
-/// already held in memory, use [`drizzle_images`]; to drizzle un-demosaiced sensor frames, use
-/// [`drizzle_cfa_stack`].
-///
-/// # Returns
-///
-/// The drizzled product — its image in the input's surface-brightness units, see
-/// [`DrizzleConfig::scale`] — with the quality planes `stack` asks for, and the count of input
-/// pixels a SIP warp could not place.
-///
-/// # Errors
-///
-/// Returns an error for an invalid configuration, missing frames, image loading failures,
-/// inconsistent image dimensions, a non-finite sample, invalid pixel weights, a failed combine, or
-/// cancellation.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "every stacking entry takes its progress and cancel token the same way, by value"
-)]
-pub fn drizzle_stack<P: AsRef<Path>>(
+/// The body of the path entries of [`DrizzleConfig`]: each frame decoded as an `I` when its turn
+/// comes.
+pub(crate) fn from_files<I: StackableImage, P: AsRef<Path>>(
     frames: Vec<DrizzleFrame<P>>,
     drizzle: &DrizzleConfig,
-    stack: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<DrizzleResult, DrizzleError> {
-    drizzle_paths::<LinearImage, P>(frames, drizzle, stack, &progress, cancel)
-}
-
-/// Drizzle frames already held in memory, and combine them under `stack`.
-///
-/// In-memory counterpart to [`drizzle_stack`]: skips the per-frame disk load when the caller
-/// already owns the decoded frames. The frames are consumed.
-///
-/// # Errors
-///
-/// As [`drizzle_stack`], but for the loads.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "every stacking entry takes its progress and cancel token the same way, by value"
-)]
-pub fn drizzle_images(
-    frames: Vec<DrizzleFrame<LinearImage>>,
-    drizzle: &DrizzleConfig,
-    stack: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<DrizzleResult, DrizzleError> {
-    drizzle_held(frames, drizzle, stack, &progress, cancel)
-}
-
-/// Drizzle calibrated, un-demosaiced sensor frames from disk — mosaic FITS or camera RAW — and
-/// combine them under `stack`: CFA (Bayer or X-Trans) drizzle.
-///
-/// Each photosite deposits into the output channel of its colour alone, so a colour plane holds
-/// only that colour's own samples, and an output pixel no photosite of a colour reached is left
-/// out of that channel's combine. That takes many well-dithered frames to fill every colour at
-/// every pixel; a few undithered frames are better demosaiced and stacked. Register the frames on
-/// [`CfaImage::green_proxy`], which interpolates nothing but the green the stars are measured on.
-///
-/// A normalized combine compares each frame with its reference over the pixels both reached in a
-/// colour. At scale 1 a sub-pixel dither shares them all; above it, two frames a photosite apart
-/// can share none, and the combine then fails with [`StackError::NoCommonCoverage`].
-/// `Normalization::None` takes any set.
-///
-/// A RAW file is decoded as it stands: the drizzle calibrates nothing. Calibrate the frames first,
-/// and drizzle the calibrated mosaics, through [`drizzle_cfa_images`] or as FITS files.
-///
-/// # Errors
-///
-/// As [`drizzle_stack`], and for a frame whose mosaic pattern differs from the first frame's.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "every stacking entry takes its progress and cancel token the same way, by value"
-)]
-pub fn drizzle_cfa_stack<P: AsRef<Path>>(
-    frames: Vec<DrizzleFrame<P>>,
-    drizzle: &DrizzleConfig,
-    stack: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<DrizzleResult, DrizzleError> {
-    drizzle_paths::<CfaImage, P>(frames, drizzle, stack, &progress, cancel)
-}
-
-/// Drizzle calibrated mosaics already held in memory, and combine them under `stack`: the
-/// in-memory counterpart to [`drizzle_cfa_stack`]. The frames are consumed.
-///
-/// # Errors
-///
-/// As [`drizzle_cfa_stack`], but for the loads.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "every stacking entry takes its progress and cancel token the same way, by value"
-)]
-pub fn drizzle_cfa_images(
-    frames: Vec<DrizzleFrame<CfaImage>>,
-    drizzle: &DrizzleConfig,
-    stack: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<DrizzleResult, DrizzleError> {
-    drizzle_held(frames, drizzle, stack, &progress, cancel)
-}
-
-/// The path entries' body: each frame decoded as an `I` when its turn comes.
-fn drizzle_paths<I: StackableImage, P: AsRef<Path>>(
-    frames: Vec<DrizzleFrame<P>>,
-    drizzle: &DrizzleConfig,
-    stack: &StackConfig,
+    ingest: &IngestConfig,
     progress: &ProgressCallback,
     cancel: CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
-    let run = IngestRun::new(&drizzle.ingest, cancel);
+    let run = IngestRun::new(ingest, cancel);
     let context = run.context.clone();
     let kept = run
         .keep_cache
@@ -224,28 +119,28 @@ fn drizzle_paths<I: StackableImage, P: AsRef<Path>>(
         frame_count,
         FrameOrigin::Files,
         drizzle,
-        stack,
+        &drizzle.stack,
         &run,
         progress,
     )
 }
 
-/// The in-memory entries' body.
-fn drizzle_held<I: StackableImage>(
+/// The body of the in-memory entries of [`DrizzleConfig`].
+pub(crate) fn from_memory<I: StackableImage>(
     frames: Vec<DrizzleFrame<I>>,
     drizzle: &DrizzleConfig,
-    stack: &StackConfig,
+    ingest: &IngestConfig,
     progress: &ProgressCallback,
     cancel: CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
-    let run = IngestRun::new(&drizzle.ingest, cancel);
+    let run = IngestRun::new(ingest, cancel);
     accumulate(
         frames.into_iter().map(Ok),
         frame_count,
         FrameOrigin::Memory,
         drizzle,
-        stack,
+        &drizzle.stack,
         &run,
         progress,
     )

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::CancelToken;
 
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::align_stack_config::AlignStackConfig;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
@@ -13,10 +13,9 @@ use crate::pipeline::frame_registration::FrameRegistration;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
-use crate::registration::register;
+use crate::registration::error::RegistrationError;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::result::RegistrationError;
 use crate::star_detection::star::Star;
 
 /// Registers each frame to the reference's stars, warps it, and parks the warped frame in the
@@ -105,7 +104,10 @@ impl<'a> FrameRegistrar<'a> {
         }
 
         let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
-        let registration = match register(&self.reference_stars, &stars, &self.config.registration)
+        let registration = match self
+            .config
+            .registration
+            .register(&self.reference_stars, &stars)
         {
             Ok(registration) => registration,
             // A pair that did not match is a frame to drop. An invalid config is not: it fails

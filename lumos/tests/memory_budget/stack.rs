@@ -1,12 +1,12 @@
-//! Frames decoded straight into a combine: `stack` of linear files, and the calibration masters
-//! `CalibrationMasters::build` stacks from mosaics.
+//! Frames decoded straight into a combine: `StackConfig::stack_paths` of linear files, and the
+//! calibration masters `CalibrationMasters::build` stacks from mosaics.
 
 use std::path::PathBuf;
 
 use common::CancelToken;
 use lumos::{
     CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NoMasterCache, ProgressCallback,
-    RunReport, StackConfig, stack,
+    RunReport, StackConfig,
 };
 
 use crate::budget::Budget;
@@ -34,14 +34,14 @@ fn a_stack_stays_within_its_budget() {
     ] {
         let ingest = session.ingest(budget);
         let run = session.measure(|| {
-            stack(
-                &paths,
-                &StackConfig::light(),
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .unwrap()
+            StackConfig::light()
+                .stack_paths(
+                    &paths,
+                    &ingest,
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+                .unwrap()
         });
         let report = &run.value.report;
         assert_eq!(

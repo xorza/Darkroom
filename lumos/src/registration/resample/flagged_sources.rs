@@ -19,7 +19,8 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags, Reach};
+use crate::image::pixel_flags::{PixelFlags, Reach};
+use crate::image::quality_flags::QualityFlags;
 use crate::math::vec2us::Vec2us;
 use crate::registration::resample::kernel::warp_kernel::TapAxis;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};

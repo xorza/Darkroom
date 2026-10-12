@@ -1,9 +1,9 @@
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::bayer::rcd;
+use crate::image::cfa::demosaic::xtrans::markesteijn;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::internals::cfa::XTRANS_PATTERN;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::raw::demosaic::bayer::rcd;
-use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::memory::budget::Budget;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
@@ -612,10 +612,11 @@ const fn warped(plane_bytes: usize, output_bytes: usize) -> usize {
     output_bytes + 2 * plane_bytes + plane_bytes / size_of::<f32>()
 }
 
-/// The stages `calibrate_align_stack` plans with the reference found, cosmic rays off: the decode
-/// raised to the statistics' copy of every channel beside the frame — at these sizes more than the
-/// noise estimate holds — and the detector's planes beside each decode; the warp of the demosaiced
-/// output, its source in hand; no normalization; a combine holding `output_bytes`.
+/// The stages `AlignStackConfig::calibrate_align_stack_paths` plans with the reference found,
+/// cosmic rays off: the decode raised to the statistics' copy of every channel beside the frame —
+/// at these sizes more than the noise estimate holds — and the detector's planes beside each
+/// decode; the warp of the demosaiced output, its source in hand; no normalization; a combine
+/// holding `output_bytes`.
 fn found_reference(plane_bytes: usize, decode: Footprint, output_bytes: usize) -> [Stage; 4] {
     let prepared = decode.beside(decode.kept);
     let warped = warped(plane_bytes, decode.kept);

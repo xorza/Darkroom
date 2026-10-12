@@ -10,15 +10,15 @@ use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::linear::LinearImage;
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::linear_image::LinearImage;
 use crate::registration::bench::Pair;
-use crate::registration::registration_config::{InterpolationMethod, WarpParams};
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::transform::WarpTransform;
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::transform::warp_transform::WarpTransform;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;

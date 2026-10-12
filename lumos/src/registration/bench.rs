@@ -10,16 +10,17 @@ use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::test_rng::TestRng;
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::final_fit::{FinalFit, FitCatalogs, FitModel, SipModel};
+use crate::registration::kd_tree::KdTree;
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::row_positions;
-use crate::registration::spatial::KdTree;
-use crate::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::matching;
 use crate::registration::triangle::voting::PointMatch;
 use crate::registration::{
-    bounding_box_centre, estimate_and_refine, final_fit, median_fwhm, ransac, register, spatial,
-    triangle, tuning,
+    bounding_box_centre, estimate_and_refine, final_fit, kd_tree, median_fwhm, ransac, triangle,
+    tuning,
 };
 use crate::star_detection::star::Star;
 
@@ -33,12 +34,16 @@ pub(crate) fn stage(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("pair", field.name()), |b| {
         let pair = Pair::typical();
         let config = RegistrationConfig::default();
-        b.iter(|| register(&pair.reference, &pair.target, &config).expect("the pair registers"));
+        b.iter(|| {
+            config
+                .register(&pair.reference, &pair.target)
+                .expect("the pair registers")
+        });
     });
 }
 
 pub(crate) fn benches(c: &mut Criterion) {
-    spatial::bench::benches(c);
+    kd_tree::bench::benches(c);
     triangle::bench::benches(c);
     ransac::bench::benches(c);
     final_fit::bench::benches(c);

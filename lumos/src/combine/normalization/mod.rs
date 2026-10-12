@@ -25,20 +25,20 @@ use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::combine::cache::slots::Slots;
-use crate::combine::config::Normalization;
 use crate::combine::error::StackError;
+use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::common_domain::{CommonDomain, WORD_BITS};
 use crate::combine::normalization::photometric_gain::{
     MAD_SIGMA_VARIANCE, MEDIAN_ERROR, paired_photometric_gain, sample_stats,
 };
-use crate::frame_store::frame_stats::SlotSpread;
+use crate::combine::stack_config::Normalization;
+use crate::error::Cancelled;
+use crate::frame::frame_stats::SlotSpread;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
-use crate::io::cancelled::Cancelled;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::sample_domain::DomainMap;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::sample_domain::DomainMap;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;

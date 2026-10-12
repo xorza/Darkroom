@@ -17,9 +17,9 @@ mod union_find;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// The connected components of a mask: each one's box and area, and its pixels as runs.
 #[derive(Debug, Default)]
@@ -90,10 +90,10 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
-    use crate::star_detection::config::detection_config::Connectivity;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::labeling::labeler::Labeler;
     use crate::star_detection::labeling::{LabelMap, LabelRun};
+    use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
     impl LabelMap {
         /// Adopt pre-computed labels `1..=num_labels`, bypassing connected-component analysis;

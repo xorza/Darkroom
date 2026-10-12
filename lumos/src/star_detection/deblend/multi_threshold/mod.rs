@@ -10,12 +10,12 @@
 //!    is significant and split nowhere below becomes a star, and a split marks every ancestor as
 //!    split. A component that split nowhere is one star.
 
-use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::deblend::{Pixel, peaks_too_close};
+use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// A pixel that belongs to no object of the current level: below it, or in a region too small to
 /// be one.

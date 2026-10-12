@@ -8,7 +8,7 @@ use imaginarium::Buffer2;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::io::image::flat_gain::{FlatGain, GainGrid, GainRows};
+use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
 
 /// Each channel's node grid of a frame's [`FlatGain`], wherever the memory tier put it.
 #[derive(Debug)]

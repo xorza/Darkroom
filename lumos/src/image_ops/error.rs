@@ -1,6 +1,10 @@
 //! Errors the image ops report from their `apply` boundary.
 
 use crate::error::InvalidConfigField;
+#[cfg(feature = "ml")]
+use crate::image_ops::ml::backend::WINDOW;
+#[cfg(feature = "ml")]
+use crate::math::size2us::Size2us;
 
 /// Why a display/processing op failed.
 #[derive(Debug, thiserror::Error)]
@@ -30,17 +34,29 @@ pub enum OpError {
     },
 }
 
+#[cfg(feature = "ml")]
+/// Why an ML filter failed.
+#[derive(Debug, thiserror::Error)]
+pub enum MlError {
+    #[error("image must be at least {WINDOW}×{WINDOW}, got {}×{}", .0.width, .0.height)]
+    TooSmall(Size2us),
+    #[error("invalid ML tiling configuration: {0}")]
+    InvalidConfig(#[from] InvalidConfigField),
+    #[error("ONNX model error: {0}")]
+    Model(String),
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::image_ops::background_extraction::ExtractBackground;
-    use crate::image_ops::color_calibration::Scnr;
+    use crate::image::linear_image::LinearImage;
+    use crate::image_ops::color_calibration::scnr::Scnr;
     use crate::image_ops::denoise::Denoise;
+    use crate::image_ops::error::OpError;
+    use crate::image_ops::extract_background::ExtractBackground;
     use crate::image_ops::hdr::Hdr;
     use crate::image_ops::local_contrast::LocalContrast;
-    use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
+    use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
     use crate::internals::images::gray_image;
-    use crate::io::image::linear::LinearImage;
     use crate::math::size2us::Size2us;
 
     /// Every op that owns a `validate`, at each bound its config can break, so an op added

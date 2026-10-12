@@ -9,12 +9,13 @@ use glam::DVec2;
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::drizzle::accumulator::DrizzleAccumulator;
-use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
-use crate::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::deposit::Deposit;
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::registration::bench::Pair;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Each kernel and its pixfrac: the default 0.8, and the square kernel at 1 too, where its drops
 /// tile the output; Lanczos takes 1 alone.

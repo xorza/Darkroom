@@ -11,7 +11,7 @@ use std::slice;
 use common::CancelToken;
 use libraw_sys as sys;
 
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::io::raw::error::{LibrawCode, RawError};
 use crate::io::raw::raw_decoder::{CodecFacts, CrxCoding, RawDecoder};
 use crate::math::size2us::Size2us;

@@ -7,40 +7,26 @@ use std::path::Path;
 use common::CancelToken;
 
 use crate::concurrency;
+use crate::image::linear_image::LinearImage;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::image::linear::LinearImage;
-use crate::pipeline::config::{AlignStackConfig, Reference};
+use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
+use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::StagePlan;
 use crate::pipeline::frame_registrar::FrameRegistrar;
 use crate::pipeline::light_source::{LightFiles, LightSource, Preparation};
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::Diagnostics;
+use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
-/// Detect → register → warp → stack a set of light frames into one aligned, combined image.
-///
-/// All frames are expected to share the same dimensions (same sensor). The reference frame is
-/// added to the stack unwarped; every other frame is aligned to it. Frames that fail to
-/// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
-/// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped);
-/// the stack proceeds with whatever aligned. A single input frame is returned as its own "stack".
-///
-/// Every light must share the first one's dimensions and hold only finite samples; each is checked
-/// before its stars are detected, so a bad input is reported as one instead of surfacing from the
-/// combine after a warp has spread it.
-///
-/// The frames arrive decoded and resident, so the inputs are committed before this is called —
-/// but the warped outputs are a second full set, and those spill to the frame store when they
-/// would not fit alongside the inputs. For camera RAW, enter through
-/// [`calibrate_align_stack`](crate::pipeline::calibrate::calibrate_align_stack)
-/// instead, which tiers the decode as well.
-pub fn align_and_stack(
+/// The body of [`AlignStackConfig::align_stack_images`].
+pub(crate) fn align_stack_images(
     lights: Vec<LinearImage>,
     config: &AlignStackConfig,
+    ingest: &IngestConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, AlignStackError> {
@@ -48,24 +34,16 @@ pub fn align_and_stack(
         return Err(AlignStackError::NoFrames);
     }
     config.validate_linear(lights.len())?;
-    let run = IngestRun::new(&config.ingest, cancel.clone());
+    let run = IngestRun::new(ingest, cancel.clone());
     let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
     register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
 }
 
-/// Detect → register → warp → stack calibrated linear lights read from files: FITS or
-/// floating-point TIFF, as [`LinearImage::from_file`] reads them — the output of Siril or
-/// PixInsight, for one.
-///
-/// [`align_and_stack`] for frames on disk: each light is decoded on a worker, checked, and its
-/// stars detected, and when the set would not fit the memory it plans against, parked and warped
-/// through the frame store as [`calibrate_align_stack`] parks its lights, so peak RAM stays flat in
-/// the frame count. With [`Reference::Index`] each light goes through one pass, written once.
-///
-/// [`calibrate_align_stack`]: crate::pipeline::calibrate::calibrate_align_stack
-pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
+/// The body of [`AlignStackConfig::align_stack_paths`].
+pub(crate) fn align_stack_paths<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     config: &AlignStackConfig,
+    ingest: &IngestConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, AlignStackError> {
@@ -73,7 +51,7 @@ pub fn align_and_stack_paths<P: AsRef<Path> + Sync>(
         return Err(AlignStackError::NoFrames);
     }
     config.validate_linear(light_paths.len())?;
-    let run = IngestRun::new(&config.ingest, cancel.clone());
+    let run = IngestRun::new(ingest, cancel.clone());
     LightFiles::new(light_paths, Preparation::Linear, &run)?.stack(config, &run, progress, cancel)
 }
 
@@ -111,7 +89,7 @@ pub(crate) fn register_warp_and_stack(
 
     // Taken before the frames are consumed below, so the funnel survives into the result in input
     // order — including for frames registration goes on to drop.
-    let detection: Vec<Diagnostics> = detected
+    let detection: Vec<DetectionDiagnostics> = detected
         .iter_mut()
         .map(|frame| mem::take(&mut frame.diagnostics))
         .collect();

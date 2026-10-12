@@ -4,10 +4,10 @@
 //! invariants, and hands similar pairs to the voting stage, which turns shared vertices into point
 //! correspondences.
 
-use crate::registration::spatial::{KdTree, Neighbor};
+use crate::registration::kd_tree::{KdTree, Neighbor};
 
-use crate::registration::triangle::TriangleConfig;
 use crate::registration::triangle::geometry::Triangle;
+use crate::registration::triangle::triangle_config::TriangleConfig;
 use crate::registration::triangle::voting::{
     PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };

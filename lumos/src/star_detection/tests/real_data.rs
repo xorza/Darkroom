@@ -7,16 +7,15 @@ use common::internals;
 use std::time::Instant;
 
 use crate::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
-use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::registration::register;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformModel;
-use crate::star_detection::config::Config;
-use crate::star_detection::config::measurement_config::CentroidMethod;
-use crate::star_detection::detector::StarDetector;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
+use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::threshold_mask::ThresholdParams;
 use glam::Vec2;
 use imaginarium::Color;
@@ -50,7 +49,7 @@ fn detect_rho_opiuchi() {
         linear_image.height()
     );
 
-    let mut detector = StarDetector::from_config(Config::precise_ground()).unwrap();
+    let mut detector = StarDetector::from_config(StarDetectionConfig::precise_ground()).unwrap();
 
     let start = Instant::now();
     let result = detector.detect(&linear_image);
@@ -134,11 +133,11 @@ fn detect_rho_opiuchi() {
 #[test]
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::internals::visual;
-    use crate::star_detection::detector::stages::detect::DetectResult;
-    use crate::star_detection::detector::stages::fwhm;
-    use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::resources::DetectionResources;
+    use crate::star_detection::star_detector::stages::detect::DetectResult;
+    use crate::star_detection::star_detector::stages::fwhm;
+    use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
     use crate::star_detection::threshold_mask::create_residual_threshold_mask;
     use imaginarium::Buffer2;
 
@@ -150,7 +149,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let size = Size2us::new(width, height);
     println!("Image size: {width}x{height}");
 
-    let config = Config::precise_ground();
+    let config = StarDetectionConfig::precise_ground();
     let mut pool = DetectionResources::new(size);
 
     let out = |name: &str| format!("rho-opiuchi-inspect/{name}");
@@ -185,7 +184,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
         &plane.values,
         &plane.noise.noise,
         ThresholdParams {
-            sigma: config.detection.sigma_threshold,
+            sigma: config.extraction.sigma_threshold,
             min_noise: plane.noise.floor,
         },
         &mut mask,
@@ -198,7 +197,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 05_threshold_mask ({pixels_above} pixels above threshold)");
 
     // 5. Label map, of the mask as it stands — the stage labels it undilated.
-    let label_map = LabelMap::from_pool(&mask, config.detection.connectivity, &mut pool);
+    let label_map = LabelMap::from_pool(&mask, config.extraction.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
@@ -208,8 +207,12 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     pool.release_bit(mask);
 
     // The stage itself, on the same plane, saw what these images show.
-    let stage =
-        DetectResult::from_plane(&plane, frame.no_data.as_ref(), &config.detection, &mut pool);
+    let stage = DetectResult::from_plane(
+        &plane,
+        frame.no_data.as_ref(),
+        &config.extraction,
+        &mut pool,
+    );
     assert_eq!(stage.pixels_above_threshold, pixels_above);
     assert_eq!(stage.connected_components, num_labels);
     plane.release_to_pool(&mut pool);
@@ -238,7 +241,7 @@ fn weighted_fit_registration_rms() {
     let noise_model = 30_000.0;
 
     let register_with = |noise: Option<f32>| {
-        let mut config = Config::precise_ground();
+        let mut config = StarDetectionConfig::precise_ground();
         config.measurement.centroid_method = CentroidMethod::GaussianFit;
         config.measurement.electrons_per_unit = noise;
         let mut detector = StarDetector::from_config(config).unwrap();
@@ -251,7 +254,9 @@ fn weighted_fit_registration_rms() {
         };
         // Seeded, so the two runs differ only in their centroids.
         reg_config.ransac.seed = 0x5EED;
-        let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
+        let r = reg_config
+            .register(&s1, &s2)
+            .expect("registration should succeed");
         Registered {
             rms: r.rms_error(),
             inliers: r.num_inliers(),

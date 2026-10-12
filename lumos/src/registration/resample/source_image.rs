@@ -2,9 +2,9 @@
 
 use arrayvec::ArrayVec;
 
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::image::pixel_flags::PixelFlags;
 use crate::math::size2us::Size2us;
 
 /// A frame as the warp reads it: its planes and its flags, borrowed from a `LinearImage` in memory.

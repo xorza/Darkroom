@@ -5,12 +5,12 @@ use criterion::Criterion;
 
 use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
-use crate::star_detection::config::Config;
 use crate::star_detection::detection_plane::DetectionPlane;
-use crate::star_detection::detector::stages::fwhm;
-use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
-use crate::star_detection::detector::stages::{detect, filter};
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detector::stages::fwhm;
+use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
+use crate::star_detection::star_detector::stages::{detect, filter};
 use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 use crate::star_detection::{
     background, centroid, convolution, labeling, median_filter, threshold_mask,
@@ -32,7 +32,7 @@ pub(crate) fn benches(c: &mut Criterion) {
 /// `StarDetector::detect` runs them, under the configuration a user picks for it.
 #[derive(Debug)]
 pub(crate) struct Stages {
-    pub(crate) config: Config,
+    pub(crate) config: StarDetectionConfig,
     /// The frame less its sky, which the stars are measured on.
     pub(super) frame: PreparedFrame,
     /// The FWHM the matched filter took, or `None` where the configuration filters with none.
@@ -55,7 +55,7 @@ impl Stages {
             &plane.values,
             &plane.noise.noise,
             ThresholdParams {
-                sigma: config.detection.sigma_threshold,
+                sigma: config.extraction.sigma_threshold,
                 min_noise: plane.noise.floor,
             },
             &mut mask,
@@ -71,10 +71,10 @@ impl Stages {
 
     /// The configuration a user picks for `field`: the default for a sparse or a typical field,
     /// the crowded-field preset for a cluster.
-    pub(crate) fn config(field: Field) -> Config {
+    pub(crate) fn config(field: Field) -> StarDetectionConfig {
         match field {
-            Field::Sparse | Field::Typical => Config::default(),
-            Field::Dense => Config::crowded_field(),
+            Field::Sparse | Field::Typical => StarDetectionConfig::default(),
+            Field::Dense => StarDetectionConfig::crowded_field(),
         }
     }
 }

@@ -17,8 +17,8 @@ use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_beta_to_alpha, 
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
-use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
+use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
@@ -267,8 +267,8 @@ impl MoffatFit {
 #[cfg(test)]
 mod internals {
     use crate::math::lm_controller::LmFit;
-    use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
     use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, fast_pow_neg};
+    use crate::star_detection::centroid::profile_problem::internals::{ModelJacobian, ModelSample};
 
     impl ModelJacobian<5> for MoffatFixedBeta {
         fn point_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> ModelSample<5> {

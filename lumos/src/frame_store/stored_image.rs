@@ -4,17 +4,18 @@ use std::fmt::Debug;
 
 use arrayvec::ArrayVec;
 
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::linear_image::LinearImage;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
@@ -134,9 +135,9 @@ mod tests {
 
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_image::StoredImage;
-    use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::pixel_flags::PixelFlags;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
+    use crate::image::pixel_flags::PixelFlags;
     use crate::math::size2us::Size2us;
     use crate::platform::MappedFile;
 

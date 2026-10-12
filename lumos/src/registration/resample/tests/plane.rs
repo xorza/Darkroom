@@ -5,11 +5,12 @@
 
 use crate::internals::prelude::*;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
-use crate::registration::registration_config::{self, InterpolationMethod, WarpParams};
-use crate::registration::resample;
+use crate::registration::registration_config;
 use crate::registration::resample::internals::warp_plane;
 use crate::registration::resample::kernel::warp_kernel::Filter;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
 /// there, and outside the source it is the border.
@@ -116,7 +117,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
                 border_value: BORDER,
                 ..Default::default()
             };
-            let warped = resample::warp(&input, &wt, params);
+            let warped = wt.warp(&input, params);
             let output = warped.image.channel(0);
             let coverage = &warped.coverage;
 

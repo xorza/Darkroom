@@ -8,7 +8,7 @@ use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::internals::synthetic::scene::BackgroundField;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::statistics::median_mut;
-use crate::star_detection::config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::Scenario;
 
 /// Each sky against the truth it was rendered from, in three parts.

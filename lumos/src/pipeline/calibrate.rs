@@ -5,43 +5,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::CancelToken;
 
-use crate::calibration_masters::CalibrationMasters;
-use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
-use crate::calibration_masters::dark_scale::DarkScaleSource;
-use crate::calibration_masters::temperature_source::TemperatureSource;
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::calibration_outcome::CalibrationOutcome;
+use crate::calibration::dark_scale::DarkScaleSource;
+use crate::calibration::temperature_source::TemperatureSource;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::align_stack_config::AlignStackConfig;
+use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_source::{LightFiles, MosaicPreparation, Preparation};
-use crate::pipeline::result::AlignStackResult;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::run_report::RunReport;
+use crate::stack_product::run_report::RunReport;
 
-/// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
-///
-/// For each raw light: load it as a `CfaImage`, apply `masters` (dark/flat/defect) in place,
-/// demosaic to a `LinearImage`, and detect its stars, then register, warp and combine. A frame
-/// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
-/// dropped and reported in
-/// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped).
-///
-/// With [`Reference::Index`](crate::Reference::Index) the reference is prepared first, and each
-/// other light then goes through its preparation, its registration and its warp in one pass,
-/// written once. With [`Reference::Auto`](crate::Reference::Auto) every light is prepared and
-/// detected first, since the reference is the sharpest one, and parked until it registers.
-///
-/// The sensor geometry is peeked from the first frame's header without a decode, so the memory
-/// tier is chosen before any pixels are read. When the frame set plus its per-frame scratch
-/// won't fit the budget, every parked and warped frame goes through the frame store's memory maps
-/// and peak RAM stays flat in the frame count.
-///
-/// For lights already calibrated (e.g. pre-processed FITS), skip this and call
-/// [`align_and_stack_paths`](crate::pipeline::align::align_and_stack_paths), or
-/// [`align_and_stack`](crate::pipeline::align::align_and_stack) for frames already decoded.
-pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
+/// The body of [`AlignStackConfig::calibrate_align_stack_paths`].
+pub(crate) fn calibrate_align_stack_paths<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
+    ingest: &IngestConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, AlignStackError> {
@@ -49,7 +31,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         return Err(AlignStackError::NoFrames);
     }
     config.validate(light_paths.len())?;
-    let run = IngestRun::new(&config.ingest, cancel.clone());
+    let run = IngestRun::new(ingest, cancel.clone());
     let notes = CalibrationNotes::default();
     let mut result = LightFiles::new(
         light_paths,
@@ -123,9 +105,9 @@ impl CalibrationNotes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calibration_masters::dark_scale::DarkScale;
-    use crate::calibration_masters::temperature_difference::TemperatureDifference;
-    use crate::io::image::unverified_conditions::UnverifiedConditions;
+    use crate::calibration::dark_scale::DarkScale;
+    use crate::calibration::temperature_difference::TemperatureDifference;
+    use crate::frame::unverified_conditions::UnverifiedConditions;
 
     /// Five lights: one unverified in exposure, one in temperature and scaled by its exposure, one
     /// matched on its camera's temperature, one matched on its sensor's 3 °C off and scaled by a

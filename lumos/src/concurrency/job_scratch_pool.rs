@@ -8,7 +8,7 @@ use std::sync::Mutex;
 ///
 /// Rayon runs an init closure once per worker and drops what it returns when the call ends,
 /// which is the right shape when the call *is* the operation — the X-Trans demosaic allocates its
-/// tile buffers straight into the init (`io/raw/demosaic/xtrans/markesteijn/mod.rs`) because
+/// tile buffers straight into the init (`image/cfa/demosaic/xtrans/markesteijn/mod.rs`) because
 /// nothing in the RAW path outlives one frame. Reach for a pool only when the same loop runs many times
 /// over: once per chunk per channel in the combine, once per tile row in the background mesh.
 /// Then the init becomes `|| pool.acquire()` and the lease hands its value back on drop, so the

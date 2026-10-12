@@ -1,6 +1,6 @@
-//! `lumos::stack` over a set of calibrated and registered mono lights in 32-bit float FITS, end to
-//! end under the light preset: the reads, each light's statistics, the normalization and the
-//! combine.
+//! `StackConfig::stack_paths` over a set of calibrated and registered mono lights in 32-bit float
+//! FITS, end to end under the light preset: the reads, each light's statistics, the normalization
+//! and the combine.
 
 use std::time::Duration;
 
@@ -10,8 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::combine::config::StackConfig;
-use crate::combine::stack::stack;
+use crate::combine::stack_config::StackConfig;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::progress::progress_callback::ProgressCallback;
 
@@ -26,14 +25,14 @@ pub(crate) fn pipeline(c: &mut Criterion) {
         let files = Files::aligned_lights(field);
         let ingest = IngestConfig::with_cache_dir(files.dir().join("cache"));
         b.iter(|| {
-            stack(
-                &files.paths,
-                &StackConfig::light(),
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .unwrap()
+            StackConfig::light()
+                .stack_paths(
+                    &files.paths,
+                    &ingest,
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+                .unwrap()
         });
     });
 }

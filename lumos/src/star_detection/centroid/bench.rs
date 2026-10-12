@@ -17,9 +17,9 @@ use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
-use crate::star_detection::centroid::local_background::LocalBackground;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
+use crate::star_detection::centroid::stamp_background::StampBackground;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 
@@ -87,7 +87,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     }
     let star = Star::WIDE;
     let annulus = MeasureGrid::new(star.fwhm).annulus;
-    // The pixels whose centre lies between the radii, as `LocalBackground::measure` takes them.
+    // The pixels whose centre lies between the radii, as `StampBackground::measure` takes them.
     let side = 0..=2 * annulus.outer;
     let radii = annulus.inner.pow(2)..=annulus.outer.pow(2);
     let pixels = side
@@ -101,7 +101,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
         let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
         let at = measured.centre();
-        let measure = || LocalBackground::measure(black_box(&measured.residual), None, at, annulus);
+        let measure = || StampBackground::measure(black_box(&measured.residual), None, at, annulus);
         assert!(measure().is_some(), "the annulus lies inside the frame");
         b.iter(measure);
     });

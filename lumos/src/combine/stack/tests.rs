@@ -1,39 +1,42 @@
-use crate::combine::cache::slots::Slots;
-use crate::combine::config::{Combine, Normalization, SmallN};
-use crate::frame_store::capture_conditions::CaptureConditions;
-use crate::frame_store::frame_facts::FrameFacts;
+use crate::combine::frame_cache::slots::Slots;
+use crate::combine::stack_config::{Combine, Normalization, SmallN};
+use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame::frame_facts::FrameFacts;
+use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::tier::CombineBudget;
 use crate::ingest::error::AdmissionError;
 use crate::internals::prelude::*;
-use crate::io::image::unverified_conditions::UnverifiedConditions;
 use crate::memory::run_memory::RunMemory;
 
-use crate::frame_store::frame_quality::FramePlane;
+use crate::frame::frame_quality::FramePlane;
 
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flat_gain::FlatGain;
+use crate::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
+};
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
+use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals;
 use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::flat_gain::FlatGain;
-use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
-};
-use crate::io::image::mosaic_noise::MosaicNoise;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::registration::registration_config::{self, InterpolationMethod};
-use crate::registration::resample;
-use crate::registration::transform::{Transform, WarpTransform};
+use crate::registration::registration_config;
+use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::transform::Transform;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::quality_map::QualityMap;
 use common::TempDir;
 use std::path::PathBuf;
@@ -41,12 +44,7 @@ use std::sync::Arc;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
-    stack_images(
-        frames,
-        config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
+    config.stack_images(frames, ProgressCallback::default(), CancelToken::never())
 }
 
 /// `frame` measured to have white noise `sigma` in every slot, so each of its samples has variance
@@ -295,13 +293,13 @@ fn source_stats(cache: &FrameCache) -> impl Iterator<Item = &FrameStats> {
 #[test]
 fn stack_empty_paths() {
     let paths: Vec<PathBuf> = vec![];
-    let result = stack(
+    let result = (StackConfig {
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_paths(
         &paths,
-        &StackConfig {
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
         &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
@@ -325,13 +323,13 @@ fn stack_images_empty() {
 #[test]
 fn stack_nonexistent_file() {
     let paths = vec![PathBuf::from("/nonexistent/image.fits")];
-    let result = stack(
+    let result = (StackConfig {
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_paths(
         &paths,
-        &StackConfig {
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
         &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
@@ -346,13 +344,13 @@ fn stack_rejects_invalid_config_before_loading() {
         PathBuf::from("/b.fits"),
         PathBuf::from("/c.fits"),
     ];
-    let error = stack(
+    let error = (StackConfig {
+        weighting: Weighting::Manual(vec![1.0, 2.0]),
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_paths(
         &paths,
-        &StackConfig {
-            weighting: Weighting::Manual(vec![1.0, 2.0]),
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
         &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
@@ -366,14 +364,14 @@ fn stack_rejects_invalid_config_before_loading() {
         })
     ));
 
-    let error = stack(
+    let error = (StackConfig {
+        combine: Combine::sigma_clipped(-1.0),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_paths(
         &paths,
-        &StackConfig {
-            combine: Combine::sigma_clipped(-1.0),
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
         &IngestConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1046,13 +1044,13 @@ fn cancelled_stack_returns_cancelled_error() {
     let b = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), invalid_pixels);
     let cancel = CancelToken::new();
     cancel.cancel();
-    let result = stack_images(
+    let result = (StackConfig {
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    })
+    .stack_images(
         vec![a.into(), b.into()],
-        &StackConfig {
-            weighting: Weighting::Equal,
-            normalization: Normalization::None,
-            ..StackConfig::light()
-        },
         ProgressCallback::default(),
         cancel,
     );
@@ -1359,11 +1357,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     };
 
     for method in InterpolationMethod::ALL {
-        let warped = resample::warp(
-            &source,
-            &transform,
-            registration_config::internals::warp_params(method),
-        );
+        let warped = transform.warp(&source, registration_config::internals::warp_params(method));
         let frames = vec![
             StackFrame::from(source.clone()),
             StackFrame::registered(&source, warped),
@@ -1421,11 +1415,8 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let mads = [&a, &b]
         .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
     let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
-    let warped_b = resample::warp(
-        &b,
-        &WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0))),
-        params,
-    );
+    let warped_b =
+        (WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0)))).warp(&b, params);
     let cache = FrameCache::from_stack_frames(
         vec![StackFrame::from(a), StackFrame::registered(&b, warped_b)],
         Normalization::Global,
@@ -1468,15 +1459,11 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let frames = vec![
         StackFrame::registered(
             &source,
-            resample::warp(&source, &WarpTransform::new(Transform::identity()), params),
+            WarpTransform::new(Transform::identity()).warp(&source, params),
         ),
         StackFrame::registered(
             &source,
-            resample::warp(
-                &source,
-                &WarpTransform::new(Transform::translation(DVec2::splat(0.5))),
-                params,
-            ),
+            WarpTransform::new(Transform::translation(DVec2::splat(0.5))).warp(&source, params),
         ),
     ];
     let cache = FrameCache::from_stack_frames(
@@ -2031,15 +2018,15 @@ fn disk_backed_stack_combines_via_mmap() {
         memory_override: Some(1), // forces disk-backed (mmap) storage
         ..IngestConfig::with_cache_dir(temp_dir.join("cache"))
     };
-    let result = stack(
-        &paths,
-        &config,
-        &ingest,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .image;
+    let result = config
+        .stack_paths(
+            &paths,
+            &ingest,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap()
+        .image;
     assert_eq!(result.channel(0).pixels(), &[20.0; 16]);
 }
 
@@ -2156,9 +2143,27 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
         .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
         .collect();
     assert_eq!(saturated, [false, true, true]);
-    assert_eq!(product.report.excluded_samples.saturated, 3);
-    assert_eq!(product.report.kept_flagged_samples.saturated, 18);
-    assert_eq!(product.report.excluded_samples.cosmic_ray, 0);
+    assert_eq!(
+        product
+            .report
+            .excluded_samples
+            .count(QualityFlags::SATURATED),
+        3
+    );
+    assert_eq!(
+        product
+            .report
+            .kept_flagged_samples
+            .count(QualityFlags::SATURATED),
+        18
+    );
+    assert_eq!(
+        product
+            .report
+            .excluded_samples
+            .count(QualityFlags::COSMIC_RAY),
+        0
+    );
 }
 
 /// A star core that saturates in every frame of a registered stack keeps its clipped value: the
@@ -2204,19 +2209,12 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
         ),
         StackFrame::registered(
             &reference,
-            resample::warp(
-                &reference,
-                &WarpTransform::new(Transform::identity()),
-                params,
-            ),
+            WarpTransform::new(Transform::identity()).warp(&reference, params),
         ),
         StackFrame::registered(
             &shifted,
-            resample::warp(
-                &shifted,
-                &WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))),
-                params,
-            ),
+            (WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))))
+                .warp(&shifted, params),
         ),
     ];
     let config = StackConfig {

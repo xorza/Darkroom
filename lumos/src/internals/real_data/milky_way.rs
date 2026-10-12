@@ -4,10 +4,10 @@
 //! Milky Way. Writes the stretched base and the enhanced result for side-by-side visual comparison.
 //! Gated behind the `real-data` feature.
 
+use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_mut;
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,

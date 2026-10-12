@@ -1,24 +1,24 @@
-use crate::combine::cache::frame_gate::FrameGate;
-use crate::frame_store::cache_key::{CacheKey, DecoderKind};
+use crate::combine::frame_cache::frame_gate::FrameGate;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::DecodeCache;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::FrameSpill;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::frame_store::decode_cache::cache_key::{CacheKey, DecoderKind};
+use crate::frame_store::decode_cache::frame_spill::FrameSpill;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::flat_gain::FlatGain;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::internals::panic_message;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::fits::options::{FitsHduSelector, FitsLoadOptions};
-use crate::io::image::flat_gain::FlatGain;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::PixelFlags;
-use crate::io::image::pixel_flags::QualityFlags;
-use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::io::fits::options::{FitsHduSelector, FitsLoadOptions};
+use crate::io::load_context::LoadContext;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
 use std::fs;
@@ -131,67 +131,6 @@ fn light_frame_keeps_quality_with_its_planes() {
         &[4.0, 3.0, 2.0, 0.0]
     );
     assert_eq!(frame.source_stats.medians[0], 2.5);
-}
-
-/// One median per channel, each over that channel alone: 5 for nine 5s and for `[1..=9]`, 20 for
-/// three each of 10, 20 and 30; `[1,3,5,7]`, `[0,0,100,100]` and `[1,2,3,4]` the means of their
-/// middle pair, 4, 50 and 2.5.
-#[test]
-fn frame_statistics_are_a_median_per_channel() {
-    let gray = ImageDimensions::new((3, 3), 1);
-    let rgb = ImageDimensions::new((2, 2), 3);
-    let cases: [(LinearImage, &[f32]); 4] = [
-        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[5.0]),
-        (
-            LinearImage::from_pixels(gray, (1..=9).map(|i| i as f32).collect()),
-            &[5.0],
-        ),
-        (
-            LinearImage::from_pixels(
-                gray,
-                vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
-            ),
-            &[20.0],
-        ),
-        (
-            LinearImage::from_planar_channels(
-                rgb,
-                [
-                    vec![1.0, 3.0, 5.0, 7.0],
-                    vec![0.0, 0.0, 100.0, 100.0],
-                    vec![1.0, 2.0, 3.0, 4.0],
-                ],
-            ),
-            &[4.0, 50.0, 2.5],
-        ),
-    ];
-    for (image, expected) in cases {
-        assert_eq!(FrameStats::measure(&image).medians.as_slice(), expected);
-    }
-}
-
-#[test]
-fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
-    // Eight pixels: four real samples and four the source declared null, filled at 0. Valid 1, 3,
-    // 5, 7 → median (3 + 5) / 2 = 4; all eight → (0 + 1) / 2 = 0.5, the fill's level.
-    let dimensions = ImageDimensions::new((8, 1), 1);
-    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 0.0, 0.0, 0.0, 0.0];
-    let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
-    masked.flags = PixelFlags::of_non_finite(
-        dimensions.size(),
-        &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
-    );
-
-    assert_eq!(FrameStats::measure(&masked).medians[0], 4.0);
-    let plain = LinearImage::from_pixels(dimensions, samples);
-    assert_eq!(FrameStats::measure(&plain).medians[0], 0.5);
-
-    // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
-    // set would panic rather than say so.
-    let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
-    all_null.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
-    let empty = FrameStats::measure(&all_null);
-    assert_eq!(empty.medians[0], 0.0);
 }
 
 #[test]

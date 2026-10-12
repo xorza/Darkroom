@@ -1,5 +1,5 @@
 use super::*;
-use crate::star_detection::detector::stages::filter::Rejection;
+use crate::star_detection::star_detector::stages::filter::FilterRejection;
 
 /// Create two overlapping stars on a 0.1 sky.
 fn make_blended_stars(
@@ -326,7 +326,7 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
     );
     assert!((star.fwhm - 6.230_268).abs() < 1e-5, "{}", star.fwhm);
     assert_eq!(
-        Rejection::of(&star, &Config::high_resolution().filter),
-        Some(Rejection::Eccentric)
+        FilterRejection::of(&star, &StarDetectionConfig::high_resolution().filter),
+        Some(FilterRejection::Eccentric)
     );
 }

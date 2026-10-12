@@ -8,10 +8,11 @@ use fits_well::header::Header;
 use fits_well::image::Image;
 
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration_masters::calibration_set::CalibrationSet;
+use crate::calibration::calibration_set::CalibrationSet;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::linear_image::LinearImage;
 use crate::internals::fits::write_fits;
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::linear::LinearImage;
 
 /// The lights of the pipeline tier's sets: few enough that an iteration stays near ten seconds.
 pub(crate) const LIGHTS: usize = 12;
@@ -131,9 +132,9 @@ fn quantize(samples: &[f32]) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::image::cfa::cfa_pattern::CfaPattern;
-    use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
-    use crate::io::image::load_context::LoadContext;
+    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::io::fits::decode::{load_cfa_fits, load_linear_fits};
+    use crate::io::load_context::LoadContext;
     use crate::math::size2us::Size2us;
 
     /// Each file loads back as what was written, to within half the 16-bit step `0.5 / 65535` for

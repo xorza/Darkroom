@@ -13,17 +13,15 @@ use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{self, FRAME, Field, STACKED_LIGHTS};
-use crate::combine::config::StackConfig;
-use crate::drizzle::accumulator::drizzle_frame::DrizzleFrame;
-use crate::drizzle::config::DrizzleConfig;
-use crate::drizzle::stack::{drizzle_cfa_stack, drizzle_images};
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::image::cfa::CfaType;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::transform::WarpTransform;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Each light's side.
 const SIDE: Size2us = Size2us::new(2048, 2048);
@@ -50,24 +48,24 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter_batched(
             || frames.clone(),
             |frames| {
-                drizzle_images(
-                    frames,
-                    &DrizzleConfig::default(),
-                    &StackConfig::light(),
-                    ProgressCallback::default(),
-                    CancelToken::never(),
-                )
-                .unwrap()
+                DrizzleConfig::default()
+                    .drizzle_images(
+                        frames,
+                        &IngestConfig::default(),
+                        ProgressCallback::default(),
+                        CancelToken::never(),
+                    )
+                    .unwrap()
             },
             BatchSize::PerIteration,
         );
     });
 }
 
-/// `drizzle_cfa_stack` over a session's calibrated lights, mosaics as calibration saves them, end
-/// to end under the default configuration and the light preset: each light read, its photosites
-/// dropped onto the channels of their colours at twice the frame's side through its dither, and
-/// the drops combined with the light preset's noise weighting.
+/// `DrizzleConfig::drizzle_cfa_paths` over a session's calibrated lights, mosaics as calibration
+/// saves them, end to end under the default configuration and the light preset: each light read,
+/// its photosites dropped onto the channels of their colours at twice the frame's side through its
+/// dither, and the drops combined with the light preset's noise weighting.
 pub(crate) fn pipeline(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
@@ -78,10 +76,8 @@ pub(crate) fn pipeline(c: &mut Criterion) {
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("rggb", set), |b| {
         let files = Files::calibrated_mosaics(field, cfa_type);
-        let config = DrizzleConfig {
-            ingest: IngestConfig::with_cache_dir(files.dir().join("cache")),
-            ..DrizzleConfig::default()
-        };
+        let config = DrizzleConfig::default();
+        let ingest = IngestConfig::with_cache_dir(files.dir().join("cache"));
         b.iter_batched(
             || {
                 files
@@ -94,14 +90,14 @@ pub(crate) fn pipeline(c: &mut Criterion) {
                     .collect()
             },
             |frames| {
-                drizzle_cfa_stack(
-                    frames,
-                    &config,
-                    &StackConfig::light(),
-                    ProgressCallback::default(),
-                    CancelToken::never(),
-                )
-                .unwrap()
+                config
+                    .drizzle_cfa_paths(
+                        frames,
+                        &ingest,
+                        ProgressCallback::default(),
+                        CancelToken::never(),
+                    )
+                    .unwrap()
             },
             BatchSize::PerIteration,
         );

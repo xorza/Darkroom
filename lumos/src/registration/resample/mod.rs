@@ -7,18 +7,19 @@ use std::slice;
 
 use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
-use crate::registration::registration_config::WarpParams;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::image::linear_pixels::LinearPixels;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
 };
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::transform::WarpTransform;
+use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::transform::warp_transform::WarpTransform;
 
 mod flagged_sources;
 mod frame_sampler;
@@ -29,8 +30,9 @@ pub(super) mod row_positions;
 pub(crate) mod source_image;
 mod source_position;
 mod tap_window;
+pub(crate) mod warp_params;
 
-/// Output of [`warp`]: the aligned image plus per-pixel support and confidence maps.
+/// Output of [`WarpTransform::warp`]: the aligned image plus per-pixel support and confidence maps.
 ///
 /// `coverage[p] ∈ [0, 1]` is the share of the interpolation kernel's magnitude that lands on
 /// measured source pixels: off the source, and on a pixel flagged a null, a cosmic ray, a defect or
@@ -54,40 +56,12 @@ pub struct WarpResult {
     pub confidence: Buffer2<f32>,
 }
 
-/// Warp an image to align with the reference frame.
-///
-/// The `WarpTransform` bundles the linear transform with optional SIP distortion correction. Use
-/// `result.warp_transform()` to obtain one from a `RegistrationResult`, or
-/// `WarpTransform::new(transform)` for a plain transform.
-///
-/// The output has the same dimensions and metadata as `image`; every output pixel is produced by
-/// inverse-mapping, so no input pixels are carried over. Returns a [`WarpResult`] carrying the
-/// aligned image and its quality maps (see that type).
-///
-/// The maps are always produced: the pipeline's only caller needs both, so there is no
-/// unconditional cost to skip. They are geometry, not pixels, so each row's maps are written once,
-/// from the same source positions every channel of that row samples at.
-///
-/// # Arguments
-/// * `image` - The source (target) image to warp
-/// * `warp_transform` - Combined transform + optional SIP correction
-/// * `config` - Configuration for interpolation method
-///
-/// # Example
-///
-/// ```no_run
-/// use lumos::detection::Star;
-/// use lumos::{LinearImage, RegistrationConfig, register, warp};
-///
-/// # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
-/// # -> Result<(), lumos::RegistrationError> {
-/// let config = RegistrationConfig::default();
-/// let result = register(ref_stars, target_stars, &config)?;
-/// let aligned = warp(target_image, &result.warp_transform(), config.warp).image;
-/// # Ok(())
-/// # }
-/// ```
-pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpParams) -> WarpResult {
+/// The body of [`WarpTransform::warp`].
+pub(crate) fn warp(
+    image: &LinearImage,
+    warp_transform: &WarpTransform,
+    config: WarpParams,
+) -> WarpResult {
     let mut buffers = WarpBuffers::new(image.dimensions());
     buffers.warp_into(&SourceImage::of(image), warp_transform, config);
     WarpResult {
@@ -265,11 +239,11 @@ impl WarpBuffers {
 pub(super) mod internals {
     use imaginarium::Buffer2;
 
-    use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::image::linear::LinearImage;
-    use crate::registration::registration_config::WarpParams;
-    use crate::registration::resample;
-    use crate::registration::transform::WarpTransform;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
+
+    use crate::registration::resample::warp_params::WarpParams;
+    use crate::registration::transform::warp_transform::WarpTransform;
 
     /// One plane warped on its own — the shape the kernel tests and the plane benches compare.
     pub(crate) fn warp_plane(
@@ -282,7 +256,7 @@ pub(super) mod internals {
             ImageDimensions::new((input.width(), input.height()), 1),
             input.pixels().to_vec(),
         );
-        let warped = resample::warp(&image, transform, params);
+        let warped = transform.warp(&image, params);
         output
             .pixels_mut()
             .copy_from_slice(warped.image.channel(0).pixels());

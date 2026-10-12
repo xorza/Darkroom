@@ -9,7 +9,7 @@ use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::Field;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
-use crate::star_detection::config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 
 pub(crate) fn benches(c: &mut Criterion) {
     let config = BackgroundConfig::default();

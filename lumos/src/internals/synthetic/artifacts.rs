@@ -4,9 +4,9 @@
 //! - Cosmic rays
 //! - CFA (Bayer) pattern artifacts
 
+use crate::image::cfa::cfa_colour::CfaColour;
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::test_rng::TestRng;
-use crate::io::image::cfa::cfa_colour::CfaColour;
-use crate::io::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Add random cosmic ray hits to the image.

@@ -491,7 +491,8 @@ mod tests {
     use crate::drizzle::deposit::Deposit;
     use crate::internals::prelude::*;
     use crate::registration::distortion::sip::SipPolynomial;
-    use crate::registration::transform::{Transform, WarpTransform};
+    use crate::registration::transform::Transform;
+    use crate::registration::transform::warp_transform::WarpTransform;
 
     /// The corner lattice gives every drop at pixfrac 1 the quadrilateral it would map itself, bit
     /// for bit — corners, weight, and the failures of a SIP inverse alike — whatever order its

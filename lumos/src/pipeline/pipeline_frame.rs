@@ -1,9 +1,9 @@
 //! [`PipelineFrame`]: the frame carrier the registered-stacking pipeline moves between stages.
 
 use crate::frame_store::stored_image::StoredImage;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::linear::LinearImage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::linear_image::LinearImage;
 
 /// A calibrated frame waiting to be registered, held wherever the memory tier put it.
 ///
@@ -49,9 +49,10 @@ mod tests {
 
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_image::StoredImage;
-    use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
+    use crate::image::pixel_flags::PixelFlags;
+    use crate::image::quality_flags::QualityFlags;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 
     /// A parked frame reaches the warp read back whole: its planes in RAM, not the map's pages,

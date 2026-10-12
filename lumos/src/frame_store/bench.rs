@@ -10,12 +10,12 @@ use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::combine::cache::frame_chunk::ChunkCopy;
-use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_stats::FrameStats;
+use crate::combine::frame_cache::frame_chunk::ChunkCopy;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::io::image::linear::LinearImage;
+use crate::image::linear_image::LinearImage;
 use crate::platform::MappedFile;
 
 /// The rows of a chunk: what a 30-frame stack of warped mono lights gets on a 1 GiB combine

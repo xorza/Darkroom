@@ -11,7 +11,8 @@ use crate::registration::final_fit::homography_refinement::HomographyRefinement;
 use crate::registration::final_fit::{FitModel, SipModel};
 use crate::registration::point_normalization::PointNormalization;
 use crate::registration::ransac::transforms::{dlt_rows, solve_homogeneous_svd_dynamic};
-use crate::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::{Transform, TransformType};
 
 /// Matched positions paired by index, each pair with its weight: the inverse of its positional
 /// variance, times its robust weight.

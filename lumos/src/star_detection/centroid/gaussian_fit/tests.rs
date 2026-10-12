@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::centroid::gaussian_fit::*;
-use crate::star_detection::centroid::lm_optimizer::internals::{
+use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
     assert_jacobian_matches_differences,
 };
@@ -621,7 +621,7 @@ fn batch_normal_equations_match_reference() {
 
 #[test]
 fn gaussian_evaluate_and_jacobian_consistency() {
-    use crate::star_detection::centroid::lm_optimizer::LMModel;
+    use crate::star_detection::centroid::profile_problem::LMModel;
 
     let mut model = Gaussian2D::new(15.0, 1e-6);
     model.integrate_at(3);

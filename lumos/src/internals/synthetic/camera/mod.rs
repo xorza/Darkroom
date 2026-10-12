@@ -5,9 +5,9 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::internals::synthetic::noise)).
 
+use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::io::image::cfa::CfaType;
 use crate::math::fwhm::fwhm_beta_to_alpha;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;

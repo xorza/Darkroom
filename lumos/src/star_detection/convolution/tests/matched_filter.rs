@@ -12,9 +12,9 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::statistics::median_mad::MedianMad;
-use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use crate::star_detection::tests::Scenario;
 
 /// One rendered field, matched-filtered at `kernel_fwhm`: each true star's response, inside a

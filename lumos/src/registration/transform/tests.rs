@@ -1,4 +1,5 @@
 use crate::internals::prelude::*;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::registration::transform::*;
 use std::f64::consts::PI;
 

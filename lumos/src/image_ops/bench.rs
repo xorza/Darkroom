@@ -9,7 +9,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::io::image::linear::LinearImage;
+use crate::image::linear_image::LinearImage;
 use crate::{
     ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
     StretchMethod,

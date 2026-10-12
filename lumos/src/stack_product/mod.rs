@@ -4,14 +4,16 @@
 pub(crate) mod coverage;
 pub(crate) mod quality_map;
 pub(crate) mod quality_planes;
+pub(crate) mod run_report;
 
 use rayon::prelude::*;
 
-use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::linear::LinearImage;
-use crate::run_report::RunReport;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::linear_image::LinearImage;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
+use crate::stack_product::run_report::RunReport;
 
 /// A stacked science product shared by statistical combine and drizzle.
 ///
@@ -166,12 +168,12 @@ impl StackProduct {
 
 #[cfg(test)]
 mod tests {
+    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::cfa_type::CfaType;
     use crate::internals::prelude::*;
-    use crate::io::image::cfa::CfaType;
-    use crate::io::image::cfa::cfa_pattern::CfaPattern;
-    use crate::run_report::RunReport;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
+    use crate::stack_product::run_report::RunReport;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
         let dimensions = ImageDimensions::new((2, 1), channels);

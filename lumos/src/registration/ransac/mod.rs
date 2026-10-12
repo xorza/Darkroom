@@ -11,7 +11,7 @@
 //! 4. Keeping the best model
 //! 5. Refining with least squares on inliers
 
-pub(crate) mod config;
+pub(crate) mod ransac_config;
 mod sampling;
 pub(super) mod transforms;
 mod welsch;
@@ -21,11 +21,11 @@ use std::mem;
 
 use glam::DVec2;
 
+use crate::registration::error::RansacFailureReason;
 use crate::registration::point_pairs::PointPairs;
-use crate::registration::ransac::config::RansacConfig;
+use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::ransac::sampling::GUIDED_POOL_FRACTIONS;
 use crate::registration::ransac::welsch::WelschScorer;
-use crate::registration::result::RansacFailureReason;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::voting::PointMatch;
 

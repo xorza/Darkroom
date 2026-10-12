@@ -21,10 +21,9 @@
 
 use arrayvec::ArrayVec;
 
-use crate::io::image::pixel_flags::QualityFlags;
-use crate::io::image::pixel_flags::Reach;
+use crate::image::pixel_flags::Reach;
+use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
-use crate::registration::registration_config::WarpParams;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};
@@ -32,7 +31,8 @@ use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
-use crate::registration::transform::WarpTransform;
+use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::{F32_LANES, Isa, Kernel};
 
 /// How a frame's pixels are sampled.
