@@ -8,4 +8,5 @@ use lumos::bench;
 
 criterion_group!(kernel, bench::kernel);
 criterion_group!(stage, bench::stage);
-criterion_main!(kernel, stage);
+criterion_group!(pipeline, bench::pipeline);
+criterion_main!(kernel, stage, pipeline);

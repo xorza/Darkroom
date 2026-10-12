@@ -131,7 +131,7 @@ impl Field {
 
     /// The field calibrated, on a mono sensor of `size`.
     pub(crate) fn render(self, size: Size2us) -> SimFrame {
-        self.expose(size, CfaType::Mono, Readout::Calibrated)
+        self.expose(size, CfaType::Mono, Readout::Calibrated, Shot::Field)
     }
 
     /// A `side` × `side` tile of the field that holds a star, cut from a calibrated mono frame of
@@ -159,31 +159,21 @@ impl Field {
     /// or fades by up to 8% and the transparency falls by up to 9%, as over a night, and the noise
     /// is the exposure's own.
     pub(crate) fn aligned(self, size: Size2us, index: usize) -> SimFrame {
-        self.sequence(size, index, Transform::identity())
+        let shot = Shot::Sequence {
+            index,
+            aligned: true,
+        };
+        self.expose(size, CfaType::Mono, Readout::Calibrated, shot)
     }
 
     /// Exposure `index` of the sequence [`Self::aligned`] gives, as the sensor saw it: placed by
     /// [`dither`].
     pub(crate) fn exposure(self, size: Size2us, index: usize) -> SimFrame {
-        self.sequence(size, index, dither(size, index))
-    }
-
-    fn sequence(self, size: Size2us, index: usize, transform: Transform) -> SimFrame {
-        let mut scene = self.scene(size);
-        scene.background = sky(exposure_sky(index));
-        for source in &mut scene.sources {
-            source.flux *= exposure_transparency(index);
-        }
-        let observation = Observation {
-            transform,
-            exposure_s: EXPOSURE_S,
-            ..Observation::reference(self.seed() ^ index as u64)
+        let shot = Shot::Sequence {
+            index,
+            aligned: false,
         };
-        render(
-            &scene,
-            &sensor(size, CfaType::Mono, Readout::Calibrated),
-            &observation,
-        )
+        self.expose(size, CfaType::Mono, Readout::Calibrated, shot)
     }
 
     /// The field's stacked master over a frame of `size` in linear RGB, as the light preset stacks
@@ -224,36 +214,57 @@ impl Field {
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray
     /// hits.
     pub(crate) fn mosaic(self, size: Size2us, cfa_type: CfaType) -> CfaImage {
-        self.hit(size, cfa_type, Readout::Calibrated)
+        self.hit(size, cfa_type, Readout::Calibrated, Shot::Field)
     }
 
     /// The field as a sensor of `size` behind `cfa_type`'s filters reads it, with cosmic-ray hits:
     /// what [`masters`] calibrate.
     pub(crate) fn light(self, size: Size2us, cfa_type: CfaType) -> CfaImage {
-        self.hit(size, cfa_type, Readout::Raw)
+        self.hit(size, cfa_type, Readout::Raw, Shot::Field)
     }
 
-    fn expose(self, size: Size2us, cfa_type: CfaType, readout: Readout) -> SimFrame {
-        let observation = Observation {
+    /// Exposure `index` of the sequence [`Self::exposure`] gives, as a sensor of `size` behind
+    /// `cfa_type`'s filters reads it, with its own cosmic-ray hits.
+    pub(crate) fn light_exposure(self, size: Size2us, cfa_type: CfaType, index: usize) -> CfaImage {
+        let shot = Shot::Sequence {
+            index,
+            aligned: false,
+        };
+        self.hit(size, cfa_type, Readout::Raw, shot)
+    }
+
+    fn expose(self, size: Size2us, cfa_type: CfaType, readout: Readout, shot: Shot) -> SimFrame {
+        let mut scene = self.scene(size);
+        let mut observation = Observation {
             exposure_s: EXPOSURE_S,
             ..Observation::reference(self.seed())
         };
-        render(
-            &self.scene(size),
-            &sensor(size, cfa_type, readout),
-            &observation,
-        )
+        if let Shot::Sequence { index, aligned } = shot {
+            scene.background = sky(exposure_sky(index));
+            for source in &mut scene.sources {
+                source.flux *= exposure_transparency(index);
+            }
+            observation.seed ^= index as u64;
+            if !aligned {
+                observation.transform = dither(size, index);
+            }
+        }
+        render(&scene, &sensor(size, cfa_type, readout), &observation)
     }
 
-    fn hit(self, size: Size2us, cfa_type: CfaType, readout: Readout) -> CfaImage {
-        let mut image = mosaic(self.expose(size, cfa_type, readout), cfa_type);
+    fn hit(self, size: Size2us, cfa_type: CfaType, readout: Readout, shot: Shot) -> CfaImage {
+        let mut image = mosaic(self.expose(size, cfa_type, readout, shot), cfa_type);
+        let index = match shot {
+            Shot::Field => 0,
+            Shot::Sequence { index, .. } => index,
+        };
         let pixels = image.data.pixels_mut();
         add_cosmic_rays(
             pixels,
             size.width,
             at_density(COSMIC_RAYS, size),
             (0.3, 1.0),
-            self.seed() ^ 0xC05,
+            self.seed() ^ 0xC05 ^ (index as u64) << 16,
         );
         for pixel in pixels {
             *pixel = pixel.min(1.0);
@@ -262,9 +273,29 @@ impl Field {
     }
 }
 
+/// Which exposure of a field a frame is.
+#[derive(Debug, Clone, Copy)]
+enum Shot {
+    /// The field's own frame.
+    Field,
+    /// Exposure `index` of a sequence: its sky and transparency changed and its noise its own,
+    /// and dithered on the sensor unless `aligned` to the field's frame.
+    Sequence { index: usize, aligned: bool },
+}
+
 /// The bias, dark and flat masters of the sensor a light of `size` behind `cfa_type` is taken on,
 /// one exposure each: how deep a master is changes none of the work that calibrates with it.
 pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option<CfaImage>> {
+    master_frames(size, cfa_type, 0)
+}
+
+/// Frame `index` of each of the bias, dark and flat sequences [`masters`] are stacked from, each
+/// with its own noise.
+pub(crate) fn master_frames(
+    size: Size2us,
+    cfa_type: CfaType,
+    index: usize,
+) -> CalibrationSet<Option<CfaImage>> {
     let expose = |role: MasterRole, seed: u64, level: f32, exposure_s: f32| {
         let scene = Scene {
             size,
@@ -273,7 +304,7 @@ pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option
         };
         let observation = Observation {
             exposure_s,
-            ..Observation::reference(SENSOR_SEED ^ seed)
+            ..Observation::reference(SENSOR_SEED ^ seed ^ (index as u64) << 8)
         };
         let frame = render(&scene, &sensor(size, cfa_type, Readout::Raw), &observation);
         let mut master = mosaic(frame, cfa_type);

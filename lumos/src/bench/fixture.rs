@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion};
+use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -16,6 +16,8 @@ pub(crate) enum Scale {
     Sample,
     /// A whole frame or plane: milliseconds an iteration, so fewer and longer samples.
     Frame,
+    /// A run over a set of files: seconds an iteration, so one iteration a sample.
+    Pipeline,
 }
 
 /// The group `name`, sampled as `scale` says.
@@ -34,6 +36,11 @@ pub(crate) fn group<'a>(
             .sample_size(10)
             .warm_up_time(Duration::from_secs(1))
             .measurement_time(Duration::from_secs(3)),
+        Scale::Pipeline => group
+            .sample_size(10)
+            .sampling_mode(SamplingMode::Flat)
+            .warm_up_time(Duration::from_secs(1))
+            .measurement_time(Duration::from_secs(10)),
     };
     group
 }

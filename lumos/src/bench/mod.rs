@@ -13,6 +13,7 @@
 //! takes a fresh copy through `iter_batched_ref`, one that consumes it a fresh copy through
 //! `iter_batched`, and one that returns a frame drops it through `iter_with_large_drop`.
 
+pub(crate) mod files;
 pub(crate) mod fixture;
 pub(crate) mod scene;
 
@@ -20,6 +21,7 @@ use criterion::Criterion;
 
 use crate::calibration_masters::{self, cosmic_ray, defect_map, prepared_flat};
 use crate::combine::cache::sample;
+use crate::combine::stack;
 use crate::combine::{normalization, rejection};
 use crate::drizzle::accumulator;
 use crate::frame_store::{self, frame_stats};
@@ -77,4 +79,11 @@ pub fn stage(c: &mut Criterion) {
     combine::bench::benches(c);
     drizzle::bench::benches(c);
     image_ops::bench::benches(c);
+}
+
+/// The pipeline tier: a public entry point end to end, from the files of a session.
+pub fn pipeline(c: &mut Criterion) {
+    stack::bench::pipeline(c);
+    calibration_masters::bench::pipeline(c);
+    pipeline::bench::pipeline(c);
 }
