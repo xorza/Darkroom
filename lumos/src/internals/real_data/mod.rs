@@ -28,7 +28,6 @@ use crate::{
 };
 
 mod milky_way;
-mod pipeline_bench;
 
 /// The bundled dataset, `test_data/lumos_data`. The `real-data` feature states that it is
 /// present, so a missing dataset or entry is a setup error: every accessor here panics and

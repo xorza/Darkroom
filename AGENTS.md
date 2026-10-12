@@ -28,7 +28,7 @@ bare `cargo test` or `cargo clippy` covers `darkroom` alone.
 
 Git submodules — `palantir` (immediate-mode GUI), `imaginarium` (CPU/GPU image
 library), `fits-well` (FITS reader and writer), `quickbench` (micro-benchmark
-harness, a `lumos` dev-dependency) — are standalone projects `exclude`d from
+harness, which no workspace member uses) — are standalone projects `exclude`d from
 this workspace, each with its own lockfile and profiles. Run cargo for them
 from their own directory: from the root, `cargo fmt -p` rejects them and
 `clippy`/`test -p` build them under this workspace's lockfile. Changes inside
