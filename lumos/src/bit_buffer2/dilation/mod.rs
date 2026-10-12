@@ -93,7 +93,5 @@ fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
     result
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(test)]
 mod tests;

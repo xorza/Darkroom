@@ -149,7 +149,7 @@ pub(crate) struct SyntheticStar {
 }
 
 impl SyntheticStar {
-    pub(crate) fn new(center: Vec2, amplitude: f32, profile: StarProfile) -> Self {
+    pub(crate) const fn new(center: Vec2, amplitude: f32, profile: StarProfile) -> Self {
         Self {
             center,
             amplitude,

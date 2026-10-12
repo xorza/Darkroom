@@ -32,6 +32,7 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::internals::visual::{self, ToneMap};
+use crate::io::image::cfa::CfaType;
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {
@@ -290,10 +291,10 @@ fn gallery_sensor() {
             edge: 0.4,
             falloff: 2.5,
         }),
-        channel_gain: [1.0; 3],
+        colour_gain: [1.0; 3],
     };
     save(
-        &vignette_flat.render(size, 0),
+        &vignette_flat.render(size, &CfaType::Mono),
         size,
         "sensor/flat_vignette_map",
         ToneMap::Clamp,

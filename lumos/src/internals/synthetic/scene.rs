@@ -5,8 +5,6 @@
 //! [`Observation`](crate::internals::synthetic::observe::Observation) render it forward into a
 //! frame; a lumos stage runs backward and is graded against this truth.
 
-use std::f64::consts::PI;
-
 use crate::internals::synthetic::backgrounds::{
     NebulaConfig, Vignette, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
@@ -188,6 +186,8 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use crate::internals::synthetic::metrics::pixel_stats;
     use crate::internals::synthetic::scene::*;
 

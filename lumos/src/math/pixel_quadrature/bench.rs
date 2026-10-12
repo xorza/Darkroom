@@ -16,7 +16,7 @@ const STAMP: usize = 15;
 const TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/pixel_quadrature", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/pixel_quadrature", Scale::Sample);
     for order in ORDERS {
         group.throughput(Throughput::Elements((STAMP * STAMP) as u64));
         group.bench_function(

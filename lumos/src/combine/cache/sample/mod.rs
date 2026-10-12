@@ -207,3 +207,6 @@ impl CombinedSample {
         }
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;

@@ -1,28 +1,68 @@
-//! Benchmarks for the FITS decode.
+//! The FITS decode of a frame from a file the page cache holds: the conversion to normalized
+//! samples, not the disk.
+
+use std::path::PathBuf;
 
 use common::TempDir;
-use fits_well::FitsWriter;
-use fits_well::image::Image;
-use quickbench::quick_bench;
+use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::internals::test_rng::TestRng;
-use crate::io::image::fits::decode::load_linear_fits;
+use crate::bench::files::{write_mono_f32, write_mosaic_u16};
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{FRAME, Field};
+use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::load_context::LoadContext;
 
-/// A 24 MP 16-bit frame (`BITPIX = 16`, `BZERO = 32768`) of random samples, loaded from a file the
-/// page cache already holds: the conversion, not the disk.
-#[quick_bench(warmup_iters = 1, iters = 5)]
-fn bench_fits_decode_u16(b: quickbench::Bencher) {
-    let (width, height) = (6000, 4000);
-    let mut rng = TestRng::new(5);
-    let samples: Vec<u16> = (0..width * height)
-        .map(|_| u16::try_from(rng.next_u64() >> 48).unwrap())
-        .collect();
-    let image = Image::from_u16(vec![width, height], &samples).unwrap();
-    let dir = TempDir::new("lumos-fits-bench");
-    let path = dir.join("frame.fits");
-    let mut writer = FitsWriter::new(std::fs::File::create(&path).unwrap());
-    writer.write_image(&image, None).unwrap();
-    writer.into_inner().sync_all().unwrap();
-    b.bench(|| load_linear_fits(&path, &LoadContext::default()).unwrap());
+pub(crate) fn benches(c: &mut Criterion) {
+    let field = Field::Typical;
+    let mut group = fixture::group(c, "kernel/io/fits/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
+    // A mono camera's 16-bit light, a calibrated or stacked frame in 32-bit float, and a colour
+    // camera's 16-bit light, which loads as a CFA image.
+    group.bench_function(BenchmarkId::new("decode/u16", field.name()), |b| {
+        let file = FitsFile::write(Format::U16, field);
+        b.iter_with_large_drop(|| load_linear_fits(&file.path, &LoadContext::default()).unwrap());
+    });
+    group.bench_function(BenchmarkId::new("decode/f32", field.name()), |b| {
+        let file = FitsFile::write(Format::F32, field);
+        b.iter_with_large_drop(|| load_linear_fits(&file.path, &LoadContext::default()).unwrap());
+    });
+    group.bench_function(BenchmarkId::new("decode/cfa_u16", field.name()), |b| {
+        let file = FitsFile::write(Format::CfaU16, field);
+        b.iter_with_large_drop(|| load_cfa_fits(&file.path, &LoadContext::default()).unwrap());
+    });
+}
+
+/// How a frame is stored.
+#[derive(Debug, Clone, Copy)]
+enum Format {
+    /// `BITPIX = 16` with `BZERO = 32768`, mono.
+    U16,
+    /// `BITPIX = -32`, normalized, mono.
+    F32,
+    /// `BITPIX = 16` with `BZERO = 32768` and `BAYERPAT = 'RGGB'`.
+    CfaU16,
+}
+
+/// A field written to a FITS file in a directory of its own, removed with it.
+#[derive(Debug)]
+struct FitsFile {
+    path: PathBuf,
+    _dir: TempDir,
+}
+
+impl FitsFile {
+    fn write(format: Format, field: Field) -> Self {
+        let dir = TempDir::new("lumos-bench-fits");
+        let path = dir.join("frame.fits");
+        match format {
+            Format::U16 => write_mosaic_u16(&path, &field.light(FRAME, CfaType::Mono)),
+            Format::F32 => write_mono_f32(&path, &field.render(FRAME).image),
+            Format::CfaU16 => {
+                write_mosaic_u16(&path, &field.light(FRAME, CfaType::Bayer(CfaPattern::Rggb)));
+            }
+        }
+        Self { path, _dir: dir }
+    }
 }

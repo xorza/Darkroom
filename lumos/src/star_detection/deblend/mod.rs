@@ -82,8 +82,6 @@ const fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    #[cfg(feature = "bench")]
-    use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
 
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
@@ -196,19 +194,6 @@ pub(crate) mod internals {
             min_separation,
             min_contrast,
         )
-    }
-
-    /// The pixels of `pixels` above `threshold`, labelled with 4-connectivity: the components the
-    /// deblender benches run on.
-    #[cfg(feature = "bench")]
-    pub(crate) fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
-        let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
-        for (idx, &value) in pixels.iter().enumerate() {
-            if value > threshold {
-                mask.set(idx, true);
-            }
-        }
-        LabelMap::from_mask(&mask, Connectivity::Four)
     }
 
     /// [`deblend_multi_threshold_test`] with the ladder's floor given.

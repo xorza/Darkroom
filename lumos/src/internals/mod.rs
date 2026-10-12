@@ -1,22 +1,37 @@
-//! Testing utilities for lumos.
+//! Testing utilities for lumos: the synthetic data and helpers the tests use, and the benches
+//! outside `cfg(test)` through the `internals` feature.
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "a bench build uses the part of the test support it builds its inputs from"
+    )
+)]
 
+#[cfg(test)]
 use std::any::Any;
 
+#[cfg(test)]
 pub(crate) mod assertions;
 pub(crate) mod cfa;
+#[cfg(test)]
 mod characterization;
 pub(crate) mod fits;
 pub(crate) mod images;
 pub(crate) mod invariance;
+#[cfg(test)]
 pub(crate) mod prelude;
-#[cfg(feature = "real-data")]
+#[cfg(all(test, feature = "real-data"))]
 pub(crate) mod real_data;
+#[cfg(test)]
 pub(crate) mod simd_check;
 pub(crate) mod synthetic;
 pub(crate) mod test_rng;
+#[cfg(test)]
 pub(crate) mod visual;
 
 /// The text a caught panic carried: its `&str` or `String` payload, the two `panic!` produces.
+#[cfg(test)]
 pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
@@ -28,6 +43,7 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
 /// Initialize tracing subscriber for tests.
 /// Safe to call multiple times - will only initialize once.
 /// Respects `RUST_LOG` env var, defaults to "info".
+#[cfg(test)]
 pub(crate) fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     // `ort` (ONNX Runtime) logs its arena allocations at INFO — far too chatty; quiet it by

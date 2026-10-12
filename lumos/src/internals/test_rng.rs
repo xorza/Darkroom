@@ -13,13 +13,13 @@ pub(crate) struct TestRng {
 
 impl TestRng {
     /// Create a new RNG with the given seed.
-    pub(crate) fn new(seed: u64) -> Self {
+    pub(crate) const fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
     /// Advance state and return raw u64.
     #[inline]
-    pub(crate) fn next_u64(&mut self) -> u64 {
+    pub(crate) const fn next_u64(&mut self) -> u64 {
         self.state = self
             .state
             .wrapping_mul(6_364_136_223_846_793_005)

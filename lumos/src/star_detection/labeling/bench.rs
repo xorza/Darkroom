@@ -1,94 +1,25 @@
-//! Benchmarks for connected component labeling.
+//! The connected components of a detection plane's threshold mask, with the labeler's buffers kept
+//! from frame to frame as the detector keeps them.
 
-use crate::bit_buffer2::BitBuffer2;
-use crate::internals::prelude::*;
-use crate::internals::synthetic::background_map;
-use crate::internals::synthetic::fixtures::star_field;
-use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::config::detection_config::Connectivity;
+use criterion::{BenchmarkId, Criterion, Throughput};
+
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{FRAME, Field};
+use crate::star_detection::bench::Stages;
 use crate::star_detection::labeling::labeler::Labeler;
-use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
-use ::quickbench::quick_bench;
-use std::hint::black_box;
 
-/// The mask the detect stage labels, without its matched filter: the residual of `pixels` past
-/// `sigma_threshold` of its sky noise.
-fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuffer2 {
-    let background = background_map::estimate(pixels, &BackgroundConfig::default());
-    let sky = background.sky_noise();
-    let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
-    create_residual_threshold_mask(
-        &background.residual_of(pixels),
-        &sky.noise,
-        ThresholdParams {
-            sigma: sigma_threshold,
-            min_noise: sky.floor,
-        },
-        &mut mask,
-    );
-    mask
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_label_map_1k(b: ::quickbench::Bencher) {
-    let pixels = star_field(Size2us::new(1024, 1024), 500, 42)
-        .image
-        .channel(0)
-        .clone();
-    let mask = create_detection_mask(&pixels, 4.0);
-    let mut labeler = Labeler::default();
-
-    b.bench(|| {
-        let map = labeler.label(black_box(&mask), Connectivity::Four);
-        black_box(map.num_labels());
-        labeler.recycle(map);
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_label_map_4k(b: ::quickbench::Bencher) {
-    let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
-        .image
-        .channel(0)
-        .clone();
-    let mask = create_detection_mask(&pixels, 4.0);
-    let mut labeler = Labeler::default();
-
-    b.bench(|| {
-        let map = labeler.label(black_box(&mask), Connectivity::Four);
-        black_box(map.num_labels());
-        labeler.recycle(map);
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_label_map_4k_globular(b: ::quickbench::Bencher) {
-    let pixels = star_field(Size2us::new(4096, 4096), 50000, 42)
-        .image
-        .channel(0)
-        .clone();
-    let mask = create_detection_mask(&pixels, 4.0);
-    let mut labeler = Labeler::default();
-
-    b.bench(|| {
-        let map = labeler.label(black_box(&mask), Connectivity::Four);
-        black_box(map.num_labels());
-        labeler.recycle(map);
-    });
-}
-
-/// The labeler on an image small enough to resolve to a single strip, where the boundary stitch
-/// has nothing to do — the single-strip path, where the parallel labeler carries no stitch cost.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_label_small(b: ::quickbench::Bencher) {
-    let size = Size2us::new(240, 240);
-    let pixels = star_field(size, 30, 42).image.channel(0).clone();
-    let mask = create_detection_mask(&pixels, 4.0);
-    let mut labeler = Labeler::default();
-
-    b.bench(|| {
-        let map = labeler.label(black_box(&mask), Connectivity::Four);
-        black_box(map.num_labels());
-        labeler.recycle(map);
-    });
+pub(crate) fn benches(c: &mut Criterion) {
+    let mut group = fixture::group(c, "kernel/detection/labeling/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
+    for field in [Field::Typical, Field::Dense] {
+        group.bench_function(BenchmarkId::new("label", field.name()), |b| {
+            let stages = Stages::of(field);
+            let connectivity = stages.config.detection.connectivity;
+            let mut labeler = Labeler::default();
+            b.iter(|| {
+                let map = labeler.label(&stages.mask, connectivity);
+                labeler.recycle(map);
+            });
+        });
+    }
 }

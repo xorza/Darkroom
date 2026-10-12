@@ -161,5 +161,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
     Ok(())
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

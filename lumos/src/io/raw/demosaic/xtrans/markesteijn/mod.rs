@@ -124,8 +124,6 @@ pub(crate) fn demosaic(
     )
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::io::raw::demosaic::tiled;

@@ -238,15 +238,5 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -
     }
 }
 
-#[cfg(all(test, feature = "real-data"))]
-pub(crate) mod internals {
-    use crate::image_ops::ml::backend::tile_starts;
-
-    /// How many tiles cover `dim` at `stride` on one axis.
-    pub(crate) fn tile_count(dim: usize, stride: usize) -> usize {
-        tile_starts(dim, stride).len()
-    }
-}
-
 #[cfg(test)]
 mod tests;

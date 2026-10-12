@@ -110,18 +110,3 @@ impl StoredImage {
         })
     }
 }
-
-#[cfg(all(test, feature = "bench"))]
-pub(crate) mod internals {
-    use crate::frame_store::stored_image::StoredImage;
-    use crate::frame_store::stored_plane::StoredPlane;
-
-    impl StoredImage {
-        /// Drop the image's pages from the page cache: see
-        /// [`StoredPlane::evict`](crate::frame_store::stored_plane::StoredPlane::evict).
-        pub(crate) fn evict(&self) -> bool {
-            self.channels.iter().all(StoredPlane::evict)
-                && self.flags.as_ref().is_none_or(StoredPlane::evict)
-        }
-    }
-}

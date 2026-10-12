@@ -382,6 +382,8 @@ fn next_band<'a>(
         .collect()
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;

@@ -1,72 +1,141 @@
-use std::ffi::CString;
+//! The decode of a raw buffer into normalized samples and flags: what a RAW load does past
+//! LibRaw's unpack.
 
-use common::CancelToken;
-use libraw_sys as sys;
-use quickbench::quick_bench;
+use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::internals::init_tracing;
-use crate::internals::real_data::raw_frames;
-use crate::io::raw::internals::load_raw_libraw_demosaic;
-use crate::io::raw::*;
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{BIAS, FRAME, Field};
+use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_pattern::CfaPattern;
+use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack};
+use crate::io::raw::libraw_filter_color;
+use crate::io::raw::sensor_layout::SensorLayout;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
-#[quick_bench(warmup_iters = 1, iters = 5)]
-fn raw_load(b: quickbench::Bencher) {
-    init_tracing();
+/// RGGB as LibRaw's `filters` word spells it.
+const RGGB: u32 = 0x9494_9494;
 
-    let path = raw_frames("Lights").swap_remove(0);
-    println!("Benchmarking load_raw on: {}", path.display());
+/// A 14-bit sensor's common black level.
+const BLACK: u32 = 512;
 
-    b.bench(|| load_raw(&path, &LoadContext::default()).unwrap());
+/// Each LibRaw channel's black above [`BLACK`].
+const CHANNEL_BLACK: [u32; 4] = [0, 3, 5, 3];
+
+/// The 14-bit white point.
+const WHITE: u16 = 16_383;
+
+/// Where the flag rule takes a photosite as saturated: below the white point, as a sensor's
+/// response bends before it clips.
+const SATURATION: f64 = 16_000.0;
+
+pub(crate) fn benches(c: &mut Criterion) {
+    let field = Field::Typical;
+    let mut group = fixture::group(c, "kernel/io/raw/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
+    // The decode of the standard frame's RGGB light from its raw buffer, masked margins included.
+    group.bench_function(BenchmarkId::new("decode/rggb", field.name()), |b| {
+        let sensor = RawSensor::of(field, FRAME);
+        b.iter_with_large_drop(|| sensor.decode());
+    });
 }
 
-/// libraw's built-in demosaic at each quality level, beside ours.
-/// For X-Trans: qual <= 2 -> Markesteijn 1-pass, qual >= 3 -> Markesteijn 3-pass.
-/// For Bayer: 0=linear, 1=VNG, 2=PPG, 3=AHD, 11=DHT.
-#[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_demosaic_vs_libraw(b: quickbench::Bencher) {
-    init_tracing();
+/// A raw buffer as LibRaw unpacks it, and the levels that decode it.
+#[derive(Debug)]
+struct RawSensor {
+    raw: Vec<u16>,
+    layout: SensorLayout,
+    black: BlackLevel,
+}
 
-    let path = raw_frames("Lights").swap_remove(0);
-    println!("Benchmarking demosaic on: {}", path.display());
+impl RawSensor {
+    /// `field`'s RGGB light over an `active` area, quantized to the levels above, with a masked
+    /// margin of 16 columns and 12 rows each side at the black level. The black level is the
+    /// light's bias, so a sample sits `sample − BIAS` of the span above it.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a light reads its bias less a few read-noise σ at the least, so a level is above zero"
+    )]
+    fn of(field: Field, active: Size2us) -> Self {
+        let layout = SensorLayout {
+            raw: Size2us::new(active.width + 32, active.height + 24),
+            active,
+            margin: Vec2us::new(16, 12),
+        };
+        // LibRaw's `cblack` is 16 KiB, too large for the stack.
+        let mut cblack: Box<[u32; libraw_sys::LIBRAW_CBLACK_SIZE as usize]> =
+            vec![0u32; libraw_sys::LIBRAW_CBLACK_SIZE as usize]
+                .into_boxed_slice()
+                .try_into()
+                .unwrap();
+        cblack[..4].copy_from_slice(&CHANNEL_BLACK);
+        let black = BlackLevel::from_libraw(&LibrawBlack {
+            black: BLACK,
+            cblack: &cblack,
+            maximum: u32::from(WHITE),
+            filters: RGGB,
+            dng: None,
+            masked: [0; 8],
+        })
+        .unwrap();
+        let light = field.light(active, CfaType::Bayer(CfaPattern::Rggb));
+        let span = black.span();
+        let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
+            .map(|index| {
+                let (x, y) = (index % layout.raw.width, index / layout.raw.width);
+                u16::try_from(BLACK + CHANNEL_BLACK[libraw_filter_color(RGGB, y, x)]).unwrap()
+            })
+            .collect();
+        for (index, &sample) in light.data.pixels().iter().enumerate() {
+            let (x, y) = (index % active.width, index / active.width);
+            let level = black.of_channel(libraw_filter_color(RGGB, y, x))
+                + (f64::from(sample) - f64::from(BIAS)) * span;
+            let (raw_x, raw_y) = (layout.margin.x + x, layout.margin.y + y);
+            raw[raw_y * layout.raw.width + raw_x] = level.round().min(f64::from(WHITE)) as u16;
+        }
+        Self { raw, layout, black }
+    }
 
-    b.bench_labeled("ours", || load_raw(&path, &LoadContext::default()).unwrap());
-    for (qual, label) in [
-        (0, "libraw linear"),
-        (1, "libraw VNG / Markesteijn 1-pass"),
-        (2, "libraw PPG / Markesteijn 1-pass"),
-        (3, "libraw AHD / Markesteijn 3-pass"),
-        (11, "libraw DHT / Markesteijn 3-pass"),
-    ] {
-        b.bench_labeled(label, || load_raw_libraw_demosaic(&path, qual).unwrap());
+    fn decode(&self) -> DecodedRaw {
+        self.black.decode(
+            &self.raw,
+            self.layout,
+            |x, y| libraw_filter_color(RGGB, y, x),
+            2,
+            FlagRule {
+                zero_is_bad: true,
+                saturation: [SATURATION; 4],
+            },
+        )
     }
 }
 
-/// LibRaw's file datastream against the memory one every load uses: the open and unpack of the
-/// first light of each set, read from disk each time either way. The memory path reads the file
-/// whole first; the file path reads it as LibRaw's decoder asks.
-#[quick_bench(warmup_iters = 1, iters = 5)]
-fn bench_unpack_file_vs_buffer(b: quickbench::Bencher) {
-    init_tracing();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for set in ["Lights", "raw_samples"] {
-        for path in raw_frames(set).into_iter().take(1) {
-            println!("Unpacking {}", path.display());
-            b.bench_labeled(&format!("{set}: open_buffer"), || {
-                let mut libraw =
-                    Libraw::open(fs::read(&path).unwrap(), &CancelToken::never()).unwrap();
-                libraw.unpack(rayon::current_num_threads()).unwrap();
-            });
-            let path_c = CString::new(path.to_str().expect("a UTF-8 dataset path")).unwrap();
-            b.bench_labeled(&format!("{set}: open_file"), || {
-                // SAFETY: the handle is checked, opened from a live C string, and closed once.
-                unsafe {
-                    let handle = sys::libraw_init(0);
-                    assert!(!handle.is_null());
-                    assert_eq!(sys::libraw_open_file(handle, path_c.as_ptr()), 0);
-                    assert_eq!(sys::libraw_unpack(handle), 0);
-                    sys::libraw_close(handle);
-                }
-            });
+    /// The decode gives the light back less its bias, to within half an ADU, `0.5 / span`,
+    /// wherever the quantization did not clip it at the white point. The span is 16 383 − 512 =
+    /// 15 871, and the raw buffer the 60 × 40 area with 16 columns and 12 rows of margin each side:
+    /// 92 × 64.
+    #[test]
+    fn the_decode_gives_back_the_light_less_its_bias() {
+        let active = Size2us::new(60, 40);
+        let sensor = RawSensor::of(Field::Typical, active);
+        assert_eq!(sensor.raw.len(), 92 * 64);
+        let span = sensor.black.span();
+        assert_eq!(span, 15_871.0);
+        let light = Field::Typical.light(active, CfaType::Bayer(CfaPattern::Rggb));
+        let decoded = sensor.decode();
+        assert_eq!(decoded.pixels.len(), active.pixel_count());
+        let headroom =
+            f64::from(u32::from(WHITE) - BLACK - CHANNEL_BLACK.into_iter().max().unwrap());
+        for (&decoded, &sample) in decoded.pixels.iter().zip(light.data.pixels()) {
+            let above_black = f64::from(sample) - f64::from(BIAS);
+            if above_black * span < headroom {
+                let error = (f64::from(decoded) - above_black).abs();
+                assert!(error <= 0.5 / span + 1e-7, "{decoded} for {sample}");
+            }
         }
     }
 }

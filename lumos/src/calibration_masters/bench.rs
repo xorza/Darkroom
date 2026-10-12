@@ -1,179 +1,71 @@
-//! Benchmarks for the calibration stage: defect-map build, per-light calibration
-//! apply, and single-frame cosmic-ray rejection.
-//!
-//! The master *combine* itself (stacking bias/dark/flat frames into a master) runs
-//! through the same engine benched in `combine::bench`
-//! (`bench_stack_{bias,dark,flat}_*`), so it isn't duplicated here.
-//!
-//! Run: `cargo test -p lumos --release --features bench calibration_masters::bench -- --ignored
-//! --nocapture`
+//! The calibration of one light by a session's masters: the bias, the dark and the flat removed
+//! and the defects repaired, as every light of the session is; and the masters built from a
+//! session's frames, end to end.
 
-use crate::internals::prelude::*;
-use quickbench::quick_bench;
-use std::hint::black_box;
+use common::{CancelToken, TempDir};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::calibration_masters::defect_map::DefectMap;
-use crate::internals::cfa::make_cfa;
+use crate::bench::files::{LIGHTS, MasterFiles};
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{self, FRAME, Field};
+use crate::calibration_masters::calibration_set::CalibrationSet;
+use crate::calibration_masters::master_cache::NoMasterCache;
+use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::ingest::ingest_config::IngestConfig;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::cfa_pattern::CfaPattern;
-use crate::{
-    CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig, DEFAULT_SIGMA_THRESHOLD,
-};
+use crate::progress::progress_callback::ProgressCallback;
 
-/// A realistic APS-C sub-frame size for the per-pixel CFA passes.
-const W: usize = 2000;
-const H: usize = 1500;
-
-const fn bayer() -> CfaType {
-    CfaType::Bayer(CfaPattern::Rggb)
-}
-
-/// Seeded uniform noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued outliers so
-/// hot/cold detection has something to flag.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "synthetic fixtures are small images with non-negative coordinates"
-)]
-fn cfa_pixels(base: f32, amp: f32, defect: f32, seed: u64) -> Vec<f32> {
-    let n = W * H;
-    let mut rng = TestRng::new(seed);
-    let mut px: Vec<f32> = (0..n)
-        .map(|_| base + (rng.next_f32() - 0.5) * 2.0 * amp)
-        .collect();
-    for _ in 0..(n / 1000) {
-        px[(rng.next_f64() * n as f64) as usize] = defect;
-    }
-    px
-}
-
-/// A full master set (dark + flat + bias + defect map) over the bench dimensions.
-fn make_masters() -> CalibrationMasters {
-    CalibrationMasters::from_images(
-        CalibrationSet {
-            dark: Some(make_cfa(
-                Size2us::new(W, H),
-                cfa_pixels(0.02, 0.004, 0.9, 0x11),
-                bayer(),
-            )),
-            flat: Some(make_cfa(
-                Size2us::new(W, H),
-                cfa_pixels(0.6, 0.05, 0.001, 0x22),
-                bayer(),
-            )),
-            bias: Some(make_cfa(
-                Size2us::new(W, H),
-                cfa_pixels(0.01, 0.002, 0.5, 0x33),
-                bayer(),
-            )),
-            flat_dark: None,
-        },
-        DEFAULT_SIGMA_THRESHOLD,
-        &CancelToken::never(),
-    )
-    .unwrap()
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
-    let masters = make_masters();
-    // A fresh, uncalibrated light per call: `calibrate` asserts the frame isn't already
-    // calibrated and mutates in place, so the clone is the realistic per-light cost — each
-    // light arrives freshly decoded and owned.
-    let light = make_cfa(
-        Size2us::new(W, H),
-        cfa_pixels(0.3, 0.05, 0.95, 0x44),
-        bayer(),
-    );
-    b.bench(|| {
-        let mut frame = light.clone();
-        masters.calibrate(&mut frame).unwrap();
-        black_box(frame)
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
-    let masters = make_masters();
-    let light = make_cfa(
-        Size2us::new(W, H),
-        cfa_pixels(0.3, 0.05, 0.95, 0x44),
-        bayer(),
-    );
-    b.bench(|| {
-        for _ in 0..30 {
-            let mut frame = light.clone();
-            masters.calibrate(&mut frame).unwrap();
-            black_box(frame);
-        }
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
-    let dark = make_cfa(
-        Size2us::new(W, H),
-        cfa_pixels(0.02, 0.004, 0.9, 0x11),
-        bayer(),
-    );
-    let flat = make_cfa(
-        Size2us::new(W, H),
-        cfa_pixels(0.6, 0.05, 0.001, 0x22),
-        bayer(),
-    );
-    b.bench(|| {
-        black_box(
-            DefectMap::new(dark.size())
-                .detect_hot(
-                    black_box(&dark),
-                    DEFAULT_SIGMA_THRESHOLD,
-                    &CancelToken::never(),
-                )
-                .unwrap()
-                .detect_cold(black_box(&flat), &CancelToken::never())
-                .unwrap(),
+pub(crate) fn benches(c: &mut Criterion) {
+    let field = Field::Typical;
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let mut group = fixture::group(c, "kernel/calibration/apply/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
+    group.bench_function(BenchmarkId::new("light/rggb", field.name()), |b| {
+        let masters = CalibrationMasters::from_images(
+            scene::masters(FRAME, cfa_type),
+            DEFAULT_SIGMA_THRESHOLD,
+            &CancelToken::never(),
         )
+        .unwrap();
+        let light = field.light(FRAME, cfa_type);
+        b.iter_batched_ref(
+            || light.clone(),
+            |light| masters.calibrate(light).unwrap(),
+            fixture::fresh_copies(size_of_val(light.data.pixels())),
+        );
     });
 }
 
-/// A 1 MP faint-sky frame seeded with sharp single-pixel "cosmic-ray" spikes for L.A.Cosmic.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "synthetic fixtures are small images with non-negative coordinates"
-)]
-fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
-    const CR_W: usize = 1024;
-    const CR_H: usize = 1024;
-    let n = CR_W * CR_H;
-    let mut rng = TestRng::new(1);
-    let mut px: Vec<f32> = (0..n)
-        .map(|_| 0.1 + (rng.next_f32() - 0.5) * 0.01)
-        .collect();
-    for _ in 0..300 {
-        px[(rng.next_f64() * n as f64) as usize] = 0.95;
-    }
-    make_cfa(Size2us::new(CR_W, CR_H), px, cfa)
-}
-
-/// Twelve iterations, not the three most benches here use: a pass over this fixture is ~850 ms and
-/// its run-to-run spread is wide enough that a median of three moves by more than any change worth
-/// making. The extra samples cost ~7 s against the ~27 s release rebuild that any A/B already pays,
-/// so they are close to free.
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
-    let frame = cosmic_ray_frame(CfaType::Mono);
-    let config = CosmicRayConfig::default();
-    b.bench(|| {
-        let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_cosmic_ray_reject_bayer(b: ::quickbench::Bencher) {
-    let frame = cosmic_ray_frame(bayer());
-    let config = CosmicRayConfig::default();
-    b.bench(|| {
-        let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
+/// `CalibrationMasters::build` over a session's bias, dark and flat frames, 16-bit mosaics as the
+/// camera writes them, with no master cache: each role stacked, the bias out of the dark and the
+/// flat, the defects detected and the flat prepared.
+pub(crate) fn pipeline(c: &mut Criterion) {
+    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let mut group = fixture::group(c, "pipeline/masters", Scale::Pipeline);
+    group.throughput(Throughput::Elements(
+        (3 * LIGHTS * FRAME.pixel_count()) as u64,
+    ));
+    group.bench_function(BenchmarkId::new("build/rggb", format!("{LIGHTS}x3")), |b| {
+        let files = MasterFiles::of(cfa_type);
+        let dir = TempDir::new("lumos-bench-masters-cache");
+        let ingest = IngestConfig::with_cache_dir(dir.path().to_path_buf());
+        let frames = CalibrationSet {
+            dark: files.frames.dark.as_slice(),
+            flat: files.frames.flat.as_slice(),
+            bias: files.frames.bias.as_slice(),
+            flat_dark: &[][..],
+        };
+        b.iter(|| {
+            CalibrationMasters::build(
+                frames,
+                DEFAULT_SIGMA_THRESHOLD,
+                &ingest,
+                &NoMasterCache,
+                &ProgressCallback::default(),
+                &CancelToken::never(),
+            )
+            .unwrap()
+        });
     });
 }

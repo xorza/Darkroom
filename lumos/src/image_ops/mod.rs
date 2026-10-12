@@ -36,8 +36,8 @@ pub(crate) mod ml;
 pub(crate) mod rgb;
 pub(crate) mod stretching;
 
-#[cfg(all(test, feature = "bench", feature = "real-data"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
 

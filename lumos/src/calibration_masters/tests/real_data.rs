@@ -1,26 +1,19 @@
-//! Real-data calibration-master benchmarks and checks over the bundled
+//! Real-data calibration-master checks over the bundled
 //! `test_data/lumos_data/{Bias,Darks,Flats}` Fuji X-Trans RAF set.
 //!
 //! These drive the master-build path `lens` calls — `stack_cfa_master` per role, then
 //! `CalibrationMasters::from_images` and its defect-map derivation — including the libraw RAW
-//! decode of every calibration frame. That decode dominates the wall time, so these measure the
-//! real end-to-end cost of producing masters, not the isolated combine kernel.
+//! decode of every calibration frame.
 //!
 //! Gated behind the `real-data` feature (the dataset is gitignored; fetch it with
-//! `scripts/fetch-test-data.sh`). The `#[quick_bench]` fns are also `#[ignore]`.
-//!
-//! Run:
-//!   cargo test -p lumos --release --features real-data \
-//!     `calibration_masters::tests::real_data` -- --ignored --nocapture
+//! `scripts/fetch-test-data.sh`).
 
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use std::cmp::Ordering;
-use std::hint::black_box;
 use std::path::PathBuf;
 
 use common::CancelToken;
-use quickbench::quick_bench;
 
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::internals::masters_from_files;
@@ -292,86 +285,4 @@ fn hot_mask_spatial_distribution_and_repeatability() {
             metrics.fullest_bin
         );
     }
-}
-
-#[quick_bench(warmup_iters = 0, iters = 1)]
-fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
-    let paths = real_data::calibration_frames();
-    println!(
-        "Building full master set: {} darks + {} flats + {} bias",
-        paths.darks.len(),
-        paths.flats.len(),
-        paths.bias.len(),
-    );
-    b.bench(|| {
-        black_box(masters_from_files(
-            CalibrationSet {
-                dark: &paths.darks,
-                flat: &paths.flats,
-                bias: &paths.bias,
-                flat_dark: &[],
-            },
-            DEFAULT_SIGMA_THRESHOLD,
-        ))
-    });
-}
-
-#[quick_bench(warmup_iters = 0, iters = 1)]
-fn bench_stack_master_dark(b: ::quickbench::Bencher) {
-    let paths = real_data::calibration_frames();
-    println!("Stacking master dark from {} frames", paths.darks.len());
-    b.bench(|| {
-        black_box(
-            stack_cfa_master(
-                &paths.darks,
-                MasterRole::Dark,
-                StackConfig::bias_or_dark(),
-                &IngestConfig::default(),
-                None,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .expect("dark stack failed"),
-        )
-    });
-}
-
-#[quick_bench(warmup_iters = 0, iters = 1)]
-fn bench_stack_master_flat(b: ::quickbench::Bencher) {
-    let paths = real_data::calibration_frames();
-    println!("Stacking master flat from {} frames", paths.flats.len());
-    b.bench(|| {
-        black_box(
-            stack_cfa_master(
-                &paths.flats,
-                MasterRole::Flat,
-                StackConfig::flat(),
-                &IngestConfig::default(),
-                None,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .expect("flat stack failed"),
-        )
-    });
-}
-
-#[quick_bench(warmup_iters = 0, iters = 1)]
-fn bench_stack_master_bias(b: ::quickbench::Bencher) {
-    let paths = real_data::calibration_frames();
-    println!("Stacking master bias from {} frames", paths.bias.len());
-    b.bench(|| {
-        black_box(
-            stack_cfa_master(
-                &paths.bias,
-                MasterRole::Bias,
-                StackConfig::bias_or_dark(),
-                &IngestConfig::default(),
-                None,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .expect("bias stack failed"),
-        )
-    });
 }

@@ -1,0 +1,27 @@
+//! The triangle matching of two catalogues' brightest stars: the 200 the default configuration
+//! takes and the 500 the precise wide-field preset takes.
+
+use std::cell::OnceCell;
+
+use criterion::{BenchmarkId, Criterion, Throughput};
+
+use crate::bench::fixture::{self, Scale};
+use crate::registration::bench::Pair;
+use crate::registration::registration_config::RegistrationConfig;
+
+pub(crate) fn benches(c: &mut Criterion) {
+    let pair = OnceCell::new();
+    let mut group = fixture::group(c, "kernel/registration/triangle", Scale::Sample);
+    for config in [
+        RegistrationConfig::default(),
+        RegistrationConfig::precise_wide_field(),
+    ] {
+        let count = config.matching.max_stars;
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_function(BenchmarkId::new("match", count), |b| {
+            let pair = pair.get_or_init(Pair::typical);
+            let trees = pair.trees(count);
+            b.iter(|| pair.matches(&trees, &config));
+        });
+    }
+}
