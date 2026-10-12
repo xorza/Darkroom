@@ -12,8 +12,6 @@ Single-crate project.
 - `examples/` — runnable examples.
 - `test_resources/` — image fixtures used by tests.
 
-Benchmark harness lives in a sibling crate at `../quickbench/` (referenced as a `dev-dependency` by relative path).
-
 ## Build
 
 Requires Rust **1.88+** (uses the 2024 edition; current deps like `wgpu` 29 and `image` 0.25 need 1.88). The toolchain is pinned in `rust-toolchain.toml`.
