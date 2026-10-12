@@ -24,9 +24,9 @@ cargo test
 ## Examples
 
 ```sh
-cargo run --release --example pipeline
-cargo run --release --example blend
-cargo run --release --example transform
+cargo run --profile release-dev --example pipeline
+cargo run --profile release-dev --example blend
+cargo run --profile release-dev --example transform
 ```
 
 See `examples/` for the full list.
