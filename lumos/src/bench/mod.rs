@@ -26,7 +26,7 @@ use crate::math::{
     dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, noise, pixel_quadrature,
     statistics, sum, wavelet,
 };
-use crate::{background_mesh, bit_buffer2, star_detection};
+use crate::{background_mesh, bit_buffer2, registration, star_detection};
 
 /// The kernel tier: one operation on the unit production gives it.
 pub fn kernel(c: &mut Criterion) {
@@ -53,4 +53,5 @@ pub fn kernel(c: &mut Criterion) {
     star_detection::bench::benches(c);
     background_mesh::bench::benches(c);
     bit_buffer2::bench::benches(c);
+    registration::bench::benches(c);
 }

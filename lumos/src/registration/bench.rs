@@ -1,182 +1,145 @@
-//! Benchmarks for the registration *solve* — triangle matching → RANSAC → optional
-//! SIP — on synthetic star fields. The image warp it feeds is benched separately in
-//! `resample::bench`; real-data register/warp timing lives in `registration::tests::real_data`.
-//!
-//! Run: `cargo test -p lumos --release --features bench registration::bench -- --ignored
-//! --nocapture`
+//! The registration benches: the entry `crate::bench` runs them by, and the input they share, a
+//! typical field's star catalogue in two exposures.
 
-use crate::internals::prelude::*;
-use quickbench::quick_bench;
-use std::hint::black_box;
+use criterion::Criterion;
+use glam::DVec2;
 
-use crate::internals::synthetic::fixtures::star_field;
-use crate::registration::transform::Transform;
-use crate::star_detection::config::Config as StarDetectionConfig;
-use crate::star_detection::detector::StarDetector;
+use crate::bench::scene::{FRAME, Field};
+use crate::internals::synthetic::distortion::RadialField;
+use crate::internals::test_rng::TestRng;
+use crate::registration::final_fit::{FinalFit, FitCatalogs, FitModel};
+use crate::registration::ransac::RansacEstimator;
+use crate::registration::registration_config::RegistrationConfig;
+use crate::registration::resample::row_positions;
+use crate::registration::spatial::KdTree;
+use crate::registration::transform::{Transform, TransformType};
+use crate::registration::triangle::matching;
+use crate::registration::triangle::voting::PointMatch;
+use crate::registration::{
+    estimate_and_refine, final_fit, median_fwhm, ransac, spatial, triangle, tuning,
+};
 use crate::star_detection::star::Star;
-use crate::{RegistrationConfig, register};
 
-/// A reference catalog and a transformed copy of it.
+pub(crate) fn benches(c: &mut Criterion) {
+    spatial::bench::benches(c);
+    triangle::bench::benches(c);
+    ransac::bench::benches(c);
+    final_fit::bench::benches(c);
+    row_positions::bench::benches(c);
+}
+
+/// The FWHM the stars are measured at, as the scene renders them.
+const FWHM: f32 = 3.5;
+
+/// A star position's measurement error, in pixels: a centroid's at the scene's typical SNR.
+const POSITION_SIGMA: f64 = 0.05;
+
+/// A typical field's star catalogue in two exposures through one lens, each sorted by flux as the
+/// detector returns it: the second dithered by (11, −7) px and turned 0.2°, as a dithered sequence
+/// is, and the lens's radial distortion moving the frame's corners by about a pixel. Each position
+/// is off by its measurement error.
 #[derive(Debug)]
-struct StarPair {
-    reference: Vec<Star>,
-    target: Vec<Star>,
+pub(super) struct Pair {
+    pub(super) reference: Vec<Star>,
+    pub(super) target: Vec<Star>,
 }
 
-/// Detect a realistic star set on a synthetic field, then build a registration target by
-/// applying a known similarity transform to those stars — a clean, deterministic correspondence
-/// set that still drives the full matching + RANSAC machinery over `num_stars` points.
-fn star_pair(num_stars: usize, seed: u64) -> StarPair {
-    let frame = star_field(Size2us::new(1500, 1500), num_stars, seed);
-    let mut detector = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
-    let ref_stars = detector.detect(&frame.image).stars;
-    // A modest rotation + scale + shift, the kind dithered subs differ by.
-    let t = Transform::similarity(DVec2::new(11.0, -7.0), 0.03, 1.002);
-    let target = ref_stars
-        .iter()
-        .map(|s| {
-            let mut moved = *s;
-            moved.pos = t.apply(s.pos);
-            moved
-        })
-        .collect();
-    StarPair {
-        reference: ref_stars,
-        target,
-    }
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_register_150_stars(b: ::quickbench::Bencher) {
-    let StarPair {
-        reference: ref_stars,
-        target,
-    } = star_pair(150, 7);
-    let config = RegistrationConfig::default();
-    b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_register_500_stars(b: ::quickbench::Bencher) {
-    let StarPair {
-        reference: ref_stars,
-        target,
-    } = star_pair(500, 9);
-    let config = RegistrationConfig::default();
-    b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
-}
-
-/// Benchmarks on the dataset's RAW lights.
-#[cfg(feature = "real-data")]
-mod real_data {
-    use std::hint::black_box;
-    use std::path::PathBuf;
-
-    use ::quickbench::quick_bench;
-    use common::TempDir;
-
-    use crate::internals::real_data::{LightPair, first_and_last_lights, raw_frames, raw_light};
-    use crate::io::image::linear::LinearImage;
-    use crate::registration::register;
-    use crate::registration::registration_config::RegistrationConfig;
-    use crate::registration::resample::warp;
-    use crate::star_detection::config::Config;
-    use crate::star_detection::detector::StarDetector;
-
-    #[quick_bench(warmup_iters = 0, iters = 1)]
-    fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
-        let paths = raw_frames("Lights");
-        let images: Vec<LinearImage> = paths.iter().map(|path| raw_light(path)).collect();
-        // The warped frames go to a fresh directory, never into the dataset.
-        let output_dir = TempDir::new("lumos-registered-lights");
-        println!(
-            "Loaded {} lights; writing under {}",
-            images.len(),
-            output_dir.path().display()
-        );
-
-        b.bench(|| {
-            let star_config = Config::precise_ground();
-            let mut detector = StarDetector::from_config(star_config).unwrap();
-
-            // Detect stars in all frames
-            let detections: Vec<_> = images.iter().map(|img| detector.detect(img)).collect();
-
-            let reg_config = RegistrationConfig::default();
-            let ref_stars = &detections[0].stars;
-
-            println!(
-                "Reference: {:?} ({} stars)",
-                paths[0].file_name().unwrap(),
-                ref_stars.len()
+impl Pair {
+    pub(super) fn typical() -> Self {
+        let mut sources = Field::Typical.scene(FRAME).sources;
+        sources.sort_by(|a, b| b.flux.total_cmp(&a.flux));
+        let centre = DVec2::new(FRAME.width as f64, FRAME.height as f64) / 2.0;
+        // k · r³ is one pixel at the corner's r = |(3000, 2000)|.
+        let lens = RadialField::new(centre, 1.0 / centre.length().powi(3));
+        let dither = Transform::similarity(DVec2::new(11.0, -7.0), 0.2_f64.to_radians(), 1.0);
+        let mut rng = TestRng::new(0x5E9);
+        let mut star = |pos: DVec2, flux: f32| {
+            let error = DVec2::new(
+                f64::from(rng.next_gaussian_f32()),
+                f64::from(rng.next_gaussian_f32()),
             );
-
-            // Save reference frame as-is
-            let tiff_name =
-                |path: &PathBuf| format!("{}.tiff", path.file_stem().unwrap().to_string_lossy());
-            let ref_output = output_dir.join(tiff_name(&paths[0]));
-            images[0]
-                .save(&ref_output)
-                .expect("Failed to save reference frame");
-
-            // Register and warp each subsequent frame
-            for i in 1..images.len() {
-                let name = paths[i].file_name().unwrap();
-                let target_stars = &detections[i].stars;
-
-                let result = match register(ref_stars, target_stars, &reg_config) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        println!("  {name:?}: FAILED ({e:?}), skipping");
-                        continue;
-                    }
-                };
-
-                println!(
-                    "  {:?}: {} inliers, RMS {:.4} px, {:.1} ms",
-                    name,
-                    result.num_inliers(),
-                    result.rms_error(),
-                    result.elapsed_ms(),
-                );
-
-                let warped = warp(&images[i], &result.warp_transform(), reg_config.warp).image;
-
-                let output_path = output_dir.join(tiff_name(&paths[i]));
-                warped
-                    .save(&output_path)
-                    .expect("Failed to save warped frame");
+            Star {
+                position_sigma: POSITION_SIGMA,
+                ..Star::at(pos + POSITION_SIGMA * error)
+                    .with_flux(flux)
+                    .with_fwhm(FWHM)
             }
-
-            println!(
-                "Saved {} registered frames to {:?}",
-                images.len(),
-                output_dir
-            );
-        });
+        };
+        let reference = sources
+            .iter()
+            .map(|source| star(lens.image(source.pos), source.flux))
+            .collect();
+        let target = sources
+            .iter()
+            .map(|source| star(lens.image(dither.apply(source.pos)), source.flux))
+            .collect();
+        Self { reference, target }
     }
 
-    #[quick_bench(warmup_iters = 3, iters = 30)]
-    fn bench_register_stars(b: ::quickbench::Bencher) {
-        let LightPair {
-            first: img1,
-            last: img2,
-        } = first_and_last_lights();
-
-        // Pre-detect stars (not part of the benchmark)
-        let star_config = Config::default();
-        let mut detector = StarDetector::from_config(star_config).unwrap();
-        let result1 = detector.detect(&img1);
-        let result2 = detector.detect(&img2);
-
-        let reg_config = RegistrationConfig::default();
-
-        b.bench(|| {
-            black_box(register(
-                black_box(&result1.stars),
-                black_box(&result2.stars),
-                &reg_config,
-            ))
-        });
+    /// The noise scale `register` derives from the stars' FWHM.
+    pub(super) fn max_sigma(&self) -> f64 {
+        tuning::max_sigma_from_fwhm(median_fwhm(&self.reference, &self.target))
     }
+
+    /// The brightest `count` positions of each catalogue as trees, as `register` builds them for
+    /// `config.matching.max_stars`.
+    pub(super) fn trees(&self, count: usize) -> Trees {
+        let brightest =
+            |stars: &[Star]| KdTree::build(stars.iter().take(count).map(|s| s.pos).collect());
+        Trees {
+            reference: brightest(&self.reference).expect("a catalogue of stars"),
+            target: brightest(&self.target).expect("a catalogue of stars"),
+        }
+    }
+
+    /// The triangle matches between the brightest stars `config` takes.
+    pub(super) fn matches(&self, trees: &Trees, config: &RegistrationConfig) -> Vec<PointMatch> {
+        matching::match_triangles(
+            &trees.reference,
+            &trees.target,
+            &config.matching.triangle,
+            self.max_sigma(),
+        )
+    }
+
+    /// RANSAC's `transform` on the matches of the default configuration's brightest stars: the
+    /// hypothesis the final fit starts from.
+    pub(super) fn hypothesis(&self, transform: TransformType) -> Transform {
+        let config = RegistrationConfig::default();
+        let trees = self.trees(config.matching.max_stars);
+        RansacEstimator::new(config.ransac.clone(), self.max_sigma())
+            .estimate(
+                &self.matches(&trees, &config),
+                trees.reference.points(),
+                trees.target.points(),
+                transform,
+            )
+            .expect("the pair registers")
+            .transform
+    }
+
+    /// `model` fitted as `register` fits it under the default configuration: RANSAC on the
+    /// matches, then the final fit over the whole catalogues.
+    pub(super) fn fit(&self, model: FitModel) -> FinalFit {
+        let config = RegistrationConfig::default();
+        let trees = self.trees(config.matching.max_stars);
+        let catalogs = FitCatalogs::new(&self.reference, &self.target).expect("a catalogue");
+        estimate_and_refine(
+            trees.reference.points(),
+            &trees.target,
+            &self.matches(&trees, &config),
+            &catalogs,
+            model,
+            self.max_sigma(),
+            &config,
+        )
+        .expect("the pair registers")
+    }
+}
+
+/// Each catalogue's brightest stars as a tree.
+#[derive(Debug)]
+pub(super) struct Trees {
+    pub(super) reference: KdTree,
+    pub(super) target: KdTree,
 }

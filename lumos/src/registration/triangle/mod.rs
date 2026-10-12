@@ -55,5 +55,7 @@ impl Default for TriangleConfig {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
