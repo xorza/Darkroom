@@ -1,4 +1,4 @@
-//! [`FloorI32`] against the library `floor` it stands in for, at both precisions.
+//! [`FloorI32`] against the library `floor`, at both precisions.
 
 use std::hint::black_box;
 
