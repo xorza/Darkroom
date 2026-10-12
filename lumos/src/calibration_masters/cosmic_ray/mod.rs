@@ -155,5 +155,7 @@ pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> Result<usize, Cos
     Ok(detector + PASS_MASKS * BitBuffer2::heap_bytes(size))
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

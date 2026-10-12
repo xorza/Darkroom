@@ -88,7 +88,7 @@ fn flat_applied_to_clean_truth() {
                 edge: 0.5,
                 falloff: 2.0,
             }),
-            channel_gain: [1.0; 3],
+            colour_gain: [1.0; 3],
         },
         ..Camera::ideal(3.0)
     };
