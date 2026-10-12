@@ -322,19 +322,19 @@ fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
     let floor = coefficients.index.len().div_ceil(MIN_NOISE_SHARE).max(2);
     let mut sigma =
         k_sigma(coefficients, &|_| true, START_CONVERGENCE, START_ITERATIONS) / LAYER_SIGMA[0];
+    let mut mean = None;
     for _ in 0..MAX_ITERATIONS {
-        let threshold = K * sigma;
-        let next = Deviation::of(
-            coefficients.detail,
-            coefficients.significance,
-            threshold,
-            &|_| true,
-        );
+        let (values, gate, below) = (coefficients.detail, coefficients.significance, K * sigma);
+        let next = match mean {
+            None => Deviation::of(values, gate, below, &|_| true),
+            Some(shift) => Deviation::around(values, gate, below, &|_| true, shift),
+        };
         if next.count < floor {
             return None;
         }
         let converged = (next.sigma - sigma).abs() <= CONVERGENCE * next.sigma;
         sigma = next.sigma;
+        mean = Some(next.mean);
         if converged || sigma == 0.0 {
             return Some(sigma);
         }
@@ -460,22 +460,25 @@ fn k_sigma(
     iterations: usize,
 ) -> f64 {
     let layer = coefficients.first_layer;
-    let mut sigma = Deviation::of(layer, layer, f64::INFINITY, within).sigma;
+    let mut deviation = Deviation::of(layer, layer, f64::INFINITY, within);
     for _ in 0..iterations {
-        let next = Deviation::of(layer, layer, K * sigma, within).sigma;
-        let converged = (next - sigma).abs() <= convergence * next;
-        sigma = next;
-        if converged || sigma == 0.0 {
+        let sigma = deviation.sigma;
+        deviation = Deviation::around(layer, layer, K * sigma, within, deviation.mean);
+        if (deviation.sigma - sigma).abs() <= convergence * deviation.sigma
+            || deviation.sigma == 0.0
+        {
             break;
         }
     }
-    sigma
+    deviation.sigma
 }
 
-/// A sample standard deviation and how many values it was taken over.
+/// A sample standard deviation, the mean it was taken about, and how many values it was taken
+/// over.
 #[derive(Debug, Clone, Copy)]
 struct Deviation {
     sigma: f64,
+    mean: f64,
     count: usize,
 }
 
@@ -491,20 +494,41 @@ impl Deviation {
         below: f64,
         within: &(impl Fn(usize) -> bool + Sync),
     ) -> Self {
-        let pass = |shift: f64| Sums::over(values, gate, below, within, shift);
-        let first = pass(0.0);
+        let first = Sums::over(values, gate, below, within, 0.0);
         if first.count < 2 {
+            return Self::from_sums(first, 0.0);
+        }
+        Self::around(values, gate, below, within, first.sum / first.count as f64)
+    }
+
+    /// The same in one pass, the deviations taken from `shift` and corrected by their sum, which
+    /// is exact whatever the shift and rounds as the two-pass algorithm's second pass does while
+    /// the shift is a small part of σ from the mean. An iteration passes the mean the one before it
+    /// found, which its own differs from by a sliver of σ.
+    fn around(
+        values: &[f64],
+        gate: &[f64],
+        below: f64,
+        within: &(impl Fn(usize) -> bool + Sync),
+        shift: f64,
+    ) -> Self {
+        Self::from_sums(Sums::over(values, gate, below, within, shift), shift)
+    }
+
+    fn from_sums(sums: Sums, shift: f64) -> Self {
+        if sums.count < 2 {
             return Self {
                 sigma: 0.0,
-                count: first.count,
+                mean: shift,
+                count: sums.count,
             };
         }
-        let count = first.count as f64;
-        let second = pass(first.sum / count);
-        let variance = (second.squares - second.sum * second.sum / count) / (count - 1.0);
+        let count = sums.count as f64;
+        let variance = (sums.squares - sums.sum * sums.sum / count) / (count - 1.0);
         Self {
             sigma: variance.max(0.0).sqrt(),
-            count: first.count,
+            mean: shift + sums.sum / count,
+            count: sums.count,
         }
     }
 }
