@@ -3,14 +3,17 @@
 use arrayvec::ArrayVec;
 
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::math::size2us::Size2us;
 
-/// A frame as the warp reads it: its planes and its flags, borrowed from a `LinearImage` in memory.
+/// A frame as the warp reads it: its planes, its flags and its metadata, borrowed from a
+/// `LinearImage` in memory.
 #[derive(Debug)]
 pub(crate) struct SourceImage<'a> {
     pub(crate) dimensions: ImageDimensions,
+    pub(crate) metadata: &'a ImageMetadata,
     pub(crate) planes: ArrayVec<SourcePlane<'a>, 3>,
     pub(crate) flags: Option<&'a PixelFlags>,
 }
@@ -27,6 +30,7 @@ impl<'a> SourceImage<'a> {
         let width = image.width();
         Self {
             dimensions: image.dimensions(),
+            metadata: &image.metadata,
             planes: (0..image.channels())
                 .map(|channel| SourcePlane {
                     pixels: image.channel(channel).pixels(),

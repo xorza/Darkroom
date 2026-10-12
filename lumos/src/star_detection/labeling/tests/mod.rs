@@ -17,8 +17,8 @@ use std::collections::VecDeque;
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
 use crate::star_detection::labeling::LabelMap;
+use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
-use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 mod parallel;
@@ -174,23 +174,22 @@ fn check(mask: &Mask) -> Labelings {
     }
 }
 
-/// A labeler that takes its maps back relabels from them as from fresh buffers: two masks of
-/// different foregrounds in turn, each held to a fresh labeler's map, the second refilling the
-/// buffers the first gave back.
+/// A labeler that keeps its map relabels into it as into fresh buffers: two masks of different
+/// foregrounds in turn, each held to a fresh labeler's map, the second refilling the buffers the
+/// first filled.
 #[test]
-fn a_recycled_map_relabels_as_a_fresh_one() {
+fn a_reused_map_relabels_as_a_fresh_one() {
     let size = Size2us::new(40, 30);
-    let mut pool = DetectionResources::new(size);
+    let mut labeler = Labeler::default();
     let masks = [
         Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),
         Mask::from_fn(size, |x, y| (x * y) % 5 == 0).bits(),
     ];
     for (index, mask) in masks.iter().enumerate() {
-        let recycled = LabelMap::from_pool(mask, Connectivity::Eight, &mut pool);
+        let reused = labeler.label(mask, Connectivity::Eight);
         let fresh = LabelMap::from_mask(mask, Connectivity::Eight);
         assert!(fresh.num_labels() > 0);
-        assert_eq!(recycled.labels(), fresh.labels(), "mask {index}");
-        assert_eq!(recycled.num_labels(), fresh.num_labels(), "mask {index}");
-        recycled.release_to_pool(&mut pool);
+        assert_eq!(reused.labels(), fresh.labels(), "mask {index}");
+        assert_eq!(reused.num_labels(), fresh.num_labels(), "mask {index}");
     }
 }

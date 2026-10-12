@@ -28,6 +28,7 @@ use crate::registration::bench::Pair;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::warp_params::WarpParams;
+use crate::scratch_pool::{Scratch, ScratchPool};
 
 pub(crate) fn benches(c: &mut Criterion) {
     prepare(c);
@@ -97,6 +98,7 @@ fn park(c: &mut Criterion) {
             let flags = parked.flags();
             let source = SourceImage {
                 dimensions: parked.dimensions,
+                metadata: &light.metadata,
                 planes: parked
                     .planes()
                     .map(|pixels| SourcePlane {
@@ -107,8 +109,10 @@ fn park(c: &mut Criterion) {
                 flags: flags.as_ref(),
             };
             let warp = Pair::typical().similarity_warp();
-            let mut buffers = WarpBuffers::new(parked.dimensions);
-            let mut warp_parked = || buffers.warp_into(&source, &warp, WarpParams::default());
+            let mut buffers = WarpBuffers::build(parked.dimensions);
+            let rows = ScratchPool::default();
+            let mut warp_parked =
+                || buffers.warp_into(&source, &warp, WarpParams::default(), &rows);
             if cold {
                 b.iter_batched(
                     || assert!(parked.evict(), "the light's pages leave the page cache"),

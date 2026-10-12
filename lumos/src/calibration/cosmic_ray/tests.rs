@@ -16,6 +16,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::median_mut;
+use crate::scratch_pool::ScratchPool;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -328,7 +329,14 @@ fn replace_flagged_matches_a_snapshot_reference() {
     let want = replace_flagged_via_snapshot(&pixels, size, &mask);
 
     let mut got = pixels.clone();
-    replace_flagged(&mut got, size, &mask, None, &mut Vec::new());
+    replace_flagged(
+        &mut got,
+        size,
+        &mask,
+        None,
+        &mut Vec::new(),
+        &ScratchPool::default(),
+    );
 
     assert_eq!(got, want);
     // The fully-masked interior keeps its original value rather than picking up a neighbour.

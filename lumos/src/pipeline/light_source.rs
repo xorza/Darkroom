@@ -37,12 +37,11 @@ use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::{FrameParking, StagePlan};
-use crate::pipeline::frame_registrar::{FrameRegistrar, ParkedFrame};
+use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet, ParkedFrame};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
-use crate::registration::resample::WarpBuffers;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::star_detector::detection_result::{
@@ -595,13 +594,14 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             result.stars,
             config,
             &parking,
-            total,
+            LightSet {
+                count: total,
+                dimensions,
+            },
             &progress,
             cancel,
         );
-        let mut buffers: Vec<Option<WarpBuffers>> = (0..slots).map(|_| None).collect();
         let reference_frame = registrar.park(
-            &mut buffers[0],
             reference,
             DetectedFrame {
                 image: PipelineFrame::Resident(image),
@@ -611,8 +611,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             },
         )?;
 
-        let mut slot_pairs = detectors.paired_with(&mut buffers);
-        let others = intake.map(0..total, &mut slot_pairs, |(detector, buffers), index| {
+        let others = intake.map(0..total, detectors.slots(), |detector, index| {
             if index == reference {
                 return Ok::<_, AlignStackError>(PassedLight::default());
             }
@@ -621,7 +620,6 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             let result = detector.detect(&image);
             log_detection(intake.complete_one(), total, &result);
             let frame = registrar.park(
-                buffers,
                 index,
                 DetectedFrame {
                     image: PipelineFrame::Resident(image),
@@ -635,11 +633,9 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 diagnostics: result.diagnostics,
             })
         })?;
-        drop(slot_pairs);
+        // The registrar's warp sets are a warped frame's worth each, and a detector's pool the
+        // planes detection holds: the combine sizes its chunks against the memory without them.
         drop(registrar);
-        // A worker's buffers are a warped frame's worth each, and its detector's pool the planes
-        // detection holds: the combine sizes its chunks against the memory without them.
-        drop(buffers);
         drop(detectors);
 
         let mut outcomes = Vec::with_capacity(total);

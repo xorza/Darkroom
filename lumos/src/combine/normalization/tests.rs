@@ -998,7 +998,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         StoredFrame::spill(
             &run_scratch,
             image,
-            &FrameQuality::None,
+            &FrameQuality::<Buffer2<f32>>::None,
             FrameStats::measure(image),
         )
         .unwrap()
@@ -1028,7 +1028,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
                 StoredFrame::spill(
                     &run_scratch,
                     &image,
-                    &FrameQuality::None,
+                    &FrameQuality::<Buffer2<f32>>::None,
                     FrameStats::measure(&image),
                 )
                 .unwrap()

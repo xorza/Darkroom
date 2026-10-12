@@ -1,5 +1,6 @@
 //! One frame as the combine engine sees it.
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 
 use arrayvec::ArrayVec;
@@ -111,7 +112,7 @@ impl StoredFrame {
     pub(crate) fn spill(
         store: &impl PlaneStore,
         image: &impl StackableImage,
-        quality: &FrameQuality<Buffer2<f32>>,
+        quality: &FrameQuality<impl Borrow<Buffer2<f32>>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let channels = (0..image.dimensions().channels())
@@ -121,8 +122,8 @@ impl StoredFrame {
             .is_none()
             .then(|| Self::spill_samples(store, image))
             .transpose()?;
-        let quality =
-            quality.try_map(|plane, buffer| store.store_quality(plane, buffer.pixels()))?;
+        let quality = quality
+            .try_map(|plane, buffer| store.store_quality(plane, buffer.borrow().pixels()))?;
         let flags = image
             .flags()
             .filter(|flags| keeps(flags, &quality))

@@ -687,7 +687,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             StoredFrame::spill(
                 &scratch,
                 &image,
-                &FrameQuality::None,
+                &FrameQuality::<Buffer2<f32>>::None,
                 FrameStats::measure(&image),
             )
             .unwrap(),

@@ -1,5 +1,6 @@
 //! [`DeblendBuffers`]: the scratch one deblending job reuses from component to component.
 
+use crate::scratch_pool::Shapeless;
 use crate::star_detection::deblend::Pixel;
 use crate::star_detection::deblend::component::Assignment;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
@@ -22,3 +23,5 @@ pub(crate) struct DeblendBuffers {
     /// The multi-threshold deblender's working sets.
     pub(crate) tree: TreeBuffers,
 }
+
+impl Shapeless for DeblendBuffers {}

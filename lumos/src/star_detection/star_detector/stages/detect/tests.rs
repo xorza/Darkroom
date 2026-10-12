@@ -68,7 +68,7 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         &flat_plane(&pixels),
         &label_map,
         &local_maxima_config(),
-        &JobScratchPool::default(),
+        &ScratchPool::default(),
     );
 
     assert_eq!(
@@ -102,7 +102,7 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         &flat_plane(&pixels),
         &label_map,
         &local_maxima_config(),
-        &JobScratchPool::default(),
+        &ScratchPool::default(),
     );
 
     assert_eq!(result.regions.len(), 1);
@@ -139,7 +139,7 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             &flat_plane(&pixels),
             &label_map,
             &config,
-            &JobScratchPool::default(),
+            &ScratchPool::default(),
         );
 
         assert!(
@@ -272,7 +272,7 @@ fn region_filter_bounds() {
         &flat_plane(&residual),
         &label_map,
         &config,
-        &JobScratchPool::default(),
+        &ScratchPool::default(),
     );
     let mut kept: Vec<(usize, usize)> = result
         .regions

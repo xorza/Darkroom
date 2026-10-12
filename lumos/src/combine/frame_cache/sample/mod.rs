@@ -4,6 +4,7 @@ use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
+use crate::scratch_pool::Scratch;
 
 /// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says
 /// the value is not the photosite's own measurement.
@@ -17,9 +18,10 @@ const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
 /// packed to the front, with their weights, flags, frames and noise in the same order, and the
 /// rejection methods' own working buffers.
 ///
-/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) rather
-/// than built in a `for_each_init` init closure, because the row loop runs once per chunk per
-/// channel — a fresh init would rebuild every vector on each of those.
+/// Leased from a [`ScratchPool`](crate::scratch_pool::ScratchPool) shaped by the frame count,
+/// rather than built in a `for_each_init` init closure, because the row loop runs once per chunk
+/// per channel — a fresh init would rebuild every vector on each of those. The gather buffers are
+/// indexed directly, so they hold the frame count as their length, not just as capacity.
 #[derive(Debug, Default)]
 pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
@@ -41,10 +43,17 @@ pub(crate) struct PixelSamples<'a> {
     pub(crate) noise: Option<NoiseColumns<'a>>,
 }
 
-impl CombineScratch {
-    /// Size the gather buffers for `frame_count` frames. They are indexed directly, so they need
-    /// the length, not just the capacity.
-    pub(super) fn resize(&mut self, frame_count: usize) {
+impl Scratch for CombineScratch {
+    /// The frame count.
+    type Shape = usize;
+
+    fn build(frame_count: usize) -> Self {
+        let mut scratch = Self::default();
+        scratch.fit(frame_count);
+        scratch
+    }
+
+    fn fit(&mut self, frame_count: usize) {
         self.values.resize(frame_count, 0.0);
         self.eff_weights.resize(frame_count, 0.0);
         self.sample_flags.resize(frame_count, 0);
@@ -52,6 +61,17 @@ impl CombineScratch {
         self.noise_sky.resize(frame_count, 0.0);
         self.noise_inverse_electrons.resize(frame_count, 0.0);
         self.buffers.reserve(frame_count);
+    }
+
+    fn has_shape(&self, frame_count: usize) -> bool {
+        [
+            self.values.len(),
+            self.eff_weights.len(),
+            self.sample_flags.len(),
+            self.noise_background.len(),
+            self.noise_sky.len(),
+            self.noise_inverse_electrons.len(),
+        ] == [frame_count; 6]
     }
 }
 

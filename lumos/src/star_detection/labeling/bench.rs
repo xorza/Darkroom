@@ -16,10 +16,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             let stages = Stages::of(field);
             let connectivity = stages.config.extraction.connectivity;
             let mut labeler = Labeler::default();
-            b.iter(|| {
-                let map = labeler.label(&stages.mask, connectivity);
-                labeler.recycle(map);
-            });
+            b.iter(|| labeler.label(&stages.mask, connectivity).num_labels());
         });
     }
 }

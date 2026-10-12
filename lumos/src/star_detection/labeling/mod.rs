@@ -15,11 +15,8 @@ pub(crate) mod labeler;
 mod run;
 mod union_find;
 
-use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::component_data::ComponentData;
-use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// The connected components of a mask: each one's box and area, and its pixels as runs.
 #[derive(Debug, Default)]
@@ -42,21 +39,6 @@ pub(crate) struct LabelRun {
 }
 
 impl LabelMap {
-    /// Label the foreground of `mask` into the buffers of `resources`' labeler.
-    pub(crate) fn from_pool(
-        mask: &BitBuffer2,
-        connectivity: Connectivity,
-        resources: &mut DetectionResources,
-    ) -> Self {
-        debug_assert_eq!(mask.size, resources.dimensions());
-        resources.labeler.label(mask, connectivity)
-    }
-
-    /// Release this `LabelMap`'s buffers back to the labeler for the next frame to refill.
-    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
-        pool.labeler.recycle(self);
-    }
-
     /// Number of connected components (excluding background).
     #[inline]
     pub(crate) const fn num_labels(&self) -> usize {
@@ -153,7 +135,9 @@ pub(crate) mod internals {
 
         /// Label `mask` with a fresh labeler instead of the pool's.
         pub(crate) fn from_mask(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
-            Labeler::default().label(mask, connectivity)
+            let mut labeler = Labeler::default();
+            labeler.label(mask, connectivity);
+            labeler.into_map()
         }
     }
 }

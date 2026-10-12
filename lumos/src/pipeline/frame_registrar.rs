@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::CancelToken;
 
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::pipeline::align_stack_config::AlignStackConfig;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
@@ -14,8 +15,9 @@ use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 use crate::registration::error::RegistrationError;
-use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
+use crate::registration::resample::{RowScratch, WarpBuffers};
+use crate::scratch_pool::ScratchPool;
 use crate::star_detection::star::Star;
 
 /// Registers each frame to the reference's stars, warps it, and parks the warped frame in the
@@ -33,6 +35,17 @@ pub(crate) struct FrameRegistrar<'a> {
     /// Counted where the work ends: a dropped frame counts as much as a registered one, since the
     /// bar tracks attempts resolved, not survivors.
     resolved: StageCounter<'a>,
+    /// The sets the frames warp into, one per frame in flight at most.
+    warps: ScratchPool<WarpBuffers>,
+    /// The warp's row scratch, one per rayon job.
+    rows: ScratchPool<RowScratch>,
+}
+
+/// The lights a registrar parks: how many, and the dimensions every one of them has.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LightSet {
+    pub(crate) count: usize,
+    pub(crate) dimensions: ImageDimensions,
 }
 
 /// One parked light: its stored frame when it registered, and how it registered.
@@ -48,11 +61,11 @@ impl<'a> FrameRegistrar<'a> {
         reference_stars: Vec<Star>,
         config: &'a AlignStackConfig,
         parking: &'a FrameParking,
-        frame_count: usize,
+        lights: LightSet,
         progress: &'a ProgressCallback,
         cancel: &'a CancelToken,
     ) -> Self {
-        let others = frame_count - 1;
+        let others = lights.count - 1;
         tracing::info!(
             reference,
             ref_stars = reference_stars.len(),
@@ -68,19 +81,16 @@ impl<'a> FrameRegistrar<'a> {
             others,
             attempted: AtomicUsize::new(0),
             resolved: StageCounter::new(progress, StackingStage::Registering, others),
+            warps: ScratchPool::new(lights.dimensions),
+            rows: ScratchPool::default(),
         }
     }
 
-    /// Register light `index`, `frame`, warp it into `buffers` and park it, with how it registered;
-    /// `None` when
-    /// the run was cancelled, which the caller turns into `Cancelled` once every worker stops.
-    ///
-    /// The spill tier hands its buffers back once the frame is on disk, so a worker warps into
-    /// pages it already faulted in. The RAM tier keeps them, and the slot refills from a fresh
-    /// allocation it would make anyway.
+    /// Register light `index`, `frame`, warp it into a set leased from the registrar and park it,
+    /// with how it registered; `None` when the run was cancelled, which the caller turns into
+    /// `Cancelled` once every worker stops. See [`FrameParking::store`] for where the set goes.
     pub(crate) fn park(
         &self,
-        buffers: &mut Option<WarpBuffers>,
         index: usize,
         frame: DetectedFrame,
     ) -> Result<Option<ParkedFrame>, AlignStackError> {
@@ -135,25 +145,19 @@ impl<'a> FrameRegistrar<'a> {
             "registered"
         );
         let warp = registration.warp_transform();
-        let mut warped = buffers
-            .take()
-            .unwrap_or_else(|| WarpBuffers::new(image.dimensions()));
+        let mut warped = self.warps.acquire();
         let image = image.into_resident();
         warped.warp_into(
             &SourceImage::of(&image),
             &warp,
             self.config.registration.warp,
+            &self.rows,
         );
-        let metadata = image
-            .metadata
-            .clone()
-            .warped(|p| warp.apply(p), image.dimensions().size());
         drop(image);
         self.resolved.complete_one();
-        let stored = self.parking.store(metadata, warped, stats)?;
-        *buffers = stored.reusable;
+        let stored = self.parking.store(warped, stats)?;
         Ok(Some(ParkedFrame {
-            stored: Some(stored.frame),
+            stored: Some(stored),
             registration: FrameRegistration::Registered {
                 warp: Box::new(warp),
                 inliers: registration.num_inliers(),

@@ -133,7 +133,6 @@ fn detect_rho_opiuchi() {
 #[test]
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::internals::visual;
-    use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::star_detector::stages::detect::DetectResult;
     use crate::star_detection::star_detector::stages::fwhm;
@@ -197,13 +196,12 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 05_threshold_mask ({pixels_above} pixels above threshold)");
 
     // 5. Label map, of the mask as it stands — the stage labels it undilated.
-    let label_map = LabelMap::from_pool(&mask, config.extraction.connectivity, &mut pool);
+    let label_map = pool.labeler.label(&mask, config.extraction.connectivity);
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
     visual::save_rgb(&labels_rgb, &out("06_label_map"));
     println!("Saved: 06_label_map ({num_labels} components)");
-    label_map.release_to_pool(&mut pool);
     drop(mask);
 
     // The stage itself, on the same plane, saw what these images show.

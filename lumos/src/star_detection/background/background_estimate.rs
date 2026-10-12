@@ -1,5 +1,7 @@
 //! Per-pixel background and noise estimates.
 
+use std::mem;
+
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -8,15 +10,15 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Pooled;
+use crate::scratch_pool::ScratchPool;
 use crate::star_detection::background::simd;
 use crate::star_detection::background::simd::SegmentRamp;
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::background::workspace::InterpolateScratch;
+use crate::star_detection::background::workspace::{InterpolateScratch, InterpolateShape};
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
@@ -128,7 +130,7 @@ impl BackgroundEstimate {
             tile_grid,
             Some(&mut background),
             &mut noise,
-            &workspace.interpolation,
+            &mut workspace.interpolation,
         );
 
         Self {
@@ -156,7 +158,7 @@ impl BackgroundEstimate {
             true,
         );
         let floor = noise_floor_from(tile_grid, &mut resources.values);
-        interpolate_from_grid(tile_grid, None, &mut noise, &workspace.interpolation);
+        interpolate_from_grid(tile_grid, None, &mut noise, &mut workspace.interpolation);
         SkyNoise { noise, floor }
     }
 
@@ -240,10 +242,13 @@ fn interpolate_from_grid(
     grid: &BackgroundMesh,
     background: Option<&mut Buffer2<f32>>,
     noise: &mut Buffer2<f32>,
-    interpolation: &JobScratchPool<InterpolateScratch>,
+    interpolation: &mut ScratchPool<InterpolateScratch>,
 ) {
     let width = noise.width();
-    let tiles_x = grid.stats.width();
+    interpolation.reshape(InterpolateShape {
+        tiles_x: grid.stats.width(),
+        width,
+    });
     let sigma_range = grid.sigma_range();
     let background_rows =
         background.map(|background| background.pixels_mut().par_chunks_mut(width));
@@ -252,12 +257,10 @@ fn interpolate_from_grid(
                        y: usize,
                        bg_row: Option<&mut [f32]>,
                        noise_row: &mut [f32]| {
-        scratch.resize(tiles_x);
         if let Some(bg_row) = bg_row {
             interpolate_row(bg_row, noise_row, y, grid, scratch);
         } else {
-            let mut discarded = std::mem::take(&mut scratch.discarded_row);
-            discarded.resize(width, 0.0);
+            let mut discarded = mem::take(&mut scratch.discarded_row);
             interpolate_row(&mut discarded, noise_row, y, grid, scratch);
             scratch.discarded_row = discarded;
         }
@@ -270,6 +273,7 @@ fn interpolate_from_grid(
         }
     };
     let noise_rows = noise.pixels_mut().par_chunks_mut(width).enumerate();
+    let interpolation = &*interpolation;
     match background_rows {
         Some(background_rows) => background_rows.zip(noise_rows).for_each_init(
             || interpolation.acquire(),

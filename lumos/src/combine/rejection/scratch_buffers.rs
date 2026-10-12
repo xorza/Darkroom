@@ -65,7 +65,7 @@ pub(crate) struct MethodScratch {
 
 /// Per-thread scratch buffers for the combine.
 ///
-/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) per job
+/// Leased from a [`ScratchPool`](crate::scratch_pool::ScratchPool) per job
 /// and reused across all of its pixels, so after the first pixel nothing here allocates.
 #[derive(Debug, Default)]
 pub(crate) struct ScratchBuffers {

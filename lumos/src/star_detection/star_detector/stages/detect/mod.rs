@@ -5,8 +5,8 @@
 
 use rayon::prelude::*;
 
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::ScratchPool;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::deblend::component::Component;
@@ -67,11 +67,9 @@ impl DetectResult {
         }
         let pixels_above_threshold = mask.count_ones();
 
-        let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
+        let label_map = pool.labeler.label(&mask, config.connectivity);
         let connected_components = label_map.num_labels();
-
-        let extraction = extract_candidates(plane, &label_map, config, &pool.deblend);
-        label_map.release_to_pool(pool);
+        let extraction = extract_candidates(plane, label_map, config, &pool.deblend);
 
         Self {
             regions: extraction.regions,
@@ -88,7 +86,7 @@ fn extract_candidates(
     plane: &DetectionPlane,
     label_map: &LabelMap,
     config: &ExtractionConfig,
-    deblend_buffers: &JobScratchPool<DeblendBuffers>,
+    deblend_buffers: &ScratchPool<DeblendBuffers>,
 ) -> ExtractionResult {
     let values = &plane.values;
     let size = Size2us::new(values.width(), values.height());

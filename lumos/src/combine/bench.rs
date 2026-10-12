@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
@@ -129,7 +130,13 @@ impl Lights {
             .iter()
             .zip(&self.stats)
             .map(|(image, stats)| {
-                StoredFrame::spill(&scratch, image, &FrameQuality::None, stats.clone()).unwrap()
+                StoredFrame::spill(
+                    &scratch,
+                    image,
+                    &FrameQuality::<Buffer2<f32>>::None,
+                    stats.clone(),
+                )
+                .unwrap()
             })
             .collect();
         let budget =

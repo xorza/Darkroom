@@ -28,7 +28,6 @@ use crate::combine::normalization::FrameNorm;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::StackFrame;
 use crate::combine::stack_config::{Normalization, StackConfig};
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::error::Cancelled;
 use crate::error::FrameDimensionMismatch;
 use crate::frame::capture_conditions::CaptureConditions;
@@ -52,6 +51,7 @@ use crate::ingest::set_facts::SetFacts;
 use crate::math::vec2us::Vec2us;
 use crate::memory::stage::{Stage, Units};
 use crate::progress::progress_callback::ProgressCallback;
+use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
@@ -332,7 +332,7 @@ impl FrameCache {
         let kept_flagged = AtomicFlagCounts::default();
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
         // chunk per channel, so the leases have to outlive any single `for_each_init`.
-        let scratch_pool = JobScratchPool::<CombineScratch>::default();
+        let scratch_pool = ScratchPool::<CombineScratch>::new(self.frames.len());
         let pixels = self
             .core
             .process_chunks(&self.frames, chunking.units, |output_slice, ctx| {
@@ -343,7 +343,7 @@ impl FrameCache {
                     channel,
                     pixel_offset,
                 } = ctx;
-                let frame_count = frames.len();
+                debug_assert_eq!(frames.len(), self.frames.len());
                 let chunk_pixels = output_slice.len();
                 debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
                 let chunk_end = pixel_offset + chunk_pixels;
@@ -426,11 +426,7 @@ impl FrameCache {
                     }
                 }
                 rows.into_par_iter().enumerate().for_each_init(
-                    || {
-                        let mut scratch = scratch_pool.acquire();
-                        scratch.resize(frame_count);
-                        scratch
-                    },
+                    || scratch_pool.acquire(),
                     |scratch, (row_in_chunk, mut row)| {
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
