@@ -11,7 +11,7 @@ use crate::math::dmat3::DMat3;
 const POINTS: usize = 4_096;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/dmat3", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/dmat3", Scale::Sample);
     group.throughput(Throughput::Elements(POINTS as u64));
     for (variant, matrix) in [
         (

@@ -33,7 +33,7 @@ pub(crate) enum PsfModel {
 
 impl PsfModel {
     /// The round-equivalent FWHM (in pixels) a detector should recover.
-    pub(crate) fn fwhm(&self) -> f32 {
+    pub(crate) const fn fwhm(&self) -> f32 {
         match self {
             PsfModel::Gaussian { fwhm }
             | PsfModel::Moffat { fwhm, .. }

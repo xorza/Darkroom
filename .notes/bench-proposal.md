@@ -2,6 +2,24 @@
 
 Status: proposal, every decision in section 6 taken; no code written. Scope: every bench in `lumos`.
 
+## Items
+
+Done in this order; each is deleted when it is committed. An item that builds a group also removes
+the quickbench benches that section 5 maps to it, and adds the `bench::scene` entries (3.2) it is
+the first to need; the `Pipeline` scale comes with the `pipeline` tier.
+
+2. `kernel/io`.
+3. `kernel/calibration`.
+4. `kernel/frame_store`.
+5. `kernel/detection`.
+6. `kernel/registration`.
+7. `kernel/combine`.
+8. `kernel/drizzle`.
+9. The `stage` tier.
+10. The `pipeline` tier.
+11. quickbench removed from `lumos`: the dev-dependency, any bench left, every real-data bench
+    (3.3), and the AGENTS.md text.
+
 ## 1. Audit of the current inventory
 
 ### 1.1 Counts
@@ -141,10 +159,8 @@ One shared, seeded catalogue, `bench::scene`, built on the generators in `intern
 
 ### 3.3 Real data
 
-A `real-data` feature adds the groups `stage/real/...` and `pipeline/real/...` to the same target,
-on `test_data/lumos_data`: RAW decode of each set's first light, registration of the first and
-last light, the full calibrate-align-stack, and the image operations on the stacked master. This
-replaces the five scattered places and the `Instant`-timed test.
+No bench reads the real-data set: every bench runs on the synthetic scenes of 3.2. The current
+real-data benches and the `Instant`-timed real-data test are removed.
 
 ### 3.4 What the code needs for this
 
@@ -215,7 +231,6 @@ replaces the five scattered places and the `Instant`-timed test.
 | `pipeline/masters` | `build/rggb/12xF` (`CalibrationMasters::build`, dark, flat and bias). |
 | `pipeline/calibrate_align_stack` | `rggb/12xF/resident`, `rggb/12xF/spilled`. |
 | `pipeline/drizzle` | `rggb/12xF`. |
-| `pipeline/real` (`real-data`) | `masters`, `calibrate_align_stack`, `stack_master_{dark,flat,bias}`. |
 
 ## 5. Migration of the current benches
 
@@ -229,16 +244,16 @@ replaces the five scattered places and the `Instant`-timed test.
 | `calibration_masters::bench_defect_map_build_bayer` | `kernel/calibration/defect_map/build/rggb/F`. |
 | `calibration_masters::bench_cosmic_ray_reject_{mono,bayer}` | `kernel/calibration/cosmic_ray/reject/{mono,rggb}/F`. |
 | `defect_map::bench_collect_color_sample_indices` | `kernel/calibration/defect_map/color_sample_indices/rggb/F`. |
-| `calibration_masters::tests::real_data` (4 benches) | `pipeline/real/{masters,stack_master_*}`. |
+| `calibration_masters::tests::real_data` (4 benches) | Removed (real data). |
 | `combine::bench_stack_30`, `bench_stack_300` | `stage/combine/*/30xF` and `kernel/combine/rejection/*/{30,300}`. The `frame-clone` row is removed. |
 | `combine::bench_spilled_mean_40` | `stage/combine/light_preset/spilled/30xF` and `kernel/frame_store/spill/read/{warm,cold}/F`. |
 | `drizzle::bench_drizzle_kernels` | `kernel/drizzle/accumulate/<kernel>/<geometry>/F`. |
 | `drizzle::bench_drizzle_quality_planes` | `stage/drizzle/default`. |
-| `image_ops::bench_*` (9, real data) | `stage/image_ops/<op>/stacked_rgb/F` on synthetic data, plus `pipeline/real` for the dataset's master. |
+| `image_ops::bench_*` (9, real data) | `stage/image_ops/<op>/stacked_rgb/F` on synthetic data. |
 | `stretching::bench_stretch_rgb` | `stage/image_ops/{stf,auto_asinh,ghs}/stacked_rgb/F`. |
 | `stretching::bench_stretch_asinh_kernel_single_thread` | Removed (single-thread variant). |
 | `fits::decode::bench_fits_decode_u16` | `kernel/io/fits/decode/u16/F`, on a sky with stars. |
-| `io::raw::raw_load` | `stage/real/raw_load` (needs a real file). |
+| `io::raw::raw_load` | Removed (real data). |
 | `io::raw::bench_demosaic_vs_libraw` | Removed (experiment). |
 | `io::raw::bench_unpack_file_vs_buffer` | Removed (experiment; the buffer path is the production one). |
 | `black_level::bench_raw_decode` | `kernel/io/raw/decode/rggb/F`. |
@@ -248,7 +263,7 @@ replaces the five scattered places and the `Instant`-timed test.
 | `pipeline::bench_parked_warp_2k` | `stage/park/warp_from_map/{warm,cold}/F`; the `owned` variant is removed. |
 | `pipeline::parked_lights_under_a_memory_cap` | Removed. |
 | `registration::bench_register_{150,500}_stars` | `stage/register/pair/typical` and `kernel/registration/{triangle,ransac,sip}`. |
-| `registration::real_data` (2) | `pipeline/real` and `stage/real/register`. |
+| `registration::real_data` (2) | Removed (real data). |
 | `resample::bench_warp_*` (13) | `stage/warp/<method>/mono/F` (5 methods), `stage/warp/lanczos3/{rgb,rgb_sip,rgb_quality}/F`. The 1k, 2k and 4k copies, the single-thread copy and fresh against reused are removed. |
 | `centroid::bench_measure_star_*`, `bench_compute_star_*`, `bench_windowed_*` (11) | `kernel/detection/centroid/{moments,annulus_background}/stamp_*` and `kernel/detection/fit/*`. The batches are removed: `stage/detect` covers a frame. |
 | `gaussian_fit::bench_*` (3), `moffat_fit::bench_*` (3) | `kernel/detection/fit/{gaussian,moffat,moffat_free_beta}/stamp_{15,31}`. |
@@ -259,7 +274,7 @@ replaces the five scattered places and the `Instant`-timed test.
 | `labeling::bench_*` (4) | `kernel/detection/labeling/label/{typical,dense}/F`. |
 | `median_filter::bench_median_filter_dispatch_vs_scalar` | `kernel/detection/median_filter/row/<tier>/6000`. |
 | `threshold_mask::bench_threshold_mask_4k` | `kernel/detection/threshold_mask/row/<tier>/6000`. |
-| `internals::real_data::pipeline_bench` | `pipeline/real/calibrate_align_stack`. |
+| `internals::real_data::pipeline_bench` | Removed (real data). |
 
 Net result: about 134 quickbench benches become about 110 criterion benches outside `math`. That
 removes about 40 duplicates and experiments and adds about 30 benches for the gaps.

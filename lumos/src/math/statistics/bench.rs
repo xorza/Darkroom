@@ -19,7 +19,7 @@ const LENGTHS: [usize; 3] = [16, 256, 4_096];
 const PLANE: usize = 24_000_000;
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/statistics", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/statistics", Scale::Sample);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
         group.bench_function(BenchmarkId::new("median_mut", len), |b| {
@@ -66,7 +66,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     }
     group.finish();
 
-    let mut group = fixture::group(c, "math/statistics/frame", Scale::Frame);
+    let mut group = fixture::group(c, "kernel/math/statistics/frame", Scale::Frame);
     group.throughput(Throughput::Elements(PLANE as u64));
     group.bench_function(BenchmarkId::new("plane_median/radix", PLANE), |b| {
         let plane = fixture::sky(PLANE, 3);
