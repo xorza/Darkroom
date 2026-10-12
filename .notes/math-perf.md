@@ -19,10 +19,13 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 |---|---|---|---|
 | `noise/frame/mrs_estimate/1024` | 0.28 | 0.22 | Two-pass deviation without a division per value, in parallel shares added in a fixed order; coefficients stored as columns, so a pass reads only the columns it needs; a tile builds its first layer and significance as it first smooths, with no plane cleared or copied first; the fused à trous step below. Moves bits: the corrected two-pass sum (Chan, Golub & LeVeque) replaces Welford's update, and errs less. |
 | `noise/frame/mrs_estimate/4096` | 0.33 | 0.23 | Same. |
-| `noise/frame/mrs_estimate_split/1024` | 0.31 | 0.31 | Same; shares of 8192 values; the gain bins measured in parallel, each on its own; the samples tagged in parallel shares. Moves bits: each bin's gain sum is added share by share. |
-| `noise/frame/mrs_estimate_split/4096` | 0.33 | 0.30 | Same. |
-| `wavelet/frame/atrous_smooth/step_1/2048` | 0.51 | | Both passes fused row by row: the five source rows convolved down the columns into one row of scratch, then along it, so the frame is read once and written once and no intermediate plane exists. Each tile, denoise and HDR hold one plane less. Moves bits: the columns are convolved before the rows, the same arithmetic in the other order. |
-| `wavelet/frame/atrous_smooth/step_8/2048` | 0.55 | | Same. |
+| `noise/frame/mrs_estimate_split/1024` | 0.31 | 0.26 | Same; shares of 8192 values; the gain bins measured in parallel, each on its own; the samples tagged in parallel shares. Moves bits: each bin's gain sum is added share by share. |
+| `noise/frame/mrs_estimate_split/4096` | 0.33 | 0.29 | Same. |
+| `wavelet/frame/atrous_smooth/step_1/2048` | 0.51 | 0.52 | Both passes fused row by row: the five source rows convolved down the columns into one row of scratch, then along it, so the frame is read once and written once and no intermediate plane exists. Each tile, denoise and HDR hold one plane less. Moves bits: the columns are convolved before the rows, the same arithmetic in the other order. |
+| `wavelet/frame/atrous_smooth/step_8/2048` | 0.55 | 0.57 | Same. |
+| `lstsq/factor/2000x15` | 0.28 | | A design taller than wide is reduced by a Householder QR and its SVD taken of the square `R`, as LAPACK's `gesvd` does: the same singular values and rank, both steps backward stable. Moves bits. |
+| `lstsq/factor/500x10` | 0.37 | | Same. |
+| `lstsq/solve/2000x15` | 2.34 | | A solve now applies the reflections to its right-hand side. Every caller factors once and solves once: factor and solve together are 0.32 of before at 2000×15. |
 | `noise/frame/binned_measure/1000000` | 0.88 | | The bins measured in parallel. |
 | `noise/gain_bin/4096` | 0.29 | 0.60 | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
 | `statistics/median_mut/16` | 0.55 | 0.77 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
