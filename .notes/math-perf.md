@@ -55,5 +55,8 @@ run on this laptop.
 
 | Change | Why |
 |---|---|
+| Four sub-histograms in the radix median's first pass | 0.95, for four times the histogram memory charged to every worker. |
+| A byte mask in the radix median's second pass | 1.06: slower than the test it replaced. |
 | `LanczosLut::at` truncation in place of `floor` | No measurable gain on x86-64-v3, where `floor` is one instruction. |
+| The MRS significance fold as an explicit `Isa` kernel, with a plain store in place of the masked store x86's code generator makes of `f64::max` | No change: the masked store waited on the division before it, and the tile phase is bound by memory traffic, not by the store. |
 | MRS coefficient columns zeroed in parallel | Slower: a fresh allocation's zero pages cost nothing until written, and an explicit fill writes all 32 MB. |
