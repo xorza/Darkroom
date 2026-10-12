@@ -4,16 +4,16 @@
 use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::cfa::XTRANS_PATTERN;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "kernel/image/demosaic/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "image/demosaic/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // RCD on a Bayer sensor, which takes no pass count, and Markesteijn on an X-Trans one at both
     // the counts a user picks between.

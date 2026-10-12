@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::noise::binned_samples::BinnedSamples;
 use crate::math::noise::gain_bins::GainBins;
 use crate::math::noise::mrs_noise::MrsNoise;
@@ -17,8 +17,8 @@ const SIDES: [usize; 2] = [1_024, 4_096];
 const SAMPLES: usize = 1_000_000;
 const GAINS: usize = 4_096;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/noise", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/noise", Scale::Sample);
     group.throughput(Throughput::Elements(GAINS as u64));
     group.bench_function(BenchmarkId::new("gain_bin", GAINS), |b| {
         let bins = GainBins::of(&mut vignette(GAINS));
@@ -32,7 +32,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     });
     group.finish();
 
-    let mut group = fixture::group(c, "kernel/math/noise/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "math/noise/frame", Scale::Frame);
     group.throughput(Throughput::Elements(SAMPLES as u64));
     group.bench_function(BenchmarkId::new("binned_measure", SAMPLES), |b| {
         let samples = fixture::sky(SAMPLES, 4);

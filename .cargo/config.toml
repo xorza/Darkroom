@@ -1,3 +1,8 @@
+[alias]
+# Every bench case of the workspace, which only lumos has: `cargo benches -- --list`,
+# `-- '^atomic/'`, `-- --exact atomic/math/sum/sum_f32/scalar/1`.
+benches = "bench -p lumos"
+
 # x86-64-v3 (Haswell, 2013; Excavator, 2015): AVX2, FMA, BMI2 and F16C are static, so palantir's
 # f16 conversions inline instead of taking a runtime feature check. An optimization only: code
 # keeps its runtime dispatch and must stay correct and fast without it. `cfg`-scoped rather than

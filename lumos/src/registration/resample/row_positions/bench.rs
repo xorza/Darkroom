@@ -6,15 +6,15 @@ use std::cell::OnceCell;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::FRAME;
 use crate::registration::bench::Pair;
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::transform::TransformType;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
-    let mut group = fixture::group(c, "kernel/registration/row_positions", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/row_positions", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     for (name, transform, sip) in [
         ("affine", TransformType::Similarity, false),

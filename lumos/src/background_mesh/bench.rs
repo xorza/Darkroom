@@ -5,16 +5,16 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::background_mesh::tile_stats::TileStats;
 use crate::background_mesh::workspace::TileScratch;
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::Field;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let config = BackgroundConfig::default();
     let side = config.tile_size;
-    let mut group = fixture::group(c, "kernel/detection/background_mesh", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/background_mesh", Scale::Sample);
     group.throughput(Throughput::Elements((side * side) as u64));
     group.bench_function(
         BenchmarkId::new("tile_stats", format!("tile_{side}")),

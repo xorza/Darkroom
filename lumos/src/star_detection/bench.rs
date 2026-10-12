@@ -16,16 +16,16 @@ use crate::star_detection::{
     background, centroid, convolution, labeling, median_filter, threshold_mask,
 };
 
-pub(crate) fn benches(c: &mut Criterion) {
-    background::bench::benches(c);
-    median_filter::simd::bench::benches(c);
-    threshold_mask::simd::bench::benches(c);
-    convolution::simd::bench::benches(c);
-    convolution::bench::benches(c);
-    labeling::bench::benches(c);
-    detect::bench::benches(c);
-    centroid::bench::benches(c);
-    filter::bench::benches(c);
+pub(crate) fn atomic(c: &mut Criterion) {
+    background::bench::atomic(c);
+    median_filter::simd::bench::atomic(c);
+    threshold_mask::simd::bench::atomic(c);
+    convolution::simd::bench::atomic(c);
+    convolution::bench::atomic(c);
+    labeling::bench::atomic(c);
+    detect::bench::atomic(c);
+    centroid::bench::atomic(c);
+    filter::bench::atomic(c);
 }
 
 /// A field at the standard frame taken through the detector's first stages as

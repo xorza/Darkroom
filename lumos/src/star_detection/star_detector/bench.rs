@@ -4,13 +4,13 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench::Stages;
 use crate::star_detection::star_detector::StarDetector;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "stage/detect", Scale::Frame);
+pub(crate) fn integration(c: &mut Criterion) {
+    let mut group = Kind::Integration.group(c, "detect", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for field in [Field::Sparse, Field::Typical, Field::Dense] {
         group.bench_function(BenchmarkId::from_parameter(field.name()), |b| {

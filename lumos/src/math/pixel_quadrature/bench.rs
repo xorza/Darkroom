@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 
 /// The orders the f32 tolerance picks at the narrowest Gaussian and Moffat the fits admit, and
@@ -15,8 +15,8 @@ const STAMP: usize = 15;
 /// The f32 pixel-mean tolerance the star fits integrate to.
 const TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/pixel_quadrature", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/pixel_quadrature", Scale::Sample);
     for order in ORDERS {
         group.throughput(Throughput::Elements((STAMP * STAMP) as u64));
         group.bench_function(

@@ -51,5 +51,6 @@ dispatch, and every kernel correct and fast without it.
 ## Benches
 
 Criterion benches live in `bench.rs` beside the code they measure and run
-from the one target `benches/lumos.rs`: `cargo bench -p lumos -- <filter>`,
-`-- --test` to run each once. `src/bench/mod.rs` states their shape.
+from the one target `benches/lumos.rs` through `bench::run`:
+`cargo benches -- <filter>`, `-- --test` to run each once. `src/bench/mod.rs`
+states their shape.

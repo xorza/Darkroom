@@ -14,7 +14,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
 use crate::internals::fits::write_fits;
 
-/// The lights of the pipeline tier's sets: few enough that an iteration stays near ten seconds.
+/// The lights of the end-to-end sets: few enough that an iteration stays near ten seconds.
 pub(crate) const LIGHTS: usize = 12;
 
 /// A set of files and the directory that holds them, removed with it.

@@ -5,13 +5,13 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::math::dmat3::DMat3;
 
 const POINTS: usize = 4_096;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/dmat3", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/dmat3", Scale::Sample);
     group.throughput(Throughput::Elements(POINTS as u64));
     for (variant, matrix) in [
         (

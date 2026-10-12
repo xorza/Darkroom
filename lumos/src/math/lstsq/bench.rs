@@ -6,14 +6,14 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use nalgebra::DMatrix;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::lstsq::Lstsq;
 
 /// Points and polynomial degree: 500 stars of a cubic, 10 terms; 2000 tiles of a quartic, 15.
 const SHAPES: [(usize, usize); 2] = [(500, 3), (2_000, 4)];
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/lstsq", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/lstsq", Scale::Sample);
     group.throughput(Throughput::Elements(1));
     for (points, degree) in SHAPES {
         let design = design(points, degree);

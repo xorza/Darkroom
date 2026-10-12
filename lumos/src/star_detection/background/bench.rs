@@ -3,14 +3,14 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::resources::DetectionResources;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/detection/background/frame", Scale::Frame);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "detection/background/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for field in [Field::Typical, Field::Dense] {
         group.bench_function(BenchmarkId::new("mesh", field.name()), |b| {

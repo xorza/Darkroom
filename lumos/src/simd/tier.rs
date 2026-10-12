@@ -101,6 +101,19 @@ pub(crate) mod internals {
         }
     }
 
+    impl Tier {
+        /// The tier's part of a bench id: `portable`, `avx2_fma`, `neon`.
+        pub(crate) const fn id(self) -> &'static str {
+            match self {
+                Self::Portable(_) => "portable",
+                #[cfg(target_arch = "x86_64")]
+                Self::Avx2Fma(_) => "avx2_fma",
+                #[cfg(target_arch = "aarch64")]
+                Self::Neon(_) => "neon",
+            }
+        }
+    }
+
     impl Display for Tier {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             f.write_str(match self {

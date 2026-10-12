@@ -5,17 +5,17 @@ use std::cell::OnceCell;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::Field;
 use crate::registration::bench::Pair;
 use crate::registration::final_fit::{FinalFit, FitCatalogs};
 use crate::registration::transform::TransformType;
 use crate::registration::tuning;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
     let count = Field::Typical.stars();
-    let mut group = fixture::group(c, "kernel/registration/final_fit", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/final_fit", Scale::Sample);
     group.throughput(Throughput::Elements(count as u64));
     for (name, with_sip) in [("similarity", false), ("similarity_sip", true)] {
         group.bench_function(BenchmarkId::new(name, count), |b| {

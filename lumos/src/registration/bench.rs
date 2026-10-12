@@ -4,7 +4,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::test_rng::TestRng;
@@ -27,9 +27,9 @@ use crate::star_detection::star::Star;
 /// Two star catalogues registered, as `register` takes every light's against the reference's:
 /// the default configuration, whose `Auto` model fits every transform up to a homography and keeps
 /// the one the geometric robust information criterion picks.
-pub(crate) fn stage(c: &mut Criterion) {
+pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "stage/register", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "register", Scale::Frame);
     group.throughput(Throughput::Elements(field.stars() as u64));
     group.bench_function(BenchmarkId::new("pair", field.name()), |b| {
         let pair = Pair::typical();
@@ -42,12 +42,12 @@ pub(crate) fn stage(c: &mut Criterion) {
     });
 }
 
-pub(crate) fn benches(c: &mut Criterion) {
-    kd_tree::bench::benches(c);
-    triangle::bench::benches(c);
-    ransac::bench::benches(c);
-    final_fit::bench::benches(c);
-    row_positions::bench::benches(c);
+pub(crate) fn atomic(c: &mut Criterion) {
+    kd_tree::bench::atomic(c);
+    triangle::bench::atomic(c);
+    ransac::bench::atomic(c);
+    final_fit::bench::atomic(c);
+    row_positions::bench::atomic(c);
 }
 
 /// The FWHM the stars are measured at, as the scene renders them.

@@ -5,14 +5,14 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::wavelet::atrous_smooth;
 
 const SIDE: usize = 2_048;
 const STEPS: [usize; 4] = [1, 2, 4, 8];
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/wavelet/frame", Scale::Frame);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/wavelet/frame", Scale::Frame);
     group.throughput(Throughput::Elements((SIDE * SIDE) as u64));
     for step in STEPS {
         group.bench_function(

@@ -61,6 +61,17 @@ as lumos's `src/internals/`: it compiles whole under `internals`, and an
 `expect(dead_code)` outside tests on its root covers what benches leave
 unused. The submodules follow the same rule.
 
+## Benches
+
+A crate with benches has one target, `benches/<crate>.rs`, whose one group runs
+`bench::run`; each driver sits in a `bench.rs` beside the code it measures.
+An `atomic` case times one operation on the unit production hands it; an
+`integration` case times a pipeline stage or a public entry point end to end on
+the 24 MP standard frame. An id is `<kind>/<group>/<case>`, and criterion's
+filter selects by it. `cargo benches` runs them in this workspace (lumos) and
+in each submodule, with that root's fixed features; `-- --test` runs each case
+once, and a change to bench code runs it.
+
 ## Conventions
 
 - **No backward compatibility.** Change serialized shapes and APIs freely: no

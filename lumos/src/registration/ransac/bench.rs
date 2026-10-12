@@ -5,17 +5,17 @@ use std::cell::OnceCell;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::registration::bench::Pair;
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
     let config = RegistrationConfig::default();
     let count = config.matching.max_stars;
-    let mut group = fixture::group(c, "kernel/registration/ransac", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/ransac", Scale::Sample);
     group.throughput(Throughput::Elements(count as u64));
     for (name, transform) in [
         ("similarity", TransformType::Similarity),

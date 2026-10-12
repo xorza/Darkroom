@@ -6,13 +6,13 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 
 const READS: usize = 4_096;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/lanczos", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/lanczos", Scale::Sample);
     group.throughput(Throughput::Elements(READS as u64));
     for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
         group.bench_function(

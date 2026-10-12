@@ -5,17 +5,17 @@
 use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let rggb = CfaType::Bayer(CfaPattern::Rggb);
-    let mut group = fixture::group(c, "kernel/frame/frame_stats/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "frame/frame_stats/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("measure/mono", field.name()), |b| {
         let frame = field.render(FRAME);

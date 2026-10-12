@@ -7,7 +7,7 @@ use std::cell::OnceCell;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::linear_image::LinearImage;
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
     StretchMethod,
 };
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
     let linear = OnceCell::new();
     let linear = || linear.get_or_init(|| field.stacked_rgb(FRAME));
@@ -28,7 +28,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             image
         })
     };
-    let mut group = fixture::group(c, "stage/image_ops", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "image_ops", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for op in Op::ALL {
         let input = if op.stretched() {

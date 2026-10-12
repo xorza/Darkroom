@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
@@ -33,8 +33,8 @@ const BETA: f32 = 2.5;
 /// radius beyond, about 49 px each way.
 const SIZE: Size2us = Size2us::new(128, 128);
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/detection/centroid", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "detection/centroid", Scale::Sample);
     for star in [Star::TIGHT, Star::WIDE] {
         let stamp = star.stamp();
         group.throughput(Throughput::Elements((stamp * stamp) as u64));
