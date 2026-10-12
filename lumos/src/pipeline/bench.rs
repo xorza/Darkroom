@@ -9,7 +9,7 @@ use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
@@ -30,9 +30,11 @@ use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::warp_params::WarpParams;
 use crate::scratch_pool::{Scratch, ScratchPool};
 
-pub(crate) fn benches(c: &mut Criterion) {
+/// The stage benches, then the entry point end to end.
+pub(crate) fn integration(c: &mut Criterion) {
     prepare(c);
     park(c);
+    end_to_end(c);
 }
 
 /// A decoded light prepared as a run of RAW or mosaic lights prepares each, through
@@ -42,7 +44,7 @@ fn prepare(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let masters = OnceCell::new();
-    let mut group = fixture::group(c, "stage/prepare", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "prepare", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (variant, cosmic_ray) in [
         ("light/rggb", AlignStackConfig::default().cosmic_ray),
@@ -84,7 +86,7 @@ fn prepare(c: &mut Criterion) {
 /// can drop a file's pages, every page on the disk, as when the parked lights outgrow the memory.
 fn park(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "stage/park", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "park", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (variant, cold) in [("warp_from_map/warm", false), ("warp_from_map/cold", true)] {
         if cold && !MappedFile::EVICTS {
@@ -134,13 +136,13 @@ const SPILLED_MACHINE_BYTES: u64 = 4 << 30;
 /// the camera writes them, under the default configuration: each light decoded, calibrated by the
 /// session's masters, demosaiced and detected, then registered to the reference, warped and
 /// combined. Resident, and spilled on the memory of a 4 GiB machine.
-pub(crate) fn pipeline(c: &mut Criterion) {
+fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let masters = OnceCell::new();
     // The slowest bench's iteration, `rggb/spilled`'s median on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(18_340);
-    let mut group = fixture::group(
+    let mut group = Kind::Integration.group(
         c,
         "pipeline/calibrate_align_stack",
         Scale::Set { iteration },

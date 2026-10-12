@@ -7,16 +7,16 @@ use common::TempDir;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{write_mono_f32, write_mosaic_u16};
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::io::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::load_context::LoadContext;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "kernel/io/fits/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "io/fits/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // A mono camera's 16-bit light, a calibrated or stacked frame in 32-bit float, and a colour
     // camera's 16-bit light, which loads as a CFA image.

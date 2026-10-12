@@ -8,7 +8,7 @@ use common::TempDir;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_cache::frame_chunk::ChunkCopy;
 use crate::frame::frame_quality::FrameQuality;
@@ -23,9 +23,9 @@ use crate::platform::MappedFile;
 /// pixel.
 const CHUNK_ROWS: usize = (1 << 30) / (2 * 30 * 12 * FRAME.width);
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "kernel/frame_store/spill/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "frame_store/spill/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // Each write takes new files, whose disk space returns as the frame drops after it.
     group.bench_function(BenchmarkId::new("write", field.name()), |b| {

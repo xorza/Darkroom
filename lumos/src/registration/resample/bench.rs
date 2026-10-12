@@ -8,7 +8,7 @@ use std::cell::OnceCell;
 use common::CancelToken;
 use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -21,11 +21,11 @@ use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::scratch_pool::{Scratch, ScratchPool};
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
     let pair = OnceCell::new();
     let similarity = || pair.get_or_init(Pair::typical).similarity_warp();
-    let mut group = fixture::group(c, "stage/warp", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "warp", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for method in InterpolationMethod::ALL {
         let id = format!("{}/mono", name(method));

@@ -4,13 +4,13 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::floor_i32::FloorI32;
 
 const VALUES: usize = 4_096;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/floor_i32", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/floor_i32", Scale::Sample);
     group.throughput(Throughput::Elements(VALUES as u64));
     group.bench_function(BenchmarkId::new("floor_i32/f32", VALUES), |b| {
         let values = values();

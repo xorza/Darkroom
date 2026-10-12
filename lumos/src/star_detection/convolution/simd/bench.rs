@@ -7,7 +7,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::simd::tier::Tier;
@@ -16,7 +16,7 @@ use crate::star_detection::convolution::simd::internals::convolve_row_scalar;
 use crate::star_detection::convolution::simd::{ConvolveRow, convolve_row};
 use crate::star_detection::convolution::{fill_gaussian_kernel_1d, kernel_radius};
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
     let inputs = || {
         let stages: &Stages = stages.get_or_init(|| Stages::of(Field::Typical));
@@ -28,7 +28,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         Inputs { row, kernel }
     };
     let tiers: Vec<Tier> = Tier::supported().collect();
-    let mut group = fixture::group(c, "kernel/detection/convolution", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/convolution", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
@@ -36,16 +36,19 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter(|| convolve_row_scalar(black_box(row), &mut output, &kernel));
     });
     for &tier in &tiers {
-        group.bench_function(BenchmarkId::new(format!("row/{tier}"), FRAME.width), |b| {
-            let Inputs { row, kernel } = inputs();
-            b.iter(|| {
-                tier.run(ConvolveRow {
-                    input: black_box(row),
-                    output: &mut output,
-                    kernel: &kernel,
+        group.bench_function(
+            BenchmarkId::new(format!("row/{}", tier.id()), FRAME.width),
+            |b| {
+                let Inputs { row, kernel } = inputs();
+                b.iter(|| {
+                    tier.run(ConvolveRow {
+                        input: black_box(row),
+                        output: &mut output,
+                        kernel: &kernel,
+                    });
                 });
-            });
-        });
+            },
+        );
     }
     group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
         let Inputs { row, kernel } = inputs();

@@ -8,7 +8,7 @@ use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
@@ -21,8 +21,8 @@ use crate::image::image_dimensions::ImageDimensions;
 /// The dither between the two lights, in pixels: the margin the second leaves uncovered.
 const DITHER: [usize; 2] = [11, 7];
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/combine/normalization/frame", Scale::Frame);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "combine/normalization/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     let field = Field::Typical;
     group.bench_function(BenchmarkId::new("global", field.name()), |b| {

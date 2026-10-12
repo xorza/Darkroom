@@ -4,14 +4,14 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench::Stages;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detector::stages::filter::DuplicateScratch;
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/detection/filter", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "detection/filter", Scale::Sample);
     for field in [Field::Typical, Field::Dense] {
         group.throughput(Throughput::Elements(field.stars() as u64));
         group.bench_function(BenchmarkId::new("remove_duplicates", field.name()), |b| {

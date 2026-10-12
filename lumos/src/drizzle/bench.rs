@@ -11,7 +11,7 @@ use common::CancelToken;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field, STACKED_LIGHTS};
 use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
@@ -26,12 +26,18 @@ use crate::registration::transform::warp_transform::WarpTransform;
 /// Each light's side.
 const SIDE: Size2us = Size2us::new(2048, 2048);
 
-pub(crate) fn benches(c: &mut Criterion) {
+/// The stage benches, then the entry point end to end.
+pub(crate) fn integration(c: &mut Criterion) {
+    stage(c);
+    end_to_end(c);
+}
+
+fn stage(c: &mut Criterion) {
     let field = Field::Typical;
     let frames = OnceCell::new();
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(7200);
-    let mut group = fixture::group(c, "stage/drizzle", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "drizzle", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * SIDE.pixel_count()) as u64,
     ));
@@ -66,12 +72,12 @@ pub(crate) fn benches(c: &mut Criterion) {
 /// saves them, end to end under the default configuration and the light preset: each light read,
 /// its photosites dropped onto the channels of their colours at twice the frame's side through its
 /// dither, and the drops combined with the light preset's noise weighting.
-pub(crate) fn pipeline(c: &mut Criterion) {
+fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(64_730);
-    let mut group = fixture::group(c, "pipeline/drizzle", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "pipeline/drizzle", Scale::Set { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("rggb", set), |b| {

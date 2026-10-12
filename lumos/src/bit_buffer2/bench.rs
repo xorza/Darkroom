@@ -3,7 +3,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::bench::Stages;
@@ -11,9 +11,9 @@ use crate::star_detection::star_detection_config::background_config::{
     BackgroundRefinement, IterativeRefinement,
 };
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "kernel/detection/dilation/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "detection/dilation/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("mask", field.name()), |b| {
         let BackgroundRefinement::Iterative(IterativeRefinement { mask_dilation, .. }) =

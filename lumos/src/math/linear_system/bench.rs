@@ -5,13 +5,13 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::linear_system::solve_in_place;
 
 const SIZES: [usize; 3] = [6, 18, 67];
 
-pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "kernel/math/linear_system", Scale::Sample);
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "math/linear_system", Scale::Sample);
     group.throughput(Throughput::Elements(1));
     for n in SIZES {
         group.bench_function(BenchmarkId::new("solve_in_place", n), |b| {

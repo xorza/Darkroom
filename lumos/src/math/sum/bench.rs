@@ -6,7 +6,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{scalar, sum_f32, weighted_sums};
 use crate::simd::tier::Tier;
@@ -15,9 +15,9 @@ use crate::simd::tier::Tier;
 /// reproducible: steps of 4, 8, 16 jump clean over the range the gate sits in.
 const LENGTHS: [usize; 13] = [1, 4, 6, 8, 10, 12, 16, 24, 32, 64, 256, 1_024, 10_000];
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let tiers: Vec<Tier> = Tier::supported().collect();
-    let mut group = fixture::group(c, "kernel/math/sum", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/sum", Scale::Sample);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
         group.bench_function(BenchmarkId::new("sum_f32/scalar", len), |b| {
@@ -41,7 +41,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         });
         for &tier in &tiers {
             group.bench_function(
-                BenchmarkId::new(format!("weighted_sums/{tier}"), len),
+                BenchmarkId::new(format!("weighted_sums/{}", tier.id()), len),
                 |b| {
                     let (values, weights) = (fixture::gaussian(len, 1), weights(len));
                     b.iter(|| {

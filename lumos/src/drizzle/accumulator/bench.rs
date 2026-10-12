@@ -6,7 +6,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::drizzle::accumulator::DrizzleAccumulator;
 use crate::drizzle::deposit::Deposit;
@@ -80,9 +80,9 @@ impl Geometry {
     }
 }
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = fixture::group(c, "kernel/drizzle/accumulate/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "drizzle/accumulate/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (kernel_name, kernel, pixfrac) in KERNELS {
         for geometry in GEOMETRIES {

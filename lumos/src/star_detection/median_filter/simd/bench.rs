@@ -7,14 +7,14 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::simd::tier::Tier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::median_filter::simd::internals::median_filter_row_scalar;
 use crate::star_detection::median_filter::simd::{MedianRow, median_filter_row};
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
     let rows = || {
         let measure = stages
@@ -27,7 +27,7 @@ pub(crate) fn benches(c: &mut Criterion) {
         [row(y - 1), row(y), row(y + 1)]
     };
     let tiers: Vec<Tier> = Tier::supported().collect();
-    let mut group = fixture::group(c, "kernel/detection/median_filter", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/median_filter", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
@@ -35,17 +35,20 @@ pub(crate) fn benches(c: &mut Criterion) {
         b.iter(|| median_filter_row_scalar(black_box(above), curr, below, &mut output));
     });
     for &tier in &tiers {
-        group.bench_function(BenchmarkId::new(format!("row/{tier}"), FRAME.width), |b| {
-            let [above, curr, below] = rows();
-            b.iter(|| {
-                tier.run(MedianRow {
-                    above: black_box(above),
-                    curr,
-                    below,
-                    output: &mut output,
+        group.bench_function(
+            BenchmarkId::new(format!("row/{}", tier.id()), FRAME.width),
+            |b| {
+                let [above, curr, below] = rows();
+                b.iter(|| {
+                    tier.run(MedianRow {
+                        above: black_box(above),
+                        curr,
+                        below,
+                        output: &mut output,
+                    });
                 });
-            });
-        });
+            },
+        );
     }
     group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
         let [above, curr, below] = rows();

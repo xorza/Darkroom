@@ -11,7 +11,7 @@ use common::{CancelToken, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
 use crate::combine::rejection;
 use crate::combine::stack::stack_stored_frames;
@@ -31,7 +31,7 @@ use crate::stack_product::StackProduct;
 /// The machine the spilled combine plans against.
 const SPILLED_MACHINE_BYTES: u64 = 8 << 30;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
     let lights = OnceCell::new();
     let lights = || lights.get_or_init(|| Lights::of(field));
@@ -39,7 +39,7 @@ pub(crate) fn benches(c: &mut Criterion) {
     // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a Ryzen 7 6800U,
     // x86-64-v3.
     let iteration = Duration::from_millis(2550);
-    let mut group = fixture::group(c, "stage/combine", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "combine", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * FRAME.pixel_count()) as u64,
     ));

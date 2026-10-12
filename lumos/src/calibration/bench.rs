@@ -8,7 +8,7 @@ use common::{CancelToken, TempDir};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{LIGHTS, MasterFiles};
-use crate::bench::fixture::{self, Scale};
+use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::calibration::calibration_set::CalibrationSet;
@@ -18,10 +18,10 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::progress::progress_callback::ProgressCallback;
 
-pub(crate) fn benches(c: &mut Criterion) {
+pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
-    let mut group = fixture::group(c, "kernel/calibration/apply/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "calibration/apply/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("light/rggb", field.name()), |b| {
         let masters = CalibrationMasters::from_images(
@@ -42,11 +42,11 @@ pub(crate) fn benches(c: &mut Criterion) {
 /// `CalibrationMasters::build` over a session's bias, dark and flat frames, 16-bit mosaics as the
 /// camera writes them, with no master cache: each role stacked, the bias out of the dark and the
 /// flat, the defects detected and the flat prepared.
-pub(crate) fn pipeline(c: &mut Criterion) {
+pub(crate) fn integration(c: &mut Criterion) {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(6620);
-    let mut group = fixture::group(c, "pipeline/masters", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "pipeline/masters", Scale::Set { iteration });
     group.throughput(Throughput::Elements(
         (3 * LIGHTS * FRAME.pixel_count()) as u64,
     ));
