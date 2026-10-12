@@ -88,9 +88,19 @@ impl Splat {
     /// there, in the reference's order: multiply, then clamp the product. For
     /// float storage `max` is one, so the multiply is exact and the clamp is the
     /// whole step.
+    ///
+    /// The clamp is `f32::clamp` lane by lane: a lane below zero becomes zero,
+    /// one above `max` becomes `max`, and any other, `-0.0` and NaN included,
+    /// passes unchanged. `vmaxq_f32` would not: it orders `-0.0` below `+0.0`,
+    /// and a blend can be `-0.0`, as a multiply onto a `-0.0` destination at
+    /// alpha zero is.
     #[inline]
     unsafe fn scale_clamp(self, blended: float32x4_t) -> float32x4_t {
-        unsafe { vminq_f32(vmaxq_f32(vmulq_f32(blended, self.max), self.zero), self.max) }
+        unsafe {
+            let scaled = vmulq_f32(blended, self.max);
+            let raised = vbslq_f32(vcltq_f32(scaled, self.zero), self.zero, scaled);
+            vbslq_f32(vcgtq_f32(raised, self.max), self.max, raised)
+        }
     }
 
     /// The four `RGBA_U8` pixels of one 16-byte load, widened and divided into

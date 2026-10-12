@@ -48,6 +48,8 @@ impl Splat {
     unsafe fn apply_f32(self, values: float32x4_t) -> float32x4_t {
         unsafe {
             let scaled = vaddq_f32(vmulq_f32(values, self.scale), self.offset);
+            // `vmaxq_f32` orders `-0.0` below `+0.0`, where `f32::clamp` keeps it; no lane is
+            // `-0.0` here, as a sum is only when both terms are and the offset never is.
             vminq_f32(vmaxq_f32(scaled, self.min), self.max)
         }
     }

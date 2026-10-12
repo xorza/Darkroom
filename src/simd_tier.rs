@@ -50,6 +50,13 @@ impl SimdTier {
 
     /// The widest tier the running CPU has, or `None` on an arch with no kernels.
     #[inline]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            clippy::missing_const_for_fn,
+            reason = "only x86 detects at run time; the body is one shape on every arch"
+        )
+    )]
     pub fn widest() -> Option<Self> {
         #[cfg(target_arch = "x86_64")]
         {

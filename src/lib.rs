@@ -1,4 +1,4 @@
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub mod bench;
 mod common;
 pub mod drawing;
