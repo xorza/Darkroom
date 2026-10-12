@@ -23,7 +23,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], wi
     let (out_groups, _) = dst[..pixels * 3].as_chunks_mut::<48>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 64 bytes and the store writes the 48 of `out`.
         unsafe {
             let rgba = vld4q_u8(group.as_ptr());
             vst3q_u8(out.as_mut_ptr(), uint8x16x3_t(rgba.0, rgba.1, rgba.2));
@@ -42,7 +41,6 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wi
     let (out_groups, _) = dst[..pixels * 4].as_chunks_mut::<64>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 48 bytes and the store writes the 64 of `out`.
         unsafe {
             let rgb = vld3q_u8(group.as_ptr());
             vst4q_u8(out.as_mut_ptr(), uint8x16x4_t(rgb.0, rgb.1, rgb.2, alpha));
@@ -110,7 +108,6 @@ pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], widt
     let (out_groups, _) = dst[..pixels].as_chunks_mut::<16>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 64 bytes and the store writes the 16 of `out`.
         unsafe {
             let rgba = vld4q_u8(group.as_ptr());
             vst1q_u8(out.as_mut_ptr(), luminance16(rgba.0, rgba.1, rgba.2));
@@ -129,7 +126,6 @@ pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width
     let (out_groups, _) = dst[..pixels].as_chunks_mut::<16>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 48 bytes and the store writes the 16 of `out`.
         unsafe {
             let rgb = vld3q_u8(group.as_ptr());
             vst1q_u8(out.as_mut_ptr(), luminance16(rgb.0, rgb.1, rgb.2));
@@ -148,7 +144,6 @@ pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], widt
     let (out_groups, _) = dst[..pixels * 4].as_chunks_mut::<64>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 16 bytes and the store writes the 64 of `out`.
         unsafe {
             let grey = vld1q_u8(group.as_ptr());
             vst4q_u8(out.as_mut_ptr(), uint8x16x4_t(grey, grey, grey, alpha));
@@ -166,7 +161,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width
     let (out_groups, _) = dst[..pixels * 3].as_chunks_mut::<48>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        // SAFETY: the load reads the group's 16 bytes and the store writes the 48 of `out`.
         unsafe {
             let grey = vld1q_u8(group.as_ptr());
             vst3q_u8(out.as_mut_ptr(), uint8x16x3_t(grey, grey, grey));
@@ -206,14 +200,12 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[u8], dst: &mut [u8], _wid
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
         let (quads, _) = group.as_chunks::<4>();
-        // SAFETY: each load reads one four-float quad of the group.
         let ints = [0, 1, 2, 3]
             .map(|quad| narrow4(unsafe { vld1q_f32(quads[quad].as_ptr()) }, full_scale));
         let words = [
             vcombine_u16(vmovn_u32(ints[0]), vmovn_u32(ints[1])),
             vcombine_u16(vmovn_u32(ints[2]), vmovn_u32(ints[3])),
         ];
-        // SAFETY: the store writes the 16 bytes of `out`.
         unsafe {
             vst1q_u8(
                 out.as_mut_ptr(),
@@ -235,7 +227,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [u8], _wid
     let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
-        // SAFETY: the load reads the group's 16 bytes.
         let bytes = unsafe { vld1q_u8(group.as_ptr()) };
         let words = [vmovl_u8(vget_low_u8(bytes)), vmovl_u8(vget_high_u8(bytes))];
         let dwords = [
@@ -246,7 +237,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [u8], _wid
         ];
         let (out, _) = out.as_chunks_mut::<4>();
         for (out, dwords) in out.iter_mut().zip(dwords) {
-            // SAFETY: the store writes the four floats of `out`.
             unsafe { vst1q_f32(out.as_mut_ptr(), vdivq_f32(vcvtq_f32_u32(dwords), divisor)) };
         }
     }
@@ -262,12 +252,10 @@ pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u8], _wid
     let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
-        // SAFETY: the load reads the group's 16 bytes.
         let bytes = unsafe { vld1q_u8(group.as_ptr()) };
         let words = [vmovl_u8(vget_low_u8(bytes)), vmovl_u8(vget_high_u8(bytes))];
         let (out, _) = out.as_chunks_mut::<8>();
         for (out, words) in out.iter_mut().zip(words) {
-            // SAFETY: the store writes the eight words of `out`.
             unsafe { vst1q_u16(out.as_mut_ptr(), vorrq_u16(words, vshlq_n_u16::<8>(words))) };
         }
     }
@@ -297,10 +285,8 @@ pub(super) unsafe fn convert_u16_to_u8_row_neon(src: &[u8], dst: &mut [u8], _wid
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
         let (halves, _) = group.as_chunks::<8>();
-        // SAFETY: each load reads one half of the group's sixteen words.
         let [lo, hi] =
             [0, 1].map(|half| divide_by_257(unsafe { vld1q_u16(halves[half].as_ptr()) }));
-        // SAFETY: the store writes the 16 bytes of `out`.
         unsafe { vst1q_u8(out.as_mut_ptr(), vcombine_u8(vmovn_u16(lo), vmovn_u16(hi))) };
     }
 
@@ -317,7 +303,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u8], dst: &mut [u8], _wi
     let (out_groups, dst_tail) = dst.as_chunks_mut::<8>();
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
-        // SAFETY: the load reads the group's eight words.
         let words = unsafe { vld1q_u16(group.as_ptr()) };
         let dwords = [
             vmovl_u16(vget_low_u16(words)),
@@ -325,7 +310,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u8], dst: &mut [u8], _wi
         ];
         let (out, _) = out.as_chunks_mut::<4>();
         for (out, dwords) in out.iter_mut().zip(dwords) {
-            // SAFETY: the store writes the four floats of `out`.
             unsafe { vst1q_f32(out.as_mut_ptr(), vdivq_f32(vcvtq_f32_u32(dwords), divisor)) };
         }
     }
@@ -343,10 +327,8 @@ pub(super) unsafe fn convert_f32_to_u16_row_neon(src: &[u8], dst: &mut [u8], _wi
 
     for (group, out) in groups.iter().zip(out_groups.iter_mut()) {
         let (quads, _) = group.as_chunks::<4>();
-        // SAFETY: each load reads one four-float quad of the group.
         let [lo, hi] =
             [0, 1].map(|quad| narrow4(unsafe { vld1q_f32(quads[quad].as_ptr()) }, full_scale));
-        // SAFETY: the store writes the eight words of `out`.
         unsafe { vst1q_u16(out.as_mut_ptr(), vcombine_u16(vmovn_u32(lo), vmovn_u32(hi))) };
     }
 

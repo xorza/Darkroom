@@ -47,7 +47,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     let count = cpu::kernel_count(row.desc());
                     b.iter_batched_ref(
                         || row.clone(),
-                        // SAFETY: a variant holds only kernels of tiers this CPU has.
                         |row| unsafe { kernel(black_box(row.bytes_mut()), count, affine) },
                         fixture::fresh_copies(bytes),
                     );

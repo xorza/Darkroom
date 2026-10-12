@@ -65,7 +65,6 @@ pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image)
     let format = src.desc().color_format;
 
     if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
-        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { apply_kernel(kernel, params, src, dst, output) };
         return;
     }
@@ -112,7 +111,6 @@ unsafe fn apply_kernel(
         .for_each(|(y, out_row)| {
             let src_row = &src_bytes[y * stride..][..stride];
             let dst_row = &dst_bytes[y * stride..][..stride];
-            // SAFETY: forwarded from this function's own contract.
             unsafe { kernel(src_row, dst_row, out_row, params) };
         });
 }

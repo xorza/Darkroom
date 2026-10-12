@@ -36,7 +36,6 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) {
 
     if let Some(kernel) = simd::row_converter(from_desc.color_format, to_desc.color_format) {
         rows.for_each(|(y, to_row)| {
-            // SAFETY: `row_converter` verified this CPU has the kernel's feature.
             unsafe { kernel(&from_bytes[y * from_stride..], to_row, width) };
         });
     } else {

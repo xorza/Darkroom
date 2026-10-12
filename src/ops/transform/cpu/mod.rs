@@ -94,7 +94,6 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     );
 
     if let Some(kernel) = SimdTier::dispatch(|tier| packed_kernel(tier, format, transform.filter)) {
-        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { kernel(transform, input, output) };
         return;
     }

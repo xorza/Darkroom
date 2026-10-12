@@ -292,7 +292,6 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
                 let op = ContrastBrightness::new(contrast, brightness);
 
                 let mut actual = input.clone();
-                // SAFETY: `tier` is supported on this CPU, checked above.
                 unsafe { apply_kernel(kernel, op, &mut actual) };
 
                 let mut expected = input.clone();

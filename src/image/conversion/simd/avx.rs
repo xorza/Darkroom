@@ -20,7 +20,6 @@ use crate::image::conversion::simd::ElementRow;
 #[inline]
 #[target_feature(enable = "avx2")]
 fn load(bytes: &[u8; 32]) -> __m256i {
-    // SAFETY: the argument is exactly the 32 bytes the load reads.
     unsafe { _mm256_loadu_si256(bytes.as_ptr().cast()) }
 }
 
@@ -28,7 +27,6 @@ fn load(bytes: &[u8; 32]) -> __m256i {
 #[inline]
 #[target_feature(enable = "avx2")]
 fn store(bytes: &mut [u8; 32], value: __m256i) {
-    // SAFETY: the argument is exactly the 32 bytes the store writes.
     unsafe { _mm256_storeu_si256(bytes.as_mut_ptr().cast(), value) }
 }
 
@@ -36,7 +34,6 @@ fn store(bytes: &mut [u8; 32], value: __m256i) {
 #[inline]
 #[target_feature(enable = "avx2")]
 fn store128(bytes: &mut [u8; 16], value: __m128i) {
-    // SAFETY: the argument is exactly the 16 bytes the store writes.
     unsafe { _mm_storeu_si128(bytes.as_mut_ptr().cast(), value) }
 }
 
@@ -44,7 +41,6 @@ fn store128(bytes: &mut [u8; 16], value: __m128i) {
 #[inline]
 #[target_feature(enable = "avx2")]
 fn load_ps(values: &[f32; 8]) -> __m256 {
-    // SAFETY: the argument is exactly the eight floats the load reads.
     unsafe { _mm256_loadu_ps(values.as_ptr()) }
 }
 
@@ -52,7 +48,6 @@ fn load_ps(values: &[f32; 8]) -> __m256 {
 #[inline]
 #[target_feature(enable = "avx2")]
 fn store_ps(values: &mut [f32; 8], value: __m256) {
-    // SAFETY: the argument is exactly the eight floats the store writes.
     unsafe { _mm256_storeu_ps(values.as_mut_ptr(), value) }
 }
 

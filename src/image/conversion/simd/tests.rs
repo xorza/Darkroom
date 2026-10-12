@@ -84,7 +84,6 @@ fn every_tier_matches_the_scalar_reference() {
                     let mut expected = vec![0; width * to.byte_count()];
                     let mut actual = vec![0; width * to.byte_count()];
                     scalar::row_converter(from, to)(&padded, &mut expected, width);
-                    // SAFETY: `tier` is supported on this CPU, checked above.
                     unsafe { kernel(&padded, &mut actual, width) };
                     assert!(
                         expected == actual,
