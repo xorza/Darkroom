@@ -88,7 +88,7 @@ impl Hdr {
 /// `(G/B)^amount`, with `B = exp(residual)` its local geometric mean and `G` the image's. The
 /// starlet's kernel is positive, so the residual lies within the range of `L`, and the factor
 /// within `65536^amount` either way; an intensity at or below zero stays there. Only the smoothed
-/// residual is ever computed — a streaming à trous over three reused planes — never the layer
+/// residual is ever computed — a streaming à trous over two reused planes — never the layer
 /// pyramid (`scales` full planes at ~100 MB each on a real master).
 fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     let size = Size2us::new(intensity.width(), intensity.height());
@@ -104,9 +104,8 @@ fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
             .collect(),
     );
     let mut c_next = Buffer2::new_default(size.width, size.height);
-    let mut tmp = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        atrous_smooth(&c_curr, &mut c_next, 1 << j);
         mem::swap(&mut c_curr, &mut c_next);
     }
     let mut residual = c_curr;

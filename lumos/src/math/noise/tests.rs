@@ -106,23 +106,24 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
 /// MRS over 1024²: 4 × 4 tiles of 256², so 1 048 576 coefficients of 32 bytes and a bin byte,
 /// 34 603 008. The tiles start at 0, 256, 512 and 768 on each axis and reach 32 past their core,
 /// clipped to the frame: regions 288, 320, 320 and 288 wide. All sixteen in work on 16 threads
-/// hold (288 + 320 + 320 + 288)² = 1216² pixels at 32 bytes, 47 316 992; on 4, the four largest,
-/// 4 × 320² × 32 = 13 107 200. Each tile's place in the list, its share of the four columns and
+/// hold (288 + 320 + 320 + 288)² = 1216² pixels at 28 bytes, 41 402 368; on 4, the four largest,
+/// 4 × 320² × 28 = 11 468 800. Each worker smooths through a row of the widest region, 320 × 4
+/// bytes: 20 480 on 16, 5120 on 4. Each tile's place in the list, its share of the four columns and
 /// its count are 64 + 64 + 8 bytes, 2176 for sixteen. A 192² frame is one tile, its region the
-/// frame: 36 864 × 33 + 36 864 × 32 + 136.
+/// frame: 36 864 × 33 + 36 864 × 28 + 16 × 192 × 4 + 136.
 #[test]
 fn working_sets_are_what_the_buffers_hold() {
     let wide = Size2us::new(1024, 1024);
     assert_eq!(
         MrsNoise::heap_bytes(wide, 16),
-        34_603_008 + 47_316_992 + 2176
+        34_603_008 + 41_402_368 + 20_480 + 2176
     );
     assert_eq!(
         MrsNoise::heap_bytes(wide, 4),
-        34_603_008 + 13_107_200 + 2176
+        34_603_008 + 11_468_800 + 5120 + 2176
     );
     assert_eq!(
         MrsNoise::heap_bytes(Size2us::new(192, 192), 16),
-        36_864 * 33 + 36_864 * 32 + 136
+        36_864 * 33 + 36_864 * 28 + 16 * 192 * 4 + 136
     );
 }

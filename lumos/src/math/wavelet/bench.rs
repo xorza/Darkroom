@@ -20,8 +20,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             |b| {
                 let image = Buffer2::new(SIDE, SIDE, fixture::sky(SIDE * SIDE, 6));
                 let mut smooth = Buffer2::new_default(SIDE, SIDE);
-                let mut scratch = Buffer2::new_default(SIDE, SIDE);
-                b.iter(|| atrous_smooth(black_box(&image), &mut smooth, &mut scratch, step));
+                b.iter(|| atrous_smooth(black_box(&image), &mut smooth, step));
             },
         );
     }

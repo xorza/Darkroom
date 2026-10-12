@@ -47,9 +47,8 @@ fn atrous_smooth_preserves_constant() {
     let size = Size2us::new(8, 6);
     let src = Buffer2::new_filled(size.width, size.height, 0.42);
     let mut dst = Buffer2::new_default(size.width, size.height);
-    let mut tmp = Buffer2::new_default(size.width, size.height);
     for step in [1usize, 2, 4] {
-        atrous_smooth(&src, &mut dst, &mut tmp, step);
+        atrous_smooth(&src, &mut dst, step);
         // The weights are dyadic and sum to 1; the two passes round 0.42 by a few ulps at most.
         for &v in dst.pixels() {
             assert!(
@@ -71,10 +70,9 @@ fn atrous_smooth_is_the_b3_convolution() {
     let src = pattern(size);
     let weights = [1.0f64, 4.0, 6.0, 4.0, 1.0].map(|w| w / 16.0);
     let mut dst = Buffer2::new_default(size.width, size.height);
-    let mut tmp = Buffer2::new_default(size.width, size.height);
     let bound = 8.0 * f64::from(f32::EPSILON) * 0.8;
     for step in [1usize, 2, 4, 8] {
-        atrous_smooth(&src, &mut dst, &mut tmp, step);
+        atrous_smooth(&src, &mut dst, step);
         for y in 0..size.height {
             for x in 0..size.width {
                 let mut expected = 0.0f64;
