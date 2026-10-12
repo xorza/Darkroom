@@ -41,8 +41,6 @@ impl Isa for Avx2Fma {
 
     #[inline(always)]
     fn run<K: Kernel>(self, kernel: K) -> K::Output {
-        // SAFETY: an `Avx2Fma` exists only once `detect` found AVX2 and FMA on this CPU, which is
-        // all `enter` needs.
         unsafe { self.enter(kernel) }
     }
 

@@ -21,7 +21,6 @@ pub(crate) fn zeroed_in_parallel(len: usize) -> Vec<f32> {
     plane.spare_capacity_mut()[..len]
         .par_chunks_mut(HUGE_PAGE_SAMPLES)
         .for_each(|block| block.fill(MaybeUninit::new(0.0)));
-    // SAFETY: every one of the `len` samples was written above.
     unsafe { plane.set_len(len) };
     plane
 }

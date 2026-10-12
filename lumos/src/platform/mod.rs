@@ -62,7 +62,6 @@ impl ScratchFile {
     /// The file mapped back, with what keeps it alive for the map's life; its handle kept open
     /// for [`MappedFile::evict`] too when `evictable`.
     pub(crate) fn map(self, evictable: bool) -> io::Result<MappedFile> {
-        // SAFETY: a scratch file has no name, so nothing but this handle can change it.
         let map = unsafe { Mmap::map(&self.file) }?;
         Ok(MappedFile::new(
             map,
@@ -92,7 +91,6 @@ impl MappedFile {
     /// their names and replaced only by a rename meets this for every file it wrote.
     pub(crate) unsafe fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
-        // SAFETY: as this function's contract.
         let map = unsafe { Mmap::map(&file) }?;
         Ok(Self::new(map, file, false))
     }

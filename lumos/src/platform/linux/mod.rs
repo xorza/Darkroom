@@ -53,7 +53,6 @@ pub(crate) mod internals {
 
     /// The page size, in bytes.
     fn page_size() -> usize {
-        // SAFETY: `sysconf` reads a constant of the system.
         let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
         usize::try_from(size).expect("the page size is positive")
     }
@@ -72,10 +71,7 @@ pub(crate) mod internals {
         // A failed call leaves pages in memory, which the count after reports.
         file.sync_data().ok();
         let start = map.as_ptr().cast::<c_void>().cast_mut();
-        // SAFETY: the range is the map's own, a shared read-only map of a file, whose pages the
-        // next touch reads back from the file unchanged.
         unsafe { libc::madvise(start, map.len(), libc::MADV_DONTNEED) };
-        // SAFETY: the descriptor is the open file's own.
         unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
         resident_share(map) == Some(0.0)
     }
@@ -88,7 +84,6 @@ pub(crate) mod internals {
         }
         let mut residency = vec![0u8; pages];
         let start = map.as_ptr().cast::<c_void>().cast_mut();
-        // SAFETY: the range is the map's own, and the vector holds one byte per page of it.
         let answered = unsafe { libc::mincore(start, map.len(), residency.as_mut_ptr()) } == 0;
         answered
             .then(|| residency.iter().filter(|&&page| page & 1 == 1).count() as f64 / pages as f64)

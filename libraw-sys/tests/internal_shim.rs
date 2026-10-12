@@ -8,8 +8,6 @@ fn zero_is_bad_follows_the_open_flags() {
     const SIDE: u16 = 24;
     for (procflags, expected) in [(0u8, false), (2, true)] {
         let mut bytes = vec![0x10u8; usize::from(SIDE) * usize::from(SIDE) * 2];
-        // SAFETY: libraw_init returns a valid pointer or null, checked below; the buffer outlives
-        // the handle, which is closed before the loop iteration ends.
         unsafe {
             let raw = sys::libraw_init(0);
             assert!(!raw.is_null());
@@ -54,7 +52,6 @@ fn zero_is_bad_follows_the_open_flags() {
 /// states as `cfg(libraw_openmp)`; setting the decode threads is harmless either way.
 #[test]
 fn the_build_carries_openmp_where_the_toolchain_links_it() {
-    // SAFETY: both calls touch only the calling thread's OpenMP state.
     unsafe {
         sys::libraw_lumos_set_decode_threads(2);
         assert_eq!(sys::libraw_lumos_openmp() != 0, cfg!(libraw_openmp));

@@ -60,14 +60,9 @@ pub(crate) fn install(deliver: impl Fn(PathBuf) + 'static) {
         .delegate()
         .expect("winit registered its application delegate in EventLoop::new");
 
-    // SAFETY: `Retained` keeps a live object, and every Objective-C object is
-    // an `AnyObject` — the cast reads its class, nothing more.
     let object: &AnyObject = unsafe { &*Retained::as_ptr(&delegate).cast::<AnyObject>() };
     let class: &AnyClass = object.class();
 
-    // SAFETY: the signature matches `v@:@@` — the encoding of
-    // `- (void)application:(id)app openURLs:(NSArray<NSURL *> *)urls`, which is
-    // what the runtime will call this IMP with.
     let added = unsafe {
         ffi::class_addMethod(
             ptr::from_ref(class).cast_mut(),

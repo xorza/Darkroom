@@ -115,8 +115,6 @@ pub(crate) fn demosaic(
         |position| xtrans.pattern.color_at(position).index(),
         passes.tiling(),
         || Tile::new(passes.directions()),
-        // SAFETY: the driver hands each place's own part to this tile alone, which writes no
-        // other.
         |tile, place, out| unsafe {
             tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out);
         },

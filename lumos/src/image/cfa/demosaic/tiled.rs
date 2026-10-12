@@ -89,7 +89,6 @@ impl OutputPlanes {
     /// `index + values.len()`.
     #[inline(always)]
     pub(crate) const unsafe fn write_row(self, channel: usize, index: usize, values: &[f32]) {
-        // SAFETY: as this function's contract.
         unsafe {
             self.planes[channel]
                 .get()
@@ -120,7 +119,6 @@ impl OutputPlanes {
         } else {
             value / gain
         };
-        // SAFETY: as this function's contract.
         unsafe { self.planes[channel].get().add(index).write(value) };
     }
 }

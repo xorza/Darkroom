@@ -5,8 +5,6 @@
 /// Only a raw pointer: wrapping any `Copy` value would make a `&Cell<_>` `Sync` from safe code.
 /// `T: Send` because the writes move `T` values onto other threads.
 ///
-/// SAFETY: Caller must ensure disjoint access from each thread.
-///
 /// Access the inner value via `.get()` — never `.0` — so that Edition 2024
 /// closures capture `&UnsafeSendPtr` (which is Sync) rather than the inner
 /// pointer field.

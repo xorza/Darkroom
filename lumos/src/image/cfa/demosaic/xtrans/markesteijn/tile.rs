@@ -107,7 +107,6 @@ impl Tile {
         self.derivatives(mrow - top, mcol - left);
         self.homogeneity(mrow - top, mcol - left);
         self.homogeneity_sums(&own);
-        // SAFETY: the caller hands over the frame's planes and the region this tile alone owns.
         unsafe { self.blend(xtrans, place, &own, out) };
     }
 
@@ -739,7 +738,6 @@ impl Tile {
                 let (y, x) = (row + top, col + left);
                 let native = xtrans.pattern.color_at(Vec2us::new(x, y)).index();
                 for (channel, &gain) in xtrans.gains.iter().enumerate() {
-                    // SAFETY: as this function's contract.
                     unsafe {
                         out.write(
                             channel,

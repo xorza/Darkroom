@@ -268,7 +268,6 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
                 let out = OutputPlanes::of(&mut planes);
                 let mut tile = Tile::new(pattern);
                 tile.poison(poison);
-                // SAFETY: the planes cover the frame, and this is the only tile.
                 unsafe { tile.demosaic(&BayerImage::new(&data, size, pattern), place, out) };
                 planes
             };

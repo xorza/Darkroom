@@ -41,8 +41,6 @@ impl<T: Pod> StoredPlane<T> {
 
     /// Memory-map a plane file [`Self::write`] wrote.
     pub(crate) fn map(path: &Path) -> Result<Self, FrameStoreError> {
-        // SAFETY: lumos publishes every named file it maps whole and never rewrites one in place;
-        // a file replaced by another process after the map is the documented mmap hazard.
         let file =
             unsafe { MappedFile::open(path) }.map_err(|source| FrameStoreError::MemoryMap {
                 path: path.to_path_buf(),

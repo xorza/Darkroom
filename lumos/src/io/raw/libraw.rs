@@ -65,8 +65,6 @@ impl Libraw {
     /// the file.
     pub(super) fn open(file: Vec<u8>, cancel: &CancelToken) -> Result<Self, RawError> {
         let libraw = Self::init(file, cancel)?;
-        // SAFETY: the handle is valid, and LibRaw reads the bytes in place until it is closed,
-        // which `Drop` does before `file` is freed.
         let code = unsafe {
             sys::libraw_open_buffer(
                 libraw.handle.as_ptr(),
@@ -79,15 +77,12 @@ impl Libraw {
 
     /// A handle with both callbacks installed, holding `file`, nothing opened yet.
     fn init(file: Vec<u8>, cancel: &CancelToken) -> Result<Self, RawError> {
-        // SAFETY: `libraw_init` returns a valid handle or null.
         let handle = NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(RawError::Init)?;
         let hooks = Box::new(Hooks {
             cancel: cancel.clone(),
             corrupt: Cell::new(false),
         });
         let user_data = (&raw const *hooks).cast_mut().cast::<c_void>();
-        // SAFETY: the handle is valid, and `hooks` stays at its heap address until `Drop` closes
-        // the handle; LibRaw calls back only from inside the calls this type makes.
         unsafe {
             sys::libraw_set_dataerror_handler(handle.as_ptr(), Some(record_data_error), user_data);
             sys::libraw_set_progress_handler(handle.as_ptr(), Some(poll_cancel), user_data);
@@ -106,8 +101,6 @@ impl Libraw {
 
     /// LibRaw's state.
     pub(super) const fn data(&self) -> &sys::libraw_data_t {
-        // SAFETY: the handle is valid while `self` lives, and LibRaw writes its state only inside
-        // the calls this type makes, which take `&mut self`.
         unsafe { self.handle.as_ref() }
     }
 
@@ -116,8 +109,6 @@ impl Libraw {
         let handle = self.handle.as_ptr();
         let mut info = sys::libraw_decoder_info_t::default();
         let (mut enc_type, mut image_levels) = (0, 0);
-        // SAFETY: the handle is valid and open, which is all the decoder report and the shim's
-        // accessors read; LibRaw points the decoder's name at a string literal of its own.
         let (name, floating_point, fuji_lossless, crx) = unsafe {
             sys::libraw_get_decoder_info(handle, &raw mut info);
             let name = if info.decoder_name.is_null() {
@@ -148,12 +139,10 @@ impl Libraw {
     /// the camera's own clock, in whatever zone that was set to.
     pub(super) fn camera_clock(&self) -> Option<String> {
         let mut text: [c_char; 20] = [0; 20];
-        // SAFETY: the handle is valid and open, and the shim writes at most `text.len()` bytes.
         let written = unsafe {
             sys::libraw_lumos_camera_clock(self.handle.as_ptr(), text.as_mut_ptr(), text.len())
         };
         (written != 0).then(|| {
-            // SAFETY: the shim wrote a NUL-terminated string into `text` when it answered.
             unsafe { CStr::from_ptr(text.as_ptr()) }
                 .to_string_lossy()
                 .into_owned()
@@ -162,13 +151,11 @@ impl Libraw {
 
     /// Whether the sensor is a Fuji SuperCCD, its photosites laid out 45° to the rows.
     pub(super) fn super_ccd(&self) -> bool {
-        // SAFETY: the handle is valid and open.
         unsafe { sys::libraw_lumos_fuji_width(self.handle.as_ptr()) != 0 }
     }
 
     /// The parameters LibRaw's own processing runs with.
     pub(super) const fn params_mut(&mut self) -> &mut sys::libraw_output_params_t {
-        // SAFETY: as `data`, and `&mut self` makes this the only reference.
         unsafe { &mut self.handle.as_mut().params }
     }
 
@@ -180,8 +167,6 @@ impl Libraw {
     /// values the format cannot hold.
     pub(super) fn unpack(&mut self, threads: usize) -> Result<(), RawError> {
         let threads = c_int::try_from(threads.max(1)).unwrap_or(c_int::MAX);
-        // SAFETY: the shim sets the calling thread's OpenMP count, which the decode below reads on
-        // this same thread; the handle is valid and open.
         let code = unsafe {
             sys::libraw_lumos_set_decode_threads(threads);
             sys::libraw_unpack(self.handle.as_ptr())
@@ -201,8 +186,6 @@ impl Libraw {
         let data = self.data();
         let image = NonNull::new(data.rawdata.raw_image)?;
         let len = usize::from(data.sizes.raw_height) * data.sizes.raw_pitch as usize / 2;
-        // SAFETY: LibRaw allocated the buffer for `raw_height` rows of `raw_pitch` bytes, and frees
-        // it no sooner than the handle, which `self` borrows.
         Some(unsafe { slice::from_raw_parts(image.as_ptr(), len) })
     }
 
@@ -212,13 +195,11 @@ impl Libraw {
     ///
     /// [`RawError::Process`] when either step fails.
     pub(super) fn process(&mut self) -> Result<ProcessedImage<'_>, RawError> {
-        // SAFETY: the handle is valid and unpacked.
         let code = unsafe { sys::libraw_dcraw_process(self.handle.as_ptr()) };
         if let Some(code) = LibrawCode::of(code) {
             return Err(RawError::Process(code));
         }
         let mut code = 0;
-        // SAFETY: the handle is valid and processed.
         let image =
             unsafe { sys::libraw_dcraw_make_mem_image(self.handle.as_ptr(), &raw mut code) };
         let image = NonNull::new(image).map(|image| ProcessedImage {
@@ -235,7 +216,6 @@ impl Libraw {
 impl Drop for Libraw {
     fn drop(&mut self) {
         // Runs ahead of the fields, as LibRaw needs: it may still point into `file` and `hooks`.
-        // SAFETY: the handle came from `libraw_init` and is closed once.
         unsafe { sys::libraw_close(self.handle.as_ptr()) };
     }
 }
@@ -259,7 +239,6 @@ impl ProcessedImage<'_> {
     /// [`RawError::ProcessedShape`] for any other shape, [`RawError::ProcessedSize`] when the
     /// image holds fewer bytes than its shape needs.
     pub(super) fn samples(&self) -> Result<ProcessedSamples<'_>, RawError> {
-        // SAFETY: LibRaw made the image and frees it only in `Drop`.
         let header = unsafe { self.image.as_ref() };
         let (width, height) = (usize::from(header.width), usize::from(header.height));
         let (colors, bits) = (usize::from(header.colors), usize::from(header.bits));
@@ -283,14 +262,12 @@ impl ProcessedImage<'_> {
         }
         // The samples run past the one-byte `data` field the header declares, so they are reached
         // through a pointer to the allocation rather than a reference to the field.
-        // SAFETY: LibRaw allocated `data_size` bytes from `data` on, 16-bit aligned.
         #[expect(
             clippy::cast_ptr_alignment,
             reason = "LibRaw aligns its 16-bit samples, as the assert below checks"
         )]
         let data = unsafe { (&raw const (*self.image.as_ptr()).data).cast::<u16>() };
         debug_assert!(data.is_aligned(), "LibRaw aligns its 16-bit samples");
-        // SAFETY: `len` samples fit the `data_size` bytes checked above, alive as long as `self`.
         let samples = unsafe { slice::from_raw_parts(data, len) };
         Ok(ProcessedSamples {
             samples,
@@ -301,7 +278,6 @@ impl ProcessedImage<'_> {
 
 impl Drop for ProcessedImage<'_> {
     fn drop(&mut self) {
-        // SAFETY: LibRaw made the image with `libraw_dcraw_make_mem_image`, and it is freed once.
         unsafe { sys::libraw_dcraw_clear_mem(self.image.as_ptr()) };
     }
 }
@@ -315,7 +291,6 @@ impl fmt::Debug for ProcessedImage<'_> {
 /// LibRaw's data-error callback: records the error in the [`Hooks`] `user_data` points at, and
 /// writes nothing to stderr, as LibRaw's default callback does.
 unsafe extern "C" fn record_data_error(user_data: *mut c_void, _file: *const c_char, _offset: i64) {
-    // SAFETY: `user_data` is the `Hooks` `Libraw::init` registered, alive while the handle is.
     let hooks = unsafe { &*user_data.cast::<Hooks>() };
     hooks.corrupt.set(true);
 }
@@ -327,7 +302,6 @@ unsafe extern "C" fn poll_cancel(
     _iteration: c_int,
     _expected: c_int,
 ) -> c_int {
-    // SAFETY: as `record_data_error`.
     let hooks = unsafe { &*user_data.cast::<Hooks>() };
     c_int::from(hooks.cancel.is_cancelled())
 }
@@ -357,7 +331,6 @@ pub(crate) mod internals {
         /// Set the orientation LibRaw saved at unpack, which its processing turns by.
         #[cfg(feature = "real-data")]
         pub(crate) const fn set_saved_flip(&mut self, flip: i32) {
-            // SAFETY: as `params_mut`.
             unsafe { self.handle.as_mut().rawdata.sizes.flip = flip };
         }
 
@@ -375,7 +348,6 @@ pub(crate) mod internals {
                 .collect();
             let mut libraw = Self::init(file, cancel)?;
             let len = libraw.file.len() as u32;
-            // SAFETY: the handle is valid, and LibRaw reads the bytes in place until it is closed.
             let code = unsafe {
                 sys::libraw_open_bayer(
                     libraw.handle.as_ptr(),
@@ -398,7 +370,6 @@ pub(crate) mod internals {
                 return Err(RawError::Open(code));
             }
             if let Some(mask) = dump.mask {
-                // SAFETY: as `params_mut`; `unpack` reads the mask.
                 unsafe { libraw.handle.as_mut().sizes.mask[0] = mask };
             }
             Ok(libraw)

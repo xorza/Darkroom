@@ -39,7 +39,6 @@ pub(super) fn replace(source: &Path, destination: &Path, mode: PublicationMode) 
     if mode == PublicationMode::Durable {
         flags |= MOVEFILE_WRITE_THROUGH;
     }
-    // SAFETY: both names are null-terminated wide strings that outlive the call.
     if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -86,7 +85,6 @@ pub(super) fn observe(path: &Path) -> io::Result<Observed> {
 /// The `class` of information about `file`, or `None` when its file system does not answer it.
 fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> Option<T> {
     let mut info = T::default();
-    // SAFETY: the buffer is a `T`, the structure `class` names, at its own size.
     let answered = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
