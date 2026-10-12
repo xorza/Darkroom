@@ -204,19 +204,17 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save_rgb(&labels_rgb, &out("06_label_map"));
     println!("Saved: 06_label_map ({num_labels} components)");
     label_map.release_to_pool(&mut pool);
-    pool.release_bit(mask);
+    drop(mask);
 
     // The stage itself, on the same plane, saw what these images show.
     let stage = DetectResult::from_plane(
         &plane,
-        frame.no_data.as_ref(),
+        frame.no_data.as_deref(),
         &config.extraction,
         &mut pool,
     );
     assert_eq!(stage.pixels_above_threshold, pixels_above);
     assert_eq!(stage.connected_components, num_labels);
-    plane.release_to_pool(&mut pool);
-    frame.release_to_pool(&mut pool);
 }
 
 /// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally

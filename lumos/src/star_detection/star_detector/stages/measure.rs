@@ -43,7 +43,7 @@ pub(crate) fn measure(
                     residual: &frame.measure,
                     sky: &frame.sky,
                     saturation: &frame.saturation,
-                    no_data: frame.no_data.as_ref(),
+                    no_data: frame.no_data.as_deref(),
                 },
                 region,
                 config,

@@ -12,6 +12,7 @@ use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::Pooled;
 use crate::star_detection::background::simd;
 use crate::star_detection::background::simd::SegmentRamp;
 use crate::star_detection::background::sky_noise::SkyNoise;
@@ -28,9 +29,9 @@ use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_thr
 #[derive(Debug)]
 pub(crate) struct BackgroundEstimate {
     /// Per-pixel background values (sky level).
-    pub(crate) background: Buffer2<f32>,
+    pub(crate) background: Pooled<Buffer2<f32>>,
     /// Per-pixel noise (sigma) estimates.
-    pub(crate) noise: Buffer2<f32>,
+    pub(crate) noise: Pooled<Buffer2<f32>>,
     /// The floor every threshold built from [`Self::noise`] applies to it. See
     /// [`noise_floor_from`] for why it is measured from the frame rather than fixed.
     pub(crate) noise_floor: f32,
@@ -48,7 +49,7 @@ pub(crate) struct Refinement {
 #[derive(Debug)]
 pub(crate) struct RefinedBackground {
     pub(crate) estimate: BackgroundEstimate,
-    pub(crate) sources: BitBuffer2,
+    pub(crate) sources: Pooled<BitBuffer2>,
 }
 
 /// A per-pixel σ is floored at this fraction of the frame's typical tile σ: far enough below the
@@ -190,7 +191,7 @@ impl BackgroundEstimate {
         for _ in 0..refinement.iterations {
             let mut residual = resources.acquire_f32();
             self.residual_into(pixels, &mut residual);
-            self.release_to_pool(resources);
+            drop(self);
             let detect = DetectionPlane::from_residual(residual, filters, config, resources);
             create_residual_threshold_mask(
                 &detect.values,
@@ -201,33 +202,22 @@ impl BackgroundEstimate {
                 },
                 &mut sources,
             );
-            detect.release_to_pool(resources);
+            drop(detect);
             sources.dilate(refinement.mask_dilation, &mut scratch);
             if let Some(mask) = filters.mask {
                 sources.or_with(mask);
             }
             self = Self::estimate(pixels, Some(&sources), config, resources);
         }
-        resources.release_bit(scratch);
         RefinedBackground {
             estimate: self,
             sources,
         }
     }
 
-    /// Return both planes to `pool`.
-    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
-        pool.release_f32(self.background);
-        pool.release_f32(self.noise);
-    }
-
     /// Subtract the sky from `pixels` in place, leaving the residual every later stage reads, and
     /// keep only its noise: the background plane goes back to the pool.
-    pub(crate) fn subtract_from(
-        self,
-        pixels: &mut Buffer2<f32>,
-        pool: &mut DetectionResources,
-    ) -> SkyNoise {
+    pub(crate) fn subtract_from(self, pixels: &mut Buffer2<f32>) -> SkyNoise {
         pixels
             .pixels_mut()
             .par_chunks_mut(SAMPLES_PER_BLOCK)
@@ -237,7 +227,6 @@ impl BackgroundEstimate {
                     *value -= sky;
                 }
             });
-        pool.release_f32(self.background);
         SkyNoise {
             noise: self.noise,
             floor: self.noise_floor,
@@ -396,6 +385,8 @@ fn interpolate_row(
 pub(crate) mod internals {
     use imaginarium::Buffer2;
 
+    use crate::math::size2us::Size2us;
+    use crate::scratch_pool::Pooled;
     use crate::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::star_detection::background::sky_noise::SkyNoise;
 
@@ -415,8 +406,9 @@ pub(crate) mod internals {
 
         /// This estimate's noise, as [`BackgroundEstimate::subtract_from`] hands it on.
         pub(crate) fn sky_noise(&self) -> SkyNoise {
+            let size = Size2us::new(self.noise.width(), self.noise.height());
             SkyNoise {
-                noise: self.noise.clone(),
+                noise: Pooled::loose(Buffer2::clone(&self.noise), size),
                 floor: self.noise_floor,
             }
         }

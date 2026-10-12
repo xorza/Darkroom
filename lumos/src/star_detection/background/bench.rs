@@ -17,10 +17,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             let pixels = field.render(FRAME).image.channel(0).clone();
             let config = Stages::config(field).background;
             let mut resources = DetectionResources::new(FRAME);
-            b.iter(|| {
-                BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
-                    .release_to_pool(&mut resources);
-            });
+            b.iter(|| BackgroundEstimate::estimate(&pixels, None, &config, &mut resources));
         });
     }
 }

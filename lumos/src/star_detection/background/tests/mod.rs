@@ -317,14 +317,14 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     let first = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
     let expected_background = first.background.pixels().to_vec();
     let expected_noise = first.noise.pixels().to_vec();
-    first.release_to_pool(&mut resources);
+    drop(first);
 
     let second = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
     assert_eq!(second.background.pixels(), expected_background);
     assert_eq!(second.noise.pixels(), expected_noise);
-    second.release_to_pool(&mut resources);
+    drop(second);
 
-    resources.reset(Size2us::new(48, 32));
+    resources.reshape(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
     let resized = BackgroundEstimate::estimate(&resized_pixels, None, &config, &mut resources);
     assert_eq!(resized.background.width(), 48);

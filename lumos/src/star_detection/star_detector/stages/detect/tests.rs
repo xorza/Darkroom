@@ -1,6 +1,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::scratch_pool::Pooled;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::star_detector::stages::detect::internals::detect_test;
@@ -26,8 +27,9 @@ fn flat_sky(size: Size2us) -> SkyNoise {
 
 /// `values` as a detection plane under a flat noise of 0.01.
 fn flat_plane(values: &Buffer2<f32>) -> DetectionPlane {
+    let size = Size2us::new(values.width(), values.height());
     DetectionPlane {
-        values: values.clone(),
+        values: Pooled::loose(values.clone(), size),
         noise: flat_sky(Size2us::new(values.width(), values.height())),
     }
 }

@@ -48,7 +48,7 @@ impl LabelMap {
         connectivity: Connectivity,
         resources: &mut DetectionResources,
     ) -> Self {
-        debug_assert_eq!(mask.size, resources.dimensions);
+        debug_assert_eq!(mask.size, resources.dimensions());
         resources.labeler.label(mask, connectivity)
     }
 

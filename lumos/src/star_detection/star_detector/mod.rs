@@ -23,7 +23,7 @@ use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 pub struct StarDetector {
     config: StarDetectionConfig,
     /// Working memory retained across detections.
-    resources: Option<DetectionResources>,
+    resources: DetectionResources,
 }
 
 impl Default for StarDetector {
@@ -42,31 +42,25 @@ impl StarDetector {
         config.validate()?;
         Ok(Self {
             config,
-            resources: None,
+            resources: DetectionResources::default(),
         })
     }
 
     /// Detect stars in a single image.
     pub fn detect(&mut self, image: &LinearImage) -> DetectionResult {
-        let width = image.width();
-        let height = image.height();
-
-        let resources = self
-            .resources
-            .get_or_insert_with(|| DetectionResources::new(Size2us::new(width, height)));
-        resources.reset(Size2us::new(width, height));
+        let resources = &mut self.resources;
+        resources.reshape(Size2us::new(image.width(), image.height()));
 
         let mut frame = PreparedFrame::new(image, &self.config, resources);
         let fwhm = fwhm::estimate(&frame, &self.config, resources);
         let plane = frame.detection_plane(fwhm.value(), &self.config, resources);
-        frame.release_sources(resources);
+        frame.drop_sources();
         let detect_result = DetectResult::from_plane(
             &plane,
-            frame.no_data.as_ref(),
+            frame.no_data.as_deref(),
             &self.config.extraction,
             resources,
         );
-        plane.release_to_pool(resources);
 
         let mut diagnostics = DetectionDiagnostics {
             pixels_above_threshold: detect_result.pixels_above_threshold,
@@ -85,7 +79,6 @@ impl StarDetector {
             fwhm.value(),
         );
         diagnostics.stars_after_centroid = stars.len();
-        frame.release_to_pool(resources);
 
         let FilterOutcome {
             stars,
@@ -128,11 +121,12 @@ impl StarDetector {
 #[cfg(test)]
 pub(super) mod internals {
     use crate::star_detection::resources::internals::BufferCounts;
-    use crate::star_detection::resources::internals::buffer_counts;
     use crate::star_detection::star_detector::StarDetector;
 
-    pub(crate) fn buffer_counts_for(detector: &StarDetector) -> Option<BufferCounts> {
-        detector.resources.as_ref().map(buffer_counts)
+    impl StarDetector {
+        pub(crate) fn buffer_counts(&self) -> BufferCounts {
+            self.resources.buffer_counts()
+        }
     }
 }
 

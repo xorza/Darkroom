@@ -3,7 +3,7 @@
 use imaginarium::Buffer2;
 
 use crate::math::vec2us::Vec2us;
-use crate::star_detection::resources::DetectionResources;
+use crate::scratch_pool::Pooled;
 
 /// The sky's noise per pixel and its floor: all the stages after the sky's removal need of it.
 ///
@@ -13,7 +13,7 @@ use crate::star_detection::resources::DetectionResources;
 #[derive(Debug)]
 pub(crate) struct SkyNoise {
     /// Per-pixel noise (σ).
-    pub(crate) noise: Buffer2<f32>,
+    pub(crate) noise: Pooled<Buffer2<f32>>,
     /// The floor every threshold built from [`Self::noise`] applies to it — see
     /// `background_estimate::noise_floor_from`.
     pub(crate) floor: f32,
@@ -24,9 +24,5 @@ impl SkyNoise {
     /// same test the threshold mask applies to every pixel.
     pub(crate) fn threshold_at(&self, pos: Vec2us, sigma: f32) -> f32 {
         sigma * self.noise[(pos.x, pos.y)].max(self.floor)
-    }
-
-    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
-        pool.release_f32(self.noise);
     }
 }

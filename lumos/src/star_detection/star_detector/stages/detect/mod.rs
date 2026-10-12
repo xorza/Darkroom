@@ -69,7 +69,6 @@ impl DetectResult {
 
         let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
         let connected_components = label_map.num_labels();
-        pool.release_bit(mask);
 
         let extraction = extract_candidates(plane, &label_map, config, &pool.deblend);
         label_map.release_to_pool(pool);
@@ -187,6 +186,7 @@ fn extract_candidates(
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::math::size2us::Size2us;
+    use crate::scratch_pool::Pooled;
     use crate::star_detection::background::sky_noise::SkyNoise;
     use crate::star_detection::deblend::region::Region;
     use crate::star_detection::detection_plane::DetectionPlane;
@@ -212,11 +212,12 @@ pub(crate) mod internals {
         sky: &SkyNoise,
         config: &ExtractionConfig,
     ) -> DetectResult {
-        let mut pool = DetectionResources::new(Size2us::new(residual.width(), residual.height()));
+        let size = Size2us::new(residual.width(), residual.height());
+        let mut pool = DetectionResources::new(size);
         let plane = DetectionPlane {
-            values: residual.clone(),
+            values: Pooled::loose(residual.clone(), size),
             noise: SkyNoise {
-                noise: sky.noise.clone(),
+                noise: Pooled::loose(Buffer2::clone(&sky.noise), size),
                 floor: sky.floor,
             },
         };

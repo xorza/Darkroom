@@ -15,9 +15,9 @@ mod dilation;
 
 use std::ops::Index;
 
-use crate::buffer_pool::PooledBuffer;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::Scratch;
 
 /// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
@@ -75,13 +75,20 @@ pub(crate) struct BitBuffer2 {
     stride: usize,
 }
 
-impl PooledBuffer for BitBuffer2 {
-    fn allocate(dimensions: Size2us) -> Self {
-        Self::new_filled(dimensions, false)
+/// A frame-sized mask: a value's shape is its size, and it is reused as it is.
+impl Scratch for BitBuffer2 {
+    type Shape = Size2us;
+
+    fn build(shape: Size2us) -> Self {
+        Self::new_filled(shape, false)
     }
 
-    fn dimensions(&self) -> Size2us {
-        self.size
+    fn fit(&mut self, shape: Size2us) {
+        debug_assert!(self.has_shape(shape));
+    }
+
+    fn has_shape(&self, shape: Size2us) -> bool {
+        self.size == shape
     }
 }
 

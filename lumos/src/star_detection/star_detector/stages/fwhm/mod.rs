@@ -66,8 +66,8 @@ fn from_bright_stars(
     };
     let plane = frame.detection_plane(None, config, pool);
     let regions =
-        DetectResult::from_plane(&plane, frame.no_data.as_ref(), &first_pass_config, pool).regions;
-    plane.release_to_pool(pool);
+        DetectResult::from_plane(&plane, frame.no_data.as_deref(), &first_pass_config, pool)
+            .regions;
     tracing::debug!(
         "FWHM estimation: first pass detected {} bright star candidates",
         regions.len()

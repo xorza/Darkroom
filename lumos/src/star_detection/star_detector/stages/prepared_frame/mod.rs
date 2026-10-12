@@ -9,6 +9,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
@@ -23,15 +24,15 @@ use crate::star_detection::star_detection_config::background_config::BackgroundR
 #[derive(Debug)]
 pub(crate) struct PreparedFrame {
     /// The channels' noise-weighted combination, less the sky.
-    pub(crate) measure: Buffer2<f32>,
+    pub(crate) measure: Pooled<Buffer2<f32>>,
     /// The sky's σ on `measure`.
     pub(crate) sky: SkyNoise,
-    pub(crate) saturation: BitBuffer2,
+    pub(crate) saturation: Pooled<BitBuffer2>,
     /// The pixels with no measurement: left out of the sky, of every noise and of every threshold.
-    pub(crate) no_data: Option<BitBuffer2>,
+    pub(crate) no_data: Option<Pooled<BitBuffer2>>,
     /// The sources the refined sky was measured around, and the pixels with no data; `None`
     /// without a refinement.
-    sources: Option<BitBuffer2>,
+    sources: Option<Pooled<BitBuffer2>>,
     /// Whether the frame was demosaiced, so its detection plane takes the 3×3 median first.
     demosaiced: bool,
 }
@@ -58,7 +59,7 @@ impl PreparedFrame {
             });
 
         let mut background =
-            BackgroundEstimate::estimate(&plane, no_data.as_ref(), &config.background, resources);
+            BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources);
         let mut sources = None;
         if let BackgroundRefinement::Iterative {
             iterations,
@@ -80,7 +81,7 @@ impl PreparedFrame {
                         .fwhm
                         .mode
                         .map(|mode| config.fwhm.filter_at(mode.seed())),
-                    mask: no_data.as_ref(),
+                    mask: no_data.as_deref(),
                 },
                 &config.background,
                 resources,
@@ -92,7 +93,7 @@ impl PreparedFrame {
         // Saturation is a property of the recorded values, read before anything combines them.
         let mut saturation = resources.acquire_bit();
         mark_saturated(image, &mut saturation);
-        let sky = background.subtract_from(&mut plane, resources);
+        let sky = background.subtract_from(&mut plane);
         Self {
             measure: plane,
             sky,
@@ -117,7 +118,7 @@ impl PreparedFrame {
             PlaneFilters {
                 median: self.demosaiced,
                 matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
-                mask: self.sources.as_ref().or(self.no_data.as_ref()),
+                mask: self.sources.as_deref().or(self.no_data.as_deref()),
             },
             &config.background,
             resources,
@@ -125,19 +126,8 @@ impl PreparedFrame {
     }
 
     /// Return the source mask once no detection plane is built any more: only their noise reads it.
-    pub(crate) fn release_sources(&mut self, resources: &mut DetectionResources) {
-        if let Some(sources) = self.sources.take() {
-            resources.release_bit(sources);
-        }
-    }
-
-    pub(crate) fn release_to_pool(self, resources: &mut DetectionResources) {
-        resources.release_f32(self.measure);
-        self.sky.release_to_pool(resources);
-        resources.release_bit(self.saturation);
-        for mask in [self.no_data, self.sources].into_iter().flatten() {
-            resources.release_bit(mask);
-        }
+    pub(crate) fn drop_sources(&mut self) {
+        self.sources = None;
     }
 }
 
