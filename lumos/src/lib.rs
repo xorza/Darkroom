@@ -124,7 +124,7 @@ pub use star_detection::roundness::Roundness;
 pub use star_detection::star::Star;
 pub use star_detection::star_detection_config::StarDetectionConfig;
 pub use star_detection::star_detection_config::background_config::{
-    BackgroundConfig, BackgroundRefinement,
+    BackgroundConfig, BackgroundRefinement, IterativeRefinement,
 };
 pub use star_detection::star_detection_config::extraction_config::{
     Connectivity, Deblend, ExtractionConfig,

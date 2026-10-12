@@ -21,7 +21,9 @@ use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::background::workspace::{InterpolateScratch, InterpolateShape};
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::background_config::{
+    BackgroundConfig, IterativeRefinement,
+};
 use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 
 /// Per-pixel background and noise estimates for an image.
@@ -37,14 +39,6 @@ pub(crate) struct BackgroundEstimate {
     /// The floor every threshold built from [`Self::noise`] applies to it. See
     /// [`noise_floor_from`] for why it is measured from the frame rather than fixed.
     pub(crate) noise_floor: f32,
-}
-
-/// The parameters of `BackgroundRefinement::Iterative`, once a refinement is known to run.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Refinement {
-    pub(crate) iterations: usize,
-    pub(crate) mask_dilation: usize,
-    pub(crate) mask_sigma: f32,
 }
 
 /// A refined estimate, and the sources it was measured around with the pixels the caller masked.
@@ -180,17 +174,21 @@ impl BackgroundEstimate {
     /// the detection plane of the residual at `mask_sigma` of its own σ, dilate the mask by a disk
     /// of `mask_dilation`, add `filters.mask`, and measure the sky again around it. photutils masks
     /// its sources on the convolved data, at 2σ, with a circular footprint.
+    ///
+    /// `iterations` is at least one by its type, and it has to be: the loop is what writes the
+    /// source mask this returns, and a mask leased from the pool holds whatever its last holder
+    /// left.
     pub(crate) fn refine(
         mut self,
         pixels: &Buffer2<f32>,
-        refinement: Refinement,
+        refinement: IterativeRefinement,
         filters: PlaneFilters<'_>,
         config: &BackgroundConfig,
         resources: &mut DetectionResources,
     ) -> RefinedBackground {
         let mut sources = resources.acquire_bit();
         let mut scratch = resources.acquire_bit();
-        for _ in 0..refinement.iterations {
+        for _ in 0..refinement.iterations.get() {
             let mut residual = resources.acquire_f32();
             self.residual_into(pixels, &mut residual);
             drop(self);

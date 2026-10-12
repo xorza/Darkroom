@@ -4,9 +4,7 @@
 
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::background_estimate::{
-    BackgroundEstimate, Refinement, noise_floor_for,
-};
+use crate::star_detection::background::background_estimate::{BackgroundEstimate, noise_floor_for};
 use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::{
@@ -44,21 +42,12 @@ pub(crate) fn estimate_in(
     pool: &mut DetectionResources,
 ) -> BackgroundEstimate {
     let estimate = BackgroundEstimate::estimate(pixels, None, config, pool);
-    let BackgroundRefinement::Iterative {
-        iterations,
-        mask_dilation,
-        mask_sigma,
-    } = config.refinement
-    else {
+    let BackgroundRefinement::Iterative(refinement) = config.refinement else {
         return estimate;
     };
     let refined = estimate.refine(
         pixels,
-        Refinement {
-            iterations,
-            mask_dilation,
-            mask_sigma,
-        },
+        refinement,
         PlaneFilters {
             median: false,
             matched: None,

@@ -96,11 +96,11 @@ fn inclusive_bounds_accept_their_edges() {
             };
         }),
         ("background refinement mask_dilation 50", |c| {
-            c.background.refinement = BackgroundRefinement::Iterative {
-                iterations: 10,
+            c.background.refinement = BackgroundRefinement::Iterative(IterativeRefinement {
+                iterations: NonZeroUsize::new(10).unwrap(),
                 mask_dilation: 50,
                 mask_sigma: 2.0,
-            };
+            });
         }),
         ("estimation_sigma_factor 1", |c| {
             c.fwhm.estimation_sigma_factor = 1.0;
@@ -136,44 +136,36 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative {
-                    iterations: 0,
-                    mask_dilation: 3,
-                    mask_sigma: 2.0,
-                };
-            }),
-            "background refinement iterations",
-            0.0,
-        ),
-        (
-            configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative {
-                    iterations: 11,
-                    mask_dilation: 3,
-                    mask_sigma: 2.0,
-                };
+                config.background.refinement =
+                    BackgroundRefinement::Iterative(IterativeRefinement {
+                        iterations: NonZeroUsize::new(11).unwrap(),
+                        mask_dilation: 3,
+                        mask_sigma: 2.0,
+                    });
             }),
             "background refinement iterations",
             11.0,
         ),
         (
             configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative {
-                    iterations: 1,
-                    mask_dilation: 51,
-                    mask_sigma: 2.0,
-                };
+                config.background.refinement =
+                    BackgroundRefinement::Iterative(IterativeRefinement {
+                        iterations: NonZeroUsize::MIN,
+                        mask_dilation: 51,
+                        mask_sigma: 2.0,
+                    });
             }),
             "background refinement mask_dilation",
             51.0,
         ),
         (
             configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative {
-                    iterations: 1,
-                    mask_dilation: 3,
-                    mask_sigma: 0.0,
-                };
+                config.background.refinement =
+                    BackgroundRefinement::Iterative(IterativeRefinement {
+                        iterations: NonZeroUsize::MIN,
+                        mask_dilation: 3,
+                        mask_sigma: 0.0,
+                    });
             }),
             "background refinement mask_sigma",
             0.0,
