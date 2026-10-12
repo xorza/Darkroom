@@ -202,8 +202,9 @@ pub(crate) mod internals {
         pub(crate) const EVICTS: bool = os::internals::EVICTS;
 
         /// Drop the file's pages from the page cache, so the next read comes from the disk: what a
-        /// bench of cold reads does between passes. `false` where the system offers no way, as
-        /// macOS and Windows here, and the next read may come from memory.
+        /// bench of cold reads does between passes. `false` when a page stays, as on tmpfs, or
+        /// where the system offers no way, as macOS and Windows here: the next read may come from
+        /// memory.
         pub(crate) fn evict(&self) -> bool {
             os::internals::evict(&self.map, &self.evictable)
         }

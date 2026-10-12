@@ -52,7 +52,6 @@ pub(crate) mod internals {
     pub(crate) const EVICTS: bool = true;
 
     /// The page size, in bytes.
-    #[cfg(test)]
     fn page_size() -> usize {
         // SAFETY: `sysconf` reads a constant of the system.
         let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
@@ -63,25 +62,25 @@ pub(crate) mod internals {
     /// `fdatasync` cleans them, `MADV_DONTNEED` takes them out of this process's map, which reads
     /// the file again on its next touch, and `POSIX_FADV_DONTNEED` drops every clean page no map
     /// holds, draining each CPU's batch of pages not yet on the LRU first. `MADV_PAGEOUT` alone
-    /// misses the pages still in such a batch, and a file just written holds many. Whether the
-    /// kernel took every call.
+    /// misses the pages still in such a batch, and a file just written holds many. Whether no page
+    /// is left in memory after, by `mincore`: a file on tmpfs, whose pages are the file, keeps
+    /// every one while each call succeeds.
     pub(crate) fn evict(map: &Mmap, file: &File) -> bool {
         if map.is_empty() {
             return true;
         }
-        let synced = file.sync_data().is_ok();
+        // A failed call leaves pages in memory, which the count after reports.
+        let _ = file.sync_data();
         let start = map.as_ptr().cast::<c_void>().cast_mut();
         // SAFETY: the range is the map's own, a shared read-only map of a file, whose pages the
         // next touch reads back from the file unchanged.
-        let unmapped = unsafe { libc::madvise(start, map.len(), libc::MADV_DONTNEED) } == 0;
+        unsafe { libc::madvise(start, map.len(), libc::MADV_DONTNEED) };
         // SAFETY: the descriptor is the open file's own.
-        let dropped =
-            unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) } == 0;
-        synced && unmapped && dropped
+        unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+        resident_share(map) == Some(0.0)
     }
 
     /// The share of `map`'s pages in memory, by `mincore`; `None` when the call fails.
-    #[cfg(test)]
     pub(crate) fn resident_share(map: &Mmap) -> Option<f64> {
         let pages = map.len().div_ceil(page_size());
         if pages == 0 {
