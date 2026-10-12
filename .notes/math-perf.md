@@ -38,6 +38,8 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `statistics/sigma_clipped/4096` | 0.96 | 0.90 | Same. |
 | `statistics/spread/16` | 0.72 | | The MAD of a sorted window by a binary search over how many of its middle rank each side of the centre gives, the deviations two ascending runs: as many steps as the length has bits, where the merge took half the window. Same bits. |
 | `statistics/spread/256` | 0.37 | | Same. |
+| `pixel_quadrature/sufficient_order/gaussian_0.5/1` | 0.48 | | The orders bisected, as the bound falls with the order; each order's golden-section search ends at the first ρ whose bound is within the tolerance, which the least it would end on is at most. Same orders. The star fits run it twice a star. |
+| `pixel_quadrature/sufficient_order/moffat_1.5_2.5/1` | 0.46 | | Same. |
 | `statistics/frame/plane_median/radix/24000000` | 0.93 | 0.67 | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
 
 The `statistics` rows are against a baseline measured again after the bench fix that batches in-place
