@@ -222,8 +222,8 @@ fn padding_bits_never_reach_the_count() {
     );
 }
 
-/// Every row shape `padding_is_clear` branches on. All three strides are 128 bits:
-/// 128 wide has no padding at all; 100 wide pads 28 bits inside the second word; 60 wide pads
+/// Every row shape `padding_is_clear` and `clear_padding` branch on. All three strides are 128
+/// bits: 128 wide has no padding at all; 100 wide pads 28 bits inside the second word; 60 wide pads
 /// 4 bits of the first word *and* the whole second one, the only case that reaches the tail scan.
 #[test]
 fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
@@ -257,6 +257,11 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
             !has_padding,
             "new_filled at {width}"
         );
+
+        // Clearing the padding of a full fill leaves exactly what setting every pixel builds.
+        let mut cleared = BitBuffer2::new_filled(size, true);
+        cleared.clear_padding();
+        assert_eq!(cleared.words, built.words, "clear_padding at {width}");
 
         // Reuse has to reach the padding a `fill` dirtied, or a mask rebuilt into a recycled
         // buffer would count padding bits as pixels. At 60 wide that means the whole trailing

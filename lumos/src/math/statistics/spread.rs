@@ -139,23 +139,27 @@ impl Ranked {
             }
         }
         let (i, j) = (low, taken - low);
-        let last = |run: &dyn Fn(usize) -> f32, count: usize| {
-            if count > 0 {
-                run(count - 1)
-            } else {
-                f32::NEG_INFINITY
-            }
-        };
-        let first = |run: &dyn Fn(usize) -> f32, count: usize, len: usize| {
-            if count < len {
-                run(count)
-            } else {
-                f32::INFINITY
-            }
-        };
         Self {
-            value: last(&a, i).max(last(&b, j)),
-            next: first(&a, i, a_len).min(first(&b, j, b_len)),
+            value: Self::last_taken(&a, i).max(Self::last_taken(&b, j)),
+            next: Self::first_left(&a, i, a_len).min(Self::first_left(&b, j, b_len)),
+        }
+    }
+
+    /// The last of the first `count` values of `run`; `−∞` when it gives none.
+    fn last_taken(run: &impl Fn(usize) -> f32, count: usize) -> f32 {
+        if count > 0 {
+            run(count - 1)
+        } else {
+            f32::NEG_INFINITY
+        }
+    }
+
+    /// The value of `run`, `len` long, after its first `count`; `+∞` when none is left.
+    fn first_left(run: &impl Fn(usize) -> f32, count: usize, len: usize) -> f32 {
+        if count < len {
+            run(count)
+        } else {
+            f32::INFINITY
         }
     }
 }
