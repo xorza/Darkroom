@@ -31,7 +31,9 @@ use crate::math::{
 };
 use crate::registration::resample;
 use crate::star_detection::detector;
-use crate::{background_mesh, bit_buffer2, pipeline, registration, star_detection};
+use crate::{
+    background_mesh, bit_buffer2, combine, drizzle, pipeline, registration, star_detection,
+};
 
 /// The kernel tier: one operation on the unit production gives it.
 pub fn kernel(c: &mut Criterion) {
@@ -71,4 +73,6 @@ pub fn stage(c: &mut Criterion) {
     registration::bench::stage(c);
     resample::bench::benches(c);
     pipeline::bench::benches(c);
+    combine::bench::benches(c);
+    drizzle::bench::benches(c);
 }
