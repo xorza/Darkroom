@@ -1,6 +1,7 @@
 //! [`GainBins`]: the bins of flat gain a frame's noise is measured over.
 
-use arrayvec::ArrayVec;
+use std::array;
+
 use serde::{Deserialize, Serialize};
 
 /// Bins of equal count a frame's noise is measured over, by flat gain: enough to fit two terms
@@ -12,7 +13,7 @@ const _: () = assert!(GAIN_BINS <= 1 << u8::BITS, "a sample's bin is a byte");
 /// The bounds between [`GAIN_BINS`] bins of equal count over a frame's flat gain, ascending.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GainBins {
-    bounds: ArrayVec<f32, { GAIN_BINS - 1 }>,
+    bounds: [f32; GAIN_BINS - 1],
 }
 
 impl GainBins {
@@ -20,15 +21,19 @@ impl GainBins {
     pub(crate) fn of(gains: &mut [f32]) -> Self {
         gains.sort_unstable_by(f32::total_cmp);
         Self {
-            bounds: (1..GAIN_BINS)
-                .map(|bin| gains[(gains.len() * bin / GAIN_BINS).min(gains.len() - 1)])
-                .collect(),
+            bounds: array::from_fn(|bound| {
+                gains[(gains.len() * (bound + 1) / GAIN_BINS).min(gains.len() - 1)]
+            }),
         }
     }
 
-    /// The bin `gain` falls in.
+    /// The bin `gain` falls in: how many bounds it has reached. The bounds ascend, so this is their
+    /// partition point, counted without a branch per bound.
     pub(crate) fn bin(&self, gain: f32) -> usize {
-        self.bounds.partition_point(|&bound| bound <= gain)
+        self.bounds
+            .iter()
+            .map(|&bound| usize::from(bound <= gain))
+            .sum()
     }
 }
 

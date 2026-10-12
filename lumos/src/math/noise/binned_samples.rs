@@ -1,15 +1,20 @@
 //! [`BinnedSamples`]: a frame's noise samples, grouped by the bin of flat gain each was taken at.
 
 use std::array;
+use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use rayon::prelude::*;
 
 use crate::math::noise::gain_bins::{GAIN_BINS, GainBins};
 
 /// The fewest samples a bin is measured over: a bin with fewer merges with its neighbours in gain.
 /// A variance over 256 samples carries a standard error of √(2/256) ≈ 9%.
 const MIN_BIN_SAMPLES: usize = 256;
+
+/// How many samples one parallel share of [`BinnedSamples::of`] tags.
+const BIN_SHARE: usize = 1 << 14;
 
 /// The noise measured over the samples of one bin of flat gain.
 #[derive(Debug, Clone, Copy)]
@@ -20,17 +25,67 @@ pub(crate) struct GainBin {
     pub(crate) samples: usize,
 }
 
+/// Samples [`BinnedSamples`] holds and groups by bin in place: one buffer, or columns that are
+/// permuted together.
+pub(crate) trait Samples {
+    /// A run of consecutive samples, as a measure reads it.
+    type Run<'a>: Send
+    where
+        Self: 'a;
+
+    /// The bytes one sample holds.
+    const BYTES: usize;
+
+    fn len(&self) -> usize;
+
+    fn swap(&mut self, a: usize, b: usize);
+
+    /// The runs `ranges` cover, which ascend and do not overlap.
+    fn runs(&mut self, ranges: &[Range<usize>]) -> Vec<Self::Run<'_>>;
+}
+
+impl<T: Send> Samples for Vec<T> {
+    type Run<'a>
+        = &'a mut [T]
+    where
+        T: 'a;
+
+    const BYTES: usize = size_of::<T>();
+
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn swap(&mut self, a: usize, b: usize) {
+        <[T]>::swap(self, a, b);
+    }
+
+    fn runs(&mut self, ranges: &[Range<usize>]) -> Vec<&mut [T]> {
+        let mut runs = Vec::with_capacity(ranges.len());
+        let mut rest = self.as_mut_slice();
+        let mut offset = 0;
+        for range in ranges {
+            let (_, tail) = mem::take(&mut rest).split_at_mut(range.start - offset);
+            let (run, tail) = tail.split_at_mut(range.len());
+            runs.push(run);
+            rest = tail;
+            offset = range.end;
+        }
+        runs
+    }
+}
+
 /// A frame's noise samples, each tagged with its gain bin, and each bin's sum of gains: what an
-/// estimator fills before it measures each bin's variance. The samples stay in the one buffer the
+/// estimator fills before it measures each bin's variance. The samples stay in the buffers the
 /// caller sized, and [`Self::measure`] groups them by bin in place, so the samples are held once.
 #[derive(Debug)]
-pub(crate) struct BinnedSamples<T> {
-    samples: Vec<T>,
+pub(crate) struct BinnedSamples<S> {
+    samples: S,
     bins: Vec<u8>,
     gain_sums: [f64; GAIN_BINS],
 }
 
-impl<T> BinnedSamples<T> {
+impl<T> BinnedSamples<Vec<T>> {
     /// Room for `capacity` samples, more than which [`Self::push`] never takes.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -38,30 +93,6 @@ impl<T> BinnedSamples<T> {
             bins: Vec::with_capacity(capacity),
             gain_sums: [0.0; GAIN_BINS],
         }
-    }
-
-    /// `samples`, each in the bin of the gain `gain` reads for it.
-    pub(crate) fn of(samples: Vec<T>, bins: &GainBins, gain: impl Fn(&T) -> f32) -> Self {
-        let mut gain_sums = [0.0; GAIN_BINS];
-        let bins = samples
-            .iter()
-            .map(|sample| {
-                let gain = gain(sample);
-                let bin = bins.bin(gain);
-                gain_sums[bin] += f64::from(gain);
-                bin as u8
-            })
-            .collect();
-        Self {
-            samples,
-            bins,
-            gain_sums,
-        }
-    }
-
-    /// The bytes `count` samples hold here: each sample and its bin.
-    pub(crate) const fn heap_bytes(count: usize) -> usize {
-        count * (size_of::<T>() + size_of::<u8>())
     }
 
     pub(crate) fn push(&mut self, bins: &GainBins, gain: f32, sample: T) {
@@ -74,14 +105,58 @@ impl<T> BinnedSamples<T> {
         self.bins.push(bin as u8);
         self.gain_sums[bin] += f64::from(gain);
     }
+}
+
+impl<S: Samples> BinnedSamples<S> {
+    /// `samples`, each in the bin of the gain `gain` reads for the sample at its position: tagged
+    /// in parallel shares of [`BIN_SHARE`], each summing its own gains, the shares' sums added in
+    /// order so the bits do not depend on the thread count.
+    pub(crate) fn of(samples: S, bins: &GainBins, gain: impl Fn(&S, usize) -> f32 + Sync) -> Self
+    where
+        S: Sync,
+    {
+        let mut tags = vec![0u8; samples.len()];
+        let mut shares = Vec::with_capacity(tags.len().div_ceil(BIN_SHARE));
+        tags.par_chunks_mut(BIN_SHARE)
+            .enumerate()
+            .map(|(share, tags)| {
+                let start = share * BIN_SHARE;
+                let mut sums = [0.0f64; GAIN_BINS];
+                for (offset, tag) in tags.iter_mut().enumerate() {
+                    let gain = gain(&samples, start + offset);
+                    let bin = bins.bin(gain);
+                    sums[bin] += f64::from(gain);
+                    *tag = bin as u8;
+                }
+                sums
+            })
+            .collect_into_vec(&mut shares);
+        let mut gain_sums = [0.0; GAIN_BINS];
+        for share in shares {
+            for (sum, part) in gain_sums.iter_mut().zip(share) {
+                *sum += part;
+            }
+        }
+        Self {
+            samples,
+            bins: tags,
+            gain_sums,
+        }
+    }
+
+    /// The bytes `count` samples hold here: each sample and its bin.
+    pub(crate) const fn heap_bytes(count: usize) -> usize {
+        count * (S::BYTES + size_of::<u8>())
+    }
 
     /// The bins `variance` measures: each run of bins in gain order merged until it holds
     /// [`MIN_BIN_SAMPLES`], a short last run into the one before it; one run of every sample when
     /// all of them are fewer. A frame too small to fill the bins still has its noise measured,
-    /// over coarser runs of gain. Within a run the samples come in no particular order.
+    /// over coarser runs of gain. Within a run the samples come in no particular order. The runs
+    /// are measured in parallel, each on its own.
     pub(crate) fn measure(
         mut self,
-        mut variance: impl FnMut(&mut [T]) -> f64,
+        variance: impl Fn(S::Run<'_>) -> f64 + Sync,
     ) -> ArrayVec<GainBin, GAIN_BINS> {
         let mut counts = [0usize; GAIN_BINS];
         for &bin in &self.bins {
@@ -107,11 +182,20 @@ impl<T> BinnedSamples<T> {
                 None => runs.push((start..end, sum)),
             }
         }
+        let ranges: ArrayVec<Range<usize>, GAIN_BINS> =
+            runs.iter().map(|(range, _)| range.clone()).collect();
+        let mut variances = Vec::with_capacity(ranges.len());
+        self.samples
+            .runs(&ranges)
+            .into_par_iter()
+            .map(&variance)
+            .collect_into_vec(&mut variances);
         runs.into_iter()
-            .map(|(run, gain_sum)| GainBin {
-                gain: gain_sum / run.len() as f64,
-                samples: run.len(),
-                variance: variance(&mut self.samples[run]),
+            .zip(variances)
+            .map(|((range, gain_sum), variance)| GainBin {
+                gain: gain_sum / range.len() as f64,
+                samples: range.len(),
+                variance,
             })
             .collect()
     }

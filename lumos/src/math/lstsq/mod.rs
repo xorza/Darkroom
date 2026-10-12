@@ -1,12 +1,20 @@
 //! [`Lstsq`]: linear least squares by the singular value decomposition.
 
-use nalgebra::{DMatrix, Dyn, SVD};
+use nalgebra::{DMatrix, Dyn, QR, SVD};
 
 /// A design matrix factored by its SVD, with its numerical rank decided by one rule: a singular
 /// value at or below `max(rows, columns)·ε·σ_max` is indistinguishable from zero in f64, the
 /// default cutoff of NumPy's `lstsq` and LAPACK's `gelsd`.
+///
+/// A design taller than wide is first reduced by a Householder QR, `A = QR`, and its SVD taken of
+/// the square `R`, whose singular values are `A`'s: what LAPACK's `gesvd` does for a matrix much
+/// taller than wide, both steps backward stable, at a fraction of the work of bidiagonalizing `A`
+/// itself and building its left singular vectors.
 #[derive(Debug)]
 pub(crate) struct Lstsq {
+    /// `A`'s Householder reflections, applied to a right-hand side before the SVD solves it; `None`
+    /// for a design wider than tall, factored whole.
+    qr: Option<QR<f64, Dyn, Dyn>>,
     svd: SVD<f64, Dyn, Dyn>,
     columns: usize,
     tolerance: f64,
@@ -15,9 +23,16 @@ pub(crate) struct Lstsq {
 impl Lstsq {
     pub(crate) fn new(design: DMatrix<f64>) -> Self {
         let (rows, columns) = design.shape();
-        let svd = design.svd(true, true);
+        let (qr, svd) = if rows >= columns {
+            let qr = design.qr();
+            let svd = qr.r().svd(true, true);
+            (Some(qr), svd)
+        } else {
+            (None, design.svd(true, true))
+        };
         let largest = svd.singular_values.iter().copied().fold(0.0, f64::max);
         Self {
+            qr,
             svd,
             columns,
             tolerance: rows.max(columns) as f64 * f64::EPSILON * largest,
@@ -32,11 +47,19 @@ impl Lstsq {
     /// The least-squares solution for each column of `rhs`; `None` when the design is rank
     /// deficient, so the solution is not unique.
     pub(crate) fn solve(&self, rhs: &DMatrix<f64>) -> Option<DMatrix<f64>> {
-        (self.rank() == self.columns).then(|| {
-            self.svd
-                .solve(rhs, self.tolerance)
-                .expect("an SVD computed with both singular-vector sets can solve")
-        })
+        if self.rank() != self.columns {
+            return None;
+        }
+        let solution = match &self.qr {
+            Some(qr) => {
+                let mut reflected = rhs.clone();
+                qr.q_tr_mul(&mut reflected);
+                self.svd
+                    .solve(&reflected.rows(0, self.columns), self.tolerance)
+            }
+            None => self.svd.solve(rhs, self.tolerance),
+        };
+        Some(solution.expect("an SVD computed with both singular-vector sets can solve"))
     }
 }
 

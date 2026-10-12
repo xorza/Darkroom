@@ -19,6 +19,8 @@
 pub(crate) mod common_domain;
 pub(crate) mod photometric_gain;
 
+use std::slice;
+
 use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
@@ -944,14 +946,14 @@ fn measure_plane(
     let median = match domain {
         Some(domain) => {
             let mut high = median.high_pass();
-            for_each_in_domain(values, domain, cancel, |value| high.add(value))?;
+            for_each_in_domain(values, domain, cancel, |run| high.add_all(run))?;
             debug_assert_eq!(
                 high.len(),
                 domain.sample_count,
                 "the walk visits the domain"
             );
             let mut low = high.finish();
-            for_each_in_domain(values, domain, cancel, |value| low.add(value))?;
+            for_each_in_domain(values, domain, cancel, |run| low.add_all(run))?;
             Some(low.median())
         }
         None => None,
@@ -959,27 +961,33 @@ fn measure_plane(
     Ok(PlaneMeasurement { median, samples })
 }
 
-/// Call `visit` with every value of `values` the domain holds, in pixel order.
+/// Call `visit` with the values of `values` the domain holds, in pixel order: a mask word's 64
+/// values as one run when it holds them all, the others one value a run.
 fn for_each_in_domain(
     values: &[f32],
     domain: &CommonDomain,
     cancel: &CancelToken,
-    mut visit: impl FnMut(f32),
+    mut visit: impl FnMut(&[f32]),
 ) -> Result<(), StackError> {
     for (chunk, chunk_values) in values.chunks(Cancelled::POLL_CHUNK).enumerate() {
         Cancelled::check(cancel)?;
         let base = chunk * Cancelled::POLL_CHUNK;
         let end = base + chunk_values.len();
         // The mask is one row, so word `w` covers pixels `64w..64w + 64`, and a chunk starts on a
-        // word: its words are read once each instead of a bit lookup per pixel.
+        // word: its words are read once each instead of a bit lookup per pixel, and a full word's
+        // pixels go on as one run.
         let words = &domain.valid.words[base / WORD_BITS..end.div_ceil(WORD_BITS)];
         for (offset, &word) in words.iter().enumerate() {
             let word_base = offset * WORD_BITS;
+            if word == u64::MAX {
+                visit(&chunk_values[word_base..word_base + WORD_BITS]);
+                continue;
+            }
             let mut bits = word;
             while bits != 0 {
                 let bit = bits.trailing_zeros() as usize;
                 bits &= bits - 1;
-                visit(chunk_values[word_base + bit]);
+                visit(slice::from_ref(&chunk_values[word_base + bit]));
             }
         }
     }

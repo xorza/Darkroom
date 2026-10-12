@@ -117,9 +117,8 @@ fn hdr_preserves_fine_detail() {
 fn residual(plane: &[f32], size: Size2us, scales: usize) -> Vec<f32> {
     let mut c_curr = Buffer2::new(size.width, size.height, plane.to_vec());
     let mut c_next = Buffer2::new_default(size.width, size.height);
-    let mut tmp = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        atrous_smooth(&c_curr, &mut c_next, 1 << j);
         mem::swap(&mut c_curr, &mut c_next);
     }
     c_curr.pixels().to_vec()
@@ -142,10 +141,9 @@ fn linear_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32>
 fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32> {
     let mut c_curr = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
     let mut c_next = Buffer2::new_default(size.width, size.height);
-    let mut tmp = Buffer2::new_default(size.width, size.height);
     let mut layers: Vec<Vec<f32>> = Vec::new();
     for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
+        atrous_smooth(&c_curr, &mut c_next, 1 << j);
         layers.push(
             c_curr
                 .pixels()

@@ -1,16 +1,17 @@
 //! The order statistics over the sizes they run at: a combine pixel's frames, a star's stamp and a
-//! background tile; and a whole plane's median, by radix and by selection.
+//! background tile; and a whole plane's median, by radix over the 64-value runs normalization
+//! feeds it, and by selection.
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{mad_with_scratch, median_fast, median_mut, robust_sigma_f64};
+use crate::math::statistics::{mad_with_scratch, median_mut, robust_sigma_f64};
 
 /// A combine pixel's frames, a star's stamp, a 64² background tile.
 const LENGTHS: [usize; 3] = [16, 256, 4_096];
@@ -26,15 +27,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| median_mut(black_box(values)),
-                BatchSize::SmallInput,
-            );
-        });
-        group.bench_function(BenchmarkId::new("median_fast", len), |b| {
-            let values = fixture::sky(len, 2);
-            b.iter_batched_ref(
-                || values.clone(),
-                |values| median_fast(black_box(values)),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("median_mad", len), |b| {
@@ -42,7 +35,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| MedianMad::of_mut(black_box(values)),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("mad_with_scratch", len), |b| {
@@ -62,7 +55,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| ClippedStats::sigma_clipped(black_box(values), &mut deviations, 3.0, 5),
-                BatchSize::SmallInput,
+                fixture::in_place(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("spread", len), |b| {
@@ -80,12 +73,12 @@ pub(crate) fn benches(c: &mut Criterion) {
         let mut median = RadixMedian::default();
         b.iter(|| {
             let mut high = median.high_pass();
-            for &value in black_box(&plane) {
-                high.add(value);
+            for word in black_box(&plane).chunks(64) {
+                high.add_all(word);
             }
             let mut low = high.finish();
-            for &value in &plane {
-                low.add(value);
+            for word in plane.chunks(64) {
+                low.add_all(word);
             }
             low.median()
         });

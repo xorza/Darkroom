@@ -3,7 +3,7 @@
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::math::linear_system::solve_in_place;
@@ -30,7 +30,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched_ref(
                 || (matrix.clone(), rhs.clone()),
                 |(matrix, rhs)| solve_in_place(black_box(matrix), black_box(rhs), 1e-12),
-                BatchSize::SmallInput,
+                fixture::in_place((n * n + n) * size_of::<f64>()),
             );
         });
     }

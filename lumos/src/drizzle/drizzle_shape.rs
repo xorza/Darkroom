@@ -157,11 +157,11 @@ mod tests {
     ///
     /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, and
     /// 16 flag bytes: 208 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B, measured by
-    /// MRS over one tile that is the frame: 4 coefficients of 33 bytes, 32 bytes of transform a
-    /// pixel and 88 of bookkeeping, 348 B, the way's peak at 368 B, 160 past the frame it keeps.
-    /// The depth of the one weight plane, 64 B, is held through every stage. The combine holds the
-    /// image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row reads three frames
-    /// of 13 B a pixel over 4 pixels, 156 B.
+    /// MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of transform a
+    /// pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 200 past the
+    /// frame it keeps. The depth of the one weight plane, 64 B, is held through every stage. The
+    /// combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row
+    /// reads three frames of 13 B a pixel over 4 pixels, 156 B.
     #[test]
     fn the_depth_is_held_through_every_stage() {
         let shape = DrizzleShape {
@@ -182,7 +182,7 @@ mod tests {
                 Stage {
                     kept: 208,
                     held: 64,
-                    in_flight: 160,
+                    in_flight: 200,
                     units: Units::Serial,
                 },
                 Stage {

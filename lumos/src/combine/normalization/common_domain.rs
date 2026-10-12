@@ -33,12 +33,16 @@ pub(crate) struct CommonDomain {
 }
 
 impl CommonDomain {
-    /// The all-valid mask an intersection starts from: one bit per pixel, one row.
+    /// The all-valid mask an intersection starts from: one bit per pixel, one row, its padding
+    /// clear. The walks over a domain read its words whole, and a span every frame covers is never
+    /// intersected, so a padding bit left set would read as a pixel past the plane.
     ///
     /// Its own function so the tests can weigh exactly what [`Self::build`] allocates rather than
     /// a copy of the expression that could drift from it.
     fn full_mask(pixel_count: usize) -> BitBuffer2 {
-        BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
+        let mut mask = BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true);
+        mask.clear_padding();
+        mask
     }
 
     /// The bytes a domain over `pixel_count` pixels holds: its mask.
@@ -89,6 +93,10 @@ impl CommonDomain {
 
     /// The domain `valid` holds; [`StackError::NoCommonCoverage`] when it holds no pixel.
     fn of_mask(valid: BitBuffer2) -> Result<Self, StackError> {
+        debug_assert!(
+            valid.padding_is_clear(),
+            "a domain's mask past its last pixel"
+        );
         let sample_count = valid.count_ones();
         if sample_count == 0 {
             return Err(StackError::NoCommonCoverage);
@@ -183,8 +191,8 @@ fn intersect_span(words: &mut [u64], pixels: usize, is_valid: impl Fn(usize) -> 
 mod tests {
     use crate::combine::normalization::common_domain::CommonDomain;
 
-    /// The common-domain mask is one bit per pixel, not one byte, and [`CommonDomain::heap_bytes`]
-    /// is what it holds.
+    /// The common-domain mask is one bit per pixel, not one byte, [`CommonDomain::heap_bytes`] is
+    /// what it holds, and its padding starts clear.
     ///
     /// Nothing else would notice a revert to `Vec<bool>` at the sizes the tests run: the combine
     /// would still be correct and simply hold eight times the mask, 37.7 MB against 4.7 MB at 6144²,
@@ -208,5 +216,11 @@ mod tests {
                 "{pixels} px: packing should be 8x, got {unpacked} B unpacked vs {packed} B packed"
             );
         }
+
+        // 1000 pixels end 40 bits into their last word, and the 24 bits past them are clear, so a
+        // walk over the words reads no pixel past the plane.
+        let mask = CommonDomain::full_mask(1000);
+        assert!(mask.padding_is_clear());
+        assert_eq!(mask.count_ones(), 1000);
     }
 }

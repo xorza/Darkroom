@@ -726,11 +726,11 @@ mod tests {
     /// Three mono lights of 4 × 4 with no normalization and the image alone, on one worker.
     ///
     /// A light decodes to 16 pixels of 4 bytes and 16 flag bytes, 80 B, and its statistics are
-    /// MRS over one tile that is the frame: 16 coefficients of 33 bytes, 32 bytes of transform a
-    /// pixel and 88 of bookkeeping, 1128 B. Its detector holds 9 planes, 576 B. Warped it holds 3
-    /// planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a row reads 12 + 1 B a
-    /// pixel and 4 B of gain over 16 pixels, rounded up to 1: 14 B a pixel, 168 B for three over 4
-    /// pixels. The combine holds the image and its flag byte, 80 B.
+    /// MRS over one tile that is the frame: 16 coefficients of 33 bytes, 28 bytes of transform a
+    /// pixel, a row of 16 B and 136 of bookkeeping, 1128 B. Its detector holds 9 planes, 576 B.
+    /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
+    /// row reads 12 + 1 B a pixel and 4 B of gain over 16 pixels, rounded up to 1: 14 B a pixel,
+    /// 168 B for three over 4 pixels. The combine holds the image and its flag byte, 80 B.
     ///
     /// Found, a light in work holds its statistics and its detector, 1704 B, and a warp its 80 B
     /// source. Named, a worker holds the light at its peak, 1208 B, and the detector. Held by the

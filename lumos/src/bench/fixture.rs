@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion};
+use criterion::{BatchSize, BenchmarkGroup, Criterion};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -36,6 +36,14 @@ pub(crate) fn group<'a>(
             .measurement_time(Duration::from_secs(3)),
     };
     group
+}
+
+/// The batch for a routine that changes an input of `bytes` in place: as many fresh copies as fit
+/// in 128 KiB, at least one. Criterion builds a batch's copies before it times them, so a batch
+/// that outgrows the cache times the routine on inputs memory has to bring back.
+pub(crate) const fn in_place(bytes: usize) -> BatchSize {
+    let copies = (128 * 1024) / if bytes == 0 { 1 } else { bytes };
+    BatchSize::NumIterations(if copies == 0 { 1 } else { copies as u64 })
 }
 
 /// `len` draws of a unit normal, by Box–Muller.

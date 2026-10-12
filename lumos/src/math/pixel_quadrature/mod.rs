@@ -1,5 +1,8 @@
 //! [`PixelQuadrature`]: Gauss–Legendre quadrature over one pixel.
 
+use std::array;
+use std::sync::OnceLock;
+
 /// The highest order a [`PixelQuadrature`] holds.
 pub(crate) const MAX_ORDER: usize = 16;
 
@@ -93,13 +96,23 @@ impl PixelQuadrature {
     /// and golden-section search finds the least. The tensor rule's error is at most the sum of
     /// the two axes' — `(I − Qₓ)·I_y` and `Qₓ·(I − Q_y)`, positive weights summing to 1 — so each
     /// axis takes half the tolerance. `None` past [`MAX_ORDER`].
+    ///
+    /// The bound falls as the order grows, so the orders are bisected; and an order is shown
+    /// sufficient by the first ρ whose bound is within the tolerance, which ends its search.
     pub(crate) fn sufficient_order(profile: AnalyticProfile, tolerance: f64) -> Option<usize> {
         let log_tolerance = (tolerance / 2.0).ln();
-        (1..=MAX_ORDER).find(|&order| Self::log_error_bound(profile, order) <= log_tolerance)
+        let orders: [usize; MAX_ORDER] = array::from_fn(|i| i + 1);
+        let insufficient = orders.partition_point(|&order| {
+            Self::least_log_bound(profile, order, log_tolerance) > log_tolerance
+        });
+        orders.get(insufficient).copied()
     }
 
-    /// `ln` of the least of the one-axis bound over ρ, for `order` points.
-    fn log_error_bound(profile: AnalyticProfile, order: usize) -> f64 {
+    /// `ln` of the least of the one-axis bound over ρ, for `order` points, or the first bound the
+    /// search meets at or below `stop`. Golden-section search keeps its least point inside the
+    /// bracket, so the least it ends on is the least it met: stopping at `stop` changes no answer to
+    /// whether the least is at or below it.
+    fn least_log_bound(profile: AnalyticProfile, order: usize, stop: f64) -> f64 {
         let n = order as f64;
         let log_bound = |log_rho: f64| {
             let rho = log_rho.exp();
@@ -115,6 +128,9 @@ impl PixelQuadrature {
         let mut right = low + ratio * (high - low);
         let (mut at_left, mut at_right) = (log_bound(left), log_bound(right));
         for _ in 0..Self::GOLDEN_STEPS {
+            if at_left.min(at_right) <= stop {
+                break;
+            }
             if at_left <= at_right {
                 high = right;
                 right = left;
@@ -132,12 +148,19 @@ impl PixelQuadrature {
         at_left.min(at_right)
     }
 
-    /// The rule of `order` points, ascending.
+    /// The rule of `order` points, ascending. Every order's rule is solved on first use and copied
+    /// out after: a fit takes one per star, and the nodes never change.
     pub(crate) fn gauss_legendre(order: usize) -> Self {
+        static RULES: OnceLock<[PixelQuadrature; MAX_ORDER]> = OnceLock::new();
         assert!(
             (1..=MAX_ORDER).contains(&order),
             "a pixel quadrature has 1 to {MAX_ORDER} points, not {order}"
         );
+        RULES.get_or_init(|| array::from_fn(|index| Self::solved(index + 1)))[order - 1]
+    }
+
+    /// The rule of `order` points, its nodes found by Newton's method.
+    fn solved(order: usize) -> Self {
         let mut rule = Self {
             order,
             nodes: [0.0; MAX_ORDER],
@@ -210,9 +233,12 @@ mod tests {
             let gaussian = PixelGaussian { sigma };
             for order in 1..=8 {
                 let rule = PixelQuadrature::gauss_legendre(order);
-                let bound =
-                    PixelQuadrature::log_error_bound(AnalyticProfile::Gaussian { sigma }, order)
-                        .exp();
+                let bound = PixelQuadrature::least_log_bound(
+                    AnalyticProfile::Gaussian { sigma },
+                    order,
+                    f64::NEG_INFINITY,
+                )
+                .exp();
                 for step in 0..=40 {
                     let d = 4.0 * sigma * f64::from(step) / 40.0;
                     let quadrature =
@@ -230,9 +256,12 @@ mod tests {
         let moffat = |t: f64, _| (1.0 + t * t / (alpha * alpha)).powf(-beta);
         for order in 1..=8 {
             let rule = PixelQuadrature::gauss_legendre(order);
-            let bound =
-                PixelQuadrature::log_error_bound(AnalyticProfile::Moffat { alpha, beta }, order)
-                    .exp();
+            let bound = PixelQuadrature::least_log_bound(
+                AnalyticProfile::Moffat { alpha, beta },
+                order,
+                f64::NEG_INFINITY,
+            )
+            .exp();
             for step in 0..=40 {
                 let d = 3.0 * f64::from(step) / 40.0;
                 let error =

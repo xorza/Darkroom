@@ -21,14 +21,15 @@ const FRAMES: usize = 6;
 ///
 /// The spilled budget, 1 572 864 B, is less than one frame takes to measure: its 102 400 B of
 /// samples and 25 600 of flags, and the MRS estimate of its noise over one tile that is the frame,
-/// 25 600 coefficients of 33 bytes, 32 bytes of transform a pixel and 88 of bookkeeping,
-/// 1 664 088 B. The run reports the 219 224 B those 1 792 088 B are past it.
+/// 25 600 coefficients of 33 bytes, 28 bytes of transform a pixel, a row of 160 pixels for each of
+/// the 2 workers and 136 of bookkeeping, 1 563 016 B. The run reports the 118 152 B those
+/// 1 691 016 B are past it.
 #[test]
 fn a_stack_stays_within_its_budget() {
     let session = Session::new("lumos_budget_stack");
     let paths = StarField::new(SIDE, 30, 0x57AC).expose(session.scratch(), FRAMES, Layout::Mono);
     for (label, budget, spilled, overcommit) in [
-        ("spilled", Budget::mib(2), FRAMES as u64, 219_224),
+        ("spilled", Budget::mib(2), FRAMES as u64, 118_152),
         ("resident", Budget::mib(16), 0, 0),
     ] {
         let ingest = session.ingest(budget);
