@@ -9,7 +9,6 @@ use crate::common::color_format::{ColorFormat, SampleType};
 use crate::common::sample::Sample;
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are
@@ -19,24 +18,30 @@ use crate::simd_tier::SimdTier;
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
 /// [`row_kernel`] at a supported [`SimdTier`] is what establishes that.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-type RowKernel = unsafe fn(src: &[u8], dst: &[u8], out: &mut [u8], params: Blend);
+pub(super) type RowKernel = unsafe fn(src: &[u8], dst: &[u8], out: &mut [u8], params: Blend);
 
-/// The SIMD row kernel `tier` has for `format`, or `None` when the tier or the
-/// format has no vector path — callers then take the scalar reference.
+/// No arch kernels: [`SimdTier`] has no value here.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub(super) fn row_kernel(tier: SimdTier, _format: ColorFormat) -> Option<RowKernel> {
+    match tier {}
+}
+
+/// The SIMD row kernel compiled for `tier` itself for `format`, or `None` when
+/// the tier or the format has no vector path — callers then take the scalar
+/// reference.
 ///
 /// Only RGBA is specialized: its four channels fill a vector register exactly,
 /// which is what lets one register hold a pixel and the blend stay branch-free
 /// across channels. L and RGB fall to the scalar path.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
+pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "aarch64")]
     use crate::ops::blend::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
     use crate::ops::blend::cpu::sse41 as simd;
 
     #[cfg(target_arch = "x86_64")]
-    if tier < SimdTier::Sse41 {
+    if tier != SimdTier::Sse41 {
         return None;
     }
     #[cfg(target_arch = "aarch64")]
@@ -59,9 +64,8 @@ pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image)
 
     let format = src.desc().color_format;
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = SimdTier::widest().and_then(|tier| row_kernel(tier, format)) {
-        // SAFETY: the kernel is the widest supported tier's.
+    if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
+        // SAFETY: dispatch takes a kernel of a supported tier.
         unsafe { apply_kernel(kernel, params, src, dst, output) };
         return;
     }
@@ -69,21 +73,28 @@ pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image)
     apply_scalar(params, src, dst, output);
 }
 
-/// The scalar path, picking the storage type the format stores channels in.
-/// Split out so the tests can reach the reference past the SIMD dispatch.
+/// The scalar path, one row pair at a time through [`scalar_row`]. Split out so
+/// the tests can reach the reference past the SIMD dispatch.
 fn apply_scalar(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
-    match src.desc().color_format.sample_type {
-        SampleType::U8 => apply_typed::<u8>(params, src, dst, output),
-        SampleType::U16 => apply_typed::<u16>(params, src, dst, output),
-        SampleType::F32 => apply_typed::<f32>(params, src, dst, output),
-    }
+    let format = src.desc().color_format;
+    let stride = src.desc().row_bytes();
+    let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
+
+    output
+        .bytes_mut()
+        .par_chunks_mut(stride)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            let src_row = &src_bytes[y * stride..][..stride];
+            let dst_row = &dst_bytes[y * stride..][..stride];
+            scalar_row(params, format, src_row, dst_row, out_row);
+        });
 }
 
 /// Drives `kernel` over every row, one rayon job per row.
 ///
 /// # Safety
 /// The running CPU must support the feature `kernel` was compiled for.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 unsafe fn apply_kernel(
     kernel: RowKernel,
     params: Blend,
@@ -156,39 +167,42 @@ fn rgba_tail<T: Sample>(params: Blend, src: &[T], dst: &[T], out: &mut [T]) {
     }
 }
 
-/// The scalar reference: per-channel blending through [`blend_value`]. Taken when
-/// the CPU offers no SIMD kernel for the format, and cross-checked against the
-/// SIMD kernels by the tests.
-fn apply_typed<T>(params: Blend, src: &Image, dst: &Image, output: &mut Image)
-where
-    T: Sample,
-{
-    let format = src.desc().color_format;
-    debug_assert_eq!(format.sample_type, T::TYPE);
+/// The scalar reference over one packed row pair of `format`: per-channel
+/// blending through [`blend_value`]. Taken when the CPU offers no SIMD kernel
+/// for the format, and cross-checked against the SIMD kernels by the tests.
+pub(super) fn scalar_row(
+    params: Blend,
+    format: ColorFormat,
+    src: &[u8],
+    dst: &[u8],
+    out: &mut [u8],
+) {
+    match format.sample_type {
+        SampleType::U8 => typed_row::<u8>(params, format, src, dst, out),
+        SampleType::U16 => typed_row::<u16>(params, format, src, dst, out),
+        SampleType::F32 => typed_row::<f32>(params, format, src, dst, out),
+    }
+}
 
+fn typed_row<T: Sample>(
+    params: Blend,
+    format: ColorFormat,
+    src: &[u8],
+    dst: &[u8],
+    out: &mut [u8],
+) {
     let channels = format.channel_count.count();
-    let stride = src.desc().row_bytes();
     // Channels the blend mode applies to; alpha, where the format has one, is
     // the last channel and is left to the mix alone.
     let color = channels - usize::from(format.has_alpha());
-    let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
+    let src: &[T] = bytemuck::cast_slice(src);
+    let dst: &[T] = bytemuck::cast_slice(dst);
+    let out: &mut [T] = bytemuck::cast_slice_mut(out);
 
-    output
-        .bytes_mut()
-        .par_chunks_mut(stride)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let src_row: &[T] = bytemuck::cast_slice(&src_bytes[y * stride..][..stride]);
-            let dst_row: &[T] = bytemuck::cast_slice(&dst_bytes[y * stride..][..stride]);
-            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row);
-
-            let inputs = src_row
-                .chunks_exact(channels)
-                .zip(dst_row.chunks_exact(channels));
-            for ((src_px, dst_px), out_px) in inputs.zip(out_row.chunks_exact_mut(channels)) {
-                blend_pixel(params, src_px, dst_px, out_px, color);
-            }
-        });
+    let inputs = src.chunks_exact(channels).zip(dst.chunks_exact(channels));
+    for ((src_px, dst_px), out_px) in inputs.zip(out.chunks_exact_mut(channels)) {
+        blend_pixel(params, src_px, dst_px, out_px, color);
+    }
 }
 
 #[cfg(test)]

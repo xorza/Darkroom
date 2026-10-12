@@ -1,48 +1,126 @@
-//! Benchmarks for the CPU image transform (rotation, nearest vs bilinear),
-//! swept across all nine pixel formats on a ~6K (25 MP) frame.
+//! The transform cases, a rotation by π/6 about the centre over all nine formats and both
+//! filters: each kernel on one tile, and the op on the standard frame on each backend.
 
 use std::f32::consts::PI;
 use std::hint::black_box;
+#[cfg(feature = "wgpu")]
 use std::time::Duration;
 
-use criterion::{BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion};
 use glam::Vec2;
 
-use super::{FilterMode, Transform};
-use crate::common::color_format::ALL_FORMATS;
-use crate::common::internals::create_test_image;
+use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
+use crate::bench::scene::{self, HEIGHT, TILE, WIDTH};
+use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+#[cfg(feature = "wgpu")]
+use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;
+use crate::image::image_desc::ImageDesc;
+#[cfg(feature = "wgpu")]
+use crate::ops::transform::pipeline::GpuTransformPipeline;
+use crate::ops::transform::{FilterMode, Transform, cpu};
 
-// 6K-class frame (~25 MP) — large enough to dominate per-call overhead and
-// exercise the rayon-parallel per-row kernel at scale.
-const WIDTH: usize = 6144;
-const HEIGHT: usize = 4096;
+/// The slowest GPU case's iteration as measured on a Radeon 680M (bilinear RGBA f32, 326 ms):
+/// the round trip copies the frame to the device and back.
+#[cfg(feature = "wgpu")]
+const GPU_ITERATION: Duration = Duration::from_millis(330);
 
-pub fn bench(c: &mut Criterion) {
-    let center = Vec2::new(WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0);
+const FILTERS: [FilterMode; 2] = [FilterMode::Nearest, FilterMode::Bilinear];
 
-    let mut group = c.benchmark_group("transform/rotate");
-    group.sample_size(20);
-    group.warm_up_time(Duration::from_secs(1));
-    group.measurement_time(Duration::from_secs(3));
-
+/// `atomic/transform/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
+/// reference and each tier's kernel. The kernel takes the image and fans its rows out on rayon,
+/// as dispatch hands it. Per output pixel, reading the tile.
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "transform", Scale::Frame);
     for format in ALL_FORMATS {
-        let input = create_test_image(format, WIDTH, HEIGHT, 0);
-        let mut output = Image::new_black(input.desc()).unwrap();
-        // Criterion turns ids into report paths, so keep them space-free.
-        let label = format.to_string().replace(' ', "_");
-
-        group.throughput(Throughput::Bytes(input.bytes().len() as u64));
-        for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
-            let transform = Transform::new()
-                .rotate_around(PI / 6.0, center)
-                .filter(filter);
-
-            group.bench_function(BenchmarkId::new(format!("{filter:?}"), &label), |b| {
-                b.iter(|| transform.apply_cpu(black_box(&input), black_box(&mut output)));
-            });
+        let mut tile = None;
+        let mut output = Image::new_black(ImageDesc::new(TILE, TILE, format)).unwrap();
+        group.throughput(fixture::throughput(TILE * TILE, format.byte_count()));
+        for filter in FILTERS {
+            let transform = rotation(TILE, TILE, filter);
+            for variant in Variant::all(|tier| cpu::packed_kernel(tier, format, filter)) {
+                let id = BenchmarkId::new(variant.name, case_id(filter, format));
+                group.bench_function(id, |b| {
+                    let tile = tile.get_or_insert_with(|| scene::sky(format, TILE, TILE, 1));
+                    if let Some(kernel) = variant.kernel {
+                        // SAFETY: a variant holds only kernels of tiers this CPU has.
+                        b.iter(|| unsafe {
+                            kernel(&transform, black_box(tile), black_box(&mut output));
+                        });
+                    } else {
+                        b.iter(|| {
+                            cpu::apply_scalar(&transform, black_box(tile), black_box(&mut output));
+                        });
+                    }
+                });
+            }
         }
     }
-
     group.finish();
+}
+
+/// `integration/transform/<backend>/<filter>/<format>`: the op on the standard frame. On the CPU
+/// into a caller's output; on the GPU the upload, the op and the readback. Per output pixel,
+/// reading the frame.
+pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
+    let mut group = Kind::Integration.group(c, "transform", Scale::Frame);
+    #[cfg(feature = "wgpu")]
+    let mut pipeline = None;
+    for format in ALL_FORMATS {
+        let mut source = None;
+        let pixels = WIDTH * HEIGHT;
+        group.throughput(fixture::throughput(pixels, format.byte_count()));
+        for filter in FILTERS {
+            let transform = rotation(WIDTH, HEIGHT, filter);
+            for backend in backends.all() {
+                match backend {
+                    Backend::Cpu => Scale::Frame,
+                    #[cfg(feature = "wgpu")]
+                    Backend::Gpu => Scale::Set {
+                        iteration: GPU_ITERATION,
+                    },
+                }
+                .apply(&mut group);
+                let id = BenchmarkId::new(backend.id(), case_id(filter, format));
+                group.bench_function(id, |b| {
+                    let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                    match backend {
+                        Backend::Cpu => {
+                            let mut output = Image::new_black(frame.desc()).unwrap();
+                            b.iter(|| transform.apply_cpu(black_box(frame), &mut output));
+                        }
+                        #[cfg(feature = "wgpu")]
+                        Backend::Gpu => {
+                            let gpu = backends.gpu();
+                            let pipeline =
+                                pipeline.get_or_insert_with(|| GpuTransformPipeline::new(gpu));
+                            b.iter_with_large_drop(|| {
+                                let input = GpuImage::from_image(gpu, frame).unwrap();
+                                let mut output = GpuImage::new_empty(gpu, frame.desc()).unwrap();
+                                transform.apply_gpu(gpu, pipeline, &input, &mut output);
+                                output.to_image(gpu).unwrap()
+                            });
+                        }
+                    }
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
+/// A rotation by π/6 about the centre of a `width` × `height` image, sampled by `filter`.
+fn rotation(width: usize, height: usize, filter: FilterMode) -> Transform {
+    let centre = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+    Transform::new()
+        .rotate_around(PI / 6.0, centre)
+        .filter(filter)
+}
+
+fn case_id(filter: FilterMode, format: ColorFormat) -> String {
+    format!(
+        "{}/{}",
+        fixture::variant_id(filter),
+        fixture::format_id(format)
+    )
 }

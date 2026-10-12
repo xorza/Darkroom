@@ -185,5 +185,7 @@ macro_rules! planar_conversions {
 
 planar_conversions!(1 u8, 1 u16, 1 f32, 3 u8, 3 u16, 3 f32, 4 u8, 4 u16, 4 f32);
 
+#[cfg(feature = "internals")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

@@ -51,11 +51,10 @@ pub(crate) type RowConvertFn = unsafe fn(src: &[u8], dst: &mut [u8], width: usiz
 /// The SIMD row kernel for a format pair, or `None` when this build and CPU have
 /// no vector path for it — the caller then takes the scalar reference.
 pub(crate) fn row_converter(from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
-    tier_converter(SimdTier::widest()?, from, to)
+    SimdTier::dispatch(|tier| tier_converter(tier, from, to))
 }
 
-/// The kernel `tier` has for a format pair, or the one the next narrower tier has — what
-/// dispatch would pick on a CPU whose widest tier is `tier`.
+/// The kernel compiled for `tier` itself for a format pair, or `None` when that tier has none.
 ///
 /// # Safety (of the returned kernel)
 /// The caller must have checked [`SimdTier::is_supported`] for `tier`.
@@ -65,40 +64,28 @@ pub(crate) fn tier_converter(
     from: ColorFormat,
     to: ColorFormat,
 ) -> Option<RowConvertFn> {
-    // No conversion fuses a multiply-add, so the FMA tier runs the AVX2 kernels.
-    let tier = tier.min(SimdTier::Avx2);
     let kernel = match (tier, from, to) {
         (SimdTier::Avx2, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
             avx::convert_rgba_to_rgb_row_avx2 as RowConvertFn
         }
-        (SimdTier::Ssse3 | SimdTier::Sse41, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
+        (SimdTier::Ssse3, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
             sse::convert_rgba_to_rgb_row_ssse3
         }
-        (
-            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
-            ColorFormat::RGB_U8,
-            ColorFormat::RGBA_U8,
-        ) => sse::convert_rgb_to_rgba_row_ssse3,
-        (
-            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
-            ColorFormat::RGBA_U8,
-            ColorFormat::L_U8,
-        ) => sse::convert_rgba_to_l_row_ssse3,
-        (
-            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
-            ColorFormat::RGB_U8,
-            ColorFormat::L_U8,
-        ) => sse::convert_rgb_to_l_row_ssse3,
-        (
-            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
-            ColorFormat::L_U8,
-            ColorFormat::RGBA_U8,
-        ) => sse::convert_l_to_rgba_row_ssse3,
-        (
-            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
-            ColorFormat::L_U8,
-            ColorFormat::RGB_U8,
-        ) => sse::convert_l_to_rgb_row_ssse3,
+        (SimdTier::Ssse3, ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => {
+            sse::convert_rgb_to_rgba_row_ssse3
+        }
+        (SimdTier::Ssse3, ColorFormat::RGBA_U8, ColorFormat::L_U8) => {
+            sse::convert_rgba_to_l_row_ssse3
+        }
+        (SimdTier::Ssse3, ColorFormat::RGB_U8, ColorFormat::L_U8) => {
+            sse::convert_rgb_to_l_row_ssse3
+        }
+        (SimdTier::Ssse3, ColorFormat::L_U8, ColorFormat::RGBA_U8) => {
+            sse::convert_l_to_rgba_row_ssse3
+        }
+        (SimdTier::Ssse3, ColorFormat::L_U8, ColorFormat::RGB_U8) => {
+            sse::convert_l_to_rgb_row_ssse3
+        }
         _ => return element_converter(tier, from, to),
     };
     Some(kernel)
@@ -152,11 +139,11 @@ fn element_converter(tier: SimdTier, from: ColorFormat, to: ColorFormat) -> Opti
         (SimdTier::Avx2, U16, U8) => avx::convert_u16_to_u8_row_avx2,
         (SimdTier::Avx2, U16, F32) => avx::convert_u16_to_f32_row_avx2,
         (SimdTier::Avx2, F32, U16) => avx::convert_f32_to_u16_row_avx2,
-        (_, F32, U8) => sse::convert_f32_to_u8_row_sse2,
-        (_, U8, F32) => sse::convert_u8_to_f32_row_sse2,
-        (_, U8, U16) => sse::convert_u8_to_u16_row_sse2,
-        (_, U16, U8) => sse::convert_u16_to_u8_row_sse2,
-        (_, U16, F32) => sse::convert_u16_to_f32_row_sse2,
+        (SimdTier::Sse2, F32, U8) => sse::convert_f32_to_u8_row_sse2,
+        (SimdTier::Sse2, U8, F32) => sse::convert_u8_to_f32_row_sse2,
+        (SimdTier::Sse2, U8, U16) => sse::convert_u8_to_u16_row_sse2,
+        (SimdTier::Sse2, U16, U8) => sse::convert_u16_to_u8_row_sse2,
+        (SimdTier::Sse2, U16, F32) => sse::convert_u16_to_f32_row_sse2,
         (SimdTier::Sse41, F32, U16) => sse::convert_f32_to_u16_row_sse41,
         _ => return None,
     };

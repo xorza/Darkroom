@@ -28,7 +28,6 @@ pub(crate) fn create_test_image(
 }
 
 /// The 895×551 lena test image in `format`, read once and converted per call.
-#[cfg(test)]
 pub(crate) fn lena(format: ColorFormat) -> Image {
     use std::sync::OnceLock;
 
@@ -43,7 +42,7 @@ pub(crate) fn lena(format: ColorFormat) -> Image {
     .convert_to(format)
 }
 
-#[cfg(all(test, feature = "wgpu"))]
+#[cfg(feature = "wgpu")]
 pub(crate) mod gpu {
     use std::sync::OnceLock;
 
@@ -53,10 +52,6 @@ pub(crate) mod gpu {
     ///
     /// `None` on a host without a usable adapter, which the first caller reports on stderr —
     /// a GPU test that returns early on `None` would otherwise pass without having run.
-    #[expect(
-        clippy::print_stderr,
-        reason = "the skip notice is what keeps a skipped GPU test from reading as a pass"
-    )]
     pub(crate) fn test_gpu() -> Option<Gpu> {
         static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
         TEST_GPU

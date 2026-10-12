@@ -132,3 +132,6 @@ impl Blend {
         gpu::apply(*self, ctx, pipeline, src, dst, output);
     }
 }
+
+#[cfg(feature = "internals")]
+pub(crate) mod bench;

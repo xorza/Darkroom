@@ -1,90 +1,113 @@
-//! Benchmarks for the CPU contrast/brightness op, sweeping all nine pixel
-//! formats at two frame sizes: the public path (a SIMD kernel on every format
-//! this arch covers) against the scalar reference it replaces.
+//! The contrast/brightness cases, over all nine formats: each row kernel on one row, and the op
+//! on the standard frame on each backend.
 
 use std::hint::black_box;
+#[cfg(feature = "wgpu")]
 use std::time::Duration;
 
-use criterion::{BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion};
 
+use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
+use crate::bench::scene::{self, HEIGHT, WIDTH};
 use crate::common::color_format::ALL_FORMATS;
-use crate::common::internals::create_test_image;
-use crate::image::Image;
+#[cfg(feature = "wgpu")]
+use crate::gpu::gpu_image::GpuImage;
+use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
+#[cfg(feature = "wgpu")]
+use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 
-/// A frame size to sweep, and what it is there to expose.
-#[derive(Debug, Clone, Copy)]
-struct Frame {
-    label: &'static str,
-    width: usize,
-    height: usize,
-}
+/// Both knobs off their identity values, so no path can short-circuit and the fused
+/// `v * contrast + offset` the kernels evaluate has a nonzero offset.
+const OP: ContrastBrightness = ContrastBrightness {
+    contrast: 1.2,
+    brightness: 0.05,
+};
 
-/// Both sizes are needed, and they answer different questions.
-///
-/// At 25 MP every format is pinned to the memory roof, so the numbers say what
-/// a big frame costs but reveal nothing about kernel quality — a kernel twice
-/// as good measures the same. At 4 MP the smaller formats sit in cache and the
-/// kernels become the limit, which is the only place a compute regression, or a
-/// SIMD path that has stopped paying for itself, is visible at all.
-const FRAMES: [Frame; 2] = [
-    Frame {
-        label: "25MP",
-        width: 6144,
-        height: 4096,
-    },
-    Frame {
-        label: "4MP",
-        width: 2048,
-        height: 2048,
-    },
-];
+/// The slowest GPU case's iteration as measured on a Radeon 680M (RGBA f32, 315 ms): the round
+/// trip copies the frame to the device and back.
+#[cfg(feature = "wgpu")]
+const GPU_ITERATION: Duration = Duration::from_millis(320);
 
-/// Both knobs off their identity values, so neither path can short-circuit and
-/// the fused `v * contrast + offset` form the SIMD kernels use is exercised
-/// with a non-trivial offset.
-const CONTRAST: f32 = 1.2;
-const BRIGHTNESS: f32 = 0.05;
-
-/// A benchmarked variant: the public entry point, or the scalar reference.
-type ApplyFn = fn(ContrastBrightness, &mut Image);
-
-fn apply_auto(params: ContrastBrightness, image: &mut Image) {
-    params.apply_cpu(image);
-}
-
-pub fn bench(c: &mut Criterion) {
-    let params = ContrastBrightness::new(CONTRAST, BRIGHTNESS);
-
-    let mut group = c.benchmark_group("contrast_brightness");
-    group.sample_size(20);
-    group.warm_up_time(Duration::from_secs(1));
-    group.measurement_time(Duration::from_secs(3));
-
-    for frame in FRAMES {
-        for format in ALL_FORMATS {
-            // Criterion turns ids into report paths, so keep them space-free.
-            let label = format!("{format}_{}", frame.label).replace(' ', "_");
-
-            let variants = [
-                ("auto", apply_auto as ApplyFn),
-                ("scalar", cpu::apply_scalar as ApplyFn),
-            ];
-            for &(variant, apply) in &variants {
-                // A fresh image per variant so both start from identical pixels.
-                // The op is in place and repeated iterations drive the data
-                // toward saturation, which costs the same: the kernels are
-                // branch-free and clamp with min/max, so timing is
-                // data-independent.
-                let mut image = create_test_image(format, frame.width, frame.height, 0);
-
-                group.throughput(Throughput::Bytes(image.bytes().len() as u64));
-                group.bench_function(BenchmarkId::new(variant, &label), |b| {
-                    b.iter(|| apply(black_box(params), black_box(&mut image)));
-                });
-            }
+/// `atomic/contrast_brightness/<variant>/<format>`: one row of the standard frame in place,
+/// through the scalar reference and each tier's kernel, on a fresh copy each iteration. Per
+/// pixel, reading the row.
+pub(crate) fn atomic(c: &mut Criterion) {
+    let mut group = Kind::Atomic.group(c, "contrast_brightness", Scale::Sample);
+    for format in ALL_FORMATS {
+        let mut source = None;
+        let affine = ChannelAffine::new(OP, format);
+        let bytes = WIDTH * format.byte_count();
+        group.throughput(fixture::throughput(WIDTH, format.byte_count()));
+        for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
+            let id = BenchmarkId::new(variant.name, fixture::format_id(format));
+            group.bench_function(id, |b| {
+                let row = source.get_or_insert_with(|| scene::sky(format, WIDTH, 1, 1));
+                if let Some(kernel) = variant.kernel {
+                    let count = cpu::kernel_count(row.desc());
+                    b.iter_batched_ref(
+                        || row.clone(),
+                        // SAFETY: a variant holds only kernels of tiers this CPU has.
+                        |row| unsafe { kernel(black_box(row.bytes_mut()), count, affine) },
+                        fixture::fresh_copies(bytes),
+                    );
+                } else {
+                    b.iter_batched_ref(
+                        || row.clone(),
+                        |row| cpu::scalar_row(affine, format, black_box(row.bytes_mut())),
+                        fixture::fresh_copies(bytes),
+                    );
+                }
+            });
         }
     }
+    group.finish();
+}
 
+/// `integration/contrast_brightness/<backend>/<format>`: the op on the standard frame. On the
+/// CPU in place on a fresh copy each iteration; on the GPU the upload, the op and the readback.
+/// Per pixel, reading the frame.
+pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
+    let mut group = Kind::Integration.group(c, "contrast_brightness", Scale::Frame);
+    #[cfg(feature = "wgpu")]
+    let mut pipeline = None;
+    for format in ALL_FORMATS {
+        let mut source = None;
+        let bytes = WIDTH * HEIGHT * format.byte_count();
+        group.throughput(fixture::throughput(WIDTH * HEIGHT, format.byte_count()));
+        for backend in backends.all() {
+            match backend {
+                Backend::Cpu => Scale::Frame,
+                #[cfg(feature = "wgpu")]
+                Backend::Gpu => Scale::Set {
+                    iteration: GPU_ITERATION,
+                },
+            }
+            .apply(&mut group);
+            let id = BenchmarkId::new(backend.id(), fixture::format_id(format));
+            group.bench_function(id, |b| {
+                let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                match backend {
+                    Backend::Cpu => b.iter_batched_ref(
+                        || frame.clone(),
+                        |frame| OP.apply_cpu(black_box(frame)),
+                        fixture::fresh_copies(bytes),
+                    ),
+                    #[cfg(feature = "wgpu")]
+                    Backend::Gpu => {
+                        let gpu = backends.gpu();
+                        let pipeline =
+                            pipeline.get_or_insert_with(|| GpuContrastBrightnessPipeline::new(gpu));
+                        b.iter_with_large_drop(|| {
+                            let input = GpuImage::from_image(gpu, frame).unwrap();
+                            let mut output = GpuImage::new_empty(gpu, frame.desc()).unwrap();
+                            OP.apply_gpu(gpu, pipeline, &input, &mut output);
+                            output.to_image(gpu).unwrap()
+                        });
+                    }
+                }
+            });
+        }
+    }
     group.finish();
 }
