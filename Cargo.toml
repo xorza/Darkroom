@@ -112,10 +112,11 @@ unescaped_backticks = "warn"
 [features]
 default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
-internals = []
-# Compiles the colocated `bench.rs` drivers and the `bench` facade they are
-# reached through. Not part of the supported surface.
-bench = ["internals", "dep:criterion"]
+# What only tests and benches build: the shared test fixtures, and the colocated
+# `bench.rs` drivers with the `bench` facade they are reached through. Not part
+# of the supported surface. Every test and bench build turns it on through the
+# self dev-dependency.
+internals = ["dep:criterion"]
 
 [dependencies]
 wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"], optional = true }
@@ -143,22 +144,22 @@ required-features = ["wgpu"]
 [[bench]]
 name = "contrast_brightness"
 harness = false
-required-features = ["bench"]
+required-features = ["internals"]
 
 [[bench]]
 name = "transform"
 harness = false
-required-features = ["bench"]
+required-features = ["internals"]
 
 [[bench]]
 name = "preview"
 harness = false
-required-features = ["bench"]
+required-features = ["internals"]
 
 [[bench]]
 name = "conversion"
 harness = false
-required-features = ["bench"]
+required-features = ["internals"]
 
 [package.metadata.cargo-machete]
 ignored = ["strum"]
@@ -173,4 +174,5 @@ split-debuginfo = "off"
 opt-level = 3
 
 [dev-dependencies]
+imaginarium = { path = ".", default-features = false, features = ["internals"] }
 tempfile = "3"

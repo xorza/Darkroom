@@ -545,6 +545,7 @@ dependencies = [
  "criterion",
  "glam",
  "image",
+ "imaginarium",
  "pollster",
  "rayon",
  "strum",
