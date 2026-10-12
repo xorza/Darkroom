@@ -283,7 +283,7 @@ pub(crate) fn fits_linear_peek(
     })
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

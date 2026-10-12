@@ -332,7 +332,5 @@ pub(crate) struct FlagRule {
     pub(crate) saturation: [f64; 4],
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(test)]
 mod tests;

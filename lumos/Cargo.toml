@@ -13,7 +13,7 @@ real-data = []
 ml = ["dep:ort"]
 # Compiles `internals`, the synthetic data and helpers the tests use, for the benches outside
 # `cfg(test)`. Not part of the supported surface.
-internals = []
+internals = ["common/internals"]
 bench = ["internals", "dep:criterion"]
 
 [dependencies]
