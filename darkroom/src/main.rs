@@ -2,8 +2,8 @@
 // Explorer opens the window alone instead of trailing a console behind it.
 // Dev builds keep the console subsystem — that is where `init_tracing`'s
 // stderr output and clap's `--help` land. Gated on the same `debug_assertions`
-// signal as `common::is_debug`; `release-max` inherits `release`, so it has it
-// off and gets the GUI subsystem.
+// signal as `common::is_debug`, which `release`, `release-dev` and `bench`
+// turn off.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 

@@ -11,8 +11,6 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-# What only tests and benches build: the synthetic data and helpers, and the benches. Every test
-# and bench build turns it on through the self dev-dependency. Not part of the supported surface.
 # `libc` drops a spilled frame's pages from the page cache, for the benches of cold reads on Linux.
 internals = ["common/internals", "dep:criterion", "dep:libc"]
 

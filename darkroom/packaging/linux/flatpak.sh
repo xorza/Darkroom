@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build darkroom with the `release-max` profile and wrap it in a single-file
+# Build darkroom with the `release` profile and wrap it in a single-file
 # Flatpak bundle. Unlike install.sh — which points the desktop entry at whatever
 # was last compiled on this machine — this produces a movable darkroom.flatpak
 # that carries the binary, its icons and the `.darkroom` association. Everything
@@ -11,7 +11,7 @@
 #
 # Environment:
 #   BUNDLE_DIR   where the bundle is staged (default target/<profile>/bundle/linux)
-#   PROFILE      cargo profile to build and bundle (default release-max)
+#   PROFILE      cargo profile to build and bundle (default release)
 #   BRANCH       flatpak branch to export under (default master)
 #   RUNTIME_VER  freedesktop runtime/SDK version (default 25.08)
 #   FINISH_ARGS  sandbox permissions, replacing the defaults below
@@ -28,20 +28,25 @@
 # alternating a host build with this one re-fingerprints the graph and rebuilds
 # it — and whichever ran last owns target/<profile>/darkroom.
 #
-# The fat-LTO, one-codegen-unit release-max link is long and memory-hungry; the
+# The fat-LTO, one-codegen-unit release link is long and memory-hungry; the
 # whole dependency graph goes through it in a single unit.
+#
+# The bundle carries the binary without its debug info, which goes to
+# darkroom.debug beside the bundle, linked from the binary by its debuglink:
+# keep it to symbolicate a crash from this build.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=$(cd ../../.. && pwd)
 
 [ "$(uname -s)" = Linux ] || { echo "error: this is a Linux script" >&2; exit 1; }
 command -v flatpak >/dev/null || { echo "error: flatpak is not installed" >&2; exit 1; }
+command -v objcopy >/dev/null || { echo "error: objcopy (binutils) is not installed" >&2; exit 1; }
 
 # Must match the desktop entry's basename and the window's Wayland app_id (set
 # in `main.rs`) — flatpak exports only files named for the app id, and the shell
 # pairs a window with its launcher only when the two agree.
 APP_ID=com.cssodessa.darkroom
-PROFILE="${PROFILE:-release-max}"
+PROFILE="${PROFILE:-release}"
 BRANCH="${BRANCH:-master}"
 RUNTIME_VER="${RUNTIME_VER:-25.08}"
 RUST_EXT=org.freedesktop.Sdk.Extension.rust-stable
@@ -58,6 +63,7 @@ WORK="${BUNDLE_DIR:-$TARGET_DIR/bundle/linux}"
 BUILD="$WORK/build"
 REPO="$WORK/repo"
 BUNDLE="$WORK/darkroom.flatpak"
+DEBUG="$WORK/darkroom.debug"
 
 missing=()
 for ref in "org.freedesktop.Platform//$RUNTIME_VER" "org.freedesktop.Sdk//$RUNTIME_VER" \
@@ -119,7 +125,12 @@ rm -rf "$BUILD"
 echo "assembling $BUILD"
 flatpak build-init "$BUILD" "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform "$RUNTIME_VER"
 FILES="$BUILD/files"
-install -Dm755 "$BIN" "$FILES/bin/darkroom"
+# The debug info into its own file, and the shipped binary without it, naming
+# that file so a debugger finds it.
+mkdir -p "$FILES/bin"
+objcopy --only-keep-debug "$BIN" "$DEBUG"
+objcopy --strip-debug --add-gnu-debuglink="$DEBUG" "$BIN" "$FILES/bin/darkroom"
+chmod 755 "$FILES/bin/darkroom"
 for n in 16 24 32 48 64 128 256 512; do
   install -Dm644 "../../assets/icons/darkroom-$n.png" "$FILES/share/icons/hicolor/${n}x${n}/apps/$APP_ID.png"
 done
@@ -161,6 +172,7 @@ flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
 
 echo "done: $BUNDLE ($(du -h "$BUNDLE" | awk '{print $1}'), version ${VERSION:-unknown})"
 echo "      flatpak install --user $BUNDLE"
+echo "debug info: $DEBUG"
 
 # wgpu reaches the GPU through the runtime's driver extension, which flatpak
 # picks by exact host driver version — a mismatch drops it to llvmpipe or fails

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build darkroom with the `release-max` profile and assemble a self-contained
+# Build darkroom with the `release` profile and assemble a self-contained
 # Darkroom.app around the result. Unlike install.sh — which symlinks a dev build
 # into ~/Applications so the `.darkroom` association points at whatever was last
 # compiled — this copies the binary in, so the bundle is a movable artifact.
@@ -9,12 +9,15 @@
 #
 # Environment:
 #   BUNDLE_DIR   where Darkroom.app is written (default target/<profile>/bundle/macos)
-#   PROFILE      cargo profile to build and bundle (default release-max)
+#   PROFILE      cargo profile to build and bundle (default release)
 #   CODESIGN_ID  signing identity; `-` is ad-hoc (default), empty skips signing
 #   SKIP_BUILD   non-empty reuses the existing binary instead of invoking cargo
 #
-# The fat-LTO, one-codegen-unit release-max link is long and memory-hungry; the
+# The fat-LTO, one-codegen-unit release link is long and memory-hungry; the
 # whole dependency graph goes through it in a single unit.
+#
+# The build writes its debug info to darkroom.dSYM beside the binary, which the
+# bundle leaves out: keep it to symbolicate a crash report from this build.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=$(cd ../../.. && pwd)
@@ -24,7 +27,7 @@ ROOT=$(cd ../../.. && pwd)
 # Must match Info.plist's CFBundleIdentifier — the check below is all that
 # stands between a stray BUNDLE_DIR and `rm -rf` on someone else's bundle.
 APP_ID=com.cssodessa.darkroom
-PROFILE="${PROFILE:-release-max}"
+PROFILE="${PROFILE:-release}"
 # `--profile dev`/`test` build into target/debug; every other profile gets a
 # directory of its own name.
 case "$PROFILE" in
@@ -35,7 +38,11 @@ APP="${BUNDLE_DIR:-$TARGET_DIR/bundle/macos}/Darkroom.app"
 
 if [ -z "${SKIP_BUILD:-}" ]; then
   echo "building darkroom (--profile $PROFILE)"
-  (cd "$ROOT" && cargo build --profile "$PROFILE" -p darkroom)
+  # `packed` runs dsymutil: the debug info lands in darkroom.dSYM, none of it in
+  # the binary. The profile's own `off` would leave it in the object files,
+  # which fat LTO does not keep.
+  (cd "$ROOT" && CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed \
+    cargo build --profile "$PROFILE" -p darkroom)
 fi
 
 BIN="$TARGET_DIR/darkroom"
@@ -53,6 +60,8 @@ cp Info.plist "$APP/Contents/Info.plist"
 cp ../../assets/icons/darkroom.icns "$APP/Contents/Resources/darkroom.icns"
 printf 'APPL????' >"$APP/Contents/PkgInfo" # type code + unset creator code
 cp "$BIN" "$APP/Contents/MacOS/darkroom"
+# The debug map's symbols, the last debug data the binary carries.
+strip -S "$APP/Contents/MacOS/darkroom"
 
 # Stamp the version Info.plist omits, asking the binary rather than Cargo.toml
 # so the bundle describes what it wraps. Also proves the copy runs.
@@ -92,4 +101,5 @@ fi
 plutil -lint -s "$APP/Contents/Info.plist"
 
 echo "done: $APP ($(du -sh "$APP" | awk '{print $1}'), version ${VERSION:-unknown})"
+[ -d "$BIN.dSYM" ] && echo "debug info: $BIN.dSYM"
 echo "$NOTE"
