@@ -7,13 +7,13 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
 use crate::memory::run_plan::RunPlan;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;
+use crate::scratch_pool::Pooled;
 
 /// The memory decisions the register-warp stage reads, both taken from one [`RunPlan`]: where a
 /// frame parks, and how many frames are warped at once.
@@ -42,12 +42,6 @@ impl StagePlan {
             warp_width: plan.width(warp),
         })
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct StoredWarp {
-    pub(crate) frame: StoredFrame,
-    pub(crate) reusable: Option<WarpBuffers>,
 }
 
 /// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the [`RunPlan`] and
@@ -88,59 +82,41 @@ impl FrameParking {
         self.parked.load(Ordering::Relaxed)
     }
 
-    /// Hand a warped frame to the combine's frame store, giving its buffers back if this tier did
-    /// not keep them.
+    /// Hand a warped frame to the combine's frame store.
     ///
-    /// The RAM tier keeps them — the planes *are* the stored frame — so nothing comes back and the
-    /// next frame allocates its own, which it must anyway. The spill tier writes them to disk and
-    /// memory-maps the files, leaving the buffers free for the next frame: the caller can warp
-    /// straight into pages already faulted in rather than into a fresh set.
+    /// The RAM tier keeps the planes — they *are* the stored frame — so the set leaves its pool and
+    /// the next frame builds its own, which it must anyway. The spill tier writes them to disk and
+    /// memory-maps the files, and the set goes back to its pool when its lease drops: the next
+    /// frame warps straight into pages already faulted in rather than into a fresh set.
     pub(crate) fn store(
         &self,
-        metadata: ImageMetadata,
-        buffers: WarpBuffers,
+        warped: Pooled<WarpBuffers>,
         source_stats: FrameStats,
-    ) -> Result<StoredWarp, AlignStackError> {
-        let WarpBuffers {
-            pixels,
-            coverage,
-            confidence,
-            flags,
-            rows,
-        } = buffers;
-        let quality = FrameQuality::Planes {
-            coverage,
-            confidence,
-        };
-        let image = LinearImage {
-            metadata,
-            pixels,
-            flags,
-        };
+    ) -> Result<StoredFrame, AlignStackError> {
         match &self.tier {
-            Tier::Resident => Ok(StoredWarp {
-                frame: StoredFrame::from_memory(image, quality, source_stats),
-                reusable: None,
-            }),
-            Tier::Spilled { scratch, .. } => {
-                let frame = StoredFrame::spill(scratch, &image, &quality, source_stats)?;
-                let FrameQuality::Planes {
+            Tier::Resident => {
+                let WarpBuffers {
+                    image,
                     coverage,
                     confidence,
-                } = quality
-                else {
-                    unreachable!("built as `Planes` above")
+                } = warped.into_inner();
+                let quality = FrameQuality::Planes {
+                    coverage,
+                    confidence,
                 };
-                Ok(StoredWarp {
-                    frame,
-                    reusable: Some(WarpBuffers {
-                        pixels: image.pixels,
-                        coverage,
-                        confidence,
-                        flags: None,
-                        rows,
-                    }),
-                })
+                Ok(StoredFrame::from_memory(image, quality, source_stats))
+            }
+            Tier::Spilled { scratch, .. } => {
+                let quality = FrameQuality::Planes {
+                    coverage: &warped.coverage,
+                    confidence: &warped.confidence,
+                };
+                Ok(StoredFrame::spill(
+                    scratch,
+                    &warped.image,
+                    &quality,
+                    source_stats,
+                )?)
             }
         }
     }

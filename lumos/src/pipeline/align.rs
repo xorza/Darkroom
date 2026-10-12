@@ -15,11 +15,10 @@ use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::StagePlan;
-use crate::pipeline::frame_registrar::FrameRegistrar;
+use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet};
 use crate::pipeline::light_source::{LightFiles, LightSource, Preparation};
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::resample::WarpBuffers;
 use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
 /// The body of [`AlignStackConfig::align_stack_images`].
@@ -113,23 +112,23 @@ pub(crate) fn register_warp_and_stack(
         mem::take(&mut detected[reference].stars),
         config,
         &parking,
-        total,
+        LightSet {
+            count: total,
+            dimensions,
+        },
         &progress,
         &cancel,
     );
-    // One reusable set of warp output planes per in-flight worker.
-    let mut warp_buffers: Vec<Option<WarpBuffers>> = (0..warp_width).map(|_| None).collect();
     // Taking each detected record by value frees its input image as soon as the warped output
     // exists, so this stage never holds the complete input and warped sets simultaneously.
     let outcomes = concurrency::try_par_map_bounded_owned(
         detected,
-        &mut warp_buffers,
-        |buffers, index, detected| registrar.park(buffers, index, detected),
+        &mut vec![(); warp_width],
+        |(), index, detected| registrar.park(index, detected),
     )?;
-    drop(registrar);
-    // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
+    // The registrar's warp sets are a warped frame's worth each, and the combine sizes its chunks
     // against the memory without them.
-    drop(warp_buffers);
+    drop(registrar);
 
     RegisteredSet {
         outcomes,

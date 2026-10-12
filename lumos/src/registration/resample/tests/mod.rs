@@ -10,6 +10,7 @@ use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams
 use crate::registration::resample::{WarpBuffers, WarpResult};
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
+use crate::scratch_pool::{Scratch, ScratchPool};
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -273,6 +274,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
     let mut nulls = vec![0.0f32; size.pixel_count()];
     nulls[5 * size.width + 7] = f32::NAN;
     nulls[9 * size.width + 13] = f32::NAN;
+    let rows = ScratchPool::default();
     for channels in [1, 3] {
         let dimensions = ImageDimensions::new((size.width, size.height), channels);
         let plain = LinearImage::from_pixels(dimensions, signed_pixels(size, channels));
@@ -295,22 +297,22 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     };
                     let fresh = transform.warp(image, params);
 
-                    let mut sentinel = WarpBuffers::new(dimensions);
-                    for plane in sentinel.pixels.planes_mut() {
+                    let mut sentinel = WarpBuffers::build(dimensions);
+                    for plane in sentinel.image.pixels.planes_mut() {
                         plane.pixels_mut().fill(f32::NAN);
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(&SourceImage::of(image), transform, params);
+                    sentinel.warp_into(&SourceImage::of(image), transform, params, &rows);
 
-                    let mut reused = WarpBuffers::new(dimensions);
-                    reused.warp_into(&SourceImage::of(&previous), &transforms[0], params);
-                    reused.warp_into(&SourceImage::of(image), transform, params);
+                    let mut reused = WarpBuffers::build(dimensions);
+                    reused.warp_into(&SourceImage::of(&previous), &transforms[0], params, &rows);
+                    reused.warp_into(&SourceImage::of(image), transform, params, &rows);
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {
                             assert_bitwise(
-                                buffers.pixels.channel(channel).pixels(),
+                                buffers.image.channel(channel).pixels(),
                                 fresh.image.channel(channel).pixels(),
                                 method,
                             );

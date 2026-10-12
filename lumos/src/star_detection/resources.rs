@@ -3,7 +3,6 @@
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::background::workspace::BackgroundWorkspace;
@@ -28,7 +27,7 @@ pub(crate) struct DetectionResources {
     pub(crate) labeler: Labeler,
     pub(crate) background: BackgroundWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
-    pub(crate) deblend: JobScratchPool<DeblendBuffers>,
+    pub(crate) deblend: ScratchPool<DeblendBuffers>,
     /// The per-tile and per-star values a detection's medians sort, refilled for each.
     pub(crate) values: Vec<f32>,
     /// Their absolute deviations from the median, for a MAD that keeps the values.
@@ -71,7 +70,7 @@ impl DetectionResources {
         self.bitmasks.reshape(dimensions);
         self.labeler = Labeler::default();
         self.background.clear();
-        self.deblend = JobScratchPool::default();
+        self.deblend.clear();
     }
 }
 

@@ -5,13 +5,14 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 use std::slice;
 
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, WindowAxes,
@@ -20,6 +21,7 @@ use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::WarpParams;
 use crate::registration::transform::warp_transform::WarpTransform;
+use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
 
 mod flagged_sources;
 mod frame_sampler;
@@ -62,41 +64,37 @@ pub(crate) fn warp(
     warp_transform: &WarpTransform,
     config: WarpParams,
 ) -> WarpResult {
-    let mut buffers = WarpBuffers::new(image.dimensions());
-    buffers.warp_into(&SourceImage::of(image), warp_transform, config);
+    let mut buffers = WarpBuffers::build(image.dimensions());
+    buffers.warp_into(
+        &SourceImage::of(image),
+        warp_transform,
+        config,
+        &ScratchPool::default(),
+    );
     WarpResult {
-        image: LinearImage {
-            metadata: image
-                .metadata
-                .clone()
-                .warped(|p| warp_transform.apply(p), image.dimensions().size()),
-            pixels: buffers.pixels,
-            flags: buffers.flags,
-        },
+        image: buffers.image,
         coverage: buffers.coverage,
         confidence: buffers.confidence,
     }
 }
 
-/// The three planes a warp fills — the aligned pixels and the two quality maps — the flags it
-/// carries, and the row scratch it fills them through.
+/// What a warp fills: the aligned image — its pixels, the flags it carries and its warped metadata
+/// — and the two quality maps.
 ///
-/// Every plane is written in full by [`Self::warp_into`], so a set can be handed straight back for
-/// the next frame without clearing. That is the point of naming them: a fresh plane costs its
-/// whole area in first-touch page faults, and the spill tier discards its planes once they are on
-/// disk, so a warp stage that reuses one set per worker pays that once instead of once per frame.
-/// Worth ~22% of a 16 MP warp (`bench_warp_into_fresh_4k` against `..._reused_4k`), or ~0.1 ms per
-/// MiB of plane — the faults are spread across rayon's workers, so this is a fraction of what a
-/// single thread would pay for the same pages. The row scratch is kept for the same reason.
+/// Every field is written in full by [`Self::warp_into`], so a set can be leased again for the
+/// next frame without clearing. That is the point of pooling them: a fresh plane costs its whole
+/// area in first-touch page faults, and the spill tier discards its planes once they are on disk,
+/// so a warp stage that reuses one set per worker pays that once instead of once per frame. Worth
+/// ~22% of a 16 MP warp (`bench_warp_into_fresh_4k` against `..._reused_4k`), or ~0.1 ms per MiB
+/// of plane — the faults are spread across rayon's workers, so this is a fraction of what a single
+/// thread would pay for the same pages.
 #[derive(Debug)]
 pub(crate) struct WarpBuffers {
-    pub(crate) pixels: LinearPixels,
+    /// The aligned image. Its flags are the carried flags of the source pixels each output pixel's
+    /// sample gave weight, for a source that carries any; see [`FlaggedSources`].
+    pub(crate) image: LinearImage,
     pub(crate) coverage: Buffer2<f32>,
     pub(crate) confidence: Buffer2<f32>,
-    /// The carried flags of the source pixels each output pixel's sample gave weight, for a source
-    /// that carries any; see [`FlaggedSources`].
-    pub(crate) flags: Option<PixelFlags>,
-    pub(crate) rows: JobScratchPool<RowScratch>,
 }
 
 /// What one row of a warp works in: the row's source positions, and the tap axes of the pixel it
@@ -107,23 +105,39 @@ pub(crate) struct RowScratch {
     axes: WindowAxes,
 }
 
-impl WarpBuffers {
-    pub(crate) fn new(dimensions: ImageDimensions) -> Self {
+impl Shapeless for RowScratch {}
+
+/// A set for frames of one shape, reused as it is.
+impl Scratch for WarpBuffers {
+    type Shape = ImageDimensions;
+
+    fn build(dimensions: ImageDimensions) -> Self {
         Self {
-            pixels: LinearPixels::new_zeroed(dimensions),
+            image: LinearImage {
+                metadata: ImageMetadata::default(),
+                pixels: LinearPixels::new_zeroed(dimensions),
+                flags: None,
+            },
             coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
             confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
-            flags: None,
-            rows: JobScratchPool::default(),
         }
     }
 
-    pub(crate) fn dimensions(&self) -> ImageDimensions {
-        self.pixels.dimensions()
+    fn fit(&mut self, dimensions: ImageDimensions) {
+        debug_assert!(self.has_shape(dimensions));
     }
 
+    fn has_shape(&self, dimensions: ImageDimensions) -> bool {
+        let size = dimensions.size();
+        self.image.dimensions() == dimensions
+            && Size2us::new(self.coverage.width(), self.coverage.height()) == size
+            && Size2us::new(self.confidence.width(), self.confidence.height()) == size
+    }
+}
+
+impl WarpBuffers {
     /// Warp `image` into these buffers, overwriting all three planes completely and replacing the
-    /// flags.
+    /// flags and the metadata; each worker leases its row scratch from `rows`.
     ///
     /// One pass over the output rows: each row's source positions are evaluated once — a SIP
     /// correction is the expensive part of a non-linear warp — and every channel, the quality maps
@@ -133,6 +147,7 @@ impl WarpBuffers {
         image: &SourceImage<'_>,
         warp_transform: &WarpTransform,
         config: WarpParams,
+        rows: &ScratchPool<RowScratch>,
     ) {
         // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
         // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
@@ -144,7 +159,7 @@ impl WarpBuffers {
         );
         let dimensions = image.dimensions;
         assert_eq!(
-            self.dimensions(),
+            self.image.dimensions(),
             dimensions,
             "warp buffers were sized for a different frame"
         );
@@ -156,6 +171,9 @@ impl WarpBuffers {
             .flags
             .map(|flags| FlaggedSources::new(image, flags, reach));
         let sampler = FrameSampler::new(method, image, flagged.as_ref(), config.border_value);
+        // The last frame's flags, dropped before this frame's plane is allocated so a worker never
+        // holds two.
+        self.image.flags = None;
         let mut flag_plane = image
             .flags
             .filter(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED))
@@ -187,17 +205,19 @@ impl WarpBuffers {
         };
 
         let Self {
-            pixels,
+            image: warped,
             coverage,
             confidence,
-            flags,
-            rows,
         } = self;
+        warped.metadata = image
+            .metadata
+            .clone()
+            .warped(|p| warp_transform.apply(p), size);
         let quality_rows = coverage
             .pixels_mut()
             .par_chunks_mut(width)
             .zip(confidence.pixels_mut().par_chunks_mut(width));
-        let mut planes: ArrayVec<&mut Buffer2<f32>, 3> = pixels.planes_mut().collect();
+        let mut planes: ArrayVec<&mut Buffer2<f32>, 3> = warped.pixels.planes_mut().collect();
         match planes.as_mut_slice() {
             [mono] => mono
                 .pixels_mut()
@@ -231,7 +251,7 @@ impl WarpBuffers {
                 ),
             _ => unreachable!("an image has one channel or three"),
         }
-        *flags = flag_plane.and_then(PixelFlags::from_buffer);
+        warped.flags = flag_plane.and_then(PixelFlags::from_buffer);
     }
 }
 

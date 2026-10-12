@@ -4,13 +4,13 @@ use std::ops::Range;
 
 use glam::DVec2;
 
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::PlaneSpan;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
 use crate::drizzle::accumulator::frame_source::{BandScan, Drop, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
 
 /// The lattice points of [`QUAD_CORNERS`](crate::drizzle::accumulator::frame_source::QUAD_CORNERS)
 /// about pixel `(x, y)`, as `(x + dx, y + dy)`: lattice
@@ -30,6 +30,8 @@ pub(super) struct RadialScratch {
     columns: Vec<f32>,
     rows: Vec<f32>,
 }
+
+impl Shapeless for RadialScratch {}
 
 /// The square kernel's corner lattice at pixfrac 1, where neighbouring drops share their corners:
 /// lattice point `(j, k)` is input point `(j − ½, k − ½)`, the corner the up to four drops around
@@ -53,10 +55,18 @@ struct LatticeRow {
     points: Vec<Option<DVec2>>,
 }
 
-impl CornerLattice {
-    /// Forget every point: a lattice row has a point more than a frame `width` pixels wide has
-    /// pixels, and a new frame maps every one of them differently.
-    fn reset(&mut self, width: usize) {
+/// Shaped by the input frame's width. A lease forgets every point: a lattice row has a point more
+/// than a frame `width` pixels wide has pixels, and a new frame maps every one of them differently.
+impl Scratch for CornerLattice {
+    type Shape = usize;
+
+    fn build(width: usize) -> Self {
+        let mut lattice = Self::default();
+        lattice.fit(width);
+        lattice
+    }
+
+    fn fit(&mut self, width: usize) {
         for row in &mut self.rows {
             row.stamps.clear();
             row.stamps.resize(width + 1, 0);
@@ -65,6 +75,14 @@ impl CornerLattice {
         }
     }
 
+    fn has_shape(&self, width: usize) -> bool {
+        self.rows
+            .iter()
+            .all(|row| row.stamps.len() == width + 1 && row.points.len() == width + 1)
+    }
+}
+
+impl CornerLattice {
     /// Lattice point `(j, k)` on the output grid, mapped through `source` the first time it is
     /// asked for in lattice row `k`.
     #[inline]
@@ -124,14 +142,14 @@ impl<'a> OutputBand<'a> {
         &mut self,
         source: &FrameSource<'_>,
         plan: KernelPlan,
-        radial: &JobScratchPool<RadialScratch>,
-        lattice: &JobScratchPool<CornerLattice>,
+        radial: &ScratchPool<RadialScratch>,
+        lattice: &ScratchPool<CornerLattice>,
     ) -> usize {
         match plan {
             // Pixfrac 1: every drop's corners are lattice points its neighbours share.
             KernelPlan::Square { half_drop: 0.5 } => {
                 let mut lattice = lattice.acquire();
-                lattice.reset(source.width());
+                debug_assert!(lattice.has_shape(source.width()));
                 self.distribute_square(source, |pixel| {
                     let Vec2us { x, y } = pixel.position;
                     source.quad_of(pixel, |corner| {
@@ -546,8 +564,7 @@ mod tests {
                 ("rows", rows_first.collect::<Vec<_>>()),
                 ("columns", columns_first.collect()),
             ] {
-                let mut lattice = CornerLattice::default();
-                lattice.reset(size.width);
+                let mut lattice = CornerLattice::build(size.width);
                 for (x, y) in walk {
                     let own = source.quad(pixel(x, y), 0.5);
                     unconverged += usize::from(matches!(own, Drop::Unconverged));

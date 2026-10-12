@@ -1,8 +1,9 @@
 use crate::background_mesh::BackgroundMesh;
 use crate::background_mesh::tile_stats::{Eligible, TileStats};
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::ScratchPool;
+use crate::scratch_pool::Shapeless;
 use imaginarium::Buffer2;
 
 #[derive(Debug, Default)]
@@ -16,6 +17,8 @@ pub(crate) struct TileScratch {
     pub(crate) deviations: Vec<f32>,
 }
 
+impl Shapeless for TileScratch {}
+
 #[derive(Debug, Default)]
 pub(crate) struct MeshWorkspace {
     grid: Option<BackgroundMesh>,
@@ -23,7 +26,7 @@ pub(crate) struct MeshWorkspace {
     spline_values: Vec<f32>,
     spline_d2: Vec<f32>,
     spline_scratch: Vec<f32>,
-    tile_scratch: JobScratchPool<TileScratch>,
+    tile_scratch: ScratchPool<TileScratch>,
 }
 
 impl MeshWorkspace {
@@ -180,7 +183,6 @@ mod tests {
     use crate::background_mesh::tile_stats::MAX_TILE_SAMPLES;
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::concurrency::job_scratch_pool::internals::{all_by, job_count};
     use crate::math::size2us::Size2us;
     use imaginarium::Buffer2;
 
@@ -233,7 +235,7 @@ mod tests {
         workspace.compute(&pixels, None, 32, SIGMA_CLIP_ITERATIONS, true);
         assert!(workspace.grid.is_some());
         assert!(workspace.median_filter_scratch.is_some());
-        assert_ne!(job_count(&workspace.tile_scratch), 0);
+        assert_ne!(workspace.tile_scratch.pooled(), 0);
 
         workspace.clear();
 
@@ -242,7 +244,7 @@ mod tests {
         assert!(workspace.spline_values.is_empty());
         assert!(workspace.spline_d2.is_empty());
         assert!(workspace.spline_scratch.is_empty());
-        assert_eq!(job_count(&workspace.tile_scratch), 0);
+        assert_eq!(workspace.tile_scratch.pooled(), 0);
     }
 
     #[test]
@@ -276,17 +278,17 @@ mod tests {
         let mut workspace = MeshWorkspace::default();
 
         workspace.compute(&pixels, Some(&mask), 256, SIGMA_CLIP_ITERATIONS, false);
-        assert_ne!(job_count(&workspace.tile_scratch), 0);
+        assert_ne!(workspace.tile_scratch.pooled(), 0);
         assert!(
-            all_by(&workspace.tile_scratch, |scratch| {
-                scratch.values.capacity() <= MAX_TILE_SAMPLES
-            }),
+            workspace
+                .tile_scratch
+                .all_free(|scratch| { scratch.values.capacity() <= MAX_TILE_SAMPLES }),
             "masked value scratch must retain at most {MAX_TILE_SAMPLES} samples per job"
         );
         assert!(
-            all_by(&workspace.tile_scratch, |scratch| {
-                scratch.deviations.capacity() <= MAX_TILE_SAMPLES
-            }),
+            workspace
+                .tile_scratch
+                .all_free(|scratch| { scratch.deviations.capacity() <= MAX_TILE_SAMPLES }),
             "deviation scratch must retain at most {MAX_TILE_SAMPLES} samples per job"
         );
     }

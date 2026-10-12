@@ -3,11 +3,18 @@
 //! A pool is fixed to one [`Scratch::Shape`], and builds and refits its values at it. A lease
 //! ([`Pooled`]) owns its value and its share of the pool, so a stage can keep several in a struct
 //! across later stages, and rayon workers can lease from one pool concurrently through `&self`.
+//!
+//! A rayon `for_each_init` init closure is the right home for scratch when the call *is* the
+//! operation, as the X-Trans demosaic's tiles are: rayon drops what the init made when the call
+//! ends. A pool is for a loop that runs many times over — once per chunk per channel in the
+//! combine, once per pass in the cosmic-ray detector — where the init becomes `|| pool.acquire()`
+//! and the next call finds its scratch warm.
 
 use std::fmt::Debug;
 use std::mem;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
+use std::ptr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
@@ -29,6 +36,24 @@ pub(crate) trait Scratch: Send + Sized {
     /// Whether a returned value still has `shape`; a holder that swapped in a value of another
     /// shape broke the lease.
     fn has_shape(&self, shape: Self::Shape) -> bool;
+}
+
+/// Scratch with no shape of its own: working vectors a job sizes as it goes, built by `Default`
+/// and reused as they are.
+pub(crate) trait Shapeless: Default + Send {}
+
+impl<T: Shapeless> Scratch for T {
+    type Shape = ();
+
+    fn build((): ()) -> Self {
+        T::default()
+    }
+
+    fn fit(&mut self, (): ()) {}
+
+    fn has_shape(&self, (): ()) -> bool {
+        true
+    }
 }
 
 /// An image plane: a value's shape is its dimensions, and it is reused as it is.
@@ -107,6 +132,12 @@ impl<T: Scratch> ScratchPool<T> {
         drop(stale);
     }
 
+    /// Drop every free value. Values still leased return as usual.
+    pub(crate) fn clear(&mut self) {
+        let free = mem::take(&mut lock(&self.shelf).free);
+        drop(free);
+    }
+
     /// A free value fitted to the pool's shape, or a fresh one.
     pub(crate) fn acquire(&self) -> Pooled<T> {
         let (reused, shape, generation) = {
@@ -137,6 +168,23 @@ pub(crate) struct Pooled<T: Scratch> {
     shape: T::Shape,
     generation: u64,
     shelf: Arc<Mutex<Shelf<T>>>,
+}
+
+impl<T: Scratch> Pooled<T> {
+    /// The value, leaving the pool for good: what a warp filled becomes the frame it parks.
+    pub(crate) fn into_inner(self) -> T {
+        let mut lease = ManuallyDrop::new(self);
+        // SAFETY: `lease` is never dropped, so `value` is taken exactly once, here, and `shelf` is
+        // read out of it exactly once, so its count is released by the drop below.
+        let (value, shelf) = unsafe {
+            (
+                ManuallyDrop::take(&mut lease.value),
+                ptr::read(&raw const lease.shelf),
+            )
+        };
+        drop(shelf);
+        value
+    }
 }
 
 impl<T: Scratch> Deref for Pooled<T> {
@@ -210,6 +258,12 @@ pub(crate) mod internals {
         pub(crate) fn pooled(&self) -> usize {
             scratch_pool::lock(&self.shelf).free.len()
         }
+
+        /// Whether every free value passes `predicate`.
+        #[cfg(test)]
+        pub(crate) fn all_free(&self, predicate: impl Fn(&T) -> bool) -> bool {
+            scratch_pool::lock(&self.shelf).free.iter().all(predicate)
+        }
     }
 }
 
@@ -217,12 +271,13 @@ pub(crate) mod internals {
 mod tests {
     use std::panic;
     use std::panic::AssertUnwindSafe;
+    use std::sync::Arc;
 
     use imaginarium::Buffer2;
 
     use crate::internals;
     use crate::math::size2us::Size2us;
-    use crate::scratch_pool::{Scratch, ScratchPool};
+    use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
 
     const SMALL: Size2us = Size2us {
         width: 8,
@@ -351,5 +406,44 @@ mod tests {
         let lease = pool.acquire();
         drop(pool);
         assert!(lease.0.is_empty());
+    }
+
+    /// `into_inner` takes a value out for good, releasing the lease's share of the pool; `clear`
+    /// drops the free values, so the next acquire builds afresh.
+    #[test]
+    fn into_inner_and_clear_take_values_out_of_the_pool() {
+        let mut pool: ScratchPool<Row> = ScratchPool::new(2);
+        let mut kept = pool.acquire();
+        kept.0.fill(5);
+        let mut returned = pool.acquire();
+        assert_eq!(Arc::strong_count(&pool.shelf), 3);
+
+        let kept = kept.into_inner();
+        assert_eq!(kept.0, [5, 5]);
+        assert_eq!(Arc::strong_count(&pool.shelf), 2);
+        drop(kept);
+        assert_eq!(pool.pooled(), 0, "a value taken out is not shelved");
+
+        returned.0.fill(6);
+        drop(returned);
+        assert_eq!(pool.pooled(), 1);
+        pool.clear();
+        assert_eq!(pool.pooled(), 0);
+        assert_eq!(pool.acquire().0, [0, 0], "built afresh after the clear");
+    }
+
+    /// A `Shapeless` type pools at the unit shape: built by `Default`, reused as it was left.
+    #[test]
+    fn shapeless_scratch_is_reused_as_it_was_left() {
+        #[derive(Debug, Default)]
+        struct Notes(Vec<u8>);
+        impl Shapeless for Notes {}
+
+        let pool: ScratchPool<Notes> = ScratchPool::default();
+        let mut notes = pool.acquire();
+        assert!(notes.0.is_empty());
+        notes.0.extend([1, 2, 3]);
+        drop(notes);
+        assert_eq!(pool.acquire().0, [1, 2, 3]);
     }
 }

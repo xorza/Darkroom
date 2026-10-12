@@ -19,6 +19,7 @@ use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::warp_transform::WarpTransform;
+use crate::scratch_pool::{Scratch, ScratchPool};
 
 pub(crate) fn benches(c: &mut Criterion) {
     let field = Field::Typical;
@@ -77,6 +78,7 @@ fn warp(
         ..WarpParams::default()
     };
     let source = SourceImage::of(light);
-    let mut buffers = WarpBuffers::new(light.dimensions());
-    b.iter(|| buffers.warp_into(&source, transform, params));
+    let mut buffers = WarpBuffers::build(light.dimensions());
+    let rows = ScratchPool::default();
+    b.iter(|| buffers.warp_into(&source, transform, params, &rows));
 }

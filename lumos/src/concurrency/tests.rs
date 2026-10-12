@@ -6,26 +6,7 @@ use std::sync::{Arc, Barrier};
 use rayon::ThreadPoolBuilder;
 
 use crate::concurrency;
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::concurrency::{try_par_map_bounded, try_par_map_bounded_owned};
-
-#[test]
-fn job_scratch_leases_are_exclusive_and_reused() {
-    let pool = JobScratchPool::<Box<u8>>::default();
-    let mut first = pool.acquire();
-    **first = 1;
-    let mut second = pool.acquire();
-    **second = 2;
-    let first_address = (&raw const **first).addr();
-    let second_address = (&raw const **second).addr();
-    assert_ne!(first_address, second_address);
-
-    **first = 3;
-    drop(first);
-    let reused = pool.acquire();
-    assert_eq!((&raw const **reused).addr(), first_address);
-    assert_eq!(**reused, 3);
-}
 
 #[test]
 fn bounded_map_preserves_order_and_reaches_the_exact_cap() {

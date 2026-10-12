@@ -33,8 +33,8 @@ pub(crate) struct Labeler {
     strips: Vec<Strip>,
     /// Provisional label → final label; see [`UnionFind::build_label_map`].
     mapping: Vec<u32>,
-    /// The buffers the last label map gave back, refilled by the next.
-    spare: LabelMap,
+    /// The last mask's components, refilled by the next.
+    map: LabelMap,
 }
 
 /// One horizontal band of the mask and the runs found in it.
@@ -55,7 +55,7 @@ impl Labeler {
     ///
     /// One band for an image under [`MIN_ROWS_PER_STRIP`] rows, where the boundary stitch has
     /// nothing to do — small inputs take the same path as large ones.
-    pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> LabelMap {
+    pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> &LabelMap {
         let height = mask.size.height;
         let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
         self.label_in_strips(mask, connectivity, num_strips)
@@ -68,11 +68,16 @@ impl Labeler {
         mask: &BitBuffer2,
         connectivity: Connectivity,
         num_strips: usize,
-    ) -> LabelMap {
+    ) -> &LabelMap {
         let width = mask.size.width;
         let height = mask.size.height;
 
-        let mut map = mem::take(&mut self.spare);
+        let Self {
+            union_find,
+            strips,
+            mapping,
+            map,
+        } = self;
         map.size = mask.size;
         map.components.clear();
         map.runs.clear();
@@ -82,12 +87,6 @@ impl Labeler {
             return map;
         }
 
-        let Self {
-            union_find,
-            strips,
-            mapping,
-            ..
-        } = self;
         debug_assert!(
             (1..=height).contains(&num_strips),
             "between one strip and one per row"
@@ -151,7 +150,7 @@ impl Labeler {
             runs,
             run_starts,
             ..
-        } = &mut map;
+        } = map;
         components.resize(count, ComponentData::default());
         run_starts.resize(count + 1, 0);
         for strip in strips.iter() {
@@ -194,11 +193,6 @@ impl Labeler {
         run_starts.copy_within(0..count, 1);
         run_starts[0] = 0;
         map
-    }
-
-    /// Take back a label map's buffers for the next frame to refill.
-    pub(crate) fn recycle(&mut self, map: LabelMap) {
-        self.spare = map;
     }
 }
 
@@ -296,20 +290,32 @@ fn stitch_boundary(
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
+    #[cfg(test)]
     use crate::bit_buffer2::BitBuffer2;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::labeler::Labeler;
+    #[cfg(test)]
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+
+    impl Labeler {
+        /// The last mask's components, kept past the labeler.
+        pub(crate) fn into_map(self) -> LabelMap {
+            self.map
+        }
+    }
 
     /// Label `mask` in exactly `num_strips` bands, whatever the thread count — so a test reaches
     /// the stitch across band boundaries on any machine.
+    #[cfg(test)]
     pub(crate) fn label_in_strips(
         mask: &BitBuffer2,
         connectivity: Connectivity,
         num_strips: usize,
     ) -> LabelMap {
-        Labeler::default().label_in_strips(mask, connectivity, num_strips)
+        let mut labeler = Labeler::default();
+        labeler.label_in_strips(mask, connectivity, num_strips);
+        labeler.into_map()
     }
 }

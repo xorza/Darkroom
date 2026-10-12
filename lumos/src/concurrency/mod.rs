@@ -1,6 +1,5 @@
-//! Concurrency helpers for Rayon work and reusable per-job resources.
+//! Concurrency helpers for Rayon work.
 
-pub(crate) mod job_scratch_pool;
 pub(crate) mod unsafe_send_ptr;
 
 use std::mem::MaybeUninit;

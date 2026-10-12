@@ -20,11 +20,11 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::{Eligible, TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::ScratchPool;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 use std::mem;
@@ -133,7 +133,7 @@ impl BackgroundMesh {
         mask: Option<&BitBuffer2>,
         eligible: Option<&Eligible<'_>>,
         sigma_clip_iterations: usize,
-        tile_scratch: &JobScratchPool<TileScratch>,
+        tile_scratch: &ScratchPool<TileScratch>,
     ) {
         let tiles_x = self.stats.width();
         let columns = MeshAxis::new(self.dimensions.width, self.tile_size);

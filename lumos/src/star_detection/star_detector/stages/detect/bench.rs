@@ -9,7 +9,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::concurrency::job_scratch_pool::JobScratchPool;
+use crate::scratch_pool::ScratchPool;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
@@ -33,10 +33,14 @@ pub(crate) fn benches(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, field.name()), |b| {
             let Labelled { stages, labels } = labelled.get_or_init(|| {
                 let stages = Stages::of(field);
-                let labels = Labeler::default().label(&stages.mask, crowded.connectivity);
-                Labelled { stages, labels }
+                let mut labeler = Labeler::default();
+                labeler.label(&stages.mask, crowded.connectivity);
+                Labelled {
+                    stages,
+                    labels: labeler.into_map(),
+                }
             });
-            let buffers = JobScratchPool::default();
+            let buffers = ScratchPool::default();
             b.iter(|| extract_candidates(&stages.plane, labels, &config, &buffers));
         });
     }

@@ -14,6 +14,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::{ScratchPool, Shapeless};
 
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
@@ -73,6 +74,8 @@ pub(super) struct MonoDetector<'a> {
     config: &'a CosmicRayConfig,
     noise: NoiseModel,
     scratch: MonoScratch,
+    /// The window medians' per-job scratch, reused by every pass.
+    windows: ScratchPool<WindowScratch>,
     /// Recompute every row on every pass: the oracle the update of changed rows is held to.
     #[cfg(test)]
     full_recompute: bool,
@@ -84,6 +87,7 @@ impl<'a> MonoDetector<'a> {
             config,
             noise,
             scratch: MonoScratch::default(),
+            windows: ScratchPool::default(),
             #[cfg(test)]
             full_recompute: false,
         }
@@ -156,10 +160,10 @@ impl<'a> MonoDetector<'a> {
             // instead read as enormous fine structure on a frame whose noise is below it, and
             // suppress every detection.
             for band in rows(MEDIAN3_REACH) {
-                median_window_rows(pix, size, 1, band, staged);
+                median_window_rows(pix, size, 1, band, staged, &self.windows);
             }
             for band in rows(FINE_REACH) {
-                median_window_rows(staged, size, 3, band.clone(), median);
+                median_window_rows(staged, size, 3, band.clone(), median, &self.windows);
                 let span = band.start * width..band.end * width;
                 for ((f, &m3), &m7) in fine[span.clone()]
                     .iter_mut()
@@ -171,7 +175,7 @@ impl<'a> MonoDetector<'a> {
             }
 
             for band in rows(NOISE_REACH) {
-                median_window_rows(pix, size, 2, band.clone(), median);
+                median_window_rows(pix, size, 2, band.clone(), median, &self.windows);
                 noise_map_rows(median, local, self.noise, band, width, noise);
             }
 
@@ -185,7 +189,7 @@ impl<'a> MonoDetector<'a> {
                 }
             }
             for band in rows(SIGNIFICANCE_REACH) {
-                median_window_rows(staged, size, 2, band.clone(), median);
+                median_window_rows(staged, size, 2, band.clone(), median, &self.windows);
                 let span = band.start * width..band.end * width;
                 for ((v, &l), &m) in significance[span.clone()]
                     .iter_mut()
@@ -201,7 +205,14 @@ impl<'a> MonoDetector<'a> {
                 break;
             }
             let unread = kept_out.map(|kept_out| &kept_out.unread);
-            replace_flagged(data, size, &masks.accumulated, unread, staged);
+            replace_flagged(
+                data,
+                size,
+                &masks.accumulated,
+                unread,
+                staged,
+                &self.windows,
+            );
             changed = Some(
                 data.par_chunks(width)
                     .zip(staged.par_chunks(width))
@@ -280,17 +291,21 @@ fn laplacian_plus_rows(data: &[f32], size: Size2us, rows: Range<usize>, out: &mu
 /// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
 /// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
 /// gathers its replicated window and takes `median_mut`.
-fn median_window_rows(data: &[f32], size: Size2us, r: usize, rows: Range<usize>, out: &mut [f32]) {
+fn median_window_rows(
+    data: &[f32],
+    size: Size2us,
+    r: usize,
+    rows: Range<usize>,
+    out: &mut [f32],
+    windows: &ScratchPool<WindowScratch>,
+) {
     let side = 2 * r + 1;
     let first = rows.start;
     out[rows.start * size.width..rows.end * size.width]
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each_init(
-            || WindowScratch {
-                values: Vec::with_capacity(side * side),
-                lanes: Vec::with_capacity(side * side),
-            },
+            || windows.acquire(),
             |scratch, (row_in_band, row)| {
                 let y = first + row_in_band;
                 let width = size.width;
@@ -336,11 +351,13 @@ fn median_window_rows(data: &[f32], size: Size2us, r: usize, rows: Range<usize>,
 const LANES: usize = 8;
 
 /// One worker's windows: a pixel's values, and eight pixels' keys, value by value.
-#[derive(Debug)]
-struct WindowScratch {
+#[derive(Debug, Default)]
+pub(super) struct WindowScratch {
     values: Vec<f32>,
     lanes: Vec<[i32; LANES]>,
 }
+
+impl Shapeless for WindowScratch {}
 
 /// `total_cmp`'s key for `value`: an `i32` whose order is the total order of the f32s.
 #[inline(always)]
@@ -447,13 +464,15 @@ pub(super) fn replace_flagged(
     mask: &BitBuffer2,
     unread: Option<&BitBuffer2>,
     snapshot: &mut Vec<f32>,
+    windows: &ScratchPool<WindowScratch>,
 ) {
     snapshot.clear();
     snapshot.extend_from_slice(data);
     let src: &[f32] = snapshot;
     data.par_chunks_mut(size.width).enumerate().for_each_init(
-        || Vec::<f32>::with_capacity(25),
-        |buf, (y, row)| {
+        || windows.acquire(),
+        |scratch, (y, row)| {
+            let buf = &mut scratch.values;
             for (x, o) in row.iter_mut().enumerate() {
                 if !mask.get_at(Vec2us::new(x, y)) {
                     continue;
@@ -489,11 +508,19 @@ pub(crate) mod internals {
     use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
     use crate::image::image_metadata::ImageMetadata;
     use crate::math::size2us::Size2us;
+    use crate::scratch_pool::ScratchPool;
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
     pub(crate) fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
         let mut out = vec![0.0; size.pixel_count()];
-        median_window_rows(data, size, r, 0..size.height, &mut out);
+        median_window_rows(
+            data,
+            size,
+            r,
+            0..size.height,
+            &mut out,
+            &ScratchPool::default(),
+        );
         out
     }
 

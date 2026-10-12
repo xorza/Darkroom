@@ -13,7 +13,6 @@ use rayon::prelude::*;
 
 use std::slice::ChunksMut;
 
-use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::frame_source::{BandScan, FrameSource};
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, RadialScratch};
@@ -27,6 +26,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
+use crate::scratch_pool::ScratchPool;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colours, so it never carries more planes, and the output never more channels.
@@ -75,8 +75,8 @@ pub(crate) struct DrizzleAccumulator {
     unconverged_points: usize,
     /// The input pixels each band scans, recomputed per frame.
     scans: Vec<BandScan>,
-    radial: JobScratchPool<RadialScratch>,
-    lattice: JobScratchPool<CornerLattice>,
+    radial: ScratchPool<RadialScratch>,
+    lattice: ScratchPool<CornerLattice>,
     /// Band height forced by the band-invariance test, which needs to compare one band against many
     /// on the same input. Production always derives it from the thread count.
     #[cfg(test)]
@@ -128,8 +128,8 @@ impl DrizzleAccumulator {
             config,
             unconverged_points: 0,
             scans: Vec::new(),
-            radial: JobScratchPool::default(),
-            lattice: JobScratchPool::default(),
+            radial: ScratchPool::default(),
+            lattice: ScratchPool::new(input_dims.width()),
             #[cfg(test)]
             band_rows_override: None,
         })
