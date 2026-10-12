@@ -1,6 +1,7 @@
 //! [`ClippedStats`]: the sigma-clipped median, σ and mean of a sample.
 
 use std::iter;
+use std::ops::Range;
 
 use arrayvec::ArrayVec;
 
@@ -127,17 +128,19 @@ fn clip_pass(
     // The selection reordered the deviations, so each is taken again from its value. Every key is
     // written and the survivors' count alone moves, so no branch hangs on a value.
     let threshold = kappa * sigma;
+    let len = keys.len();
     let mut kept = 0;
-    let mut left = 0;
-    for i in 0..keys.len() {
-        if i == keys.len() / 2 {
-            left = kept;
+    let mut close_up = |range: Range<usize>, kept: &mut usize| {
+        for i in range {
+            let key = keys[i];
+            keys[*kept] = key;
+            *kept += usize::from((decode(key) - median).abs() <= threshold);
         }
-        let key = keys[i];
-        keys[kept] = key;
-        kept += usize::from((decode(key) - median).abs() <= threshold);
-    }
-    if kept == keys.len() {
+    };
+    close_up(0..len / 2, &mut kept);
+    let left = kept;
+    close_up(len / 2..len, &mut kept);
+    if kept == len {
         ClipPass::Converged(MedianMad { median, mad })
     } else {
         ClipPass::Clipped { kept, left }
