@@ -9,7 +9,7 @@ members = [
     "darkroom",
 ]
 default-members = ["darkroom"]
-exclude = ["palantir", "imaginarium", "fits-well", "quickbench"]
+exclude = ["palantir", "imaginarium", "fits-well"]
 
 resolver = "3"
 

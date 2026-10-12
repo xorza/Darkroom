@@ -64,7 +64,6 @@ GUI, and the imaging stack it draws on:
 | **imaginarium** | Image library with CPU and wgpu GPU operations. *Submodule.* |
 | **lumos** | Astronomical pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, drizzle. |
 | **fits-well** | A fast reader/writer for FITS (astronomy's image format), targeting the full FITS 4.0 standard. *Submodule.* |
-| **quickbench** | A tiny micro-benchmark harness (`#[test] #[ignore]`, run via `cargo test`). *Submodule.* |
 
 `common` is the pure leaf; `scenarium` builds the graph engine on it; `darkroom`
 edits a `scenarium::Graph`, renders it through `palantir`, and pulls node

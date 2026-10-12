@@ -4,7 +4,6 @@
 - visual node groups
 - mesh once registrations
 - image buffer and lens image interleaved/planar formats
-- quickbench - runonce cli arg
 - custom panels
 - custom renderer backends
 - wgpu features and limits request public api

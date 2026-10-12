@@ -27,13 +27,12 @@ Workspace members, each after the crates it uses:
 bare `cargo test` or `cargo clippy` covers `darkroom` alone.
 
 Git submodules — `palantir` (immediate-mode GUI), `imaginarium` (CPU/GPU image
-library), `fits-well` (FITS reader and writer), `quickbench` (micro-benchmark
-harness, which no workspace member uses) — are standalone projects `exclude`d from
-this workspace, each with its own lockfile and profiles. Run cargo for them
-from their own directory: from the root, `cargo fmt -p` rejects them and
-`clippy`/`test -p` build them under this workspace's lockfile. Changes inside
-them, `Cargo.toml` above all, must stay valid in a standalone checkout; never
-make them inherit from this workspace.
+library), `fits-well` (FITS reader and writer) — are standalone projects
+`exclude`d from this workspace, each with its own lockfile and profiles. Run
+cargo for them from their own directory: from the root, `cargo fmt -p` rejects
+them and `clippy`/`test -p` build them under this workspace's lockfile. Changes
+inside them, `Cargo.toml` above all, must stay valid in a standalone checkout;
+never make them inherit from this workspace.
 
 `libraw-sys/LibRaw` is upstream LibRaw at a release tag, compiled and bound by
 `libraw-sys/build.rs`; never edit it. Bindgen needs libclang: Xcode tools on

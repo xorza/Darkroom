@@ -1,6 +1,3 @@
-[submodule "quickbench"]
-	path = quickbench
-	url = git@github.com:xorza/quickbench.git
 [submodule "imaginarium"]
 	path = imaginarium
 	url = git@github.com:xorza/Imaginarium.git
