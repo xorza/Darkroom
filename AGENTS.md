@@ -34,19 +34,39 @@ Windows, `libclang-dev` on Linux.
 
 ## Verification
 
-Per touched member crate:
+`x.py` at the root runs every check (`python x.py` on Windows). `gate` runs,
+on the packages the working tree changed: rustfmt in place, clippy on every
+target per lint set, plain clippy for the build that ships, rustdoc with
+private items under `-D warnings`, the tests per test set, and the doc tests.
+It stops after the first step that fails. Each cargo call prints one line, a
+failure adds only its diagnostics or failed tests, and the full output is in
+`target/x/last/`.
 
 ```
-cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && cargo clippy -p <crate> -- -D warnings && RUSTDOCFLAGS="-D warnings" cargo doc -p <crate> --no-deps --document-private-items --all-features && cargo test -p <crate> --tests --all-features
+./x.py gate                        # the changed packages
+./x.py gate -p <pkg>               # named packages; --workspace for every one
+./x.py test -p <pkg> -- <filter>   # one step: fmt, lint, doc, test, nextest, doctest
+./x.py test --lib                  # or --test <name>, in place of the set's targets
+./x.py bench -- <filter>           # --smoke runs each case once, --no-run prints the binary
+./x.py watch                       # rebuilds on change, so the cache stays warm
 ```
+
+Check through `x.py`, not cargo: each call is one package with fixed flags,
+so every run reuses the build `watch` keeps warm, and another flag set builds
+another copy of the crate. A package's feature sets are in its `Cargo.toml`,
+under `[package.metadata.x]`. `x.py` is one file, the same in darkroom and
+in each submodule: a change to it is copied to the others.
+
+A changed file in a submodule puts its packages in scope; they build in the
+submodule's directory, into its target dir, under its own sets. `-p` names a
+package of any root, and `--workspace` means this root's members.
 
 The second clippy lints the build that ships: `--all-targets` turns `internals`
 on through the self dev-dependency, so only a build of the library and binaries
 alone shows what production compiles, such as a field only test code reads.
 The doc step fails on a broken intra-doc link; it documents private items,
 where most of the workspace's docs sit. Rustdoc never builds `cfg(test)`
-code, so a doc names a test-only item in a code span, not a link. A crate's
-AGENTS.md may replace `--all-features` in `cargo test` (`lumos` does).
+code, so a doc names a test-only item in a code span, not a link.
 
 ## Test code
 
@@ -69,9 +89,10 @@ An `atomic` case times one operation on the unit production hands it; an
 `integration` case times a pipeline stage, a frame or a public entry point end
 to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's filter
 selects by it; a crate with GPU cases puts the backend first in every case, so
-`'/cpu/'` opens no device. `cargo benches` runs them in this workspace (lumos,
-and darkroom's editor frame) and in each submodule, with that root's fixed
-features; `-- --test` runs each case once, and a change to bench code runs it.
+`'/cpu/'` opens no device. `./x.py bench` runs them in this workspace (lumos,
+and darkroom's editor frame) and in each submodule, with that package's fixed
+bench features; `--smoke` runs each case once, and a change to bench code runs
+it.
 
 ## Conventions
 
