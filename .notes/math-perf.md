@@ -42,6 +42,8 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `pixel_quadrature/sufficient_order/moffat_1.5_2.5/1` | 0.46 | 0.43 | Same. |
 | `floor_i32/floor_i32/f32/4096` | 0.94 | 0.41 | The target's rounding instruction (`roundss` from SSE4.1, arm64's `frintm`) where it has one; truncation and one step down only on x86-64 without SSE4.1, where `floor` is a library call. Same values. |
 | `floor_i32/floor_i32/f64/4096` | 0.94 | 0.67 | Same. |
+| `pixel_quadrature/gauss_legendre/7` | 0.012 | | Every order's rule solved once, on first use, and copied out after, as the Lanczos tables are: the fits take one a star. Same nodes. |
+| `pixel_quadrature/gauss_legendre/16` | 0.001 | | Same. |
 | `statistics/frame/plane_median/radix/24000000` | 0.93 | 0.67 | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
 
 The `statistics` rows are against a baseline measured again after the bench fix that batches in-place
