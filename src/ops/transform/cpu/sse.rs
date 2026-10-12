@@ -43,7 +43,7 @@ pub(super) trait SsePacked: Sample {
 
 impl SsePacked for u8 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[u8], base: usize) -> __m128 {
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> __m128 {
         unsafe {
             let p = pixels.as_ptr().add(base);
             // Pack the channels into the low bytes of a u32; for N==3 read the 3
@@ -63,7 +63,7 @@ impl SsePacked for u8 {
         clippy::cast_sign_loss,
         reason = "each lane is clamped to 0..=255 first"
     )]
-    unsafe fn store<const N: usize>(out: &mut [u8], base: usize, v: __m128) {
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: __m128) {
         unsafe {
             let i = clamp_to_i32(v, 255.0);
             let p = out.as_mut_ptr().add(base);
@@ -77,9 +77,9 @@ impl SsePacked for u8 {
                         .write_unaligned(_mm_cvtsi128_si32(u8x).cast_unsigned());
                 }
                 3 => {
-                    *p = _mm_extract_epi32::<0>(i) as u8;
-                    *p.add(1) = _mm_extract_epi32::<1>(i) as u8;
-                    *p.add(2) = _mm_extract_epi32::<2>(i) as u8;
+                    *p = _mm_extract_epi32::<0>(i) as Self;
+                    *p.add(1) = _mm_extract_epi32::<1>(i) as Self;
+                    *p.add(2) = _mm_extract_epi32::<2>(i) as Self;
                 }
                 _ => unreachable!(),
             }
@@ -89,7 +89,11 @@ impl SsePacked for u8 {
 
 impl SsePacked for u16 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[u16], base: usize) -> __m128 {
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "`_mm_loadl_epi64` reads 8 bytes with no alignment requirement"
+    )]
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> __m128 {
         unsafe {
             let p = pixels.as_ptr().add(base);
             let u16x = match N {
@@ -108,16 +112,20 @@ impl SsePacked for u16 {
         clippy::cast_sign_loss,
         reason = "each lane is clamped to 0..=65535 first"
     )]
-    unsafe fn store<const N: usize>(out: &mut [u16], base: usize, v: __m128) {
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "`_mm_storel_epi64` writes 8 bytes with no alignment requirement"
+    )]
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: __m128) {
         unsafe {
             let i = clamp_to_i32(v, 65535.0);
             let p = out.as_mut_ptr().add(base);
             match N {
                 4 => _mm_storel_epi64(p.cast::<__m128i>(), _mm_packus_epi32(i, i)),
                 3 => {
-                    *p = _mm_extract_epi32::<0>(i) as u16;
-                    *p.add(1) = _mm_extract_epi32::<1>(i) as u16;
-                    *p.add(2) = _mm_extract_epi32::<2>(i) as u16;
+                    *p = _mm_extract_epi32::<0>(i) as Self;
+                    *p.add(1) = _mm_extract_epi32::<1>(i) as Self;
+                    *p.add(2) = _mm_extract_epi32::<2>(i) as Self;
                 }
                 _ => unreachable!(),
             }
@@ -127,7 +135,7 @@ impl SsePacked for u16 {
 
 impl SsePacked for f32 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[f32], base: usize) -> __m128 {
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> __m128 {
         unsafe {
             let p = pixels.as_ptr().add(base);
             match N {
@@ -141,7 +149,7 @@ impl SsePacked for f32 {
         }
     }
     #[inline]
-    unsafe fn store<const N: usize>(out: &mut [f32], base: usize, v: __m128) {
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: __m128) {
         // Unclamped, matching the scalar `f32::from_f32`.
         unsafe {
             let p = out.as_mut_ptr().add(base);

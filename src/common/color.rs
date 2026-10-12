@@ -11,7 +11,7 @@ pub struct Color {
 }
 
 impl Color {
-    pub const GREEN: Color = Color::rgb(0.0, 1.0, 0.0);
+    pub const GREEN: Self = Self::rgb(0.0, 1.0, 0.0);
 
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }

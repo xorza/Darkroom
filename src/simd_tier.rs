@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 ///
 /// On one arch the tiers form a chain, narrowest first, and a tier counts as supported only when
 /// every narrower one is too, so `tier >= SimdTier::Sse41` asks whether an SSE4.1 kernel may run.
-/// A kernel table gives each tier only the kernels compiled for that tier, and [`Self::dispatch`]
+/// A kernel table gives each tier only the kernels compiled for that tier, and `Self::dispatch`
 /// walks down from [`Self::widest`] to the first tier with one. A test runs every supported tier,
 /// because on a wide CPU only a test reaches the narrower kernels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -51,8 +51,8 @@ pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKerne
         return None;
     }
     Some(match format.sample_type {
-        SampleType::U8 => simd::rgba_u8_row as RowKernel,
-        SampleType::F32 => simd::rgba_f32_row as RowKernel,
+        SampleType::U8 => simd::rgba_u8_row,
+        SampleType::F32 => simd::rgba_f32_row,
         SampleType::U16 => return None,
     })
 }
