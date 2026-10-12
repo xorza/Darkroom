@@ -87,40 +87,76 @@ impl Spread {
 }
 
 /// The MAD about `centre` of an ascending window, without a scratch buffer: the deviations form two
-/// ascending runs, the samples below `centre` read backwards and the rest read forwards, so a merge
-/// reaches them in order up to the middle rank. An even count takes the mean of the two middle
+/// ascending runs, the samples below `centre` read backwards and the rest read forwards, so the
+/// middle rank of their union is found by a binary search over how many of it each run gives, in
+/// as many steps as the window's length has bits. An even count takes the mean of the two middle
 /// deviations, as [`Spread::median_of_sorted`] does for the samples.
 fn mad_of_sorted(sorted: &[f32], centre: f32) -> f32 {
     let n = sorted.len();
     let split = sorted.partition_point(|&v| v < centre);
-    let mut below = split;
-    let mut above = split;
-    let mut previous = 0.0f32;
-    let mut deviation = 0.0f32;
-    for _ in 0..=n / 2 {
-        previous = deviation;
-        let low = (below > 0).then(|| centre - sorted[below - 1]);
-        let high = (above < n).then(|| sorted[above] - centre);
-        deviation = match (low, high) {
-            (Some(low), Some(high)) if low <= high => {
-                below -= 1;
-                low
-            }
-            (Some(low), None) => {
-                below -= 1;
-                low
-            }
-            (_, Some(high)) => {
-                above += 1;
-                high
-            }
-            (None, None) => unreachable!("the merge stops at the middle rank of a non-empty run"),
-        };
-    }
+    let middle = Ranked::of(
+        |i| centre - sorted[split - 1 - i],
+        split,
+        |j| sorted[split + j] - centre,
+        n - split,
+        (n - 1) / 2,
+    );
     if n.is_multiple_of(2) {
-        f32::midpoint(previous, deviation)
+        f32::midpoint(middle.value, middle.next)
     } else {
-        deviation
+        middle.value
+    }
+}
+
+/// The value at one rank of the union of two ascending runs, and the value at the rank after it.
+#[derive(Debug, Clone, Copy)]
+struct Ranked {
+    value: f32,
+    /// `+∞` when the rank is the union's last.
+    next: f32,
+}
+
+impl Ranked {
+    /// Rank `rank` of the union of `a`, `a_len` values ascending, and `b`, `b_len` values
+    /// ascending: the `rank + 1` smallest take some `i` from `a` and the rest from `b`, and the
+    /// split is the first `i` whose next `a` is not below the last `b` it leaves out.
+    fn of(
+        a: impl Fn(usize) -> f32,
+        a_len: usize,
+        b: impl Fn(usize) -> f32,
+        b_len: usize,
+        rank: usize,
+    ) -> Self {
+        debug_assert!(rank < a_len + b_len);
+        let taken = rank + 1;
+        let (mut low, mut high) = (taken.saturating_sub(b_len), taken.min(a_len));
+        while low < high {
+            let i = usize::midpoint(low, high);
+            if a(i) < b(taken - i - 1) {
+                low = i + 1;
+            } else {
+                high = i;
+            }
+        }
+        let (i, j) = (low, taken - low);
+        let last = |run: &dyn Fn(usize) -> f32, count: usize| {
+            if count > 0 {
+                run(count - 1)
+            } else {
+                f32::NEG_INFINITY
+            }
+        };
+        let first = |run: &dyn Fn(usize) -> f32, count: usize, len: usize| {
+            if count < len {
+                run(count)
+            } else {
+                f32::INFINITY
+            }
+        };
+        Self {
+            value: last(&a, i).max(last(&b, j)),
+            next: first(&a, i, a_len).min(first(&b, j, b_len)),
+        }
     }
 }
 
@@ -133,8 +169,9 @@ mod tests {
 
     /// The centre and the MAD are medians at both parities. [1, 3, 7, 9]: centre (3 + 7)/2 = 5,
     /// deviations ranked [2, 2, 4, 4], MAD (2 + 4)/2 = 3. [1, 3, 7]: centre 3, deviations ranked
-    /// [0, 2, 4], MAD 2. The merge agrees with sorting the deviations on odd and even counts, a
-    /// centre at either end, ties and a heavy outlier.
+    /// [0, 2, 4], MAD 2. The selection agrees with sorting the deviations on odd and even counts, a
+    /// centre at either end, ties and a heavy outlier, and on windows of every length from 1 to 40
+    /// drawn with many ties.
     #[test]
     fn the_centre_and_the_mad_are_medians_at_both_parities() {
         assert_eq!(Spread::median_of_sorted(&[1.0, 3.0, 7.0, 9.0]), 5.0);
@@ -149,7 +186,21 @@ mod tests {
             &[10.0, 10.0, 10.0],
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
         ];
-        for sorted in cases {
+        let mut rng = TestRng::new(11);
+        let random: Vec<Vec<f32>> = (1..=40)
+            .map(|len| {
+                let mut window: Vec<f32> = (0..len)
+                    .map(|_| (rng.next_f32() * 8.0).round() * 0.25)
+                    .collect();
+                window.sort_unstable_by(f32::total_cmp);
+                window
+            })
+            .collect();
+        for sorted in cases
+            .iter()
+            .copied()
+            .chain(random.iter().map(Vec::as_slice))
+        {
             for centre in [
                 Spread::median_of_sorted(sorted),
                 sorted[0],

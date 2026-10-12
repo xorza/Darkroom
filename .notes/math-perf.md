@@ -23,9 +23,9 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `noise/frame/mrs_estimate_split/4096` | 0.33 | 0.29 | Same. |
 | `wavelet/frame/atrous_smooth/step_1/2048` | 0.51 | 0.52 | Both passes fused row by row: the five source rows convolved down the columns into one row of scratch, then along it, so the frame is read once and written once and no intermediate plane exists. Each tile, denoise and HDR hold one plane less. Moves bits: the columns are convolved before the rows, the same arithmetic in the other order. |
 | `wavelet/frame/atrous_smooth/step_8/2048` | 0.55 | 0.57 | Same. |
-| `lstsq/factor/2000x15` | 0.28 | | A design taller than wide is reduced by a Householder QR and its SVD taken of the square `R`, as LAPACK's `gesvd` does: the same singular values and rank, both steps backward stable. Moves bits. |
-| `lstsq/factor/500x10` | 0.37 | | Same. |
-| `lstsq/solve/2000x15` | 2.34 | | A solve now applies the reflections to its right-hand side. Every caller factors once and solves once: factor and solve together are 0.32 of before at 2000×15. |
+| `lstsq/factor/2000x15` | 0.28 | 0.23 | A design taller than wide is reduced by a Householder QR and its SVD taken of the square `R`, as LAPACK's `gesvd` does: the same singular values and rank, both steps backward stable. Moves bits. |
+| `lstsq/factor/500x10` | 0.37 | 0.31 | Same. |
+| `lstsq/solve/2000x15` | 2.34 | 2.24 | A solve now applies the reflections to its right-hand side. Every caller factors once and solves once: factor and solve together are 0.32 of before at 2000×15. |
 | `noise/frame/binned_measure/1000000` | 0.88 | | The bins measured in parallel. |
 | `noise/gain_bin/4096` | 0.29 | 0.60 | The 7 bounds as a fixed array, the bin counted without a branch. Same bins. |
 | `statistics/median_mut/16` | 0.55 | 0.77 | Selection on integer keys in `total_cmp`'s order, where `total_cmp` mapped both operands of every comparison. A slice with no sign bit set is its own keys, which one OR over its bits finds, so it is neither written nor mapped back; any other is mapped once each way. Same medians. |
@@ -36,6 +36,8 @@ Work on branch `lumos-math-perf`. Every figure is criterion's median time agains
 | `statistics/robust_sigma_f64/4096` | 0.84 | 1.16 | Both medians on keys. |
 | `statistics/sigma_clipped/16` | 0.89 | 0.99 | The values are clipped as keys across every pass; the survivors close up without a branch per value; unmapped keys read back as the values' bits. `median_fast` (a comparison that is wrong for NaN) is gone: every median is the total-order one. |
 | `statistics/sigma_clipped/4096` | 0.96 | 0.90 | Same. |
+| `statistics/spread/16` | 0.72 | | The MAD of a sorted window by a binary search over how many of its middle rank each side of the centre gives, the deviations two ascending runs: as many steps as the length has bits, where the merge took half the window. Same bits. |
+| `statistics/spread/256` | 0.37 | | Same. |
 | `statistics/frame/plane_median/radix/24000000` | 0.93 | 0.67 | `add_all` takes a run: eight keys at a time, and the second pass tests eight at once and counts only those in the middle bins. Normalization hands it every full mask word. |
 
 The `statistics` rows are against a baseline measured again after the bench fix that batches in-place
