@@ -15,8 +15,8 @@ Workspace members, each after the crates it uses:
 - **`lumos`** — the astronomical image-processing pipeline.
 - **`lens`** — the node-function library: application nodes (filesystem
   watching, random generation) and adapters from `imaginarium` and `lumos`.
-- **`darkroom`** — the editor and the only binary; editor work may need a
-  matching Palantir change. `--features profile-with-tracy` forwards
+- **`darkroom`** — the editor and the only binary, a thin `main.rs` over the
+  `darkroom` library; editor work may need a matching Palantir change. `--features profile-with-tracy` forwards
   Palantir's Tracy zones.
 
 `default-members = ["darkroom"]`: a bare `cargo run`, `test` or `clippy`
@@ -66,11 +66,12 @@ unused. The submodules follow the same rule.
 A crate with benches has one target, `benches/<crate>.rs`, whose one group runs
 `bench::run`; each driver sits in a `bench.rs` beside the code it measures.
 An `atomic` case times one operation on the unit production hands it; an
-`integration` case times a pipeline stage or a public entry point end to end on
-the 24 MP standard frame. An id is `<kind>/<group>/<case>`, and criterion's
-filter selects by it. `cargo benches` runs them in this workspace (lumos) and
-in each submodule, with that root's fixed features; `-- --test` runs each case
-once, and a change to bench code runs it.
+`integration` case times a pipeline stage, a frame or a public entry point end
+to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's filter
+selects by it; a crate with GPU cases puts the backend first in every case, so
+`'/cpu/'` opens no device. `cargo benches` runs them in this workspace (lumos,
+and darkroom's editor frame) and in each submodule, with that root's fixed
+features; `-- --test` runs each case once, and a change to bench code runs it.
 
 ## Conventions
 

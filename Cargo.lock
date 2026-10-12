@@ -809,6 +809,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "common",
+ "criterion",
+ "darkroom",
  "glam 0.34.1",
  "image",
  "imaginarium",
@@ -2628,12 +2630,10 @@ version = "0.8.0"
 dependencies = [
  "arboard",
  "bytemuck",
- "clap",
  "cosmic-text",
  "criterion",
  "etagere",
  "fixedbitset",
- "gethostname",
  "glam 0.34.1",
  "half",
  "padding-struct",

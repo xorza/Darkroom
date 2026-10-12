@@ -13,7 +13,7 @@ pub(crate) mod edit;
 pub(crate) mod io;
 pub(crate) mod preview;
 pub(crate) mod runtime_host;
-mod runtime_library;
+pub(crate) mod runtime_library;
 pub(crate) mod status;
 pub(crate) mod wake;
 mod worker;

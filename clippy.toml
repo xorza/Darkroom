@@ -5,3 +5,12 @@ allowed-wildcard-imports = ["x86_64", "aarch64", "arch"]
 # The house rule bans inline `crate::` paths. A standard-library path may stay inline, which is
 # what a gated field or statement uses instead of a cfg'd import.
 absolute-paths-allowed-crates = ["std", "core", "alloc"]
+
+# A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
+# policy every case shares; `Scale::apply` alone calls these.
+disallowed-methods = [
+    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `Scale`" },
+]
