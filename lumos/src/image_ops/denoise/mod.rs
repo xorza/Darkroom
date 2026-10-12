@@ -185,16 +185,12 @@ impl Denoise {
             strength,
             ..
         } = *self;
-        let DenoiseScratch {
-            c_curr,
-            c_next,
-            tmp,
-        } = scratch;
+        let DenoiseScratch { c_curr, c_next } = scratch;
 
         c_curr.pixels_mut().copy_from_slice(plane);
         for j in 0..scales {
             let step = 1usize << j;
-            atrous_smooth(c_curr, c_next, tmp, step); // c_next = c_{j+1}
+            atrous_smooth(c_curr, c_next, step); // c_next = c_{j+1}
 
             // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed part
             // is computed inline, saving a full read+write pass over the plane each scale.
@@ -271,8 +267,6 @@ struct DenoiseScratch {
     c_curr: Buffer2<f32>,
     /// Next smooth `c_{j+1}`.
     c_next: Buffer2<f32>,
-    /// Separable-convolution horizontal-pass intermediate for [`atrous_smooth`].
-    tmp: Buffer2<f32>,
 }
 
 impl DenoiseScratch {
@@ -280,7 +274,6 @@ impl DenoiseScratch {
         Self {
             c_curr: Buffer2::new_default(size.width, size.height),
             c_next: Buffer2::new_default(size.width, size.height),
-            tmp: Buffer2::new_default(size.width, size.height),
         }
     }
 }

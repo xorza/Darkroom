@@ -77,10 +77,9 @@ const TILES_PER_AXIS: usize = 4;
 /// Wider than the transform reaches from a pixel: two taps of `2^(j−1)` at each of the four
 /// layers, 2 × (1 + 2 + 4 + 8) = 30.
 const MARGIN: usize = 32;
-/// The bytes a tile's transform holds for each pixel of its region: the image, the smooth, the
-/// next smooth and the convolution's scratch in f32, and the first layer and the significance in
-/// f64.
-const TILE_BYTES_PER_PIXEL: usize = 4 * size_of::<f32>() + 2 * size_of::<f64>();
+/// The bytes a tile's transform holds for each pixel of its region: the image, the smooth and the
+/// next smooth in f32, and the first layer and the significance in f64.
+const TILE_BYTES_PER_PIXEL: usize = 3 * size_of::<f32>() + 2 * size_of::<f64>();
 
 /// The analysed pixels, one column for each figure, so that a pass of the support iteration reads
 /// only the columns it tests and sums: each pixel's row-major index in the image, its first detail
@@ -232,8 +231,9 @@ impl MrsNoise {
 
     /// The most bytes an estimate over a `size` image holds at once, with `threads` workers to
     /// share its tiles: [`Self::estimate_split`]'s coefficients, each with its gain bin, the
-    /// six planes of every tile in work, the largest first, and the tile list beside them.
-    /// [`Self::estimate`] holds no bins and so a byte a coefficient less.
+    /// five planes of every tile in work, the largest first, the row each worker smooths through,
+    /// as wide as the widest region, and the tile list beside them. [`Self::estimate`] holds no
+    /// bins and so a byte a coefficient less.
     pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
         let tiles = tiles(size);
         let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
@@ -241,8 +241,14 @@ impl MrsNoise {
             tiles.iter().map(|tile| tile.region.area()).collect();
         regions.sort_unstable_by(|a, b| b.cmp(a));
         let in_work: usize = regions.iter().take(threads.max(1)).sum();
+        let widest = tiles
+            .iter()
+            .map(|tile| tile.region.width())
+            .max()
+            .unwrap_or(0);
         BinnedSamples::<Coefficients>::heap_bytes(analysed)
             + in_work * TILE_BYTES_PER_PIXEL
+            + threads.max(1) * widest * size_of::<f32>()
             + tiles.len()
                 * (size_of::<Tile>() + size_of::<CoefficientShare<'_>>() + size_of::<usize>())
     }
@@ -401,10 +407,9 @@ fn tile_coefficients(
     let image = Buffer2::new(width, height, pixels);
     let mut smooth = Buffer2::new_default(width, height);
     let mut next = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     // The first layer is built as it is first smoothed, so neither it nor the significance is
     // cleared first: the largest significance of one layer is that layer's.
-    atrous_smooth(&image, &mut smooth, &mut scratch, 1);
+    atrous_smooth(&image, &mut smooth, 1);
     let first_layer: Vec<f64> = smooth
         .pixels()
         .iter()
@@ -416,7 +421,7 @@ fn tile_coefficients(
         .map(|detail| detail.abs() / LAYER_SIGMA[0])
         .collect();
     for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
-        atrous_smooth(&smooth, &mut next, &mut scratch, 1 << scale);
+        atrous_smooth(&smooth, &mut next, 1 << scale);
         for ((significance, &coarse), &fine) in significance
             .iter_mut()
             .zip(next.pixels())

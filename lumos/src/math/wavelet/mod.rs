@@ -15,102 +15,93 @@ use rayon::prelude::*;
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
 
 /// One starlet smoothing step: separable B3-spline à trous convolution with hole spacing `step`,
-/// `src → dst` using `tmp` as the horizontal-pass intermediate.
-pub(crate) fn atrous_smooth(
-    src: &Buffer2<f32>,
-    dst: &mut Buffer2<f32>,
-    tmp: &mut Buffer2<f32>,
-    step: usize,
-) {
-    convolve_horizontal(src, tmp, step);
-    convolve_vertical(tmp, dst, step);
+/// `src → dst`.
+///
+/// Each output row is its five source rows convolved down the columns into a row of scratch, then
+/// convolved along that row. Consecutive rows share their source rows, which so come from cache:
+/// the frame is read once and written once, with no plane between the passes.
+pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
+    let (width, height) = (src.width(), src.height());
+    debug_assert_eq!((dst.width(), dst.height()), (width, height));
+    let rows = height as isize;
+    let s = step as isize;
+    dst.pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each_init(
+            || vec![0.0f32; width],
+            |column, (y, out)| {
+                let taps = if y >= 2 * step && y + 2 * step < height {
+                    [y - 2 * step, y - step, y, y + step, y + 2 * step]
+                } else {
+                    let yi = y as isize;
+                    [
+                        reflect(yi - 2 * s, rows),
+                        reflect(yi - s, rows),
+                        y,
+                        reflect(yi + s, rows),
+                        reflect(yi + 2 * s, rows),
+                    ]
+                };
+                convolve_column(taps.map(|row| src.row(row)), column);
+                convolve_row(column, out, step);
+            },
+        );
 }
 
-/// Horizontal B3-spline convolution with taps at `x ± step` and `x ± 2·step` (mirror boundary).
-fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
-    let width = src.width();
+/// The B3 taps of five rows, lane by lane, into `out`.
+fn convolve_column(rows: [&[f32]; 5], out: &mut [f32]) {
+    let [r0, r1, r2, r3, r4] = rows;
+    // Zip-iterated (bounds checks elide) so the compiler auto-vectorizes the 5-tap column.
+    out.iter_mut()
+        .zip(r0.iter())
+        .zip(r1.iter())
+        .zip(r2.iter())
+        .zip(r3.iter())
+        .zip(r4.iter())
+        .for_each(|(((((o, &a), &b), &c), &d), &e)| {
+            *o = B3[0] * a + B3[1] * b + B3[2] * c + B3[3] * d + B3[4] * e;
+        });
+}
+
+/// The B3 taps of `row` at `x ± step` and `x ± 2·step` (mirror boundary), into `out`.
+fn convolve_row(row: &[f32], out: &mut [f32], step: usize) {
+    let width = row.len();
     let wi = width as isize;
     let s = step as isize;
     // Interior `[lo, hi)` has all five taps in-bounds; only the thin borders need reflection.
     let lo = (2 * step).min(width);
     let hi = width.saturating_sub(2 * step);
-    dst.pixels_mut()
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, out)| {
-            let row = src.row(y);
-            let reflected = |x: usize| {
-                let xi = x as isize;
-                B3[0] * row[reflect(xi - 2 * s, wi)]
-                    + B3[1] * row[reflect(xi - s, wi)]
-                    + B3[2] * row[x]
-                    + B3[3] * row[reflect(xi + s, wi)]
-                    + B3[4] * row[reflect(xi + 2 * s, wi)]
-            };
-            for (x, o) in out[..lo].iter_mut().enumerate() {
-                *o = reflected(x);
-            }
-            // Branchless fixed-offset stencil: zip-iterated so the per-element bounds checks elide
-            // and the compiler can auto-vectorize the (vast-majority) interior.
-            if hi > lo {
-                let n = hi - lo;
-                out[lo..hi]
-                    .iter_mut()
-                    .zip(row[lo - 2 * step..lo - 2 * step + n].iter())
-                    .zip(row[lo - step..lo - step + n].iter())
-                    .zip(row[lo..lo + n].iter())
-                    .zip(row[lo + step..lo + step + n].iter())
-                    .zip(row[lo + 2 * step..lo + 2 * step + n].iter())
-                    .for_each(|(((((o, &m2), &m1), &c), &p1), &p2)| {
-                        *o = B3[0] * m2 + B3[1] * m1 + B3[2] * c + B3[3] * p1 + B3[4] * p2;
-                    });
-            }
-            let rstart = hi.max(lo);
-            for (i, o) in out[rstart..].iter_mut().enumerate() {
-                *o = reflected(rstart + i);
-            }
-        });
-}
-
-/// Vertical B3-spline convolution with taps at `y ± step` and `y ± 2·step` (mirror boundary).
-fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
-    let width = src.width();
-    let height = src.height();
-    let hi = height as isize;
-    let s = step as isize;
-    dst.pixels_mut()
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, out)| {
-            let (r0, r1, r2, r3, r4) = if y >= 2 * step && y + 2 * step < height {
-                (
-                    src.row(y - 2 * step),
-                    src.row(y - step),
-                    src.row(y),
-                    src.row(y + step),
-                    src.row(y + 2 * step),
-                )
-            } else {
-                let yi = y as isize;
-                (
-                    src.row(reflect(yi - 2 * s, hi)),
-                    src.row(reflect(yi - s, hi)),
-                    src.row(y),
-                    src.row(reflect(yi + s, hi)),
-                    src.row(reflect(yi + 2 * s, hi)),
-                )
-            };
-            // Zip-iterated (bounds checks elide) so the compiler auto-vectorizes the 5-tap column.
-            out.iter_mut()
-                .zip(r0.iter())
-                .zip(r1.iter())
-                .zip(r2.iter())
-                .zip(r3.iter())
-                .zip(r4.iter())
-                .for_each(|(((((o, &a), &b), &c), &d), &e)| {
-                    *o = B3[0] * a + B3[1] * b + B3[2] * c + B3[3] * d + B3[4] * e;
-                });
-        });
+    let reflected = |x: usize| {
+        let xi = x as isize;
+        B3[0] * row[reflect(xi - 2 * s, wi)]
+            + B3[1] * row[reflect(xi - s, wi)]
+            + B3[2] * row[x]
+            + B3[3] * row[reflect(xi + s, wi)]
+            + B3[4] * row[reflect(xi + 2 * s, wi)]
+    };
+    for (x, o) in out[..lo].iter_mut().enumerate() {
+        *o = reflected(x);
+    }
+    // Branchless fixed-offset stencil: zip-iterated so the per-element bounds checks elide and the
+    // compiler can auto-vectorize the (vast-majority) interior.
+    if hi > lo {
+        let n = hi - lo;
+        out[lo..hi]
+            .iter_mut()
+            .zip(row[lo - 2 * step..lo - 2 * step + n].iter())
+            .zip(row[lo - step..lo - step + n].iter())
+            .zip(row[lo..lo + n].iter())
+            .zip(row[lo + step..lo + step + n].iter())
+            .zip(row[lo + 2 * step..lo + 2 * step + n].iter())
+            .for_each(|(((((o, &m2), &m1), &c), &p1), &p2)| {
+                *o = B3[0] * m2 + B3[1] * m1 + B3[2] * c + B3[3] * p1 + B3[4] * p2;
+            });
+    }
+    let rstart = hi.max(lo);
+    for (i, o) in out[rstart..].iter_mut().enumerate() {
+        *o = reflected(rstart + i);
+    }
 }
 
 /// Mirror-reflect an index into `[0, n)` (whole-sample symmetric, no edge repeat), folding

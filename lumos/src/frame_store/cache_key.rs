@@ -64,7 +64,7 @@ pub(crate) const DECODE_PINS: DecodePins = DecodePins {
     // reused, and the `real-data` snapshot prints the digest to pin here.
     raw_cfa: "repin-on-real-data",
     demosaic: "834a8c96c0a8a6c2",
-    frame_stats: "caaddb6878657b08",
+    frame_stats: "8a0aee7afd8d22fe",
 };
 
 /// The decode version every cache key carries: derived from [`DECODE_PINS`], not bumped by hand.
