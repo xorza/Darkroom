@@ -40,6 +40,17 @@ impl Files {
         })
     }
 
+    /// [`LIGHTS`] dithered exposures of `field` as calibration leaves them, mosaics behind
+    /// `cfa_type`'s filters saved by `CfaImage::save_fits`: a set to drizzle.
+    pub(crate) fn calibrated_mosaics(field: Field, cfa_type: CfaType) -> Self {
+        Self::write("calibrated", |path, index| {
+            field
+                .mosaic_exposure(FRAME, cfa_type, index)
+                .save_fits(path)
+                .unwrap();
+        })
+    }
+
     fn write(name: &str, write: impl Fn(&Path, usize)) -> Self {
         let dir = TempDir::new("lumos-bench-files");
         let paths = (0..LIGHTS)
@@ -126,7 +137,7 @@ mod tests {
     use crate::math::size2us::Size2us;
 
     /// Each file loads back as what was written, to within half the 16-bit step `0.5 / 65535` for
-    /// the integer files and exactly for the float one.
+    /// the integer files and exactly for the float ones.
     #[test]
     fn each_file_loads_back_as_written() {
         let size = Size2us::new(60, 40);
@@ -158,5 +169,12 @@ mod tests {
         let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
         assert_eq!(loaded.cfa_type, mosaic.cfa_type);
         within_half_step(loaded.data.pixels(), mosaic.data.pixels());
+
+        let calibrated = field.mosaic_exposure(size, CfaType::Bayer(CfaPattern::Rggb), 1);
+        let path = dir.join("calibrated.fits");
+        calibrated.save_fits(&path).unwrap();
+        let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
+        assert_eq!(loaded.cfa_type, calibrated.cfa_type);
+        assert_eq!(loaded.data.pixels(), calibrated.data.pixels());
     }
 }

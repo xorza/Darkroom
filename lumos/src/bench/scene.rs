@@ -218,6 +218,22 @@ impl Field {
         self.hit(size, cfa_type, Readout::Calibrated, Shot::Field)
     }
 
+    /// Exposure `index` of the sequence [`Self::exposure`] gives, calibrated, on a sensor of `size`
+    /// behind `cfa_type`'s filters, with its own cosmic-ray hits: a light of a dithered set as
+    /// calibration leaves it, for a drizzle.
+    pub(crate) fn mosaic_exposure(
+        self,
+        size: Size2us,
+        cfa_type: CfaType,
+        index: usize,
+    ) -> CfaImage {
+        let shot = Shot::Sequence {
+            index,
+            aligned: false,
+        };
+        self.hit(size, cfa_type, Readout::Calibrated, shot)
+    }
+
     /// The field as a sensor of `size` behind `cfa_type`'s filters reads it, with cosmic-ray hits:
     /// what [`masters`] calibrate.
     pub(crate) fn light(self, size: Size2us, cfa_type: CfaType) -> CfaImage {
@@ -505,6 +521,20 @@ mod tests {
         assert_eq!(frame.image.metadata.camera_white_balance, None);
         let mosaic = Field::Typical.mosaic(SMALL, RGGB);
         assert_eq!(mosaic.metadata.camera_white_balance, Some(WHITE_BALANCE));
+        // A calibrated exposure carries the sequence's sky on the calibrated sensor: exposure 1's
+        // sky is the field's, (92 + 4·2) / 100 = 1, and exposure 2's (92 + 4·(14 mod 5)) / 100 =
+        // 1.08 of it. The medians, the sky with no bias under them, stand in the same ratios.
+        let median = |image: &CfaImage| median_mut(&mut image.data.pixels().to_vec());
+        let field_sky = median(&mosaic);
+        for (index, level) in [(1, 1.0), (2, 1.08)] {
+            let exposure = Field::Typical.mosaic_exposure(SMALL, RGGB, index);
+            assert_eq!(exposure.metadata.camera_white_balance, Some(WHITE_BALANCE));
+            let ratio = median(&exposure) / field_sky;
+            assert!(
+                (ratio / level - 1.0).abs() < 0.005,
+                "exposure {index}: sky ratio {ratio}"
+            );
+        }
     }
 
     /// The masters carry the sensor's defects: against the dark's noise, σ ≈ 8·10⁻⁵ from 3 e⁻ of

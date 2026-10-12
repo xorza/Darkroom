@@ -86,4 +86,5 @@ pub fn pipeline(c: &mut Criterion) {
     stack::bench::pipeline(c);
     calibration_masters::bench::pipeline(c);
     pipeline::bench::pipeline(c);
+    drizzle::bench::pipeline(c);
 }

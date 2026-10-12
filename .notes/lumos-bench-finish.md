@@ -7,20 +7,6 @@ rules are the ones `lumos/src/bench/mod.rs` states.
 
 Done in this order; each is deleted when it is committed.
 
-6. **`pipeline/drizzle/rggb/12xtypical`**.
-   - `bench::scene`: `Field::mosaic_exposure(size, cfa_type, index)`, exposure `index` of the
-     sequence calibrated and dithered, with its cosmic-ray hits:
-     `self.hit(size, cfa_type, Readout::Calibrated, Shot::Sequence { index, aligned: false })`.
-     Extend `a_field_keeps_its_density_on_a_smaller_frame` with its dither and white balance.
-   - `bench::files`: `Files::calibrated_mosaics(field, cfa_type)`, [`LIGHTS`] such exposures saved
-     by `CfaImage::save_fits`. Extend `each_file_loads_back_as_written` with one.
-   - The bench, beside `pipeline::bench::pipeline` or in `lumos/src/drizzle/bench.rs` as a
-     `pipeline` entry that `crate::bench::pipeline` calls: `drizzle_cfa_stack` over the files,
-     each `DrizzleFrame` with `WarpTransform::new(scene::dither(FRAME, index))`, under
-     `DrizzleConfig::default()` with its `ingest` cache in the files' directory, and
-     `StackConfig::light()`. Throughput `LIGHTS × FRAME` pixels.
-   - Run it once with `-- --test` to show the light preset's noise weighting now succeeds.
-
 7. **The sampling of seconds-long iterations.** `stage/combine` (1.96 s an iteration) and
    `stage/drizzle` (6.91 s) are sampled at `Scale::Frame`, whose 3 s window holds neither, so
    criterion warns "Unable to complete 10 samples" on every run; the `pipeline` groups take longer
