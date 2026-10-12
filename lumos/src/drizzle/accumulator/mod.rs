@@ -77,10 +77,6 @@ pub(crate) struct DrizzleAccumulator {
     scans: Vec<BandScan>,
     radial: ScratchPool<RadialScratch>,
     lattice: ScratchPool<CornerLattice>,
-    /// Band height forced by the band-invariance test, which needs to compare one band against many
-    /// on the same input. Production always derives it from the thread count.
-    #[cfg(test)]
-    band_rows_override: Option<usize>,
 }
 
 /// One frame drizzled on its own, as the combine reads it: where its drops landed, each channel
@@ -130,8 +126,6 @@ impl DrizzleAccumulator {
             scans: Vec::new(),
             radial: ScratchPool::default(),
             lattice: ScratchPool::new(input_dims.width()),
-            #[cfg(test)]
-            band_rows_override: None,
         })
     }
 
@@ -159,6 +153,16 @@ impl DrizzleAccumulator {
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
     ) -> Result<(), DrizzleError> {
+        self.add_frame_in_bands(frame, Self::balanced_band_rows(self.output.height))
+    }
+
+    /// [`Self::add_frame`] over output bands of `band_rows` rows each. The result does not depend
+    /// on the band height, which the band-invariance test holds to.
+    fn add_frame_in_bands(
+        &mut self,
+        frame: &DrizzleFrame<impl StackableImage>,
+        band_rows: usize,
+    ) -> Result<(), DrizzleError> {
         self.validate(frame)?;
         self.next_frame += 1;
         if self.flags.is_none()
@@ -180,7 +184,6 @@ impl DrizzleAccumulator {
         let reach = plan.reach();
 
         let Size2us { width, height } = self.output;
-        let band_rows = self.band_rows();
         self.scans.clear();
         self.scans
             .extend((0..height).step_by(band_rows).map(|start| {
@@ -341,14 +344,6 @@ impl DrizzleAccumulator {
         Ok(())
     }
 
-    fn band_rows(&self) -> usize {
-        #[cfg(test)]
-        if let Some(rows) = self.band_rows_override {
-            return rows;
-        }
-        Self::balanced_band_rows(self.output.height)
-    }
-
     /// How many output rows one band covers.
     ///
     /// Several per worker so rayon can steal: a band's cost varies with how much of the input
@@ -382,7 +377,7 @@ fn next_band<'a>(
         .collect()
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 pub(crate) mod internals {
@@ -419,10 +414,8 @@ pub(crate) mod internals {
             frame: &DrizzleFrame<LinearImage>,
             band_rows: usize,
         ) {
-            self.band_rows_override = Some(band_rows);
-            self.add_frame(frame)
+            self.add_frame_in_bands(frame, band_rows)
                 .expect("test frame must be coherent with the accumulator");
-            self.band_rows_override = None;
         }
 
         /// `Σw` per output pixel as deposited, in the plane every channel shares.

@@ -63,7 +63,7 @@ pub(crate) fn create_residual_threshold_mask(
         });
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::star_detection::threshold_mask::ThresholdParams;
 

@@ -151,7 +151,6 @@ pub(crate) fn save_metrics(metrics: &DetectionMetrics, name: &str) {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use crate::internals::assertions::is_close;
     use crate::internals::visual::report::*;

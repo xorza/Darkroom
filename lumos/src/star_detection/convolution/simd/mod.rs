@@ -339,7 +339,7 @@ fn add_weighted<S: Isa>(isa: S, output: &mut [f32], input: &[f32], weight: f32) 
     }
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
     use crate::math::size2us::Size2us;
@@ -389,7 +389,7 @@ pub(crate) mod internals {
     }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

@@ -27,8 +27,7 @@ fn every_method_on_a_sub_pixel_grid() {
         let seed = truth.round();
 
         let gaussian =
-            SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma: 2.5 })
-                .stamp(size, 0.1);
+            SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::gaussian(2.5)).stamp(size, 0.1);
         let fit = GaussianFit::new(&gaussian, seed, &StampGrid::new(8), 0.1, None)
             .expect("the Gaussian fit lands");
         assert!(
@@ -95,7 +94,7 @@ fn moment_metrics_of_gaussian_stars() {
         (4.0, 2.0, -1.081_322_3, -0.111_348_47),
         (2.0, 4.0, 1.081_322_3, 0.111_348_47),
     ] {
-        let profile = StarProfile::Elliptical {
+        let profile = StarProfile::Gaussian {
             sigma_x,
             sigma_y,
             angle: 0.0,

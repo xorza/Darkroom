@@ -111,16 +111,8 @@ pub(crate) mod internals {
         make_test_component(
             Size2us::new(100, 100),
             &[
-                SyntheticStar::new(
-                    Vec2::new(30.0, 50.0),
-                    1.0,
-                    StarProfile::Gaussian { sigma: 2.5 },
-                ),
-                SyntheticStar::new(
-                    Vec2::new(70.0, 50.0),
-                    secondary,
-                    StarProfile::Gaussian { sigma: 2.5 },
-                ),
+                SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+                SyntheticStar::new(Vec2::new(70.0, 50.0), secondary, StarProfile::gaussian(2.5)),
             ],
         )
     }

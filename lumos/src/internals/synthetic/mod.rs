@@ -29,7 +29,7 @@
 //! ```
 //!
 //! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the
-//! benches and detection tests.
+//! detection tests.
 //!
 //! # Modules
 //!

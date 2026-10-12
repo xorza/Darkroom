@@ -28,7 +28,7 @@ fn single_star_no_deblending() {
         &[SyntheticStar::new(
             Vec2::new(50.0, 50.0),
             1.0,
-            StarProfile::Gaussian { sigma: 3.0 },
+            StarProfile::gaussian(3.0),
         )],
     );
     let result =
@@ -78,16 +78,8 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(44.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 4.0 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(56.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 4.0 },
-            ),
+            SyntheticStar::new(Vec2::new(44.0, 50.0), 1.0, StarProfile::gaussian(4.0)),
+            SyntheticStar::new(Vec2::new(56.0, 50.0), 1.0, StarProfile::gaussian(4.0)),
         ],
     );
 
@@ -180,16 +172,8 @@ fn close_peaks_merge() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(48.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.0 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(52.0, 50.0),
-                0.9,
-                StarProfile::Gaussian { sigma: 2.0 },
-            ),
+            SyntheticStar::new(Vec2::new(48.0, 50.0), 1.0, StarProfile::gaussian(2.0)),
+            SyntheticStar::new(Vec2::new(52.0, 50.0), 0.9, StarProfile::gaussian(2.0)),
         ],
     );
 
@@ -225,21 +209,9 @@ fn three_stars_deblend() {
     } = make_test_component(
         Size2us::new(150, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(75.0, 50.0),
-                0.9,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(120.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(75.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(120.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
 
@@ -268,21 +240,9 @@ fn hierarchical_deblend() {
     } = make_test_component(
         Size2us::new(150, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(100.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(115.0, 50.0),
-                0.7,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(100.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(115.0, 50.0), 0.7, StarProfile::gaussian(2.5)),
         ],
     );
 
@@ -417,16 +377,8 @@ fn vertical_star_pair() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(50.0, 30.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(50.0, 70.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(50.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(50.0, 70.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
 
@@ -450,16 +402,8 @@ fn diagonal_star_pair() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 30.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 70.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(30.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(70.0, 70.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
 
@@ -483,16 +427,8 @@ fn n_thresholds_effect() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(46.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(54.0, 50.0),
-                0.9,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(46.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(54.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
         ],
     );
     let component = Component::new(&data, &pixels, &labels);
@@ -590,18 +526,10 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
     }
 
     for &star in &[
-        SyntheticStar::new(
-            Vec2::new(30.0, 50.0),
-            1.0,
-            StarProfile::Gaussian { sigma: 2.5 },
-        ),
-        SyntheticStar::new(
-            Vec2::new(70.0, 50.0),
-            0.8,
-            StarProfile::Gaussian { sigma: 2.5 },
-        ),
+        SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+        SyntheticStar::new(Vec2::new(70.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
     ] {
-        let StarProfile::Gaussian { sigma } = star.profile else {
+        let StarProfile::Gaussian { sigma_x: sigma, .. } = star.profile else {
             unreachable!("this fixture's stars are all Gaussian")
         };
         // 6σ, not the profile's own 4σ: this component is padded well past the falloff on purpose.
@@ -659,7 +587,7 @@ fn many_stars_are_all_kept() {
             SyntheticStar::new(
                 Vec2::new((15 + i * 12) as f32, 50.0),
                 0.45 + i as f32 * 0.05,
-                StarProfile::Gaussian { sigma: 2.0 },
+                StarProfile::gaussian(2.0),
             )
         })
         .collect();
@@ -690,7 +618,7 @@ fn a_wide_split_keeps_every_child() {
             stars.push(SyntheticStar::new(
                 Vec2::new((20 + col * 25) as f32, (20 + row * 25) as f32),
                 1.0 - (row * 4 + col) as f32 * 0.03,
-                StarProfile::Gaussian { sigma: 2.0 },
+                StarProfile::gaussian(2.0),
             ));
         }
     }
@@ -724,31 +652,15 @@ fn buffer_reuse_consistency() {
     let pair = make_test_component(
         Size2us::new(100, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(30.0, 50.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(70.0, 50.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
     let close = make_test_component(
         Size2us::new(60, 60),
         &[
-            SyntheticStar::new(
-                Vec2::new(26.0, 30.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(34.0, 30.0),
-                0.9,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(26.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(34.0, 30.0), 0.9, StarProfile::gaussian(2.5)),
         ],
     );
     let run = |fixture: &TestComponent, buffers: &mut DeblendBuffers| {
@@ -793,21 +705,9 @@ fn bbox_contains_all_peaks() {
     } = make_test_component(
         Size2us::new(150, 100),
         &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 30.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(75.0, 50.0),
-                0.9,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(120.0, 70.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
+            SyntheticStar::new(Vec2::new(30.0, 30.0), 1.0, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(75.0, 50.0), 0.9, StarProfile::gaussian(2.5)),
+            SyntheticStar::new(Vec2::new(120.0, 70.0), 0.8, StarProfile::gaussian(2.5)),
         ],
     );
 
@@ -857,7 +757,7 @@ fn a_region_under_min_area_is_no_object() {
         &[SyntheticStar::new(
             Vec2::new(15.0, 15.0),
             1.0,
-            StarProfile::Gaussian { sigma: 2.0 },
+            StarProfile::gaussian(2.0),
         )],
     );
     fixture.pixels[(19, 15)] += 0.3;

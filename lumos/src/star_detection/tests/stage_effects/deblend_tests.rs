@@ -214,12 +214,8 @@ fn deblending_does_not_depend_on_the_sky_level() {
     let render = |pedestal: f32| {
         let mut pixels = Buffer2::new_filled(size.width, size.height, pedestal);
         for (x, amplitude) in [(22.0, 0.2), (27.0, 0.05)] {
-            SyntheticStar::new(
-                Vec2::new(x, 24.0),
-                amplitude,
-                StarProfile::Gaussian { sigma: 1.5 },
-            )
-            .add_to(&mut pixels);
+            SyntheticStar::new(Vec2::new(x, 24.0), amplitude, StarProfile::gaussian(1.5))
+                .add_to(&mut pixels);
         }
         pixels
     };

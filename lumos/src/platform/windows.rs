@@ -40,13 +40,7 @@ pub(super) fn create_deleted(path: &Path) -> io::Result<File> {
 
 /// The handle itself: Windows deletes the file when its last handle closes, and the map must not
 /// outlive it.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "one signature on every system: Unix holds nothing and returns `None`"
-)]
-pub(super) const fn hold_for_map(file: File) -> Option<File> {
-    Some(file)
-}
+pub(super) const SCRATCH_MAP_NEEDS_HANDLE: bool = true;
 
 /// Nothing: Windows takes no advice on a view's access pattern.
 pub(super) const fn advise_sequential(_map: &Mmap) {}
@@ -172,7 +166,7 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
     None
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::fs::File;
 

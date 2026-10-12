@@ -14,7 +14,7 @@ pub(crate) mod stored_plane;
 pub(crate) mod stratified_samples;
 pub(crate) mod tier;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

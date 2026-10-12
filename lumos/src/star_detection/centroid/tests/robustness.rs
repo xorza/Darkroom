@@ -10,9 +10,8 @@ fn make_blended_stars(
     amp1: f32,
     amp2: f32,
 ) -> Buffer2<f32> {
-    let mut pixels =
-        SyntheticStar::new(pos1, amp1, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
-    SyntheticStar::new(pos2, amp2, StarProfile::Gaussian { sigma }).add_exact(&mut pixels);
+    let mut pixels = SyntheticStar::new(pos1, amp1, StarProfile::gaussian(sigma)).stamp(size, 0.1);
+    SyntheticStar::new(pos2, amp2, StarProfile::gaussian(sigma)).add_exact(&mut pixels);
     pixels
 }
 
@@ -35,8 +34,7 @@ fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
     let window = MeasureGrid::new(fwhm).window_sigma;
     let spread = 2.0 * (2.5f64 * 2.5 + 1.0 / 12.0 + window * window);
     let alone = Measured::flat(
-        &SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(size, 0.1),
+        &SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::gaussian(2.5)).stamp(size, 0.1),
         0.1,
         0.01,
     );
@@ -104,15 +102,10 @@ fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
 /// hold, so pinned to 1e-4 of the measured value, and along x only by symmetry.
 #[test]
 fn gaussian_fit_with_contamination() {
-    let mut pixels =
-        SyntheticStar::new(Vec2::splat(15.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(31, 31), 0.1);
-    SyntheticStar::new(
-        Vec2::new(22.0, 15.0),
-        0.2,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .add_exact(&mut pixels);
+    let mut pixels = SyntheticStar::new(Vec2::splat(15.0), 0.8, StarProfile::gaussian(2.5))
+        .stamp(Size2us::new(31, 31), 0.1);
+    SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::gaussian(2.5))
+        .add_exact(&mut pixels);
     let fit = GaussianFit::new(&pixels, DVec2::splat(15.0), &StampGrid::new(8), 0.1, None)
         .expect("the fit lands");
     assert!((fit.pos.x - 15.0 - 0.38168).abs() <= 1e-4, "{}", fit.pos);
@@ -134,7 +127,7 @@ fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
     ] {
         let start = DVec2::splat((side / 2) as f64);
         let truth = (start + DVec2::new(0.3, 0.7)).as_vec2();
-        let pixels = SyntheticStar::new(truth, 0.9, StarProfile::Gaussian { sigma })
+        let pixels = SyntheticStar::new(truth, 0.9, StarProfile::gaussian(sigma))
             .stamp(Size2us::new(side, side), 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
         let centre = measured
@@ -169,7 +162,7 @@ fn make_rotated_elliptical_star(
     SyntheticStar::new(
         pos,
         amplitude,
-        StarProfile::Elliptical {
+        StarProfile::Gaussian {
             sigma_x: sigma_major,
             sigma_y: sigma_minor,
             angle: angle_rad,

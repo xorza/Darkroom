@@ -1065,7 +1065,7 @@ fn source_noise_variance(
     Ok(sigma * sigma * inverse_confidence / indices.len() as f64)
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

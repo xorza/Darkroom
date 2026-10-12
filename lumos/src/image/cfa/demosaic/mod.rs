@@ -8,7 +8,7 @@ pub(crate) mod bayer;
 pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod memory_tests {

@@ -337,7 +337,7 @@ pub(crate) mod internals {
     }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

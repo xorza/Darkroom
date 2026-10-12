@@ -112,7 +112,7 @@ impl StoredImage {
     }
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::frame_store::stored_image::StoredImage;
     use crate::frame_store::stored_plane::StoredPlane;
@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn an_evicted_image_leaves_every_plane_on_the_disk() {
         let directory = TempDir::new("stored_image_evict");
-        let scratch = RunScratch::create(directory.path()).unwrap();
+        let scratch = RunScratch::create_evictable(directory.path()).unwrap();
         let size = Size2us::new(512, 512);
         let mut image = LinearImage::from_planar_channels(
             ImageDimensions::new(size, 3),

@@ -66,7 +66,7 @@ impl StoredGain {
     }
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_plane::StoredPlane;

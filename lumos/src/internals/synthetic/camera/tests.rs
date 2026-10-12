@@ -11,7 +11,7 @@ fn render_one(psf: PsfModel, size: usize, flux: f32, seeing: f32) -> Vec<f32> {
 #[test]
 fn gaussian_psf_conserves_flux() {
     // A wide canvas captures essentially all of the 4σ-truncated profile.
-    let pixels = render_one(PsfModel::Gaussian { fwhm: 4.0 }, 81, 100.0, 1.0);
+    let pixels = render_one(PsfModel::gaussian(4.0), 81, 100.0, 1.0);
     let sum: f32 = pixels.iter().sum();
     assert!((sum - 100.0).abs() < 1.0, "sum {sum}");
 }
@@ -34,7 +34,7 @@ fn moffat_psf_conserves_flux() {
 
 #[test]
 fn elliptical_psf_conserves_flux_and_is_elongated() {
-    let psf = PsfModel::Elliptical {
+    let psf = PsfModel::Gaussian {
         fwhm: 4.0,
         eccentricity: 0.6,
         angle: 0.0,
@@ -52,7 +52,7 @@ fn elliptical_psf_conserves_flux_and_is_elongated() {
 
 #[test]
 fn seeing_scale_widens_and_lowers_peak() {
-    let psf = PsfModel::Gaussian { fwhm: 4.0 };
+    let psf = PsfModel::gaussian(4.0);
     let size = 81;
     let c = size / 2;
     let sharp = render_one(psf, size, 100.0, 1.0);
@@ -102,7 +102,7 @@ fn flat_field_colour_gain_and_vignette() {
 
 #[test]
 fn psf_fwhm_accessor() {
-    assert_eq!(PsfModel::Gaussian { fwhm: 3.5 }.fwhm(), 3.5);
+    assert_eq!(PsfModel::gaussian(3.5).fwhm(), 3.5);
     assert_eq!(
         PsfModel::Moffat {
             fwhm: 4.0,
@@ -119,7 +119,7 @@ fn moffat_has_heavier_wings_than_gaussian() {
     // into atmospheric wings. At r=10 px the Gaussian (4σ-truncated) is gone; the Moffat is not.
     let size = 121;
     let c = size / 2;
-    let g = render_one(PsfModel::Gaussian { fwhm: 4.0 }, size, 100.0, 1.0);
+    let g = render_one(PsfModel::gaussian(4.0), size, 100.0, 1.0);
     let m = render_one(
         PsfModel::Moffat {
             fwhm: 4.0,
@@ -170,7 +170,7 @@ fn eccentricity_controls_elongation() {
     let c = size / 2;
     let ratio = |e: f32| {
         let p = render_one(
-            PsfModel::Elliptical {
+            PsfModel::Gaussian {
                 fwhm: 4.0,
                 eccentricity: e,
                 angle: 0.0,

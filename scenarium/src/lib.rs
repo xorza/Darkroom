@@ -5,7 +5,7 @@ mod containers;
 mod data;
 mod execution;
 mod graph;
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub mod internals;
 mod library;
 mod runtime;

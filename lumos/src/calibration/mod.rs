@@ -18,5 +18,5 @@ pub(crate) mod prepared_flat;
 pub(crate) mod temperature_difference;
 pub(crate) mod temperature_source;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;

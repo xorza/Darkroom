@@ -255,7 +255,6 @@ pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use crate::internals::visual::*;
 

@@ -31,7 +31,7 @@ impl FloorI32 for f32 {
     }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 
 #[cfg(test)]

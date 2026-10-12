@@ -147,18 +147,19 @@ fn warp_transform_new() {
 /// `d` = (−50, −50) and the correction is `1e-4·(−50)·5000` = −25 px on each axis.
 #[test]
 fn warp_transform_with_sip() {
-    use crate::internals::synthetic::distortion::{RadialField, RadialPairs};
+    use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
     use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
     let field = RadialField {
         transform,
+        ..RadialField::new(DVec2::new(50.0, 50.0), 1e-4)
+    };
+    let RadialPairs { reference, target } = field.pairs(Grid {
         start: 5,
         step: 10,
         extent: 95,
-        ..RadialField::new(DVec2::new(50.0, 50.0), 1e-4)
-    };
-    let RadialPairs { reference, target } = field.pairs();
+    });
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(field.centre),

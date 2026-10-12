@@ -28,7 +28,7 @@ pub(crate) mod avx2_fma;
 pub(crate) mod math;
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod neon;
-#[cfg(any(test, feature = "bench", not(target_arch = "aarch64")))]
+#[cfg(any(feature = "internals", not(target_arch = "aarch64")))]
 pub(crate) mod portable;
 pub(crate) mod tier;
 

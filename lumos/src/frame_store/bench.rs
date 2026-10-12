@@ -83,7 +83,7 @@ impl Warped {
     /// does.
     fn of(field: Field) -> Self {
         let dir = TempDir::new("lumos-bench-spill");
-        let scratch = RunScratch::create(dir.path()).unwrap();
+        let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let image = field.render(FRAME).image;
         let plane = || Buffer2::new_filled(FRAME.width, FRAME.height, 1.0);
         let quality = FrameQuality::Planes {

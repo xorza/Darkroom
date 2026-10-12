@@ -26,9 +26,7 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     SyntheticStar::new(
         Vec2::new(32.3, 31.6),
         1.0,
-        StarProfile::Gaussian {
-            sigma: 2.0 / 2.354_82,
-        },
+        StarProfile::gaussian(2.0 / 2.354_82),
     )
     .add_to(&mut star);
     let truth: f64 = star.pixels().iter().map(|&value| f64::from(value)).sum();

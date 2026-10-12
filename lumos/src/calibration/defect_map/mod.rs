@@ -509,7 +509,7 @@ fn compute_per_color_residual_stats(
     stats
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

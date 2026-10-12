@@ -373,7 +373,7 @@ const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
     if tile_size < side { tile_size } else { side }
 }
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

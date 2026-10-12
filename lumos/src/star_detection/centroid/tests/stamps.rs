@@ -16,7 +16,7 @@ fn sigma_seed_is_the_truncated_second_moment() {
     const SKY: f32 = 0.1;
     let radius = 10;
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
-        let pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::Gaussian { sigma })
+        let pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(sigma))
             .stamp(Size2us::new(21, 21), SKY);
         let fit = StampFit::prepare::<6>(
             &pixels,
@@ -147,7 +147,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
     let pixels = SyntheticStar::new(
         Vec2::new(64.3, 63.6),
         AMPLITUDE,
-        StarProfile::Gaussian { sigma },
+        StarProfile::gaussian(sigma),
     )
     .stamp(Size2us::new(128, 128), 0.1);
     let truth = Measured::flat(&pixels, 0.1, 0.01);

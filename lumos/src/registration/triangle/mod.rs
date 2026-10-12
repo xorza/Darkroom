@@ -18,7 +18,7 @@ pub(super) mod matching;
 pub(crate) mod triangle_config;
 pub(crate) mod voting;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

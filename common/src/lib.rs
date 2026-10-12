@@ -33,7 +33,7 @@
 #[macro_use]
 mod macros;
 pub mod file_utils;
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub mod internals;
 
 mod cancel_token;
@@ -44,11 +44,11 @@ mod serde;
 pub use cancel_token::CancelToken;
 pub use file_utils::file_identity::{FileId, FileIdentity};
 pub use float_ext::FloatExt;
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub use internals::temp_dir::TempDir;
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub use internals::temp_file::TempFile;
-#[cfg(all(unix, any(test, feature = "internals")))]
+#[cfg(all(unix, feature = "internals"))]
 pub use internals::unreadable::Unreadable;
 // The derives share their traits' names in the macro namespace, so one name exports both.
 #[cfg(any(test, feature = "introspect-derive"))]

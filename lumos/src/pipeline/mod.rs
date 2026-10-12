@@ -23,7 +23,7 @@ pub(crate) mod light_source;
 pub(crate) mod pipeline_frame;
 pub(crate) mod registered_set;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

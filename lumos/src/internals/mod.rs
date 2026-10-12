@@ -1,11 +1,10 @@
-//! Testing utilities for lumos: the synthetic data and helpers the tests use, and the benches
-//! outside `cfg(test)` through the `internals` feature.
+//! Testing utilities for lumos: the synthetic data and helpers the tests and the benches use.
+//!
+//! The one exception to gating test code by its callers: this tree is fixtures, compiled whole
+//! wherever `internals` is on, and a bench build uses only part of them.
 #![cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "a bench build uses the part of the test support it builds its inputs from"
-    )
+    expect(dead_code, reason = "a bench build uses part of the test fixtures")
 )]
 
 #[cfg(test)]

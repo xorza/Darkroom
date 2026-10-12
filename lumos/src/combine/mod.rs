@@ -16,7 +16,7 @@ pub(crate) mod rejection;
 pub(crate) mod stack;
 pub(crate) mod stack_config;
 
-#[cfg(feature = "bench")]
+#[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

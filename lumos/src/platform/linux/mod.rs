@@ -40,7 +40,7 @@ fn memory_backed_in(mounts: &MountTable, path: &Path) -> Option<String> {
         .map(|mount| mount.filesystem.clone())
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::ffi::c_void;
     use std::fs::File;

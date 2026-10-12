@@ -228,7 +228,7 @@ fn lock<T: Scratch>(shelf: &Mutex<Shelf<T>>) -> MutexGuard<'_, Shelf<T>> {
     shelf.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-#[cfg(any(test, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::mem::ManuallyDrop;
 

@@ -32,7 +32,7 @@ fn fits_report_their_own_widths() {
     let cases = [
         Case {
             name: "round Gaussian",
-            profile: StarProfile::Gaussian { sigma: 2.0 },
+            profile: StarProfile::gaussian(2.0),
             method: CentroidMethod::GaussianFit,
             fwhm: sigma_to_fwhm(2.0),
             eccentricity: Some(0.0),
@@ -40,7 +40,7 @@ fn fits_report_their_own_widths() {
         },
         Case {
             name: "elongated Gaussian",
-            profile: StarProfile::Elliptical {
+            profile: StarProfile::Gaussian {
                 sigma_x: 2.0,
                 sigma_y: 4.0,
                 angle: 0.0,
@@ -128,7 +128,7 @@ fn windowed_covariance_deconvolves_to_the_source() {
     let size = Size2us::new(64, 64);
     let pos = DVec2::splat(32.0);
     for (sigma_x, sigma_y, radius) in [(2.5f32, 2.5f32, 12), (3.0, 2.0, 14), (2.0, 3.0, 14)] {
-        let profile = StarProfile::Elliptical {
+        let profile = StarProfile::Gaussian {
             sigma_x,
             sigma_y,
             angle: 0.0,
@@ -172,7 +172,7 @@ fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
     let sigma = 2.5f32;
     let radius = 12;
     let mut pixels =
-        SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
+        SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::gaussian(sigma)).stamp(size, 0.1);
     patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 12345);
     let measured = Measured::flat(&pixels, 0.1, NOISE);
 

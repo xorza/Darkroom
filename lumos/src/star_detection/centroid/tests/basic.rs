@@ -38,7 +38,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         let pixels = SyntheticStar::new(
             truth.as_vec2(),
             AMPLITUDE as f32,
-            StarProfile::Gaussian { sigma },
+            StarProfile::gaussian(sigma),
         )
         .stamp(Size2us::new(128, 128), SKY);
         let truth = truth.as_vec2().as_dvec2();
@@ -163,12 +163,8 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
     let near = Size2us::new(64, 64);
     let true_pos = DVec2::new(32.3, 32.7);
 
-    let near_pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(near, 0.1);
+    let near_pixels =
+        SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::gaussian(2.5)).stamp(near, 0.1);
 
     // Blit, don't re-render: re-rendering at x = 6000.3 would round the centre in the fixture
     // itself and measure that instead of the coordinate arithmetic.
