@@ -19,6 +19,7 @@ pub(crate) mod scene;
 use criterion::Criterion;
 
 use crate::calibration_masters::{self, cosmic_ray, defect_map, prepared_flat};
+use crate::frame_store::{self, frame_stats};
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::raw::{self, demosaic};
 use crate::math::{
@@ -46,4 +47,6 @@ pub fn kernel(c: &mut Criterion) {
     defect_map::bench::benches(c);
     cosmic_ray::bench::benches(c);
     prepared_flat::bench::benches(c);
+    frame_stats::bench::benches(c);
+    frame_store::bench::benches(c);
 }
