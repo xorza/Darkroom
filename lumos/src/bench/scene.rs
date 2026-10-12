@@ -13,6 +13,7 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
@@ -57,6 +58,9 @@ const VIGNETTE: Vignette = Vignette {
     edge: 0.7,
     falloff: 2.0,
 };
+
+/// The lights of the light preset's typical stack.
+const STACKED_LIGHTS: usize = 30;
 
 /// The exposure of a light and of the dark that matches it, in seconds.
 const EXPOSURE_S: f32 = 120.0;
@@ -180,6 +184,41 @@ impl Field {
             &sensor(size, CfaType::Mono, Readout::Calibrated),
             &observation,
         )
+    }
+
+    /// The field's stacked master over a frame of `size` in linear RGB, as the light preset stacks
+    /// 30 lights of a colour sensor: each star its colour, from red to blue, on a light-polluted
+    /// sky of 1.2, 1 and 0.8 times the field's in red, green and blue, with a thirtieth of one
+    /// light's noise variance and no hot pixels, which the stack rejects.
+    pub(crate) fn stacked_rgb(self, size: Size2us) -> LinearImage {
+        let mut camera = sensor(size, CfaType::Mono, Readout::Calibrated);
+        camera.full_well_e *= STACKED_LIGHTS as f32;
+        camera.read_noise_e *= (STACKED_LIGHTS as f32).sqrt();
+        camera.defects.hot.clear();
+        let scene = self.scene(size);
+        let mut rng = TestRng::new(self.seed() ^ 0xC010);
+        let colours: Vec<f32> = scene.sources.iter().map(|_| rng.next_f32()).collect();
+        let planes = [1.2, 1.0, 0.8]
+            .into_iter()
+            .enumerate()
+            .map(|(channel, level)| {
+                let mut light = scene.clone();
+                light.background = sky(level);
+                for (source, &colour) in light.sources.iter_mut().zip(&colours) {
+                    // A red star (0) is 1.3 in red and 0.7 in blue, a blue one (1) the reverse.
+                    source.flux *= 1.0 + 0.3 * (1.0 - 2.0 * colour) * (1.0 - channel as f32);
+                }
+                let observation = Observation {
+                    exposure_s: EXPOSURE_S,
+                    ..Observation::reference(self.seed() ^ channel as u64)
+                };
+                render(&light, &camera, &observation)
+                    .image
+                    .channel(0)
+                    .pixels()
+                    .to_vec()
+            });
+        LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
     }
 
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray
@@ -408,6 +447,16 @@ mod tests {
             .zip(&Field::Typical.scene(SMALL).sources)
         {
             assert_eq!(dithered.pos, placement.apply(source.pos));
+        }
+        // The stacked master's sky medians stand as its sky levels, 1.2 : 1 : 0.8.
+        let stacked = Field::Typical.stacked_rgb(SMALL);
+        let sky = |channel: usize| median_mut(&mut stacked.channel(channel).pixels().to_vec());
+        for (channel, level) in [(0, 1.2), (2, 0.8)] {
+            let ratio = sky(channel) / sky(1);
+            assert!(
+                (ratio / level - 1.0).abs() < 0.01,
+                "channel {channel}: {ratio}"
+            );
         }
         let first = Field::Typical.aligned(SMALL, 0);
         let second = Field::Typical.aligned(SMALL, 1);
