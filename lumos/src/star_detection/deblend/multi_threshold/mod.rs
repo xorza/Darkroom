@@ -322,7 +322,5 @@ impl TreeBuffers {
     }
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(test)]
 mod tests;

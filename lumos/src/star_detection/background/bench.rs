@@ -1,34 +1,26 @@
-//! Benchmark module for background estimation. Run with: cargo test -p lumos --release --features
-//! bench `bench_background` -- --ignored --nocapture
+//! The sky and its noise over a whole frame, as the detector's first stage measures them: each
+//! tile's clipped statistics, the median filter over the tiles, and the spline between them.
 
-use crate::internals::prelude::*;
-use quickbench::quick_bench;
-use std::hint::black_box;
+use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::internals::synthetic::background_map;
-use crate::internals::synthetic::fixtures::star_field;
-use crate::star_detection::config::background_config::BackgroundConfig;
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{FRAME, Field};
+use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::star_detection::bench::Stages;
 use crate::star_detection::resources::DetectionResources;
 
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
-    let width = 6144;
-    let height = 6144;
-    let num_stars = (width * height) / 1000;
-
-    let pixels = star_field(Size2us::new(width, height), num_stars, 42)
-        .image
-        .channel(0)
-        .clone();
-    let config = BackgroundConfig {
-        tile_size: 64,
-        ..Default::default()
-    };
-    let mut resources = DetectionResources::new(Size2us::new(width, height));
-
-    b.bench(|| {
-        let bg = background_map::estimate_in(&pixels, &config, &mut resources);
-        black_box(&bg);
-        bg.release_to_pool(&mut resources);
-    });
+pub(crate) fn benches(c: &mut Criterion) {
+    let mut group = fixture::group(c, "kernel/detection/background/frame", Scale::Frame);
+    group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
+    for field in [Field::Typical, Field::Dense] {
+        group.bench_function(BenchmarkId::new("mesh", field.name()), |b| {
+            let pixels = field.render(FRAME).image.channel(0).clone();
+            let config = Stages::config(field).background;
+            let mut resources = DetectionResources::new(FRAME);
+            b.iter(|| {
+                BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
+                    .release_to_pool(&mut resources);
+            });
+        });
+    }
 }

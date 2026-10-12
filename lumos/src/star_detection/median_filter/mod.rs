@@ -3,7 +3,7 @@
 //! This filter is essential for images from color sensors where alternating rows
 //! have different sensitivities due to the Bayer color filter array.
 
-mod simd;
+pub(super) mod simd;
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
