@@ -140,7 +140,5 @@ fn is_local_maximum(pixel: Pixel, residual: &Buffer2<f32>) -> bool {
         && (x + 1 >= width || y + 1 >= height || residual[(x + 1, y + 1)] < v)
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(test)]
 mod tests;

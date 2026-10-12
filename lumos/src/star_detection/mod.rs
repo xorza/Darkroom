@@ -68,5 +68,7 @@ pub(crate) mod roundness;
 pub(crate) mod star;
 mod threshold_mask;
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

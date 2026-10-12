@@ -1,370 +1,178 @@
-//! Benchmarks for centroid computation.
-//!
-//! Run with: `cargo test -p lumos --release --features bench bench_centroid -- --ignored
-//! --nocapture`
-use crate::bit_buffer2::BitBuffer2;
-use crate::internals::prelude::*;
-use crate::internals::synthetic::background_map;
+//! The parts of one star's measurement, each on one star as production measures every star of a
+//! frame on the global pool, a star a task: the windowed centroid and the profile fits on the
+//! stamp of a tight star, of FWHM 4 and 15 px, and of a wide one, of FWHM 8.5 and 31 px, the
+//! largest stamp, and the sky annulus of the wide one, which reaches furthest.
 
-use ::quickbench::quick_bench;
+use std::f64::consts::TAU;
 use std::hint::black_box;
 
-use crate::internals::synthetic::fixtures::star_field;
-use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::centroid::covariance::Cov2;
+use criterion::{BenchmarkId, Criterion, Throughput};
+use glam::DVec2;
+use imaginarium::Buffer2;
+
+use crate::bench::fixture::{self, Scale};
+use crate::internals::synthetic::camera::{Camera, PsfModel};
+use crate::internals::synthetic::observe::{Observation, render};
+use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::size2us::Size2us;
+use crate::star_detection::centroid::gaussian_fit::GaussianFit;
+use crate::star_detection::centroid::local_background::LocalBackground;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::centroid::moffat_fit::MoffatFit;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
-use crate::star_detection::centroid::{MeasurePlanes, measure_star};
-use crate::star_detection::centroid::{StarBackground, compute_star};
-use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::config::detection_config::DetectionConfig;
-use crate::star_detection::config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
-};
-use crate::star_detection::detector::stages::detect::internals::detect_stars_test;
 
-/// One Gaussian star at (32.3, 32.7) on a 64×64 field, or centred on a larger one, less its
-/// estimated sky: the fixture every single-star bench below shares.
+/// The sky the stars sit on, which the residual has taken out.
+const SKY: f32 = 0.1;
+
+/// The Moffat β of atmospheric seeing, which the ground-based preset fits with.
+const BETA: f32 = 2.5;
+
+/// The frame a star is rendered on: room for the wide star's annulus, out to 4 FWHM and a stamp
+/// radius beyond, about 49 px each way.
+const SIZE: Size2us = Size2us::new(128, 128);
+
+pub(crate) fn benches(c: &mut Criterion) {
+    let mut group = fixture::group(c, "kernel/detection/centroid", Scale::Sample);
+    for star in [Star::TIGHT, Star::WIDE] {
+        let stamp = star.stamp();
+        group.throughput(Throughput::Elements((stamp * stamp) as u64));
+        group.bench_function(BenchmarkId::new("moments", star.name()), |b| {
+            let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+            b.iter(|| {
+                WindowedCentroid::measure(
+                    black_box(&measured.residual),
+                    measured.start,
+                    &measured.grid,
+                    measured.inputs(),
+                )
+            });
+        });
+        group.bench_function(BenchmarkId::new("gaussian_fit", star.name()), |b| {
+            let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+            let at = measured.centre();
+            let fit = || {
+                GaussianFit::new(
+                    black_box(&measured.residual),
+                    at,
+                    &measured.grid.stamp,
+                    0.0,
+                    None,
+                )
+            };
+            assert!(fit().is_some(), "the fit converges on a bright star");
+            b.iter(fit);
+        });
+        group.bench_function(BenchmarkId::new("moffat_fit", star.name()), |b| {
+            let psf = PsfModel::Moffat {
+                fwhm: star.fwhm,
+                beta: BETA,
+            };
+            let measured = Measured::of(star, psf);
+            let at = measured.centre();
+            let fit = || {
+                MoffatFit::new(
+                    black_box(&measured.residual),
+                    at,
+                    &measured.grid.stamp,
+                    0.0,
+                    None,
+                    BETA,
+                )
+            };
+            assert!(fit().is_some(), "the fit converges on a bright star");
+            b.iter(fit);
+        });
+    }
+    let star = Star::WIDE;
+    let annulus = MeasureGrid::new(star.fwhm).annulus;
+    group.throughput(Throughput::Elements(
+        (annulus.outer * annulus.outer - annulus.inner * annulus.inner) as u64,
+    ));
+    group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
+        let measured = Measured::of(star, PsfModel::Gaussian { fwhm: star.fwhm });
+        let at = measured.centre();
+        let measure = || LocalBackground::measure(black_box(&measured.residual), None, at, annulus);
+        assert!(measure().is_some(), "the annulus lies inside the frame");
+        b.iter(measure);
+    });
+}
+
+/// A star of one width, which sets its stamp.
+#[derive(Debug, Clone, Copy)]
+struct Star {
+    fwhm: f32,
+}
+
+impl Star {
+    /// Radius ⌈1.75 · 4⌉ = 7.
+    const TIGHT: Self = Self { fwhm: 4.0 };
+    /// Radius ⌈1.75 · 8.5⌉ = 15, the largest.
+    const WIDE: Self = Self { fwhm: 8.5 };
+
+    fn stamp(self) -> usize {
+        2 * MeasureGrid::new(self.fwhm).stamp.radius + 1
+    }
+
+    fn name(self) -> String {
+        format!("stamp_{}", self.stamp())
+    }
+}
+
+/// One star on its sky, less the sky, and what its measurement starts from.
 #[derive(Debug)]
-struct SingleStar {
+struct Measured {
     residual: Buffer2<f32>,
-    sky: SkyNoise,
-    saturation: BitBuffer2,
+    grid: MeasureGrid,
+    /// The pixel the detection peaked at.
+    start: DVec2,
 }
 
-impl SingleStar {
-    fn at(size: Size2us, pos: Vec2) -> SingleStar {
-        let pixels =
-            SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 }).stamp(size, 0.1);
-        let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-        SingleStar {
-            residual: bg.residual_of(&pixels),
-            sky: bg.sky_noise(),
-            saturation: BitBuffer2::new_filled(size, false),
+impl Measured {
+    /// `star` rendered by `psf` at an off-centre position, its peak at half the full well.
+    fn of(star: Star, psf: PsfModel) -> Self {
+        let sigma = f64::from(fwhm_to_sigma(star.fwhm));
+        let pos = DVec2::new(64.3, 64.7);
+        let flux = (0.5 * TAU * sigma * sigma) as f32;
+        let scene = Scene::single(SIZE, pos, flux, BackgroundField::Uniform { level: SKY });
+        let camera = Camera {
+            psf,
+            ..Camera::realistic(star.fwhm)
+        };
+        let mut residual = render(&scene, &camera, &Observation::reference(7))
+            .image
+            .channel(0)
+            .clone();
+        for pixel in residual.pixels_mut() {
+            *pixel -= SKY;
+        }
+        Self {
+            residual,
+            grid: MeasureGrid::new(star.fwhm),
+            start: pos.round(),
         }
     }
 
-    fn field() -> SingleStar {
-        SingleStar::at(Size2us::new(64, 64), Vec2::new(32.3, 32.7))
-    }
-}
-
-/// `measure_star` on one detected star under `config`.
-fn bench_measure_star(b: ::quickbench::Bencher, star: &SingleStar, config: &MeasurementConfig) {
-    let candidates = detect_stars_test(&star.residual, &star.sky, &DetectionConfig::default());
-    let region = candidates.first().expect("Should detect star");
-    let grid = MeasureGrid::new(4.0);
-    b.bench(|| {
-        black_box(measure_star(
-            MeasurePlanes {
-                residual: black_box(&star.residual),
-                sky: black_box(&star.sky),
-                saturation: &star.saturation,
-                no_data: None,
+    /// The sky's noise as the camera gives it: shot noise of the sky in a 50 ke⁻ well and 3 e⁻ of
+    /// read noise.
+    fn inputs(&self) -> WindowedInputs {
+        let camera = Camera::realistic(1.0);
+        let shot = f64::from(SKY) / f64::from(camera.full_well_e);
+        let read = f64::from(camera.read_noise_e / camera.full_well_e);
+        WindowedInputs {
+            offset: 0.0,
+            noise: StarNoise {
+                background_sigma: (shot + read * read).sqrt(),
+                electrons_per_unit: None,
             },
-            black_box(region),
-            black_box(config),
-            black_box(&grid),
-        ))
-    });
-}
-
-fn centroid_config(centroid_method: CentroidMethod) -> MeasurementConfig {
-    MeasurementConfig {
-        centroid_method,
-        ..Default::default()
+        }
     }
-}
 
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_measure_star_single(b: ::quickbench::Bencher) {
-    bench_measure_star(
-        b,
-        &SingleStar::field(),
-        &centroid_config(CentroidMethod::WeightedMoments),
-    );
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
-    bench_measure_star(
-        b,
-        &SingleStar::field(),
-        &centroid_config(CentroidMethod::GaussianFit),
-    );
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
-    bench_measure_star(
-        b,
-        &SingleStar::field(),
-        &centroid_config(CentroidMethod::MoffatFit { beta: 2.5 }),
-    );
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
-    let config = MeasurementConfig {
-        local_background: LocalBackgroundMethod::LocalAnnulus,
-        ..centroid_config(CentroidMethod::WeightedMoments)
-    };
-    bench_measure_star(
-        b,
-        &SingleStar::at(Size2us::new(128, 128), Vec2::splat(64.0)),
-        &config,
-    );
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
-    // 100 stars batch processing with WeightedMoments
-    let pixels = star_field(Size2us::new(512, 512), 100, 42)
-        .image
-        .channel(0)
-        .clone();
-    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let residual = bg.residual_of(&pixels);
-    let sky = bg.sky_noise();
-    let saturation = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
-    let candidates = detect_stars_test(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &DetectionConfig::default(),
-    );
-    let regions: Vec<_> = candidates.iter().collect();
-    let config = MeasurementConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
-        ..Default::default()
-    };
-
-    let grid = MeasureGrid::new(4.0);
-    b.bench(|| {
-        let stars: Vec<_> = regions
-            .iter()
-            .filter_map(|r| {
-                measure_star(
-                    MeasurePlanes {
-                        residual: &residual,
-                        sky: &sky,
-                        saturation: &saturation,
-                        no_data: None,
-                    },
-                    r,
-                    &config,
-                    &grid,
-                )
-            })
-            .collect();
-        black_box(stars)
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
-    // 2000 stars on 4K image - compare all centroid methods
-    let pixels = star_field(Size2us::new(6144, 6144), 10000, 42)
-        .image
-        .channel(0)
-        .clone();
-    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let residual = bg.residual_of(&pixels);
-    let sky = bg.sky_noise();
-    let saturation = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
-    let candidates = detect_stars_test(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &DetectionConfig::default(),
-    );
-    let regions: Vec<_> = candidates.iter().collect();
-
-    let config_moments = MeasurementConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
-        ..Default::default()
-    };
-    let config_gaussian = MeasurementConfig {
-        centroid_method: CentroidMethod::GaussianFit,
-        ..Default::default()
-    };
-    let config_moffat = MeasurementConfig {
-        centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
-        ..Default::default()
-    };
-
-    let grid = MeasureGrid::new(4.0);
-
-    b.bench_labeled("weighted_moments", || {
-        let stars: Vec<_> = regions
-            .iter()
-            .filter_map(|r| {
-                measure_star(
-                    MeasurePlanes {
-                        residual: &residual,
-                        sky: &sky,
-                        saturation: &saturation,
-                        no_data: None,
-                    },
-                    r,
-                    &config_moments,
-                    &grid,
-                )
-            })
-            .collect();
-        black_box(stars)
-    });
-
-    b.bench_labeled("gaussian_fit", || {
-        let stars: Vec<_> = regions
-            .iter()
-            .filter_map(|r| {
-                measure_star(
-                    MeasurePlanes {
-                        residual: &residual,
-                        sky: &sky,
-                        saturation: &saturation,
-                        no_data: None,
-                    },
-                    r,
-                    &config_gaussian,
-                    &grid,
-                )
-            })
-            .collect();
-        black_box(stars)
-    });
-
-    b.bench_labeled("moffat_fit", || {
-        let stars: Vec<_> = regions
-            .iter()
-            .filter_map(|r| {
-                measure_star(
-                    MeasurePlanes {
-                        residual: &residual,
-                        sky: &sky,
-                        saturation: &saturation,
-                        no_data: None,
-                    },
-                    r,
-                    &config_moffat,
-                    &grid,
-                )
-            })
-            .collect();
-        black_box(stars)
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_windowed_centroid_batch_1000(b: ::quickbench::Bencher) {
-    // 1000 converged windowed centroids from the peak pixel.
-    let star = SingleStar::field();
-    let grid = MeasureGrid::new(4.0);
-    let inputs = WindowedInputs {
-        offset: 0.0,
-        noise: StarNoise {
-            background_sigma: 0.01,
-            electrons_per_unit: None,
-        },
-    };
-    b.bench(|| {
-        for _ in 0..1000 {
-            black_box(WindowedCentroid::measure(
-                black_box(&star.residual),
-                black_box(DVec2::splat(32.0)),
-                &grid,
-                inputs,
-            ));
-        }
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_compute_star_single(b: ::quickbench::Bencher) {
-    // Flux, SNR, sharpness, roundness and the windowed covariance for one candidate — everything
-    // `measure_star` does after the centroid is settled.
-    let SingleStar { residual, sky, .. } = SingleStar::field();
-    let pos = DVec2::new(32.3, 32.7);
-    let background = StarBackground {
-        offset: 0.0,
-        noise: StarNoise {
-            background_sigma: f64::from(sky.noise[(32, 33)].max(sky.floor)),
-            electrons_per_unit: None,
-        },
-        sky_samples: None,
-    };
-
-    b.bench(|| {
-        black_box(compute_star(
-            black_box(&residual),
-            black_box(pos),
-            black_box(7),
-            2.5,
-            background,
-        ))
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
-    let SingleStar { residual, sky, .. } = SingleStar::field();
-    let pos = DVec2::new(32.3, 32.7);
-    let background = StarBackground {
-        offset: 0.0,
-        noise: StarNoise {
-            background_sigma: f64::from(sky.noise[(32, 33)].max(sky.floor)),
-            electrons_per_unit: None,
-        },
-        sky_samples: None,
-    };
-
-    b.bench(|| {
-        for _ in 0..1000 {
-            black_box(compute_star(
-                black_box(&residual),
-                black_box(pos),
-                black_box(7),
-                2.5,
-                background,
-            ));
-        }
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
-    // The adaptive-window moment loop nested inside `compute_star`: up to four re-reads of the
-    // stamp's image and background rows, one per window iteration.
-    let SingleStar { residual, .. } = SingleStar::field();
-    // Seeded as `compute_star` seeds it — sigma 2.5 gives sigma^2 = 6.25.
-    let seed_sigma_sq = 6.25;
-
-    b.bench(|| {
-        black_box(Cov2::windowed(
-            black_box(&residual),
-            0.0,
-            black_box(DVec2::new(32.3, 32.7)),
-            black_box(7),
-            black_box(seed_sigma_sq),
-        ))
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_windowed_covariance_batch_1000(b: ::quickbench::Bencher) {
-    let SingleStar { residual, .. } = SingleStar::field();
-    let seed_sigma_sq = 6.25;
-
-    b.bench(|| {
-        for _ in 0..1000 {
-            black_box(Cov2::windowed(
-                black_box(&residual),
-                0.0,
-                black_box(DVec2::new(32.3, 32.7)),
-                black_box(7),
-                black_box(seed_sigma_sq),
-            ));
-        }
-    });
+    /// The windowed centroid, which the fits and the annulus start from in production.
+    fn centre(&self) -> DVec2 {
+        WindowedCentroid::measure(&self.residual, self.start, &self.grid, self.inputs())
+            .expect("a bright star's centroid converges")
+            .pos
+    }
 }

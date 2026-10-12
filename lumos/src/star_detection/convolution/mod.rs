@@ -6,7 +6,7 @@
 //!
 //! Uses SIMD acceleration when available (AVX2/SSE on `x86_64`, NEON on aarch64).
 
-mod simd;
+pub(super) mod simd;
 
 use std::f64::consts::FRAC_PI_2;
 use std::mem;
@@ -337,7 +337,7 @@ pub(crate) mod internals {
     }
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
