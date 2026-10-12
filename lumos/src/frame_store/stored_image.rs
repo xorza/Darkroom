@@ -110,3 +110,20 @@ impl StoredImage {
         })
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod internals {
+    use crate::frame_store::stored_image::StoredImage;
+    use crate::frame_store::stored_plane::StoredPlane;
+
+    impl StoredImage {
+        /// Drop the image's pages from the page cache, its channels' and its flags', so its next
+        /// read comes from the disk; whether each plane went, which a resident one does not.
+        pub(crate) fn evict(&self) -> bool {
+            let flags = self.flags.as_ref().is_none_or(StoredPlane::evict);
+            self.channels
+                .iter()
+                .fold(flags, |all, plane| plane.evict() & all)
+        }
+    }
+}

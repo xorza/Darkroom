@@ -1,5 +1,6 @@
 //! A warped light on the spill tier: written to the run's scratch and mapped back, then read as
-//! the combine reads it, copied out of its maps a chunk of rows at a time.
+//! the combine reads it, copied out of its maps a chunk of rows at a time, from the page cache and,
+//! where the system can drop a file's pages, from the disk.
 
 use std::slice;
 
@@ -15,6 +16,7 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::io::image::linear::LinearImage;
+use crate::platform::MappedFile;
 
 /// The rows of a chunk: what a 30-frame stack of warped mono lights gets on a 1 GiB combine
 /// budget, which holds two chunks of every frame's pixel, coverage and confidence, 12 bytes a
@@ -41,13 +43,31 @@ pub(crate) fn benches(c: &mut Criterion) {
         let frame = warped.spill(warped.stats.clone());
         let frames = slice::from_ref(&frame);
         let mut copy = ChunkCopy::new(frames, CHUNK_ROWS * FRAME.width);
-        b.iter(|| {
-            for start in (0..FRAME.height).step_by(CHUNK_ROWS) {
-                let end = (start + CHUNK_ROWS).min(FRAME.height);
-                copy.fill(frames, start * FRAME.width..end * FRAME.width);
-            }
-        });
+        b.iter(|| read(&mut copy, frames));
     });
+    // Every page of the frame on the disk, as when the frames outgrow the memory the system has
+    // left: the frame's pages are dropped from the page cache before each pass.
+    if MappedFile::EVICTS {
+        group.bench_function(BenchmarkId::new("read/cold", field.name()), |b| {
+            let warped = Warped::of(field);
+            let frame = warped.spill(warped.stats.clone());
+            let frames = slice::from_ref(&frame);
+            let mut copy = ChunkCopy::new(frames, CHUNK_ROWS * FRAME.width);
+            b.iter_batched(
+                || assert!(frame.evict(), "the frame's pages leave the page cache"),
+                |()| read(&mut copy, frames),
+                BatchSize::PerIteration,
+            );
+        });
+    }
+}
+
+/// Every row of `frames` copied out a chunk of [`CHUNK_ROWS`] at a time, as the combine reads them.
+fn read(copy: &mut ChunkCopy, frames: &[StoredFrame]) {
+    for start in (0..FRAME.height).step_by(CHUNK_ROWS) {
+        let end = (start + CHUNK_ROWS).min(FRAME.height);
+        copy.fill(frames, start * FRAME.width..end * FRAME.width);
+    }
 }
 
 /// A warped mono light, its quality planes, and the scratch it spills to.

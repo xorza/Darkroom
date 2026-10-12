@@ -1,42 +1,11 @@
 # lumos benches: finish the inventory
 
 Scope: the work the bench inventory left, and the open issues in `.notes/ISSUES.md`. The bench
-rules are the ones `lumos/src/bench/mod.rs` states. Decision already taken: `libc` may become an
-optional Linux dependency for the cold reads (item 2).
+rules are the ones `lumos/src/bench/mod.rs` states.
 
 ## Items
 
 Done in this order; each is deleted when it is committed.
-
-2. **The page eviction compiles for the benches.** The eviction is `#[cfg(test)]` in
-   `lumos/src/platform/mod.rs` (`MappedFile::evict`), `platform/linux/mod.rs`, `platform/macos.rs`,
-   `platform/windows.rs` and `frame_store/stored_plane.rs` (`StoredPlane::evict`).
-   - `lumos/Cargo.toml`: `[target.'cfg(target_os = "linux")'.dependencies] libc = { workspace =
-     true, optional = true }`, and `bench = ["internals", "dep:criterion", "dep:libc"]`. The
-     Linux dev-dependency stays for the tests.
-   - Gate the eviction `any(test, feature = "bench")` in those files, with the Linux `page_size`
-     it uses. `resident_share` stays `#[cfg(test)]`: split the gated mods so a bench build has no
-     dead code.
-   - A capability on the platform entity, `MappedFile::EVICTS: bool`, true on Linux and false
-     elsewhere, so a bench registers a cold variant only where it is true. No `cfg(target_os)`
-     outside `platform/`.
-   - `StoredImage::evict` (the branch removed it) and `StoredFrame::evict`: every plane a read
-     touches, channels, quality planes, samples and flags, through `StoredPlane::evict`.
-   - Test: `StoredFrame::evict` of a spilled frame with quality planes leaves every plane's
-     `resident_share` at 0 where `EVICTS` is true, and the frame reads back the same; extend
-     `an_evicted_plane_reads_from_the_disk` or put it beside it.
-
-3. **`kernel/frame_store/spill/frame/read/cold/typical`** in `lumos/src/frame_store/bench.rs`:
-   the `read/warm` bench with every page of the frame evicted before each pass, the eviction in the
-   untimed setup of `iter_batched` with `BatchSize::PerIteration`. Registered only where
-   `MappedFile::EVICTS` holds. Update the module doc.
-
-4. **`stage/park/warp_from_map/cold/typical`** in `lumos/src/pipeline/bench.rs`: the `warm` bench
-   with the parked image evicted before each warp, as in item 3. Update `park`'s doc.
-
-5. **`stage/combine/light_preset/spilled_cold/30xtypical`** in `lumos/src/combine/bench.rs`: the
-   `spilled` bench with every spilled frame evicted after the setup writes it, so the combine reads
-   the disk. Registered only where `MappedFile::EVICTS` holds. Update the module doc.
 
 6. **`pipeline/drizzle/rggb/12xtypical`**.
    - `bench::scene`: `Field::mosaic_exposure(size, cfa_type, index)`, exposure `index` of the

@@ -247,3 +247,90 @@ impl StoredFrame {
         }))
     }
 }
+
+#[cfg(any(test, feature = "bench"))]
+pub(crate) mod internals {
+    use arrayvec::ArrayVec;
+
+    use crate::frame_store::frame_quality::FrameQuality;
+    use crate::frame_store::stored_frame::StoredFrame;
+    use crate::frame_store::stored_gain::StoredGain;
+    use crate::frame_store::stored_plane::StoredPlane;
+
+    impl StoredFrame {
+        /// Every `f32` plane the frame holds: its channels, its samples, its quality planes and
+        /// its flat gain's.
+        pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
+            let quality: ArrayVec<&StoredPlane, 6> = match &self.quality {
+                FrameQuality::None | FrameQuality::Mask { .. } => ArrayVec::new(),
+                FrameQuality::Planes {
+                    coverage,
+                    confidence,
+                } => [coverage, confidence].into_iter().collect(),
+                FrameQuality::Drizzled { drops } => drops
+                    .iter()
+                    .flat_map(|drop| [&drop.weight, &drop.confidence])
+                    .collect(),
+            };
+            self.channels
+                .iter()
+                .chain(self.samples.iter().flatten())
+                .chain(quality)
+                .chain(self.flat_gain.iter().flat_map(StoredGain::planes))
+        }
+
+        /// Drop every page of the frame from the page cache, its flags' too, so the combine's next
+        /// read of it comes from the disk; whether each plane went, which a resident one does not.
+        pub(crate) fn evict(&self) -> bool {
+            let flags = self.flags.as_ref().is_none_or(StoredPlane::evict);
+            self.planes().fold(flags, |all, plane| plane.evict() & all)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::TempDir;
+    use imaginarium::Buffer2;
+
+    use crate::frame_store::frame_quality::FrameQuality;
+    use crate::frame_store::frame_stats::FrameStats;
+    use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::stored_frame::StoredFrame;
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::linear::LinearImage;
+    use crate::math::size2us::Size2us;
+    use crate::platform::MappedFile;
+
+    /// A spilled frame with quality planes leaves the page cache whole where the system evicts:
+    /// its three channels and its coverage and confidence, 512² × 4 bytes = 1 MiB each, every page
+    /// out by `mincore`, and its channels read back as written.
+    #[test]
+    fn an_evicted_frame_leaves_every_plane_on_the_disk() {
+        let directory = TempDir::new("stored_frame_evict");
+        let scratch = RunScratch::create(directory.path()).unwrap();
+        let size = Size2us::new(512, 512);
+        let image = LinearImage::from_planar_channels(
+            ImageDimensions::new(size, 3),
+            [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
+        );
+        let plane = |level| Buffer2::new_filled(size.width, size.height, level);
+        let quality = FrameQuality::Planes {
+            coverage: plane(1.0),
+            confidence: plane(0.5),
+        };
+        let stats = FrameStats::measure(&image);
+        let frame = StoredFrame::spill(&scratch, &image, &quality, stats).unwrap();
+        assert_eq!(frame.planes().count(), 5);
+        assert_eq!(frame.evict(), MappedFile::EVICTS);
+        if MappedFile::EVICTS {
+            for plane in frame.planes() {
+                assert_eq!(plane.resident_share(), Some(0.0));
+            }
+        }
+        for (channel, level) in frame.channels.iter().zip([0.25, 0.5, 0.75]) {
+            let read = channel.chunk(0, size.pixel_count());
+            assert!(read.iter().all(|&value| value == level));
+        }
+    }
+}
