@@ -1,6 +1,7 @@
 //! [`PixelQuadrature`]: Gauss–Legendre quadrature over one pixel.
 
 use std::array;
+use std::sync::OnceLock;
 
 /// The highest order a [`PixelQuadrature`] holds.
 pub(crate) const MAX_ORDER: usize = 16;
@@ -147,12 +148,19 @@ impl PixelQuadrature {
         at_left.min(at_right)
     }
 
-    /// The rule of `order` points, ascending.
+    /// The rule of `order` points, ascending. Every order's rule is solved on first use and copied
+    /// out after: a fit takes one per star, and the nodes never change.
     pub(crate) fn gauss_legendre(order: usize) -> Self {
+        static RULES: OnceLock<[PixelQuadrature; MAX_ORDER]> = OnceLock::new();
         assert!(
             (1..=MAX_ORDER).contains(&order),
             "a pixel quadrature has 1 to {MAX_ORDER} points, not {order}"
         );
+        RULES.get_or_init(|| array::from_fn(|index| Self::solved(index + 1)))[order - 1]
+    }
+
+    /// The rule of `order` points, its nodes found by Newton's method.
+    fn solved(order: usize) -> Self {
         let mut rule = Self {
             order,
             nodes: [0.0; MAX_ORDER],
