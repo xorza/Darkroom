@@ -8,7 +8,7 @@
 
 use rayon::prelude::*;
 
-mod simd;
+pub(super) mod simd;
 
 use crate::bit_buffer2::BitBuffer2;
 use imaginarium::Buffer2;
@@ -63,13 +63,14 @@ pub(crate) fn create_residual_threshold_mask(
         });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
     use crate::star_detection::threshold_mask::ThresholdParams;
 
     /// The σ floor this module's tests threshold with, shared by the kernel cross-checks in
     /// [`super::simd`]. Frame-derived in production; fixed here so every case is graded on the
     /// noise it declares, and low enough never to bind on it.
+    #[cfg(test)]
     pub(crate) const TEST_MIN_NOISE: f32 = 1e-6;
 
     impl ThresholdParams {
@@ -81,7 +82,8 @@ pub(crate) mod internals {
     }
 
     /// [`ThresholdParams`] at `sigma` with the shared test floor.
-    pub(crate) fn test_params(sigma: f32) -> ThresholdParams {
+    #[cfg(test)]
+    pub(crate) const fn test_params(sigma: f32) -> ThresholdParams {
         ThresholdParams {
             sigma,
             min_noise: TEST_MIN_NOISE,

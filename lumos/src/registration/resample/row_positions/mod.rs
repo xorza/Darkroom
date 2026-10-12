@@ -69,6 +69,8 @@ impl RowPositions {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests {
     use glam::DVec2;

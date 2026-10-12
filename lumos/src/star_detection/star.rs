@@ -52,7 +52,14 @@ impl Star {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the synthetic star lists build on these, the tests on all of them"
+    )
+)]
 pub(crate) mod internals {
     use glam::DVec2;
 
@@ -66,7 +73,7 @@ pub(crate) mod internals {
         /// The defaults clear every
         /// [`FilterConfig`](crate::star_detection::config::filter_config::FilterConfig)
         /// default with room to spare, so any rejection a test observes is the one it asked for.
-        pub(crate) fn at(pos: DVec2) -> Self {
+        pub(crate) const fn at(pos: DVec2) -> Self {
             Self {
                 pos,
                 position_sigma: 0.01,
@@ -84,47 +91,47 @@ pub(crate) mod internals {
             }
         }
 
-        pub(crate) fn with_pos(mut self, pos: DVec2) -> Self {
+        pub(crate) const fn with_pos(mut self, pos: DVec2) -> Self {
             self.pos = pos;
             self
         }
 
-        pub(crate) fn with_flux(mut self, flux: f32) -> Self {
+        pub(crate) const fn with_flux(mut self, flux: f32) -> Self {
             self.flux = flux;
             self
         }
 
-        pub(crate) fn with_fwhm(mut self, fwhm: f32) -> Self {
+        pub(crate) const fn with_fwhm(mut self, fwhm: f32) -> Self {
             self.fwhm = fwhm;
             self
         }
 
-        pub(crate) fn with_eccentricity(mut self, eccentricity: f32) -> Self {
+        pub(crate) const fn with_eccentricity(mut self, eccentricity: f32) -> Self {
             self.eccentricity = eccentricity;
             self
         }
 
-        pub(crate) fn with_snr(mut self, snr: f32) -> Self {
+        pub(crate) const fn with_snr(mut self, snr: f32) -> Self {
             self.snr = snr;
             self
         }
 
-        pub(crate) fn with_peak(mut self, peak: f32) -> Self {
+        pub(crate) const fn with_peak(mut self, peak: f32) -> Self {
             self.peak = peak;
             self
         }
 
-        pub(crate) fn with_saturated(mut self, saturated: bool) -> Self {
+        pub(crate) const fn with_saturated(mut self, saturated: bool) -> Self {
             self.saturated = saturated;
             self
         }
 
-        pub(crate) fn with_sharpness(mut self, sharpness: f32) -> Self {
+        pub(crate) const fn with_sharpness(mut self, sharpness: f32) -> Self {
             self.sharpness = sharpness;
             self
         }
 
-        pub(crate) fn with_roundness(mut self, roundness: Roundness) -> Self {
+        pub(crate) const fn with_roundness(mut self, roundness: Roundness) -> Self {
             self.roundness = roundness;
             self
         }

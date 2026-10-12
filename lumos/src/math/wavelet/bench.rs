@@ -12,7 +12,7 @@ const SIDE: usize = 2_048;
 const STEPS: [usize; 4] = [1, 2, 4, 8];
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/wavelet/frame", Scale::Frame);
+    let mut group = fixture::group(c, "kernel/math/wavelet/frame", Scale::Frame);
     group.throughput(Throughput::Elements((SIDE * SIDE) as u64));
     for step in STEPS {
         group.bench_function(

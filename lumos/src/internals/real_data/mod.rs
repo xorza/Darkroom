@@ -28,7 +28,6 @@ use crate::{
 };
 
 mod milky_way;
-mod pipeline_bench;
 
 /// The bundled dataset, `test_data/lumos_data`. The `real-data` feature states that it is
 /// present, so a missing dataset or entry is a setup error: every accessor here panics and
@@ -145,6 +144,10 @@ pub(crate) mod ml_support {
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else
     /// `test_data/<default_file>`. Returns `None` (after a skip message) when absent — lumos ships
     /// no models, so the tests skip rather than fail when the gitignored weights aren't present.
+    #[expect(
+        clippy::print_stderr,
+        reason = "a real-data test reports the weights it skips for, as a test does"
+    )]
     pub(crate) fn onnx_weights(env_var: &str, default_file: &str) -> Option<PathBuf> {
         let path = env::var_os(env_var).map_or_else(
             || {

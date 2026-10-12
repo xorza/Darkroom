@@ -115,7 +115,7 @@ fn padded(samples: &[f32]) -> [f32; WORD_PIXELS] {
     word
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 mod internals {
     use crate::star_detection::threshold_mask::ThresholdParams;
     use crate::star_detection::threshold_mask::simd::WORD_PIXELS;
@@ -143,7 +143,7 @@ mod internals {
     }
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

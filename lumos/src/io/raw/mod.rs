@@ -207,8 +207,8 @@ pub(crate) mod internals {
     }
 }
 
-#[cfg(all(test, feature = "bench", feature = "real-data"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod quality_report;
 #[cfg(test)]

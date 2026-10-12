@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion};
+use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -16,6 +16,8 @@ pub(crate) enum Scale {
     Sample,
     /// A whole frame or plane: milliseconds an iteration, so fewer and longer samples.
     Frame,
+    /// A run over a set of files: seconds an iteration, so one iteration a sample.
+    Pipeline,
 }
 
 /// The group `name`, sampled as `scale` says.
@@ -34,14 +36,20 @@ pub(crate) fn group<'a>(
             .sample_size(10)
             .warm_up_time(Duration::from_secs(1))
             .measurement_time(Duration::from_secs(3)),
+        Scale::Pipeline => group
+            .sample_size(10)
+            .sampling_mode(SamplingMode::Flat)
+            .warm_up_time(Duration::from_secs(1))
+            .measurement_time(Duration::from_secs(10)),
     };
     group
 }
 
-/// The batch for a routine that changes an input of `bytes` in place: as many fresh copies as fit
-/// in 128 KiB, at least one. Criterion builds a batch's copies before it times them, so a batch
-/// that outgrows the cache times the routine on inputs memory has to bring back.
-pub(crate) const fn in_place(bytes: usize) -> BatchSize {
+/// The batch for a routine that changes an input of `bytes` in place or consumes it, so takes a
+/// fresh copy each iteration: as many copies as fit in 128 KiB, at least one. Criterion builds a
+/// batch's copies before it times them, so a batch that outgrows the cache times the routine on
+/// inputs memory has to bring back.
+pub(crate) const fn fresh_copies(bytes: usize) -> BatchSize {
     let copies = (128 * 1024) / if bytes == 0 { 1 } else { bytes };
     BatchSize::NumIterations(if copies == 0 { 1 } else { copies as u64 })
 }

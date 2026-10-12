@@ -132,7 +132,7 @@ fn compare_swap<V: F32x8>(a: &mut V, b: &mut V) {
     *a = low;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 mod internals {
     /// The scalar reference the kernel is tested and benched against: the interior of one row.
     pub(super) fn median_filter_row_scalar(
@@ -194,7 +194,7 @@ mod internals {
     }
 }
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

@@ -28,17 +28,16 @@ planes (coverage, weight, variance/noise) that let a downstream tool
 
 ## Verification
 
-Tests leave out `real-data`:
+Tests leave out `real-data`, and take `bench` for the tests of the benches' inputs:
 
 ```
-cargo test -p lumos --tests --features ml
+cargo test -p lumos --tests --features ml,bench
 ```
 
 Benches live in `bench.rs` files beside the code they measure, compiled only with the `bench`
-feature. Those of `math` are criterion benches, run by the one target `benches/lumos.rs`:
-`cargo bench -p lumos --features bench -- <filter>`, with `-- --test` to run each once. Their shape
-is stated in `src/bench/mod.rs`. The other modules' are quickbench `#[test] #[ignore]` functions:
-`cargo test -p lumos --release --features bench <filter> -- --ignored --nocapture`.
+feature, and are criterion benches run by the one target `benches/lumos.rs`: `cargo bench -p lumos
+--features bench -- <filter>`, with `-- --test` to run each once. Their shape is stated in
+`src/bench/mod.rs`.
 
 A change to a vector kernel (anything under `simd::Isa`) is also checked for code that fell out
 of line. A function the `#[target_feature]` entry does not inline runs without AVX2 and FMA in a

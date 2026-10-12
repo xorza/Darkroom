@@ -1,59 +1,34 @@
-//! Benchmarks for duplicate-star removal.
+//! The removal of duplicate detections from a star list sorted by flux, the detector's last filter,
+//! on a typical field's 3000 stars and a cluster's 20 000, at the separation each field's
+//! configuration sets.
 
-use ::quickbench::quick_bench;
-use std::hint::black_box;
+use criterion::{BenchmarkId, Criterion, Throughput};
 
-use glam::DVec2;
-
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{FRAME, Field};
+use crate::star_detection::bench::Stages;
 use crate::star_detection::detector::stages::filter::DuplicateScratch;
-use crate::star_detection::roundness::Roundness;
 use crate::star_detection::star::Star;
 
-/// `count` stars scattered over a `width` × `height` frame, every property randomized across the
-/// range a real detection would produce.
-fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
-    use rand::prelude::*;
-
-    let mut rng = StdRng::seed_from_u64(42);
-    (0..count)
-        .map(|_| {
-            Star::at(DVec2::new(
-                rng.random_range(0.0..width),
-                rng.random_range(0.0..height),
-            ))
-            .with_flux(rng.random_range(100.0..10000.0))
-            .with_fwhm(rng.random_range(2.0..6.0))
-            .with_eccentricity(rng.random_range(0.0..0.3))
-            .with_snr(rng.random_range(10.0..100.0))
-            .with_peak(rng.random_range(0.1..0.9))
-            .with_sharpness(rng.random_range(0.2..0.5))
-            .with_roundness(Roundness {
-                ground: rng.random_range(-0.1..0.1),
-                sround: rng.random_range(-0.1..0.1),
-            })
-        })
-        .collect()
-}
-
-/// One scratch for every iteration, as a detector keeps it from frame to frame.
-fn bench_deduplication(b: ::quickbench::Bencher, base_stars: &[Star]) {
-    let mut scratch = DuplicateScratch::default();
-    b.bench(|| {
-        let mut stars = base_stars.to_vec();
-        // Sort by flux — the algorithm's documented precondition.
-        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-        black_box(scratch.remove_duplicates(&mut stars, 5.0))
-    });
-}
-
-/// Benchmark the duplicate removal with varying star counts.
-/// Simulates dense star field scenario similar to rho-opiuchi detection.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, &random_stars(5000, 4096.0, 4096.0));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, &random_stars(10000, 8000.0, 6000.0));
+pub(crate) fn benches(c: &mut Criterion) {
+    let mut group = fixture::group(c, "kernel/detection/filter", Scale::Sample);
+    for field in [Field::Typical, Field::Dense] {
+        group.throughput(Throughput::Elements(field.stars() as u64));
+        group.bench_function(BenchmarkId::new("remove_duplicates", field.name()), |b| {
+            let mut stars: Vec<Star> = field
+                .scene(FRAME)
+                .sources
+                .iter()
+                .map(|source| Star::at(source.pos).with_flux(source.flux))
+                .collect();
+            stars.sort_by(|a, b| b.flux.total_cmp(&a.flux));
+            let min_separation = Stages::config(field).filter.duplicate_min_separation;
+            let mut scratch = DuplicateScratch::default();
+            b.iter_batched_ref(
+                || stars.clone(),
+                |stars| scratch.remove_duplicates(stars, min_separation),
+                fixture::fresh_copies(size_of_val(stars.as_slice())),
+            );
+        });
+    }
 }

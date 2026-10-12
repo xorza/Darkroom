@@ -14,7 +14,7 @@ const TRUTH: [f64; 5] = [1.0, 7.3, 6.8, 1.6, 0.1];
 const START: [f64; 5] = [0.8, 7.0, 7.4, 2.1, 0.0];
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/lm_controller", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/lm_controller", Scale::Sample);
     group.throughput(Throughput::Elements(1));
     group.bench_function(BenchmarkId::new("fit/gaussian", STAMP * STAMP), |b| {
         let stamp = Stamp::new();

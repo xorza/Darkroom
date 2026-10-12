@@ -1,67 +1,54 @@
-//! Does the vectorized 3x3 median row kernel beat the plain scalar loop?
-//!
-//! It retired the row-width crossovers the dispatcher once gated on: the kernel now runs at every
-//! width, so one network decides every pixel.
-//!
-//! It filters a whole image rather than timing one row: a single row of a realistic width runs in
-//! a few microseconds, short enough that timer overhead and machine state swamped the difference
-//! (an earlier per-row sweep put AVX2 anywhere from 8x faster to 3x slower than scalar at the same
-//! width, depending on which other widths were in the sweep). A megapixel of rows takes
-//! milliseconds and is stable.
-//!
-//! Rows run sequentially, not through rayon: production parallelizes across rows either way, so
-//! the scheduler is common to both arms and only adds variance to the thing being compared.
+//! The 3×3 median over one row of a frame's residual, on the scalar reference, every tier's kernel
+//! and the dispatcher: production filters a demosaiced frame's rows on the global pool, a row a
+//! task. Every tier is measured, the gate that picks one included.
 
-use ::quickbench::quick_bench;
+use std::cell::OnceCell;
 use std::hint::black_box;
 
+use criterion::{BenchmarkId, Criterion, Throughput};
+
+use crate::bench::fixture::{self, Scale};
+use crate::bench::scene::{FRAME, Field};
+use crate::simd::tier::Tier;
+use crate::star_detection::bench::Stages;
 use crate::star_detection::median_filter::simd::internals::median_filter_row_scalar;
-use crate::star_detection::median_filter::simd::median_filter_row;
+use crate::star_detection::median_filter::simd::{MedianRow, median_filter_row};
 
-/// Frame widths from narrow enough that the overlapping last vector is a large share of a row up to
-/// a 6k sensor.
-const IMAGE_WIDTHS: [usize; 5] = [16, 64, 256, 1024, 4096];
-
-/// Rows per image, chosen with the widths above to keep each sample near a megapixel of work.
-const fn rows_for(width: usize) -> usize {
-    (1 << 20) / width
-}
-
-/// `SIMD` picks the dispatched kernel or the scalar reference. A const generic rather than a
-/// function pointer so both arms inline exactly as they do in production — a `fn` pointer would
-/// block inlining of the scalar row loop and quietly hand the comparison to the vector arm.
-fn filter_interior<const SIMD: bool>(input: &[f32], output: &mut [f32], width: usize, rows: usize) {
-    for y in 1..rows - 1 {
-        let above = &input[(y - 1) * width..y * width];
-        let curr = &input[y * width..(y + 1) * width];
-        let below = &input[(y + 1) * width..(y + 2) * width];
-        let out = &mut output[y * width..(y + 1) * width];
-        if SIMD {
-            median_filter_row(above, curr, below, out);
-        } else {
-            median_filter_row_scalar(above, curr, below, out);
-        }
-    }
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_median_filter_dispatch_vs_scalar(b: ::quickbench::Bencher) {
-    for width in IMAGE_WIDTHS {
-        let rows = rows_for(width);
-        // Unsorted, non-monotonic values: the sorting network is data-independent but the scalar
-        // remainder around it is not.
-        let input: Vec<f32> = (0..width * rows)
-            .map(|i| ((i * 2_654_435_761_usize) % 65521) as f32 * 1.5e-5)
-            .collect();
-        let mut output = vec![0.0f32; width * rows];
-
-        b.bench_labeled(&format!("scalar_{width}"), || {
-            filter_interior::<false>(black_box(&input), black_box(&mut output), width, rows);
-            black_box(&output);
-        });
-        b.bench_labeled(&format!("dispatch_{width}"), || {
-            filter_interior::<true>(black_box(&input), black_box(&mut output), width, rows);
-            black_box(&output);
+pub(crate) fn benches(c: &mut Criterion) {
+    let stages = OnceCell::new();
+    let rows = || {
+        let measure = stages
+            .get_or_init(|| Stages::of(Field::Typical))
+            .frame
+            .measure
+            .pixels();
+        let y = FRAME.height / 2;
+        let row = |y: usize| &measure[y * FRAME.width..(y + 1) * FRAME.width];
+        [row(y - 1), row(y), row(y + 1)]
+    };
+    let tiers: Vec<Tier> = Tier::supported().collect();
+    let mut group = fixture::group(c, "kernel/detection/median_filter", Scale::Sample);
+    group.throughput(Throughput::Elements(FRAME.width as u64));
+    let mut output = vec![0.0; FRAME.width];
+    group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
+        let [above, curr, below] = rows();
+        b.iter(|| median_filter_row_scalar(black_box(above), curr, below, &mut output));
+    });
+    for &tier in &tiers {
+        group.bench_function(BenchmarkId::new(format!("row/{tier}"), FRAME.width), |b| {
+            let [above, curr, below] = rows();
+            b.iter(|| {
+                tier.run(MedianRow {
+                    above: black_box(above),
+                    curr,
+                    below,
+                    output: &mut output,
+                });
+            });
         });
     }
+    group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
+        let [above, curr, below] = rows();
+        b.iter(|| median_filter_row(black_box(above), curr, below, &mut output));
+    });
 }

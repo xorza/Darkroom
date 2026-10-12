@@ -17,7 +17,7 @@ const LENGTHS: [usize; 13] = [1, 4, 6, 8, 10, 12, 16, 24, 32, 64, 256, 1_024, 10
 
 pub(crate) fn benches(c: &mut Criterion) {
     let tiers: Vec<Tier> = Tier::supported().collect();
-    let mut group = fixture::group(c, "math/sum", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/sum", Scale::Sample);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
         group.bench_function(BenchmarkId::new("sum_f32/scalar", len), |b| {

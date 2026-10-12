@@ -13,7 +13,7 @@ use crate::math::lstsq::Lstsq;
 const SHAPES: [(usize, usize); 2] = [(500, 3), (2_000, 4)];
 
 pub(crate) fn benches(c: &mut Criterion) {
-    let mut group = fixture::group(c, "math/lstsq", Scale::Sample);
+    let mut group = fixture::group(c, "kernel/math/lstsq", Scale::Sample);
     group.throughput(Throughput::Elements(1));
     for (points, degree) in SHAPES {
         let design = design(points, degree);
@@ -22,7 +22,7 @@ pub(crate) fn benches(c: &mut Criterion) {
             b.iter_batched(
                 || design.clone(),
                 |design| Lstsq::new(black_box(design)),
-                fixture::in_place(design.len() * size_of::<f64>()),
+                fixture::fresh_copies(design.len() * size_of::<f64>()),
             );
         });
         group.bench_function(BenchmarkId::new("solve", &shape), |b| {

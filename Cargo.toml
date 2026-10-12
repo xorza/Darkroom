@@ -26,7 +26,6 @@ lens = { path = "lens" }
 palantir = { path = "palantir" }
 imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
-quickbench = { path = "quickbench" }
 libraw-sys = { path = "libraw-sys" }
 
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -115,8 +114,6 @@ opt-level = 3
 [profile.dev.package.palantir]
 opt-level = 0
 [profile.dev.package.imaginarium]
-opt-level = 0
-[profile.dev.package.quickbench]
 opt-level = 0
 
 

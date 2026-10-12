@@ -13,7 +13,6 @@ use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 use glam::DVec2;
@@ -34,7 +33,7 @@ pub(crate) struct Observation {
 
 impl Observation {
     /// A reference exposure: identity transform, 1 s, nominal seeing.
-    pub(crate) fn reference(seed: u64) -> Self {
+    pub(crate) const fn reference(seed: u64) -> Self {
         Self {
             transform: Transform::identity(),
             exposure_s: 1.0,
@@ -70,7 +69,8 @@ pub(crate) struct SimFrame {
     pub(crate) truth: FrameTruth,
 }
 
-/// Render `scene` through `camera` for one `obs` into a grayscale [`SimFrame`].
+/// Render `scene` through `camera` for one `obs` into a one-plane [`SimFrame`]: a mono sensor's
+/// pixels, or the photosites of the mosaic behind the camera's filters.
 pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
     let width = scene.size.width;
     let height = scene.size.height;
@@ -96,7 +96,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     }
 
     // 3. Flat field (multiplicative sensor response) → clean becomes the on-sensor signal.
-    let flat = camera.flat.render(scene.size, 0);
+    let flat = camera.flat.render(scene.size, &camera.cfa_type);
     for (c, f) in clean.iter_mut().zip(flat.iter()) {
         *c *= *f;
     }

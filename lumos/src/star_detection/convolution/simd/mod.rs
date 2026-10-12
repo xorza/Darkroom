@@ -339,12 +339,13 @@ fn add_weighted<S: Isa>(isa: S, output: &mut [f32], input: &[f32], weight: f32) 
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub(crate) mod internals {
+    #[cfg(test)]
     use crate::math::size2us::Size2us;
-    use crate::star_detection::convolution::simd::{
-        Kernel2d, convolve_2d_pixel, convolve_pixel_scalar, mirror_index,
-    };
+    use crate::star_detection::convolution::simd::convolve_pixel_scalar;
+    #[cfg(test)]
+    use crate::star_detection::convolution::simd::{Kernel2d, convolve_2d_pixel, mirror_index};
 
     /// The scalar row convolution the kernel is tested and benched against.
     pub(crate) fn convolve_row_scalar(input: &[f32], output: &mut [f32], kernel: &[f32]) {
@@ -354,6 +355,7 @@ pub(crate) mod internals {
     }
 
     /// The scalar column pass over one output row, mirrored at the image's top and bottom.
+    #[cfg(test)]
     pub(crate) fn convolve_cols_row_scalar(
         input: &[f32],
         out_row: &mut [f32],
@@ -373,7 +375,8 @@ pub(crate) mod internals {
     }
 
     /// The scalar 2D convolution of one output row.
-    pub(crate) fn convolve_2d_row_scalar(
+    #[cfg(test)]
+    pub(super) fn convolve_2d_row_scalar(
         input: &[f32],
         output_row: &mut [f32],
         size: Size2us,
@@ -386,5 +389,7 @@ pub(crate) mod internals {
     }
 }
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;

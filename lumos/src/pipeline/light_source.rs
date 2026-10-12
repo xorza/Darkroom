@@ -70,14 +70,50 @@ pub(crate) struct LightFiles<'a, P> {
 #[derive(Debug)]
 pub(crate) enum Preparation<'a> {
     /// A mosaic, calibrated, cleaned of cosmic rays and demosaiced.
-    Calibrate {
-        masters: &'a CalibrationMasters,
-        cosmic_ray: Option<&'a CosmicRayConfig>,
-        /// What calibrating them could not check, counted for the run's report.
-        notes: &'a CalibrationNotes,
-    },
+    Calibrate(MosaicPreparation<'a>),
     /// An image already calibrated, taken as it decodes.
     Linear,
+}
+
+/// What a mosaic light goes through before its stars are detected.
+#[derive(Debug)]
+pub(crate) struct MosaicPreparation<'a> {
+    pub(crate) masters: &'a CalibrationMasters,
+    pub(crate) cosmic_ray: Option<&'a CosmicRayConfig>,
+    /// What calibrating the lights could not check, counted for the run's report.
+    pub(crate) notes: &'a CalibrationNotes,
+}
+
+impl MosaicPreparation<'_> {
+    /// `cfa`, the light decoded from `path`, calibrated by the masters, cleaned of cosmic rays when
+    /// asked, and demosaiced.
+    pub(crate) fn prepare(
+        &self,
+        mut cfa: CfaImage,
+        path: &Path,
+        context: &LoadContext,
+    ) -> Result<LinearImage, AlignStackError> {
+        let outcome =
+            self.masters
+                .calibrate(&mut cfa)
+                .map_err(|source| AlignStackError::Calibration {
+                    path: path.to_path_buf(),
+                    source: Box::new(source),
+                })?;
+        self.notes.record(outcome);
+        if let Some(cosmic_ray) = self.cosmic_ray {
+            let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
+                AlignStackError::CosmicRay {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+            tracing::info!(removed, "rejected cosmic rays");
+        }
+        // The demosaic polls the cancel token between its passes.
+        cfa.demosaic(context.xtrans_passes, &context.cancel)
+            .map_err(|Cancelled| AlignStackError::Cancelled)
+    }
 }
 
 /// The detected lights, and the memory decisions the register-warp stage reads.
@@ -416,7 +452,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let first = self.paths[0].as_ref();
         let workers = run.budget.workers();
         let cosmic_ray = match self.preparation {
-            Preparation::Calibrate { cosmic_ray, .. } => cosmic_ray,
+            Preparation::Calibrate(MosaicPreparation { cosmic_ray, .. }) => cosmic_ray,
             Preparation::Linear => {
                 let peek = match LinearImage::peek(first, &run.context) {
                     Some(peek) => peek,
@@ -624,35 +660,10 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     /// Load one light and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
     /// rays when asked, and demosaiced; a linear image as it decodes.
     fn prepare(&self, path: &Path, context: &LoadContext) -> Result<LinearImage, AlignStackError> {
-        let Preparation::Calibrate {
-            masters,
-            cosmic_ray,
-            notes,
-        } = self.preparation
-        else {
+        let Preparation::Calibrate(mosaic) = &self.preparation else {
             return self.decode(path, context);
         };
-        let mut cfa: CfaImage = self.decode(path, context)?;
-        let outcome =
-            masters
-                .calibrate(&mut cfa)
-                .map_err(|source| AlignStackError::Calibration {
-                    path: path.to_path_buf(),
-                    source: Box::new(source),
-                })?;
-        notes.record(outcome);
-        if let Some(cosmic_ray) = cosmic_ray {
-            let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
-                AlignStackError::CosmicRay {
-                    path: path.to_path_buf(),
-                    source,
-                }
-            })?;
-            tracing::info!(removed, "rejected cosmic rays");
-        }
-        // The demosaic polls the cancel token between its passes.
-        cfa.demosaic(context.xtrans_passes, &context.cancel)
-            .map_err(|Cancelled| AlignStackError::Cancelled)
+        mosaic.prepare(self.decode(path, context)?, path, context)
     }
 
     /// `path` decoded as an `I` under `context`: through the decode cache when the run keeps one,

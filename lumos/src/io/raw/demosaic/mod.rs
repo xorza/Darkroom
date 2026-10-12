@@ -8,6 +8,8 @@ pub(crate) mod bayer;
 pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod memory_tests {
     use crate::internals::cfa::XTRANS_PATTERN;
