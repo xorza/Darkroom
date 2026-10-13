@@ -30,17 +30,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let frames: Vec<StoredFrame> = (0..2)
             .map(|index| {
                 let image = field.aligned(FRAME, index).image;
-                let coverage = Buffer2::new(
-                    FRAME.width,
-                    FRAME.height,
-                    (0..FRAME.pixel_count())
-                        .map(|pixel| {
-                            let (x, y) = (pixel % FRAME.width, pixel / FRAME.width);
-                            let outside = x >= FRAME.width - DITHER[0] || y < DITHER[1];
-                            if index > 0 && outside { 0.0 } else { 1.0 }
-                        })
-                        .collect(),
-                );
+                let coverage = Buffer2::from_fn(FRAME.width, FRAME.height, |x, y| {
+                    let outside = x >= FRAME.width - DITHER[0] || y < DITHER[1];
+                    if index > 0 && outside { 0.0 } else { 1.0 }
+                });
                 let quality = FrameQuality::Planes {
                     confidence: coverage.clone(),
                     coverage,

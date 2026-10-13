@@ -804,15 +804,13 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     };
     check(every(Size2us::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
 
-    let even = (0..pixel_count)
-        .map(|pixel| if pixel % 2 == 0 { 1.0 } else { 0.0 })
-        .collect();
+    let even = Buffer2::from_fn(pixel_count, 1, |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
     let frame = StoredFrame::from_memory(
         LinearImage::from_pixels(
             ImageDimensions::new((pixel_count, 1), 1),
             vec![0.5; pixel_count],
         ),
-        FrameQuality::from_coverage(Buffer2::new(pixel_count, 1, even)),
+        FrameQuality::from_coverage(even),
         frame_stats(0.5, 0.1),
     );
     let domain = CommonDomain::build(
@@ -1143,12 +1141,12 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
                 .collect();
             let drops = (0..3)
                 .map(|c| {
-                    let reached: Vec<f32> = (0..8)
-                        .map(|x| f32::from(u8::from(reaches(frame, c).contains(&x))))
-                        .collect();
+                    let reached = Buffer2::from_fn(8, 1, |x, _| {
+                        f32::from(u8::from(reaches(frame, c).contains(&x)))
+                    });
                     DropPlanes {
-                        weight: Buffer2::new(8, 1, reached.clone()),
-                        confidence: Buffer2::new(8, 1, reached),
+                        weight: reached.clone(),
+                        confidence: reached,
                     }
                 })
                 .collect();
@@ -1359,10 +1357,10 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
             .collect();
         let drops = (0..3)
             .map(|_| {
-                let reach: Vec<f32> = (0..4).map(|x| f32::from(u8::from(x == reached))).collect();
+                let reach = Buffer2::from_fn(4, 1, |x, _| f32::from(u8::from(x == reached)));
                 DropPlanes {
-                    weight: Buffer2::new(4, 1, reach.clone()),
-                    confidence: Buffer2::new(4, 1, reach),
+                    weight: reach.clone(),
+                    confidence: reach,
                 }
             })
             .collect();

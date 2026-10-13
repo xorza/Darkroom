@@ -1,4 +1,3 @@
 # Open issues
 
-- **lumos cosmic-ray rejection builds its detector anew for every frame.** `cosmic_ray::reject` builds a fresh `BayerDetector` or `MonoDetector` on each call from `MosaicPreparation::prepare`, so every light allocates the detector's scratch planes and masks again; the pipeline's `DetectorPool` keeps a `StarDetector` per frame in flight, and nothing keeps a cosmic-ray detector.
-- **lumos `memory_budget` detection tests fail on macOS arm64 in most runs of the full test binary.** `detection::*_holds_the_same_heap_for_any_frame_count` reads peaks 48 bytes apart between three and four frames, in either direction; each passes when run by itself. Seen on `HEAD` in 8 of 10 runs.
+- **lumos `memory_budget` still fails on macOS arm64 in about one gate run of twenty.** One of 21 runs of `./x.py gate -p lumos` failed a `memory_budget` test, which was not captured; 20 runs of the binary alone passed. A session of two workers counts the heap around handing a run to its pool, so an idle worker's first sleep — on which std boxes a `Condvar`'s `pthread_cond_t`, where it has no futex — can land inside a measurement.

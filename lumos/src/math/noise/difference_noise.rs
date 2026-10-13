@@ -129,17 +129,10 @@ mod tests {
         let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
-        let mosaic = Buffer2::new(
-            512,
-            512,
-            (0..size.pixel_count())
-                .map(|index| {
-                    let (x, y) = (index % 512, index / 512);
-                    let colour = cfa_type.color_at(Vec2us::new(x, y));
-                    0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
-                })
-                .collect(),
-        );
+        let mosaic = Buffer2::from_fn(512, 512, |x, y| {
+            let colour = cfa_type.color_at(Vec2us::new(x, y));
+            0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
+        });
         for per_colour in [MAX_STATISTIC_SAMPLES, 43_690] {
             let sampling = MosaicSampling {
                 size,

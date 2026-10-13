@@ -305,19 +305,14 @@ impl Oracle<'_> {
 
 /// A `size` plane of signed, unstructured values with a few bright pixels among them.
 fn fixture(size: Size2us, seed: usize) -> Buffer2<f32> {
-    Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|i| {
-                if (i + seed).is_multiple_of(37) {
-                    40.0
-                } else {
-                    ((i * 13 + seed + i / size.width * 7) % 31) as f32 / 9.0 - 1.0
-                }
-            })
-            .collect(),
-    )
+    Buffer2::from_fn(size.width, size.height, |x, y| {
+        let i = y * size.width + x;
+        if (i + seed).is_multiple_of(37) {
+            40.0
+        } else {
+            ((i * 13 + seed + y * 7) % 31) as f32 / 9.0 - 1.0
+        }
+    })
 }
 
 /// The positions of a rotated, enlarged grid over a `size` source: interior, edge band, the rim

@@ -122,6 +122,7 @@ mod tests {
     use crate::math::noise::mosaic_noise::{MosaicNoise, colour_medians};
     use crate::math::noise::mosaic_sampling::MosaicSampling;
     use crate::math::size2us::Size2us;
+    use crate::math::vec2us::Vec2us;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
     /// row, three of each of its two colours: 6 red, 12 green and 6 blue, 24 pairs at 4 bytes and a
@@ -144,13 +145,7 @@ mod tests {
         let size = Size2us::new(64, 64);
         let rggb = CfaType::Bayer(CfaPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
-        let mosaic = Buffer2::new(
-            64,
-            64,
-            (0..size.pixel_count())
-                .map(|index| levels[rggb.color_at(size.point_of(index))])
-                .collect(),
-        );
+        let mosaic = Buffer2::from_fn(64, 64, |x, y| levels[rggb.color_at(Vec2us::new(x, y))]);
         let sampling = MosaicSampling {
             size,
             cfa_type: &rggb,

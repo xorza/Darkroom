@@ -10,6 +10,7 @@ use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 use std::f32::consts::PI;
@@ -124,15 +125,11 @@ impl FlatField {
     /// The response of every photosite of a `size` sensor behind `cfa_type`'s filters: its
     /// colour's gain times the vignette.
     pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Buffer2<f32> {
-        let pixels = (0..size.pixel_count())
-            .map(|index| {
-                let pos = size.point_of(index);
-                let gain = self.colour_gain[cfa_type.color_at(pos)];
-                self.vignette
-                    .map_or(gain, |vignette| gain * vignette.at(size, pos.x, pos.y))
-            })
-            .collect();
-        Buffer2::new(size.width, size.height, pixels)
+        Buffer2::from_fn(size.width, size.height, |x, y| {
+            let gain = self.colour_gain[cfa_type.color_at(Vec2us::new(x, y))];
+            self.vignette
+                .map_or(gain, |vignette| gain * vignette.at(size, x, y))
+        })
     }
 }
 

@@ -84,13 +84,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
                 (0.5 + sigma * f64::from(rng.next_gaussian_f32())) as f32
             })
             .collect();
-        let divisor = Buffer2::new(
-            size.width,
-            size.height,
-            (0..size.pixel_count())
-                .map(|index| (1.0 / gain(index % size.width)) as f32)
-                .collect(),
-        );
+        let divisor = Buffer2::from_fn(size.width, size.height, |x, _| (1.0 / gain(x)) as f32);
         (pixels, divisor)
     };
     let cfa = CfaType::Bayer(CfaPattern::Rggb);

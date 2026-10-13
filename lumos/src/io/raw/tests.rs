@@ -116,17 +116,13 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         }
     };
     let samples = |margin: u16| -> Buffer2<u16> {
-        let pixels = (0..SIDE * SIDE)
-            .map(|index| {
-                let (x, y) = (index % SIDE, index / SIDE);
-                if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
-                    margin
-                } else {
-                    visible(x - 1, y - 1)
-                }
-            })
-            .collect();
-        Buffer2::new(SIDE, SIDE, pixels)
+        Buffer2::from_fn(SIDE, SIDE, |x, y| {
+            if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
+                margin
+            } else {
+                visible(x - 1, y - 1)
+            }
+        })
     };
     let context = LoadContext::default();
     let preview = |margin| {
@@ -376,21 +372,14 @@ fn the_raw_values_settle_no_data_and_saturation() {
 fn the_decode_takes_the_masked_means_libraw_truncates() {
     const SIDE: usize = 26;
     let parity = |row: usize, col: usize| (row % 2) * 2 + col % 2;
-    let samples = Buffer2::new(
-        SIDE,
-        SIDE,
-        (0..SIDE * SIDE)
-            .map(|index| {
-                let (row, col) = (index / SIDE, index % SIDE);
-                if col < 2 {
-                    let p = parity(row, col);
-                    (2048 + p + usize::from(row / 2 <= p)) as u16
-                } else {
-                    3000
-                }
-            })
-            .collect(),
-    );
+    let samples = Buffer2::from_fn(SIDE, SIDE, |col, row| {
+        if col < 2 {
+            let p = parity(row, col);
+            (2048 + p + usize::from(row / 2 <= p)) as u16
+        } else {
+            3000
+        }
+    });
     let raw = bayer_dump(
         &samples,
         BayerDump {

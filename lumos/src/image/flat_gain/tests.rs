@@ -30,20 +30,11 @@ fn a_node_is_its_colours_mean_gain() {
     assert_eq!(unflagged.at(0, 0.0, 0.0), 2.0);
 
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
-    let mosaic = Size2us::new(8, 8);
-    let divisor = Buffer2::new(
-        8,
-        8,
-        (0..mosaic.pixel_count())
-            .map(
-                |index| match cfa.color_at(Vec2us::new(index % 8, index / 8)) {
-                    0 => 0.5,
-                    1 => 1.0,
-                    _ => 0.25,
-                },
-            )
-            .collect(),
-    );
+    let divisor = Buffer2::from_fn(8, 8, |x, y| match cfa.color_at(Vec2us::new(x, y)) {
+        0 => 0.5,
+        1 => 1.0,
+        _ => 0.25,
+    });
     let gain = FlatGain::of_divisor(&divisor, &cfa, |_| false);
     for (colour, expected) in [(0, 2.0), (1, 1.0), (2, 4.0)] {
         for (x, y) in [(0.0, 0.0), (4.0, 4.0), (8.0, 0.0), (2.0, 6.0)] {
@@ -65,13 +56,7 @@ fn a_node_is_its_colours_mean_gain() {
 #[test]
 fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     let size = Size2us::new(9, 9);
-    let divisor = Buffer2::new(
-        9,
-        9,
-        (0..size.pixel_count())
-            .map(|index| 1.0 / (1.0 + (index % 9) as f32 / 8.0))
-            .collect(),
-    );
+    let divisor = Buffer2::from_fn(9, 9, |x, _| 1.0 / (1.0 + x as f32 / 8.0));
     let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     let close = |actual: f32, expected: f32, what: &str| {
         assert!(

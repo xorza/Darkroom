@@ -4,7 +4,6 @@ use imaginarium::Buffer2;
 
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 
 /// Create a diagonal gradient for interpolation testing.
 ///
@@ -13,26 +12,21 @@ use crate::math::vec2us::Vec2us;
 /// making it useful for testing interpolation accuracy.
 pub(crate) fn diagonal_gradient(size: Size2us) -> Buffer2<f32> {
     let scale = (size.width + size.height) as f32;
-    let pixels: Vec<f32> = (0..size.height)
-        .flat_map(|y| (0..size.width).map(move |x| (x as f32 + y as f32 * 0.5) / scale))
-        .collect();
-    Buffer2::new(size.width, size.height, pixels)
+    Buffer2::from_fn(size.width, size.height, |x, y| {
+        (x as f32 + y as f32 * 0.5) / scale
+    })
 }
 
 /// A horizontal gradient from `left` at the first column to `right` at the last.
 pub(crate) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
-    let mut pixels = vec![0.0f32; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let t = if size.width > 1 {
-                x as f32 / (size.width - 1) as f32
-            } else {
-                0.5
-            };
-            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
+    Buffer2::from_fn(size.width, size.height, |x, _| {
+        let t = if size.width > 1 {
+            x as f32 / (size.width - 1) as f32
+        } else {
+            0.5
+        };
+        left + t * (right - left)
+    })
 }
 
 /// Add seeded Gaussian noise of a constant `sigma` to a pixel slice — for a fixture that wants one
