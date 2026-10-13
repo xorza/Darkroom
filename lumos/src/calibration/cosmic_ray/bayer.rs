@@ -20,17 +20,21 @@ use crate::math::vec2us::Vec2us;
 /// sampled to the phase, two, and the mask of the photosites it repaired.
 const PHASE_MASKS: usize = 3;
 
-/// The Bayer detector: a mono detector, the lattice that deinterleaves the phases, and the buffer
-/// each phase is deinterleaved into.
+/// The Bayer detector: a mono detector, the lattice that deinterleaves the phases, and the buffers
+/// each phase is deinterleaved, kept out and found in.
 ///
-/// The detector and the buffer are reused across all four phases. `(0, 0)` is the largest phase
-/// and runs first, so no later one grows either allocation.
+/// The detector and the buffers are reused across all four phases. `(0, 0)` is the largest phase
+/// and runs first, so no later one grows any allocation.
 #[derive(Debug)]
 pub(super) struct BayerDetector<'a> {
     mono: MonoDetector<'a>,
     lattice: CfaLattice,
     pattern: CfaPattern,
     plane: Vec<f32>,
+    /// The frame's [`KeptOut`] sampled to the phase at hand.
+    plane_kept_out: KeptOut,
+    /// The photosites the phase at hand repaired.
+    plane_found: BitBuffer2,
 }
 
 impl<'a> BayerDetector<'a> {
@@ -40,6 +44,8 @@ impl<'a> BayerDetector<'a> {
             lattice: CfaLattice::new(&CfaType::Bayer(pattern)),
             pattern,
             plane: Vec::new(),
+            plane_kept_out: KeptOut::empty(),
+            plane_found: BitBuffer2::empty(),
         }
     }
 
@@ -73,6 +79,8 @@ impl<'a> BayerDetector<'a> {
             lattice,
             pattern,
             plane,
+            plane_kept_out,
+            plane_found,
         } = self;
         let mut total = 0;
         for b in 0..2 {
@@ -88,17 +96,14 @@ impl<'a> BayerDetector<'a> {
                     let at = plane_size.point_of(index);
                     backgrounds.at(colour, Vec2us::new(2 * at.x + a, 2 * at.y + b))
                 };
-                let plane_kept_out = kept_out.map(|kept_out| {
-                    kept_out.sampled(plane_size, |at| Vec2us::new(2 * at.x + a, 2 * at.y + b))
+                let phase_kept_out = kept_out.map(|kept_out| {
+                    kept_out.sample_into(plane_kept_out, plane_size, |at| {
+                        Vec2us::new(2 * at.x + a, 2 * at.y + b)
+                    });
+                    &*plane_kept_out
                 });
-                let mut plane_found = BitBuffer2::new_default(plane_size);
-                total += mono.reject(
-                    plane,
-                    plane_size,
-                    &local,
-                    plane_kept_out.as_ref(),
-                    &mut plane_found,
-                );
+                plane_found.clear_to(plane_size);
+                total += mono.reject(plane, plane_size, &local, phase_kept_out, plane_found);
                 plane_found.for_each_set(|pos| {
                     found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
                 });

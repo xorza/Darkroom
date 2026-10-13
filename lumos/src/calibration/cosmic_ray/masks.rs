@@ -13,9 +13,10 @@ pub(crate) const CONCURRENT_MASKS: usize = 3;
 
 /// The three cosmic-ray masks a detection holds, one bit per pixel each.
 ///
-/// All three live for the whole detection rather than being rebuilt per iteration, which costs
-/// nothing at the peak — [`detect_and_grow`](Self::detect_and_grow) needed all three live at once
-/// anyway — and saves two frame-sized allocations per pass.
+/// All three live as long as the detector and are cleared for each plane rather than rebuilt per
+/// iteration or plane, which costs nothing at the peak — [`detect_and_grow`](Self::detect_and_grow)
+/// needed all three live at once anyway, and a Bayer mosaic's largest phase runs first — and saves
+/// two frame-sized allocations per pass and three per plane.
 #[derive(Debug)]
 pub(super) struct CrMasks {
     /// Every CR pixel found so far: the in-painting mask, and the count the detector returns.
@@ -33,11 +34,19 @@ impl CrMasks {
         CONCURRENT_MASKS * BitBuffer2::heap_bytes(size)
     }
 
-    pub(super) fn new(size: Size2us) -> Self {
+    /// Masks with no pixels yet, for [`Self::clear_to`] to size.
+    pub(super) const fn empty() -> Self {
         Self {
-            accumulated: new_cr_mask(size),
-            primary: new_cr_mask(size),
-            flags: new_cr_mask(size),
+            accumulated: BitBuffer2::empty(),
+            primary: BitBuffer2::empty(),
+            flags: BitBuffer2::empty(),
+        }
+    }
+
+    /// All three clear at `size`, in the allocations a previous detection left.
+    pub(super) fn clear_to(&mut self, size: Size2us) {
+        for mask in [&mut self.accumulated, &mut self.primary, &mut self.flags] {
+            mask.clear_to(size);
         }
     }
 
@@ -148,21 +157,17 @@ fn grow_box(
         });
 }
 
-/// One cosmic-ray mask: one bit per pixel.
-///
-/// Its own function so `cosmic_ray_scratch` can weigh exactly what the detector allocates. A detection
-/// holds three ([`CrMasks`]), so the packing is worth three times its face value.
-fn new_cr_mask(size: Size2us) -> BitBuffer2 {
-    BitBuffer2::new_default(size)
-}
-
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
+    use crate::calibration::cosmic_ray::masks::CrMasks;
     use crate::math::size2us::Size2us;
 
-    /// The mask as the detector allocates it, for `cosmic_ray_scratch` to weigh.
+    /// One of the masks a detection on a `size` plane holds, sized as the detector sizes it, for
+    /// `cosmic_ray_scratch` to weigh.
     pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {
-        super::new_cr_mask(size)
+        let mut masks = CrMasks::empty();
+        masks.clear_to(size);
+        masks.accumulated
     }
 }

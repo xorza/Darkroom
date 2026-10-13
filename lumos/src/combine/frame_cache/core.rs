@@ -18,6 +18,7 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::memory::stage::{Placement, Stage, Width};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
+use crate::recycle;
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
 /// Owned by composition inside
@@ -115,9 +116,14 @@ impl CacheCore {
         // Hand chunk `chunk`, read as `views`, to `process` channel by channel, reporting each;
         // `false` once the run is cancelled, the in-flight channel completed and the partial output
         // left for the caller to discard.
+        // What a chunk borrows its planes through, kept empty between chunks so the combine
+        // allocates each once.
+        let mut kept_samples: Vec<&'static [f32]> = Vec::new();
+        let mut kept_views: Vec<FrameChunk<'static>> = Vec::new();
         let mut reduce = |views: &[FrameChunk<'_>], chunk: usize| {
             let pixels = range(chunk);
-            let mut samples: Vec<&[f32]> = Vec::with_capacity(views.len());
+            let mut samples: Vec<&[f32]> = recycle::emptied(mem::take(&mut kept_samples));
+            let mut completed = true;
             for channel in 0..channel_count {
                 samples.clear();
                 samples.extend(views.iter().map(|view| view.channels[channel]));
@@ -137,18 +143,24 @@ impl CacheCore {
                     StackingStage::Combining,
                 );
                 if self.monitor.cancel.is_cancelled() {
-                    return false;
+                    completed = false;
+                    break;
                 }
             }
-            true
+            kept_samples = recycle::emptied(samples);
+            completed
         };
         if !self.tier.spills() {
             for chunk in 0..num_chunks {
-                let views: Vec<FrameChunk<'_>> = frames
-                    .iter()
-                    .map(|frame| FrameChunk::borrowed(frame, range(chunk)))
-                    .collect();
-                if !reduce(&views, chunk) {
+                let mut views: Vec<FrameChunk<'_>> = recycle::emptied(mem::take(&mut kept_views));
+                views.extend(
+                    frames
+                        .iter()
+                        .map(|frame| FrameChunk::borrowed(frame, range(chunk))),
+                );
+                let completed = reduce(&views, chunk);
+                kept_views = recycle::emptied(views);
+                if !completed {
                     break;
                 }
             }
@@ -162,7 +174,10 @@ impl CacheCore {
             let completed = thread::scope(|scope| {
                 let reading = (chunk + 1 < num_chunks)
                     .then(|| scope.spawn(|| next.fill(frames, range(chunk + 1))));
-                let completed = reduce(&current.views(frames), chunk);
+                let mut views: Vec<FrameChunk<'_>> = recycle::emptied(mem::take(&mut kept_views));
+                current.views_into(frames, &mut views);
+                let completed = reduce(&views, chunk);
+                kept_views = recycle::emptied(views);
                 if let Some(reading) = reading {
                     reading.join().expect("the chunk reader does not panic");
                 }

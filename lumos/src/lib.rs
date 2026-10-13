@@ -55,6 +55,7 @@ mod memory;
 mod pipeline;
 mod platform;
 mod progress;
+mod recycle;
 mod registration;
 mod scratch_pool;
 mod simd;

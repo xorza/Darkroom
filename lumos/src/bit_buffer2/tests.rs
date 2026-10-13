@@ -309,3 +309,34 @@ fn a_square_finds_the_bits_inside_it() {
     outside.set_at(Vec2us::new(6, 0), true);
     assert!(!outside.any_in_square(Vec2us::new(0, 0), 5));
 }
+
+/// Cleared to a smaller size, a buffer keeps its words and holds no bit of the larger one, padding
+/// included; cleared to a larger one, it takes that size's layout. 200 px rows pad to 256 bits,
+/// four words a row: 3 rows are 12 words, 130 px rows of 2 are 2 · 4 = 8, and 400 px rows of 2
+/// pad to 512 bits, 8 words a row, so 16.
+#[test]
+fn clear_to_reuses_the_words_and_clears_every_bit() {
+    let mut buffer = BitBuffer2::new_filled(Size2us::new(200, 3), true);
+    assert_eq!(buffer.words.len(), 12);
+    let held = buffer.words.as_ptr();
+
+    buffer.clear_to(Size2us::new(130, 2));
+    assert_eq!(buffer.size, Size2us::new(130, 2));
+    assert_eq!(buffer.words.len(), 8);
+    assert_eq!(
+        buffer.words.as_ptr(),
+        held,
+        "a smaller size reuses the allocation"
+    );
+    assert!(buffer.words.iter().all(|&word| word == 0));
+    assert!(buffer.padding_is_clear());
+    buffer.set_at(Vec2us::new(129, 1), true);
+    assert_eq!(buffer.count_ones(), 1);
+
+    buffer.clear_to(Size2us::new(400, 2));
+    assert_eq!(
+        (buffer.size, buffer.words.len()),
+        (Size2us::new(400, 2), 16)
+    );
+    assert_eq!(buffer.count_ones(), 0);
+}

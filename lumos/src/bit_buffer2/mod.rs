@@ -118,6 +118,25 @@ impl BitBuffer2 {
         Self::new_filled(size, false)
     }
 
+    /// A buffer of no pixels, which allocates nothing: what [`Self::clear_to`] sizes.
+    pub(crate) const fn empty() -> Self {
+        Self {
+            words: Vec::new(),
+            size: Size2us::new(0, 0),
+            stride: 0,
+        }
+    }
+
+    /// Every bit clear at `size`, in the allocation this buffer already holds when it is large
+    /// enough: a buffer reused for planes of several sizes grows once, to the largest.
+    pub(crate) fn clear_to(&mut self, size: Size2us) {
+        let layout = BitLayout::of(size);
+        self.words.clear();
+        self.words.resize(layout.num_words, 0);
+        self.size = size;
+        self.stride = layout.stride;
+    }
+
     #[inline]
     pub(crate) const fn words_per_row(&self) -> usize {
         self.stride / BITS_PER_WORD

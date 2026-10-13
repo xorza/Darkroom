@@ -496,7 +496,19 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
         objlim: 5.0,
         ..CosmicRayConfig::default()
     };
-    let mut masks = CrMasks::new(size);
+    // Sized from a larger plane's detection, as a Bayer mosaic's later phases are: clearing to the
+    // plane at hand must leave none of the earlier plane's bits behind.
+    let mut masks = CrMasks::empty();
+    let larger = Size2us::new(16, 4);
+    masks.clear_to(larger);
+    let crowded = vec![10.0f32; larger.pixel_count()];
+    let flat = vec![0.0f32; larger.pixel_count()];
+    let unit = vec![1.0f32; larger.pixel_count()];
+    assert_eq!(
+        masks.detect_and_grow(&crowded, &flat, &unit, &cfg, None),
+        larger.pixel_count()
+    );
+    masks.clear_to(size);
     assert_eq!(
         masks.detect_and_grow(&significance, &fine, &noise, &cfg, None),
         4
