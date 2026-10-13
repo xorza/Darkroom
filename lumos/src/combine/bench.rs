@@ -20,7 +20,7 @@ use crate::combine::stack_config::{Combine, CombineMethod, StackConfig};
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -131,12 +131,12 @@ impl Lights {
             .iter()
             .zip(&self.stats)
             .map(|(image, stats)| {
-                StoredFrame::spill(
-                    &scratch,
+                SpillFrame {
                     image,
-                    &FrameQuality::<Buffer2<f32>>::None,
-                    stats.clone(),
-                )
+                    quality: &FrameQuality::<Buffer2<f32>>::None,
+                    source_stats: stats.clone(),
+                }
+                .spill(&scratch)
                 .unwrap()
             })
             .collect();

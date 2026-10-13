@@ -5,6 +5,7 @@ use std::mem;
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::masked_plane::MaskedPlane;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::median_filter;
@@ -70,7 +71,14 @@ impl DetectionPlane {
                 .kernels
                 .matched_filter(&mut residual, filter, &mut temp);
         }
-        let noise = SkyNoise::measure(&residual, spec.mask, spec.background, resources);
+        let noise = SkyNoise::measure(
+            MaskedPlane {
+                pixels: &residual,
+                mask: spec.mask,
+            },
+            spec.background,
+            resources,
+        );
         Self {
             values: residual,
             noise,

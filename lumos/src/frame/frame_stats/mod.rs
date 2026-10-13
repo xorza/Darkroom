@@ -12,10 +12,11 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::noise::background_split::BackgroundSplit;
 use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::noise::mosaic_noise::MosaicNoise;
-use crate::math::noise::mrs_noise::MrsNoise;
+use crate::math::noise::mrs_noise::{MrsNoise, PixelGains};
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
+use imaginarium::Buffer2;
 
 /// Per-frame statistics, per slot: a channel, or a colour of a mosaic, whose one channel holds three
 /// colours of their own level and noise.
@@ -91,14 +92,7 @@ impl FrameStats {
             |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
         let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
         let mosaic_noise = match mosaic {
-            Some(cfa_type) => Some(MosaicNoise::measure(
-                image.channel(0),
-                dimensions.size(),
-                &cfa_type,
-                excluded,
-                metadata.quantization_sigma,
-                image.flat_gain(),
-            )),
+            Some(_) => Some(MosaicNoise::measure(image)),
             None => metadata.mosaic_noise.inspect(|_| {
                 assert_eq!(
                     dimensions.channels(),
@@ -124,20 +118,21 @@ impl FrameStats {
                         Some(gain) => {
                             let split = MrsNoise::estimate_split(
                                 plane,
-                                size,
                                 excluded,
-                                |index| {
-                                    gain.at(
-                                        channel,
-                                        (index % size.width) as f32,
-                                        (index / size.width) as f32,
-                                    )
+                                PixelGains {
+                                    gain: |index| {
+                                        gain.at(
+                                            channel,
+                                            (index % size.width) as f32,
+                                            (index / size.width) as f32,
+                                        )
+                                    },
+                                    bins: gain.bins(channel),
                                 },
-                                gain.bins(channel),
                             );
                             (split.variance.sqrt(), split.read_share)
                         }
-                        None => (MrsNoise::estimate(plane, size, excluded), 0.0),
+                        None => (MrsNoise::estimate(plane, excluded), 0.0),
                     }
                 })
                 .unzip(),
@@ -146,12 +141,11 @@ impl FrameStats {
         let measured = |index: usize| {
             nulls.is_none_or(|nulls| !nulls.at(index).intersects(QualityFlags::NO_DATA))
         };
-        let width = dimensions.width();
         let levels: Vec<SlotLevel> = match mosaic {
             Some(cfa_type) => (0..cfa_type.num_colors())
                 .into_par_iter()
                 .map(|colour| {
-                    SlotLevel::of(image.channel(0), width, spreads, |index, position| {
+                    SlotLevel::of(image.channel(0), spreads, |index, position| {
                         measured(index) && cfa_type.color_at(position) == colour
                     })
                 })
@@ -160,9 +154,7 @@ impl FrameStats {
             // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
                 .map(|channel| {
-                    SlotLevel::of(image.channel(channel), width, spreads, |index, _| {
-                        measured(index)
-                    })
+                    SlotLevel::of(image.channel(channel), spreads, |index, _| measured(index))
                 })
                 .collect(),
         };
@@ -244,16 +236,12 @@ struct SlotLevel {
 }
 
 impl SlotLevel {
-    /// The median of the samples of `plane`, rows `width` long, whose index and position `keep`
-    /// names, and with [`Spreads::Measured`] their `1.4826·MAD`. Both 0 when `keep` names none: a
-    /// frame with nothing measured there contributes at none of them, so the figures are never
-    /// read — but the median of nothing would panic.
-    fn of(
-        plane: &[f32],
-        width: usize,
-        spreads: Spreads,
-        keep: impl Fn(usize, Vec2us) -> bool,
-    ) -> Self {
+    /// The median of the samples of `plane` whose index and position `keep` names, and with
+    /// [`Spreads::Measured`] their `1.4826·MAD`. Both 0 when `keep` names none: a frame with
+    /// nothing measured there contributes at none of them, so the figures are never read — but the
+    /// median of nothing would panic.
+    fn of(plane: &Buffer2<f32>, spreads: Spreads, keep: impl Fn(usize, Vec2us) -> bool) -> Self {
+        let width = plane.width();
         let kept = |y: usize, x: usize| keep(y * width + x, Vec2us::new(x, y));
         let mut count = 0;
         for (y, row) in plane.chunks(width).enumerate() {

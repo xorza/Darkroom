@@ -10,13 +10,13 @@ use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
 use crate::core::document::port_ref::PortRef;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::NodePalette;
+use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
-use crate::gui::pane::graph_ui::paint::anchored_menu::AnchoredMenu;
-use crate::gui::requests::Requests;
+use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape};
 
 /// Right-click or double-click on empty canvas → popup that lists every
 /// `Func` the context's library holds plus the built-in specials, grouped by
@@ -43,19 +43,19 @@ pub(crate) struct NewNodeUi {
     /// filters the listed entries by name (a matching category name shows
     /// that whole column). Empty ⇒ everything shows.
     search: Search,
-    /// The rows the search matched, filtered again only when it changes.
-    rows: PaletteRows,
 }
 
-/// The palette's search text and its case-folded copy.
+/// The palette's search text, its case-folded copy, and the rows it matched.
 ///
 /// Together, because the fold is derived from the text and every frame
 /// needs it: keeping the buffer beside its source lets the fold reuse one
-/// allocation instead of building a fresh `String` per frame.
+/// allocation instead of building a fresh `String` per frame. The rows are
+/// filtered again only when the fold changes.
 #[derive(Default, Debug)]
 struct Search {
     text: String,
     folded: String,
+    rows: PaletteRows,
 }
 
 impl Search {
@@ -89,20 +89,21 @@ impl NewNodeUi {
         self.menu.is_open()
     }
 
+    /// Open the palette from a bare RMB / double-click, or from a connection
+    /// dropped on empty canvas whose source is `pending_source`, and record it
+    /// while it is open. Returns the `AddNode` a pick raises.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
         cx: CanvasCtx<'_>,
         pending_source: Option<PortRef>,
-        out: &mut Requests,
-    ) {
+    ) -> Option<GraphIntent> {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
-        let just_opened = if (pending_source.is_some()
-            || cx.gesture() == Some(CanvasGesture::NewNode))
+        let opening = if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.world_pos = graph_ctx.viewport().to_world(local);
@@ -112,9 +113,9 @@ impl NewNodeUi {
             // definitions once, and focus the search field this frame so
             // the user can type straight away.
             self.search.text.clear();
-            true
+            Opening::Fresh
         } else {
-            false
+            Opening::Standing
         };
 
         // Everything below is per-open work — the height arithmetic reads
@@ -122,7 +123,7 @@ impl NewNodeUi {
         // should pay for it. `show` would answer `None` anyway, but only
         // after its arguments were built.
         if !self.menu.is_open() {
-            return;
+            return None;
         }
 
         // Cap the palette height to the window so a short window scrolls
@@ -134,26 +135,33 @@ impl NewNodeUi {
         let surface = ui.display().logical_rect();
         let max_height = popup_cap(graph_ctx.theme().new_node_popup_max_height, surface.size.h);
         let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
-        let (search, rows) = (&mut self.search, &mut self.rows);
+        let search = &mut self.search;
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
         let pos = self.world_pos;
         // Inside the body, so the per-frame read only happens on the frames
         // the palette is actually up — `show` skips the body when closed.
-        let chosen = self
-            .menu
-            .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
-                let palette = NodePalette::new(graph_ctx, pos);
-                palette.body(ui, popup, search, rows, scroll_cap, just_opened)
-            });
+        let shape = PopupShape {
+            id_salt: "new_node_popup",
+            max_height: Some(max_height),
+        };
+        let chosen = self.menu.show(ui, shape, |ui, popup| {
+            let palette = NodePalette {
+                graph_ctx,
+                pos,
+                scroll_cap,
+                opening,
+            };
+            palette.body(ui, popup, search)
+        });
 
-        if let Some(intent) = chosen {
-            out.push_graph(intent);
+        if chosen.is_some() {
             // If a dropped connection opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the
             // exact port to land it, rather than it auto-attaching.
             self.resume_floating = self.source;
         }
+        chosen
     }
 
     /// Take the source of a wire whose drop spawned a node this frame — the

@@ -59,22 +59,19 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 #[test]
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
     let size = Size2us::new(64, 64);
-    let mut data = vec![0.05f32; size.pixel_count()];
+    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     data[size.index_of(Vec2us::new(32, 32))] = 0.95;
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
-    // pass that never reaches `replace_flagged`'s snapshot buffer.
+    // pass that never reaches `Repair::apply`'s snapshot buffer.
     let repaired = cosmic_ray::reject(
-        &mut cfa_from_plane(
-            Buffer2::new(size.width, size.height, data.clone()),
-            CfaType::Mono,
-        ),
+        &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig::default(),
     )
     .unwrap();
     assert_eq!(repaired, 1, "the fixture must in-paint something");
 
-    let floats = mono_scratch_floats(&mut data, size, &CosmicRayConfig::default());
+    let floats = mono_scratch_floats(&mut data, &CosmicRayConfig::default());
     assert_eq!(
         floats,
         MONO_SCRATCH_PLANES * size.pixel_count(),
@@ -91,18 +88,19 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
 }
 
 /// What the decode budget charges for a cosmic-ray pass, from the planes above and the masks. A
-/// mask row pads to 128 bits, two words, so a 64×64 mask is 1024 B and three are 3072. Mono: 5
-/// planes of 4096 px = 81 920 B, plus the detector's three masks and the pass's three. Bayer runs
-/// on its 32×32 phases: the phase plane, 4096 B, and the mono scratch over it, 20 480 B plus three
-/// 512 B masks, three more 512 B masks for the phase's kept-out pixels and repairs, and the pass's
-/// three frame masks. A frame too small to scan still holds the
-/// pass's three masks: 2 rows of 16 B each at 2×2, 4 at 4×4 and 6 at 6×6.
+/// mask row pads to 128 bits, two words, so a 64×64 mask is 1024 B. Mono: 5 planes of 4096 px =
+/// 81 920 B, the detector's three masks, 3072 B, and the pass's two of kept-out pixels, 2048 B.
+/// Bayer runs on its 32×32 phases: the phase plane, 4096 B, and the mono scratch over it, 20 480 B
+/// plus three 512 B masks; two more 512 B masks for the phase's kept-out pixels; the 1024 B mask
+/// of the mosaic's repairs; and the pass's two frame masks. A frame too small to scan holds the
+/// three masks building the kept-out pixels takes, more than the detector's empty mask of repairs
+/// and the pass's two: 2 rows of 16 B each at 2×2, 4 at 4×4.
 #[test]
 fn cosmic_ray_heap_bytes_count_planes_and_masks() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     for (cfa, side, expected) in [
-        (CfaType::Mono, 64, 81_920 + 3_072 + 3_072),
-        (bayer, 64, 4_096 + 20_480 + 1_536 + 1_536 + 3_072),
+        (CfaType::Mono, 64, 81_920 + 3_072 + 2_048),
+        (bayer, 64, 4_096 + 20_480 + 1_536 + 1_024 + 1_024 + 2_048),
         (CfaType::Mono, 2, 3 * 2 * 16),
         (bayer, 4, 3 * 4 * 16),
     ] {

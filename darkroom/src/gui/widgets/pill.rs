@@ -35,18 +35,17 @@ pub(crate) fn background(theme: &Theme) -> Background {
 
 /// One frosted group pill: `panel` (a caller-configured `Panel::hstack`
 /// / `vstack` carrying its id and any alignment) dressed in the shared
-/// pill chrome — hugging, chip gap, pill padding, frosted backdrop. The
-/// pill senses pointer gestures itself, so a drag or scroll starting
-/// between chips stays on the pill instead of falling through to the
-/// canvas or image beneath.
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, panel: Panel, body: impl FnOnce(&mut Ui)) {
+/// pill chrome — hugging, chip gap, pill padding, frosted backdrop — for the
+/// caller to show. The pill senses pointer gestures itself, so a drag or
+/// scroll starting between chips stays on the pill instead of falling
+/// through to the canvas or image beneath.
+pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
     panel
         .size((Sizing::HUG, Sizing::HUG))
         .gap(BUTTON_GAP)
         .padding(Spacing::all(PILL_PADDING))
         .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)
         .background(background(theme))
-        .show(ui, body);
 }
 
 /// Thin horizontal rule between concept groups sharing one column

@@ -223,8 +223,7 @@ fn local_annulus_needs_ten_pixels_in_the_frame() {
     let annulus = |width| {
         let residual = Buffer2::new_filled(width, 5, 0.25f32);
         StampBackground::measure(
-            &residual,
-            None,
+            MaskedPlane::from(&residual),
             DVec2::splat(1.0),
             AnnulusRadii { inner: 1, outer: 2 },
         )
@@ -253,12 +252,18 @@ fn the_annulus_reads_the_sky_around_the_star() {
     }
     for fwhm in [4.0, 20.0] {
         let grid = MeasureGrid::new(fwhm);
-        let sky = StampBackground::measure(&residual, None, centre, grid.annulus).unwrap();
+        let sky =
+            StampBackground::measure(MaskedPlane::from(&residual), centre, grid.annulus).unwrap();
         assert_eq!((sky.offset, sky.noise), (0.25, 0.0), "FWHM {fwhm}");
     }
     let outside = DVec2::splat(-200.0);
     assert!(
-        StampBackground::measure(&residual, None, outside, MeasureGrid::new(4.0).annulus).is_none()
+        StampBackground::measure(
+            MaskedPlane::from(&residual),
+            outside,
+            MeasureGrid::new(4.0).annulus
+        )
+        .is_none()
     );
 }
 

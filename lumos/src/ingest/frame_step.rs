@@ -20,6 +20,23 @@ pub(crate) trait FrameStep<I>: Sync + Debug {
     }
 }
 
+/// Frame files, and the step each takes as it decodes, given its index into `paths`.
+#[derive(Debug)]
+pub(crate) struct SteppedPaths<'a, P, S> {
+    pub(crate) paths: &'a [P],
+    pub(crate) step: &'a S,
+}
+
+/// Copied whatever its type parameters are, as it holds references alone: a derive would ask each
+/// to be `Copy`.
+impl<P, S> Clone for SteppedPaths<'_, P, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<P, S> Copy for SteppedPaths<'_, P, S> {}
+
 /// A step that leaves every frame as it decodes.
 #[derive(Debug)]
 pub(crate) struct NoStep;

@@ -4,15 +4,16 @@ use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::event_ref::EventRef;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
-use crate::gui::pane::graph_ui::paint::wire::{Wire, WirePass, WireTint};
+use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::requests::Requests;
+use crate::gui::widgets::hover::Hover;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -110,11 +111,11 @@ impl SubscriptionUI {
         // release edge.
         let released = match &mut state {
             InFlight::FromEmitter(drag) => {
-                drag.snap = scan_sub_target(geometry, ui, graph_ctx, drag.from);
+                drag.snap = scan_sub_target(ui, cx, drag.from);
                 !drag.held(&geometry.events)
             }
             InFlight::FromSubscriber(drag) => {
-                drag.snap = scan_emitter_target(geometry, ui, graph_ctx, drag.from);
+                drag.snap = scan_emitter_target(ui, cx, drag.from);
                 !drag.held(&geometry.subs)
             }
         };
@@ -174,29 +175,32 @@ impl SubscriptionUI {
     /// preview keeps a committed wire's shape regardless of drag direction.
     pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
-        let (p0, p3) = match self.state.get().copied() {
-            None => return,
-            Some(InFlight::FromEmitter(drag)) => {
+        let Some(state) = self.state.get().copied() else {
+            return;
+        };
+        let pointer = canvas::world_pointer(ui, graph_ctx, canvas_origin);
+        let (p0, p3) = match state {
+            InFlight::FromEmitter(drag) => {
                 let Some(p0) = geometry.events.center(drag.from) else {
                     return;
                 };
-                let Some(p3) = drag.free_end(ui, graph_ctx, canvas_origin, &geometry.subs) else {
+                let Some(p3) = drag.free_end(pointer, &geometry.subs) else {
                     return;
                 };
                 (p0, p3)
             }
-            Some(InFlight::FromSubscriber(drag)) => {
+            InFlight::FromSubscriber(drag) => {
                 let Some(p3) = geometry.subs.center(drag.from) else {
                     return;
                 };
-                let Some(p0) = drag.free_end(ui, graph_ctx, canvas_origin, &geometry.events) else {
+                let Some(p0) = drag.free_end(pointer, &geometry.events) else {
                     return;
                 };
                 (p0, p3)
             }
         };
         let theme = graph_ctx.theme();
-        Wire::event(p0, p3).add(ui, theme.stroke_width, port_color::event(theme, false));
+        Wire::event(p0, p3).add(ui, theme.stroke_width, port_color::event(theme));
     }
 }
 
@@ -221,13 +225,17 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         ) else {
             continue;
         };
-        let hover = geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber);
+        let hover = Hover::from(
+            geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber),
+        );
         let wire = Wire::event(p0, p3);
         // Events carry no data type, so one neutral swatch runs the whole
         // curve rather than a per-end gradient.
-        if pass.draw_wire(ui, &wire, hover, || {
-            WireTint::flat(port_color::event(theme, false))
-        }) {
+        let ends = WireEnds {
+            hover,
+            tint: || WireTint::flat(port_color::event(theme)),
+        };
+        if pass.draw_wire(ui, &wire, ends) {
             pass.probe.mark_broken_subscription(s);
         }
     }
@@ -237,34 +245,26 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// sink node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
-fn scan_sub_target(
-    geometry: &CanvasGeometry,
-    ui: &mut Ui,
-    graph_ctx: GraphCtx<'_>,
-    emitter: EventRef,
-) -> Option<NodeId> {
+fn scan_sub_target(ui: &mut Ui, cx: CanvasCtx<'_>, emitter: EventRef) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    let candidates = graph_ctx
+    let candidates = cx
+        .graph_ctx()
         .nodes()
         .filter(|n| n.id != emitter.node_id && n.sink())
         .map(|n| n.id);
-    geometry.subs.first_containing(pointer, candidates)
+    cx.geometry().subs.first_containing(pointer, candidates)
 }
 
 /// Emitter event glyph under the pointer that's a valid drop for a wire
 /// dragged from `subscriber`'s pin: any node's event other than the
 /// subscriber's own (a node can't subscribe to itself). Mirror of
 /// [`scan_sub_target`] for the reverse drag.
-fn scan_emitter_target(
-    geometry: &CanvasGeometry,
-    ui: &mut Ui,
-    graph_ctx: GraphCtx<'_>,
-    subscriber: NodeId,
-) -> Option<EventRef> {
+fn scan_emitter_target(ui: &mut Ui, cx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;
-    let candidates = graph_ctx
+    let candidates = cx
+        .graph_ctx()
         .nodes()
         .filter(|n| n.id != subscriber)
         .flat_map(NodeCtx::event_refs);
-    geometry.events.first_containing(pointer, candidates)
+    cx.geometry().events.first_containing(pointer, candidates)
 }

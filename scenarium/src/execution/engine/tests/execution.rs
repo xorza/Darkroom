@@ -24,11 +24,11 @@ async fn simple_compute() {
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
     g.add("print", NodeSpec::records);
-    g.wire("a", 0, "sum", 0);
-    g.wire("b", 0, "sum", 1);
-    g.wire("sum", 0, "mult", 0);
-    g.wire("b", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("a", "sum");
+    g.wire("b", ("sum", 1));
+    g.wire("sum", "mult");
+    g.wire("b", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;

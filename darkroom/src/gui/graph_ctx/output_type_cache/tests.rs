@@ -20,7 +20,7 @@ fn the_table_is_resolved_again_only_when_its_sources_move() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.output(DataType::Int));
     g.add("hop", NodeSpec::passthrough);
-    g.wire("src", 0, "hop", 0);
+    g.wire("src", "hop");
     let (src, hop) = (g.id("src"), g.id("hop"));
     let DocFixture { doc, library } = g.into();
     let library = Arc::new(library);

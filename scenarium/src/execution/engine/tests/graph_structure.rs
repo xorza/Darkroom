@@ -32,8 +32,8 @@ async fn updates_after_graph_change() {
     let mut e = TestEngine::over(TestGraph::sample());
     // Rewire mult to the sources directly, bypassing sum.
     e.edit(|g| {
-        g.wire("get_a", 0, "mult", 0);
-        g.wire("get_b", 0, "mult", 1);
+        g.wire("get_a", "mult");
+        g.wire("get_b", ("mult", 1));
     });
 
     let plan = e.plan_sinks().await;

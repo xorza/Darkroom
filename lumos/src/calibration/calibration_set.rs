@@ -68,7 +68,7 @@ impl CalibrationSet<Option<CfaImage>> {
             .iter()
             .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
-            let size = Size2us::new(master.data.width(), master.data.height());
+            let size = Size2us::from(&master.data);
             let Some((expected_size, expected_pattern)) = expected else {
                 expected = Some((size, master.cfa_type));
                 continue;

@@ -64,13 +64,13 @@ fn add_point_caps_total_length() {
 /// A polyline crosses a wire only when one of its segments properly crosses
 /// one of the wire's chords.
 #[test]
-fn intersects_cubic_finds_a_proper_crossing() {
-    let straight = [
-        Vec2::new(0.0, 0.0),
-        Vec2::new(33.0, 0.0),
-        Vec2::new(66.0, 0.0),
-        Vec2::new(100.0, 0.0),
-    ];
+fn intersects_wire_finds_a_proper_crossing() {
+    let straight = Wire {
+        p0: Vec2::new(0.0, 0.0),
+        p1: Vec2::new(33.0, 0.0),
+        p2: Vec2::new(66.0, 0.0),
+        p3: Vec2::new(100.0, 0.0),
+    };
     let cases: [(&[Vec2], bool, &str); 3] = [
         (
             &[Vec2::new(50.0, -10.0), Vec2::new(50.0, 10.0)],
@@ -93,8 +93,7 @@ fn intersects_cubic_finds_a_proper_crossing() {
         for &p in &points[1..] {
             b.add_point(p);
         }
-        let [p0, p1, p2, p3] = straight;
-        assert_eq!(b.intersects_cubic(p0, p1, p2, p3), expected, "{why}");
+        assert_eq!(b.intersects_wire(&straight), expected, "{why}");
     }
 }
 
@@ -148,23 +147,16 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
             .iter()
             .any(|p| p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y)
             || b.segments().any(|(a, c)| {
-                (0..4).any(|i| segments_intersect(a, c, corners[i], corners[(i + 1) % 4]))
+                (0..4).any(|i| segments_intersect((a, c), (corners[i], corners[(i + 1) % 4])))
             })
     };
-    let brute_cubic = |p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2| {
+    let brute_wire = |wire: &Wire| {
         (1..=BEZIER_SAMPLES).any(|i| {
             let t0 = (i - 1) as f32 / BEZIER_SAMPLES as f32;
             let t1 = i as f32 / BEZIER_SAMPLES as f32;
-            let (a, c) = (
-                if i == 1 {
-                    p0
-                } else {
-                    cubic_point(p0, p1, p2, p3, t0)
-                },
-                cubic_point(p0, p1, p2, p3, t1),
-            );
+            let a = if i == 1 { wire.p0 } else { wire.at(t0) };
             b.segments()
-                .any(|(s0, s1)| segments_intersect(a, c, s0, s1))
+                .any(|segment| segments_intersect((a, wire.at(t1)), segment))
         })
     };
 
@@ -186,13 +178,18 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
             rect_hits += usize::from(brute_rect(rect));
 
             let (p0, p3) = (Vec2::new(x, y), Vec2::new(x + 40.0, y + 20.0));
-            let (p1, p2) = (p0 + Vec2::new(15.0, -5.0), p3 - Vec2::new(15.0, -5.0));
+            let wire = Wire {
+                p0,
+                p1: p0 + Vec2::new(15.0, -5.0),
+                p2: p3 - Vec2::new(15.0, -5.0),
+                p3,
+            };
             assert_eq!(
-                b.intersects_cubic(p0, p1, p2, p3),
-                brute_cubic(p0, p1, p2, p3),
+                b.intersects_wire(&wire),
+                brute_wire(&wire),
                 "cubic from ({x}, {y})"
             );
-            cubic_hits += usize::from(brute_cubic(p0, p1, p2, p3));
+            cubic_hits += usize::from(brute_wire(&wire));
         }
     }
     // Both kinds of answer occur, so the sweep tests the rejection and the

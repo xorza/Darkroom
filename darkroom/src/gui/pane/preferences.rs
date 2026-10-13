@@ -35,88 +35,222 @@ const SECTIONS_GAP: f32 = 26.0;
 /// Gap between a section's label and its rows, and between the rows.
 const SECTION_GAP: f32 = 8.0;
 
-/// Draw the preferences form, editing `prefs` in place, and queue whatever
-/// the edit needs `App` to run: persist + re-sync, or a Browse dialog.
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mut Requests) {
-    Panel::vstack()
-        .id_salt("preferences_view")
-        .size((Sizing::FILL, Sizing::FILL))
-        .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
-        .child_align(Align::new(HAlign::Center, VAlign::Top))
-        .background(Background::fill(theme.canvas.bg))
-        .show(ui, |ui| {
-            Panel::vstack()
-                .id_salt("preferences_column")
-                .size((Sizing::FILL, Sizing::HUG))
-                .max_size((COLUMN_WIDTH, f32::INFINITY))
-                .gap(SECTIONS_GAP)
-                .show(ui, |ui| {
-                    // Behavior — the startup + exit toggles.
-                    section(ui, theme, "Behavior", |ui| {
-                        if Checkbox::new(&mut prefs.load_last_document)
-                            .label("Load last document on startup")
-                            .show(ui)
-                            .changed
-                        {
-                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                        }
-                        if Checkbox::new(&mut prefs.confirm_unsaved_changes)
-                            .label("Ask to save unsaved changes")
-                            .show(ui)
-                            .changed
-                        {
-                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                        }
-                    });
+/// The preferences form for one record pass: the theme it paints with and
+/// the sink its edits queue into.
+#[derive(Debug)]
+pub(crate) struct PreferencesForm<'a> {
+    pub(crate) theme: &'a Theme,
+    pub(crate) out: &'a mut Requests,
+}
 
-                    // ML models — caller-supplied ONNX files the ml_denoise /
-                    // remove_stars nodes load (lumos ships none).
-                    section(ui, theme, "ML Models", |ui| {
-                        model_row(
-                            ui,
-                            theme,
-                            ModelRow {
-                                label: "Denoise (DeepSNR)",
-                                kind: MlModelKind::Denoise,
-                                download_label: "Download DeepSNR CLI \u{2197}",
-                                download_url: "https://starnetastro.com/cli-tools/deepsnr/",
-                            },
-                            &mut prefs.ml_models,
-                            out,
-                        );
-                        model_row(
-                            ui,
-                            theme,
-                            ModelRow {
-                                label: "Star removal (StarNet)",
-                                kind: MlModelKind::StarRemoval,
-                                download_label: "Download StarNet CLI \u{2197}",
-                                download_url: "https://starnetastro.com/cli-tools/starnet/",
-                            },
-                            &mut prefs.ml_models,
-                            out,
-                        );
+impl PreferencesForm<'_> {
+    /// Draw the form, editing `prefs` in place, and queue whatever the edit
+    /// needs `App` to run: persist + re-sync, or a Browse dialog.
+    pub(crate) fn show(mut self, ui: &mut Ui, prefs: &mut Preferences) {
+        let theme = self.theme;
+        Panel::vstack()
+            .id_salt("preferences_view")
+            .size((Sizing::FILL, Sizing::FILL))
+            .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
+            .child_align(Align::new(HAlign::Center, VAlign::Top))
+            .background(Background::fill(theme.canvas.bg))
+            .show(ui, |ui| {
+                Panel::vstack()
+                    .id_salt("preferences_column")
+                    .size((Sizing::FILL, Sizing::HUG))
+                    .max_size((COLUMN_WIDTH, f32::INFINITY))
+                    .gap(SECTIONS_GAP)
+                    .show(ui, |ui| {
+                        // Behavior — the startup + exit toggles.
+                        Section { title: "Behavior" }.show(ui, theme, |ui| {
+                            if Checkbox::new(&mut prefs.load_last_document)
+                                .label("Load last document on startup")
+                                .show(ui)
+                                .changed
+                            {
+                                self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                            }
+                            if Checkbox::new(&mut prefs.confirm_unsaved_changes)
+                                .label("Ask to save unsaved changes")
+                                .show(ui)
+                                .changed
+                            {
+                                self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                            }
+                        });
+
+                        // ML models — caller-supplied ONNX files the ml_denoise /
+                        // remove_stars nodes load (lumos ships none).
+                        Section { title: "ML Models" }.show(ui, theme, |ui| {
+                            self.model_row(
+                                ui,
+                                ModelRow {
+                                    label: "Denoise (DeepSNR)",
+                                    kind: MlModelKind::Denoise,
+                                    download_label: "Download DeepSNR CLI \u{2197}",
+                                    download_url: "https://starnetastro.com/cli-tools/deepsnr/",
+                                },
+                                &mut prefs.ml_models,
+                            );
+                            self.model_row(
+                                ui,
+                                ModelRow {
+                                    label: "Star removal (StarNet)",
+                                    kind: MlModelKind::StarRemoval,
+                                    download_label: "Download StarNet CLI \u{2197}",
+                                    download_url: "https://starnetastro.com/cli-tools/starnet/",
+                                },
+                                &mut prefs.ml_models,
+                            );
+                        });
                     });
+            });
+    }
+
+    /// One model-path row: a fixed-width label, an **editable** path field (type
+    /// or paste a path; Enter or click-away commits it, Escape drops it), a
+    /// "Browse…" button, and — beneath, indented under the field — an error line
+    /// when the committed path is broken, then a download hint (a browser link to
+    /// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
+    /// Writes the path `kind` names in `paths` in place and queues
+    /// [`PrefsCommand::Changed`] on an edited path, or
+    /// [`PrefsCommand::PickMlModel`] when Browse is clicked.
+    fn model_row(&mut self, ui: &mut Ui, row: ModelRow, paths: &mut MlModelPaths) {
+        let ModelRow { label, kind, .. } = row;
+        let theme = self.theme;
+        let path = kind.path_mut(paths);
+        let id = WidgetId::from_hash(("preferences.ml_model_path", label));
+        // Refresh the draft from `path` only when `path` changed *externally*
+        // (initial load, a Browse pick, or last frame's commit) — never on
+        // "unfocused". Focus is resolved before the record pass, so on the blur
+        // frame `focus()` already reads unfocused; mirroring there would stomp
+        // the just-typed text before `TextEdit`'s submit/blur commit could read
+        // it (the field would snap back and nothing would save). Keying the
+        // refresh on the external value sidesteps that race entirely — and gives
+        // `status` its no-stat-per-frame revalidation point.
+        ui.with_state::<PathField, _>(id, |ui, field| {
+            // Scoped so the borrow of `path` ends here: `to_string_lossy` is
+            // borrowed for a UTF-8 path (every path that round-trips through this
+            // field), so the common — unchanged — case compares in place rather
+            // than allocating a fresh `String` each frame only to find nothing
+            // moved. The committing branch below compares against the mirrored
+            // `seen` instead.
+            {
+                let canonical = path.to_string_lossy();
+                if field.seen != canonical {
+                    field.text.replace_range(.., &canonical);
+                    field.seen.replace_range(.., &canonical);
+                    field.problem = path_problem(&canonical);
+                }
+            }
+            let problem = field.problem;
+            Panel::vstack()
+                .id_salt(label)
+                .size((Sizing::FILL, Sizing::HUG))
+                .gap(4.0)
+                .show(ui, |ui| {
+                    Panel::hstack()
+                        .id_salt("row")
+                        .size((Sizing::FILL, Sizing::HUG))
+                        .gap(ML_ROW_GAP)
+                        .child_align(Align::v(VAlign::Center))
+                        .show(ui, |ui| {
+                            Panel::hstack()
+                                .id_salt("label")
+                                .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
+                                .show(ui, |ui| {
+                                    Text::new(label)
+                                        .style(&support::sized_text(ui, theme.text.body))
+                                        .show(ui);
+                                });
+
+                            let mut edit = TextEdit::new(&mut field.text)
+                                .id(id)
+                                .size((Sizing::FILL, Sizing::HUG))
+                                .min_size((ML_PATH_FIELD_MIN, 0.0))
+                                .placeholder("/path/to/model.onnx");
+                            // A broken committed path recolors the field's chrome
+                            // to the error tint (message under the row says
+                            // what's wrong).
+                            if problem.is_some() {
+                                edit = edit.style(&theme.path_field_error);
+                            }
+                            let response = edit.show(ui);
+                            if response.canceled {
+                                // Escape drops the draft: the field shows the
+                                // committed path again.
+                                field.text.clone_from(&field.seen);
+                            }
+                            if response.committed {
+                                // Against the mirror, not a re-read of `path`:
+                                // `seen` was just synced to it, and comparing
+                                // there keeps `path` unborrowed for the write.
+                                if field.text != field.seen {
+                                    *path = PathBuf::from(field.text.clone());
+                                    self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                                }
+                                // Re-stat on every commit — even an unchanged
+                                // path: the file may have appeared (or vanished)
+                                // since the last check, and Enter is the natural
+                                // retry. A *changed* commit re-checks again next
+                                // frame via the `seen` mirror once it lands in
+                                // `canonical`.
+                                field.problem = path_problem(&field.text);
+                            }
+
+                            if Button::new()
+                                .id_salt("browse")
+                                .label("Browse…")
+                                .show(ui)
+                                .left
+                                .clicked()
+                            {
+                                self.out
+                                    .push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
+                            }
+                        });
+
+                    if let Some(problem) = problem {
+                        indented_line(ui, "problem", |ui| {
+                            Text::new(problem)
+                                .style(&support::colored_text(
+                                    ui,
+                                    theme.status.error,
+                                    theme.text.body,
+                                ))
+                                .show(ui);
+                        });
+                    }
+                    download_hint(ui, theme, row);
                 });
         });
+    }
 }
 
 /// One settings section: a bold muted label with its rows grouped tight
 /// beneath it, the whole block spaced well apart from its neighbors
 /// ([`SECTIONS_GAP`] between sections vs. [`SECTION_GAP`] inside one).
-fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&mut Ui)) {
-    Panel::vstack()
-        .id_salt(title)
-        .size((Sizing::FILL, Sizing::HUG))
-        .gap(SECTION_GAP)
-        .show(ui, |ui| {
-            let style = TextStyle {
-                weight: FontWeight::BOLD,
-                ..support::muted_text(ui, theme, theme.text.body)
-            };
-            Text::new(title).style(&style).show(ui);
-            body(ui);
-        });
+#[derive(Clone, Copy, Debug)]
+struct Section {
+    title: &'static str,
+}
+
+impl Section {
+    fn show(self, ui: &mut Ui, theme: &Theme, body: impl FnOnce(&mut Ui)) {
+        let title = self.title;
+        Panel::vstack()
+            .id_salt(title)
+            .size((Sizing::FILL, Sizing::HUG))
+            .gap(SECTION_GAP)
+            .show(ui, |ui| {
+                let style = TextStyle {
+                    weight: FontWeight::BOLD,
+                    ..support::muted_text(ui, theme, theme.text.body)
+                };
+                Text::new(title).style(&style).show(ui);
+                body(ui);
+            });
+    }
 }
 
 /// One ML-model row's fixed description: what it is called, which preference
@@ -161,7 +295,7 @@ fn path_problem(path: &str) -> Option<&'static str> {
     (!onnx).then_some("Not an .onnx file")
 }
 
-/// Cross-frame state for a [`model_row`] path field: the editor's live `text`
+/// Cross-frame state for a [`PreferencesForm::model_row`] path field: the editor's live `text`
 /// plus `seen`, the external path value last mirrored into it. The buffer is
 /// refreshed from the path only when `seen` diverges from it (an external
 /// change — load, Browse, or our own commit landing), so an in-progress edit
@@ -174,134 +308,6 @@ struct PathField {
     text: String,
     seen: String,
     problem: Option<&'static str>,
-}
-
-/// One model-path row: a fixed-width label, an **editable** path field (type
-/// or paste a path; Enter or click-away commits it, Escape drops it), a
-/// "Browse…" button, and — beneath, indented under the field — an error line
-/// when the committed path is broken, then a download hint (a browser link to
-/// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
-/// Writes the path `kind` names in `paths` in place and queues
-/// [`PrefsCommand::Changed`] on an edited path, or
-/// [`PrefsCommand::PickMlModel`] when Browse is clicked.
-fn model_row(
-    ui: &mut Ui,
-    theme: &Theme,
-    row: ModelRow,
-    paths: &mut MlModelPaths,
-    out: &mut Requests,
-) {
-    let ModelRow {
-        label,
-        kind,
-        download_label,
-        download_url,
-    } = row;
-    let path = kind.path_mut(paths);
-    let id = WidgetId::from_hash(("preferences.ml_model_path", label));
-    // Refresh the draft from `path` only when `path` changed *externally*
-    // (initial load, a Browse pick, or last frame's commit) — never on
-    // "unfocused". Focus is resolved before the record pass, so on the blur
-    // frame `focus()` already reads unfocused; mirroring there would stomp
-    // the just-typed text before `TextEdit`'s submit/blur commit could read
-    // it (the field would snap back and nothing would save). Keying the
-    // refresh on the external value sidesteps that race entirely — and gives
-    // `status` its no-stat-per-frame revalidation point.
-    ui.with_state::<PathField, _>(id, |ui, field| {
-        // Scoped so the borrow of `path` ends here: `to_string_lossy` is
-        // borrowed for a UTF-8 path (every path that round-trips through this
-        // field), so the common — unchanged — case compares in place rather
-        // than allocating a fresh `String` each frame only to find nothing
-        // moved. The committing branch below compares against the mirrored
-        // `seen` instead.
-        {
-            let canonical = path.to_string_lossy();
-            if field.seen != canonical {
-                field.text.replace_range(.., &canonical);
-                field.seen.replace_range(.., &canonical);
-                field.problem = path_problem(&canonical);
-            }
-        }
-        let problem = field.problem;
-        Panel::vstack()
-            .id_salt(label)
-            .size((Sizing::FILL, Sizing::HUG))
-            .gap(4.0)
-            .show(ui, |ui| {
-                Panel::hstack()
-                    .id_salt("row")
-                    .size((Sizing::FILL, Sizing::HUG))
-                    .gap(ML_ROW_GAP)
-                    .child_align(Align::v(VAlign::Center))
-                    .show(ui, |ui| {
-                        Panel::hstack()
-                            .id_salt("label")
-                            .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
-                            .show(ui, |ui| {
-                                Text::new(label)
-                                    .style(&support::sized_text(ui, theme.text.body))
-                                    .show(ui);
-                            });
-
-                        let mut edit = TextEdit::new(&mut field.text)
-                            .id(id)
-                            .size((Sizing::FILL, Sizing::HUG))
-                            .min_size((ML_PATH_FIELD_MIN, 0.0))
-                            .placeholder("/path/to/model.onnx");
-                        // A broken committed path recolors the field's chrome
-                        // to the error tint (message under the row says
-                        // what's wrong).
-                        if problem.is_some() {
-                            edit = edit.style(&theme.path_field_error);
-                        }
-                        let response = edit.show(ui);
-                        if response.canceled {
-                            // Escape drops the draft: the field shows the
-                            // committed path again.
-                            field.text.clone_from(&field.seen);
-                        }
-                        if response.committed {
-                            // Against the mirror, not a re-read of `path`:
-                            // `seen` was just synced to it, and comparing
-                            // there keeps `path` unborrowed for the write.
-                            if field.text != field.seen {
-                                *path = PathBuf::from(field.text.clone());
-                                out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                            }
-                            // Re-stat on every commit — even an unchanged
-                            // path: the file may have appeared (or vanished)
-                            // since the last check, and Enter is the natural
-                            // retry. A *changed* commit re-checks again next
-                            // frame via the `seen` mirror once it lands in
-                            // `canonical`.
-                            field.problem = path_problem(&field.text);
-                        }
-
-                        if Button::new()
-                            .id_salt("browse")
-                            .label("Browse…")
-                            .show(ui)
-                            .left
-                            .clicked()
-                        {
-                            out.push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
-                        }
-                    });
-
-                if let Some(problem) = problem {
-                    indented_line(ui, "problem", |ui| {
-                        Text::new(problem)
-                            .style(&support::colored_text(
-                                ui,
-                                theme.status.error,
-                                theme.text.body,
-                            ))
-                            .show(ui);
-                    });
-                }
-                download_hint(ui, theme, download_label, download_url);
-            });
-    });
 }
 
 /// The CLI tools ship as a zip of self-contained binaries plus the model
@@ -324,10 +330,15 @@ fn indented_line(ui: &mut Ui, salt: &'static str, body: impl FnOnce(&mut Ui)) {
 }
 
 /// Guidance line under a model row: a clickable "Download … CLI ↗" link
-/// (accent-colored, brightening on hover; opens `url` in the browser on
-/// click) followed by muted instructions to unzip the download and point the
-/// field at the `.onnx` inside.
-fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'static str) {
+/// (accent-colored, brightening on hover; opens the row's download URL in the
+/// browser on click) followed by muted instructions to unzip the download and
+/// point the field at the `.onnx` inside.
+fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
+    let ModelRow {
+        download_label: link_label,
+        download_url: url,
+        ..
+    } = row;
     let id = WidgetId::from_hash(("preferences.download_hint", link_label));
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
@@ -409,7 +420,13 @@ mod tests {
         let mut h = UiHarness::new(UVec2::new(800, 200));
         let mut frame = |h: &mut UiHarness, paths: &mut MlModelPaths| {
             let mut out = Requests::default();
-            h.frame(|ui| model_row(ui, &theme, row, paths, &mut out));
+            h.frame(|ui| {
+                PreferencesForm {
+                    theme: &theme,
+                    out: &mut out,
+                }
+                .model_row(ui, row, paths);
+            });
             iter::from_fn(|| out.pop_app())
                 .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
                 .count()

@@ -1,5 +1,6 @@
 //! Matched-filter FWHM selection and estimation settings.
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Where the matched filter's FWHM comes from.
@@ -72,35 +73,22 @@ impl FwhmConfig {
 
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         if let Some(mode) = self.mode {
-            InvalidConfigField::finite(
+            ConfigValue::new(
                 match mode {
                     FwhmMode::Fixed(_) => "fwhm Fixed",
                     FwhmMode::Auto { .. } => "fwhm Auto fallback",
                 },
-                "finite and positive",
                 mode.seed(),
-                |value| value > 0.0,
-            )?;
+            )
+            .finite_and("finite and positive", |value| value > 0.0)?;
         }
-        InvalidConfigField::check(
-            self.min_stars >= 5,
-            "fwhm min_stars",
-            "at least 5",
-            self.min_stars as f64,
-        )?;
-        InvalidConfigField::finite(
-            "fwhm estimation_sigma_factor",
-            "finite and at least 1",
-            self.estimation_sigma_factor,
-            |value| value >= 1.0,
-        )?;
-        InvalidConfigField::finite(
-            "psf_axis_ratio",
-            "finite and in (0, 1]",
-            self.psf_axis_ratio,
-            |value| value > 0.0 && value <= 1.0,
-        )?;
-        InvalidConfigField::finite_only("psf_angle", self.psf_angle)?;
+        ConfigValue::count("fwhm min_stars", self.min_stars)
+            .must_be("at least 5", self.min_stars >= 5)?;
+        ConfigValue::new("fwhm estimation_sigma_factor", self.estimation_sigma_factor)
+            .finite_and("finite and at least 1", |value| value >= 1.0)?;
+        ConfigValue::new("psf_axis_ratio", self.psf_axis_ratio)
+            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
+        ConfigValue::new("psf_angle", self.psf_angle).finite()?;
         Ok(())
     }
 }

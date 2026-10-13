@@ -40,18 +40,27 @@ pub(crate) struct AppCtx<'a> {
 }
 
 impl<'a> AppCtx<'a> {
+    /// The frame's world with no status-bar inputs: no error, no memory
+    /// figure — see [`Self::with_status`].
     pub(crate) const fn new(
         theme: &'a Theme,
         library: &'a Arc<Library>,
         run_state: &'a RunState,
-        status: StatusInputs<'a>,
     ) -> Self {
         Self {
             theme,
             library,
             run_state,
-            status,
+            status: StatusInputs {
+                error: None,
+                process_memory: 0,
+            },
         }
+    }
+
+    /// This world with the status bar reading `status`.
+    pub(crate) const fn with_status(self, status: StatusInputs<'a>) -> Self {
+        Self { status, ..self }
     }
 
     pub(crate) const fn theme(self) -> &'a Theme {

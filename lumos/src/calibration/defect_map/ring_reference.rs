@@ -5,6 +5,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_to_sigma, median_mut};
 use crate::math::vec2us::Vec2us;
+use imaginarium::Buffer2;
 
 /// The ring's inner reach, in pixels: a same-colour cluster of up to this many pixels across keeps
 /// most of itself out of its members' rings, and what it leaves in, the clip takes out.
@@ -35,6 +36,23 @@ pub(crate) struct RingReference {
     residuals: Vec<f32>,
 }
 
+/// The frame a ring is read from: its size, and its sample at each flat index.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RingFrame<F> {
+    pub(crate) size: Size2us,
+    pub(crate) value: F,
+}
+
+impl RingFrame<()> {
+    /// `data` as it holds its samples.
+    pub(crate) fn of(data: &Buffer2<f32>) -> RingFrame<impl Fn(usize) -> f64 + Copy + '_> {
+        RingFrame {
+            size: Size2us::from(data),
+            value: |index: usize| f64::from(data[index]),
+        }
+    }
+}
+
 /// One photosite of the ring: its offset from the pixel, and its value.
 #[derive(Debug, Clone, Copy)]
 struct RingSample {
@@ -52,16 +70,15 @@ struct Plane {
 }
 
 impl RingReference {
-    /// The plane's level at `point` of a `size` frame whose sample at a flat index `value` reads,
-    /// of its colour under `cfa`; `None` when the frame gives the ring too few photosites, or they
-    /// fix no plane.
+    /// The plane's level at `point` of `frame`, of its colour under `cfa`; `None` when the frame
+    /// gives the ring too few photosites, or they fix no plane.
     pub(crate) fn at(
         &mut self,
-        size: Size2us,
-        value: impl Fn(usize) -> f64,
+        frame: RingFrame<impl Fn(usize) -> f64>,
         cfa: &CfaType,
         point: Vec2us,
     ) -> Option<f32> {
+        let RingFrame { size, value } = frame;
         let colour = cfa.color_at(point);
         self.samples.clear();
         let reach = RING_OUTER as isize;

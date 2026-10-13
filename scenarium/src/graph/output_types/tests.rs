@@ -13,8 +13,8 @@ fn chain() -> TestGraph {
     g.add("p1", NodeSpec::passthrough);
     g.instance("p2", "p1");
     g.instance("isolated", "src");
-    g.wire("src", 0, "p1", 0);
-    g.wire("p1", 0, "p2", 0);
+    g.wire("src", "p1");
+    g.wire("p1", "p2");
     g
 }
 
@@ -98,7 +98,7 @@ fn update_discards_what_the_previous_graph_resolved() {
 fn a_cycle_resolves_to_any_rather_than_being_absent() {
     let mut c = chain();
     // p1 ← p2 ← p1: the chain now closes on itself.
-    c.wire("p2", 0, "p1", 0);
+    c.wire("p2", "p1");
     let mut types = OutputTypes::default();
 
     types.update(&c.graph, &c.library);

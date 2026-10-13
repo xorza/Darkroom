@@ -104,7 +104,7 @@ impl MeshWorkspace {
     /// Measure every tile of `input` into the grid, rebuilding the grid when the frame or the tile
     /// size changed.
     fn fill_tile_stats(&mut self, input: &TileInput<'_>, params: MeshParams) {
-        let dimensions = Size2us::new(input.pixels.width(), input.pixels.height());
+        let dimensions = Size2us::from(input.pixels);
         let tile_size = params.tile_size;
         if self
             .grid

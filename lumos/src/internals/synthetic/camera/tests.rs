@@ -1,17 +1,17 @@
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::synthetic::camera::*;
 
-fn render_one(psf: PsfModel, size: usize, flux: f32, seeing: f32) -> Vec<f32> {
+fn render_one(psf: PsfModel, size: usize, flux: f32) -> Vec<f32> {
     let mut pixels = Buffer2::new_filled(size, size, 0.0f32);
     let c = size as f32 / 2.0;
-    psf.render(&mut pixels, c, c, flux, seeing);
+    psf.render(&mut pixels, Vec2::splat(c), flux);
     pixels.pixels().to_vec()
 }
 
 #[test]
 fn gaussian_psf_conserves_flux() {
     // A wide canvas captures essentially all of the 4σ-truncated profile.
-    let pixels = render_one(PsfModel::gaussian(4.0), 81, 100.0, 1.0);
+    let pixels = render_one(PsfModel::gaussian(4.0), 81, 100.0);
     let sum: f32 = pixels.iter().sum();
     assert!((sum - 100.0).abs() < 1.0, "sum {sum}");
 }
@@ -26,7 +26,6 @@ fn moffat_psf_conserves_flux() {
         },
         121,
         100.0,
-        1.0,
     );
     let sum: f32 = pixels.iter().sum();
     assert!((sum - 100.0).abs() < 2.0, "sum {sum}");
@@ -40,7 +39,7 @@ fn elliptical_psf_conserves_flux_and_is_elongated() {
         angle: 0.0,
     };
     let size = 81;
-    let pixels = render_one(psf, size, 100.0, 1.0);
+    let pixels = render_one(psf, size, 100.0);
     let sum: f32 = pixels.iter().sum();
     assert!((sum - 100.0).abs() < 1.5, "sum {sum}");
     // Major axis horizontal (angle 0): more flux 6px right of center than 6px below.
@@ -55,8 +54,8 @@ fn seeing_scale_widens_and_lowers_peak() {
     let psf = PsfModel::gaussian(4.0);
     let size = 81;
     let c = size / 2;
-    let sharp = render_one(psf, size, 100.0, 1.0);
-    let blurred = render_one(psf, size, 100.0, 2.0);
+    let sharp = render_one(psf, size, 100.0);
+    let blurred = render_one(psf.with_seeing(2.0), size, 100.0);
     // Same flux spread over a wider PSF → lower peak, but flux still conserved.
     assert!(blurred[c * size + c] < sharp[c * size + c]);
     let (s_sum, b_sum): (f32, f32) = (sharp.iter().sum(), blurred.iter().sum());
@@ -83,7 +82,7 @@ fn flat_field_colour_gain_and_vignette() {
     );
     // RGGB: R G on even rows, G B on odd ones.
     let rggb = ff.render(Size2us::new(4, 2), &CfaType::Bayer(CfaPattern::Rggb));
-    assert_eq!(rggb, [0.9, 1.0, 0.9, 1.0, 1.0, 1.25, 1.0, 1.25]);
+    assert_eq!(rggb.pixels(), [0.9, 1.0, 0.9, 1.0, 1.0, 1.25, 1.0, 1.25]);
 
     let vig = FlatField {
         vignette: Some(Vignette {
@@ -119,7 +118,7 @@ fn moffat_has_heavier_wings_than_gaussian() {
     // into atmospheric wings. At r=10 px the Gaussian (4σ-truncated) is gone; the Moffat is not.
     let size = 121;
     let c = size / 2;
-    let g = render_one(PsfModel::gaussian(4.0), size, 100.0, 1.0);
+    let g = render_one(PsfModel::gaussian(4.0), size, 100.0);
     let m = render_one(
         PsfModel::Moffat {
             fwhm: 4.0,
@@ -127,7 +126,6 @@ fn moffat_has_heavier_wings_than_gaussian() {
         },
         size,
         100.0,
-        1.0,
     );
     assert!(
         g[c * size + c] > m[c * size + c],
@@ -153,7 +151,7 @@ fn moffat_beta_controls_wing_weight() {
     let size = 121;
     let c = size / 2;
     let wing = |beta: f32| {
-        render_one(PsfModel::Moffat { fwhm: 4.0, beta }, size, 100.0, 1.0)[c * size + (c + 10)]
+        render_one(PsfModel::Moffat { fwhm: 4.0, beta }, size, 100.0)[c * size + (c + 10)]
     };
     let heavy = wing(2.0);
     let light = wing(6.0);
@@ -177,7 +175,6 @@ fn eccentricity_controls_elongation() {
             },
             size,
             100.0,
-            1.0,
         );
         p[c * size + (c + 5)] / p[(c + 5) * size + c]
     };

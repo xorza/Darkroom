@@ -6,7 +6,7 @@ use crate::image::linear_image::LinearImage;
 use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::WarpParams;
-use crate::registration::resample::{WarpBuffers, WarpResult};
+use crate::registration::resample::{Warp, WarpBuffers, WarpResult};
 use crate::registration::transform::Transform;
 use crate::registration::transform::inverse_warp::InverseWarp;
 use crate::scratch_pool::{Scratch, ScratchPool};
@@ -54,12 +54,11 @@ impl WarpTransform {
     /// ```
     pub fn warp(&self, image: &LinearImage, params: WarpParams) -> WarpResult {
         let mut buffers = WarpBuffers::build(image.dimensions());
-        buffers.warp_into(
-            &SourceImage::of(image),
-            self,
+        let warp = Warp {
+            transform: self,
             params,
-            &ScratchPool::default(),
-        );
+        };
+        buffers.warp_into(&SourceImage::of(image), warp, &ScratchPool::default());
         WarpResult {
             image: buffers.image,
             coverage: buffers.coverage,

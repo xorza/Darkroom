@@ -1,8 +1,8 @@
 use imaginarium::Buffer2;
 
-use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::calibration::cosmic_ray::noise_model::*;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::masked_plane::MaskedPlane;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::size2us::Size2us;
 
@@ -38,11 +38,12 @@ fn the_noise_adds_the_photons_above_the_local_sky() {
 fn a_pixel_reads_its_mesh_and_its_flat_gain() {
     let size = Size2us::new(16, 16);
     let mesh = ColourMesh::measure(
-        &Buffer2::new(16, 16, vec![0.5; size.pixel_count()]),
+        MaskedPlane {
+            pixels: &Buffer2::new(16, 16, vec![0.5; size.pixel_count()]),
+            mask: None,
+        },
         &CfaType::Mono,
         8,
-        None,
-        &mut MeshWorkspace::default(),
     );
     let gain = FlatGain::of_divisor(
         &Buffer2::new(16, 16, vec![0.5; 256]),

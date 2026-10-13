@@ -8,6 +8,8 @@ use crate::image::image_provenance::{
 };
 use crate::internals::images::gray_image;
 use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
+use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
@@ -231,12 +233,12 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
     use crate::math::size2us::Size2us;
 
     let size = Size2us::new(2, 1);
-    let image = rgb_image(size, vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]);
+    let image = rgb_image(size, [vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]]);
     let mut mask = BitBuffer2::new_default(size);
     mark_saturated(&image, &mut mask);
     assert_eq!([mask.get(0), mask.get(1)], [true, false]);
 
-    let mut flagged = rgb_image(size, vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]);
+    let mut flagged = rgb_image(size, [vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]]);
     flagged.metadata.saturation_flagged = true;
     flagged.flags = PixelFlags::from_fn(size, |index| {
         if index == 1 {
@@ -343,8 +345,10 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     assert!((sigma / 0.01 - 1.0).abs() <= 0.1, "{sigma}");
     let plane = frame.detection_plane(Some(4.0), &config, &mut pool);
     let detected = DetectResult::from_plane(
-        &plane,
-        frame.no_data.as_deref(),
+        DetectionInput {
+            plane: &plane,
+            no_data: frame.no_data.as_deref(),
+        },
         &config.extraction,
         &mut pool,
     );

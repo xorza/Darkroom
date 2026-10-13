@@ -5,14 +5,14 @@ use super::*;
 #[test]
 fn the_blur_frame_is_not_idle() {
     let mut buf = EditBuffer::default();
-    assert!(buf.is_idle(false), "never focused");
-    buf.settle(false);
-    assert!(!buf.is_idle(true), "focused");
-    buf.settle(true);
+    assert!(buf.is_idle(Focus::Elsewhere), "never focused");
+    buf.settle(Focus::Elsewhere);
+    assert!(!buf.is_idle(Focus::Held), "focused");
+    buf.settle(Focus::Held);
     assert!(
-        !buf.is_idle(false),
+        !buf.is_idle(Focus::Elsewhere),
         "focus just left: the draft must survive"
     );
-    buf.settle(false);
-    assert!(buf.is_idle(false), "unfocused a frame later");
+    buf.settle(Focus::Elsewhere);
+    assert!(buf.is_idle(Focus::Elsewhere), "unfocused a frame later");
 }

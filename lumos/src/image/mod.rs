@@ -11,6 +11,7 @@ pub(crate) mod image_metadata;
 pub(crate) mod image_provenance;
 pub(crate) mod linear_image;
 pub(crate) mod linear_pixels;
+pub(crate) mod masked_plane;
 pub(crate) mod pixel_flags;
 pub(crate) mod preview_image;
 pub(crate) mod quality_flags;

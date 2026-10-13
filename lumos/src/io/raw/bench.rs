@@ -8,7 +8,7 @@ use crate::bench::scene::{BIAS, FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::io::raw;
-use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack};
+use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -100,11 +100,13 @@ impl RawSensor {
         self.black.decode(
             &self.raw,
             self.layout,
-            |x, y| raw::filter_color(RGGB, y, x),
-            2,
-            FlagRule {
-                zero_is_bad: true,
-                saturation: [SATURATION; 4],
+            Photosites {
+                channel: |x, y| raw::filter_color(RGGB, y, x),
+                period: 2,
+                rule: FlagRule {
+                    zero_is_bad: true,
+                    saturation: [SATURATION; 4],
+                },
             },
         )
     }

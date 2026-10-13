@@ -2,6 +2,7 @@
 //!
 //! Provides utilities to create `BackgroundEstimate` instances for benchmarks and tests.
 
+use crate::image::masked_plane::MaskedPlane;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, noise_floor_for};
@@ -29,7 +30,7 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
 ///
 /// The counterpart to [`uniform`]: that one hands back a flat map, this one measures the image.
 pub(crate) fn estimate(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> BackgroundEstimate {
-    let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
+    let mut pool = DetectionResources::new(Size2us::from(pixels));
     estimate_in(pixels, config, &mut pool)
 }
 
@@ -39,7 +40,7 @@ pub(crate) fn estimate_in(
     config: &BackgroundConfig,
     pool: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    BackgroundEstimate::estimate(pixels, None, config, pool)
+    BackgroundEstimate::estimate(MaskedPlane::from(pixels), config, pool)
         .refine(
             pixels,
             PlaneSpec {

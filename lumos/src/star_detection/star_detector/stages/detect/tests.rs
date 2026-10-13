@@ -55,8 +55,10 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
     );
 
     let result = extract_candidates(
-        &flat_plane(&pixels),
-        &label_map,
+        LabelledPlane {
+            plane: &flat_plane(&pixels),
+            labels: &label_map,
+        },
         &local_maxima_config(),
         &ScratchPool::default(),
     );
@@ -89,8 +91,10 @@ fn local_maxima_single_peak_reports_zero_deblended() {
     );
 
     let result = extract_candidates(
-        &flat_plane(&pixels),
-        &label_map,
+        LabelledPlane {
+            plane: &flat_plane(&pixels),
+            labels: &label_map,
+        },
         &local_maxima_config(),
         &ScratchPool::default(),
     );
@@ -126,8 +130,10 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
         };
 
         let result = extract_candidates(
-            &flat_plane(&pixels),
-            &label_map,
+            LabelledPlane {
+                plane: &flat_plane(&pixels),
+                labels: &label_map,
+            },
             &config,
             &ScratchPool::default(),
         );
@@ -259,8 +265,10 @@ fn region_filter_bounds() {
     );
 
     let result = extract_candidates(
-        &flat_plane(&residual),
-        &label_map,
+        LabelledPlane {
+            plane: &flat_plane(&residual),
+            labels: &label_map,
+        },
         &config,
         &ScratchPool::default(),
     );

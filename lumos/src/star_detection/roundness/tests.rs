@@ -1,18 +1,41 @@
 use crate::star_detection::roundness::{Roundness, RoundnessStamp};
 
-/// A sampled Gaussian of `(σx, σy)` and rotation `angle` at `(dx, dy)` from the centre of a stamp
-/// of `radius`.
-fn stamp(radius: usize, sigma: (f64, f64), angle: f64, offset: (f64, f64)) -> Vec<f64> {
-    let size = 2 * radius + 1;
-    let (sin, cos) = angle.sin_cos();
-    (0..size * size)
-        .map(|index| {
-            let x = (index % size) as f64 - radius as f64 - offset.0;
-            let y = (index / size) as f64 - radius as f64 - offset.1;
-            let (u, v) = (x * cos + y * sin, -x * sin + y * cos);
-            (-(u * u) / (2.0 * sigma.0 * sigma.0) - (v * v) / (2.0 * sigma.1 * sigma.1)).exp()
-        })
-        .collect()
+/// A Gaussian of `(σx, σy)` and rotation `angle` at `(dx, dy)` from a stamp's centre.
+#[derive(Debug, Clone, Copy)]
+struct Gaussian {
+    sigma: (f64, f64),
+    angle: f64,
+    offset: (f64, f64),
+}
+
+impl Gaussian {
+    /// Round, of `sigma`, at the centre.
+    const fn round(sigma: f64) -> Self {
+        Self {
+            sigma: (sigma, sigma),
+            angle: 0.0,
+            offset: (0.0, 0.0),
+        }
+    }
+
+    /// The Gaussian sampled on a stamp of `radius`.
+    fn stamp(self, radius: usize) -> Vec<f64> {
+        let Self {
+            sigma,
+            angle,
+            offset,
+        } = self;
+        let size = 2 * radius + 1;
+        let (sin, cos) = angle.sin_cos();
+        (0..size * size)
+            .map(|index| {
+                let x = (index % size) as f64 - radius as f64 - offset.0;
+                let y = (index / size) as f64 - radius as f64 - offset.1;
+                let (u, v) = (x * cos + y * sin, -x * sin + y * cos);
+                (-(u * u) / (2.0 * sigma.0 * sigma.0) - (v * v) / (2.0 * sigma.1 * sigma.1)).exp()
+            })
+            .collect()
+    }
 }
 
 fn measure(values: &[f64], radius: usize, psf_sigma: f64) -> Roundness {
@@ -36,7 +59,7 @@ const PHOTUTILS_F32: f32 = 1e-7;
 #[test]
 fn a_round_star_reads_only_its_phase() {
     let sigma = 2.0 / 2.354_82;
-    let centred = measure(&stamp(4, (sigma, sigma), 0.0, (0.0, 0.0)), 4, sigma);
+    let centred = measure(&Gaussian::round(sigma).stamp(4), 4, sigma);
     assert!(
         centred.ground.abs() < 1e-12 && centred.sround.abs() < 1e-6,
         "{centred:?}"
@@ -47,7 +70,15 @@ fn a_round_star_reads_only_its_phase() {
         ((0.5, 0.5), 0.0, 0.363_711_33),
         ((-0.3, 0.4), 0.061_485_24, -0.138_095_76),
     ] {
-        let shifted = measure(&stamp(4, (sigma, sigma), 0.0, offset), 4, sigma);
+        let shifted = measure(
+            &Gaussian {
+                offset,
+                ..Gaussian::round(sigma)
+            }
+            .stamp(4),
+            4,
+            sigma,
+        );
         assert!(
             (shifted.ground - ground).abs() <= PHOTUTILS_F32
                 && (shifted.sround - sround).abs() <= PHOTUTILS_F32,
@@ -67,14 +98,24 @@ fn elongation_has_its_sign_on_both_metrics() {
         ((1.0, 2.0), 0.0, 0.983_267_7, 0.336_543_3),
         ((2.0, 1.0), std::f64::consts::FRAC_PI_4, 0.0, 0.623_014_3),
     ] {
-        let elongated = measure(&stamp(7, sigma, angle, (0.0, 0.0)), 7, 1.5);
+        let elongated = measure(
+            &Gaussian {
+                sigma,
+                angle,
+                offset: (0.0, 0.0),
+            }
+            .stamp(7),
+            7,
+            1.5,
+        );
         assert!(
             (elongated.ground - ground).abs() <= PHOTUTILS_F32
                 && (elongated.sround - sround).abs() <= PHOTUTILS_F32,
             "{sigma:?} at {angle}: {elongated:?}"
         );
     }
-    let negative: Vec<f64> = stamp(4, (1.0, 1.0), 0.0, (0.0, 0.0))
+    let negative: Vec<f64> = Gaussian::round(1.0)
+        .stamp(4)
         .into_iter()
         .map(|value| -value)
         .collect();

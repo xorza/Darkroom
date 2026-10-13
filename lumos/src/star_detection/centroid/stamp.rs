@@ -130,8 +130,7 @@ impl StampFit {
             noise,
         } = inputs;
         let radius = grid.radius;
-        let centre =
-            centroid::stamp_centre(pos, Size2us::new(pixels.width(), pixels.height()), radius)?;
+        let centre = centroid::stamp_centre(pos, Size2us::from(pixels), radius)?;
         let stamp_size = 2 * radius + 1;
         if stamp_size * stamp_size <= N {
             return None;
@@ -193,7 +192,7 @@ impl StampFit {
     /// The optimizer's view of the stamp: coordinate ramps shared across the whole detection,
     /// pixel values and weights owned per candidate.
     pub(super) fn data<'a>(&'a self, grid: &'a StampGrid) -> FitData<'a> {
-        FitData::new(&grid.x, &grid.y, &self.stamp.z, self.weights.as_deref())
+        FitData::new([&grid.x, &grid.y, &self.stamp.z], self.weights.as_deref())
     }
 
     /// Fit `model`, integrated over each pixel, to the stamp from `initial`; `None` when the fit

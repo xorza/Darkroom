@@ -10,9 +10,10 @@
 use palantir::prelude::*;
 
 use crate::gui::widgets::support;
+use crate::gui::widgets::toggle::Toggle;
 
 /// Side of an indicator chip (px), and its glyph font size. Public because a
-/// caller drawing a vector glyph ([`Badge::action`]) paints into this box, and the
+/// caller drawing a vector glyph ([`BadgeFace::drawn`]) paints into this box, and the
 /// node header sizes its run-time label and spinner to match.
 pub(crate) const BADGE_SIZE: f32 = 18.0;
 pub(crate) const BADGE_FONT: f32 = 12.0;
@@ -38,13 +39,49 @@ const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
 #[derive(Debug, Clone, Copy)]
 enum BadgeKind {
     /// Interactive: a bordered square that lifts a faint fill on hover
-    /// (pressable). `wid` makes it clickable; `filled` deepens the tint for
-    /// the "on" state. Toggles (`C`/`D`) and actions (`G`/`i`).
-    Control { wid: WidgetId, filled: bool },
+    /// (pressable). `wid` makes it clickable; [`Toggle::On`] deepens the tint
+    /// for the "on" state. Toggles (`C`/`D`) and actions (`G`/`i`).
+    Control { wid: WidgetId, state: Toggle },
     /// Read-only descriptor: a borderless, tinted pill with its glyph inked in
     /// its own color. Never clickable — `salt` just gives it a stable id for the
     /// tooltip. Markers (`■` sink, `~` impure).
     Marker { salt: &'static str },
+}
+
+/// What a chip shows whichever family it belongs to: its icon, the ink it is
+/// drawn in, and its tooltip.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BadgeFace {
+    glyph: BadgeGlyph,
+    color: RgbaF32,
+    tip: &'static str,
+}
+
+impl BadgeFace {
+    /// A bold font character in `color`.
+    pub(crate) const fn text(glyph: &'static str, color: RgbaF32, tip: &'static str) -> Self {
+        Self {
+            glyph: BadgeGlyph::Char(glyph),
+            color,
+            tip,
+        }
+    }
+
+    /// A vector glyph `draw` paints into the [`BADGE_SIZE`] box in the chip's
+    /// ink — the node header's run chip. `rest` is its idle ink; pair the chip
+    /// with [`Badge::hover_color`] for one that swings whole to the outcome it
+    /// delivers.
+    pub(crate) const fn drawn(
+        draw: fn(&mut Ui, RgbaF32),
+        rest: RgbaF32,
+        tip: &'static str,
+    ) -> Self {
+        Self {
+            glyph: BadgeGlyph::Drawn(draw),
+            color: rest,
+            tip,
+        }
+    }
 }
 
 /// A chip's icon: a bold font character (the common case) or a caller-
@@ -58,58 +95,28 @@ enum BadgeGlyph {
 }
 
 /// One header indicator chip; the two families render differently (see
-/// [`BadgeKind`]). Build one with [`Badge::control`] / [`Badge::action`] /
-/// [`Badge::marker`], then
+/// [`BadgeKind`]). Build one with [`Badge::control`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
 /// frame (always `false` for a marker).
 #[derive(Debug)]
 pub(crate) struct Badge {
-    glyph: BadgeGlyph,
-    color: RgbaF32,
+    face: BadgeFace,
     /// Ink to swap to while the pointer is over the chip, for a control whose
     /// whole face — border, glyph, hover fill — points at the outcome of the
-    /// click rather than at a setting. `None` keeps [`Self::color`] in every
+    /// click rather than at a setting. `None` keeps the face's ink in every
     /// state. Caller-supplied like the rest, so this module still names no
     /// palette slot of its own.
     hover_color: Option<RgbaF32>,
-    tip: &'static str,
     kind: BadgeKind,
 }
 
 impl Badge {
-    /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    pub(crate) const fn control(
-        glyph: &'static str,
-        color: RgbaF32,
-        filled: bool,
-        wid: WidgetId,
-        tip: &'static str,
-    ) -> Self {
+    /// An interactive chip, clickable through `wid`, showing `state`.
+    pub(crate) const fn control(face: BadgeFace, wid: WidgetId, state: Toggle) -> Self {
         Self {
-            glyph: BadgeGlyph::Char(glyph),
-            color,
+            face,
             hover_color: None,
-            tip,
-            kind: BadgeKind::Control { wid, filled },
-        }
-    }
-
-    /// A control whose glyph is drawn rather than typed — the node header's
-    /// run chip. `rest` is its idle ink; pair it with
-    /// [`hover_color`](Self::hover_color) for a chip that swings whole to the
-    /// outcome it delivers.
-    pub(crate) fn action(
-        wid: WidgetId,
-        tip: &'static str,
-        draw: fn(&mut Ui, RgbaF32),
-        rest: RgbaF32,
-    ) -> Self {
-        Self {
-            glyph: BadgeGlyph::Drawn(draw),
-            color: rest,
-            hover_color: None,
-            tip,
-            kind: BadgeKind::Control { wid, filled: false },
+            kind: BadgeKind::Control { wid, state },
         }
     }
 
@@ -120,27 +127,23 @@ impl Badge {
     }
 
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
-    pub(crate) const fn marker(
-        salt: &'static str,
-        glyph: &'static str,
-        color: RgbaF32,
-        tip: &'static str,
-    ) -> Self {
+    pub(crate) const fn marker(face: BadgeFace, salt: &'static str) -> Self {
         Self {
-            glyph: BadgeGlyph::Char(glyph),
-            color,
+            face,
             hover_color: None,
-            tip,
             kind: BadgeKind::Marker { salt },
         }
     }
 
     pub(crate) fn show(self, ui: &mut Ui) -> bool {
         let Self {
-            glyph,
-            mut color,
+            face:
+                BadgeFace {
+                    glyph,
+                    mut color,
+                    tip,
+                },
             hover_color,
-            tip,
             kind,
         } = self;
         // Last frame's hover, the same read the fill lift below makes. Only a
@@ -175,14 +178,14 @@ impl Badge {
                 .id_salt(salt)
                 .sense(Sense::HOVER)
                 .padding(Spacing::xy(MARKER_PAD_X, 0.0)),
-            BadgeKind::Control { wid, filled } => {
+            BadgeKind::Control { wid, state } => {
                 // Last-frame hover (`response_for`) lifts the fill so the chip
                 // reads as pressable — the same trick the tab-strip chips use.
-                let alpha = match (filled, ui.response_for(wid).hovered()) {
-                    (true, true) => CHIP_ON_HOVER_ALPHA,
-                    (true, false) => CHIP_ON_ALPHA,
-                    (false, true) => CHIP_TINT_ALPHA,
-                    (false, false) => 0.0,
+                let alpha = match (state, ui.response_for(wid).hovered()) {
+                    (Toggle::On, true) => CHIP_ON_HOVER_ALPHA,
+                    (Toggle::On, false) => CHIP_ON_ALPHA,
+                    (Toggle::Off, true) => CHIP_TINT_ALPHA,
+                    (Toggle::Off, false) => 0.0,
                 };
                 let mut background = Background {
                     border: Stroke::new(color, 1.0),

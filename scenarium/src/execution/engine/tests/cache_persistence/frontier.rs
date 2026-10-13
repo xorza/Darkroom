@@ -18,11 +18,11 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", NodeSpec::records);
-    g.wire("src_a", 0, "sum", 0);
-    g.wire("src_b", 0, "sum", 1);
-    g.wire("sum", 0, "mult", 0);
-    g.wire("src_b", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("src_a", "sum");
+    g.wire("src_b", ("sum", 1));
+    g.wire("sum", "mult");
+    g.wire("src_b", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -111,10 +111,10 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
     g.add("print_mult", NodeSpec::records);
     g.instance("print_direct", "print_mult");
-    g.wire("src", 0, "mult", 0);
-    g.wire("src", 0, "mult", 1);
-    g.wire("mult", 0, "print_mult", 0);
-    g.wire("src", 0, "print_direct", 0);
+    g.wire("src", "mult");
+    g.wire("src", ("mult", 1));
+    g.wire("mult", "print_mult");
+    g.wire("src", "print_direct");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -154,11 +154,11 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "sum", 0);
-    g.wire("src", 0, "sum", 1);
-    g.wire("sum", 0, "mult", 0);
-    g.wire("src", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("src", "sum");
+    g.wire("src", ("sum", 1));
+    g.wire("sum", "mult");
+    g.wire("src", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -238,7 +238,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
-    g.wire("mult", 0, "print", 0);
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let first = e.run_sinks().await;
@@ -309,7 +309,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     });
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
-    g.wire("mult", 0, "watch", 0);
+    g.wire("mult", "watch");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -340,7 +340,7 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
     g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
-    g.wire("mult", 0, "print", 0);
+    g.wire("mult", "print");
 
     // Config A: mult runs and is stored, stamped with its digest D_A.
     let mut e = TestEngine::over(g).with_disk_store(dir.path());

@@ -1,7 +1,7 @@
 use glam::DVec2;
 use rayon::prelude::*;
 
-use crate::internals::synthetic::transforms::generate_random_positions;
+use crate::internals::synthetic::transforms::StarScatter;
 use crate::internals::test_rng::TestRng;
 use crate::registration::final_fit::fit_catalogs::{CAUCHY_TUNING, FitCatalogs};
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
@@ -43,7 +43,12 @@ fn indices(fit: &FinalFit) -> Vec<(usize, usize)> {
 /// all 50 come back, and the transform is the truth to the rounding of coordinates up to 2000 px.
 #[test]
 fn a_seed_that_misses_stars_reaches_them_all() {
-    let reference = generate_random_positions(50, 2000.0, 2000.0, 42);
+    let reference = StarScatter {
+        count: 50,
+        side: 2000.0,
+        seed: 42,
+    }
+    .positions();
     let truth = rotation_about_centre(1.0, DVec2::new(30.0, -20.0));
     let target: Vec<DVec2> = reference.iter().map(|&p| truth.apply(p)).collect();
     let seed = rotation_about_centre(0.85, DVec2::new(31.0, -20.0));
@@ -119,7 +124,12 @@ fn pairs_weigh_by_their_variance() {
 /// and the fit is exact.
 #[test]
 fn saturated_stars_and_a_blend_take_no_part() {
-    let reference_points = generate_random_positions(51, 2000.0, 2000.0, 7);
+    let reference_points = StarScatter {
+        count: 51,
+        side: 2000.0,
+        seed: 7,
+    }
+    .positions();
     let truth = rotation_about_centre(0.3, DVec2::new(-12.0, 8.0));
     let mut target_points: Vec<DVec2> = reference_points.iter().map(|&p| truth.apply(p)).collect();
     target_points[11] += DVec2::new(2.0, 0.0);
@@ -177,7 +187,12 @@ fn cauchy_variance_ratio() -> f64 {
 #[test]
 fn the_fit_reaches_the_cramer_rao_bound() {
     const DRAWS: u64 = 300;
-    let positions = generate_random_positions(2000, 2000.0, 2000.0, 11);
+    let positions = StarScatter {
+        count: 2000,
+        side: 2000.0,
+        seed: 11,
+    }
+    .positions();
     let sigmas: Vec<f64> = (0..positions.len())
         .map(|i| 0.02 + 0.18 * (i % 10) as f64 / 9.0)
         .collect();
@@ -272,7 +287,12 @@ fn the_fit_reaches_the_cramer_rao_bound() {
 #[test]
 fn the_homography_minimizes_the_reprojection_error() {
     let truth = Transform::homography([1.01, 0.02, 15.0, -0.015, 0.99, -8.0, 2e-5, -1.5e-5]);
-    let reference = generate_random_positions(40, 2000.0, 2000.0, 5);
+    let reference = StarScatter {
+        count: 40,
+        side: 2000.0,
+        seed: 5,
+    }
+    .positions();
     let mut rng = TestRng::new(77);
     let mut pairs = WeightedPairs::default();
     for &r in &reference {

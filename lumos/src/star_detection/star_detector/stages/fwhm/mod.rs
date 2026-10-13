@@ -12,7 +12,7 @@ use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::star_detection::star_detector::detection_result::FwhmSource;
 use crate::star_detection::star_detector::stages::FWHM_MAD_FLOOR_FRACTION;
-use crate::star_detection::star_detector::stages::detect::DetectResult;
+use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
 use crate::star_detection::star_detector::stages::filter::FilterRejection;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 
@@ -41,53 +41,76 @@ pub(crate) fn estimate(
     match config.fwhm.mode {
         None => FwhmSource::Disabled,
         Some(FwhmMode::Fixed(fwhm)) => FwhmSource::Configured(fwhm),
-        Some(FwhmMode::Auto { fallback }) => from_bright_stars(frame, config, fallback, pool),
+        Some(FwhmMode::Auto { fallback }) => BrightStars {
+            frame,
+            config,
+            fallback,
+        }
+        .fwhm(pool),
     }
 }
 
-/// Detect bright stars on the detection plane without a matched filter, measure them on the
-/// measurement plane, and estimate the FWHM from them.
-///
-/// The measurement's stamp radius and the moments' weighting width both scale with the FWHM they
-/// assume, so a star measured at a seed far from its own width comes out biased toward the seed —
-/// a wide star clipped by too small a stamp reads narrow. The first measurement uses `fallback`,
-/// the configured seed; a second at the radius the first estimate implies corrects for it.
-fn from_bright_stars(
-    frame: &PreparedFrame,
-    config: &StarDetectionConfig,
+/// The FWHM estimate from a frame's bright stars: the frame, its configuration, and `fallback`,
+/// the configured seed.
+#[derive(Debug, Clone, Copy)]
+struct BrightStars<'a> {
+    frame: &'a PreparedFrame,
+    config: &'a StarDetectionConfig,
     fallback: f32,
-    pool: &mut DetectionResources,
-) -> FwhmSource {
-    let first_pass_config = ExtractionConfig {
-        sigma_threshold: config.extraction.sigma_threshold * config.fwhm.estimation_sigma_factor,
-        min_area: 3,
-        ..config.extraction.clone()
-    };
-    let plane = frame.detection_plane(None, config, pool);
-    let regions =
-        DetectResult::from_plane(&plane, frame.no_data.as_deref(), &first_pass_config, pool)
-            .regions;
-    tracing::debug!(
-        "FWHM estimation: first pass detected {} bright star candidates",
-        regions.len()
-    );
+}
 
-    let estimator = Estimator {
-        fwhm: &config.fwhm,
-        filter: &config.filter,
-        fallback,
-    };
-    let mut at = |seed: f32| {
-        let stars = frame.measure_stars(&regions, &config.measurement, Some(seed));
-        estimator.estimate(&stars, &mut pool.values, &mut pool.deviations)
-    };
-    let first = at(fallback);
-    let FwhmSource::Estimated { fwhm, .. } = first else {
-        return first;
-    };
-    match at(fwhm) {
-        second @ FwhmSource::Estimated { .. } => second,
-        FwhmSource::Configured(_) | FwhmSource::Disabled => first,
+impl BrightStars<'_> {
+    /// Detect bright stars on the detection plane without a matched filter, measure them on the
+    /// measurement plane, and estimate the FWHM from them.
+    ///
+    /// The measurement's stamp radius and the moments' weighting width both scale with the FWHM
+    /// they assume, so a star measured at a seed far from its own width comes out biased toward
+    /// the seed — a wide star clipped by too small a stamp reads narrow. The first measurement uses
+    /// the seed; a second at the radius the first estimate implies corrects for it.
+    fn fwhm(self, pool: &mut DetectionResources) -> FwhmSource {
+        let Self {
+            frame,
+            config,
+            fallback,
+        } = self;
+        let first_pass_config = ExtractionConfig {
+            sigma_threshold: config.extraction.sigma_threshold
+                * config.fwhm.estimation_sigma_factor,
+            min_area: 3,
+            ..config.extraction.clone()
+        };
+        let plane = frame.detection_plane(None, config, pool);
+        let regions = DetectResult::from_plane(
+            DetectionInput {
+                plane: &plane,
+                no_data: frame.no_data.as_deref(),
+            },
+            &first_pass_config,
+            pool,
+        )
+        .regions;
+        tracing::debug!(
+            "FWHM estimation: first pass detected {} bright star candidates",
+            regions.len()
+        );
+
+        let estimator = Estimator {
+            fwhm: &config.fwhm,
+            filter: &config.filter,
+            fallback,
+        };
+        let mut at = |seed: f32| {
+            let stars = frame.measure_stars(&regions, &config.measurement, Some(seed));
+            estimator.estimate(&stars, &mut pool.values, &mut pool.deviations)
+        };
+        let first = at(fallback);
+        let FwhmSource::Estimated { fwhm, .. } = first else {
+            return first;
+        };
+        match at(fwhm) {
+            second @ FwhmSource::Estimated { .. } => second,
+            FwhmSource::Configured(_) | FwhmSource::Disabled => first,
+        }
     }
 }
 

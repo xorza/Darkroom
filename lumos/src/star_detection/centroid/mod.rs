@@ -23,6 +23,7 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::masked_plane::MaskedPlane;
 use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -142,7 +143,7 @@ impl MeasurePlanes<'_> {
         let start = DVec2::new(region.peak.x as f64, region.peak.y as f64);
         // A stamp over a pixel with no measurement reads its fill as one, so such a star is not
         // measured: at its peak, and again at the centre it moves to.
-        let size = Size2us::new(residual.width(), residual.height());
+        let size = Size2us::from(residual);
         let holds_no_data = |at: DVec2| {
             no_data.is_some_and(|no_data| {
                 stamp_centre(at, size, stamp_radius)
@@ -159,9 +160,14 @@ impl MeasurePlanes<'_> {
         // in for the stamp only where nothing better was measured.
         let annulus_at = |at: DVec2| match config.local_background {
             LocalBackgroundMethod::GlobalMap => None,
-            LocalBackgroundMethod::LocalAnnulus => {
-                StampBackground::measure(residual, no_data, at, grid.annulus)
-            }
+            LocalBackgroundMethod::LocalAnnulus => StampBackground::measure(
+                MaskedPlane {
+                    pixels: residual,
+                    mask: no_data,
+                },
+                at,
+                grid.annulus,
+            ),
         };
         let start_annulus = annulus_at(start);
         let (local_offset, local_noise) = start_annulus
@@ -175,9 +181,9 @@ impl MeasurePlanes<'_> {
 
         let windowed = WindowedCentroid::measure(
             residual,
-            start,
             grid,
             WindowedInputs {
+                start,
                 offset: local_offset,
                 noise,
             },
@@ -193,8 +199,8 @@ impl MeasurePlanes<'_> {
         let fit_noise = noise.electrons_per_unit.is_some().then_some(noise);
         match config.centroid_method {
             CentroidMethod::GaussianFit => {
-                let fit = restamped(
-                    |at| {
+                let fit = Refit {
+                    fit: |at: DVec2| {
                         GaussianFit::new(FitInputs {
                             pixels: residual,
                             pos: at,
@@ -203,10 +209,9 @@ impl MeasurePlanes<'_> {
                             noise: fit_noise,
                         })
                     },
-                    |fit| fit.pos,
-                    windowed.pos,
-                    stamp_radius,
-                );
+                    centre: |fit: &GaussianFit| fit.pos,
+                }
+                .restamped(windowed.pos, stamp_radius);
                 if let Some(fit) = fit {
                     pos = fit.pos;
                     position_sigma = fit.position_sigma;
@@ -215,8 +220,8 @@ impl MeasurePlanes<'_> {
                 }
             }
             CentroidMethod::MoffatFit { beta } => {
-                let fit = restamped(
-                    |at| {
+                let fit = Refit {
+                    fit: |at: DVec2| {
                         MoffatFit::new(
                             FitInputs {
                                 pixels: residual,
@@ -228,10 +233,9 @@ impl MeasurePlanes<'_> {
                             beta,
                         )
                     },
-                    |fit| fit.pos,
-                    windowed.pos,
-                    stamp_radius,
-                );
+                    centre: |fit: &MoffatFit| fit.pos,
+                }
+                .restamped(windowed.pos, stamp_radius);
                 if let Some(fit) = fit {
                     pos = fit.pos;
                     position_sigma = fit.position_sigma;
@@ -285,23 +289,28 @@ impl MeasurePlanes<'_> {
     }
 }
 
-/// A profile fit from `start`, fitted again once from its own centre when it moved more than half
-/// the stamp radius: a stamp centred far off the star truncates its wings, which pulls the fit.
-/// `None` when either fit fails, or the second moves that far again.
-fn restamped<T>(
-    fit: impl Fn(DVec2) -> Option<T>,
-    centre: impl Fn(&T) -> DVec2,
-    start: DVec2,
-    stamp_radius: usize,
-) -> Option<T> {
-    let half = stamp_radius as f64 / 2.0;
-    let first = fit(start)?;
-    let moved = centre(&first);
-    if (moved - start).abs().max_element() <= half {
-        return Some(first);
+/// A profile fit from a start position, and the centre it moved to.
+#[derive(Debug, Clone, Copy)]
+struct Refit<F, C> {
+    fit: F,
+    centre: C,
+}
+
+impl<T, F: Fn(DVec2) -> Option<T>, C: Fn(&T) -> DVec2> Refit<F, C> {
+    /// The fit from `start`, fitted again once from its own centre when it moved more than half
+    /// the stamp radius: a stamp centred far off the star truncates its wings, which pulls the
+    /// fit. `None` when either fit fails, or the second moves that far again.
+    fn restamped(self, start: DVec2, stamp_radius: usize) -> Option<T> {
+        let Self { fit, centre } = self;
+        let half = stamp_radius as f64 / 2.0;
+        let first = fit(start)?;
+        let moved = centre(&first);
+        if (moved - start).abs().max_element() <= half {
+            return Some(first);
+        }
+        let second = fit(moved)?;
+        ((centre(&second) - moved).abs().max_element() <= half).then_some(second)
     }
-    let second = fit(moved)?;
-    ((centre(&second) - moved).abs().max_element() <= half).then_some(second)
 }
 
 /// How closely a profile fit integrates its model over each pixel, relative to the amplitude:
@@ -335,11 +344,7 @@ fn compute_star(stamp: StampAt<'_>, psf_sigma: f64, background: StarBackground) 
         radius: stamp_radius,
     } = stamp;
     let offset = background.offset;
-    let centre = stamp_centre(
-        pos,
-        Size2us::new(residual.width(), residual.height()),
-        stamp_radius,
-    )?;
+    let centre = stamp_centre(pos, Size2us::from(residual), stamp_radius)?;
 
     // Flux and core flux sum the *signed* residual: sky noise is zero-mean, and clipping each pixel
     // at zero would turn it into a positive bias of about 0.4σ per pixel. The second moments are

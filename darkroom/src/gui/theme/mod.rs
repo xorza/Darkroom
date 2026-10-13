@@ -127,6 +127,16 @@ pub(crate) struct Theme {
     pub(crate) palantir: palantir::Theme,
 }
 
+/// How a selectable card's outline resolves, highest first: a breaker hit
+/// reads as the alarm, else the selection halo, else the neutral resting
+/// border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CardTier {
+    Broken,
+    Selected,
+    Resting,
+}
+
 impl Theme {
     /// How far a port circle of the given `radius` is pulled out of its
     /// column so its **center** lands on the node body's outer edge: clear
@@ -149,24 +159,17 @@ impl Theme {
         self.port_overhang_for(self.ports.radius())
     }
 
-    /// Border color + width for a selectable card's 3-tier resting decision
-    /// — how a node body resolves its outline: a breaker hit wins as the
-    /// alarm color, else the selection halo
-    /// when selected, else the neutral resting `node_border`. Width is
-    /// always [`CardTheme::border_width_total`] regardless of tier, so
-    /// selecting (or breaking) a card never resizes it — only the color
-    /// changes. A
-    /// caller with an extra tier of its own (e.g. a node body's "missing"
-    /// stub state) special-cases that tier around this call instead of
-    /// forcing it in here.
+    /// Border color for a selectable card in `tier`. Width is always
+    /// [`CardTheme::border_width_total`] regardless of tier, so selecting (or
+    /// breaking) a card never resizes it — only the color changes. A caller
+    /// with an extra tier of its own (e.g. a node body's "missing" stub state)
+    /// special-cases that tier around this call instead of forcing it in here.
     #[inline]
-    pub(crate) const fn card_border(&self, broken: bool, selected: bool) -> RgbaF32 {
-        if broken {
-            self.colors.connection_broken
-        } else if selected {
-            self.colors.selection_rect
-        } else {
-            self.card.border
+    pub(crate) const fn card_border(&self, tier: CardTier) -> RgbaF32 {
+        match tier {
+            CardTier::Broken => self.colors.connection_broken,
+            CardTier::Selected => self.colors.selection_rect,
+            CardTier::Resting => self.card.border,
         }
     }
 

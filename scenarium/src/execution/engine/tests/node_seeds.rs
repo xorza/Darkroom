@@ -44,8 +44,8 @@ async fn second_seeded_run_obeys_none_cache_mode() {
     g.add("a", |n| n.counted(1i64, &calls));
     g.add("b", |n| n.counted(11i64, &calls));
     g.add("sum", NodeSpec::sum);
-    g.wire("a", 0, "sum", 0);
-    g.wire("b", 0, "sum", 1);
+    g.wire("a", "sum");
+    g.wire("b", ("sum", 1));
     g.cache_all(CacheMode::None);
     let mut e = TestEngine::over(g);
 

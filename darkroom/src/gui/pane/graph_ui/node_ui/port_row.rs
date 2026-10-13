@@ -13,8 +13,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use palantir::InternedStr;
 use palantir::prelude::*;
-use palantir::{CloseHandle, InternedStr};
 use scenarium::Binding;
 use scenarium::FuncEvent;
 use scenarium::InputPort;
@@ -31,13 +31,13 @@ use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
-use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
+use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::node_ui::value_editor;
+use crate::gui::pane::graph_ui::node_ui::value_editor::{ConstEdit, Field};
 use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
 use crate::gui::widgets::support;
@@ -68,14 +68,8 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
 /// `row_tracks` is [`NodeUI`](crate::gui::pane::graph_ui::node_ui::NodeUI)'s retained staging
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
-pub(super) fn show(
-    ui: &mut Ui,
-    ncx: NodeCtx<'_>,
-    dcx: DrawCtx<'_>,
-    row_tracks: &mut Vec<Track>,
-    out: &mut Requests,
-) {
-    let (theme, node) = (ncx.theme(), ncx);
+pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
+    let (theme, node) = (rec.node.theme(), rec.node);
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
     let n_rows = node
@@ -113,83 +107,112 @@ pub(super) fn show(
             theme.ports.gap,
         ))
         .show(ui, |ui| {
-            input_cells(ui, ncx, dcx, out);
-            output_cells(ui, ncx, dcx, out);
+            input_cells(ui, rec);
+            output_cells(ui, rec);
         });
 }
 
-/// A port's hover tooltip: its `description` (when the func declares one)
-/// above a dimmer type line, else just the type, and below them the input
-/// that sets this one aside, if one does. `description` is the resolved
-/// [`InputCtx::description`] text (empty = none).
-///
-/// Built only for the node under the pointer — see [`show`] — and
-/// interned straight into this pass's text arena, so a hovered node's ports
-/// author their tips with no `String` between them and the widget. `None`
-/// off that node, which [`support::tooltip_after`] and [`port_label`] both take as
-/// "no tooltip".
-fn tip_for(
-    ui: &mut Ui,
-    ncx: NodeCtx<'_>,
-    description: &str,
-    ty: &DataType,
-    set_aside_by: Option<&str>,
-) -> Option<InternedStr> {
-    if !ncx.tips() {
-        return None;
-    }
-    let type_label = TypeLabel {
-        library: ncx.graph_ctx.library(),
-        ty,
-    };
-    Some(match (description.is_empty(), set_aside_by) {
-        (true, None) => fmt!(ui, "{type_label}"),
-        (false, None) => fmt!(ui, "{description}\n{type_label}"),
-        (true, Some(by)) => fmt!(ui, "{type_label}\nSet aside: \"{by}\" overrides it."),
-        (false, Some(by)) => {
-            fmt!(
-                ui,
-                "{description}\n{type_label}\nSet aside: \"{by}\" overrides it."
-            )
+/// A port's hover tooltip: its `description` (when the func declares one,
+/// empty otherwise — the resolved [`InputCtx::description`] text) above a
+/// dimmer type line, else just the type, and below them the input that sets
+/// this one aside, if one does.
+#[derive(Debug, Clone, Copy)]
+struct PortTip<'a> {
+    description: &'a str,
+    ty: &'a DataType,
+    set_aside_by: Option<&'a str>,
+}
+
+impl PortTip<'_> {
+    /// The tip for a port of `ncx`, interned straight into this pass's text
+    /// arena, so a hovered node's ports author their tips with no `String`
+    /// between them and the widget.
+    ///
+    /// Built only for the node under the pointer — see [`show`]. `None` off
+    /// that node, which [`support::tooltip_after`] and [`PortLabel`] both take
+    /// as "no tooltip".
+    fn intern(self, ui: &mut Ui, ncx: NodeCtx<'_>) -> Option<InternedStr> {
+        let Self {
+            description,
+            ty,
+            set_aside_by,
+        } = self;
+        if !ncx.tips() {
+            return None;
         }
-    })
-}
-
-/// Render `name` as a port's label, with `tip` (the port's data type) as its
-/// hover tooltip; `None` means no tooltip, as [`tip_for`] answers off the
-/// hovered node.
-///
-/// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs a
-/// trigger anchor for the tooltip, but the node body below it owns selection
-/// and drag, so the press has to fall through. Muted ink — the value column is
-/// each row's strong element, not the label — and fainter still for an input
-/// another sets aside (`set_aside`).
-fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>, set_aside: bool) {
-    let snapshot = Text::new(name)
-        .style(&label_style(ui, theme, set_aside))
-        .sense(Sense::HOVER)
-        .show(ui)
-        .snapshot();
-    support::tooltip_after(ui, &snapshot, tip);
-}
-
-fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
-    for input in ncx.inputs() {
-        input_label_cell(ui, ncx, dcx, input, out);
-        value_cell(ui, ncx, input, out);
+        let type_label = TypeLabel {
+            library: ncx.graph_ctx.library(),
+            ty,
+        };
+        Some(match (description.is_empty(), set_aside_by) {
+            (true, None) => fmt!(ui, "{type_label}"),
+            (false, None) => fmt!(ui, "{description}\n{type_label}"),
+            (true, Some(by)) => fmt!(ui, "{type_label}\nSet aside: \"{by}\" overrides it."),
+            (false, Some(by)) => {
+                fmt!(
+                    ui,
+                    "{description}\n{type_label}\nSet aside: \"{by}\" overrides it."
+                )
+            }
+        })
     }
 }
 
-fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
-    let node = ncx;
+/// How a port's label inks: the ports' muted label ink, or fainter still for
+/// an input another sets aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelInk {
+    Plain,
+    SetAside,
+}
+
+/// A port's label, `name`, with `tip` (the port's data type) as its hover
+/// tooltip; `None` means no tooltip, as [`PortTip::intern`] answers off the
+/// hovered node.
+#[derive(Debug, Clone, Copy)]
+struct PortLabel<'a> {
+    name: &'a str,
+    tip: Option<InternedStr>,
+    ink: LabelInk,
+}
+
+impl PortLabel<'_> {
+    /// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs
+    /// a trigger anchor for the tooltip, but the node body below it owns
+    /// selection and drag, so the press has to fall through. Muted ink — the
+    /// value column is each row's strong element, not the label.
+    fn show(self, ui: &mut Ui, theme: &Theme) {
+        let snapshot = Text::new(self.name)
+            .style(&label_style(ui, theme, self.ink))
+            .sense(Sense::HOVER)
+            .show(ui)
+            .snapshot();
+        support::tooltip_after(ui, &snapshot, self.tip);
+    }
+}
+
+fn input_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+    for input in rec.node.inputs() {
+        input_label_cell(ui, rec, input);
+        value_cell(ui, rec, input);
+    }
+}
+
+fn output_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+    let node = rec.node;
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
-        output_cell(ui, ncx, dcx, output, out);
+        output_cell(ui, rec, output);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
-    for (i, event) in node.events().iter().enumerate() {
-        event_cell(ui, ncx, dcx, i, output_count + i, event);
+    for (index, event) in node.events().iter().enumerate() {
+        EventRow {
+            index,
+            row: output_count + index,
+            event,
+        }
+        .show(ui, rec);
     }
 }
 
@@ -229,27 +252,26 @@ fn input_cell_wid(port: PortRef) -> WidgetId {
     wid::port("input_cell", port)
 }
 
-/// Open `menu_id`'s context menu when the cell or its port circle was
-/// secondary-clicked this frame — shared by the input and output cells.
+/// Open `menu_id`'s context menu at the pointer — shared by the input and
+/// output cells, on a frame the cell or its port circle was secondary-clicked.
 ///
-/// `secondary` is read by the caller before this runs: the cell's `Response`
+/// The click is read by the caller before this runs: the cell's `Response`
 /// borrows `ui`, and this needs `ui` mutably. It is the cell's right-click
 /// *or* the port glyph's — the glyph senses its own `Sense::CLICK` and
 /// consumes hits over its rect, so the cell alone misses a right-click landed
 /// on the circle (no bubbling).
-fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, secondary: bool) {
-    if secondary && let Some(p) = ui.pointer_pos() {
+fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
+    if let Some(p) = ui.pointer_pos() {
         ContextMenu::open(ui, menu_id, p);
     }
 }
 
 /// The ink a port or event label wears: the ports' muted label ink, fainter
 /// still for an input another sets aside.
-fn label_style(ui: &Ui, theme: &Theme, set_aside: bool) -> TextStyle {
-    let color = if set_aside {
-        theme.colors.text_muted
-    } else {
-        theme.ports.label
+fn label_style(ui: &Ui, theme: &Theme, ink: LabelInk) -> TextStyle {
+    let color = match ink {
+        LabelInk::SetAside => theme.colors.text_muted,
+        LabelInk::Plain => theme.ports.label,
     };
     TextStyle {
         color,
@@ -261,18 +283,27 @@ fn label_style(ui: &Ui, theme: &Theme, set_aside: bool) -> TextStyle {
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(
-    ui: &mut Ui,
-    ncx: NodeCtx<'_>,
-    dcx: DrawCtx<'_>,
-    input: InputCtx<'_>,
-    out: &mut Requests,
-) {
+fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
+    let (ncx, dcx) = (rec.node, rec.draw);
     let (theme, node) = (ncx.theme(), ncx);
     let port = input.port_ref();
     let set_aside_by = input.overridden_by();
-    let set_aside = set_aside_by.is_some();
-    let tip = tip_for(ui, ncx, input.description(), input.ty(), set_aside_by);
+    let ink = if set_aside_by.is_some() {
+        LabelInk::SetAside
+    } else {
+        LabelInk::Plain
+    };
+    let tip = PortTip {
+        description: input.description(),
+        ty: input.ty(),
+        set_aside_by,
+    }
+    .intern(ui, ncx);
+    let label = PortLabel {
+        name: input.name(),
+        tip,
+        ink,
+    };
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
@@ -282,12 +313,11 @@ fn input_label_cell(
     let fill = if missing {
         theme.status.warning
     } else {
-        port_color::data(
+        Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(
             theme,
             input.ty(),
             PortKind::Input,
-            dcx.geometry().ports.is_hovered(port),
-        )
+        ))
     };
     // A required input's port reads as bigger — its total footprint matches
     // a bound output's circle-plus-ring, so "important port" carries the
@@ -320,7 +350,7 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if input.const_only() {
-                port_label(ui, theme, input.name(), tip, set_aside);
+                label.show(ui, theme);
                 PortGlyphResponse::default()
             } else {
                 let mut circle = PortGlyph::circle(wid, diameter, fill)
@@ -330,7 +360,7 @@ fn input_label_cell(
                     circle = circle.outline(color);
                 }
                 let glyph = circle.show(ui);
-                port_label(ui, theme, input.name(), tip, set_aside);
+                label.show(ui, theme);
                 glyph
             }
         });
@@ -342,7 +372,9 @@ fn input_label_cell(
         cell.response.right.clicked(),
         cell.response.left.double_clicked(),
     );
-    open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
+    if cell_secondary || glyph.secondary_clicked {
+        open_port_context_menu(ui, menu_id);
+    }
     // Double-click on the circle or the label toggles the binding: clear it,
     // or seed the default const when unbound.
     //
@@ -357,10 +389,11 @@ fn input_label_cell(
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    out.push_graph(GraphIntent::set_input(port, Binding::Const(default)));
+                    rec.out
+                        .push_graph(GraphIntent::set_input(port, Binding::Const(default)));
                 }
             }
-            Some(_) => out.push_graph(GraphIntent::set_input(port, None)),
+            Some(_) => rec.out.push_graph(GraphIntent::set_input(port, None)),
         }
     }
     ContextMenu::for_id(menu_id)
@@ -377,7 +410,8 @@ fn input_label_cell(
                 .clicked()
                 && let Some(value) = default
             {
-                out.push_graph(GraphIntent::set_input(port, Binding::Const(value)));
+                rec.out
+                    .push_graph(GraphIntent::set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .disabled(input.binding().is_none())
@@ -385,14 +419,15 @@ fn input_label_cell(
                 .left
                 .clicked()
             {
-                out.push_graph(GraphIntent::set_input(port, None));
+                rec.out.push_graph(GraphIntent::set_input(port, None));
             }
         });
 }
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requests) {
+fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
+    let ncx = rec.node;
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
     let Some(Binding::Const(value)) = input.binding() else {
@@ -414,10 +449,11 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
         && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
         && let DataType::FsPath(config) = data_type
     {
-        out.push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
-            port: input.port(),
-            config: Arc::clone(config),
-        })));
+        rec.out
+            .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
+                port: input.port(),
+                config: Arc::clone(config),
+            })));
     }
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
@@ -431,18 +467,21 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
         .disabled(input.overridden_by().is_some())
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            value_editor::show(
-                ui,
-                ncx.sve(),
-                ncx.graph_ctx.library(),
-                editor_id,
+            ConstEdit {
+                field: Field {
+                    theme: ncx.sve(),
+                    id: editor_id,
+                },
+                library: ncx.graph_ctx.library(),
                 value,
                 data_type,
                 value_variants,
-            )
+            }
+            .show(ui)
         });
     if let Some(new_value) = edited.inner {
-        out.push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
+        rec.out
+            .push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
     }
 }
 
@@ -450,23 +489,22 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(
-    ui: &mut Ui,
-    ncx: NodeCtx<'_>,
-    dcx: DrawCtx<'_>,
-    output: OutputCtx<'_>,
-    out: &mut Requests,
-) {
+fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>) {
+    let (ncx, dcx) = (rec.node, rec.draw);
     let theme = ncx.theme();
     let port = output.port_ref();
     let ty = output.ty();
-    let fill = port_color::data(
+    let fill = Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(
         theme,
         ty,
         PortKind::Output,
-        dcx.geometry().ports.is_hovered(port),
-    );
-    let tip = tip_for(ui, ncx, output.description(), ty, None);
+    ));
+    let tip = PortTip {
+        description: output.description(),
+        ty,
+        set_aside_by: None,
+    }
+    .intern(ui, ncx);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -478,7 +516,12 @@ fn output_cell(
         .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, theme, output.name(), tip, false);
+            PortLabel {
+                name: output.name(),
+                tip,
+                ink: LabelInk::Plain,
+            }
+            .show(ui, theme);
             PortGlyph::circle(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
                 .tip(tip)
@@ -494,7 +537,7 @@ fn output_cell(
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
     if glyph.double_clicked {
-        out.extend_graph(
+        rec.out.extend_graph(
             ncx.graph_ctx
                 .connections()
                 .filter(|(_, producer)| {
@@ -503,11 +546,35 @@ fn output_cell(
                 .map(|(consumer, _)| GraphIntent::set_input(consumer.into(), None)),
         );
     }
-    open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
+    if cell_secondary || glyph.secondary_clicked {
+        open_port_context_menu(ui, menu_id);
+    }
+    // "Add preview" — spawn a preview node already wired to this output. What it
+    // creates is an ordinary node the user can move, delete, and undo like any
+    // other. Hidden when the library has no preview func.
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            add_preview_item(ui, popup, ncx, dcx, port, out);
+            if let Some(func) = preview_sink::registered(ncx.graph_ctx.library())
+                && MenuItem::new("Add preview").show(ui, popup).left.clicked()
+            {
+                // Positioned off the port when its center is known (it is,
+                // after the first frame); otherwise the node lands at the
+                // origin and the user drags it.
+                let pos = dcx
+                    .geometry()
+                    .ports
+                    .center(port)
+                    .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
+                rec.out.extend_graph(
+                    PreviewSpawn {
+                        port,
+                        pos,
+                        node_id: NodeId::unique(),
+                    }
+                    .intents(func),
+                );
+            }
         });
 }
 
@@ -515,94 +582,79 @@ fn output_cell(
 /// node body and a little above, so it doesn't cover what it is watching.
 const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 
-/// "Add preview" — spawn a preview node already wired to this output. What it
-/// creates is an ordinary node the user can move, delete, and undo like any
-/// other.
-///
-/// Hidden when the library has no preview func.
-fn add_preview_item(
-    ui: &mut Ui,
-    popup: &CloseHandle,
-    ncx: NodeCtx<'_>,
-    dcx: DrawCtx<'_>,
-    port: PortRef,
-    out: &mut Requests,
-) {
-    let Some(func) = preview_sink::registered(ncx.graph_ctx.library()) else {
-        return;
-    };
-    if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
-        return;
-    }
-    // Positioned off the port when its center is known (it is, after the first
-    // frame); otherwise the node lands at the origin and the user drags it.
-    let pos = dcx
-        .geometry()
-        .ports
-        .center(port)
-        .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-    out.extend_graph(add_preview_intents(func, port, pos, NodeId::unique()));
+/// A preview node `node_id` to spawn at `pos`, already reading `port`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PreviewSpawn {
+    pub(crate) port: PortRef,
+    pub(crate) pos: Vec2,
+    pub(crate) node_id: NodeId,
 }
 
-/// The two intents that spawn a preview already reading `port`. Emitted
-/// together so one undo removes node *and* wire — the same shape
-/// `connection_ui::commit_connection` uses for a boundary port.
-pub(crate) fn add_preview_intents(
-    func: &Func,
-    port: PortRef,
-    pos: Vec2,
-    node_id: NodeId,
-) -> [GraphIntent; 2] {
-    [
-        GraphIntent::AddNode {
-            pos,
-            node_id,
-            node: func.into(),
-            bindings: func.default_bindings(node_id).collect(),
-        },
-        GraphIntent::SetInput {
-            input: InputPort::new(node_id, 0),
-            to: Some(Binding::bind(port.node_id, port.port_idx)),
-        },
-    ]
+impl PreviewSpawn {
+    /// The two intents that spawn the preview `func` declares. Emitted
+    /// together so one undo removes node *and* wire.
+    pub(crate) fn intents(self, func: &Func) -> [GraphIntent; 2] {
+        let Self { port, pos, node_id } = self;
+        [
+            GraphIntent::AddNode {
+                pos,
+                node_id,
+                node: func.into(),
+                bindings: func.default_bindings(node_id).collect(),
+            },
+            GraphIntent::SetInput {
+                input: InputPort::new(node_id, 0),
+                to: Some(Binding::bind(port.node_id, port.port_idx)),
+            },
+        ]
+    }
 }
 
 /// One event (emitter) port row: the event name plus an event-colored triangle
 /// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
 /// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
-fn event_cell(
-    ui: &mut Ui,
-    ncx: NodeCtx<'_>,
-    dcx: DrawCtx<'_>,
-    event_idx: usize,
+#[derive(Debug, Clone, Copy)]
+struct EventRow<'a> {
+    /// The event's index among the node's events.
+    index: usize,
+    /// The grid row it sits in.
     row: usize,
-    event: &FuncEvent,
-) {
-    let theme = ncx.theme();
-    let node_id = ncx.id;
-    let overhang = theme.port_overhang();
-    let ev = EventRef { node_id, event_idx };
-    let wid = event_glyph_wid(ev);
-    let fill = port_color::event(theme, dcx.geometry().events.is_hovered(ev));
-    let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
-    Panel::hstack()
-        .id_salt(("event", event_idx))
-        .grid_cell((grid_row(row), COL_OUTPUT))
-        .align(Align::new(HAlign::Right, VAlign::Center))
-        .size((Sizing::HUG, Sizing::HUG))
-        .gap(ROW_GAP)
-        .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| {
-            // Muted like the data-port labels.
-            Text::new(event.name.as_str())
-                .style(&label_style(ui, theme, false))
-                .show(ui);
-            PortGlyph::arrow(wid, theme.ports.size, fill)
-                .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
-                .tip(tip)
-                .show(ui);
-        });
+    event: &'a FuncEvent,
+}
+
+impl EventRow<'_> {
+    fn show(self, ui: &mut Ui, rec: &NodeRecord<'_, '_>) {
+        let Self { index, row, event } = self;
+        let (ncx, dcx) = (rec.node, rec.draw);
+        let theme = ncx.theme();
+        let node_id = ncx.id;
+        let overhang = theme.port_overhang();
+        let ev = EventRef {
+            node_id,
+            event_idx: index,
+        };
+        let wid = event_glyph_wid(ev);
+        let fill = Hover::from(dcx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
+        let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
+        Panel::hstack()
+            .id_salt(("event", index))
+            .grid_cell((grid_row(row), COL_OUTPUT))
+            .align(Align::new(HAlign::Right, VAlign::Center))
+            .size((Sizing::HUG, Sizing::HUG))
+            .gap(ROW_GAP)
+            .child_align(Align::v(VAlign::Center))
+            .show(ui, |ui| {
+                // Muted like the data-port labels.
+                Text::new(event.name.as_str())
+                    .style(&label_style(ui, theme, LabelInk::Plain))
+                    .show(ui);
+                PortGlyph::arrow(wid, theme.ports.size, fill)
+                    .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
+                    .tip(tip)
+                    .show(ui);
+            });
+    }
 }
 
 /// An event port glyph. A separate id space from data ports
@@ -618,7 +670,7 @@ pub(crate) fn event_glyph_wid(event: EventRef) -> WidgetId {
 /// under it.
 ///
 /// Renders on demand rather than into a `String`: a hovered node builds one
-/// of these per port per frame, and [`tip_for`] feeds it straight to `fmt!`.
+/// of these per port per frame, and [`PortTip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]
 struct TypeLabel<'a> {
     library: &'a Library,
@@ -709,7 +761,12 @@ mod tests {
         let center = Vec2::new(100.0, 40.0);
 
         let node_id = NodeId::unique();
-        let [add, bind] = add_preview_intents(&func, port, center + PREVIEW_SPAWN_OFFSET, node_id);
+        let [add, bind] = PreviewSpawn {
+            port,
+            pos: center + PREVIEW_SPAWN_OFFSET,
+            node_id,
+        }
+        .intents(&func);
 
         let GraphIntent::AddNode {
             pos, node_id, node, ..

@@ -48,8 +48,8 @@ async fn cached_output_survives_node_removal() {
     g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::Ram));
     g.add("print_a", NodeSpec::records);
     g.instance("print_b", "print_a");
-    g.wire("a", 0, "print_a", 0);
-    g.wire("b", 0, "print_b", 0);
+    g.wire("a", "print_a");
+    g.wire("b", "print_b");
 
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
@@ -90,7 +90,7 @@ async fn repeated_structural_churn_stays_correct() {
     let mut g = TestGraph::new();
     g.add("a", |n| n.returns(2i64));
     g.add("print_a", NodeSpec::records);
-    g.wire("a", 0, "print_a", 0);
+    g.wire("a", "print_a");
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
@@ -99,7 +99,7 @@ async fn repeated_structural_churn_stays_correct() {
         e.edit(|g| {
             g.add("b", |n| n.returns(5i64));
             g.instance("print_b", "print_a");
-            g.wire("b", 0, "print_b", 0);
+            g.wire("b", "print_b");
         });
         assert_eq!(e.engine.compiled().e_nodes.len(), 4, "round {round} grow");
         let run = e.run_sinks().await;
@@ -121,7 +121,7 @@ async fn repeated_structural_churn_stays_correct() {
 async fn planning_a_cycle_names_the_node_that_closes_it() {
     let mut e = TestEngine::over(TestGraph::sample());
     // Close the loop: sum[0] ← mult, and mult already depends on sum.
-    e.edit(|g| g.wire("mult", 0, "sum", 0));
+    e.edit(|g| g.wire("mult", "sum"));
 
     let error = e
         .try_plan(RunSeeds::sinks())

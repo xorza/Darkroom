@@ -5,6 +5,7 @@ use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;
+use imaginarium::Buffer2;
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {
@@ -59,7 +60,7 @@ fn slice_and_iteration_preserve_row_major_order() {
     let source = [
         true, false, true, false, false, true, false, true, true, false, false, true,
     ];
-    let buffer = BitBuffer2::from_slice(Size2us::new(4, 3), &source);
+    let buffer = BitBuffer2::from_plane(&Buffer2::new(4, 3, source.to_vec()));
     assert_eq!(iter_bits(&buffer), source);
 
     // The set-bit walk visits exactly the true positions, in row-major order.
@@ -97,7 +98,7 @@ fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
 }
 
 #[test]
-fn fill_count_copy_and_swap_ignore_padding() {
+fn fill_count_clone_and_swap_ignore_padding() {
     let mut first = BitBuffer2::new_default(Size2us::new(7, 2));
     first.words[0] |= 1 << 7;
     assert_eq!(first.count_ones(), 0);
@@ -108,8 +109,7 @@ fn fill_count_copy_and_swap_ignore_padding() {
     first.set_at(Vec2us::new(3, 1), false);
     assert_eq!(first.count_ones(), 13);
 
-    let mut copy = BitBuffer2::new_default(Size2us::new(7, 2));
-    copy.copy_from(&first);
+    let mut copy = first.clone();
     assert_eq!(iter_bits(&copy), iter_bits(&first));
 
     let mut clear = BitBuffer2::new_default(Size2us::new(7, 2));
@@ -132,13 +132,6 @@ fn construction_rejects_every_dimension_overflow_stage() {
             "{width}x{height} did not report {expected}"
         );
     }
-}
-
-#[test]
-fn from_slice_rejects_a_mismatched_length() {
-    let panic = catch_unwind(|| BitBuffer2::from_slice(Size2us::new(2, 2), &[true, false, true]))
-        .expect_err("mismatched data length must panic");
-    assert!(panic_message(&*panic).contains("data length 3 does not match dimensions 2x2=4"));
 }
 
 #[cfg(debug_assertions)]

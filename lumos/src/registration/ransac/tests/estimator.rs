@@ -2,11 +2,11 @@ use super::*;
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics::CHI2_99_2DOF;
 
-/// One estimation: exact points under `known`, the listed indices moved far away, at `confidences`.
+/// One estimation of `known`'s model: exact points under `known`, the listed indices moved far
+/// away, at `confidences`.
 #[derive(Debug)]
 struct Case {
     name: &'static str,
-    model: TransformType,
     known: Transform,
     points: Vec<DVec2>,
     outliers: Vec<usize>,
@@ -17,10 +17,9 @@ struct Case {
 }
 
 impl Case {
-    fn new(name: &'static str, model: TransformType, known: Transform, points: Vec<DVec2>) -> Self {
+    fn new(name: &'static str, known: Transform, points: Vec<DVec2>) -> Self {
         Self {
             name,
-            model,
             known,
             points,
             outliers: Vec::new(),
@@ -49,7 +48,11 @@ impl Case {
             self.confidences.clone()
         };
         let result = estimator(self.max_sigma, config)
-            .estimate(&pairs(&self.points, &targets), &confidences, self.model)
+            .estimate(
+                &pairs(&self.points, &targets),
+                &confidences,
+                self.known.transform_type(),
+            )
             .unwrap_or_else(|failure| panic!("{}: no estimate, {failure:?}", self.name));
         let expected: Vec<usize> = (0..self.points.len())
             .filter(|i| !self.outliers.contains(i))
@@ -70,7 +73,6 @@ impl Case {
 /// Every model, with and without outliers, at the coordinate scales registration meets.
 #[test]
 fn ransac_recovers_every_model_and_exactly_its_inliers() {
-    use TransformType::*;
     let scattered = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -100,21 +102,10 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
         .collect();
     let million_grid: Vec<DVec2> = make_grid(5, 4, 1e6);
     let cases = [
-        Case::new(
-            "translation",
-            Translation,
-            shifted(15.0, -7.0),
-            scattered.clone(),
-        ),
-        Case::new(
-            "two points",
-            Translation,
-            shifted(10.0, 10.0),
-            scattered[..2].to_vec(),
-        ),
+        Case::new("translation", shifted(15.0, -7.0), scattered.clone()),
+        Case::new("two points", shifted(10.0, 10.0), scattered[..2].to_vec()),
         Case::new(
             "sub-pixel translation",
-            Translation,
             shifted(0.5, -0.3),
             make_grid(5, 4, 10.0),
         ),
@@ -122,7 +113,6 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
             unconstrained: true,
             ..Case::new(
                 "similarity at 45°",
-                Similarity,
                 Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 1.2),
                 make_grid(4, 2, 10.0),
             )
@@ -131,20 +121,17 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
             unconstrained: true,
             ..Case::new(
                 "similarity on a coarse grid",
-                Similarity,
                 Transform::similarity(DVec2::new(10.0, -5.0), 0.2, 1.1),
                 make_grid(4, 2, 50.0),
             )
         },
         Case::new(
             "similarity at 0.001 rad",
-            Similarity,
             Transform::similarity(DVec2::new(5.0, 3.0), 0.001, 1.0),
             make_grid(5, 4, 100.0),
         ),
         Case::new(
             "similarity at scale 1.0001",
-            Similarity,
             Transform::similarity(DVec2::new(2.0, -1.0), 0.0, 1.0001),
             make_grid(5, 4, 100.0),
         ),
@@ -152,71 +139,49 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
             unconstrained: true,
             ..Case::new(
                 "similarity 2000 px out",
-                Similarity,
                 Transform::similarity(DVec2::new(50.0, -30.0), PI / 16.0, 1.05),
                 far_grid,
             )
         },
         Case::new(
             "a million pixels apart",
-            Translation,
             shifted(5000.0, -3000.0),
             million_grid,
         ),
-        Case::new(
-            "mixed scales",
-            Translation,
-            shifted(10.0, -5.0),
-            mixed_scales,
-        ),
+        Case::new("mixed scales", shifted(10.0, -5.0), mixed_scales),
         Case::new(
             "affine",
-            Affine,
             Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]),
             make_grid(4, 2, 25.0),
         ),
         Case::new(
             "affine shear",
-            Affine,
             Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]),
             make_grid(5, 4, 50.0),
         ),
         Case::new(
             "homography",
-            Homography,
             Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-4, 5e-5]),
             make_grid(4, 2, 25.0),
         ),
         Case::new(
             "homography near affine",
-            Homography,
             Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]),
             make_grid(4, 2, 25.0),
         ),
         Case {
             outliers: vec![8, 9],
-            ..Case::new(
-                "two outliers",
-                Translation,
-                shifted(5.0, 3.0),
-                make_grid(5, 2, 10.0),
-            )
+            ..Case::new("two outliers", shifted(5.0, 3.0), make_grid(5, 2, 10.0))
         },
         Case {
             outliers: vec![10, 11, 12, 13],
-            ..Case::new(
-                "30% outliers",
-                Translation,
-                shifted(5.0, 3.0),
-                make_grid(7, 2, 10.0),
-            )
+            ..Case::new("30% outliers", shifted(5.0, 3.0), make_grid(7, 2, 10.0))
         },
         Case {
             outliers: vec![15, 16, 17, 18, 19],
             confidences: [vec![0.9; 15], vec![0.1; 5]].concat(),
             ..Case::new(
                 "low-confidence outliers",
-                Translation,
                 shifted(10.0, 5.0),
                 make_grid(5, 4, 20.0),
             )
@@ -227,7 +192,6 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
             max_sigma: 1.67,
             ..Case::new(
                 "one outlier at low confidence",
-                Translation,
                 shifted(50.0, -30.0),
                 vec![
                     DVec2::new(100.0, 100.0),

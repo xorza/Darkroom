@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use glam::DVec2;
 
+use crate::config_value::{self, ConfigValue};
 use crate::error::InvalidConfigField;
 use crate::math::statistics::median_mut;
 use crate::registration::distortion::sip::{SipConfig, SipModel};
@@ -57,35 +58,23 @@ impl RegistrationMatchingConfig {
     }
 
     fn validate(&self, model: TransformModel) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.max_stars >= 3,
-            "max_stars",
-            "at least 3 for triangle matching",
-            self.max_stars as f64,
-        )?;
+        ConfigValue::count("max_stars", self.max_stars)
+            .must_be("at least 3 for triangle matching", self.max_stars >= 3)?;
         if let Some(min_stars) = self.min_stars {
-            InvalidConfigField::check(
-                min_stars >= 3,
-                "min_stars",
-                "at least 3 for triangle matching",
-                min_stars as f64,
-            )?;
+            ConfigValue::count("min_stars", min_stars)
+                .must_be("at least 3 for triangle matching", min_stars >= 3)?;
         }
         let required_stars = self.required_stars(model);
-        InvalidConfigField::check_against(
-            self.max_stars >= required_stars,
-            "max_stars",
+        ConfigValue::count("max_stars", self.max_stars).must_be_against(
             "at least the star gate",
-            self.max_stars as f64,
-            required_stars as f64,
+            config_value::exact(required_stars),
+            self.max_stars >= required_stars,
         )?;
         let required_points = model.most_general().min_points();
-        InvalidConfigField::check_against(
-            self.min_matches >= required_points,
-            "min_matches",
+        ConfigValue::count("min_matches", self.min_matches).must_be_against(
             "at least the transform's minimum point count",
-            self.min_matches as f64,
-            required_points as f64,
+            config_value::exact(required_points),
+            self.min_matches >= required_points,
         )?;
         self.triangle.validate()
     }
@@ -395,22 +384,20 @@ impl RegistrationConfig {
     pub fn validate(&self) -> Result<(), InvalidConfigField> {
         self.matching.validate(self.transform_type)?;
         self.ransac.validate()?;
-        InvalidConfigField::finite(
-            "max_rms_error",
-            "finite and positive",
-            self.max_rms_error,
-            |value| value > 0.0,
-        )?;
+        ConfigValue::new("max_rms_error", self.max_rms_error)
+            .finite_and("finite and positive", |value| value > 0.0)?;
         if let Some(sip) = &self.sip {
             sip.validate()?;
             // A homography's perspective terms act to first order as the correction's quadratic
             // ones: the two are not determined together.
-            InvalidConfigField::check(
-                self.transform_type != TransformModel::Fixed(TransformType::Homography),
+            ConfigValue::count(
                 "transform_type with SIP",
+                TransformType::Homography.parameter_count(),
+            )
+            .must_be(
                 "at most affine, as a homography's perspective terms are the SIP correction's \
                  quadratic ones",
-                TransformType::Homography.parameter_count() as f64,
+                self.transform_type != TransformModel::Fixed(TransformType::Homography),
             )?;
         }
         self.warp.validate()?;

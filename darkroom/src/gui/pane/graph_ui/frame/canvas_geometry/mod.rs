@@ -101,6 +101,15 @@ pub(crate) struct PortLayer<K> {
     started_drag: Option<K>,
 }
 
+/// Where a node's body measured last frame, and where it sits this frame: the
+/// two ends a glyph's offset spans.
+#[derive(Clone, Copy, Debug)]
+struct NodePlace {
+    /// The body's layout-rect corner, from last frame's layout.
+    layout_min: Vec2,
+    pos: Vec2,
+}
+
 impl<K> Default for PortLayer<K> {
     fn default() -> Self {
         Self {
@@ -112,9 +121,26 @@ impl<K> Default for PortLayer<K> {
 }
 
 impl<K: NodeKey> PortLayer<K> {
-    /// Snapshot one widget into `live`, refreshing its persistent offset.
-    fn record(&mut self, key: K, r: ResponseState, node_min: Vec2, node_pos: Vec2) {
-        let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
+    /// Snapshot one widget's response `r` into `live`: refresh the
+    /// intra-node offset from this frame's rects when both recorded, else fall
+    /// back to the cached offset so a just-shown graph still anchors. The
+    /// center is the node's position plus the offset, so a moved node's glyph
+    /// tracks its current position.
+    fn record(&mut self, key: K, r: ResponseState, node: NodePlace) {
+        let fresh_offset = r.layout_rect.map(|rect| rect.center() - node.layout_min);
+        if let Some(offset) = fresh_offset {
+            self.offsets.insert(key, offset);
+        }
+        let layout_center = fresh_offset
+            .or_else(|| self.offsets.get(&key).copied())
+            .map(|offset| node.pos + offset);
+        let info = PortInfo {
+            layout_center,
+            screen_rect: r.rect,
+            hovered: r.hovered(),
+            drag_started: r.left.drag.started(),
+            dragging: r.left.drag.started() || r.left.drag.delta().is_some(),
+        };
         if info.drag_started && self.started_drag.is_none() {
             self.started_drag = Some(key);
         }
@@ -315,26 +341,29 @@ impl CanvasGeometry {
             // the pass proportional to what's *on screen*: a culled node
             // costs one lookup, not one per port plus one per event glyph
             // plus one for its pin.
-            let Some(node_min) = body.layout_rect.map(|r| r.min) else {
+            let Some(place) = body.layout_rect.map(|r| NodePlace {
+                layout_min: r.min,
+                pos: n.pos,
+            }) else {
                 self.replay_cached(n);
                 continue;
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_row::port_circle_wid(port));
-                    self.ports.record(port, r, node_min, n.pos);
+                    self.ports.record(port, r, place);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_refs() {
                 let r = ui.response_for(port_row::event_glyph_wid(ev));
-                self.events.record(ev, r, node_min, n.pos);
+                self.events.record(ev, r, place);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
                 let r = ui.response_for(header::subscription_glyph_wid(n.id));
-                self.subs.record(n.id, r, node_min, n.pos);
+                self.subs.record(n.id, r, place);
             }
         }
     }
@@ -356,34 +385,6 @@ impl CanvasGeometry {
         if n.sink() {
             self.subs.replay(n.id, n.pos);
         }
-    }
-}
-
-/// Snapshot one widget's [`ResponseState`] into a [`PortInfo`]: refresh the
-/// intra-node offset from this frame's rects when both recorded, else fall
-/// back to the cached offset so a just-shown graph still anchors. The center
-/// is `node_pos + offset` so a moved node's glyph tracks its current
-/// position. Shared by data ports, event glyphs, and subscription pins.
-fn snapshot<K: NodeKey>(
-    r: ResponseState,
-    node_min: Vec2,
-    node_pos: Vec2,
-    key: K,
-    offsets: &mut HashMap<K, Vec2>,
-) -> PortInfo {
-    let fresh_offset = r.layout_rect.map(|rect| rect.center() - node_min);
-    if let Some(offset) = fresh_offset {
-        offsets.insert(key, offset);
-    }
-    let layout_center = fresh_offset
-        .or_else(|| offsets.get(&key).copied())
-        .map(|offset| node_pos + offset);
-    PortInfo {
-        layout_center,
-        screen_rect: r.rect,
-        hovered: r.hovered(),
-        drag_started: r.left.drag.started(),
-        dragging: r.left.drag.started() || r.left.drag.delta().is_some(),
     }
 }
 

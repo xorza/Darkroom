@@ -94,6 +94,14 @@ impl Default for OpenDocument {
     }
 }
 
+/// What a launch opens a document from: the command-line argument, else the
+/// document the preferences remember.
+#[derive(Debug)]
+pub(crate) struct LaunchSource<'a> {
+    pub(crate) argument: Option<PathBuf>,
+    pub(crate) preferences: &'a mut Preferences,
+}
+
 impl OpenDocument {
     /// Apply a single `intent` and record it as its own undo entry. For edits
     /// raised outside a frame's drain — e.g. a file-picker result handled
@@ -264,8 +272,8 @@ impl OpenDocument {
         })
     }
 
-    /// The document a launching frontend opens: `argument` when the command
-    /// line named a file, otherwise the one `preferences` remembers.
+    /// The document a launching frontend opens `from`: its `argument` when the
+    /// command line named a file, otherwise the one its `preferences` remember.
     ///
     /// A named file outranks the remembered one, reopening preference
     /// included — the user asked for that document by name — and a named file
@@ -278,11 +286,14 @@ impl OpenDocument {
     /// forgotten in `preferences`, so the next launch starts clean instead of
     /// failing again; persisting that is the caller's.
     pub(crate) fn open_at_launch(
-        argument: Option<PathBuf>,
-        preferences: &mut Preferences,
+        from: LaunchSource<'_>,
         status: &mut StatusLog,
         library: &Library,
     ) -> Self {
+        let LaunchSource {
+            argument,
+            preferences,
+        } = from;
         let Some(path) = argument else {
             return Self::load_preferred(preferences, status, library);
         };

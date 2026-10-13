@@ -2,11 +2,17 @@
 
 use std::time::Duration;
 
+use common::FloatExt;
 use glam::Vec2;
+use palantir::Ui;
 
 use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::pane::graph_ui::canvas;
+use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
+use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 use crate::gui::requests::Requests;
 
 /// The longest pause inside one run of wheel, touchpad or pinch input. The
@@ -53,25 +59,72 @@ impl CameraGesture {
         !self.pan.is_idle()
     }
 
+    /// Read the outer canvas's current-frame response, compute the target
+    /// viewport, and emit a `GraphIntent::SetViewport` when it changed. The
+    /// intent (not a direct write) is the only thing that mutates the document's
+    /// viewport — so pan/zoom rides the same undo path as every other edit, and
+    /// each of this camera's gestures folds into one undo entry. Three independent
+    /// sources:
+    ///
+    /// - **Middle-button drag** (`Sense::DRAG` + `Ui::drag_delta_by`): canvas
+    ///   pan, `anchor + delta` from the latch until release. Left-drag stays with
+    ///   rubber-band selection.
+    /// - **Scroll** (`Sense::SCROLL`): a two-finger touchpad swipe pans, and a
+    ///   mouse wheel zooms about the cursor (graph-editor convention: Figma /
+    ///   Blender node editor / `ComfyUI`). Palantir ingests the scroll delta
+    ///   already negated, so `+y` means "scroll content down" → zoom out, and
+    ///   `-y` (wheel up) → zoom in.
+    /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
+    ///   `Response::pointer_local` pivot.
+    pub(crate) fn emit(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) {
+        let viewport = cx.graph_ctx().viewport();
+        let resp = ui.response_for(canvas::outer_wid());
+        let mut v = viewport;
+        // Pan latch comes from the central classification; continuation and
+        // wheel/pinch zoom below read the response directly (not arbitration).
+        if cx.input().gesture == Some(CanvasGesture::Pan) {
+            self.latch_pan(viewport.pan, out);
+        }
+        let held = self.fold_pan(resp.middle.drag.delta(), &mut v.pan);
+        pan_zoom::CANVAS_ZOOM.fold_scroll(&mut v, ui, &resp);
+        // Only emit when the gesture actually moved the viewport (approx
+        // compare — exact float `!=` would emit on the last-bit noise the
+        // zoom-about-cursor algebra leaves behind, which `approximately_eq`
+        // reads at the pan's own magnitude rather than against a fixed
+        // epsilon a four-digit pan would swamp).
+        let unchanged =
+            v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
+        if unchanged {
+            return;
+        }
+        // A frame that both pans and scrolls belongs to the held pan.
+        let gesture = held.unwrap_or_else(|| self.scroll_frame(ui.now(), out));
+        out.push_graph(GraphIntent::SetViewport {
+            to: v,
+            gesture: Some(gesture),
+        });
+    }
+
     /// Latch a pan drag at the camera's current `pan`, as a new gesture.
-    pub(crate) fn latch_pan(&mut self, pan: Vec2, out: &mut Requests) {
+    fn latch_pan(&mut self, pan: Vec2, out: &mut Requests) {
         self.pan.latch(PanAnchor {
             start: pan,
             gesture: out.open_gesture(),
         });
     }
 
-    /// Fold a live pan drag into `pan` — see [`pan_zoom::fold_pan_drag`] —
+    /// Fold a live pan drag into `pan` — see [`GestureSlot::fold_pan`] —
     /// and return its gesture while it is held.
-    pub(crate) fn fold_pan(&mut self, delta: Option<Vec2>, pan: &mut Vec2) -> Option<GestureId> {
-        pan_zoom::fold_pan_drag(&mut self.pan, |anchor| anchor.start, delta, pan)
+    fn fold_pan(&mut self, delta: Option<Vec2>, pan: &mut Vec2) -> Option<GestureId> {
+        self.pan
+            .fold_pan(|anchor| anchor.start, delta, pan)
             .map(|anchor| anchor.gesture)
     }
 
     /// The gesture a frame of wheel, touchpad or pinch input at `now` belongs
     /// to: the run in flight if it moved the camera at most [`SCROLL_RUN_GAP`]
     /// ago, else a new run.
-    pub(crate) fn scroll_frame(&mut self, now: Duration, out: &mut Requests) -> GestureId {
+    fn scroll_frame(&mut self, now: Duration, out: &mut Requests) -> GestureId {
         match &mut self.scroll {
             Some(run) if now.saturating_sub(run.last) <= SCROLL_RUN_GAP => {
                 run.last = now;

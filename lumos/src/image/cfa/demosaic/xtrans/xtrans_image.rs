@@ -2,6 +2,7 @@
 
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
+use imaginarium::Buffer2;
 
 /// An X-Trans frame the demosaic reads: its samples row by row, its size, and its pattern
 /// anchored at its first pixel.
@@ -17,15 +18,14 @@ pub(crate) struct XTransImage<'a> {
 
 impl<'a> XTransImage<'a> {
     /// # Panics
-    /// When `data` does not hold one sample per pixel of `size`, or `size` is empty.
-    pub(crate) fn new(data: &'a [f32], size: Size2us, pattern: XTransPattern) -> Self {
+    /// When `data` is empty.
+    pub(crate) fn new(data: &'a Buffer2<f32>, pattern: XTransPattern) -> Self {
+        let size = Size2us::from(data);
         assert!(
-            size.width > 0 && size.height > 0 && data.len() == size.pixel_count(),
-            "an X-Trans frame of {}x{} holds {} samples",
-            size.width,
-            size.height,
-            data.len()
+            size.width > 0 && size.height > 0,
+            "an X-Trans frame of {size} holds no samples"
         );
+        let data = data.pixels();
         debug_assert!(
             data.iter().all(|v| v.is_finite()),
             "XTransImage data contains NaN or Infinity values"

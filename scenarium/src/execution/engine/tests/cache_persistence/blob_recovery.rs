@@ -190,9 +190,9 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Disk));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "sum", 0);
-    g.wire("src", 0, "sum", 1);
-    g.wire("sum", 0, "print", 0);
+    g.wire("src", "sum");
+    g.wire("src", ("sum", 1));
+    g.wire("sum", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -237,7 +237,7 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls).cache(CacheMode::Both));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "print", 0);
+    g.wire("src", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
 
@@ -320,7 +320,7 @@ async fn redefined_output_type_rekeys_and_recomputes() {
                 *received.lock().unwrap() = inputs[0].as_f64().unwrap_or(f64::NAN);
             })
         });
-        g.wire("produce", 0, "consume", 0);
+        g.wire("produce", "consume");
         g
     };
 

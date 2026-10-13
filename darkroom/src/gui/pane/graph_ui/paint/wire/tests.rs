@@ -31,106 +31,113 @@ fn gradient(paint: &WirePaint) -> Option<(SrgbaU8, SrgbaU8)> {
 fn emphasis_tiers_fade_dim_and_lift() {
     let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
     let c = RgbaF32::new(1.0, 0.5, 0.0, 1.0);
-    let rest = WireEmphasis::resolve(canvas, false);
+    let rest = WireEmphasis::resolve(canvas, WireSet::Standing);
     // Rest pulls 15% toward the (black) canvas: r 1.0→0.85, g 0.5→0.425.
-    let dimmed = rest.tint(c, false);
+    let dimmed = rest.tint(c, Tier::Rest);
     assert_close(dimmed.r, 0.85);
     assert_close(dimmed.g, 0.425);
     assert_close(dimmed.b, 0.0);
     // Emphasis keeps the full color and lifts the width by 1.25×.
-    assert_eq!(rest.tint(c, true), c);
-    assert_eq!(width(2.0, true), 2.5);
-    assert_eq!(width(2.0, false), 2.0);
+    assert_eq!(rest.tint(c, Tier::Emphasized), c);
+    assert_eq!(width(2.0, Tier::Emphasized), 2.5);
+    assert_eq!(width(2.0, Tier::Rest), 2.0);
     // Endpoint hover carries the emphasis at rest…
-    assert!(rest.hovered(true));
-    assert!(!rest.hovered(false));
+    assert_eq!(
+        rest.stroke(2.0, WireMark::EndpointHovered).tier,
+        Tier::Emphasized
+    );
+    assert_eq!(rest.stroke(2.0, WireMark::Plain).tier, Tier::Rest);
 
     // …but a fading pass drops alpha to the fade constant and
     // suppresses hover even with a forced endpoint hover — the snap
     // target's forced hover must not re-emphasize a faded wire.
-    let fading = WireEmphasis::resolve(canvas, true);
-    assert_eq!(fading.tint(c, false).a, WIRE_DRAG_FADE);
-    assert!(!fading.hovered(true));
+    let fading = WireEmphasis::resolve(canvas, WireSet::Faded);
+    assert_eq!(fading.tint(c, Tier::Rest).a, WIRE_DRAG_FADE);
+    assert_eq!(fading.tint(c, Tier::Emphasized).a, WIRE_DRAG_FADE);
+    assert_eq!(
+        fading.stroke(2.0, WireMark::EndpointHovered).tier,
+        Tier::Rest
+    );
 }
 
 #[test]
 fn stroke_lets_the_broken_alarm_win_over_hover() {
-    let rest = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), false);
+    let rest = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), WireSet::Standing);
 
     // Plain wire: no lift at all.
-    let idle = rest.stroke(2.0, false, false);
-    assert!(!idle.hovered);
+    let idle = rest.stroke(2.0, WireMark::Plain);
+    assert_eq!(idle.tier, Tier::Rest);
     assert_eq!(idle.width, 2.0);
 
     // Endpoint hover alone lifts both the tier and the width.
-    let hover = rest.stroke(2.0, false, true);
-    assert!(hover.hovered);
+    let hover = rest.stroke(2.0, WireMark::EndpointHovered);
+    assert_eq!(hover.tier, Tier::Emphasized);
     assert_eq!(hover.width, 2.5);
 
-    // Broken *and* hovered: `hovered` is suppressed so the caller takes the
+    // Broken (hovered or not): the tier stays at rest so the caller takes the
     // flat alarm color, but the width lift is kept.
-    let broken = rest.stroke(2.0, true, true);
-    assert!(!broken.hovered);
+    let broken = rest.stroke(2.0, WireMark::Broken);
+    assert_eq!(broken.tier, Tier::Rest);
     assert_eq!(broken.width, 2.5);
 
     // A fading pass still gives a broken wire full width — that's the
     // alarm read against the dimmed rest of the set.
-    let fading = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), true);
-    let faded_hover = fading.stroke(2.0, false, true);
-    assert!(!faded_hover.hovered);
+    let fading = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), WireSet::Faded);
+    let faded_hover = fading.stroke(2.0, WireMark::EndpointHovered);
+    assert_eq!(faded_hover.tier, Tier::Rest);
     assert_eq!(faded_hover.width, 2.0);
-    assert_eq!(fading.stroke(2.0, true, false).width, 2.5);
+    assert_eq!(fading.stroke(2.0, WireMark::Broken).width, 2.5);
 }
 
 #[test]
 fn paint_ramps_differing_ends_and_flattens_equal_ones() {
     let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
-    let rest = WireEmphasis::resolve(canvas, false);
+    let rest = WireEmphasis::resolve(canvas, WireSet::Standing);
     let a = RgbaF32::new(1.0, 0.0, 0.0, 1.0);
     let b = RgbaF32::new(0.0, 1.0, 0.0, 1.0);
 
     // Distinct ends run p0 → p3 as a gradient, each stop taken through this
     // frame's tier — the rest-dim pull, not the raw color.
-    let (start, end) = gradient(&rest.paint(WireTint::new(a, b), false))
+    let (start, end) = gradient(&rest.paint(WireTint::new(a, b), Tier::Rest))
         .expect("two different endpoint colors lower to a gradient");
-    assert_eq!(start, rest.tint(a, false).into());
-    assert_eq!(end, rest.tint(b, false).into());
+    assert_eq!(start, rest.tint(a, Tier::Rest).into());
+    assert_eq!(end, rest.tint(b, Tier::Rest).into());
     assert_ne!(start, end, "and the two ends stay distinguishable");
     // Emphasized keeps both stops at full strength.
-    let (start, end) =
-        gradient(&rest.paint(WireTint::new(a, b), true)).expect("still a gradient when emphasized");
+    let (start, end) = gradient(&rest.paint(WireTint::new(a, b), Tier::Emphasized))
+        .expect("still a gradient when emphasized");
     assert_eq!((start, end), (a.into(), b.into()));
 
     // Equal ends — an event wire, or a type-mismatched data wire — collapse to
     // one flat paint rather than a ramp between two identical stops.
     assert_eq!(
-        solid(&rest.paint(WireTint::flat(a), true)),
+        solid(&rest.paint(WireTint::flat(a), Tier::Emphasized)),
         Some(a),
         "a flat tint paints solid"
     );
     // `WireTint::new` with the same color both sides is the same thing: the
     // collapse is decided on the resolved colors, not on which constructor ran.
     assert_eq!(
-        solid(&rest.paint(WireTint::new(a, a), true)),
+        solid(&rest.paint(WireTint::new(a, a), Tier::Emphasized)),
         Some(a),
         "equal ends collapse however they were built"
     );
     // Two colors that differ *only* before the tier still differ after it, so
     // the collapse can't swallow a real gradient.
     assert!(
-        gradient(&rest.paint(WireTint::new(a, b), false)).is_some(),
+        gradient(&rest.paint(WireTint::new(a, b), Tier::Rest)).is_some(),
         "the tier is applied per end, not to a pre-collapsed pair"
     );
 
     // A fading pass drops both stops to the fade alpha and keeps the gradient;
     // a flat tint keeps painting solid through it.
-    let fading = WireEmphasis::resolve(canvas, true);
-    let (start, end) = gradient(&fading.paint(WireTint::new(a, b), false))
+    let fading = WireEmphasis::resolve(canvas, WireSet::Faded);
+    let (start, end) = gradient(&fading.paint(WireTint::new(a, b), Tier::Rest))
         .expect("a faded wire keeps its gradient");
     assert_eq!(start, a.with_alpha(WIRE_DRAG_FADE).into());
     assert_eq!(end, b.with_alpha(WIRE_DRAG_FADE).into());
     assert_eq!(
-        solid(&fading.paint(WireTint::flat(a), false)).map(|c| c.a),
+        solid(&fading.paint(WireTint::flat(a), Tier::Rest)).map(|c| c.a),
         Some(WIRE_DRAG_FADE),
         "and a flat one keeps painting solid"
     );
@@ -225,6 +232,23 @@ fn event_wire_arrives_up_left_at_the_subscriber_pin() {
     // The two families place different handles for the same endpoints —
     // a data wire arrives level from the left, an event wire diagonally.
     assert_ne!(Wire::data(Vec2::ZERO, Vec2::new(100.0, 0.0)).p2, w.p2);
+}
+
+/// The curve runs from `p0` at `t = 0` to `p3` at `t = 1`, and at `t = ½`
+/// weighs the four points `⅛, ⅜, ⅜, ⅛`: over `x = 0, 30, 60, 90` and
+/// `y = 0, 40, 40, 0` that is `(0 + 11.25 + 22.5 + 11.25, 0 + 15 + 15 + 0)` =
+/// `(45, 30)`, every term exact in f32.
+#[test]
+fn at_runs_the_curve_from_p0_to_p3() {
+    let w = Wire {
+        p0: Vec2::new(0.0, 0.0),
+        p1: Vec2::new(30.0, 40.0),
+        p2: Vec2::new(60.0, 40.0),
+        p3: Vec2::new(90.0, 0.0),
+    };
+    assert_eq!(w.at(0.0), w.p0);
+    assert_eq!(w.at(1.0), w.p3);
+    assert_eq!(w.at(0.5), Vec2::new(45.0, 30.0));
 }
 
 #[test]

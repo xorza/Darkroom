@@ -24,7 +24,7 @@ use crate::star_detection::median_filter::simd::MedianRow;
 /// against each other and so needs one border convention across all of them, and it picked
 /// replication.
 pub(crate) fn apply_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = Size2us::from(pixels);
     debug_assert_eq!(size.width, output.width());
     debug_assert_eq!(size.height, output.height());
 
@@ -51,7 +51,7 @@ pub(crate) fn apply_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
 #[inline]
 fn filter_interior_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) {
     let width = pixels.width();
-    output_row[0] = median_at_left_edge(pixels, width, y);
+    output_row[0] = median_at_left_edge(pixels, y);
 
     MedianRow {
         above: pixels.row(y - 1),
@@ -61,21 +61,21 @@ fn filter_interior_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) 
     }
     .dispatch();
 
-    output_row[width - 1] = median_at_right_edge(pixels, width, y);
+    output_row[width - 1] = median_at_right_edge(pixels, y);
 }
 
 /// Filter an edge row (y=0 or y=height-1).
 #[inline]
 fn filter_edge_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) {
-    let size = Size2us::new(pixels.width(), pixels.height());
     for (x, out) in output_row.iter_mut().enumerate() {
-        *out = median_at_edge(pixels, size, Vec2us::new(x, y));
+        *out = median_at_edge(pixels, Vec2us::new(x, y));
     }
 }
 
 /// Compute median at left edge (x=0) for interior row.
 #[inline]
-fn median_at_left_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
+fn median_at_left_edge(pixels: &Buffer2<f32>, y: usize) -> f32 {
+    let width = pixels.width();
     let mut v = [0.0f32; 6];
     v[0] = pixels[(y - 1) * width];
     v[1] = pixels[(y - 1) * width + 1];
@@ -88,7 +88,8 @@ fn median_at_left_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
 
 /// Compute median at right edge (x=width-1) for interior row.
 #[inline]
-fn median_at_right_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
+fn median_at_right_edge(pixels: &Buffer2<f32>, y: usize) -> f32 {
+    let width = pixels.width();
     let x = width - 1;
     let mut v = [0.0f32; 6];
     v[0] = pixels[(y - 1) * width + x - 1];
@@ -102,7 +103,8 @@ fn median_at_right_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
 
 /// Compute median for edge/corner pixels with variable neighborhood size.
 #[inline]
-fn median_at_edge(pixels: &[f32], size: Size2us, pos: Vec2us) -> f32 {
+fn median_at_edge(pixels: &Buffer2<f32>, pos: Vec2us) -> f32 {
+    let size = Size2us::from(pixels);
     let mut neighbors = [0.0f32; 9];
     let mut count = 0;
 

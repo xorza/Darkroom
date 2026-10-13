@@ -120,6 +120,24 @@ impl Default for AlignStackConfig {
     }
 }
 
+/// What [`AlignStackConfig::calibrate_align_stack_paths`] stacks: the camera-RAW or mosaic-FITS
+/// lights, and the masters each is calibrated by.
+#[derive(Debug)]
+pub struct CalibratedLights<'a, P> {
+    pub paths: &'a [P],
+    pub masters: &'a CalibrationMasters,
+}
+
+/// Copied whatever its type parameters are, as it holds references alone: a derive would ask each
+/// to be `Copy`.
+impl<P> Clone for CalibratedLights<'_, P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<P> Copy for CalibratedLights<'_, P> {}
+
 impl AlignStackConfig {
     /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
     ///
@@ -178,7 +196,7 @@ impl AlignStackConfig {
 
     /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
     ///
-    /// For each raw light: load it as a `CfaImage`, apply `masters` (dark/flat/defect) in place,
+    /// For each raw light: load it as a `CfaImage`, apply the masters (dark/flat/defect) in place,
     /// demosaic to a `LinearImage`, and detect its stars, then register, warp and combine. A frame
     /// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
     /// dropped and reported in [`AlignmentSummary::dropped`](crate::AlignmentSummary::dropped).
@@ -198,11 +216,14 @@ impl AlignStackConfig {
     /// [`Self::align_stack_images`] for frames already decoded.
     pub fn calibrate_align_stack_paths<P: AsRef<Path> + Sync>(
         &self,
-        light_paths: &[P],
-        masters: &CalibrationMasters,
+        lights: CalibratedLights<'_, P>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
+        let CalibratedLights {
+            paths: light_paths,
+            masters,
+        } = lights;
         if light_paths.is_empty() {
             return Err(AlignStackError::NoFrames);
         }

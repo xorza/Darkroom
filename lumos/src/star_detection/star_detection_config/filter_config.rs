@@ -1,5 +1,6 @@
 //! Final quality and duplicate-filtering settings.
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Configuration for final star-quality filtering and duplicate removal.
@@ -36,41 +37,20 @@ impl Default for FilterConfig {
 
 impl FilterConfig {
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite("min_snr", "finite and positive", self.min_snr, |value| {
-            value > 0.0
-        })?;
-        InvalidConfigField::finite(
-            "max_eccentricity",
-            "finite and in [0, 1]",
-            self.max_eccentricity,
-            |value| (0.0..=1.0).contains(&value),
-        )?;
-        InvalidConfigField::finite(
-            "max_sharpness",
-            "finite and in (0, 1]",
-            self.max_sharpness,
-            |value| value > 0.0 && value <= 1.0,
-        )?;
-        InvalidConfigField::finite(
-            "max_roundness",
-            "finite and in (0, 2]",
-            self.max_roundness,
-            |value| value > 0.0 && value <= 2.0,
-        )?;
+        ConfigValue::new("min_snr", self.min_snr)
+            .finite_and("finite and positive", |value| value > 0.0)?;
+        ConfigValue::new("max_eccentricity", self.max_eccentricity)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
+        ConfigValue::new("max_sharpness", self.max_sharpness)
+            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
+        ConfigValue::new("max_roundness", self.max_roundness)
+            .finite_and("finite and in (0, 2]", |value| value > 0.0 && value <= 2.0)?;
         if let Some(deviation) = self.max_fwhm_deviation {
-            InvalidConfigField::finite(
-                "max_fwhm_deviation",
-                "finite and positive",
-                deviation,
-                |value| value > 0.0,
-            )?;
+            ConfigValue::new("max_fwhm_deviation", deviation)
+                .finite_and("finite and positive", |value| value > 0.0)?;
         }
-        InvalidConfigField::finite(
-            "duplicate_min_separation",
-            "finite and non-negative",
-            self.duplicate_min_separation,
-            |value| value >= 0.0,
-        )?;
+        ConfigValue::new("duplicate_min_separation", self.duplicate_min_separation)
+            .finite_and("finite and non-negative", |value| value >= 0.0)?;
         Ok(())
     }
 }

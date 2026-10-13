@@ -19,6 +19,7 @@ use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -27,7 +28,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::cfa::make_cfa;
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
@@ -675,10 +676,18 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
         .collect();
     let sky = Sky {
         level: 0.1,
-        noise: 0.0,
+        noise: None,
         clamp: false,
     };
-    let truth = SkyField::render(size, sky, 1.5, &stars, 0).pixels;
+    let truth = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 1.5,
+            peaks: &stars,
+        },
+    )
+    .pixels;
     let dimensions = ImageDimensions::new((size.width, size.height), 1);
     let settings = [
         (1.0f32, 0.0f32, 0.002f32),
@@ -1046,12 +1055,12 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         )
     };
     let store = |image: &LinearImage| {
-        StoredFrame::spill(
-            &run_scratch,
+        SpillFrame {
             image,
-            &FrameQuality::<Buffer2<f32>>::None,
-            FrameStats::measure(image),
-        )
+            quality: &FrameQuality::<Buffer2<f32>>::None,
+            source_stats: FrameStats::measure(image),
+        }
+        .spill(&run_scratch)
         .unwrap()
     };
     check(
@@ -1076,12 +1085,12 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         (0..4)
             .map(|frame| {
                 let image = mosaic(frame);
-                StoredFrame::spill(
-                    &run_scratch,
-                    &image,
-                    &FrameQuality::<Buffer2<f32>>::None,
-                    FrameStats::measure(&image),
-                )
+                SpillFrame {
+                    image: &image,
+                    quality: &FrameQuality::<Buffer2<f32>>::None,
+                    source_stats: FrameStats::measure(&image),
+                }
+                .spill(&run_scratch)
                 .unwrap()
             })
             .collect(),

@@ -10,7 +10,7 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::internals::synthetic::background_map;
-use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
@@ -24,17 +24,28 @@ use crate::star_detection::tests::stage_effects::{background_estimate, matched_t
 /// The sky these stage tests detect against: bright enough to matter, quiet enough to detect on.
 const DETECTION_SKY: Sky = Sky {
     level: 0.1,
-    noise: 0.01,
+    noise: Some(SkyNoise {
+        sigma: 0.01,
+        seed: 42,
+    }),
     clamp: true,
 };
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
-fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)], seed: u64) -> Buffer2<f32> {
+fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> Buffer2<f32> {
     let stars: Vec<(Vec2, f32)> = stars
         .iter()
         .map(|&(x, y, amp)| (Vec2::new(x, y), amp))
         .collect();
-    SkyField::render(size, DETECTION_SKY, sigma, &stars, seed).pixels
+    SkyField::render(
+        size,
+        DETECTION_SKY,
+        GaussianStars {
+            sigma,
+            peaks: &stars,
+        },
+    )
+    .pixels
 }
 
 fn deblend_config(n_thresholds: usize, min_contrast: f32) -> ExtractionConfig {
@@ -51,7 +62,7 @@ fn deblend_config(n_thresholds: usize, min_contrast: f32) -> ExtractionConfig {
 /// more than one region, exactly one component must have been split — the stars shared it, so
 /// the split is the deblender's and not the threshold's.
 fn deblend_blend(size: Size2us, stars: &[(f32, f32, f32)], contrast: f32) -> Vec<Region> {
-    let pixels = field(size, fwhm::to_sigma(4.0), stars, 42);
+    let pixels = field(size, fwhm::to_sigma(4.0), stars);
     let background = background_estimate(&pixels);
     let result = detect_test(
         &background.residual_of(&pixels),
@@ -164,7 +175,7 @@ fn a_crowded_group_splits_into_every_star() {
         })
         .collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.3)).collect();
-    let pixels = field(Size2us::new(256, 256), fwhm::to_sigma(4.0), &stars, 42);
+    let pixels = field(Size2us::new(256, 256), fwhm::to_sigma(4.0), &stars);
     let background = background_estimate(&pixels);
     for deblend in [
         ExtractionConfig::default().deblend,

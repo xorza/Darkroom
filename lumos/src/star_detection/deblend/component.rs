@@ -28,7 +28,7 @@ impl<'a> Component<'a> {
         labels: &'a LabelMap,
     ) -> Self {
         debug_assert_eq!(
-            Size2us::new(residual.width(), residual.height()),
+            Size2us::from(residual),
             labels.size(),
             "residual and labels must have same dimensions"
         );

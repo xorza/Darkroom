@@ -13,6 +13,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::io::error::{FitsRefusal, FitsWriteError, ImageError};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
+use crate::io::fits::hdu_list::HduList;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -83,22 +84,21 @@ impl FlagsExtension {
     /// when it has none. Refused when the file's claims do not pass [`Self::check_claims`], or
     /// the extension is not this version's.
     pub(crate) fn locate(
-        path: &Path,
-        hdus: &[Hdu],
+        file: HduList<'_>,
         image: usize,
         size: Size2us,
     ) -> Result<Option<usize>, ImageError> {
-        let found = Self::check_claims(path, hdus)?.for_image(path, hdus, image)?;
+        let found = Self::check_claims(file)?.for_image(file, image)?;
         if let Some(index) = found {
-            Self::check(path, &hdus[index], size)?;
+            Self::check(file.path, &file.hdus[index], size)?;
         }
         Ok(found)
     }
 
     /// Each flags extension of the file and the image it is for, refused unless each names an
     /// image of the file that no other names: one that names none would be dropped unseen.
-    pub(crate) fn check_claims(path: &Path, hdus: &[Hdu]) -> Result<ExtensionClaims, ImageError> {
-        ExtensionClaims::of(path, hdus, LumosExtension::Flags)
+    pub(crate) fn check_claims(file: HduList<'_>) -> Result<ExtensionClaims, ImageError> {
+        ExtensionClaims::of(file, LumosExtension::Flags)
     }
 
     /// Refuse a flags HDU that is not this format's: another version, another type or scaling, or
@@ -150,14 +150,11 @@ impl FlagsExtension {
     /// image's NaNs: either file was not the one Lumos wrote.
     pub(crate) fn join(
         path: &Path,
-        stored: FitsData,
-        size: Size2us,
+        stored: Buffer2<u8>,
         decoded: Option<&PixelFlags>,
     ) -> Result<Option<PixelFlags>, ImageError> {
-        let FitsData::U8(mut bytes) = stored else {
-            unreachable!("`check` admitted only BITPIX = 8");
-        };
-        debug_assert_eq!(bytes.len(), size.pixel_count());
+        let size = Size2us::from(&stored);
+        let mut bytes = stored;
         let unknown = !QualityFlags::KNOWN.byte();
         let no_data = QualityFlags::NO_DATA.byte();
         let disagreement = bytes.par_iter().enumerate().find_first(|&(index, &byte)| {
@@ -180,11 +177,16 @@ impl FlagsExtension {
                 .zip(decoded.bytes())
                 .for_each(|(byte, &found)| *byte |= found);
         }
-        Ok(PixelFlags::from_buffer(Buffer2::new(
-            size.width,
-            size.height,
-            bytes,
-        )))
+        Ok(PixelFlags::from_buffer(bytes))
+    }
+
+    /// The bytes of a flags HDU [`Self::locate`] found, `stored` as read, as the plane of the
+    /// `size` image they are for.
+    pub(crate) fn plane(stored: FitsData, size: Size2us) -> Buffer2<u8> {
+        let FitsData::U8(bytes) = stored else {
+            unreachable!("`check` admitted only BITPIX = 8");
+        };
+        Buffer2::new(size.width, size.height, bytes)
     }
 }
 
@@ -221,25 +223,20 @@ mod tests {
             3 => QualityFlags::SATURATED,
             _ => QualityFlags::default(),
         });
-        let joined = FlagsExtension::join(
-            path,
-            FitsData::U8(vec![0, 1, 6, 0, 24, 32]),
-            size,
-            decoded.as_ref(),
-        )
-        .unwrap()
-        .unwrap();
+        let plane = |bytes| FlagsExtension::plane(FitsData::U8(bytes), size);
+        let joined = FlagsExtension::join(path, plane(vec![0, 1, 6, 0, 24, 32]), decoded.as_ref())
+            .unwrap()
+            .unwrap();
         assert_eq!(joined.bytes(), &[0, 1, 6, 2, 24, 32]);
         assert_eq!(joined.count(QualityFlags::SATURATED), 2);
 
         assert!(
-            FlagsExtension::join(path, FitsData::U8(vec![0; 6]), size, None)
+            FlagsExtension::join(path, plane(vec![0; 6]), None)
                 .unwrap()
                 .is_none()
         );
         let reason = fits_refusal(
-            FlagsExtension::join(path, FitsData::U8(vec![0, 0, 0, 0, 0x80, 0]), size, None)
-                .unwrap_err(),
+            FlagsExtension::join(path, plane(vec![0, 0, 0, 0, 0x80, 0]), None).unwrap_err(),
         );
         assert_eq!(
             reason,

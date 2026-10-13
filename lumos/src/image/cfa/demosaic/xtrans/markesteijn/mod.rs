@@ -33,7 +33,7 @@ use crate::error::Cancelled;
 use crate::image::cfa::demosaic::tiled;
 use crate::image::cfa::demosaic::tiled::{Mosaic, TileKernel, Tiling};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
-use crate::image::cfa::demosaic::xtrans::markesteijn::tile::Tile;
+use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{Tile, TileJob};
 use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
@@ -118,7 +118,12 @@ pub(crate) fn demosaic(
         tiling: passes.tiling(),
         new_tile: || Tile::new(passes.directions()),
         run: |tile: &mut Tile, place, out| unsafe {
-            tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out);
+            let job = TileJob {
+                xtrans,
+                hex: &hex,
+                passes,
+            };
+            tile.demosaic(job, place, out);
         },
     };
     mosaic.demosaic(kernel, cancel)

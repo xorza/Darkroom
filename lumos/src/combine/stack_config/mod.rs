@@ -9,7 +9,7 @@ use crate::combine::rejection::Rejection;
 use crate::combine::stack;
 use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack::{FrameSet, FrameSource};
-use crate::error::InvalidConfigField;
+use crate::config_value::ConfigValue;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -308,12 +308,8 @@ impl StackConfig {
 
     /// Validate configuration parameters.
     pub fn validate(&self) -> Result<(), StackConfigError> {
-        InvalidConfigField::check(
-            self.min_survivors >= 1,
-            "min_survivors",
-            "at least 1",
-            self.min_survivors as f64,
-        )?;
+        ConfigValue::count("min_survivors", self.min_survivors)
+            .must_be("at least 1", self.min_survivors >= 1)?;
         if let CombineMethod::Mean(rejection) = &self.combine.method {
             rejection.validate()?;
         }

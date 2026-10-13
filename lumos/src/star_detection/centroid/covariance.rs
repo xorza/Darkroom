@@ -99,12 +99,8 @@ impl Cov2 {
             radius: stamp_radius,
         } = stamp;
         // Caller's contract, not data validation: `compute_star` has already rejected edge positions.
-        let centre = centroid::stamp_centre(
-            pos,
-            Size2us::new(residual.width(), residual.height()),
-            stamp_radius,
-        )
-        .expect("Cov2::windowed needs the whole stamp in frame");
+        let centre = centroid::stamp_centre(pos, Size2us::from(residual), stamp_radius)
+            .expect("Cov2::windowed needs the whole stamp in frame");
         let (x0, y0) = (centre.x - stamp_radius, centre.y - stamp_radius);
         let pos_x = pos.x;
         let pos_y = pos.y;

@@ -29,6 +29,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::app_command::AppCommand;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::session::Session;
+use crate::gui::frame_writes::FrameWrites;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -129,15 +130,10 @@ impl SessionHarness {
         // own when it records, so an open tab draws at full resolution on the
         // frame it appears, in this harness exactly as in production.
         run_state.previews.reconcile(&session.open.document);
-        let ctx = AppCtx::new(
-            theme,
-            library,
-            run_state,
-            StatusInputs {
-                error: None,
-                process_memory: *process_memory,
-            },
-        );
+        let ctx = AppCtx::new(theme, library, run_state).with_status(StatusInputs {
+            error: None,
+            process_memory: *process_memory,
+        });
         // Drained *inside* every pass, as `App::record` does — it is the
         // per-pass entry point in production, and executes what each pass
         // raised. That includes the frames the harness runs first to deliver
@@ -147,7 +143,14 @@ impl SessionHarness {
             // Deliberately dropped: production hands this to `App::record`,
             // which owns the app's one `request_relayout`. This harness
             // asserts on commands and documents, not on layout passes.
-            let _needs_relayout = session.frame(recorder, ctx, preferences, requests);
+            let _needs_relayout = session.frame(
+                recorder,
+                ctx,
+                FrameWrites {
+                    preferences,
+                    requests,
+                },
+            );
             commands.extend(iter::from_fn(|| requests.pop_app()));
         });
         commands

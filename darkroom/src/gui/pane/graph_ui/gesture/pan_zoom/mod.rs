@@ -6,7 +6,6 @@
 
 pub(crate) mod camera_gesture;
 
-use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
 
@@ -14,35 +13,8 @@ use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas;
+use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
-use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::CameraGesture;
-use crate::gui::requests::Requests;
-
-/// Fold a live pan drag into `pan`: the latch's start (read by `start`)
-/// plus `delta` while the drag is held, and a missing delta after a latch is
-/// the release edge that drops it. Returns the latch while it is held; a call
-/// before anything latched does nothing at all. Shared by the canvas and the
-/// image viewer.
-///
-/// Measured from the latch rather than integrated per frame, so a pan lands
-/// exactly where the pointer says however many frames it took (no per-frame
-/// rounding drift).
-pub(crate) fn fold_pan_drag<'s, T>(
-    slot: &'s mut GestureSlot<T>,
-    start: impl FnOnce(&T) -> Vec2,
-    delta: Option<Vec2>,
-    pan: &mut Vec2,
-) -> Option<&'s T> {
-    let Some(delta) = delta else {
-        slot.clear();
-        return None;
-    };
-    let latched = slot.get()?;
-    *pan = start(latched) + delta;
-    Some(latched)
-}
 
 /// Whether `resp` carries any scroll, touchpad or pinch input this frame.
 /// Palantir reports exactly zero, and a unit zoom, for none, so the tests are
@@ -53,61 +25,74 @@ pub(crate) fn scrolled(resp: &ResponseState) -> bool {
         || resp.scroll.zoom != ZoomFactor::ONE
 }
 
-/// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
-/// shared half of the canvas and image-viewer pan/zoom gestures (drag
-/// panning stays with each caller, whose button policy differs):
-/// two-finger `scroll_pixels` pan, wheel `scroll_lines` zoom-about-
-/// cursor, and pinch `zoom_factor` zoom-about-cursor, clamped to the
-/// caller's `[min_zoom, max_zoom]`.
-pub(crate) fn fold_scroll_zoom(
-    v: &mut Viewport,
-    ui: &Ui,
-    resp: &ResponseState,
-    min_zoom: f32,
-    max_zoom: f32,
-) {
-    if resp.scroll.pixels != Vec2::ZERO {
-        v.pan -= resp.scroll.pixels;
-    }
-    if resp.scroll.lines.y != 0.0
-        && let Some(pivot) = resp.pointer_local
-    {
-        let text = &ui.theme().text;
-        let line_px = text.line_height_for(text.font_size);
-        zoom_about(
-            &mut v.pan,
-            &mut v.zoom,
-            pivot,
-            scroll_to_zoom_factor(resp.scroll.lines.y * line_px),
-            min_zoom,
-            max_zoom,
-        );
-    }
-    if resp.scroll.zoom != ZoomFactor::ONE
-        && let Some(pivot) = resp.pointer_local
-    {
-        zoom_about(
-            &mut v.pan,
-            &mut v.zoom,
-            pivot,
-            resp.scroll.zoom.get(),
-            min_zoom,
-            max_zoom,
-        );
-    }
+/// The zoom factors a surface allows. Pinch / scroll-zoom deltas multiply in;
+/// clamped each frame so pathological gestures can't drive the zoom to 0
+/// (which would make the inverse transform explode) or to a value so large
+/// that the world coordinates underflow.
+///
+/// A type rather than a pair of bounds, because the canvas and the image viewer
+/// bound zoom differently and both pass their range into the same folding: a
+/// named range says which surface's is in play.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ZoomRange {
+    pub(crate) min: f32,
+    pub(crate) max: f32,
 }
 
-/// Bounds on the canvas zoom factor. Pinch / scroll-zoom deltas
-/// multiply in; clamped each frame so pathological gestures can't
-/// drive it to 0 (which would make the inverse transform explode) or
-/// to a value so large that the world coordinates underflow.
-///
-/// Named apart from the image viewer's own (far wider)
-/// `VIEWER_MIN_ZOOM`/`VIEWER_MAX_ZOOM` because both pairs are passed into the
-/// shared [`fold_scroll_zoom`] / [`zoom_about`], where an unqualified
-/// `MIN_ZOOM` at the call site wouldn't say which surface's range is in play.
-const CANVAS_MIN_ZOOM: f32 = 0.1;
-const CANVAS_MAX_ZOOM: f32 = 5.0;
+/// The canvas's zoom range.
+const CANVAS_ZOOM: ZoomRange = ZoomRange { min: 0.1, max: 5.0 };
+
+impl ZoomRange {
+    /// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
+    /// shared half of the canvas and image-viewer pan/zoom gestures (drag
+    /// panning stays with each caller, whose button policy differs):
+    /// two-finger `scroll_pixels` pan, wheel `scroll_lines` zoom-about-
+    /// cursor, and pinch `zoom_factor` zoom-about-cursor, clamped to this
+    /// range.
+    pub(crate) fn fold_scroll(self, v: &mut Viewport, ui: &Ui, resp: &ResponseState) {
+        if resp.scroll.pixels != Vec2::ZERO {
+            v.pan -= resp.scroll.pixels;
+        }
+        if resp.scroll.lines.y != 0.0
+            && let Some(pivot) = resp.pointer_local
+        {
+            let text = &ui.theme().text;
+            let line_px = text.line_height_for(text.font_size);
+            self.zoom_about(
+                v,
+                pivot,
+                scroll_to_zoom_factor(resp.scroll.lines.y * line_px),
+            );
+        }
+        if resp.scroll.zoom != ZoomFactor::ONE
+            && let Some(pivot) = resp.pointer_local
+        {
+            self.zoom_about(v, pivot, resp.scroll.zoom.get());
+        }
+    }
+
+    /// Multiply `v`'s zoom by `factor` while holding the pre-transform point
+    /// under `pivot_local` fixed in the pane, so a gesture can fold several
+    /// inputs before emitting/committing once. Standard zoom-about-cursor
+    /// algebra: world point under cursor = `(pivot - pan) / zoom`; choose new
+    /// pan so that same world point stays under the same screen pixel after
+    /// scaling. Clamps to this range; ignores non-finite / non-positive
+    /// factors. Shared with [`crate::gui::pane::image_viewer`].
+    pub(crate) fn zoom_about(self, v: &mut Viewport, pivot_local: Vec2, factor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let new_zoom = self.clamp(v.zoom * factor);
+        let effective = new_zoom / v.zoom;
+        v.pan = pivot_local - (pivot_local - v.pan) * effective;
+        v.zoom = new_zoom;
+    }
+
+    /// `zoom` held to this range.
+    const fn clamp(self, zoom: f32) -> f32 {
+        zoom.clamp(self.min, self.max)
+    }
+}
 
 /// Per-pixel base for converting wheel / touchpad scroll into a
 /// multiplicative zoom factor. Tuned so a single classic wheel notch
@@ -117,90 +102,12 @@ const CANVAS_MAX_ZOOM: f32 = 5.0;
 /// zoom, higher → snappier but jumps badly on touchpad.
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
-/// Read the outer canvas's current-frame response, compute the target
-/// viewport, and emit a `GraphIntent::SetViewport` when it changed. The
-/// intent (not a direct write) is the only thing that mutates the document's
-/// viewport — so pan/zoom rides the same undo path as every other edit, and
-/// each of `camera`'s gestures folds into one undo entry. Three independent
-/// sources:
-///
-/// - **Middle-button drag** (`Sense::DRAG` + `Ui::drag_delta_by`): canvas
-///   pan, `anchor + delta` from the latch until release. Left-drag stays with
-///   rubber-band selection.
-/// - **Scroll** (`Sense::SCROLL`): a two-finger touchpad swipe pans, and a
-///   mouse wheel zooms about the cursor (graph-editor convention: Figma /
-///   Blender node editor / `ComfyUI`). Palantir ingests the scroll delta
-///   already negated, so `+y` means "scroll content down" → zoom out, and
-///   `-y` (wheel up) → zoom in.
-/// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
-///   `Response::pointer_local` pivot.
-pub(crate) fn emit(
-    camera: &mut CameraGesture,
-    ui: &Ui,
-    graph_ctx: GraphCtx<'_>,
-    gesture: Option<CanvasGesture>,
-    out: &mut Requests,
-) {
-    let viewport = graph_ctx.viewport();
-    let resp = ui.response_for(canvas::outer_wid());
-    let mut v = viewport;
-    // Pan latch comes from the central classification; continuation and
-    // wheel/pinch zoom below read the response directly (not arbitration).
-    if gesture == Some(CanvasGesture::Pan) {
-        camera.latch_pan(viewport.pan, out);
-    }
-    let held = camera.fold_pan(resp.middle.drag.delta(), &mut v.pan);
-    fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
-    // Only emit when the gesture actually moved the viewport (approx
-    // compare — exact float `!=` would emit on the last-bit noise the
-    // zoom-about-cursor algebra leaves behind, which `approximately_eq`
-    // reads at the pan's own magnitude rather than against a fixed
-    // epsilon a four-digit pan would swamp).
-    let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
-    if unchanged {
-        return;
-    }
-    // A frame that both pans and scrolls belongs to the held pan.
-    let gesture = held.unwrap_or_else(|| camera.scroll_frame(ui.now(), out));
-    out.push_graph(GraphIntent::SetViewport {
-        to: v,
-        gesture: Some(gesture),
-    });
-}
-
-/// Multiply `zoom` by `factor` while holding the pre-transform point
-/// under `pivot_local` fixed in the pane. Operates on the caller's
-/// local `(pan, zoom)` so a gesture can fold several inputs before
-/// emitting/committing once. Standard zoom-about-cursor algebra: world
-/// point under cursor = `(pivot - pan) / zoom`; choose new pan so that
-/// same world point stays under the same screen pixel after scaling.
-/// Clamps to `[min_zoom, max_zoom]` (callers pass their own range —
-/// the canvas and the image viewer bound zoom differently); ignores
-/// non-finite / non-positive factors. Shared with
-/// [`crate::gui::pane::image_viewer`].
-pub(crate) fn zoom_about(
-    pan: &mut Vec2,
-    zoom: &mut f32,
-    pivot_local: Vec2,
-    factor: f32,
-    min_zoom: f32,
-    max_zoom: f32,
-) {
-    if !factor.is_finite() || factor <= 0.0 {
-        return;
-    }
-    let new_zoom = (*zoom * factor).clamp(min_zoom, max_zoom);
-    let effective = new_zoom / *zoom;
-    *pan = pivot_local - (pivot_local - *pan) * effective;
-    *zoom = new_zoom;
-}
-
 /// Map a one-frame vertical scroll delta (in logical px, palantir's
 /// "advance offset forward" sign convention — `+y` = scroll content
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
 /// up) zooms in (`factor > 1`); positive (wheel down) zooms out
 /// (`factor < 1`). Pure function so it can be unit-tested without
-/// spinning up a UI. [`fold_scroll_zoom`] is its one reader, for the canvas
+/// spinning up a UI. [`ZoomRange::fold_scroll`] is its one reader, for the canvas
 /// and the viewer alike.
 fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
@@ -224,31 +131,29 @@ pub(crate) enum Framing {
     ShowSelected,
 }
 
-/// Compute the `SetViewport` intent a [`Framing`] implies, or `None`
-/// when there's nothing to frame — `ShowSelected` with an empty
-/// selection, no nodes to fit, or the viewport not yet measured. The
-/// pane size comes from the outer canvas's `layout_rect`; node extents
-/// come from `geometry`'s cross-frame size cache, position from
-/// `NodeCtx::pos`.
-pub(crate) fn framing_intent(
-    ui: &Ui,
-    geometry: &CanvasGeometry,
-    graph_ctx: GraphCtx<'_>,
-    framing: Framing,
-) -> Option<GraphIntent> {
-    let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
-    let pane = Vec2::new(vp.w, vp.h);
-    let to = match framing {
-        Framing::Reset => reset_target(geometry, graph_ctx, pane),
-        Framing::ShowAll => fit_target(node_bounds(geometry, graph_ctx, Bounded::All)?, pane),
-        Framing::ShowSelected => {
-            if graph_ctx.selected().is_empty() {
-                return None;
+impl Framing {
+    /// The `SetViewport` intent this framing implies on the canvas `cx`, or
+    /// `None` when there's nothing to frame — `ShowSelected` with an empty
+    /// selection, no nodes to fit, or the viewport not yet measured. The pane
+    /// size comes from the outer canvas's `layout_rect`; node extents come
+    /// from the geometry's cross-frame size cache, position from
+    /// `NodeCtx::pos`.
+    pub(crate) fn intent(self, ui: &Ui, cx: CanvasCtx<'_>) -> Option<GraphIntent> {
+        let (geometry, graph_ctx) = (cx.geometry(), cx.graph_ctx());
+        let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
+        let pane = Vec2::new(vp.w, vp.h);
+        let to = match self {
+            Self::Reset => reset_target(geometry, graph_ctx, pane),
+            Self::ShowAll => fit_target(node_bounds(geometry, graph_ctx, Bounded::All)?, pane),
+            Self::ShowSelected => {
+                if graph_ctx.selected().is_empty() {
+                    return None;
+                }
+                fit_target(node_bounds(geometry, graph_ctx, Bounded::Selected)?, pane)
             }
-            fit_target(node_bounds(geometry, graph_ctx, Bounded::Selected)?, pane)
-        }
-    };
-    Some(GraphIntent::SetViewport { to, gesture: None })
+        };
+        Some(GraphIntent::SetViewport { to, gesture: None })
+    }
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
@@ -304,7 +209,7 @@ fn node_bounds(
 /// Fit `bounds` (world coords) centered in a `viewport`-sized pane,
 /// leaving [`FIT_MARGIN`] on every side. The scale is the tighter of the
 /// two per-axis fits, never magnified past 1:1 (a lone small node
-/// shouldn't balloon), and clamped to `[CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM]`. Placing the
+/// shouldn't balloon), and clamped to [`CANVAS_ZOOM`]. Placing the
 /// bbox center at the viewport center uses the same `outer_local = pan +
 /// scale * world` mapping the inner-canvas transform applies.
 fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
@@ -322,7 +227,7 @@ fn fit_target(bounds: Rect, pane: Vec2) -> Viewport {
     } else {
         f32::INFINITY
     };
-    let zoom = sx.min(sy).min(1.0).clamp(CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
+    let zoom = CANVAS_ZOOM.clamp(sx.min(sy).min(1.0));
     let pan = pane * 0.5 - bounds.center() * zoom;
     Viewport { pan, zoom }
 }

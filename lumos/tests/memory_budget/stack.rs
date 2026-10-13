@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use lumos::{
-    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NoMasterCache, ProgressMonitor,
-    RunReport, StackConfig,
+    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterBuild, NoMasterCache,
+    ProgressMonitor, RunReport, StackConfig,
 };
 
 use crate::alone::alone;
@@ -64,15 +64,17 @@ fn a_master_stays_within_its_budget() {
         let none: &[PathBuf] = &[];
         let run = session.measure(|| {
             CalibrationMasters::build(
-                CalibrationSet {
-                    dark: darks.as_slice(),
-                    flat: none,
-                    bias: none,
-                    flat_dark: none,
+                MasterBuild {
+                    frames: CalibrationSet {
+                        dark: darks.as_slice(),
+                        flat: none,
+                        bias: none,
+                        flat_dark: none,
+                    },
+                    sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+                    cache: &NoMasterCache,
                 },
-                DEFAULT_SIGMA_THRESHOLD,
                 &ingest,
-                &NoMasterCache,
                 &ProgressMonitor::unattended(),
             )
             .unwrap()

@@ -10,7 +10,9 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{LIGHTS, MasterFiles};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::calibration_masters::{
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, MasterBuild,
+};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::master_cache::NoMasterCache;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -62,10 +64,12 @@ pub(crate) fn integration(c: &mut Criterion) {
         };
         b.iter(|| {
             CalibrationMasters::build(
-                frames,
-                DEFAULT_SIGMA_THRESHOLD,
+                MasterBuild {
+                    frames,
+                    sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+                    cache: &NoMasterCache,
+                },
                 &ingest,
-                &NoMasterCache,
                 &ProgressMonitor::unattended(),
             )
             .unwrap()

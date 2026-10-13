@@ -66,8 +66,7 @@ impl ClippedStats {
         }
     }
 
-    /// Sigma-clipped median, MAD-sigma and mean of `values`, rejecting outliers beyond
-    /// `kappa × sigma` from the median over `iterations` passes.
+    /// Sigma-clipped median, MAD-sigma and mean of `values`, under `clip`.
     ///
     /// `values` must be NaN-free, as a NaN never passes the clip's band and so has no place among
     /// the survivors whose mean this reports, and is reordered in place.
@@ -78,8 +77,7 @@ impl ClippedStats {
     pub(crate) fn sigma_clipped(
         values: &mut [f32],
         deviations: &mut impl DeviationScratch,
-        kappa: f32,
-        iterations: usize,
+        clip: SigmaClip,
     ) -> Self {
         if values.is_empty() {
             return Self::ZERO;
@@ -89,8 +87,16 @@ impl ClippedStats {
             "sigma_clipped requires NaN-free values"
         );
 
-        sigma_clipped_core(values, deviations.sized_to(values.len()), kappa, iterations)
+        sigma_clipped_core(values, deviations.sized_to(values.len()), clip)
     }
+}
+
+/// How a sigma clip rejects: values beyond `kappa × sigma` from the median, over `iterations`
+/// passes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SigmaClip {
+    pub(crate) kappa: f32,
+    pub(crate) iterations: usize,
 }
 
 /// What one clip pass found.
@@ -114,7 +120,8 @@ struct Clipping<'a, D> {
 impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
     /// Iteratively clip the values, `iterations` passes at most at `kappa` σ, then measure what
     /// survived.
-    fn clip(mut self, kappa: f32, iterations: usize) -> Survivors {
+    fn clip(mut self, clip: SigmaClip) -> Survivors {
+        let SigmaClip { kappa, iterations } = clip;
         let (mut len, mut boundary) = (self.keys.len(), 0);
         for _ in 0..iterations {
             if len < 3 {
@@ -201,12 +208,7 @@ struct Survivors {
 ///
 /// `deviations` must already be `values.len()` long — [`ClippedStats::sigma_clipped`] sizes it
 /// through [`DeviationScratch`], and everything after the sizing lives here.
-fn sigma_clipped_core(
-    values: &mut [f32],
-    deviations: &mut [f32],
-    kappa: f32,
-    iterations: usize,
-) -> ClippedStats {
+fn sigma_clipped_core(values: &mut [f32], deviations: &mut [f32], clip: SigmaClip) -> ClippedStats {
     // The values are clipped as their total-order keys, mapped at most once each way: each pass
     // selects twice, and the keys select with nothing mapped. Keys left unmapped are the values'
     // own bits, which read back as the values with no flip.
@@ -217,14 +219,14 @@ fn sigma_clipped_core(
             deviations,
             decode: f32::from_key,
         }
-        .clip(kappa, iterations)
+        .clip(clip)
     } else {
         Clipping {
             keys: order.keys(),
             deviations,
             decode: |key: i32| f32::from_bits(key.cast_unsigned()),
         }
-        .clip(kappa, iterations)
+        .clip(clip)
     };
     let values = order.into_values();
     ClippedStats::from_median_mad(survivors.location, sum::mean_f32(&values[..survivors.len]))

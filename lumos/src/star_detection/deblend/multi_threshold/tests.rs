@@ -13,7 +13,7 @@ use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::internals::{
-    TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
+    Ladder, TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
     make_test_component, separated_pair,
 };
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
@@ -36,7 +36,7 @@ fn single_star_no_deblending() {
         )],
     );
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(result.len(), 1, "Single star should produce one object");
     assert!((result[0].peak.x as i32 - 50).abs() <= 1);
@@ -52,7 +52,7 @@ fn two_separated_stars_deblend() {
     } = separated_pair(0.8);
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(
         result.len(),
@@ -111,9 +111,10 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
 
     let result = deblend_multi_threshold_test(
         &Component::new(&data, &pixels, &labels),
-        threshold_count,
-        3,
-        0.005,
+        Ladder {
+            n_thresholds: threshold_count,
+            ..Ladder::STANDARD
+        },
     );
     let mut peaks: Vec<_> = result.iter().map(|region| region.peak.x).collect();
     peaks.sort_unstable();
@@ -133,8 +134,13 @@ fn faint_secondary_below_contrast() {
         data,
     } = separated_pair(0.001);
 
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.01);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            min_contrast: 0.01,
+            ..Ladder::STANDARD
+        },
+    );
 
     assert_eq!(
         result.len(),
@@ -181,8 +187,13 @@ fn close_peaks_merge() {
         ],
     );
 
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 5, 0.005);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            min_separation: 5,
+            ..Ladder::STANDARD
+        },
+    );
 
     assert_eq!(result.len(), 1, "Close peaks should not be deblended");
 }
@@ -195,7 +206,13 @@ fn deblend_disabled_with_high_contrast() {
         data,
     } = separated_pair(0.8);
 
-    let result = deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 1.0);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            min_contrast: 1.0,
+            ..Ladder::STANDARD
+        },
+    );
 
     assert_eq!(
         result.len(),
@@ -220,7 +237,7 @@ fn three_stars_deblend() {
     );
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(
         result.len(),
@@ -250,7 +267,13 @@ fn hierarchical_deblend() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.1);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            min_contrast: 0.1,
+            ..Ladder::STANDARD
+        },
+    );
 
     assert!(
         result.len() >= 2,
@@ -315,7 +338,7 @@ fn equal_brightness_stars() {
     } = separated_pair(1.0);
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(
         result.len(),
@@ -345,11 +368,25 @@ fn contrast_at_boundary() {
     } = separated_pair(0.1);
     let component = Component::new(&data, &pixels, &labels);
     assert_eq!(
-        deblend_multi_threshold_test(&component, 32, 3, 0.08).len(),
+        deblend_multi_threshold_test(
+            &component,
+            Ladder {
+                min_contrast: 0.08,
+                ..Ladder::STANDARD
+            }
+        )
+        .len(),
         2
     );
     assert_eq!(
-        deblend_multi_threshold_test(&component, 32, 3, 0.10).len(),
+        deblend_multi_threshold_test(
+            &component,
+            Ladder {
+                min_contrast: 0.10,
+                ..Ladder::STANDARD
+            }
+        )
+        .len(),
         1
     );
 }
@@ -363,7 +400,7 @@ fn pixel_assignment_conservation() {
     } = separated_pair(0.8);
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(
@@ -387,7 +424,7 @@ fn vertical_star_pair() {
     );
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(result.len(), 2, "Vertically separated stars should deblend");
 
@@ -412,7 +449,7 @@ fn diagonal_star_pair() {
     );
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(result.len(), 2, "Diagonally separated stars should deblend");
 }
@@ -437,10 +474,23 @@ fn n_thresholds_effect() {
     );
     let component = Component::new(&data, &pixels, &labels);
     assert_eq!(
-        deblend_multi_threshold_test(&component, 4, 3, 0.005).len(),
+        deblend_multi_threshold_test(
+            &component,
+            Ladder {
+                n_thresholds: 4,
+                ..Ladder::STANDARD
+            }
+        )
+        .len(),
         1
     );
-    let split = deblend_multi_threshold_test(&component, 64, 3, 0.005);
+    let split = deblend_multi_threshold_test(
+        &component,
+        Ladder {
+            n_thresholds: 64,
+            ..Ladder::STANDARD
+        },
+    );
     let mut peaks: Vec<usize> = split.iter().map(|region| region.peak.x).collect();
     peaks.sort_unstable();
     assert_eq!(peaks, [46, 54]);
@@ -462,7 +512,7 @@ fn single_pixel_component() {
     };
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(result.len(), 1, "Single pixel should produce one object");
     assert_eq!(result[0].area, 1);
@@ -497,7 +547,7 @@ fn flat_profile_no_deblend() {
     };
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(
         result.len(),
@@ -568,9 +618,7 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
     let result = deblend_multi_threshold_floored(
         &Component::new(&data, &pixels, &labels),
         0.01,
-        32,
-        3,
-        0.005,
+        Ladder::STANDARD,
     );
 
     assert_eq!(
@@ -603,7 +651,7 @@ fn many_stars_are_all_kept() {
     } = make_test_component(Size2us::new(180, 100), &stars);
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     let mut peaks: Vec<usize> = result.iter().map(|region| region.peak.x).collect();
     peaks.sort_unstable();
@@ -633,8 +681,13 @@ fn a_wide_split_keeps_every_child() {
         data,
     } = make_test_component(Size2us::new(150, 150), &stars);
 
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 64, 3, 0.005);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            n_thresholds: 64,
+            ..Ladder::STANDARD
+        },
+    );
 
     let mut peaks: Vec<(usize, usize)> = result
         .iter()
@@ -680,8 +733,9 @@ fn buffer_reuse_consistency() {
             min_separation: 3,
             min_area: 1,
             connectivity: Connectivity::Eight,
+            floor,
         }
-        .deblend(&component, floor, buffers, &mut regions);
+        .deblend(&component, buffers, &mut regions);
         regions
             .iter()
             .map(|region| (region.peak, region.bbox, region.area))
@@ -716,7 +770,7 @@ fn bbox_contains_all_peaks() {
     );
 
     let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     for candidate in &result {
         assert!(
@@ -737,8 +791,13 @@ fn single_threshold_level() {
         data,
     } = separated_pair(0.8);
 
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 1, 3, 0.005);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        Ladder {
+            n_thresholds: 1,
+            ..Ladder::STANDARD
+        },
+    );
 
     // Should still produce valid output
     assert!(!result.is_empty(), "Should produce at least one object");
@@ -778,13 +837,9 @@ fn a_region_under_min_area_is_no_object() {
             min_separation: 1,
             min_area,
             connectivity: Connectivity::Eight,
-        }
-        .deblend(
-            &component,
             floor,
-            &mut DeblendBuffers::default(),
-            &mut regions,
-        );
+        }
+        .deblend(&component, &mut DeblendBuffers::default(), &mut regions);
         let mut peaks: Vec<(usize, usize)> = regions
             .iter()
             .map(|region| (region.peak.x, region.peak.y))
@@ -825,8 +880,9 @@ fn the_scratch_follows_the_pixels_not_the_box() {
         min_separation: 3,
         min_area: 1,
         connectivity: Connectivity::Eight,
+        floor: 0.5,
     }
-    .deblend(&component, 0.5, &mut buffers, &mut regions);
+    .deblend(&component, &mut buffers, &mut regions);
     LocalMaximaParams {
         min_separation: 3,
         min_prominence: 0.3,

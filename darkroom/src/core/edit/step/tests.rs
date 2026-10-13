@@ -50,14 +50,18 @@ fn cst(v: f64) -> Binding {
     Binding::Const(ConstValue::Float(v))
 }
 
-fn subscription(emitter: NodeId, subscriber: NodeId, from: bool, to: bool) -> UndoStep {
+/// `subscriber` subscribing to `emitter`'s first event.
+fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
     UndoStep::SetSubscription(SetSubscription {
         subscription: Subscription {
             emitter,
             event_idx: 0,
             subscriber,
         },
-        subscribed: Change { from, to },
+        subscribed: Change {
+            from: false,
+            to: true,
+        },
     })
 }
 
@@ -122,7 +126,7 @@ fn dirties_document_splits_edits_from_navigation() {
         move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
         set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
         node_property(node_id, CacheMode::None, CacheMode::Ram),
-        subscription(node_id, NodeId::unique(), false, true),
+        subscribed(node_id, NodeId::unique()),
     ];
     for step in &content {
         assert!(step.dirties_document(), "content step must dirty: {step:?}");
@@ -181,7 +185,7 @@ fn retypes_outputs_splits_wiring_from_everything_else() {
             }),
             false,
         ),
-        (subscription(node_id, NodeId::unique(), false, true), false),
+        (subscribed(node_id, NodeId::unique()), false),
     ];
     for (step, retypes) in &every_kind {
         assert_eq!(step.retypes_outputs(), *retypes, "{step:?}");
@@ -225,7 +229,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         // A dimmed body and a filled badge keep the same rect...
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         // ...and an event wire paints between glyphs that are already there.
-        subscription(node_id, NodeId::unique(), false, true),
+        subscribed(node_id, NodeId::unique()),
     ];
     for step in &moves {
         assert!(

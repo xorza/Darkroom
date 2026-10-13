@@ -17,7 +17,7 @@ use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -26,13 +26,15 @@ const W: usize = 128;
 const H: usize = 128;
 
 fn demo_scene(seed: u64) -> Scene {
-    Scene::random_field(
+    Scene::scatter(
         Size2us::new(W, H),
-        20,
-        (4.0, 10.0),
+        Scatter {
+            count: 20,
+            flux: (4.0, 10.0),
+            placement: Placement::Uniform { margin: 16.0 },
+            seed,
+        },
         BackgroundField::Uniform { level: 0.1 },
-        16.0,
-        seed,
     )
 }
 
@@ -43,14 +45,16 @@ struct FrameSet {
     clean: Buffer2<f32>,
 }
 
-/// Render `n` noisy frames of one scene with independent per-frame noise; the clean truth
-/// (the noiseless signal every frame is a noisy realization of) is identical across frames.
-fn frame_set(scene: &Scene, camera: &Camera, n: usize, base_seed: u64) -> FrameSet {
+/// Render `n` noisy frames of one scene through a realistic camera of FWHM 4, with independent
+/// per-frame noise; the clean truth (the noiseless signal every frame is a noisy realization of)
+/// is identical across frames.
+fn frame_set(scene: &Scene, n: usize, base_seed: u64) -> FrameSet {
+    let camera = Camera::realistic(4.0);
     let sims: Vec<SimFrame> = (0..n)
         .map(|i| {
             render(
                 scene,
-                camera,
+                &camera,
                 &Observation::reference(base_seed.wrapping_add(i as u64 * 7919)),
             )
         })
@@ -87,9 +91,8 @@ fn outlier_sites() -> [(usize, usize, usize); 4] {
 #[test]
 fn mean_stack_reduces_noise_as_sqrt_n() {
     let scene = demo_scene(1);
-    let camera = Camera::realistic(4.0);
     let n = 16;
-    let FrameSet { sims, clean } = frame_set(&scene, &camera, n, 100);
+    let FrameSet { sims, clean } = frame_set(&scene, n, 100);
 
     // Residual RMS vs the clean truth: a single frame vs the N-frame mean.
     let single_rms = rms_diff(sims[0].image.channel(0).pixels(), clean.pixels());
@@ -118,9 +121,8 @@ fn mean_stack_reduces_noise_as_sqrt_n() {
 #[test]
 fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
     let scene = demo_scene(2);
-    let camera = Camera::realistic(4.0);
     let n = 14;
-    let FrameSet { mut sims, clean } = frame_set(&scene, &camera, n, 200);
+    let FrameSet { mut sims, clean } = frame_set(&scene, n, 200);
 
     let sites = outlier_sites();
     for &(f, x, y) in &sites {
@@ -179,9 +181,8 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
 #[test]
 fn all_rejection_methods_remove_outliers() {
     let scene = demo_scene(3);
-    let camera = Camera::realistic(4.0);
     let n = 15;
-    let FrameSet { mut sims, clean } = frame_set(&scene, &camera, n, 300);
+    let FrameSet { mut sims, clean } = frame_set(&scene, n, 300);
 
     let sites = outlier_sites();
     for &(f, x, y) in &sites {
@@ -337,8 +338,7 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
 #[test]
 fn rejection_methods_preserve_clean_frames() {
     let scene = demo_scene(5);
-    let camera = Camera::realistic(4.0);
-    let FrameSet { sims, clean } = frame_set(&scene, &camera, 15, 500);
+    let FrameSet { sims, clean } = frame_set(&scene, 15, 500);
     let mean_rms = rms_diff(
         stack_frames(
             &sims,

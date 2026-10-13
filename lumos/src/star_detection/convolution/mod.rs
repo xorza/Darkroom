@@ -36,16 +36,15 @@ fn kernel_radius(sigma: f32) -> usize {
 }
 
 fn convolve_2d(pixels: &Buffer2<f32>, kernel: simd::Kernel2d<'_>, output: &mut Buffer2<f32>) {
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = Size2us::from(pixels);
     output
         .pixels_mut()
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, output_row)| {
             Convolve2dRow {
-                input: pixels.pixels(),
+                input: pixels,
                 output_row,
-                size,
                 y,
                 kernel,
             }
@@ -86,16 +85,15 @@ fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
 /// row. Each output row depends on input rows `[y-radius, y+radius]` (mirror edges), so rows are
 /// independent.
 fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-    let size = Size2us::new(input.width(), input.height());
+    let size = Size2us::from(input);
     output
         .pixels_mut()
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, out_row)| {
             ConvolveColsRow {
-                input: input.pixels(),
+                input,
                 out_row,
-                size,
                 y,
                 kernel,
             }

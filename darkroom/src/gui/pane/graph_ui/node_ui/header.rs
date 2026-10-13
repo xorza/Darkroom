@@ -20,21 +20,22 @@ use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::gui::app::app_command::AppCommand;
 use crate::gui::app::app_command::run_command::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
+use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::node_widget;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::pane::graph_ui::paint::inspectors;
 use crate::gui::pane::graph_ui::paint::inspectors::InspectMode;
-use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::badge::{BADGE_SIZE, Badge};
+use crate::gui::widgets::badge::{BADGE_SIZE, Badge, BadgeFace};
 use crate::gui::widgets::format::elapsed::Elapsed;
+use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
 use crate::gui::widgets::support::{CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP};
+use crate::gui::widgets::toggle::Toggle;
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
@@ -80,9 +81,10 @@ const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
 /// the *protruding* half starts a subscription wire aimed at an emitter
 /// (see `SubscriptionUI`); the body-covered half yields presses to the
 /// node (the body records after, so it hit-tests on top), while
-/// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
+/// drop-snapping (rect-based) still accepts the whole box. `hover` (over
 /// while a drag snaps to it) tints the triangle as drop feedback.
-pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, hovered: bool) {
+pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
+    let theme = node.theme();
     // The emitter arrow turned half a turn — mirroring its apex from right to
     // left — plus a quarter, aiming it up-left along the wire arriving from
     // there. Placed by its grown box's center rather than in flow, so it
@@ -90,7 +92,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
     PortGlyph::arrow(
         subscription_glyph_wid(node.id),
         theme.ports.size,
-        port_color::event(theme, hovered),
+        hover.lift(port_color::event(theme)),
     )
     .turn(PI + FRAC_PI_4)
     .centered_on(node.pos)
@@ -117,7 +119,8 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// Reports whether the inspect chip was clicked — cycling a panel needs
 /// `&mut Inspectors`, which the draw holds only shared, so the caller applies
 /// it once the draw is over.
-pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) -> bool {
+pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
+    let (ncx, dcx) = (rec.node, rec.draw);
     let (theme, node) = (ncx.theme(), ncx);
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -139,9 +142,9 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Re
             if node.runnable() && play_chip(ui, theme, node) {
                 // Run this node's cone — the same command the context menu's
                 // "Run to this node" resolves to.
-                out.push_app(AppCommand::Run(RunCommand::Node(node.id)));
+                rec.out.push_app(AppCommand::Run(RunCommand::Node(node.id)));
             }
-            title(ui, ncx, out);
+            title(ui, rec);
             // Splits the title (left) from the descriptive cluster
             // (right): the markers, then inspect.
             support::hspacer(ui, "header_spacer");
@@ -150,19 +153,23 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Re
             // title; the interactive controls stay in `status_row` below.
             if node.sink() {
                 Badge::marker(
+                    BadgeFace::text(
+                        "■",
+                        theme.colors.badge_sink,
+                        "Sink — runs for its effect, not for a value",
+                    ),
                     "badge_sink",
-                    "■",
-                    theme.colors.badge_sink,
-                    "Sink — runs for its effect, not for a value",
                 )
                 .show(ui);
             }
             if node.impure() {
                 Badge::marker(
+                    BadgeFace::text(
+                        "~",
+                        theme.colors.badge_impure,
+                        "Impure — holds work that recomputes every run, never cached",
+                    ),
                     "badge_impure",
-                    "~",
-                    theme.colors.badge_impure,
-                    "Impure — holds work that recomputes every run, never cached",
                 )
                 .show(ui);
             }
@@ -175,11 +182,9 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Re
                 theme.colors.text_muted
             };
             Badge::control(
-                "i",
-                color,
-                mode == Some(InspectMode::Pinned),
+                BadgeFace::text("i", color, "Inspect — values, status, log"),
                 inspectors::inspect_badge_wid(node.id),
-                "Inspect — values, status, log",
+                Toggle::from(mode == Some(InspectMode::Pinned)),
             )
             .show(ui)
         })
@@ -191,7 +196,8 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Re
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
+pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+    let ncx = rec.node;
     let (theme, node) = (ncx.theme(), ncx);
     Panel::hstack()
         .id_salt("status_row")
@@ -242,35 +248,33 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
             // Only runnable sinks can be disabled from Darkroom, so running a
             // disabled node can still evaluate its ordinary upstream cone.
             if node.can_disable() {
-                property_chip(
-                    ui,
-                    theme,
-                    node,
-                    PropertyChip {
-                        glyph: "D",
-                        // Never takes an accent: disabling is a suppression,
-                        // not a stored value the way a cache bit is.
-                        on_color: theme.colors.text_muted,
-                        on: node.disabled(),
-                        tag: "disable_badge",
-                        tip: "Disable — exclude this sink from graph runs",
-                        to: NodeProperty::Disabled(!node.disabled()),
-                        then: None,
-                    },
-                    out,
-                );
+                PropertyChip {
+                    glyph: "D",
+                    // Never takes an accent: disabling is a suppression,
+                    // not a stored value the way a cache bit is.
+                    on_color: theme.colors.text_muted,
+                    state: Toggle::from(node.disabled()),
+                    tag: "disable_badge",
+                    tip: "Disable — exclude this sink from graph runs",
+                    to: NodeProperty::Disabled(!node.disabled()),
+                    then: None,
+                }
+                .show(ui, rec);
             }
             if node.can_evict_cache()
                 && Badge::control(
-                    "↻",
-                    theme.colors.badge_cache,
-                    false,
+                    BadgeFace::text(
+                        "↻",
+                        theme.colors.badge_cache,
+                        "Drop this node and downstream caches from RAM and disk",
+                    ),
                     wid::node("cache_eviction_badge", node.id),
-                    "Drop this node and downstream caches from RAM and disk",
+                    Toggle::Off,
                 )
                 .show(ui)
             {
-                out.push_app(AppCommand::Run(RunCommand::EvictCache(node.id)));
+                rec.out
+                    .push_app(AppCommand::Run(RunCommand::EvictCache(node.id)));
             }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and
@@ -294,7 +298,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     PropertyChip {
                         glyph: "R",
                         on_color: theme.colors.badge_cache,
-                        on: ram,
+                        state: Toggle::from(ram),
                         tag: "ram_badge",
                         tip: "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
@@ -303,7 +307,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     PropertyChip {
                         glyph: "↓",
                         on_color: theme.colors.badge_cache,
-                        on: disk,
+                        state: Toggle::from(disk),
                         tag: "disk_badge",
                         tip: "RuntimeCache to disk — persist the output across runs and reopens",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, !disk)),
@@ -316,7 +320,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                             .then_some(AppCommand::Run(RunCommand::FlushCache(node.id))),
                     },
                 ] {
-                    property_chip(ui, theme, node, chip, out);
+                    chip.show(ui, rec);
                 }
             }
         });
@@ -334,7 +338,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
 struct PropertyChip {
     glyph: &'static str,
     on_color: RgbaF32,
-    on: bool,
+    state: Toggle,
     tag: &'static str,
     tip: &'static str,
     /// What a click sets — already carries the flipped value.
@@ -347,36 +351,30 @@ struct PropertyChip {
     then: Option<AppCommand>,
 }
 
-fn property_chip(
-    ui: &mut Ui,
-    theme: &Theme,
-    node: NodeCtx<'_>,
-    chip: PropertyChip,
-    out: &mut Requests,
-) {
-    let color = if chip.on {
-        chip.on_color
-    } else {
-        theme.colors.text_muted
-    };
-    if Badge::control(
-        chip.glyph,
-        color,
-        chip.on,
-        wid::node(chip.tag, node.id),
-        chip.tip,
-    )
-    .show(ui)
-    {
-        out.push_graph(GraphIntent::SetNodeProperty {
-            node_id: node.id,
-            to: chip.to,
-        });
-        // After the intent, and it matters: the document tier drains before the
-        // app tier runs, so the command compiles a graph that already carries
-        // the property this click just set.
-        if let Some(command) = chip.then {
-            out.push_app(command);
+impl PropertyChip {
+    fn show(self, ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+        let node = rec.node;
+        let color = match self.state {
+            Toggle::On => self.on_color,
+            Toggle::Off => node.theme().colors.text_muted,
+        };
+        if Badge::control(
+            BadgeFace::text(self.glyph, color, self.tip),
+            wid::node(self.tag, node.id),
+            self.state,
+        )
+        .show(ui)
+        {
+            rec.out.push_graph(GraphIntent::SetNodeProperty {
+                node_id: node.id,
+                to: self.to,
+            });
+            // After the intent, and it matters: the document tier drains before the
+            // app tier runs, so the command compiles a graph that already carries
+            // the property this click just set.
+            if let Some(command) = self.then {
+                rec.out.push_app(command);
+            }
         }
     }
 }
@@ -399,11 +397,10 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
     } else {
         "Run to this node — execute its upstream cone and keep the output for preview"
     };
-    Badge::action(
+    Badge::control(
+        BadgeFace::drawn(draw_play_triangle, theme.colors.text_muted, tooltip),
         wid::node("play_badge", node.id),
-        tooltip,
-        draw_play_triangle,
-        theme.colors.text_muted,
+        Toggle::Off,
     )
     .hover_color(theme.status.success)
     .show(ui)
@@ -414,28 +411,29 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
 /// the rounding radius: the SDF rounds by dilating, so the glyph grows
 /// back out to the intended extents.
 fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
-    support::play_triangle(ui, BADGE_SIZE, 0.5, color);
+    ui.add_shape(support::play_triangle(BADGE_SIZE, 0.5).fill(color));
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click).
-fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
-    let node = ncx;
+fn title(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+    let node = rec.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
     let id = wid::rename(node.id);
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
-    let ev = InlineRename::new(node.name(), &ncx.theme().inline_rename_title)
+    let ev = InlineRename::new(node.name(), &node.theme().inline_rename_title)
         .id(id)
         .max_chars(NODE_NAME_MAX_CHARS)
         .show(ui);
     if ev.clicked {
-        out.extend_graph(GraphIntent::click(mode, ncx.graph_ctx.selected(), node.id));
+        rec.out
+            .extend_graph(GraphIntent::click(mode, node.graph_ctx.selected(), node.id));
     }
     if let Some(to) = ev.committed {
-        out.push_graph(GraphIntent::RenameNode {
+        rec.out.push_graph(GraphIntent::RenameNode {
             node_id: node.id,
             to,
         });

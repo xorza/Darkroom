@@ -164,6 +164,13 @@ pub(crate) struct RunState {
     published: HashMap<NodeId, DynamicValue>,
 }
 
+/// Where a run's reports come from, and where their verdicts land.
+#[derive(Debug)]
+pub(crate) struct RunFeed<'a> {
+    pub(crate) runtime: &'a RuntimeHost,
+    pub(crate) status: &'a mut StatusLog,
+}
+
 impl RunState {
     /// Bring this projection up to date with everything that has happened
     /// since the last frame: fold the worker's reports, take in the values
@@ -180,13 +187,8 @@ impl RunState {
     /// costs a lookup per cached entry, while `record` runs *twice* on a frame
     /// carrying action input — and before the session rebuilds its scene, so
     /// the status and log projections it reads reflect the latest run.
-    pub(crate) fn sync(
-        &mut self,
-        runtime: &RuntimeHost,
-        status: &mut StatusLog,
-        ui: &Ui,
-        document: &Document,
-    ) {
+    pub(crate) fn sync(&mut self, feed: RunFeed<'_>, ui: &Ui, document: &Document) {
+        let RunFeed { runtime, status } = feed;
         self.drain_reports(runtime, status);
         self.sync_previews(runtime, ui, document);
     }

@@ -19,6 +19,15 @@ pub(crate) struct AnchoredMenu {
     anchor: GestureSlot<Vec2>,
 }
 
+/// Which canvas popup a menu records as, and how tall it may grow.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PopupShape {
+    pub(crate) id_salt: &'static str,
+    /// Caps the popup so a tall body wraps/scrolls (the new-node palette);
+    /// `None` hugs the content (the small context menus).
+    pub(crate) max_height: Option<f32>,
+}
+
 impl AnchoredMenu {
     /// Close the menu without a pick.
     pub(crate) fn reset(&mut self) {
@@ -39,19 +48,20 @@ impl AnchoredMenu {
         !self.anchor.is_idle()
     }
 
-    /// Show the menu when open, recording `body` inside the shared popup chrome. `body` records the
-    /// items and returns the pick (if any); returning `Some` — or an Esc /
-    /// outside-click dismiss — closes the menu. The pick is handed back for
-    /// the caller to act on. `max_height` caps the popup so a tall body
-    /// wraps/scrolls (the new-node palette); `None` hugs the content (the
-    /// small context menus).
+    /// Show the menu when open, recording `body` inside the shared popup
+    /// chrome shaped by `shape`. `body` records the items and returns the pick
+    /// (if any); returning `Some` — or an Esc / outside-click dismiss — closes
+    /// the menu. The pick is handed back for the caller to act on.
     pub(crate) fn show<T>(
         &mut self,
         ui: &mut Ui,
-        id_salt: &'static str,
-        max_height: Option<f32>,
+        shape: PopupShape,
         body: impl FnOnce(&mut Ui, &CloseHandle) -> Option<T>,
     ) -> Option<T> {
+        let PopupShape {
+            id_salt,
+            max_height,
+        } = shape;
         // `None` for a menu that isn't open.
         let anchor = *self.anchor.get()?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into

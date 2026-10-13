@@ -88,8 +88,8 @@ impl TestWorker {
         graph.add_declared("Print");
         graph.constant("Frame Event", 0, ConstValue::Int(1));
         graph.subscribe("Frame Event", 0, "Print");
-        graph.wire("Frame Event", 1, "To String", 0);
-        graph.wire("To String", 0, "Print", 0);
+        graph.wire(("Frame Event", 1), "To String");
+        graph.wire("To String", "Print");
         Self::over(graph)
     }
 

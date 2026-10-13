@@ -49,7 +49,7 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::ingest::frame_check::FrameCheck;
-use crate::ingest::frame_step::{FrameStep, NoStep};
+use crate::ingest::frame_step::{FrameStep, NoStep, SteppedPaths};
 use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
 use crate::math::vec2us::Vec2us;
@@ -653,7 +653,7 @@ impl FrameCache {
             held: planes.pixel_bytes(
                 dimensions.channels(),
                 self.coverage_channels(planes),
-                self.flag_plane(),
+                usize::from(self.flag_plane()),
             ) * dimensions.pixel_count(),
             in_flight: frame_bytes * dimensions.width(),
             units: Units::Rows(dimensions.height()),
@@ -662,14 +662,17 @@ impl FrameCache {
 
     /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.
     pub(crate) fn from_cfa_paths<P: AsRef<Path>>(
-        paths: &[P],
+        frames: SteppedPaths<'_, P, impl FrameStep<CfaImage, Error = SubtractionError>>,
         config: &StackConfig,
         run: IngestRun,
-        step: &impl FrameStep<CfaImage, Error = SubtractionError>,
     ) -> Result<Self, StackError> {
-        let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
+        let paths: Vec<&Path> = frames.paths.iter().map(AsRef::as_ref).collect();
+        let frames = SteppedPaths {
+            paths: &paths,
+            step: frames.step,
+        };
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage>(&paths, config, run, step)?,
+            loader::load_tiered::<CfaImage>(frames, config, run)?,
             config.normalization,
         )
     }
@@ -683,7 +686,14 @@ impl FrameCache {
         run: IngestRun,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage>(paths, config, run, &NoStep)?,
+            loader::load_tiered::<LinearImage>(
+                SteppedPaths {
+                    paths,
+                    step: &NoStep,
+                },
+                config,
+                run,
+            )?,
             config.normalization,
         )
     }

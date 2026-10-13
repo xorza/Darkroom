@@ -11,16 +11,14 @@ use glam::Vec2;
 use palantir::{Rect, Size};
 
 use crate::core::document::viewport::Viewport;
-use crate::gui::pane::graph_ui::gesture::pan_zoom;
+use crate::gui::pane::graph_ui::gesture::pan_zoom::ZoomRange;
 
-/// Viewer zoom bounds — far wider than the canvas's
-/// (`pan_zoom::CANVAS_MIN_ZOOM`/`CANVAS_MAX_ZOOM`): out to overview a
-/// full-sensor frame in a small pane, in for pixel peeping. Named apart
-/// from the canvas pair because both are passed into the same shared
-/// `fold_scroll_zoom` / `zoom_about`, where an unqualified `MIN_ZOOM` at the
-/// call site wouldn't say which surface's range is in play.
-pub(super) const VIEWER_MIN_ZOOM: f32 = 0.02;
-pub(super) const VIEWER_MAX_ZOOM: f32 = 32.0;
+/// Viewer zoom range — far wider than the canvas's: out to overview a
+/// full-sensor frame in a small pane, in for pixel peeping.
+pub(super) const VIEWER_ZOOM: ZoomRange = ZoomRange {
+    min: 0.02,
+    max: 32.0,
+};
 
 /// The pane-local rect a viewport paints the texture into.
 pub(super) fn draw_rect(img: Vec2, v: Viewport) -> Rect {
@@ -45,14 +43,7 @@ pub(super) fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
 /// fixed — the button sibling of the cursor-anchored wheel zoom.
 pub(super) fn zoom_about_pane_center(mut v: Viewport, zoom: f32, pane: Vec2) -> Viewport {
     let factor = zoom / v.zoom;
-    pan_zoom::zoom_about(
-        &mut v.pan,
-        &mut v.zoom,
-        pane * 0.5,
-        factor,
-        VIEWER_MIN_ZOOM,
-        VIEWER_MAX_ZOOM,
-    );
+    VIEWER_ZOOM.zoom_about(&mut v, pane * 0.5, factor);
     v
 }
 

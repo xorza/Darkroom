@@ -163,7 +163,7 @@ impl PixelFlags {
 
     /// Flags from a plane of their bytes; `None` when no pixel holds one.
     pub(crate) fn from_buffer(bits: Buffer2<u8>) -> Option<Self> {
-        let flags = Self::from_plane(bits);
+        let flags = Self::from_bytes(bits);
         flags.counts.any().then_some(flags)
     }
 
@@ -172,12 +172,8 @@ impl PixelFlags {
         self.contains(QualityFlags::from_byte(!except.byte()))
     }
 
-    /// Flags restored from the bytes [`Self::bytes`] holds, as a spill wrote them.
-    pub(crate) fn from_bytes(size: Size2us, bytes: &[u8]) -> Self {
-        Self::from_plane(Buffer2::new(size.width, size.height, bytes.to_vec()))
-    }
-
-    fn from_plane(bits: Buffer2<u8>) -> Self {
+    /// Flags restored from a plane of the bytes [`Self::bytes`] holds, as a spill wrote them.
+    pub(crate) fn from_bytes(bits: Buffer2<u8>) -> Self {
         let counts = FlagCounts::of(bits.pixels());
         Self { bits, counts }
     }
@@ -407,6 +403,8 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use crate::image::pixel_flags::{PixelFlags, Reach};
     use crate::image::quality_flags::QualityFlags;
     use crate::internals::test_rng::TestRng;
@@ -465,7 +463,11 @@ mod tests {
         assert!(PixelFlags::of_non_finite(size, &[&green]).is_none());
 
         // The bytes round-trip with their counts, as a spill reads them back.
-        let restored = PixelFlags::from_bytes(size, flags.bytes());
+        let restored = PixelFlags::from_bytes(Buffer2::new(
+            size.width,
+            size.height,
+            flags.bytes().to_vec(),
+        ));
         assert_eq!(restored.bytes(), flags.bytes());
         assert_eq!(restored.count(QualityFlags::NO_DATA), 2);
     }

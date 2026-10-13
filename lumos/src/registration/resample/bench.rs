@@ -15,9 +15,9 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::linear_image::LinearImage;
 use crate::registration::bench::Pair;
-use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::{Warp, WarpBuffers};
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::scratch_pool::{Scratch, ScratchPool};
 
@@ -31,7 +31,14 @@ pub(crate) fn integration(c: &mut Criterion) {
         let id = format!("{}/mono", name(method));
         group.bench_function(BenchmarkId::new(id, field.name()), |b| {
             let light = field.render(FRAME).image;
-            warp(b, &light, &similarity(), method);
+            warp(
+                b,
+                WarpCase {
+                    light: &light,
+                    transform: &similarity(),
+                    method,
+                },
+            );
         });
     }
     let rgb = || {
@@ -43,14 +50,23 @@ pub(crate) fn integration(c: &mut Criterion) {
     let method = InterpolationMethod::default();
     let id = |variant: &str| BenchmarkId::new(format!("{}/{variant}", name(method)), field.name());
     group.bench_function(id("rgb"), |b| {
-        warp(b, &rgb(), &similarity(), method);
+        warp(
+            b,
+            WarpCase {
+                light: &rgb(),
+                transform: &similarity(),
+                method,
+            },
+        );
     });
     group.bench_function(id("rgb_sip"), |b| {
         warp(
             b,
-            &rgb(),
-            &pair.get_or_init(Pair::typical).sip_warp(),
-            method,
+            WarpCase {
+                light: &rgb(),
+                transform: &pair.get_or_init(Pair::typical).sip_warp(),
+                method,
+            },
         );
     });
 }
@@ -67,18 +83,29 @@ const fn name(method: InterpolationMethod) -> &'static str {
     }
 }
 
-fn warp(
-    b: &mut Bencher<'_>,
-    light: &LinearImage,
-    transform: &WarpTransform,
+/// `light` warped by `transform`, sampled by `method`.
+#[derive(Debug, Clone, Copy)]
+struct WarpCase<'a> {
+    light: &'a LinearImage,
+    transform: &'a WarpTransform,
     method: InterpolationMethod,
-) {
-    let params = WarpParams {
+}
+
+fn warp(b: &mut Bencher<'_>, case: WarpCase<'_>) {
+    let WarpCase {
+        light,
+        transform,
         method,
-        ..WarpParams::default()
+    } = case;
+    let warp = Warp {
+        transform,
+        params: WarpParams {
+            method,
+            ..WarpParams::default()
+        },
     };
     let source = SourceImage::of(light);
     let mut buffers = WarpBuffers::build(light.dimensions());
     let rows = ScratchPool::default();
-    b.iter(|| buffers.warp_into(&source, transform, params, &rows));
+    b.iter(|| buffers.warp_into(&source, warp, &rows));
 }

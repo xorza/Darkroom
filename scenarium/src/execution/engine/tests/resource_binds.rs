@@ -98,9 +98,9 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
     });
     g.add("capture", capture(observed));
     g.constant("make_path", 0, data_path);
-    g.wire("make_path", 0, "load_text", 0);
-    g.wire("load_text", 0, "annotate", 0);
-    g.wire("annotate", 0, "capture", 0);
+    g.wire("make_path", "load_text");
+    g.wire("load_text", "annotate");
+    g.wire("annotate", "capture");
     g
 }
 
@@ -159,7 +159,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     g.add("load_text", loader(Observed::default()));
     g.add("capture", capture(Observed::default()));
     g.constant("load_text", 0, ConstValue::FsPath(data_path.clone()));
-    g.wire("load_text", 0, "capture", 0);
+    g.wire("load_text", "capture");
     let mut e = TestEngine::over(g);
 
     let Some(locked) = lock() else {
@@ -191,7 +191,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     });
     g.add("capture", capture(Observed::default()));
     g.constant("ignores_path", 0, ConstValue::FsPath(data_path.clone()));
-    g.wire("ignores_path", 0, "capture", 0);
+    g.wire("ignores_path", "capture");
     let mut e = TestEngine::over(g);
 
     let Some(locked) = lock() else {

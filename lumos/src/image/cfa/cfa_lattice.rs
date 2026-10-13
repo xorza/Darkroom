@@ -4,8 +4,8 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::masked_plane::MaskedPlane;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
@@ -98,19 +98,19 @@ impl CfaLattice {
         &self.taps[self.starts[phase] as usize..self.starts[phase + 1] as usize]
     }
 
-    /// The median of `position`'s nearest neighbours under its filter that `mask` does not name, so
-    /// a defect is never repaired from another: 8 with their ties for mono and Bayer, which on a
-    /// Bayer sensor are the four at 2 and the four at 2√2 of its own phase, and 24 with their ties
-    /// for X-Trans; fewer where the frame's edge cuts the window. The pixel's own value when none
-    /// is valid.
+    /// The median of `position`'s nearest neighbours in `plane` under its filter that the plane's
+    /// mask does not name, so a defect is never repaired from another: 8 with their ties for mono
+    /// and Bayer, which on a Bayer sensor are the four at 2 and the four at 2√2 of its own phase,
+    /// and 24 with their ties for X-Trans; fewer where the frame's edge cuts the window. The
+    /// pixel's own value when none is valid.
     pub(crate) fn median(
         &self,
-        pixels: &Buffer2<f32>,
+        plane: MaskedPlane<'_>,
         position: Vec2us,
-        mask: Option<&BitBuffer2>,
         scratch: &mut Gathered,
     ) -> f32 {
-        let size = Size2us::new(pixels.width(), pixels.height());
+        let MaskedPlane { pixels, mask } = plane;
+        let size = Size2us::from(pixels);
         let count = if self.period == 6 { 24 } else { 8 };
         scratch.values.clear();
         scratch.distances.clear();
@@ -146,19 +146,19 @@ impl CfaLattice {
     /// they are the whole of its serial fraction otherwise.
     pub(crate) fn deinterleave(
         &self,
-        mosaic: &[f32],
-        size: Size2us,
+        mosaic: &Buffer2<f32>,
         phase: Vec2us,
-        plane: &mut Vec<f32>,
+        plane: &mut Buffer2<f32>,
     ) {
         debug_assert_eq!(self.period, 2);
+        let size = Size2us::from(mosaic);
         let plane_size = Self::phase_size(size, phase);
-        plane.resize(plane_size.pixel_count(), 0.0);
+        plane.reshape(plane_size.width, plane_size.height, 0.0);
         plane
             .par_chunks_mut(plane_size.width.max(1))
             .enumerate()
             .for_each(|(y, row)| {
-                let source = &mosaic[(2 * y + phase.y) * size.width..][..size.width];
+                let source = mosaic.row(2 * y + phase.y);
                 for (x, value) in row.iter_mut().enumerate() {
                     *value = source[2 * x + phase.x];
                 }
@@ -169,22 +169,23 @@ impl CfaLattice {
     /// [`Self::deinterleave`].
     pub(crate) fn interleave(
         &self,
-        plane: &[f32],
-        size: Size2us,
+        plane: &Buffer2<f32>,
         phase: Vec2us,
-        mosaic: &mut [f32],
+        mosaic: &mut Buffer2<f32>,
     ) {
         debug_assert_eq!(self.period, 2);
-        let plane_width = Self::phase_size(size, phase).width;
+        let size = Size2us::from(&*mosaic);
+        debug_assert_eq!(
+            Size2us::from(plane),
+            Self::phase_size(size, phase),
+            "the plane is the phase's"
+        );
         mosaic
             .par_chunks_mut(size.width)
             .enumerate()
             .filter(|(y, _)| y % 2 == phase.y)
             .for_each(|(y, row)| {
-                for (x, &value) in plane[(y / 2) * plane_width..][..plane_width]
-                    .iter()
-                    .enumerate()
-                {
+                for (x, &value) in plane.row(y / 2).iter().enumerate() {
                     row[2 * x + phase.x] = value;
                 }
             });
@@ -210,6 +211,7 @@ pub(crate) struct Gathered {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bit_buffer2::BitBuffer2;
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::internals::cfa::XTRANS_PATTERN;
 
@@ -301,7 +303,7 @@ mod tests {
                 for x in 0..size.width {
                     let position = Vec2us::new(x, y);
                     assert_eq!(
-                        lattice.median(&pixels, position, None, &mut scratch),
+                        lattice.median(MaskedPlane::from(&pixels), position, &mut scratch),
                         level(position),
                         "{cfa:?} at ({x}, {y})"
                     );
@@ -326,20 +328,37 @@ mod tests {
         );
         let centre = Vec2us::new(1, 1);
         let mut scratch = Gathered::default();
-        assert_eq!(lattice.median(&pixels, centre, None, &mut scratch), 505.0);
+        assert_eq!(
+            lattice.median(MaskedPlane::from(&pixels), centre, &mut scratch),
+            505.0
+        );
         let mut mask = BitBuffer2::new_default(size);
         for index in [5, 6, 7, 8] {
             mask.set(index, true);
         }
         assert_eq!(
-            lattice.median(&pixels, centre, Some(&mask), &mut scratch),
+            lattice.median(
+                MaskedPlane {
+                    pixels: &pixels,
+                    mask: Some(&mask)
+                },
+                centre,
+                &mut scratch
+            ),
             10.0
         );
         for index in [0, 1, 2, 3] {
             mask.set(index, true);
         }
         assert_eq!(
-            lattice.median(&pixels, centre, Some(&mask), &mut scratch),
+            lattice.median(
+                MaskedPlane {
+                    pixels: &pixels,
+                    mask: Some(&mask)
+                },
+                centre,
+                &mut scratch
+            ),
             999.0
         );
     }
@@ -363,11 +382,11 @@ mod tests {
         pixels[(2, 1)] = 1000.0;
         let mut scratch = Gathered::default();
         assert_eq!(
-            lattice.median(&pixels, Vec2us::new(0, 0), None, &mut scratch),
+            lattice.median(MaskedPlane::from(&pixels), Vec2us::new(0, 0), &mut scratch),
             60.0
         );
         assert_eq!(
-            lattice.median(&pixels, Vec2us::new(1, 0), None, &mut scratch),
+            lattice.median(MaskedPlane::from(&pixels), Vec2us::new(1, 0), &mut scratch),
             30.0
         );
     }
@@ -378,20 +397,26 @@ mod tests {
     fn deinterleave_takes_one_phase() {
         let lattice = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
         let size = Size2us::new(5, 3);
-        let mosaic: Vec<f32> = (0..15).map(|index| index as f32).collect();
-        let mut plane = Vec::new();
-        lattice.deinterleave(&mosaic, size, Vec2us::new(1, 0), &mut plane);
-        assert_eq!(plane, [1.0, 3.0, 11.0, 13.0]);
+        let mosaic = Buffer2::new(5, 3, (0..15).map(|index| index as f32).collect());
+        let mut plane = Buffer2::default();
+        lattice.deinterleave(&mosaic, Vec2us::new(1, 0), &mut plane);
+        assert_eq!(Size2us::from(&plane), Size2us::new(2, 2));
+        assert_eq!(plane.pixels(), [1.0, 3.0, 11.0, 13.0]);
         assert_eq!(
             CfaLattice::phase_size(size, Vec2us::new(1, 0)),
             Size2us::new(2, 2)
         );
-        lattice.deinterleave(&mosaic, size, Vec2us::new(0, 1), &mut plane);
-        assert_eq!(plane, [5.0, 7.0, 9.0]);
-        let mut written = vec![0.0; 15];
-        lattice.interleave(&[-1.0, -2.0, -3.0], size, Vec2us::new(0, 1), &mut written);
+        lattice.deinterleave(&mosaic, Vec2us::new(0, 1), &mut plane);
+        assert_eq!(Size2us::from(&plane), Size2us::new(3, 1));
+        assert_eq!(plane.pixels(), [5.0, 7.0, 9.0]);
+        let mut written = Buffer2::new_default(5, 3);
+        lattice.interleave(
+            &Buffer2::new(3, 1, vec![-1.0, -2.0, -3.0]),
+            Vec2us::new(0, 1),
+            &mut written,
+        );
         assert_eq!(
-            written,
+            written.pixels(),
             [
                 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, -2.0, 0.0, -3.0, 0.0, 0.0, 0.0, 0.0, 0.0
             ]

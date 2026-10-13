@@ -10,7 +10,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y};
+use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue};
 
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
@@ -44,39 +44,68 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>) {
                 .gap(12.0)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    if ram.cpu > 0 {
-                        meter(ui, theme, ram_hue(theme), "RAM", ram.cpu);
-                    }
-                    if ram.gpu > 0 {
-                        meter(ui, theme, vram_hue(theme), "VRAM", ram.gpu);
+                    for pool in Pool::held(theme, ram) {
+                        pool.meter(ui, theme);
                     }
                 });
             proportion_bar(ui, theme, ram);
         });
 }
 
-/// The system-RAM pool's hue: the cache badge's, as a cache is what holds it.
-const fn ram_hue(theme: &Theme) -> RgbaF32 {
-    theme.colors.badge_cache
+/// One memory pool the node holds bytes in, and the hue it shows in.
+#[derive(Debug, Clone, Copy)]
+struct Pool {
+    label: &'static str,
+    hue: RgbaF32,
+    bytes: usize,
 }
 
-/// The GPU-memory pool's hue: the accent the graph badge wears.
-const fn vram_hue(theme: &Theme) -> RgbaF32 {
-    theme.colors.badge_graph
-}
+impl Pool {
+    /// The pools of `ram` that hold bytes: system RAM in the cache badge's hue, as a cache is what
+    /// holds it, and GPU memory in the accent the graph badge wears.
+    fn held(theme: &Theme, ram: RamUsage) -> impl Iterator<Item = Self> {
+        [
+            Self {
+                label: "RAM",
+                hue: theme.colors.badge_cache,
+                bytes: ram.cpu,
+            },
+            Self {
+                label: "VRAM",
+                hue: theme.colors.badge_graph,
+                bytes: ram.gpu,
+            },
+        ]
+        .into_iter()
+        .filter(|pool| pool.bytes > 0)
+    }
 
-/// One pool: a colored dot, an uppercase micro-label, and the byte figure. The
-/// value takes the node's default text color; the label is muted.
-fn meter(ui: &mut Ui, theme: &Theme, hue: RgbaF32, label: &'static str, bytes: usize) {
-    Panel::hstack()
-        .id_salt(("node_mem_meter", label))
-        .size((Sizing::HUG, Sizing::HUG))
-        .gap(5.0)
-        .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| {
-            dot_cell(ui, hue);
-            support::labeled_value(ui, theme, label, Bytes::new(bytes as u64));
-        });
+    /// A colored dot, an uppercase micro-label, and the byte figure. The value takes the node's
+    /// default text color; the label is muted.
+    fn meter(self, ui: &mut Ui, theme: &Theme) {
+        Panel::hstack()
+            .id_salt(("node_mem_meter", self.label))
+            .size((Sizing::HUG, Sizing::HUG))
+            .gap(5.0)
+            .child_align(Align::v(VAlign::Center))
+            .show(ui, |ui| {
+                dot_cell(ui, self.hue);
+                LabeledValue {
+                    label: self.label,
+                    value: Bytes::new(self.bytes as u64),
+                }
+                .show(ui, theme);
+            });
+    }
+
+    /// The pool's segment of the proportion bar, weighted by its bytes.
+    fn bar_segment(self, ui: &mut Ui) {
+        Panel::zstack()
+            .id_salt(("node_mem_seg", self.label))
+            .size((Sizing::fill(self.bytes as f32), Sizing::FILL))
+            .background(Background::rounded(self.hue, Corners::all(BAR_H * 0.5)))
+            .show(ui, |_ui| {});
+    }
 }
 
 /// A small filled circle occupying `DOT`×`DOT` of layout so the label flows
@@ -98,20 +127,8 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
         .id_salt("node_mem_bar")
         .size((Sizing::FILL, Sizing::fixed(BAR_H)))
         .show(ui, |ui| {
-            if ram.cpu > 0 {
-                bar_segment(ui, "ram", ram_hue(theme), ram.cpu as f32);
-            }
-            if ram.gpu > 0 {
-                bar_segment(ui, "vram", vram_hue(theme), ram.gpu as f32);
+            for pool in Pool::held(theme, ram) {
+                pool.bar_segment(ui);
             }
         });
-}
-
-/// One weighted segment of the proportion bar.
-fn bar_segment(ui: &mut Ui, salt: &'static str, hue: RgbaF32, weight: f32) {
-    Panel::zstack()
-        .id_salt(("node_mem_seg", salt))
-        .size((Sizing::fill(weight), Sizing::FILL))
-        .background(Background::rounded(hue, Corners::all(BAR_H * 0.5)))
-        .show(ui, |_ui| {});
 }

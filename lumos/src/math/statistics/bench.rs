@@ -7,7 +7,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Kind, Scale};
-use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::spread::Spread;
@@ -54,7 +54,16 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let mut deviations = Vec::with_capacity(len);
             b.iter_batched_ref(
                 || values.clone(),
-                |values| ClippedStats::sigma_clipped(black_box(values), &mut deviations, 3.0, 5),
+                |values| {
+                    ClippedStats::sigma_clipped(
+                        black_box(values),
+                        &mut deviations,
+                        SigmaClip {
+                            kappa: 3.0,
+                            iterations: 5,
+                        },
+                    )
+                },
                 fixture::fresh_copies(len * size_of::<f32>()),
             );
         });

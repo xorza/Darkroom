@@ -12,7 +12,7 @@ use crate::execution::cache::disk_store::error::StoreError;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
-use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec};
+use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 use crate::{ConstValue, DynamicValue};
 
@@ -32,34 +32,6 @@ async fn read_snapshot(
     target.read(codecs, &demand).await
 }
 
-/// Publish, asserting the store answered `expected`. Every call has a definite
-/// answer now; a test that dropped one would be back to inferring the write
-/// from the filesystem alone.
-async fn store_expecting(
-    codecs: &Codecs,
-    target: &BlobTarget,
-    snapshot: &OutputSnapshot,
-    policy: StorePolicy,
-    expected: StoreOutcome,
-) {
-    let outcome = target.store(codecs, snapshot, policy).await;
-    assert_eq!(
-        outcome.as_ref().ok(),
-        Some(&expected),
-        "expected {expected:?}, got {outcome:?}"
-    );
-}
-
-fn versioned_codecs(version: u32, decodes: Calls, fail_encode: bool) -> Codecs {
-    let codec = BlobCodec {
-        version,
-        decodes,
-        fail_encode,
-        ..BlobCodec::default()
-    };
-    Codecs::clone(codec.library().codecs())
-}
-
 #[tokio::test]
 async fn store_read_header_check_and_digest_replacement_round_trip() {
     let file = TempFile::new("roundtrip");
@@ -74,14 +46,13 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
         DynamicValue::Static(ConstValue::String("x".into())),
     ]);
 
-    store_expecting(
-        &codecs,
-        &first_target,
-        &first,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        first_target
+            .store(&codecs, &first, StorePolicy::KnownMiss)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     assert!(first_target.covers(first.values(), &codecs).await);
     assert!(!second_target.covers(first.values(), &codecs).await);
     let restored = read_snapshot(&codecs, &first_target, 3).await.unwrap();
@@ -92,14 +63,13 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     let second = OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(35))]);
     // A blob under the previous digest cannot cover this one, so the probe
     // fails and the publication goes ahead.
-    store_expecting(
-        &codecs,
-        &second_target,
-        &second,
-        StorePolicy::PreserveCovering,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        second_target
+            .store(&codecs, &second, StorePolicy::PreserveCovering)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     assert!(read_snapshot(&codecs, &first_target, 3).await.is_none());
     assert_eq!(
         read_snapshot(&codecs, &second_target, 1)
@@ -115,20 +85,19 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 async fn broader_same_digest_blob_is_preserved() {
     let file = TempFile::new("coverage");
     let decode_calls = Calls::default();
-    let codecs = versioned_codecs(1, decode_calls.clone(), false);
+    let codecs = BlobCodec::versioned(1, decode_calls.clone()).codecs();
     let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
         DynamicValue::Static(ConstValue::Int(7)),
         DynamicValue::Unbound,
     ]);
-    store_expecting(
-        &codecs,
-        &target,
-        &partial,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        target
+            .store(&codecs, &partial, StorePolicy::KnownMiss)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
     assert!(target.read(&codecs, &second_output).await.is_none());
     assert!(file.exists(), "an insufficient but valid blob is retained");
@@ -137,24 +106,22 @@ async fn broader_same_digest_blob_is_preserved() {
         DynamicValue::Static(ConstValue::Int(7)),
         DynamicValue::from_custom(Blob(vec![1, 2, 3])),
     ]);
-    store_expecting(
-        &codecs,
-        &target,
-        &complete,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        target
+            .store(&codecs, &complete, StorePolicy::KnownMiss)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     let complete_bytes = fs::read(file.path()).unwrap();
 
-    store_expecting(
-        &codecs,
-        &target,
-        &partial,
-        StorePolicy::PreserveCovering,
-        StoreOutcome::AlreadyCovered,
-    )
-    .await;
+    assert_eq!(
+        target
+            .store(&codecs, &partial, StorePolicy::PreserveCovering)
+            .await
+            .unwrap(),
+        StoreOutcome::AlreadyCovered
+    );
     assert_eq!(fs::read(file.path()).unwrap(), complete_bytes);
     assert!(target.covers(complete.values(), &codecs).await);
     assert!(target.covers(partial.values(), &codecs).await);
@@ -173,15 +140,14 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
     let old_calls = Calls::default();
-    let old_codecs = versioned_codecs(1, old_calls.clone(), false);
-    store_expecting(
-        &old_codecs,
-        &target,
-        &snapshot,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    let old_codecs = BlobCodec::versioned(1, old_calls.clone()).codecs();
+    assert_eq!(
+        target
+            .store(&old_codecs, &snapshot, StorePolicy::KnownMiss)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
 
     assert!(!target.covers(snapshot.values(), &Codecs::default()).await);
     assert!(
@@ -191,19 +157,18 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     );
 
     let new_calls = Calls::default();
-    let new_codecs = versioned_codecs(2, new_calls.clone(), false);
+    let new_codecs = BlobCodec::versioned(2, new_calls.clone()).codecs();
     assert!(!target.covers(snapshot.values(), &new_codecs).await);
     assert!(read_snapshot(&new_codecs, &target, 1).await.is_none());
     assert_eq!(new_calls.count(), 0);
 
-    store_expecting(
-        &new_codecs,
-        &target,
-        &snapshot,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        target
+            .store(&new_codecs, &snapshot, StorePolicy::KnownMiss)
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     assert!(!target.covers(snapshot.values(), &old_codecs).await);
     assert!(read_snapshot(&new_codecs, &target, 1).await.is_some());
     assert_eq!(new_calls.count(), 1);
@@ -226,14 +191,13 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
         DynamicValue::from_custom(Blob(vec![1])),
     ]);
     for policy in [StorePolicy::KnownMiss, StorePolicy::PreserveCovering] {
-        store_expecting(
-            &Codecs::default(),
-            &target(&blob, Digest([1; 32])),
-            &snapshot,
-            policy,
-            StoreOutcome::Unsupported { type_id: BLOB_TYPE },
-        )
-        .await;
+        assert_eq!(
+            target(&blob, Digest([1; 32]))
+                .store(&Codecs::default(), &snapshot, policy)
+                .await
+                .unwrap(),
+            StoreOutcome::Unsupported { type_id: BLOB_TYPE }
+        );
         assert!(!file.exists(), "{policy:?} touched the disk");
     }
 }
@@ -242,19 +206,26 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
 async fn failed_streaming_encode_preserves_previous_blob() {
     let file = TempFile::new("encode-failure");
     let calls = Calls::default();
-    let good_codecs = versioned_codecs(1, calls.clone(), false);
+    let good_codecs = BlobCodec::versioned(1, calls.clone()).codecs();
     let original_target = target(file.path(), Digest([4; 32]));
-    store_expecting(
-        &good_codecs,
-        &original_target,
-        &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        original_target
+            .store(
+                &good_codecs,
+                &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
+                StorePolicy::KnownMiss
+            )
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     let original = fs::read(file.path()).unwrap();
 
-    let failing_codecs = versioned_codecs(1, Calls::default(), true);
+    let failing_codecs = BlobCodec {
+        fault: BlobFault::EncodeFails,
+        ..BlobCodec::versioned(1, Calls::default())
+    }
+    .codecs();
     let failed = target(file.path(), Digest([5; 32]))
         .store(
             &failing_codecs,
@@ -314,16 +285,19 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     let file = TempFile::new("truncated");
     let codecs = Codecs::default();
     let target = target(file.path(), Digest([6; 32]));
-    store_expecting(
-        &codecs,
-        &target,
-        &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
-            "payload".into(),
-        ))]),
-        StorePolicy::KnownMiss,
-        StoreOutcome::Published,
-    )
-    .await;
+    assert_eq!(
+        target
+            .store(
+                &codecs,
+                &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
+                    "payload".into(),
+                ))]),
+                StorePolicy::KnownMiss
+            )
+            .await
+            .unwrap(),
+        StoreOutcome::Published
+    );
     let mut bytes = fs::read(file.path()).unwrap();
     bytes.pop();
     fs::write(file.path(), bytes).unwrap();

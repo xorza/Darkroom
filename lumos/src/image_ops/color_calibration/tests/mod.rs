@@ -4,7 +4,7 @@ mod real_data;
 use crate::image_ops::color_calibration::neutralize_background::*;
 use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::{assert_close, assert_close_slice};
-use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::images::{gray_image, rgb_image};
 use crate::math::size2us::Size2us;
 
 /// A green background at 0.3 over red and blue at 0.1, and a white star 0.4 above every channel.
@@ -17,7 +17,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     let r = [vec![0.1; 7], vec![0.5, 0.5]].concat();
     let g = [vec![0.3; 7], vec![0.7, 0.7]].concat();
     let b = [vec![0.1; 7], vec![0.5, 0.5]].concat();
-    let mut img = rgb(Size2us::new(3, 3), r.clone(), g, b.clone());
+    let mut img = rgb_image(Size2us::new(3, 3), [r.clone(), g, b.clone()]);
 
     let before = channel_backgrounds(&img);
     assert_eq!((before.r, before.g, before.b), (0.1, 0.3, 0.1));
@@ -33,11 +33,9 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
 /// mean 0.2, exact; (0.5, 0.3, 0.5) is below its mean and stays.
 #[test]
 fn scnr_average_neutral_clamps_only_green_excess() {
-    let mut img = rgb(
+    let mut img = rgb_image(
         Size2us::new(2, 1),
-        vec![0.2, 0.5],
-        vec![0.6, 0.3],
-        vec![0.2, 0.5],
+        [vec![0.2, 0.5], vec![0.6, 0.3], vec![0.2, 0.5]],
     );
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     assert_eq!(img.channel(0).pixels(), &[0.2, 0.5], "R unchanged");
@@ -59,7 +57,7 @@ fn scnr_additive_mask_hand_computed() {
         ((0.7, 0.6, 0.5), 0.5, 0.6),
         ((0.7, 0.6, 0.5), 1.0, 0.6),
     ] {
-        let mut img = rgb(Size2us::new(1, 1), vec![r], vec![g], vec![b]);
+        let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
         Scnr::additive_mask(amount).apply(&mut img).unwrap();
         let green = img.channel(1).pixels()[0];
         assert_close!(
@@ -96,7 +94,7 @@ fn every_protection_blends_by_its_amount() {
     ];
     for (name, scnr, full, half) in protections {
         for (amount, expected) in [(0.0f32, 0.6f64), (0.5, half), (1.0, full)] {
-            let mut img = rgb(Size2us::new(1, 1), vec![r], vec![g], vec![b]);
+            let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
             scnr(amount).apply(&mut img).unwrap();
             assert_close!(
                 img.channel(1).pixels()[0],
@@ -109,14 +107,14 @@ fn every_protection_blends_by_its_amount() {
                 (r, b)
             );
         }
-        let mut img = rgb(Size2us::new(1, 1), vec![r], vec![g], vec![b]);
+        let mut img = rgb_image(Size2us::new(1, 1), [vec![r], vec![g], vec![b]]);
         assert!(scnr(1.5).apply(&mut img).is_err(), "{name}");
     }
 }
 
 #[test]
 fn color_ops_are_noops_on_grayscale() {
-    let mut g = gray(Size2us::new(2, 1), vec![0.3, 0.7]);
+    let mut g = gray_image(Size2us::new(2, 1), vec![0.3, 0.7]);
     NeutralizeBackground.apply(&mut g).unwrap();
     Scnr::average_neutral(1.0).apply(&mut g).unwrap();
     assert_eq!(

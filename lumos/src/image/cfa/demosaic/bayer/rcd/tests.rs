@@ -4,7 +4,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
 use crate::image::cfa::demosaic::bayer::rcd::{
-    INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
+    INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, Neighbour, TILE, demosaic, estimate_green,
 };
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
@@ -12,17 +12,16 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::portable::Portable;
 use crate::simd::{F32_LANES, F32x8, Isa};
+use imaginarium::Buffer2;
 
 /// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
 fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
     let isa = Portable::new();
-    let lanes = estimate_green(
-        isa,
-        isa.splat_f32(neighbor_green),
-        isa.splat_f32(center_lpf),
-        isa.splat_f32(same_color_lpf),
-    )
-    .to_array();
+    let neighbour = Neighbour {
+        green: isa.splat_f32(neighbor_green),
+        lpf: isa.splat_f32(same_color_lpf),
+    };
+    let lanes = estimate_green(isa, isa.splat_f32(center_lpf), neighbour).to_array();
     assert!(
         lanes
             .iter()
@@ -79,7 +78,11 @@ fn cancelling_green_estimate_has_the_additive_limit() {
     ];
     let isa = Portable::new();
     let lanes = |input: usize| isa.load_f32(&cases.map(|case| case[input]));
-    let mixed = estimate_green(isa, lanes(0), lanes(1), lanes(2)).to_array();
+    let neighbour = Neighbour {
+        green: lanes(0),
+        lpf: lanes(2),
+    };
+    let mixed = estimate_green(isa, lanes(1), neighbour).to_array();
     for (case, lane) in cases.into_iter().zip(mixed) {
         let [green, center, same] = case;
         assert_eq!(
@@ -214,17 +217,17 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     ];
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
-            let data: Vec<f32> = (0..size.pixel_count())
-                .map(|index| {
-                    let (x, y) = (index % WIDTH, index / WIDTH);
-                    scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
-                })
-                .collect();
-            let planes = demosaic(
-                &BayerImage::new(&data, size, pattern),
-                &CancelToken::never(),
-            )
-            .unwrap();
+            let data = Buffer2::new(
+                size.width,
+                size.height,
+                (0..size.pixel_count())
+                    .map(|index| {
+                        let (x, y) = (index % WIDTH, index / WIDTH);
+                        scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
+                    })
+                    .collect(),
+            );
+            let planes = demosaic(&BayerImage::new(&data, pattern), &CancelToken::never()).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325u64;
             for plane in &planes {
                 for row in INTERPOLATED_BORDER..HEIGHT - INTERPOLATED_BORDER {
@@ -247,9 +250,13 @@ fn rcd_matches_librtprocess_bit_for_bit() {
 fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
     let size = Size2us::new(TILE + 40, TILE + 30);
     let mut rng = TestRng::new(11);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|_| 0.1 + 0.8 * rng.next_f32())
-        .collect();
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|_| 0.1 + 0.8 * rng.next_f32())
+            .collect(),
+    );
     for pattern in CfaPattern::ALL {
         for place in [
             TilePlace {
@@ -268,7 +275,7 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
                 let out = OutputPlanes::of(&mut planes);
                 let mut tile = Tile::new(pattern);
                 tile.poison(poison);
-                unsafe { tile.demosaic(&BayerImage::new(&data, size, pattern), place, out) };
+                unsafe { tile.demosaic(&BayerImage::new(&data, pattern), place, out) };
                 planes
             };
             let (high, low) = (run(1000.0), run(-1000.0));
@@ -297,23 +304,26 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let size = Size2us::new(TILE + 40, TILE + 30);
     let gains = [2.13, 1.0, 1.71];
     let mut rng = TestRng::new(5);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|_| 0.1 + 0.8 * rng.next_f32())
-        .collect();
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|_| 0.1 + 0.8 * rng.next_f32())
+            .collect(),
+    );
     for pattern in CfaPattern::ALL {
         let colour = |index: usize| pattern.color_at(size.point_of(index)).index();
-        let balanced: Vec<f32> = data
-            .iter()
-            .enumerate()
-            .map(|(index, &sample)| sample * gains[colour(index)])
-            .collect();
+        let balanced = Buffer2::new(
+            size.width,
+            size.height,
+            data.iter()
+                .enumerate()
+                .map(|(index, &sample)| sample * gains[colour(index)])
+                .collect(),
+        );
         let never = CancelToken::never();
-        let planes = demosaic(
-            &BayerImage::new(&data, size, pattern).with_gains(gains),
-            &never,
-        )
-        .unwrap();
-        let reference = demosaic(&BayerImage::new(&balanced, size, pattern), &never).unwrap();
+        let planes = demosaic(&BayerImage::new(&data, pattern).with_gains(gains), &never).unwrap();
+        let reference = demosaic(&BayerImage::new(&balanced, pattern), &never).unwrap();
         let border = INTERPOLATED_BORDER;
         for row in border..size.height - border {
             for index in row * size.width + border..(row + 1) * size.width - border {

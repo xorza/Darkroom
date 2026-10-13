@@ -13,7 +13,7 @@ use crate::execution::cache::disk_store::format::{
     PAYLOAD_LEN_OFFSET, header_len,
 };
 use crate::graph::func::lambda::OutputDemand;
-use crate::internals::blob::{Blob, BlobCodec};
+use crate::internals::blob::{Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 use crate::library::Library;
 use crate::{ConstValue, DynamicValue};
@@ -91,16 +91,6 @@ where
     }
 }
 
-fn library(version: u32, under_read: bool, decodes: Calls) -> Library {
-    BlobCodec {
-        version,
-        decodes,
-        under_read,
-        ..BlobCodec::default()
-    }
-    .library()
-}
-
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
     BlobWriter {
@@ -120,7 +110,7 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
 /// blob on disk unreadable or, worse, read with the wrong meaning.
 #[tokio::test]
 async fn a_small_blob_has_the_pinned_layout() {
-    let library = library(7, false, Calls::default());
+    let library = BlobCodec::versioned(7, Calls::default()).library();
     let outputs = [
         DynamicValue::Unbound,
         DynamicValue::Static(ConstValue::Int(-2)),
@@ -161,7 +151,7 @@ async fn a_small_blob_has_the_pinned_layout() {
 #[tokio::test]
 async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     let calls = Calls::default();
-    let library = library(7, false, calls.clone());
+    let library = BlobCodec::versioned(7, calls.clone()).library();
     let digest = Digest([3; 32]);
     let first_blob = (0u8..=255)
         .cycle()
@@ -261,7 +251,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         DynamicValue::Static(ConstValue::Int(77)),
     ];
     let calls = Calls::default();
-    let complete_library = library(1, false, calls.clone());
+    let complete_library = BlobCodec::versioned(1, calls.clone()).library();
     let bytes = encoded(digest, &outputs, &complete_library).await;
     let restored = BlobReader {
         reader: &mut Cursor::new(&bytes),
@@ -280,7 +270,11 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     assert_eq!(restored[1].as_i64(), Some(77));
 
     let underread_calls = Calls::default();
-    let underread_library = library(1, true, underread_calls.clone());
+    let underread_library = BlobCodec {
+        fault: BlobFault::DecodeUnderReads,
+        ..BlobCodec::versioned(1, underread_calls.clone())
+    }
+    .library();
     let error = BlobReader {
         reader: &mut Cursor::new(&bytes),
         file_len: bytes.len() as u64,
@@ -301,7 +295,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
 async fn descriptors_selectively_validate_codecs_and_coverage() {
     let digest = Digest([5; 32]);
     let calls = Calls::default();
-    let registered = library(2, false, calls);
+    let registered = BlobCodec::versioned(2, calls).library();
     let outputs = vec![
         DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::from_custom(Blob(vec![2])),
@@ -351,7 +345,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     );
 
     let changed_calls = Calls::default();
-    let changed = library(3, false, changed_calls.clone());
+    let changed = BlobCodec::versioned(3, changed_calls.clone()).library();
     assert!(
         !BlobReader {
             reader: &mut Cursor::new(&bytes),

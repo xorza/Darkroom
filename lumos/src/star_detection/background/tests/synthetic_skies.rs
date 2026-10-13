@@ -2,17 +2,17 @@
 //! background and residual images for inspection.
 
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::background_map;
-use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
+use crate::internals::synthetic::backgrounds::{Gradient, NebulaConfig, Vignette};
 use crate::internals::synthetic::scene::BackgroundField;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::Scenario;
+use imaginarium::Buffer2;
 
 /// Each sky against the truth it was rendered from, in three parts.
 ///
@@ -52,11 +52,11 @@ fn rendered_skies_are_recovered() {
         },
         Case {
             name: "gradient",
-            sky: BackgroundField::Gradient {
+            sky: BackgroundField::Gradient(Gradient {
                 start: 0.05,
                 end: 0.25,
                 angle: 0.0,
-            },
+            }),
             num_stars: 30,
             model_error: None,
             star_move: 0.000_190,
@@ -98,12 +98,9 @@ fn rendered_skies_are_recovered() {
         .image
         .channel(0)
         .clone();
-        let size = Size2us::new(pixels.width(), pixels.height());
+        let size = Size2us::from(&pixels);
         let truth = case.sky.render(size);
-        let bare = background_map::estimate(
-            &Buffer2::new(size.width, size.height, truth.clone()),
-            &config,
-        );
+        let bare = background_map::estimate(&truth, &config);
         let background = background_map::estimate(&pixels, &config);
         let noise_only = Scenario {
             num_stars: 0,
@@ -116,19 +113,22 @@ fn rendered_skies_are_recovered() {
         .clone();
         let noisy = background_map::estimate(&noise_only, &config);
 
-        let residual: Vec<f32> = pixels
-            .iter()
-            .zip(background.background.iter())
-            .map(|(&p, &sky)| (p - sky).max(0.0))
-            .collect();
+        let residual = Buffer2::new(
+            size.width,
+            size.height,
+            pixels
+                .iter()
+                .zip(background.background.iter())
+                .map(|(&p, &sky)| (p - sky).max(0.0))
+                .collect(),
+        );
         for (suffix, image) in [
-            ("input", pixels.pixels()),
-            ("background", background.background.pixels()),
-            ("subtracted", &*residual),
+            ("input", &pixels),
+            ("background", &background.background),
+            ("subtracted", &residual),
         ] {
             save(
                 image,
-                size,
                 &format!("synthetic_starfield/stage_bg_{}_{suffix}", case.name),
                 ToneMap::Clamp,
             );

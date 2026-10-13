@@ -16,6 +16,7 @@ use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use imaginarium::Buffer2;
 
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
@@ -71,11 +72,13 @@ impl StoredImage {
     /// The image's flags, copied out of the map: a byte a pixel, against the four a channel
     /// costs.
     pub(crate) fn flags(&self) -> Option<PixelFlags> {
+        let size = self.dimensions.size();
         self.flags.as_ref().map(|plane| {
-            PixelFlags::from_bytes(
-                self.dimensions.size(),
-                plane.chunk(0..self.dimensions.pixel_count()),
-            )
+            PixelFlags::from_bytes(Buffer2::new(
+                size.width,
+                size.height,
+                plane.chunk(0..size.pixel_count()).to_vec(),
+            ))
         })
     }
 
@@ -129,6 +132,8 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use common::TempDir;
 
     use crate::frame_store::run_scratch::RunScratch;
@@ -153,7 +158,11 @@ mod tests {
         let bytes: Vec<u8> = (0..size.pixel_count())
             .map(|index| (index % 2) as u8)
             .collect();
-        image.flags = Some(PixelFlags::from_bytes(size, &bytes));
+        image.flags = Some(PixelFlags::from_bytes(Buffer2::new(
+            size.width,
+            size.height,
+            bytes.clone(),
+        )));
         let parked = StoredImage::spill(&scratch, &image).unwrap();
         assert_eq!(parked.evict(), MappedFile::EVICTS);
         let loaded = parked.load();

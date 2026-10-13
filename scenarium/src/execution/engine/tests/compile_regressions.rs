@@ -18,7 +18,7 @@ fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
     g.add("sink", |n| n.sink().input(DataType::Any));
     g.add("make_int", |n| n.returns(1i64));
     g.add("make_str", |n| n.returns("s"));
-    g.wire("make_str", 0, "sink", 0);
+    g.wire("make_str", "sink");
 
     let compiled = g.compile();
 
@@ -43,7 +43,7 @@ fn compiled_output_types_match_authoring_resolution() {
     for hop in 0..70 {
         let name = format!("hop{hop}");
         g.add(&name, NodeSpec::passthrough);
-        g.wire(&previous, 0, &name, 0);
+        g.wire(&previous, &name);
         previous = name;
     }
     g.add("scalar_const", NodeSpec::passthrough);
@@ -82,7 +82,7 @@ fn compiled_output_types_match_authoring_resolution() {
 fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
     let mut g = TestGraph::new();
     g.add("passthrough", NodeSpec::passthrough);
-    g.wire("passthrough", 0, "passthrough", 0);
+    g.wire("passthrough", "passthrough");
     assert_eq!(g.output_type("passthrough", 0), DataType::Any);
 
     // The same wire, compiled: the walk resolves the wildcard through the
@@ -99,7 +99,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
     let mut g = TestGraph::new();
     g.add("generate", |n| n.returns(1i64));
     g.add("print", NodeSpec::records);
-    g.wire("generate", 0, "print", 0);
+    g.wire("generate", "print");
 
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
@@ -163,7 +163,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
             .lambda(body())
     });
     g.add("print", NodeSpec::records);
-    g.wire("generate", 0, "print", 0);
+    g.wire("generate", "print");
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
@@ -196,7 +196,7 @@ async fn dangling_wiring_compiles_and_reports_missing_input() {
     // subscription to an event it doesn't emit — the drift a changed library
     // leaves behind. Neither may fail the compile.
     e.edit(|g| {
-        g.wire("get_a", 9, "sum", 0);
+        g.wire(("get_a", 9), "sum");
         g.subscribe("get_a", 9, "sum");
     });
 

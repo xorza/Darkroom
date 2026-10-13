@@ -7,11 +7,9 @@ use crate::math::size2us::Size2us;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
 /// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.
-fn threshold_mask(filtered: &[f32], noise: &[f32], sigma: f32, size: Size2us) -> BitBuffer2 {
-    let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
-    let noise = Buffer2::new(size.width, size.height, noise.to_vec());
-    let mut mask = BitBuffer2::new_filled(size, false);
-    ThresholdParams::test(sigma).fill_mask(&filtered, &noise, &mut mask);
+fn threshold_mask(filtered: &Buffer2<f32>, noise: &Buffer2<f32>, sigma: f32) -> BitBuffer2 {
+    let mut mask = BitBuffer2::new_filled(Size2us::from(filtered), false);
+    ThresholdParams::test(sigma).fill_mask(filtered, noise, &mut mask);
     mask
 }
 
@@ -23,6 +21,15 @@ struct ThresholdMaskCase {
     sigma: f32,
     size: Size2us,
     expected: &'static [bool],
+}
+
+impl ThresholdMaskCase {
+    /// The case's pixels and noise, as planes of its size, and the mask of the one over the other.
+    fn mask(&self) -> BitBuffer2 {
+        let plane =
+            |values: &[f32]| Buffer2::new(self.size.width, self.size.height, values.to_vec());
+        threshold_mask(&plane(self.pixels), &plane(self.noise), self.sigma)
+    }
 }
 
 /// A pixel is set where its residual exceeds σ·max(noise, floor), strictly: 0.3 against 3 × 0.1,
@@ -146,7 +153,7 @@ fn threshold_mask_truth_table() {
     ];
 
     for case in cases {
-        let mask = threshold_mask(case.pixels, case.noise, case.sigma, case.size);
+        let mask = case.mask();
         let actual: Vec<bool> = mask.iter().collect();
 
         assert_eq!(actual.as_slice(), case.expected, "{}: {case:?}", case.name);
@@ -180,12 +187,16 @@ fn row_layout_over_sizes_and_patterns() {
             let expected: Vec<bool> = (0..size.height)
                 .flat_map(|y| (0..size.width).map(move |x| pattern(x, y, size)))
                 .collect();
-            let residual: Vec<f32> = expected
-                .iter()
-                .map(|&on| if on { 1.0 } else { -0.5 })
-                .collect();
-            let noise = vec![0.1f32; size.pixel_count()];
-            let mask = threshold_mask(&residual, &noise, 3.0, size);
+            let residual = Buffer2::new(
+                size.width,
+                size.height,
+                expected
+                    .iter()
+                    .map(|&on| if on { 1.0 } else { -0.5 })
+                    .collect(),
+            );
+            let noise = Buffer2::new_filled(size.width, size.height, 0.1f32);
+            let mask = threshold_mask(&residual, &noise, 3.0);
             let actual: Vec<bool> = mask.iter().collect();
             assert_eq!(actual, expected, "{name} at {size:?}");
         }

@@ -14,8 +14,8 @@ fn a_named_graph_compiles_to_one_node_per_name() {
             .compute(|inputs| (inputs[0].as_i64().unwrap() * 2).into())
     });
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "double", 0);
-    g.wire("double", 0, "print", 0);
+    g.wire("src", "double");
+    g.wire("double", "print");
 
     // Every name resolves to a distinct node, and the wiring is real.
     assert_eq!(g.graph.len(), 3);

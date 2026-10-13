@@ -36,6 +36,16 @@ enum GlyphShape {
     Arrow { turn: f32 },
 }
 
+/// The painted glyph: its shape, the side of the square it paints in, and its
+/// ink.
+#[derive(Clone, Copy, Debug)]
+struct Painted {
+    shape: GlyphShape,
+    /// Side of the *painted* shape; the sensing box is [`HIT_SCALE`] of this.
+    size: f32,
+    fill: RgbaF32,
+}
+
 /// Where the grown box sits.
 #[derive(Clone, Copy, Debug)]
 enum Placement {
@@ -63,10 +73,7 @@ enum Placement {
 #[derive(Debug)]
 pub(crate) struct PortGlyph<'a> {
     wid: WidgetId,
-    /// Side of the *painted* shape; the sensing box is [`HIT_SCALE`] of this.
-    size: f32,
-    shape: GlyphShape,
-    fill: RgbaF32,
+    glyph: Painted,
     placement: Placement,
     tip: Option<TextInput<'a>>,
 }
@@ -89,21 +96,33 @@ pub(crate) struct PortGlyphResponse {
 impl<'a> PortGlyph<'a> {
     /// A data port's circle, `diameter` across, inked `fill`.
     pub(crate) const fn circle(wid: WidgetId, diameter: f32, fill: RgbaF32) -> Self {
-        Self::new(wid, diameter, GlyphShape::Circle { outline: None }, fill)
+        Self::new(
+            wid,
+            Painted {
+                shape: GlyphShape::Circle { outline: None },
+                size: diameter,
+                fill,
+            },
+        )
     }
 
     /// An emitter event's triangle, apex pointing right (the emit direction),
     /// inked `fill`.
     pub(crate) const fn arrow(wid: WidgetId, size: f32, fill: RgbaF32) -> Self {
-        Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 }, fill)
+        Self::new(
+            wid,
+            Painted {
+                shape: GlyphShape::Arrow { turn: 0.0 },
+                size,
+                fill,
+            },
+        )
     }
 
-    const fn new(wid: WidgetId, size: f32, shape: GlyphShape, fill: RgbaF32) -> Self {
+    const fn new(wid: WidgetId, glyph: Painted) -> Self {
         Self {
             wid,
-            size,
-            shape,
-            fill,
+            glyph,
             placement: Placement::Margin(Spacing::ZERO),
             tip: None,
         }
@@ -112,7 +131,7 @@ impl<'a> PortGlyph<'a> {
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
     pub(crate) const fn outline(mut self, color: RgbaF32) -> Self {
-        if let GlyphShape::Circle { outline } = &mut self.shape {
+        if let GlyphShape::Circle { outline } = &mut self.glyph.shape {
             *outline = Some(color);
         }
         self
@@ -121,7 +140,7 @@ impl<'a> PortGlyph<'a> {
     /// Rotate an arrow's apex by `radians` about the box center. Ignored by
     /// [`circle`](Self::circle). Default: none (apex points right).
     pub(crate) const fn turn(mut self, radians: f32) -> Self {
-        if let GlyphShape::Arrow { turn } = &mut self.shape {
+        if let GlyphShape::Arrow { turn } = &mut self.glyph.shape {
             *turn = radians;
         }
         self
@@ -156,15 +175,11 @@ impl<'a> PortGlyph<'a> {
     pub(crate) fn show(self, ui: &mut Ui) -> PortGlyphResponse {
         let Self {
             wid,
-            size,
-            shape,
-            fill,
+            glyph,
             placement,
             tip,
         } = self;
-        let hit = size * HIT_SCALE;
-        // Half the growth — the painted glyph's offset within the grown box.
-        let inset = (hit - size) * 0.5;
+        let (hit, inset) = (glyph.hit(), glyph.inset());
         let panel = Panel::zstack()
             .id(wid)
             .size((Sizing::fixed(hit), Sizing::fixed(hit)))
@@ -176,13 +191,13 @@ impl<'a> PortGlyph<'a> {
             }
             Placement::CenteredOn(point) => panel.position(point - Vec2::splat(hit * 0.5)),
         };
-        let glyph = panel.show(ui, |ui| shape.draw(ui, size, inset, hit, fill));
+        let shown = panel.show(ui, |ui| glyph.draw(ui));
         // Take the owned snapshot + the click edges so the glyph's `ui` borrow
         // ends before the tooltip records into `ui`.
-        let snapshot = glyph.response.snapshot();
+        let snapshot = shown.response.snapshot();
         let response = PortGlyphResponse {
-            double_clicked: glyph.response.left.double_clicked(),
-            secondary_clicked: glyph.response.right.clicked(),
+            double_clicked: shown.response.left.double_clicked(),
+            secondary_clicked: shown.response.right.clicked(),
         };
         support::tooltip_after(ui, &snapshot, tip);
         response
@@ -195,11 +210,24 @@ pub(crate) const fn enlarged_diameter(base: f32) -> f32 {
     base + 2.0 * OUTLINE_WIDTH
 }
 
-impl GlyphShape {
-    /// Paint into the `size`-sided square at `inset` within the `hit`-sided box.
-    fn draw(self, ui: &mut Ui, size: f32, inset: f32, hit: f32, fill: RgbaF32) {
-        match self {
-            Self::Circle { outline } => {
+impl Painted {
+    /// Side of the sensing box.
+    const fn hit(self) -> f32 {
+        self.size * HIT_SCALE
+    }
+
+    /// Half the growth — the painted glyph's offset within the grown box.
+    const fn inset(self) -> f32 {
+        (self.hit() - self.size) * 0.5
+    }
+
+    /// Paint into the `size`-sided square at [`Self::inset`] within the
+    /// [`Self::hit`]-sided box.
+    fn draw(self, ui: &mut Ui) {
+        let Self { shape, size, fill } = self;
+        let (hit, inset) = (self.hit(), self.inset());
+        match shape {
+            GlyphShape::Circle { outline } => {
                 let rect = Rect::new(inset, inset, size, size);
                 let radius = size * 0.5;
                 // The ring paints *before* the fill — an annulus strictly
@@ -208,17 +236,15 @@ impl GlyphShape {
                 // drawing it on `rect` would eat into the fill; inflating first
                 // lands the ring's inner edge exactly on the fill's outer edge.
                 if let Some(color) = outline {
-                    support::stroked_rect(
-                        ui,
-                        rect.inflated(OUTLINE_WIDTH),
-                        radius + OUTLINE_WIDTH,
-                        color,
-                        OUTLINE_WIDTH,
+                    ui.add_shape(
+                        Shape::rect(rect.inflated(OUTLINE_WIDTH))
+                            .corners(radius + OUTLINE_WIDTH)
+                            .border(Stroke::new(color, OUTLINE_WIDTH)),
                     );
                 }
-                support::filled_rect(ui, rect, radius, fill);
+                ui.add_shape(Shape::rect(rect).corners(radius).fill(fill));
             }
-            Self::Arrow { turn } => {
+            GlyphShape::Arrow { turn } => {
                 // Vertices are inset by the corner radius — the SDF rounds by
                 // *dilating* (`sdf - radius`), so the rounded result grows back
                 // out to the glyph box instead of past it. `turn` rotates the

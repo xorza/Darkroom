@@ -6,9 +6,9 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::linear_image::LinearImage;
+use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::noise::mrs_noise::MrsNoise;
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
@@ -72,21 +72,27 @@ impl PreparedFrame {
             });
 
         // The sources are found at the FWHM the configuration starts from.
-        let refined =
-            BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources)
-                .refine(
-                    &plane,
-                    PlaneSpec {
-                        prefilter,
-                        matched: config
-                            .fwhm
-                            .mode
-                            .map(|mode| config.fwhm.filter_at(mode.seed())),
-                        mask: no_data.as_deref(),
-                        background: &config.background,
-                    },
-                    resources,
-                );
+        let refined = BackgroundEstimate::estimate(
+            MaskedPlane {
+                pixels: &plane,
+                mask: no_data.as_deref(),
+            },
+            &config.background,
+            resources,
+        )
+        .refine(
+            &plane,
+            PlaneSpec {
+                prefilter,
+                matched: config
+                    .fwhm
+                    .mode
+                    .map(|mode| config.fwhm.filter_at(mode.seed())),
+                mask: no_data.as_deref(),
+                background: &config.background,
+            },
+            resources,
+        );
 
         // Saturation is a property of the recorded values, read before anything combines them.
         let mut saturation = resources.acquire_bit();
@@ -181,8 +187,7 @@ fn channel_noise(image: &LinearImage) -> [f32; 3] {
     let flags = image.flags.as_ref();
     let excluded =
         |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
-    let size = Size2us::new(image.width(), image.height());
-    [0, 1, 2].map(|channel| MrsNoise::estimate(image.channel(channel).pixels(), size, excluded))
+    [0, 1, 2].map(|channel| MrsNoise::estimate(image.channel(channel), excluded))
 }
 
 /// Inverse-variance weights for collapsing RGB into the detection plane, summing to 1.

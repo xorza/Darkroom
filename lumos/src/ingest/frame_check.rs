@@ -29,7 +29,7 @@ impl FrameCheck<'_> {
     /// Every sample of a decoded image is finite.
     pub(crate) fn samples(self, image: &impl StackableImage) -> Result<(), AdmissionError> {
         self.sample_channels(
-            (0..image.dimensions().channels()).map(|channel| image.channel(channel)),
+            (0..image.dimensions().channels()).map(|channel| image.channel(channel).pixels()),
         )
     }
 

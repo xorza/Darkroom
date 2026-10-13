@@ -8,13 +8,14 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
-use crate::gui::pane::graph_ui::gesture::group_drag;
-use crate::gui::pane::graph_ui::node_ui::{NodeUI, header, memory_row, port_row, preview_row, wid};
-use crate::gui::requests::Requests;
+use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab};
+use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
+use crate::gui::pane::graph_ui::node_ui::{
+    NodePass, NodeUI, header, memory_row, port_row, preview_row, wid,
+};
 use crate::gui::state::run_state::ExecStatus;
-use crate::gui::theme::Theme;
+use crate::gui::theme::{CardTier, Theme};
+use crate::gui::widgets::hover::Hover;
 
 /// What drawing **one** node reports back: the signals its own widgets
 /// produced but could not act on, in the shape palantir's
@@ -51,14 +52,10 @@ impl<'a> NodeWidget<'a> {
         Self { state, ncx }
     }
 
-    pub(super) fn show(
-        self,
-        ui: &mut Ui,
-        dcx: DrawCtx<'_>,
-        probe: &mut BreakerProbe<'_>,
-        out: &mut Requests,
-    ) -> NodeResponse {
+    pub(super) fn show(self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> NodeResponse {
         let Self { state, ncx } = self;
+        let NodePass { dcx, probe, out } = pass;
+        let dcx = *dcx;
         let (theme, node) = (ncx.theme(), ncx);
 
         // Probe the body against the breaker polyline. Hit → recolor border
@@ -83,12 +80,19 @@ impl<'a> NodeWidget<'a> {
         // then the missing-stub color, then `Theme::card_border`'s selected
         // or resting color.
         let border_width = theme.card.border_width_total();
-        let border = if node.missing() && !broken {
+        let tier = if broken {
+            CardTier::Broken
+        } else if selected {
+            CardTier::Selected
+        } else {
+            CardTier::Resting
+        };
+        let border = if node.missing() && tier != CardTier::Broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
             theme.status.error
         } else {
-            theme.card_border(broken, selected)
+            theme.card_border(tier)
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
@@ -101,7 +105,11 @@ impl<'a> NodeWidget<'a> {
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
         if node.sink() {
-            header::subscription_pin(ui, theme, node, dcx.geometry().subs.is_hovered(node.id));
+            header::subscription_pin(
+                ui,
+                node,
+                Hover::from(dcx.geometry().subs.is_hovered(node.id)),
+            );
         }
 
         // Borrowed off `self` before the body closure so it can't conflict
@@ -125,13 +133,18 @@ impl<'a> NodeWidget<'a> {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                let inspect_toggled = header::show(ui, ncx, dcx, out);
-                header::status_row(ui, ncx, out);
-                port_row::show(ui, ncx, dcx, row_tracks, out);
+                let mut rec = NodeRecord {
+                    node: ncx,
+                    draw: dcx,
+                    out,
+                };
+                let inspect_toggled = header::show(ui, &mut rec);
+                header::status_row(ui, &mut rec);
+                port_row::show(ui, &mut rec, row_tracks);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
-                    preview_row::show(ui, ncx, out);
+                    preview_row::show(ui, &mut rec);
                 } else {
                     memory_row::show(ui, ncx);
                 }
@@ -191,7 +204,14 @@ impl<'a> NodeWidget<'a> {
                     pos: node.pos,
                 }])
             };
-            state.drag.latch(node.id, members, handle, out);
+            state.drag.latch(
+                Grab {
+                    node: node.id,
+                    members,
+                    handle,
+                },
+                out,
+            );
         }
         response
     }

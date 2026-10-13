@@ -95,8 +95,8 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
             })
     });
     graph.add("print", NodeSpec::records);
-    graph.wire("source", 0, "square", 0);
-    graph.wire("square", 0, "print", 0);
+    graph.wire("source", "square");
+    graph.wire("square", "print");
     graph
 }
 

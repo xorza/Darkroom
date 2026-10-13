@@ -325,9 +325,10 @@ fn ghs_reference_tp(d: f64, b: f64, u: f64) -> f64 {
     }
 }
 
-/// The textbook GHS, in f64: the base `T` and its slope per `b` branch, the mirror about `sp`, the
-/// linear tails past `lp` and `hp`, normalized to [0, 1].
-fn ghs_reference(d: f64, b: f64, sp: f64, lp: f64, hp: f64, x: f64) -> f64 {
+/// The textbook GHS of `shape`, in f64: the base `T` and its slope per `b` branch, the mirror about
+/// `sp`, the linear tails past `lp` and `hp`, normalized to [0, 1].
+fn ghs_reference(shape: GhsShape, x: f64) -> f64 {
+    let [d, b, sp, lp, hp] = [shape.d, shape.b, shape.sp, shape.lp, shape.hp].map(f64::from);
     let t = |u: f64| ghs_reference_t(d, b, u);
     let tp = |u: f64| ghs_reference_tp(d, b, u);
     let raw = |x: f64| {
@@ -369,17 +370,11 @@ fn ghs_matches_an_f64_reference_through_both_limits() {
     ] {
         for d in [0.5f32, 5.0, 12.0] {
             for (sp, lp, hp) in [(0.3f32, 0.0f32, 1.0f32), (0.4, 0.15, 0.85)] {
-                let curve = GhsCurve::new(GhsShape { d, b, sp, lp, hp });
+                let shape = GhsShape { d, b, sp, lp, hp };
+                let curve = GhsCurve::new(shape);
                 for i in 0..=400 {
                     let x = i as f32 / 400.0;
-                    let expected = ghs_reference(
-                        f64::from(d),
-                        f64::from(b),
-                        f64::from(sp),
-                        f64::from(lp),
-                        f64::from(hp),
-                        f64::from(x),
-                    );
+                    let expected = ghs_reference(shape, f64::from(x));
                     let got = f64::from(curve.eval(x));
                     assert!(
                         (got - expected).abs() <= bound,
@@ -461,17 +456,18 @@ const GHS_EVAL_BOUND: f32 = 8.0 * f32::EPSILON;
 /// reference is that closed form, and the curve meets it to [`GHS_EVAL_BOUND`].
 #[test]
 fn ghs_exponential_b0_hand_computed() {
-    let c = GhsCurve::new(GhsShape {
+    let shape = GhsShape {
         d: 2.0,
         b: 0.0,
         sp: 0.0,
         lp: 0.0,
         hp: 1.0,
-    });
+    };
+    let c = GhsCurve::new(shape);
     for (x, hand) in [(0.5f32, 0.731_059), (0.25, 0.455_054)] {
         let closed = (1.0 - (-2.0 * f64::from(x)).exp()) / (1.0 - (-2.0f64).exp());
         assert!((closed - hand).abs() < 1e-6, "{closed} vs {hand}");
-        let reference = ghs_reference(2.0, 0.0, 0.0, 0.0, 1.0, f64::from(x));
+        let reference = ghs_reference(shape, f64::from(x));
         assert!(
             (reference - closed).abs() < 1e-15,
             "{reference} vs {closed}"
@@ -595,9 +591,7 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
     let mut img = rgb_image(
         Size2us::new(2, 1),
-        vec![0.3, 0.9],
-        vec![0.15, 0.45],
-        vec![0.15, 0.45],
+        [vec![0.3, 0.9], vec![0.15, 0.45], vec![0.15, 0.45]],
     );
     let cfg = Stretch {
         method: StretchMethod::Asinh {
@@ -626,8 +620,8 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let r = vec![0.20, 0.21, 0.19, 0.20, 0.50];
     let g = vec![0.05, 0.06, 0.04, 0.05, 0.50];
     let b = vec![0.05, 0.06, 0.04, 0.05, 0.50];
-    let mut linked = rgb_image(Size2us::new(5, 1), r.clone(), g.clone(), b.clone());
-    let mut unlinked = rgb_image(Size2us::new(5, 1), r, g, b);
+    let mut linked = rgb_image(Size2us::new(5, 1), [r.clone(), g.clone(), b.clone()]);
+    let mut unlinked = rgb_image(Size2us::new(5, 1), [r, g, b]);
 
     Stretch::auto_stf().apply(&mut linked).unwrap();
     Stretch {
@@ -703,7 +697,7 @@ fn subsampled_intensity_is_the_intensity_plane_subsampled() {
             .map(|i| (i.wrapping_mul(2_654_435_761).wrapping_add(seed) >> 8) as f32 / 16_777_216.0)
             .collect()
     };
-    let image = rgb_image(size, plane(1), plane(2), plane(3));
+    let image = rgb_image(size, [plane(1), plane(2), plane(3)]);
     let sample = Subsample::new(size.pixel_count(), MAX_STATISTIC_SAMPLES);
     assert_eq!(sample.count(), 500_500);
     let expected: Vec<f32> = sample.of(image.intensity_plane().pixels()).collect();
@@ -724,7 +718,7 @@ fn default_config_is_color_preserving_auto_asinh() {
 #[test]
 fn faint_h_alpha_keeps_its_hue() {
     let stretch = |black_point: f32| {
-        let mut image = rgb_image(Size2us::new(1, 1), vec![0.055], vec![0.05], vec![0.05]);
+        let mut image = rgb_image(Size2us::new(1, 1), [vec![0.055], vec![0.05], vec![0.05]]);
         Stretch {
             method: StretchMethod::Asinh {
                 black_point,
@@ -763,7 +757,7 @@ fn the_auto_black_point_keeps_a_faint_colour() {
         .collect();
     let background = MedianMad::of_mut(&mut intensities);
     let black = background.median - StretchMethod::AUTO_SHADOW_SIGMAS * background.sigma();
-    let mut image = rgb_image(size, r, g, b);
+    let mut image = rgb_image(size, [r, g, b]);
     Stretch::auto_asinh().apply(&mut image).unwrap();
     let (out_r, out_g, out_b) = (
         image.channel(0).pixels()[1],
@@ -808,7 +802,7 @@ fn a_nan_sample_is_black_on_every_curve() {
         .eval(f32::NAN),
         0.0
     );
-    let mut image = rgb_image(Size2us::new(1, 1), vec![f32::NAN], vec![0.2], vec![0.2]);
+    let mut image = rgb_image(Size2us::new(1, 1), [vec![f32::NAN], vec![0.2], vec![0.2]]);
     Stretch {
         method: StretchMethod::Ghs {
             black_point: 0.0,

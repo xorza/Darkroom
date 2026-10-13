@@ -10,6 +10,7 @@ use common::Introspect;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -78,24 +79,12 @@ impl LocalContrast {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.tiles >= 1,
-            "local contrast tiles",
-            "at least 1",
-            self.tiles as f64,
-        )?;
-        InvalidConfigField::finite(
-            "local contrast clip_limit",
-            "finite and at least 1",
-            self.clip_limit,
-            |value| value >= 1.0,
-        )?;
-        InvalidConfigField::finite(
-            "local contrast strength",
-            "finite and in [0, 1]",
-            self.strength,
-            |value| (0.0..=1.0).contains(&value),
-        )
+        ConfigValue::count("local contrast tiles", self.tiles)
+            .must_be("at least 1", self.tiles >= 1)?;
+        ConfigValue::new("local contrast clip_limit", self.clip_limit)
+            .finite_and("finite and at least 1", |value| value >= 1.0)?;
+        ConfigValue::new("local contrast strength", self.strength)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }
 
@@ -228,7 +217,7 @@ impl TileGrid {
     /// with the original by `strength`.
     fn apply(&self, intensity: &Buffer2<f32>, luts: &[TileLut], strength: f32) -> Buffer2<f32> {
         let Self { columns, rows } = self;
-        let size = Size2us::new(intensity.width(), intensity.height());
+        let size = Size2us::from(intensity);
         let column_blends: Vec<Blend> = (0..size.width).map(|x| columns.blend(x)).collect();
         let mut out = Buffer2::new_default(size.width, size.height);
         out.pixels_mut()

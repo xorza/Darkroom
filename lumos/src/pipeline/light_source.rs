@@ -324,7 +324,7 @@ impl LightShape {
         warp: usize,
         run: &IngestRun,
     ) -> Result<StagePlan, AlignStackError> {
-        let tier = Tier::for_plan(plan, run.budget, self.spill_bytes(), &run.cache_dir)?;
+        let tier = Tier::for_plan(plan, self.spill_bytes(), &run.cache_dir)?;
         Ok(StagePlan {
             parking: FrameParking::new(tier),
             warp_width: plan.width(warp),

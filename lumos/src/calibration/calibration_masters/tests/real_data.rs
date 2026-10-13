@@ -70,7 +70,7 @@ fn builds_full_master_set() {
     let bias = masters.bias.as_ref().expect("master bias");
 
     // All masters share the single sensor geometry (one CFA plane each).
-    let size = Size2us::new(dark.data.width(), dark.data.height());
+    let size = Size2us::from(&dark.data);
     assert!(
         size.width > 0 && size.height > 0,
         "degenerate master dimensions {}x{}",
@@ -228,7 +228,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         .run(ProgressMonitor::unattended())
         .expect("master-dark stack failed")
         .expect("master dark");
-        let size = Size2us::new(dark.data.width(), dark.data.height());
+        let size = Size2us::from(&dark.data);
         let map = DefectMap::new(dark.size())
             .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
             .expect("hot detection failed");

@@ -6,7 +6,7 @@
 use std::fmt::Display;
 
 use palantir::prelude::*;
-use palantir::widget::Shape;
+use palantir::widget::{RectShape, Shape, TriangleShape};
 use palantir::{FontFamily, ResponseSnapshot, TextInput};
 
 use crate::gui::theme::Theme;
@@ -53,16 +53,25 @@ pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
     Text::new(fmt!(ui, "{value}")).style(&style).show(ui);
 }
 
-/// [`bare_value`] behind a muted micro-label, as two direct `Text` widgets
-/// (no wrapping panel — draw it inside the caller's own panel so its `gap`
-/// spaces the pair like any other sibling). Shared shape behind a node body's
-/// memory footer (`gui::pane::graph_ui::node_ui::memory_row`) and a preview node's
-/// image-info footer (`gui::pane::graph_ui::node_ui::preview_row`).
-pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: impl Display) {
-    Text::new(label)
-        .style(&muted_text(ui, theme, theme.text.caption))
-        .show(ui);
-    bare_value(ui, theme, value);
+/// A value behind a muted micro-label.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LabeledValue<'a, V> {
+    pub(crate) label: &'a str,
+    pub(crate) value: V,
+}
+
+impl<V: Display> LabeledValue<'_, V> {
+    /// The value as [`bare_value`] behind its label, as two direct `Text` widgets
+    /// (no wrapping panel — draw it inside the caller's own panel so its `gap`
+    /// spaces the pair like any other sibling). Shared shape behind a node body's
+    /// memory footer (`gui::pane::graph_ui::node_ui::memory_row`) and a preview node's
+    /// image-info footer (`gui::pane::graph_ui::node_ui::preview_row`).
+    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) {
+        Text::new(self.label)
+            .style(&muted_text(ui, theme, theme.text.caption))
+            .show(ui);
+        bare_value(ui, theme, self.value);
+    }
 }
 
 /// A read-only "fact strip" footer's background: the chrome fill, rounded
@@ -104,27 +113,13 @@ pub(crate) const CARD_HEADER_PAD_Y: f32 = 7.0;
 pub(crate) const CARD_FOOTER_PAD_X: f32 = 10.0;
 pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
 
-/// A filled rounded rect — the fill sibling of [`stroked_rect`].
-pub(crate) fn filled_rect(ui: &mut Ui, rect: Rect, radius: f32, color: RgbaF32) {
-    ui.add_shape(Shape::rect(rect).corners(radius).fill(color));
-}
-
-/// A rounded-rect outline (transparent fill, `color` stroke of `width`).
-pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: RgbaF32, width: f32) {
-    ui.add_shape(
-        Shape::rect(rect)
-            .corners(radius)
-            .border(Stroke::new(color, width)),
-    );
-}
-
-/// A small filled circle of radius `r` centered at `(cx, cy)`.
-pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: RgbaF32) {
-    filled_rect(ui, Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r), r, color);
+/// A small circle of radius `r` centred on `centre`, for the caller to fill.
+pub(crate) fn dot(centre: Vec2, r: f32) -> RectShape {
+    Shape::rect(Rect::new(centre.x - r, centre.y - r, 2.0 * r, 2.0 * r)).corners(r)
 }
 
 /// A right-pointing play triangle inscribed in an `s`-sized box, spanning
-/// `fill` of it.
+/// `fill` of it, for the caller to fill.
 ///
 /// Nudged right by a fifth of its half-width: a play mark's visual centre sits
 /// left of its bounding box's, so a geometrically centred one reads as offset.
@@ -135,26 +130,23 @@ pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: RgbaF32) {
 /// the graph toolbar's run button — cannot drift on that geometry. `fill`
 /// stays per-caller: a 30px toolbar button carries proportionally less glyph
 /// than an 18px header badge.
-pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: RgbaF32) {
-    play_triangle_at(ui, s, Vec2::splat(s * 0.5), fill, color);
+pub(crate) fn play_triangle(s: f32, fill: f32) -> TriangleShape {
+    play_triangle_at(s, Vec2::splat(s * 0.5), fill)
 }
 
 /// [`play_triangle`] centred on `c` rather than on the box — for a mark that
 /// shares its box with another, like the event-loop button's bar.
-pub(crate) fn play_triangle_at(ui: &mut Ui, s: f32, c: Vec2, fill: f32, color: RgbaF32) {
+pub(crate) fn play_triangle_at(s: f32, c: Vec2, fill: f32) -> TriangleShape {
     let half_h = s * fill * 0.5;
     let half_w = half_h * (5.0 / 6.0);
     let r = s * 0.05;
     let nudge = half_w * 0.2;
-    ui.add_shape(
-        Shape::triangle(
-            c + Vec2::new(nudge - half_w + r, r - half_h),
-            c + Vec2::new(nudge - half_w + r, half_h - r),
-            c + Vec2::new(nudge + half_w - r, 0.0),
-        )
-        .radius(r)
-        .fill(color),
-    );
+    Shape::triangle(
+        c + Vec2::new(nudge - half_w + r, r - half_h),
+        c + Vec2::new(nudge - half_w + r, half_h - r),
+        c + Vec2::new(nudge + half_w - r, 0.0),
+    )
+    .radius(r)
 }
 
 /// The shared rounded-rect outline glyphs frame their contents in,
@@ -162,7 +154,11 @@ pub(crate) fn play_triangle_at(ui: &mut Ui, s: f32, c: Vec2, fill: f32, color: R
 pub(crate) fn frame(ui: &mut Ui, s: f32, color: RgbaF32) {
     let w = s * 0.62;
     let o = (s - w) * 0.5;
-    stroked_rect(ui, Rect::new(o, o, w, w), s * 0.08, color, s * 0.06);
+    ui.add_shape(
+        Shape::rect(Rect::new(o, o, w, w))
+            .corners(s * 0.08)
+            .border(Stroke::new(color, s * 0.06)),
+    );
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the

@@ -12,10 +12,12 @@
 
 use palantir::SrgbaU8;
 use palantir::prelude::*;
+use palantir::widget::Shape;
 
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
+use crate::gui::widgets::toggle::Toggle;
 
 /// The "1:1" glyph's share of its button box — the text peer of the `s * k`
 /// factors its drawn siblings are built from, so it scales with the box rather
@@ -64,7 +66,11 @@ pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: RgbaF32) {
         (far - t, far - len, t, len),
     ];
     for (x, y, w, h) in bars {
-        support::filled_rect(ui, Rect::new(x, y, w, h), t * 0.5, color);
+        ui.add_shape(
+            Shape::rect(Rect::new(x, y, w, h))
+                .corners(t * 0.5)
+                .fill(color),
+        );
     }
 }
 
@@ -83,54 +89,65 @@ pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: RgbaF32) {
         for ix in 0..2 {
             let x = o + ix as f32 * (cell + gap);
             let y = o + iy as f32 * (cell + gap);
-            support::filled_rect(ui, Rect::new(x, y, cell, cell), 1.0, color);
+            ui.add_shape(
+                Shape::rect(Rect::new(x, y, cell, cell))
+                    .corners(1.0)
+                    .fill(color),
+            );
         }
     }
 }
 
-/// A backdrop-mode swatch: an inset square filled with the mode itself
-/// (mini checker for `Checker`), ringed with the selection accent when
-/// active.
-pub(super) fn draw_swatch(
-    ui: &mut Ui,
-    s: f32,
-    theme: &Theme,
-    mode: ViewerBackground,
-    selected: bool,
-) {
-    let d = s * SWATCH_SHARE;
-    let o = (s - d) * 0.5;
-    let rect = Rect::new(o, o, d, d);
-    if let Some(fill) = flat_fill(theme, mode) {
-        support::filled_rect(ui, rect, SWATCH_RADIUS, fill);
-    } else {
-        let light = RgbaF32::from_srgba(SrgbaU8::rgb(
-            CHECKER_LIGHT_U8,
-            CHECKER_LIGHT_U8,
-            CHECKER_LIGHT_U8,
-        ));
-        let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
-            CHECKER_DARK_U8,
-            CHECKER_DARK_U8,
-            CHECKER_DARK_U8,
-        ));
-        support::filled_rect(ui, rect, SWATCH_RADIUS, dark);
-        // Two light quads on the diagonal make the 2×2 mini checker.
-        let h = d * 0.5;
-        for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-            support::filled_rect(ui, cell, 0.0, light);
+/// A backdrop mode's swatch, ringed with the selection accent while `state`
+/// is on.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Swatch {
+    pub(super) mode: ViewerBackground,
+    pub(super) state: Toggle,
+}
+
+impl Swatch {
+    /// An inset square in the `s`-sized box filled with the mode itself (mini
+    /// checker for `Checker`).
+    pub(super) fn draw(self, ui: &mut Ui, s: f32, theme: &Theme) {
+        let Self { mode, state } = self;
+        let d = s * SWATCH_SHARE;
+        let o = (s - d) * 0.5;
+        let rect = Rect::new(o, o, d, d);
+        if let Some(fill) = flat_fill(theme, mode) {
+            ui.add_shape(Shape::rect(rect).corners(SWATCH_RADIUS).fill(fill));
+        } else {
+            let light = RgbaF32::from_srgba(SrgbaU8::rgb(
+                CHECKER_LIGHT_U8,
+                CHECKER_LIGHT_U8,
+                CHECKER_LIGHT_U8,
+            ));
+            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
+                CHECKER_DARK_U8,
+                CHECKER_DARK_U8,
+                CHECKER_DARK_U8,
+            ));
+            ui.add_shape(Shape::rect(rect).corners(SWATCH_RADIUS).fill(dark));
+            // Two light quads on the diagonal make the 2×2 mini checker.
+            let h = d * 0.5;
+            for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
+                ui.add_shape(Shape::rect(cell).fill(light));
+            }
         }
+        // Ring on top so the checker quads can't cover it.
+        let (ring, width) = match state {
+            Toggle::On => (theme.colors.selection_rect, theme.card.border_width_total()),
+            Toggle::Off => (
+                theme.colors.text_muted.with_alpha(SWATCH_RING_ALPHA),
+                theme.card.border_width,
+            ),
+        };
+        ui.add_shape(
+            Shape::rect(rect)
+                .corners(SWATCH_RADIUS)
+                .border(Stroke::new(ring, width)),
+        );
     }
-    // Ring on top so the checker quads can't cover it.
-    let (ring, width) = if selected {
-        (theme.colors.selection_rect, theme.card.border_width_total())
-    } else {
-        (
-            theme.colors.text_muted.with_alpha(SWATCH_RING_ALPHA),
-            theme.card.border_width,
-        )
-    };
-    support::stroked_rect(ui, rect, SWATCH_RADIUS, ring, width);
 }
 
 /// The single colour `mode` paints, or `None` for the checker, which is a

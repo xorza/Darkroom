@@ -10,6 +10,7 @@ use crate::math::vec2us::Vec2us;
 use crate::calibration::defect_map::sampling::internals::color_samples;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::cfa::make_cfa;
+use imaginarium::Buffer2;
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)
@@ -444,11 +445,9 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         .collect();
     let data = Buffer2::new(size.width, size.height, pixels);
     let background = ColourMesh::measure(
-        &data,
+        MaskedPlane::from(&data),
         &CfaType::Mono,
         DARK_BACKGROUND_TILE_SIZE,
-        None,
-        &mut MeshWorkspace::default(),
     );
 
     for y in 0..size.height {
@@ -815,14 +814,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
     let mut ring = RingReference::default();
     for point in [Vec2us::new(20, 20), Vec2us::new(0, 0), Vec2us::new(39, 38)] {
         let plain = make_cfa(size, pixels.clone(), cfa);
-        let read = ring
-            .at(
-                plain.size(),
-                |index| f64::from(plain.data[index]),
-                &cfa,
-                point,
-            )
-            .unwrap();
+        let read = ring.at(RingFrame::of(&plain.data), &cfa, point).unwrap();
         assert!(
             (read - level(point.x, point.y)).abs() < 1e-6,
             "{point:?}: {read}"
@@ -837,23 +829,13 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
     }
     let spotted = make_cfa(size, pixels, cfa);
     let read = ring
-        .at(
-            spotted.size(),
-            |index| f64::from(spotted.data[index]),
-            &cfa,
-            Vec2us::new(20, 20),
-        )
+        .at(RingFrame::of(&spotted.data), &cfa, Vec2us::new(20, 20))
         .unwrap();
     assert!((read - level(20, 20)).abs() < 1e-6, "{read}");
     let tiny = make_cfa(Size2us::new(6, 6), vec![0.1; 36], CfaType::Mono);
     assert!(
-        ring.at(
-            tiny.size(),
-            |index| f64::from(tiny.data[index]),
-            &CfaType::Mono,
-            Vec2us::new(3, 3)
-        )
-        .is_none()
+        ring.at(RingFrame::of(&tiny.data), &CfaType::Mono, Vec2us::new(3, 3))
+            .is_none()
     );
 }
 

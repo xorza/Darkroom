@@ -13,6 +13,7 @@
 use common::Introspect;
 use rayon::prelude::*;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::SAMPLES_PER_BLOCK;
@@ -79,7 +80,7 @@ impl Hdr {
     /// computed — a streaming à trous over two reused planes — never the layer pyramid (`scales`
     /// full planes at ~100 MB each on a real master).
     fn compress(&self, intensity: &Buffer2<f32>) -> Buffer2<f32> {
-        let size = Size2us::new(intensity.width(), intensity.height());
+        let size = Size2us::from(intensity);
         let scales = self.scales.min(wavelet::max_scales(size));
 
         let mut c_curr = Buffer2::new(
@@ -114,15 +115,9 @@ impl Hdr {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.scales >= 1,
-            "hdr scales",
-            "at least 1",
-            self.scales as f64,
-        )?;
-        InvalidConfigField::finite("hdr amount", "finite and in [0, 1]", self.amount, |value| {
-            (0.0..=1.0).contains(&value)
-        })
+        ConfigValue::count("hdr scales", self.scales).must_be("at least 1", self.scales >= 1)?;
+        ConfigValue::new("hdr amount", self.amount)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }
 

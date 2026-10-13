@@ -715,8 +715,15 @@ fn data_len() {
 #[test]
 fn from_libraw_classifies_the_sensor() {
     let xtrans = *XTRANS_PATTERN.rows();
-    let classify =
-        |filters, colors| CfaType::from_libraw(filters, colors, *b"RGBG", xtrans).unwrap();
+    let classify = |filters, colors| {
+        CfaType::from_libraw(&LibrawFilters {
+            filters,
+            colors,
+            cdesc: *b"RGBG",
+            xtrans,
+        })
+        .unwrap()
+    };
     assert_eq!(classify(0, 1), Some(CfaType::Mono));
     assert_eq!(classify(0x9494_9494, 1), Some(CfaType::Mono));
     assert_eq!(classify(0, 3), None);
@@ -736,12 +743,24 @@ fn from_libraw_classifies_the_sensor() {
             "{cdesc:?}: the word alone passes for Bayer"
         );
         assert_eq!(
-            CfaType::from_libraw(filters, 4, cdesc, xtrans).unwrap(),
+            CfaType::from_libraw(&LibrawFilters {
+                filters,
+                colors: 4,
+                cdesc,
+                xtrans
+            })
+            .unwrap(),
             None,
             "{cdesc:?}"
         );
         assert_eq!(
-            CfaType::from_libraw(filters, 3, cdesc, xtrans).unwrap(),
+            CfaType::from_libraw(&LibrawFilters {
+                filters,
+                colors: 3,
+                cdesc,
+                xtrans
+            })
+            .unwrap(),
             None,
             "{cdesc:?} described as three colours"
         );
@@ -750,7 +769,12 @@ fn from_libraw_classifies_the_sensor() {
     let mut corrupt = xtrans;
     corrupt[0][0] = 3;
     assert!(matches!(
-        CfaType::from_libraw(9, 3, *b"RGBG", corrupt),
+        CfaType::from_libraw(&LibrawFilters {
+            filters: 9,
+            colors: 3,
+            cdesc: *b"RGBG",
+            xtrans: corrupt
+        }),
         Err(XTransPatternError::Value {
             row: 0,
             column: 0,

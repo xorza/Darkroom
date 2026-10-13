@@ -1,11 +1,9 @@
 //! [`GlyphDrag`]: one in-flight wire drag between two glyph layers.
 
 use glam::Vec2;
-use palantir::Ui;
 use scenarium::NodeId;
 
 use crate::core::document::node_key::NodeKey;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer;
 
 /// One in-flight wire drag: the glyph the press latched (`from`, a key in
@@ -54,23 +52,15 @@ impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
         layer.dragging(self.from)
     }
 
-    /// The moving end of the preview curve: the snapped glyph's center once
-    /// the drag has a target, else the bare pointer in canvas-world coords.
-    /// `None` on a frame where neither resolves (pointer off-window, or a snap
-    /// target that hasn't measured yet) — the preview simply doesn't paint
-    /// that frame. `canvas_origin` is the inner canvas's pre-transform origin.
-    pub(crate) fn free_end(
-        self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        canvas_origin: Vec2,
-        layer: &PortLayer<B>,
-    ) -> Option<Vec2> {
+    /// The moving end of the preview curve: the snapped glyph's center once the drag has a target,
+    /// else `pointer`, the bare pointer in canvas-world coords (see
+    /// [`world_pointer`](crate::gui::pane::graph_ui::canvas::world_pointer)). `None` on a frame
+    /// where neither resolves (pointer off-window, or a snap target that hasn't measured yet) — the
+    /// preview simply doesn't paint that frame.
+    pub(crate) fn free_end(self, pointer: Option<Vec2>, layer: &PortLayer<B>) -> Option<Vec2> {
         match self.snap {
             Some(key) => layer.center(key),
-            None => ui
-                .pointer_pos()
-                .map(|p| graph_ctx.viewport().to_world(p - canvas_origin)),
+            None => pointer,
         }
     }
 }

@@ -25,49 +25,47 @@ use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 
 use crate::image::cfa::cfa_type::CfaType;
-use crate::internals::synthetic::artifacts::add_cosmic_rays;
-use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
+use crate::internals::synthetic::artifacts::CosmicRays;
+use crate::internals::synthetic::backgrounds::{Gradient, NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::internals::synthetic::fixtures::{cluster_field, star_field};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
-fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {
-    assert_eq!(
-        pixels.len(),
-        size.pixel_count(),
-        "pixel/dimension mismatch for {name}"
-    );
+fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
     let name = format!("synthetic_gallery/{name}");
     let path = visual::debug_file(&name)
         .unwrap_or_else(|| panic!("the gallery writes images; set {DEBUG_OUTPUT_VAR}=1 to run it"));
-    visual::save(pixels, size, &name, tone);
+    visual::save(pixels, &name, tone);
     path
 }
 
 /// Render a forward-model frame and save its sensor image.
-fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, tone: ToneMap) {
-    let frame = render(scene, camera, obs);
-    save(
-        frame.image.channel(0).pixels(),
-        Size2us::new(scene.size.width, scene.size.height),
-        name,
-        tone,
-    );
+fn save_frame(frame: &SimFrame, name: &str, tone: ToneMap) {
+    save(frame.image.channel(0), name, tone);
 }
 
 /// A representative populated star field over `background`.
 fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
-    Scene::random_field(size, 120, (3.0, 250.0), background, 16.0, seed)
+    Scene::scatter(
+        size,
+        Scatter {
+            count: 120,
+            flux: (3.0, 250.0),
+            placement: Placement::Uniform { margin: 16.0 },
+            seed,
+        },
+        background,
+    )
 }
 
 /// Create a checkerboard pattern.
 ///
 /// Useful for phase correlation and registration tests.
-fn checkerboard(size: Size2us, cell_size: usize, value_a: f32, value_b: f32) -> Buffer2<f32> {
+fn checkerboard(size: Size2us, cell_size: usize, [value_a, value_b]: [f32; 2]) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
@@ -78,28 +76,17 @@ fn checkerboard(size: Size2us, cell_size: usize, value_a: f32, value_b: f32) -> 
     Buffer2::new(size.width, size.height, pixels)
 }
 
-/// Render one `scene` through `camera` as `dithers.len()` frames, each translated by its
-/// dither offset and given an independent noise seed derived from `base_seed`.
-fn observe_dithered(
-    scene: &Scene,
-    camera: &Camera,
-    dithers: &[DVec2],
-    exposure_s: f32,
-    base_seed: u64,
-) -> Vec<SimFrame> {
-    dithers
-        .iter()
-        .enumerate()
-        .map(|(i, &d)| {
-            let obs = Observation {
-                transform: Transform::translation(d),
-                exposure_s,
-                seeing_scale: 1.0,
-                seed: base_seed.wrapping_add(i as u64 * 7919),
-            };
-            render(scene, camera, &obs)
-        })
-        .collect()
+/// `base` repeated at each of `dithers`: each translated by its offset, with an independent noise
+/// seed derived from `base`'s.
+fn dithered<'a>(
+    base: &'a Observation,
+    dithers: &'a [DVec2],
+) -> impl Iterator<Item = Observation> + 'a {
+    dithers.iter().enumerate().map(move |(i, &d)| Observation {
+        transform: Transform::translation(d),
+        seed: base.seed.wrapping_add(i as u64 * 7919),
+        ..*base
+    })
 }
 
 #[test]
@@ -114,20 +101,20 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/gradient_0deg",
-            BackgroundField::Gradient {
+            BackgroundField::Gradient(Gradient {
                 start: 0.02,
                 end: 0.4,
                 angle: 0.0,
-            },
+            }),
             ToneMap::Clamp,
         ),
         (
             "backgrounds/gradient_45deg",
-            BackgroundField::Gradient {
+            BackgroundField::Gradient(Gradient {
                 start: 0.02,
                 end: 0.4,
                 angle: FRAC_PI_4,
-            },
+            }),
             ToneMap::Clamp,
         ),
         (
@@ -158,7 +145,7 @@ fn gallery_backgrounds() {
         ),
     ];
     for (name, bg, tone) in cases {
-        save(&bg.render(size), size, name, tone);
+        save(&bg.render(size), name, tone);
     }
 }
 
@@ -202,16 +189,21 @@ fn gallery_psf_models() {
         ),
     ];
     for (name, psf) in cases {
-        let scene = Scene::single(size, DVec2::new(32.0, 32.0), 8.0, dark.clone());
+        let scene = Scene::single(
+            size,
+            TrueSource {
+                pos: DVec2::new(32.0, 32.0),
+                flux: 8.0,
+            },
+            dark.clone(),
+        );
         let camera = Camera {
             psf,
             ..Camera::ideal(4.0)
         };
         // asinh shows the wings (Moffat vs Gaussian) and the elongation.
         save_frame(
-            &scene,
-            &camera,
-            &Observation::reference(1),
+            &render(&scene, &camera, &Observation::reference(1)),
             name,
             ToneMap::Asinh,
         );
@@ -229,16 +221,12 @@ fn gallery_noise() {
     };
     // A uniform field: linear tone makes the noise grain (or its absence) visible.
     save_frame(
-        &flat,
-        &Camera::ideal(3.0),
-        &Observation::reference(1),
+        &render(&flat, &Camera::ideal(3.0), &Observation::reference(1)),
         "noise/flat_ideal",
         ToneMap::Clamp,
     );
     save_frame(
-        &flat,
-        &Camera::realistic(3.0),
-        &Observation::reference(1),
+        &render(&flat, &Camera::realistic(3.0), &Observation::reference(1)),
         "noise/flat_realistic",
         ToneMap::Clamp,
     );
@@ -251,30 +239,22 @@ fn gallery_noise() {
         ..Camera::realistic(3.0)
     };
     save_frame(
-        &field,
-        &Camera::ideal(3.0),
-        &Observation::reference(2),
+        &render(&field, &Camera::ideal(3.0), &Observation::reference(2)),
         "noise/field_ideal",
         ToneMap::Asinh,
     );
     save_frame(
-        &field,
-        &well(50_000.0, 3.0),
-        &Observation::reference(2),
+        &render(&field, &well(50_000.0, 3.0), &Observation::reference(2)),
         "noise/field_well50k",
         ToneMap::Asinh,
     );
     save_frame(
-        &field,
-        &well(5_000.0, 3.0),
-        &Observation::reference(2),
+        &render(&field, &well(5_000.0, 3.0), &Observation::reference(2)),
         "noise/field_well5k_more_shot",
         ToneMap::Asinh,
     );
     save_frame(
-        &field,
-        &well(50_000.0, 30.0),
-        &Observation::reference(2),
+        &render(&field, &well(50_000.0, 30.0), &Observation::reference(2)),
         "noise/field_read30_more_read",
         ToneMap::Asinh,
     );
@@ -295,7 +275,6 @@ fn gallery_sensor() {
     };
     save(
         &vignette_flat.render(size, &CfaType::Mono),
-        size,
         "sensor/flat_vignette_map",
         ToneMap::Clamp,
     );
@@ -311,9 +290,7 @@ fn gallery_sensor() {
         ..Camera::ideal(3.0)
     };
     save_frame(
-        &sky,
-        &vignetted,
-        &Observation::reference(1),
+        &render(&sky, &vignetted, &Observation::reference(1)),
         "sensor/sky_through_vignette",
         ToneMap::Clamp,
     );
@@ -338,9 +315,7 @@ fn gallery_sensor() {
         ..Camera::realistic(3.0)
     };
     save_frame(
-        &field,
-        &camera,
-        &Observation::reference(3),
+        &render(&field, &camera, &Observation::reference(3)),
         "sensor/defects_and_bias",
         ToneMap::Asinh,
     );
@@ -351,36 +326,36 @@ fn gallery_sensor() {
 fn gallery_scenes() {
     let size = Size2us::new(512, 512);
 
-    let sparse = Scene::random_field(
+    let sparse = Scene::scatter(
         size,
-        40,
-        (5.0, 250.0),
+        Scatter {
+            count: 40,
+            flux: (5.0, 250.0),
+            placement: Placement::Uniform { margin: 20.0 },
+            seed: 1,
+        },
         BackgroundField::Uniform { level: 0.05 },
-        20.0,
-        1,
     );
     save_frame(
-        &sparse,
-        &Camera::ideal(3.5),
-        &Observation::reference(1),
+        &render(&sparse, &Camera::ideal(3.5), &Observation::reference(1)),
         "scenes/sparse_ideal",
         ToneMap::Asinh,
     );
 
     let dense = demo_field(size, BackgroundField::Uniform { level: 0.06 }, 2);
     save_frame(
-        &dense,
-        &Camera::realistic(3.5),
-        &Observation::reference(2),
+        &render(&dense, &Camera::realistic(3.5), &Observation::reference(2)),
         "scenes/dense_realistic",
         ToneMap::Asinh,
     );
 
     let over_nebula = demo_field(size, BackgroundField::Nebula(NebulaConfig::default()), 3);
     save_frame(
-        &over_nebula,
-        &Camera::realistic(3.5),
-        &Observation::reference(3),
+        &render(
+            &over_nebula,
+            &Camera::realistic(3.5),
+            &Observation::reference(3),
+        ),
         "scenes/over_nebula",
         ToneMap::Asinh,
     );
@@ -395,35 +370,38 @@ fn gallery_scenes() {
         ..Camera::realistic(3.5)
     };
     save_frame(
-        &dense,
-        &elliptical,
-        &Observation::reference(4),
+        &render(&dense, &elliptical, &Observation::reference(4)),
         "scenes/elliptical_tracking_error",
         ToneMap::Asinh,
     );
 
     // Saturation: very bright sources clip flat at the well.
-    let bright = Scene::random_field(
+    let bright = Scene::scatter(
         size,
-        25,
-        (300.0, 4000.0),
+        Scatter {
+            count: 25,
+            flux: (300.0, 4000.0),
+            placement: Placement::Uniform { margin: 20.0 },
+            seed: 5,
+        },
         BackgroundField::Uniform { level: 0.05 },
-        20.0,
-        5,
     );
     save_frame(
-        &bright,
-        &Camera::realistic(3.5),
-        &Observation::reference(6),
+        &render(&bright, &Camera::realistic(3.5), &Observation::reference(6)),
         "scenes/saturated_stars",
         ToneMap::Asinh,
     );
 
     // Cosmic rays peppered onto a realistic field.
     let frame = render(&dense, &Camera::realistic(3.5), &Observation::reference(7));
-    let mut pixels = frame.image.channel(0).pixels().to_vec();
-    add_cosmic_rays(&mut pixels, size.width, 60, (0.5, 1.0), 1234);
-    save(&pixels, size, "scenes/cosmic_rays", ToneMap::Asinh);
+    let mut pixels = frame.image.channel(0).clone();
+    CosmicRays {
+        count: 60,
+        amplitude: 0.5..1.0,
+        seed: 1234,
+    }
+    .add_to(&mut pixels);
+    save(&pixels, "scenes/cosmic_rays", ToneMap::Asinh);
 }
 
 #[test]
@@ -441,7 +419,11 @@ fn gallery_seeing() {
             ..Observation::reference(1)
         };
         let name = format!("seeing/scale_{}", (scale * 10.0) as u32);
-        save_frame(&field, &Camera::realistic(3.0), &obs, &name, ToneMap::Asinh);
+        save_frame(
+            &render(&field, &Camera::realistic(3.0), &obs),
+            &name,
+            ToneMap::Asinh,
+        );
     }
 }
 
@@ -455,11 +437,10 @@ fn gallery_dither() {
         DVec2::new(12.0, -6.0),
         DVec2::new(-8.0, 10.0),
     ];
-    let frames = observe_dithered(&field, &Camera::realistic(3.5), &dithers, 1.0, 21);
-    for (i, frame) in frames.iter().enumerate() {
-        save(
-            frame.image.channel(0).pixels(),
-            size,
+    let camera = Camera::realistic(3.5);
+    for (i, obs) in dithered(&Observation::reference(21), &dithers).enumerate() {
+        save_frame(
+            &render(&field, &camera, &obs),
             &format!("dither/frame_{i}"),
             ToneMap::Asinh,
         );
@@ -471,20 +452,17 @@ fn gallery_dither() {
 fn gallery_patterns() {
     let size = Size2us::new(256, 256);
     save(
-        checkerboard(size, 16, 0.1, 0.9).pixels(),
-        size,
+        &checkerboard(size, 16, [0.1, 0.9]),
         "patterns/checkerboard",
         ToneMap::Clamp,
     );
     save(
-        patterns::horizontal_gradient(size, 0.0, 1.0).pixels(),
-        size,
+        &patterns::horizontal_gradient(size, 0.0, 1.0),
         "patterns/horizontal_gradient",
         ToneMap::Clamp,
     );
     save(
-        patterns::diagonal_gradient(size).pixels(),
-        size,
+        &patterns::diagonal_gradient(size),
         "patterns/diagonal_gradient",
         ToneMap::Clamp,
     );
@@ -499,36 +477,28 @@ fn gallery_fixtures() {
     save(
         star_field(Size2us::new(size, size), 100, 42)
             .image
-            .channel(0)
-            .pixels(),
-        Size2us::new(size, size),
+            .channel(0),
         "fixtures/star_field_sparse",
         ToneMap::Asinh,
     );
     save(
         star_field(Size2us::new(size, size), 1000, 42)
             .image
-            .channel(0)
-            .pixels(),
-        Size2us::new(size, size),
+            .channel(0),
         "fixtures/star_field_dense",
         ToneMap::Asinh,
     );
     save(
         cluster_field(Size2us::new(size, size), 4000, 42)
             .image
-            .channel(0)
-            .pixels(),
-        Size2us::new(size, size),
+            .channel(0),
         "fixtures/cluster_field",
         ToneMap::Asinh,
     );
     save(
         cluster_field(Size2us::new(size, size), 15000, 42)
             .image
-            .channel(0)
-            .pixels(),
-        Size2us::new(size, size),
+            .channel(0),
         "fixtures/cluster_field_dense",
         ToneMap::Asinh,
     );

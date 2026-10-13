@@ -12,6 +12,7 @@ use crate::combine::stack::{FrameSet, FrameSource};
 use crate::combine::stack_config::StackConfig;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
+use crate::ingest::frame_step::SteppedPaths;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -80,7 +81,14 @@ impl<P: AsRef<Path>> MasterStack<'_, P> {
             count: paths.len(),
         };
         let product = stack::combine_cached(&config, set, || {
-            let cache = FrameCache::from_cfa_paths(paths, &config, run, &subtraction)?;
+            let cache = FrameCache::from_cfa_paths(
+                SteppedPaths {
+                    paths,
+                    step: &subtraction,
+                },
+                &config,
+                run,
+            )?;
             if role.is_dark() {
                 let conditions = cache
                     .frames

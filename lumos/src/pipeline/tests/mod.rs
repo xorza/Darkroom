@@ -24,7 +24,7 @@ use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::io::fits::cfa;
-use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
+use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
@@ -712,8 +712,10 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     let run = |paths: &[PathBuf], config: &AlignStackConfig| {
         config
             .calibrate_align_stack_paths(
-                paths,
-                &CalibrationMasters::default(),
+                CalibratedLights {
+                    paths,
+                    masters: &CalibrationMasters::default(),
+                },
                 &IngestConfig::default(),
                 ProgressMonitor::unattended(),
             )
@@ -776,8 +778,10 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     cfa::save(&longer_path, &longer).unwrap();
     let error = AlignStackConfig::default()
         .calibrate_align_stack_paths(
-            &[paths[0].clone(), longer_path.clone()],
-            &masters,
+            CalibratedLights {
+                paths: &[paths[0].clone(), longer_path.clone()],
+                masters: &masters,
+            },
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
@@ -1085,8 +1089,10 @@ fn both_front_ends_report_the_same_stages() {
         .collect();
     config
         .calibrate_align_stack_paths(
-            &paths,
-            &CalibrationMasters::default(),
+            CalibratedLights {
+                paths: &paths,
+                masters: &CalibrationMasters::default(),
+            },
             &IngestConfig::default(),
             ProgressMonitor::new(raw_progress, CancelToken::never()),
         )
@@ -1176,7 +1182,14 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let masters = CalibrationMasters::default();
     let run = |config: &AlignStackConfig, ingest: &IngestConfig| {
         config
-            .calibrate_align_stack_paths(&paths, &masters, ingest, ProgressMonitor::unattended())
+            .calibrate_align_stack_paths(
+                CalibratedLights {
+                    paths: &paths,
+                    masters: &masters,
+                },
+                ingest,
+                ProgressMonitor::unattended(),
+            )
             .expect("stack the lights")
     };
     let ram = run(&config, &ram_ingest);
@@ -1354,8 +1367,10 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 
     let result = AlignStackConfig::default()
         .calibrate_align_stack_paths(
-            lights,
-            &masters,
+            CalibratedLights {
+                paths: lights,
+                masters: &masters,
+            },
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )

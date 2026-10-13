@@ -4,11 +4,12 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
+use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::noise::binned_samples::BinnedSamples;
 use crate::math::noise::gain_bins::GainBins;
-use crate::math::noise::mrs_noise::MrsNoise;
+use crate::math::noise::mrs_noise::{MrsNoise, PixelGains};
 use crate::math::size2us::Size2us;
 
 /// One tile of the MRS grid, and a frame the 4 × 4 grid covers in part.
@@ -54,20 +55,21 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let size = Size2us::new(side, side);
         group.throughput(Throughput::Elements(size.pixel_count() as u64));
         group.bench_function(BenchmarkId::new("mrs_estimate", side), |b| {
-            let plane = fixture::sky(size.pixel_count(), 5);
-            b.iter(|| MrsNoise::estimate(black_box(&plane), size, |_| false));
+            let plane = Buffer2::new(side, side, fixture::sky(size.pixel_count(), 5));
+            b.iter(|| MrsNoise::estimate(black_box(&plane), |_| false));
         });
         group.bench_function(BenchmarkId::new("mrs_estimate_split", side), |b| {
-            let plane = fixture::sky(size.pixel_count(), 5);
+            let plane = Buffer2::new(side, side, fixture::sky(size.pixel_count(), 5));
             let gains = vignette(size.pixel_count());
             let bins = GainBins::of(&mut gains.clone());
             b.iter(|| {
                 MrsNoise::estimate_split(
                     black_box(&plane),
-                    size,
                     |_| false,
-                    |index| gains[index],
-                    &bins,
+                    PixelGains {
+                        gain: |index| gains[index],
+                        bins: &bins,
+                    },
                 )
             });
         });

@@ -36,165 +36,308 @@ use std::fmt::Formatter;
 use std::fmt::{Display, Write as _};
 use std::path::Path;
 
+use palantir::TextWrap;
 use palantir::prelude::*;
-use palantir::{TextEditTheme, TextWrap};
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
-use crate::gui::widgets::edit_buffer::EditBuffer;
+use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
 
-/// Render the editor for `value`. Returns the new value when the user
-/// committed an edit this frame (scrub released, Enter, blur, or a
-/// discrete pick), otherwise `None`. `id` must be stable across frames
-/// so the `TextEdit` / buffer state survives. Every visual axis (button
-/// look, field width) comes off `theme`.
-pub(super) fn show(
-    ui: &mut Ui,
-    theme: &ConstValueEditorTheme,
-    library: &Library,
-    id: WidgetId,
-    value: &ConstValue,
-    data_type: &DataType,
-    value_variants: &[ValueVariant],
-) -> Option<ConstValue> {
-    let width = theme.width;
-    // Picker variants (the input's `value_variants`, e.g. named config presets)
-    // override the per-type editor: a dropdown of variant names, binding the
-    // chosen variant's value. Works regardless of `data_type` (a custom config
-    // port still shows its presets).
-    if !value_variants.is_empty() {
-        let before = value_variants
-            .iter()
-            .position(|o| &o.value == value)
-            .unwrap_or(0);
-        let picked = combo_pick(ui, theme, id, value_variants, ValueVariant::label, before)?;
-        return value_variants.get(picked).map(|o| o.value.clone());
-    }
-    // The widget follows the *declared* port type, not the stored literal's
-    // kind: a coerced or library-drifted literal still gets the declared
-    // type's editor (displaying its coerced reading), and the next commit
-    // stores the declared kind — re-canonicalizing the document. A literal
-    // outside the type's coercion class falls back to a read-only label.
-    let editor = &theme.drag_value.editor;
-    match data_type {
-        // An untyped (`Any`) port declares no concrete kind, so the literal's
-        // kind is inferred from the text (see `parse_any`). Keyed on the port
-        // type, not the stored value, so the field keeps reinterpreting across
-        // kinds — typing "42" then "hello" flips `Int` → `String` — instead of
-        // locking to the kind first entered.
-        DataType::Any => any_smart_edit(ui, editor, id, value, width),
-        DataType::Int => {
-            let Some(current) = value.as_i64() else {
-                return read_only_label(ui, theme, id, value);
-            };
-            int_edit(ui, theme, id, current)
-        }
-        DataType::Float => {
-            let Some(current) = value.as_f64() else {
-                return read_only_label(ui, theme, id, value);
-            };
-            float_edit(ui, theme, id, current)
-        }
-        DataType::Bool => {
-            let Some(current) = value.as_bool() else {
-                return read_only_label(ui, theme, id, value);
-            };
-            let mut draft = current;
-            Checkbox::new(&mut draft).id(id).show(ui);
-            (draft != current).then_some(ConstValue::Bool(draft))
-        }
-        DataType::String => {
-            let Some(current) = value.as_string() else {
-                return read_only_label(ui, theme, id, value);
-            };
-            let edited = buffered_text_edit(ui, editor, id, current, format_string, width)?;
-            (edited != current).then_some(ConstValue::String(edited))
-        }
-        DataType::FsPath(config) => {
-            // Preview whichever path literal is stored — a mode/kind mismatch
-            // left by library drift still previews, and the pick dialog
-            // (opened per the declared config) replaces it wholesale.
-            let preview = match value {
-                ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
-                ConstValue::FsPaths(paths) => PathPreview::multi(paths),
-                _ => return read_only_label(ui, theme, id, value),
-            };
-            let label = fmt!(ui, "{preview}");
-            // The blocking dialog runs after authoring, so this button only records its click.
-            Button::new()
-                .id(id)
-                .label(label)
-                .style(&theme.drag_value.chip)
-                .text_wrap(TextWrap::Ellipsis)
-                .size((Sizing::FILL, Sizing::FILL))
-                .min_size((width, 0.0))
-                .show(ui);
-            None
-        }
-        DataType::Enum(type_id) => {
-            // A dropdown over the port's registered variants. The variant list
-            // lives on the library's `Enum` type entry, not on the value or the
-            // id-only `DataType` — without it (an unregistered type, or one
-            // registered with no variants) we can't populate the menu, so fall
-            // back to a read-only label. A drifted non-`Enum` literal seeds the
-            // first variant; any pick repairs it.
-            let Some(variants) = library.enum_variants(*type_id).filter(|v| !v.is_empty()) else {
-                return read_only_label(ui, theme, id, value);
-            };
-            let current = value.as_enum().unwrap_or_default();
-            let before = variants.iter().position(|v| v == current).unwrap_or(0);
-            let picked = combo_pick(ui, theme, id, variants, String::as_str, before)?;
-            variants.get(picked).cloned().map(ConstValue::Enum)
-        }
-        // No literal form (pick-or-wire ports carry variants, handled above).
-        DataType::Custom(_) => read_only_label(ui, theme, id, value),
-    }
+/// One const editor: the field it records as, and the literal it edits on
+/// a port of `data_type`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConstEdit<'a> {
+    pub(super) field: Field<'a>,
+    pub(super) library: &'a Library,
+    pub(super) value: &'a ConstValue,
+    pub(super) data_type: &'a DataType,
+    /// The port's named presets; a non-empty list overrides the per-type
+    /// editor.
+    pub(super) value_variants: &'a [ValueVariant],
 }
 
-/// A dropdown over `options`, returning the newly picked index — `None` when
-/// the selection is unchanged. Both pickers (the value-variant override and
-/// the `Enum` port) are this widget over different option lists, each read
-/// through its own `label`.
-///
-/// Generic over the row so each caller hands its own collection over — a
-/// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
-/// projecting the labels into a fresh `Vec<&str>` on every frame the port
-/// records.
-fn combo_pick<S>(
-    ui: &mut Ui,
-    theme: &ConstValueEditorTheme,
-    id: WidgetId,
-    options: &[S],
+/// Where one editor records: its stable id, and the theme every visual axis
+/// (button look, field width) comes off.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Field<'a> {
+    pub(super) theme: &'a ConstValueEditorTheme,
+    /// Stable across frames, so the `TextEdit` / buffer state survives.
+    pub(super) id: WidgetId,
+}
+
+/// A dropdown's options, each read through `label`, with `before` selected.
+#[derive(Debug)]
+struct Pick<'a, S> {
+    options: &'a [S],
     label: fn(&S) -> &str,
     before: usize,
-) -> Option<usize> {
-    let mut idx = before;
-    ComboBox::labeled(&mut idx, options, label)
-        .id(id)
-        .button_style(&theme.drag_value.chip)
-        .size((Sizing::FILL, Sizing::FILL))
-        .min_size((theme.width, 0.0))
-        .show(ui);
-    (idx != before).then_some(idx)
 }
 
-/// Editor for an untyped (`Any`) port: one text field that reinterprets what
-/// the user types into the tightest [`ConstValue`] — `true`/`false` → `Bool`,
-/// an integer → `Int`, a finite decimal → `Float`, anything else → `String`.
-/// The port declares no kind, so the kind rides on the value itself; the
-/// ambiguity is inherent — `"42"` always reads back as `Int`, never the string
-/// `"42"`. Returns the reinterpreted value only when the edit committed and
-/// it differs from the current one.
-fn any_smart_edit(
-    ui: &mut Ui,
-    editor: &TextEditTheme,
-    id: WidgetId,
-    value: &ConstValue,
-    width: f32,
-) -> Option<ConstValue> {
-    let text = buffered_text_edit(ui, editor, id, value, format_any, width)?;
-    let parsed = parse_any(&text);
-    (parsed != *value).then_some(parsed)
+/// Hand-written: `derive` would demand `S: Copy`, and only a borrow of the
+/// options is held.
+impl<S> Clone for Pick<'_, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Pick<'_, S> {}
+
+impl ConstEdit<'_> {
+    /// Render the editor for the value. Returns the new value when the user
+    /// committed an edit this frame (scrub released, Enter, blur, or a
+    /// discrete pick), otherwise `None`.
+    pub(super) fn show(self, ui: &mut Ui) -> Option<ConstValue> {
+        let ConstEdit {
+            field,
+            library,
+            value,
+            data_type,
+            value_variants,
+        } = self;
+        // Picker variants (the input's `value_variants`, e.g. named config presets)
+        // override the per-type editor: a dropdown of variant names, binding the
+        // chosen variant's value. Works regardless of `data_type` (a custom config
+        // port still shows its presets).
+        if !value_variants.is_empty() {
+            let before = value_variants
+                .iter()
+                .position(|o| &o.value == value)
+                .unwrap_or(0);
+            let picked = field.combo(
+                ui,
+                Pick {
+                    options: value_variants,
+                    label: ValueVariant::label,
+                    before,
+                },
+            )?;
+            return value_variants.get(picked).map(|o| o.value.clone());
+        }
+        // The widget follows the *declared* port type, not the stored literal's
+        // kind: a coerced or library-drifted literal still gets the declared
+        // type's editor (displaying its coerced reading), and the next commit
+        // stores the declared kind — re-canonicalizing the document. A literal
+        // outside the type's coercion class falls back to a read-only label.
+        match data_type {
+            // An untyped (`Any`) port declares no concrete kind, so the literal's
+            // kind is inferred from the text (see `parse_any`). Keyed on the port
+            // type, not the stored value, so the field keeps reinterpreting across
+            // kinds — typing "42" then "hello" flips `Int` → `String` — instead of
+            // locking to the kind first entered.
+            DataType::Any => field.any_smart(ui, value),
+            DataType::Int => {
+                let Some(current) = value.as_i64() else {
+                    return field.read_only(ui, value);
+                };
+                field.int(ui, current)
+            }
+            DataType::Float => {
+                let Some(current) = value.as_f64() else {
+                    return field.read_only(ui, value);
+                };
+                field.float(ui, current)
+            }
+            DataType::Bool => {
+                let Some(current) = value.as_bool() else {
+                    return field.read_only(ui, value);
+                };
+                let mut draft = current;
+                Checkbox::new(&mut draft).id(field.id).show(ui);
+                (draft != current).then_some(ConstValue::Bool(draft))
+            }
+            DataType::String => {
+                let Some(current) = value.as_string() else {
+                    return field.read_only(ui, value);
+                };
+                let edited = field.text(ui, current, format_string)?;
+                (edited != current).then_some(ConstValue::String(edited))
+            }
+            DataType::FsPath(config) => {
+                // Preview whichever path literal is stored — a mode/kind mismatch
+                // left by library drift still previews, and the pick dialog
+                // (opened per the declared config) replaces it wholesale.
+                let preview = match value {
+                    ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
+                    ConstValue::FsPaths(paths) => PathPreview::multi(paths),
+                    _ => return field.read_only(ui, value),
+                };
+                let label = fmt!(ui, "{preview}");
+                // The blocking dialog runs after authoring, so this button only records its click.
+                Button::new()
+                    .id(field.id)
+                    .label(label)
+                    .style(&field.theme.drag_value.chip)
+                    .text_wrap(TextWrap::Ellipsis)
+                    .size((Sizing::FILL, Sizing::FILL))
+                    .min_size((field.theme.width, 0.0))
+                    .show(ui);
+                None
+            }
+            DataType::Enum(type_id) => {
+                // A dropdown over the port's registered variants. The variant list
+                // lives on the library's `Enum` type entry, not on the value or the
+                // id-only `DataType` — without it (an unregistered type, or one
+                // registered with no variants) we can't populate the menu, so fall
+                // back to a read-only label. A drifted non-`Enum` literal seeds the
+                // first variant; any pick repairs it.
+                let Some(variants) = library.enum_variants(*type_id).filter(|v| !v.is_empty())
+                else {
+                    return field.read_only(ui, value);
+                };
+                let current = value.as_enum().unwrap_or_default();
+                let before = variants.iter().position(|v| v == current).unwrap_or(0);
+                let picked = field.combo(
+                    ui,
+                    Pick {
+                        options: variants,
+                        label: String::as_str,
+                        before,
+                    },
+                )?;
+                variants.get(picked).cloned().map(ConstValue::Enum)
+            }
+            // No literal form (pick-or-wire ports carry variants, handled above).
+            DataType::Custom(_) => field.read_only(ui, value),
+        }
+    }
+}
+
+impl Field<'_> {
+    /// A dropdown over `pick`'s options, returning the newly picked index —
+    /// `None` when the selection is unchanged. Both pickers (the value-variant
+    /// override and the `Enum` port) are this widget over different option
+    /// lists, each read through its own `label`.
+    ///
+    /// Generic over the row so each caller hands its own collection over — a
+    /// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
+    /// projecting the labels into a fresh `Vec<&str>` on every frame the port
+    /// records.
+    fn combo<S>(self, ui: &mut Ui, pick: Pick<'_, S>) -> Option<usize> {
+        let Pick {
+            options,
+            label,
+            before,
+        } = pick;
+        let mut idx = before;
+        ComboBox::labeled(&mut idx, options, label)
+            .id(self.id)
+            .button_style(&self.theme.drag_value.chip)
+            .size((Sizing::FILL, Sizing::FILL))
+            .min_size((self.theme.width, 0.0))
+            .show(ui);
+        (idx != before).then_some(idx)
+    }
+
+    /// Editor for an untyped (`Any`) port: one text field that reinterprets
+    /// what the user types into the tightest [`ConstValue`] — `true`/`false` →
+    /// `Bool`, an integer → `Int`, a finite decimal → `Float`, anything else →
+    /// `String`. The port declares no kind, so the kind rides on the value
+    /// itself; the ambiguity is inherent — `"42"` always reads back as `Int`,
+    /// never the string `"42"`. Returns the reinterpreted value only when the
+    /// edit committed and it differs from the current one.
+    fn any_smart(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
+        let text = self.text(ui, value, format_any)?;
+        let parsed = parse_any(&text);
+        (parsed != *value).then_some(parsed)
+    }
+
+    /// Non-editable fallback for a literal outside its port's coercion class —
+    /// a drifted kind, a `Custom` port's stray const, an unregistered enum, a
+    /// `Null`: shows the textual form in a read-only field; clicks fall
+    /// through to the surrounding row. Always returns `None`.
+    fn read_only(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
+        let Self { theme, id } = self;
+        // The same retained buffer the editable fields keep under this id,
+        // refilled from the literal every frame — which is also what makes the
+        // field read-only: anything typed into it is gone by the next record.
+        ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
+            let text = &mut buffer.text;
+            text.clear();
+            write!(text, "{}", value.value_text()).expect("writing to a String cannot fail");
+            TextEdit::new(text)
+                .id(id)
+                .style(&theme.drag_value.editor)
+                .size((Sizing::fixed(theme.width), Sizing::FILL))
+                .show(ui);
+        });
+        None
+    }
+
+    /// Render a `TextEdit` whose buffer survives across frames via palantir's
+    /// `StateMap`. Returns the buffer's text on the frame the edit commits
+    /// (Enter, or focus left the field), `None` on every other — Escape
+    /// included, which drops the draft and lets the next idle frame refill it.
+    ///
+    /// While the field is idle, `mirror` refills the cleared buffer from
+    /// `canonical` rather than handing back a fresh `String`, so the frames
+    /// that change nothing cost no allocation. While focused, and on the frame
+    /// focus leaves, the user's text is left alone so it survives to be
+    /// committed ([`EditBuffer::is_idle`]).
+    fn text<T: ?Sized>(
+        self,
+        ui: &mut Ui,
+        canonical: &T,
+        mirror: fn(&T, &mut String),
+    ) -> Option<String> {
+        let Self { theme, id } = self;
+        ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
+            let idle = buffer.is_idle(Focus::of(ui, id));
+            let text = &mut buffer.text;
+            if idle {
+                text.clear();
+                mirror(canonical, text);
+            }
+            let response = TextEdit::new(text)
+                .id(id)
+                .style(&theme.drag_value.editor)
+                .size((Sizing::fixed(theme.width), Sizing::FILL))
+                .show(ui);
+            // The buffer keeps the text — the editor goes on showing it until
+            // the mirror re-seeds from the committed document value — so a
+            // commit is the one frame that copies, at gesture rate rather than
+            // frame rate.
+            let committed = response.committed.then(|| text.clone());
+            buffer.settle(Focus::of(ui, id));
+            committed
+        })
+    }
+
+    /// Editor for an `Int` const: an editable `DragValue` — drag horizontally
+    /// to scrub, click to type an exact value. Both modes, the focus swap, and
+    /// Enter/blur commit live inside the widget. The draft re-seeds from the
+    /// document value every frame and is emitted only on the widget's
+    /// `committed` frame, which carries the gesture's final value — one scrub
+    /// or typed entry lands as one change.
+    fn int(self, ui: &mut Ui, current: i64) -> Option<ConstValue> {
+        let mut draft = current;
+        let committed = DragValue::new(&mut draft)
+            .editable(true)
+            .speed(int_speed(current))
+            .style(&self.theme.drag_value)
+            .size((Sizing::fixed(self.theme.width), Sizing::FILL))
+            .id(self.id)
+            .show(ui)
+            .committed;
+        (committed && draft != current).then_some(ConstValue::Int(draft))
+    }
+
+    /// `Float` sibling of [`Self::int`].
+    fn float(self, ui: &mut Ui, current: f64) -> Option<ConstValue> {
+        let mut draft = current;
+        let committed = DragValue::new(&mut draft)
+            .editable(true)
+            .speed(float_speed(current))
+            .decimals(3)
+            .style(&self.theme.drag_value)
+            .size((Sizing::fixed(self.theme.width), Sizing::FILL))
+            .id(self.id)
+            .show(ui)
+            .committed;
+        // Bit-exact: matches ConstValue's PartialEq, so `1.0` → `1`
+        // (same value, different textual form) doesn't emit a change.
+        (committed && draft.to_bits() != current.to_bits()).then_some(ConstValue::Float(draft))
+    }
 }
 
 /// Canonical text for an `Any` const, chosen so [`parse_any`] round-trips the
@@ -203,7 +346,7 @@ fn any_smart_edit(
 /// prints verbatim, so a numeric-looking string (`"42"`) is the one kind that
 /// doesn't round-trip — the accepted ambiguity of an untyped literal.
 ///
-/// Writes into the caller's cleared buffer — see [`buffered_text_edit`].
+/// Writes into the caller's cleared buffer — see [`Field::text`].
 fn format_any(value: &ConstValue, out: &mut String) {
     match value {
         ConstValue::Null => {}
@@ -234,32 +377,6 @@ fn parse_any(text: &str) -> ConstValue {
         return ConstValue::Float(float);
     }
     ConstValue::String(text.to_owned())
-}
-
-/// Non-editable fallback for a literal outside its port's coercion class —
-/// a drifted kind, a `Custom` port's stray const, an unregistered enum, a
-/// `Null`: shows the textual form in a read-only field; clicks fall
-/// through to the surrounding row. Always returns `None`.
-fn read_only_label(
-    ui: &mut Ui,
-    theme: &ConstValueEditorTheme,
-    id: WidgetId,
-    value: &ConstValue,
-) -> Option<ConstValue> {
-    // The same retained buffer the editable fields keep under this id,
-    // refilled from the literal every frame — which is also what makes the
-    // field read-only: anything typed into it is gone by the next record.
-    ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
-        let text = &mut buffer.text;
-        text.clear();
-        write!(text, "{}", value.value_text()).expect("writing to a String cannot fail");
-        TextEdit::new(text)
-            .id(id)
-            .style(&theme.drag_value.editor)
-            .size((Sizing::fixed(theme.width), Sizing::FILL))
-            .show(ui);
-    });
-    None
 }
 
 /// What an `FsPath` input's pick button reads: the mode's call to action
@@ -319,46 +436,6 @@ impl Display for PathPreview<'_> {
     }
 }
 
-/// Render a `TextEdit` whose buffer survives across frames via palantir's
-/// `StateMap`. Returns the buffer's text on the frame the edit commits (Enter,
-/// or focus left the field), `None` on every other — Escape included, which
-/// drops the draft and lets the next idle frame refill it.
-///
-/// While the field is idle, `mirror` refills the cleared buffer from the
-/// canonical value rather than handing back a fresh `String`, so the frames
-/// that change nothing cost no allocation. While focused, and on the frame
-/// focus leaves, the user's text is left alone so it survives to be committed
-/// ([`EditBuffer::is_idle`]).
-fn buffered_text_edit<T: ?Sized>(
-    ui: &mut Ui,
-    editor: &TextEditTheme,
-    id: WidgetId,
-    canonical: &T,
-    mirror: fn(&T, &mut String),
-    width: f32,
-) -> Option<String> {
-    ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
-        let idle = buffer.is_idle(ui.focus() == Some(id));
-        let text = &mut buffer.text;
-        if idle {
-            text.clear();
-            mirror(canonical, text);
-        }
-        let response = TextEdit::new(text)
-            .id(id)
-            .style(editor)
-            .size((Sizing::fixed(width), Sizing::FILL))
-            .show(ui);
-        // The buffer keeps the text — the editor goes on showing it until
-        // the mirror re-seeds from the committed document value — so a
-        // commit is the one frame that copies, at gesture rate rather than
-        // frame rate.
-        let committed = response.committed.then(|| text.clone());
-        buffer.settle(ui.focus() == Some(id));
-        committed
-    })
-}
-
 /// The `String` port's mirror: its literal *is* the field's text, verbatim.
 fn format_string(value: &str, out: &mut String) {
     out.push_str(value);
@@ -369,52 +446,6 @@ fn format_string(value: &str, out: &mut String) {
 /// trailing `.0` so the field looks like a float.
 fn format_float(v: f64, out: &mut String) {
     write!(out, "{v:?}").expect("writing to a String cannot fail");
-}
-
-/// Editor for an `Int` const: an editable `DragValue` — drag horizontally
-/// to scrub, click to type an exact value. Both modes, the focus swap, and
-/// Enter/blur commit live inside the widget. The draft re-seeds from the
-/// document value every frame and is emitted only on the widget's
-/// `committed` frame, which carries the gesture's final value — one scrub
-/// or typed entry lands as one change.
-fn int_edit(
-    ui: &mut Ui,
-    theme: &ConstValueEditorTheme,
-    id: WidgetId,
-    current: i64,
-) -> Option<ConstValue> {
-    let mut draft = current;
-    let committed = DragValue::new(&mut draft)
-        .editable(true)
-        .speed(int_speed(current))
-        .style(&theme.drag_value)
-        .size((Sizing::fixed(theme.width), Sizing::FILL))
-        .id(id)
-        .show(ui)
-        .committed;
-    (committed && draft != current).then_some(ConstValue::Int(draft))
-}
-
-/// `Float` sibling of [`int_edit`].
-fn float_edit(
-    ui: &mut Ui,
-    theme: &ConstValueEditorTheme,
-    id: WidgetId,
-    current: f64,
-) -> Option<ConstValue> {
-    let mut draft = current;
-    let committed = DragValue::new(&mut draft)
-        .editable(true)
-        .speed(float_speed(current))
-        .decimals(3)
-        .style(&theme.drag_value)
-        .size((Sizing::fixed(theme.width), Sizing::FILL))
-        .id(id)
-        .show(ui)
-        .committed;
-    // Bit-exact: matches ConstValue's PartialEq, so `1.0` → `1`
-    // (same value, different textual form) doesn't emit a change.
-    (committed && draft.to_bits() != current.to_bits()).then_some(ConstValue::Float(draft))
 }
 
 /// Drag speed for a float: ≈1% of the value's magnitude per logical pixel

@@ -1,5 +1,6 @@
 //! Candidate detection, deblending, and region-filtering settings.
 
+use crate::config_value::{self, ConfigValue};
 use crate::error::InvalidConfigField;
 
 /// Pixel connectivity for connected component labeling.
@@ -84,56 +85,33 @@ impl Default for ExtractionConfig {
 
 impl ExtractionConfig {
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite(
-            "sigma_threshold",
-            "finite and positive",
-            self.sigma_threshold,
-            |value| value > 0.0,
-        )?;
-        InvalidConfigField::check(
-            self.deblend_min_separation >= 1,
-            "deblend_min_separation",
-            "at least 1",
-            self.deblend_min_separation as f64,
-        )?;
+        ConfigValue::new("sigma_threshold", self.sigma_threshold)
+            .finite_and("finite and positive", |value| value > 0.0)?;
+        ConfigValue::count("deblend_min_separation", self.deblend_min_separation)
+            .must_be("at least 1", self.deblend_min_separation >= 1)?;
         match self.deblend {
-            Deblend::LocalMaxima { min_prominence } => InvalidConfigField::finite(
-                "deblend min_prominence",
-                "finite and in [0, 1]",
-                min_prominence,
-                |value| (0.0..=1.0).contains(&value),
-            )?,
+            Deblend::LocalMaxima { min_prominence } => {
+                ConfigValue::new("deblend min_prominence", min_prominence)
+                    .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
+            }
             Deblend::MultiThreshold {
                 n_thresholds,
                 min_contrast,
             } => {
-                InvalidConfigField::check_against(
-                    (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&n_thresholds),
-                    "deblend n_thresholds",
+                ConfigValue::count("deblend n_thresholds", n_thresholds).must_be_against(
                     "between 2 and the deblend level cap",
-                    n_thresholds as f64,
-                    MAX_DEBLEND_N_THRESHOLDS as f64,
+                    config_value::exact(MAX_DEBLEND_N_THRESHOLDS),
+                    (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&n_thresholds),
                 )?;
-                InvalidConfigField::finite(
-                    "deblend min_contrast",
-                    "finite and in [0, 1]",
-                    min_contrast,
-                    |value| (0.0..=1.0).contains(&value),
-                )?;
+                ConfigValue::new("deblend min_contrast", min_contrast)
+                    .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }
         }
-        InvalidConfigField::check(
-            self.min_area >= 1,
-            "min_area",
-            "at least 1",
-            self.min_area as f64,
-        )?;
-        InvalidConfigField::check_against(
-            self.max_area >= self.min_area,
-            "max_area",
+        ConfigValue::count("min_area", self.min_area).must_be("at least 1", self.min_area >= 1)?;
+        ConfigValue::count("max_area", self.max_area).must_be_against(
             "at least min_area",
-            self.max_area as f64,
-            self.min_area as f64,
+            config_value::exact(self.min_area),
+            self.max_area >= self.min_area,
         )?;
         Ok(())
     }

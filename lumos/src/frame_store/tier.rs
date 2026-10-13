@@ -9,7 +9,7 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
 
@@ -50,7 +50,7 @@ impl CombineBudget {
 
 impl Tier {
     /// Resident when `plan` keeps the run in memory; spilled to a scratch under `cache_dir`
-    /// otherwise, its combine budgeted against `budget`, when the disk there holds the
+    /// otherwise, its combine budgeted against the plan's budget, when the disk there holds the
     /// `spill_bytes` the run will write.
     ///
     /// # Errors
@@ -58,7 +58,6 @@ impl Tier {
     /// The scratch cannot be made, or [`FrameStoreError::InsufficientSpace`].
     pub(crate) fn for_plan(
         plan: &RunPlan,
-        budget: Budget,
         spill_bytes: u64,
         cache_dir: &Path,
     ) -> Result<Self, FrameStoreError> {
@@ -78,7 +77,7 @@ impl Tier {
             scratch,
             combine: CombineBudget {
                 prior_overcommit,
-                ..CombineBudget::new(budget)
+                ..CombineBudget::new(plan.budget)
             },
         })
     }
@@ -114,9 +113,12 @@ impl Tier {
     ) -> Result<StoredFrame, FrameStoreError> {
         match self {
             Self::Resident => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spilled { scratch, .. } => {
-                StoredFrame::spill(scratch, &image, &quality, source_stats)
+            Self::Spilled { scratch, .. } => SpillFrame {
+                image: &image,
+                quality: &quality,
+                source_stats,
             }
+            .spill(scratch),
         }
     }
 }

@@ -27,7 +27,7 @@ pub(crate) const fn preview_drag_modifier(ui: &mut Ui) -> bool {
 ///
 /// Covers the *latch* frame only: continuation of an in-flight gesture is
 /// tracked by each controller's own `Option<state>`, and wheel/pinch zoom
-/// coexists with everything (handled in `pan_zoom::emit`, not here).
+/// coexists with everything (handled in `CameraGesture::emit`, not here).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CanvasGesture {
     /// Middle-button drag → viewport pan.

@@ -209,7 +209,7 @@ impl<'a> FrameSource<'a> {
         let dimensions = image.dimensions();
         Self {
             planes: (0..dimensions.channels())
-                .map(|channel| image.channel(channel))
+                .map(|channel| image.channel(channel).pixels())
                 .collect(),
             mosaic: deposit.mosaic(),
             size: dimensions.size(),

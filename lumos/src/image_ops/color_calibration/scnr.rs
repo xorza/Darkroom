@@ -2,6 +2,7 @@
 
 use crate::image_ops::rgb::Rgb;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -88,12 +89,8 @@ impl Scnr {
     }
 
     fn validate(self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite(
-            "SCNR amount",
-            "finite and in [0, 1]",
-            self.amount,
-            |value| (0.0..=1.0).contains(&value),
-        )
+        ConfigValue::new("SCNR amount", self.amount)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }
 

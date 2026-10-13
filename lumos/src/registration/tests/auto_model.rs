@@ -4,32 +4,26 @@
 
 use glam::DVec2;
 
-use crate::internals::synthetic::transforms::{add_star_noise, generate_random_stars};
+use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::error::RegistrationError;
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars};
+use crate::registration::tests::helpers::{self, FWHM_TIGHT, FieldMotion, map_stars};
 use crate::registration::transform::{Transform, TransformModel, TransformType};
 use crate::star_detection::star::Star;
-
-/// `s·R(θ)` about (1000, 1000), then `offset`.
-fn about_centre(offset: DVec2, angle_deg: f64, scale: f64) -> Transform {
-    let linear = Transform::similarity(DVec2::ZERO, angle_deg.to_radians(), scale);
-    let centre = DVec2::splat(1000.0);
-    Transform::similarity(
-        centre + offset - linear.apply(centre),
-        angle_deg.to_radians(),
-        scale,
-    )
-}
 
 /// Each truth fits exactly with its own model and leaves every simpler one pixels off on stars of
 /// position σ 0.01 px, so its residuals' caps outweigh the parameters a more general model costs:
 /// GRIC takes the truth's model, and none more general.
 #[test]
 fn auto_selects_the_simplest_adequate_model() {
-    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101_010, FWHM_TIGHT);
+    let ref_stars = StarScatter {
+        count: 90,
+        side: 2000.0,
+        seed: 101_010,
+    }
+    .stars(FWHM_TIGHT);
     let config = RegistrationConfig {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
@@ -37,7 +31,15 @@ fn auto_selects_the_simplest_adequate_model() {
     };
 
     // Rigid (rotation + translation, scale exactly 1.0) → Euclidean, NOT Similarity.
-    let euclid = map_stars(&ref_stars, &about_centre(DVec2::new(40.0, -25.0), 0.8, 1.0));
+    let euclid = map_stars(
+        &ref_stars,
+        &FieldMotion {
+            offset: DVec2::new(40.0, -25.0),
+            angle_deg: 0.8,
+            scale: 1.0,
+        }
+        .about(1000.0),
+    );
     let result = config
         .register(&ref_stars, &euclid)
         .expect("euclidean auto");
@@ -51,7 +53,12 @@ fn auto_selects_the_simplest_adequate_model() {
     // Uniform scale ≠ 1 → Euclidean can't fit the scale → Similarity.
     let sim = map_stars(
         &ref_stars,
-        &about_centre(DVec2::new(30.0, -20.0), 0.5, 1.002),
+        &FieldMotion {
+            offset: DVec2::new(30.0, -20.0),
+            angle_deg: 0.5,
+            scale: 1.002,
+        }
+        .about(1000.0),
     );
     let result = config.register(&ref_stars, &sim).expect("similarity auto");
     assert_eq!(
@@ -96,8 +103,18 @@ fn auto_selects_the_simplest_adequate_model() {
 /// A least-squares ladder read 0.57 px RMS from the blend and climbed to an affine map.
 #[test]
 fn a_blend_buys_no_model() {
-    let ref_stars = generate_random_stars(51, 2000.0, 2000.0, 4242, FWHM_TIGHT);
-    let truth = about_centre(DVec2::new(12.0, -5.0), 0.4, 1.0);
+    let ref_stars = StarScatter {
+        count: 51,
+        side: 2000.0,
+        seed: 4242,
+    }
+    .stars(FWHM_TIGHT);
+    let truth = FieldMotion {
+        offset: DVec2::new(12.0, -5.0),
+        angle_deg: 0.4,
+        scale: 1.0,
+    }
+    .about(1000.0);
     let mut target = map_stars(&ref_stars, &truth);
     target[50].pos += DVec2::new(4.0, 0.0);
     let config = RegistrationConfig {
@@ -129,13 +146,18 @@ fn a_blend_buys_no_model() {
 /// refuses it while the affine map passes, and the affine map is the answer.
 #[test]
 fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
-    let ref_stars: Vec<Star> = generate_random_stars(90, 2000.0, 2000.0, 101_010, FWHM_TIGHT)
-        .into_iter()
-        .map(|star| Star {
-            position_sigma: 0.5,
-            ..star
-        })
-        .collect();
+    let ref_stars: Vec<Star> = StarScatter {
+        count: 90,
+        side: 2000.0,
+        seed: 101_010,
+    }
+    .stars(FWHM_TIGHT)
+    .into_iter()
+    .map(|star| Star {
+        position_sigma: 0.5,
+        ..star
+    })
+    .collect();
     let target = map_stars(
         &ref_stars,
         &Transform::affine([1.000_25, 0.0, 20.0, 0.0, 0.999_75, -15.0]),
@@ -173,7 +195,12 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
 fn a_model_that_fit_survives_another_failing() {
     // A tight, noisy cluster leaves the affine map with SIP fewer pairs than SIP's `3 × terms`, 20
     // of 21 (measured), so it fails outright while the rotation and the similarity fit.
-    let ref_stars = generate_random_stars(60, 60.0, 60.0, 999, FWHM_TIGHT);
+    let ref_stars = StarScatter {
+        count: 60,
+        side: 60.0,
+        seed: 999,
+    }
+    .stars(FWHM_TIGHT);
     let target = add_star_noise(
         &map_stars(&ref_stars, &Transform::translation(DVec2::new(5.0, -3.0))),
         1.4,
@@ -225,7 +252,12 @@ fn a_model_that_fit_survives_another_failing() {
 #[test]
 fn every_model_failing_reports_every_reason() {
     // Order 5 needs 3 × 18 = 54 points; 40 stars cannot supply that to any model.
-    let ref_stars = generate_random_stars(40, 2000.0, 2000.0, 5150, FWHM_TIGHT);
+    let ref_stars = StarScatter {
+        count: 40,
+        side: 2000.0,
+        seed: 5150,
+    }
+    .stars(FWHM_TIGHT);
     let target = add_star_noise(
         &map_stars(
             &ref_stars,

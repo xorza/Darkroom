@@ -11,7 +11,7 @@ use std::ops::Range;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd::{
-    BORDER, EPS, EPSSQ, INTERPOLATED_BORDER, TILE, discriminate, estimate_green, intp,
+    BORDER, EPS, EPSSQ, INTERPOLATED_BORDER, Neighbour, TILE, discriminate, estimate_green, intp,
     pq_neighbourhood, vh_neighbourhood,
 };
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
@@ -64,9 +64,25 @@ pub(super) struct Tile {
 #[derive(Debug)]
 struct Stages<'a> {
     tile: &'a mut Tile,
+    crop: Crop,
+}
+
+/// The crop a tile demosaics: its size, the pattern of its samples, the gains that balance them,
+/// and the column phase of the red and blue sites of each row parity.
+#[derive(Debug, Clone, Copy)]
+struct Crop {
     size: Size2us,
     pattern: CfaPattern,
     gains: [f32; 3],
+    red_blue: [usize; 2],
+}
+
+/// Colour `colour`'s own samples: the photosites of `cfa`, a crop of `pattern`, behind its filter.
+#[derive(Debug, Clone, Copy)]
+struct ColourSamples<'a> {
+    cfa: [&'a [f32]; 4],
+    pattern: CfaPattern,
+    colour: usize,
 }
 
 /// A photosite at a fixed step from each site of one crop row's column phase: its own row of a
@@ -183,11 +199,19 @@ impl Tile {
                 *odd = pair[1] * odd_gain;
             }
         }
+        // The column phase of the red and blue sites of each row parity.
+        let red_blue = [
+            pattern.color_at(Vec2us::new(0, 0)).index() & 1,
+            pattern.color_at(Vec2us::new(0, 1)).index() & 1,
+        ];
         Stages {
             tile: self,
-            size,
-            pattern,
-            gains,
+            crop: Crop {
+                size,
+                pattern,
+                gains,
+                red_blue,
+            },
         }
         .dispatch();
         let border = INTERPOLATED_BORDER;
@@ -298,7 +322,12 @@ impl Tile {
     /// Steps 2 and 3: the low-pass filter at red and blue sites, then green there from the ratio
     /// of its neighbours' green to the filter, blended along the direction map.
     #[inline(always)]
-    fn green<S: Isa>(&mut self, isa: S, Size2us { width, height }: Size2us, red_blue: [usize; 2]) {
+    fn green<S: Isa>(&mut self, isa: S, crop: Crop) {
+        let Crop {
+            size: Size2us { width, height },
+            red_blue,
+            ..
+        } = crop;
         let cfa = view(&self.cfa);
         let (half, quarter) = (isa.splat_f32(0.5), isa.splat_f32(0.25));
         for row in 2..height - 2 {
@@ -368,7 +397,7 @@ impl Tile {
                 column,
                 [(row - 2, 0), (row + 2, 0), (row, -2), (row, 0), (row, 2)],
             );
-            let vh_centre = Tap::at(vh_dir, row, column, 0);
+            let vh_centre = Tap::at(vh_dir, column, (row, 0));
             let vh_diagonals = diagonals(vh_dir, row, column);
             let out = row_mut(&mut self.rgb[1][2 * (row % 2) + column], row);
             for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
@@ -390,10 +419,14 @@ impl Tile {
                     + ((e1 - e3).abs() + (e2 - e4).abs());
 
                 let lpfi = lpf_centre.load(isa, j);
-                let n_est = estimate_green(isa, n1, lpfi, lpf_n.load(isa, j));
-                let s_est = estimate_green(isa, s1, lpfi, lpf_s.load(isa, j));
-                let w_est = estimate_green(isa, w1, lpfi, lpf_w.load(isa, j));
-                let e_est = estimate_green(isa, e1, lpfi, lpf_e.load(isa, j));
+                let estimate = |green, lpf: Tap<'_>| {
+                    let lpf = lpf.load(isa, j);
+                    estimate_green(isa, lpfi, Neighbour { green, lpf })
+                };
+                let n_est = estimate(n1, lpf_n);
+                let s_est = estimate(s1, lpf_s);
+                let w_est = estimate(w1, lpf_w);
+                let e_est = estimate(e1, lpf_e);
 
                 let v_est = (s_grad * n_est + n_grad * s_est) / (n_grad + s_grad);
                 let h_est = (w_grad * e_est + e_grad * w_est) / (e_grad + w_grad);
@@ -413,17 +446,17 @@ impl Tile {
     /// as RCD 2.3's closed forms do. librtprocess keeps the filter on odd columns only, so its
     /// step 4.1 reads some of the three beside the diagonal.
     #[inline(always)]
-    fn diagonal_directions<S: Isa>(
-        &mut self,
-        isa: S,
-        Size2us { width, height }: Size2us,
-        red_blue: [usize; 2],
-    ) {
+    fn diagonal_directions<S: Isa>(&mut self, isa: S, crop: Crop) {
+        let Crop {
+            size: Size2us { width, height },
+            red_blue,
+            ..
+        } = crop;
         let cfa = view(&self.cfa);
         let (three, six, epssq) = (isa.splat_f32(3.0), isa.splat_f32(6.0), isa.splat_f32(EPSSQ));
         for row in 3..height - 3 {
             let column = red_blue[row % 2];
-            let centre = Tap::at(cfa, row, column, 0);
+            let centre = Tap::at(cfa, column, (row, 0));
             // The P diagonal runs down to the right, the Q one down to the left.
             let [p_m3, p_m2, p_m1, p_p1, p_p2, p_p3] = Tap::all(
                 cfa,
@@ -491,13 +524,13 @@ impl Tile {
     /// Step 4.2: blue at red sites and red at blue ones, from the diagonal colour differences
     /// along the diagonal direction map.
     #[inline(always)]
-    fn opposite_colours<S: Isa>(
-        &mut self,
-        isa: S,
-        Size2us { width, height }: Size2us,
-        pattern: CfaPattern,
-        red_blue: [usize; 2],
-    ) {
+    fn opposite_colours<S: Isa>(&mut self, isa: S, crop: Crop) {
+        let Crop {
+            size: Size2us { width, height },
+            pattern,
+            red_blue,
+            ..
+        } = crop;
         let cfa = view(&self.cfa);
         let pq_dir = red_blue_view(&self.red_blue);
         let eps = isa.splat_f32(EPS);
@@ -507,11 +540,16 @@ impl Tile {
             // own samples.
             let colour = 2 - phase_colour(pattern, phase);
             let [red, green, blue] = &mut self.rgb;
-            let green = with_natives(view(green), cfa, pattern, 1);
+            let samples = |colour| ColourSamples {
+                cfa,
+                pattern,
+                colour,
+            };
+            let green = samples(1).fill(view(green));
             let dst = if colour == 0 { red } else { blue };
-            let Split { written, read: dst } = Split::of(dst, phase, cfa, pattern, colour);
+            let Split { written, read: dst } = Split::of(dst, phase, samples(colour));
             for row in (BORDER + parity..height - BORDER).step_by(2) {
-                let pq_centre = Tap::at(pq_dir, row, column, 0);
+                let pq_centre = Tap::at(pq_dir, column, (row, 0));
                 let pq_diagonals = diagonals(pq_dir, row, column);
                 let [d_nw, d_ne, d_sw, d_se] = diagonals(dst, row, column);
                 let [d_nw3, d_ne3, d_sw3, d_se3] = Tap::all(
@@ -576,13 +614,13 @@ impl Tile {
     /// Step 4.3: red and blue at green sites, from the colour differences of their four
     /// neighbours along the direction map.
     #[inline(always)]
-    fn colours_at_green<S: Isa>(
-        &mut self,
-        isa: S,
-        Size2us { width, height }: Size2us,
-        pattern: CfaPattern,
-        red_blue: [usize; 2],
-    ) {
+    fn colours_at_green<S: Isa>(&mut self, isa: S, crop: Crop) {
+        let Crop {
+            size: Size2us { width, height },
+            pattern,
+            red_blue,
+            ..
+        } = crop;
         let cfa = view(&self.cfa);
         let vh_dir = view(&self.vh_dir);
         let eps = isa.splat_f32(EPS);
@@ -590,11 +628,16 @@ impl Tile {
             let column = 1 - red_blue;
             let phase = 2 * parity + column;
             let [red, green, blue] = &mut self.rgb;
-            let green = with_natives(view(green), cfa, pattern, 1);
-            let mut red = Split::of(red, phase, cfa, pattern, 0);
-            let mut blue = Split::of(blue, phase, cfa, pattern, 2);
+            let samples = |colour| ColourSamples {
+                cfa,
+                pattern,
+                colour,
+            };
+            let green = samples(1).fill(view(green));
+            let mut red = Split::of(red, phase, samples(0));
+            let mut blue = Split::of(blue, phase, samples(2));
             for row in (BORDER + parity..height - BORDER).step_by(2) {
-                let vh_centre = Tap::at(vh_dir, row, column, 0);
+                let vh_centre = Tap::at(vh_dir, column, (row, 0));
                 let vh_diagonals = diagonals(vh_dir, row, column);
                 let [g_centre, g_n2, g_s2, g_w2, g_e2] = Tap::all(
                     green,
@@ -659,13 +702,13 @@ impl Tile {
     /// Each interpolated value that leaves the tile, divided by its colour's gain into the
     /// frame's balance. A colour at unit gain is left as it is: `x / 1` is `x`.
     #[inline(always)]
-    fn unbalance<S: Isa>(
-        &mut self,
-        isa: S,
-        Size2us { width, height }: Size2us,
-        pattern: CfaPattern,
-        gains: [f32; 3],
-    ) {
+    fn unbalance<S: Isa>(&mut self, isa: S, crop: Crop) {
+        let Crop {
+            size: Size2us { width, height },
+            pattern,
+            gains,
+            ..
+        } = crop;
         let border = INTERPOLATED_BORDER;
         for (colour, (planes, gain)) in self.rgb.iter_mut().zip(gains).enumerate() {
             if gain == 1.0 {
@@ -694,23 +737,13 @@ impl Kernel for Stages<'_> {
 
     #[inline(always)]
     fn run<S: Isa>(self, isa: S) {
-        let Self {
-            tile,
-            size,
-            pattern,
-            gains,
-        } = self;
-        // The column phase of the red and blue sites of each row parity.
-        let red_blue = [
-            pattern.color_at(Vec2us::new(0, 0)).index() & 1,
-            pattern.color_at(Vec2us::new(0, 1)).index() & 1,
-        ];
-        tile.directions(isa, size);
-        tile.green(isa, size, red_blue);
-        tile.diagonal_directions(isa, size, red_blue);
-        tile.opposite_colours(isa, size, pattern, red_blue);
-        tile.colours_at_green(isa, size, pattern, red_blue);
-        tile.unbalance(isa, size, pattern, gains);
+        let Self { tile, crop } = self;
+        tile.directions(isa, crop.size);
+        tile.green(isa, crop);
+        tile.diagonal_directions(isa, crop);
+        tile.opposite_colours(isa, crop);
+        tile.colours_at_green(isa, crop);
+        tile.unbalance(isa, crop);
     }
 }
 
@@ -727,9 +760,9 @@ impl<'a> Tap<'a> {
     }
 
     /// The photosite `dx` crop columns from each site of column phase `column` in crop row `row`
-    /// of `planes`.
+    /// of `planes`, as one of [`Tap::all`]'s steps.
     #[inline(always)]
-    fn at(planes: [&'a [f32]; 4], row: usize, column: usize, dx: isize) -> Self {
+    fn at(planes: [&'a [f32]; 4], column: usize, (row, dx): (usize, isize)) -> Self {
         let col = column as isize + dx;
         let start = (row / 2) * STRIDE;
         Self {
@@ -750,7 +783,7 @@ impl<'a> Tap<'a> {
             offset: 0,
         }; N];
         for (tap, (row, dx)) in taps.iter_mut().zip(steps) {
-            *tap = Self::at(planes, row, column, dx);
+            *tap = Self::at(planes, column, (row, dx));
         }
         taps
     }
@@ -763,16 +796,10 @@ impl<'a> Tap<'a> {
 }
 
 impl<'a> Split<'a> {
-    /// Colour `colour`'s `planes` with phase `phase` taken out to write, its own phases read from
-    /// `cfa`, the samples of a frame of `pattern`.
+    /// A colour's `planes` with phase `phase` taken out to write, its own phases read from its
+    /// `samples`.
     #[inline(always)]
-    fn of(
-        planes: &'a mut [Vec<f32>; 4],
-        phase: usize,
-        cfa: [&'a [f32]; 4],
-        pattern: CfaPattern,
-        colour: usize,
-    ) -> Self {
+    fn of(planes: &'a mut [Vec<f32>; 4], phase: usize, samples: ColourSamples<'a>) -> Self {
         let mut written = None;
         let mut read: [&[f32]; 4] = [&[]; 4];
         for (index, plane) in planes.iter_mut().enumerate() {
@@ -784,7 +811,7 @@ impl<'a> Split<'a> {
         }
         Self {
             written: written.expect("a Bayer phase"),
-            read: with_natives(read, cfa, pattern, colour),
+            read: samples.fill(read),
         }
     }
 }
@@ -871,20 +898,17 @@ fn view<const N: usize>(planes: &[Vec<f32>; N]) -> [&[f32]; N] {
     view
 }
 
-/// `planes` of colour `colour`, with the samples of `cfa` at the colour's own phases of `pattern`.
-#[inline(always)]
-fn with_natives<'a>(
-    mut planes: [&'a [f32]; 4],
-    cfa: [&'a [f32]; 4],
-    pattern: CfaPattern,
-    colour: usize,
-) -> [&'a [f32]; 4] {
-    for (phase, (plane, samples)) in planes.iter_mut().zip(cfa).enumerate() {
-        if phase_colour(pattern, phase) == colour {
-            *plane = samples;
+impl<'a> ColourSamples<'a> {
+    /// `planes` of the colour, with its own samples at its own phases.
+    #[inline(always)]
+    fn fill(self, mut planes: [&'a [f32]; 4]) -> [&'a [f32]; 4] {
+        for (phase, (plane, samples)) in planes.iter_mut().zip(self.cfa).enumerate() {
+            if phase_colour(self.pattern, phase) == self.colour {
+                *plane = samples;
+            }
         }
+        planes
     }
-    planes
 }
 
 /// A set of red-and-blue planes, one per row parity, as [`Tap::at`] reads a set of four: only the

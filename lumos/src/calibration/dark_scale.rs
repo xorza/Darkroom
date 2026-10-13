@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use crate::calibration::defect_map::HotPixels;
-use crate::calibration::defect_map::ring_reference::RingReference;
+use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
 use crate::calibration::light_calibration::Subtracted;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::pixel_flags::PixelFlags;
@@ -123,7 +123,11 @@ impl FitLight<'_> {
                 if unmeasured(index) {
                     return None;
                 }
-                let level = ring.at(size, less_bias, &image.cfa_type, size.point_of(index))?;
+                let frame = RingFrame {
+                    size,
+                    value: less_bias,
+                };
+                let level = ring.at(frame, &image.cfa_type, size.point_of(index))?;
                 Some(Pair {
                     dark: f64::from(excess) * self.dark_gain,
                     light: less_bias(index) - f64::from(level),

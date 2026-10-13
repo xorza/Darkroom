@@ -43,6 +43,8 @@ pub(super) struct WindowedCentroid {
 /// What a windowed centroid reads of a stamp besides its pixels.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WindowedInputs {
+    /// Where the centring starts.
+    pub(super) start: DVec2,
     /// The local sky the residual still carries.
     pub(super) offset: f32,
     /// The noise of the star's pixels, its σ held to the frame's floor.
@@ -61,15 +63,15 @@ struct Moments {
 }
 
 impl WindowedCentroid {
-    /// The converged centre from `start`; `None` when the stamp leaves the frame, holds no positive
-    /// windowed signal, wanders more than half the stamp radius from `start`, or does not converge
-    /// within the step budget.
+    /// The converged centre from the inputs' start; `None` when the stamp leaves the frame, holds
+    /// no positive windowed signal, wanders more than half the stamp radius from the start, or does
+    /// not converge within the step budget.
     pub(super) fn measure(
         residual: &Buffer2<f32>,
-        start: DVec2,
         grid: &MeasureGrid,
         inputs: WindowedInputs,
     ) -> Option<Self> {
+        let start = inputs.start;
         let radius = grid.stamp.radius;
         let window_sq = grid.window_sigma * grid.window_sigma;
         let mut pos = start;
@@ -143,11 +145,7 @@ impl Stamp {
     /// The stamp of `grid`'s radius and window about `pos`; `None` when it leaves the frame.
     fn at(residual: &Buffer2<f32>, pos: DVec2, grid: &MeasureGrid) -> Option<Self> {
         let radius = grid.stamp.radius;
-        let centre = centroid::stamp_centre(
-            pos,
-            Size2us::new(residual.width(), residual.height()),
-            radius,
-        )?;
+        let centre = centroid::stamp_centre(pos, Size2us::from(residual), radius)?;
         let inv_two_window = 1.0 / (2.0 * grid.window_sigma * grid.window_sigma);
         let size = 2 * radius + 1;
         let (x0, y0) = (centre.x - radius, centre.y - radius);

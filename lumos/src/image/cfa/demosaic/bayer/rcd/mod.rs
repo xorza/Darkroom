@@ -55,6 +55,13 @@ fn intp<V: F32x8>(a: V, b: V, c: V) -> V {
     b + a * (c - b)
 }
 
+/// One neighbour a green estimate reads: its green, and its same-colour low-pass filter.
+#[derive(Debug, Clone, Copy)]
+struct Neighbour<V> {
+    green: V,
+    lpf: V,
+}
+
 /// The green at red or blue sites from a neighbouring green `g`, as RCD's ratio `g·2c/(c + s)`
 /// of each site's low-pass value `c` and its same-colour neighbour's `s`.
 ///
@@ -66,12 +73,11 @@ fn intp<V: F32x8>(a: V, b: V, c: V) -> V {
 /// Every lane computes each case and keeps its own, so a lane another case divides by zero in
 /// never reaches the output.
 #[inline(always)]
-fn estimate_green<S: Isa>(
-    isa: S,
-    neighbor_green: S::F32,
-    center_lpf: S::F32,
-    same_color_lpf: S::F32,
-) -> S::F32 {
+fn estimate_green<S: Isa>(isa: S, center_lpf: S::F32, neighbour: Neighbour<S::F32>) -> S::F32 {
+    let Neighbour {
+        green: neighbor_green,
+        lpf: same_color_lpf,
+    } = neighbour;
     let one = isa.splat_f32(1.0);
     let scale = center_lpf.abs() + same_color_lpf.abs();
     let numerator = neighbor_green * (center_lpf + center_lpf);

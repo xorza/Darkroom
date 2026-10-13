@@ -12,15 +12,19 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
 use crate::io::error::FitsAllocation;
-use crate::io::fits::decode::plan::internals::description;
+use crate::io::fits::cfa;
+use crate::io::fits::decode::plan::DecodeLimit;
+use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::*;
 use crate::io::fits::fits_checksum_provenance::FitsChecksumState;
 use crate::io::fits::fits_load_options::{
-    FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
+    FitsNullPolicy,
 };
 use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
 use common::{CancelToken, TempDir};
 use std::fs;
+use std::fs::File;
 
 fn load_context() -> LoadContext {
     LoadContext::new(CancelToken::never(), u64::MAX)
@@ -154,12 +158,21 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
     let huge_shape = [1_000_000_000, 1_000_000_000, 4];
     let huge_cube = image_header(-32, &huge_shape);
     let reason = fits_refusal(
-        plan::preflight(
-            path,
-            description(&huge_cube, HduKind::Primary, &huge_shape, Bitpix::F32, 0),
+        HduSpec {
+            header: &huge_cube,
+            kind: HduKind::Primary,
+            shape: &huge_shape,
+            bitpix: Bitpix::F32,
+            source_bytes: 0,
+        }
+        .description()
+        .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            u64::MAX,
+            DecodeLimit {
+                path,
+                bytes: u64::MAX,
+            },
         )
         .unwrap_err(),
     );
@@ -172,12 +185,21 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let path = Path::new("budget.fits");
     let rgb_shape = [100, 100, 3];
     let rgb = image_header(-64, &rgb_shape);
-    let plan = plan::preflight(
-        path,
-        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
+    let plan = HduSpec {
+        header: &rgb,
+        kind: HduKind::Primary,
+        shape: &rgb_shape,
+        bitpix: Bitpix::F64,
+        source_bytes: 241_920,
+    }
+    .description()
+    .plan(
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
-        u64::MAX,
+        DecodeLimit {
+            path,
+            bytes: u64::MAX,
+        },
     )
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
@@ -202,21 +224,39 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         );
     }
     assert_eq!(plan.rows_per_chunk, 100);
-    plan::preflight(
-        path,
-        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
+    HduSpec {
+        header: &rgb,
+        kind: HduKind::Primary,
+        shape: &rgb_shape,
+        bitpix: Bitpix::F64,
+        source_bytes: 241_920,
+    }
+    .description()
+    .plan(
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
-        plan.peak_bytes,
+        DecodeLimit {
+            path,
+            bytes: plan.peak_bytes,
+        },
     )
     .unwrap();
     let reason = fits_refusal(
-        plan::preflight(
-            path,
-            description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
+        HduSpec {
+            header: &rgb,
+            kind: HduKind::Primary,
+            shape: &rgb_shape,
+            bitpix: Bitpix::F64,
+            source_bytes: 241_920,
+        }
+        .description()
+        .plan(
             FitsCubeInterpretation::Rgb,
             FitsFloatScale::Auto,
-            plan.peak_bytes - 1,
+            DecodeLimit {
+                path,
+                bytes: plan.peak_bytes - 1,
+            },
         )
         .unwrap_err(),
     );
@@ -235,8 +275,18 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     );
     // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
     // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
-    plan.admit_flags_extension(path, 140_000).unwrap();
-    let reason = fits_refusal(plan.admit_flags_extension(path, 139_999).unwrap_err());
+    plan.admit_flags_extension(DecodeLimit {
+        path,
+        bytes: 140_000,
+    })
+    .unwrap();
+    let reason = fits_refusal(
+        plan.admit_flags_extension(DecodeLimit {
+            path,
+            bytes: 139_999,
+        })
+        .unwrap_err(),
+    );
     assert_eq!(
         reason,
         FitsRefusal::OverBudget {
@@ -253,37 +303,61 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let mono_shape = [100, 100];
     let mut mono = image_header(16, &mono_shape);
     let plan_of = |header: &Header| {
-        plan::preflight(
-            path,
-            description(header, HduKind::Primary, &mono_shape, Bitpix::I16, 20_160),
+        HduSpec {
+            header,
+            kind: HduKind::Primary,
+            shape: &mono_shape,
+            bitpix: Bitpix::I16,
+            source_bytes: 20_160,
+        }
+        .description()
+        .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            u64::MAX,
+            DecodeLimit {
+                path,
+                bytes: u64::MAX,
+            },
         )
         .unwrap()
     };
     let without = plan_of(&mono);
     assert_eq!(without.peak_bytes, 80_000);
-    without.admit_flags_extension(path, 50_000).unwrap();
-    assert!(without.admit_flags_extension(path, 49_999).is_err());
+    without
+        .admit_flags_extension(DecodeLimit {
+            path,
+            bytes: 50_000,
+        })
+        .unwrap();
+    assert!(
+        without
+            .admit_flags_extension(DecodeLimit {
+                path,
+                bytes: 49_999
+            })
+            .is_err()
+    );
     mono.set("DATAMAX", 30_000.0).unwrap();
     assert_eq!(plan_of(&mono).peak_bytes, 90_000);
 
     let compressed_shape = [1024, 1024];
     let compressed = compressed_header(-32, &compressed_shape);
     let reason = fits_refusal(
-        plan::preflight(
-            path,
-            description(
-                &compressed,
-                HduKind::CompressedImage,
-                &compressed_shape,
-                Bitpix::F32,
-                2_880,
-            ),
+        HduSpec {
+            header: &compressed,
+            kind: HduKind::CompressedImage,
+            shape: &compressed_shape,
+            bitpix: Bitpix::F32,
+            source_bytes: 2_880,
+        }
+        .description()
+        .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            4 * 1024 * 1024 - 1,
+            DecodeLimit {
+                path,
+                bytes: 4 * 1024 * 1024 - 1,
+            },
         )
         .unwrap_err(),
     );

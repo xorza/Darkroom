@@ -6,10 +6,9 @@
 
 use arrayvec::ArrayVec;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
-use crate::bit_buffer2::BitBuffer2;
-use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::image::masked_plane::MaskedPlane;
+use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
 
@@ -24,14 +23,18 @@ pub(super) struct StampBackground {
 }
 
 impl StampBackground {
-    /// The residual's sigma-clipped median and σ over `annulus` about `pos`, whose inner radius keeps
-    /// the star's flux out; `None` when fewer than 10 of its pixels lie in the frame.
+    /// The residual's sigma-clipped median and σ over `annulus` about `pos`, less the pixels its
+    /// mask names, whose inner radius keeps the star's flux out; `None` when fewer than 10 of its
+    /// pixels lie in the frame.
     pub(super) fn measure(
-        residual: &Buffer2<f32>,
-        no_data: Option<&BitBuffer2>,
+        residual: MaskedPlane<'_>,
         pos: DVec2,
         annulus: AnnulusRadii,
     ) -> Option<Self> {
+        let MaskedPlane {
+            pixels: residual,
+            mask: no_data,
+        } = residual;
         let icx = pos.x.round() as isize;
         let icy = pos.y.round() as isize;
         let inner_r2 = annulus.inner * annulus.inner;
@@ -65,7 +68,14 @@ impl StampBackground {
         values.extend(pixels().step_by(stride).map(|(x, y)| residual.row(y)[x]));
         let mut deviations: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
         let samples = values.len();
-        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
+        let stats = ClippedStats::sigma_clipped(
+            &mut values,
+            &mut deviations,
+            SigmaClip {
+                kappa: 3.0,
+                iterations: 2,
+            },
+        );
         Some(Self {
             offset: stats.median,
             noise: stats.sigma,

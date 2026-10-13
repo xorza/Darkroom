@@ -38,8 +38,9 @@ use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
-use crate::gui::pane::image_viewer::camera::{VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM};
-use crate::gui::pane::image_viewer::toolbar::BACKDROPS;
+use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
+use crate::gui::pane::image_viewer::glyph::Swatch;
+use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
 use crate::gui::state::preview_store::error::PreviewImageError;
 use crate::gui::state::preview_store::{
     DrawableImage, PreviewMessage, PreviewStore, StoredContent,
@@ -48,6 +49,7 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
+use crate::gui::widgets::toggle::Toggle;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
@@ -137,6 +139,24 @@ impl ShownSource {
     }
 }
 
+/// The pane a viewer draws into this frame, and what it draws from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ViewerPane<'a> {
+    pub(crate) theme: &'a Theme,
+    /// The tab's title, never empty — [`node_label`] supplies the fallback.
+    pub(crate) title: &'a str,
+    pub(crate) previews: &'a PreviewStore,
+    /// The pane's size, `None` before it was ever arranged.
+    pub(crate) size: Option<Vec2>,
+}
+
+/// A frame that has an image to show, in its pane.
+#[derive(Debug, Clone, Copy)]
+struct Shown<'a> {
+    pane: ViewerPane<'a>,
+    image: &'a DrawableImage,
+}
+
 impl ImageViewer {
     /// An empty viewer for `node_id` (shows the hint until content arrives).
     pub(crate) fn new(node_id: NodeId) -> Self {
@@ -191,19 +211,22 @@ impl ImageViewer {
         }
     }
 
-    /// Draw the viewer pane (the whole tab content). Borrows the centralized
-    /// texture, applies last frame's pan/zoom gestures, then paints the image
-    /// (or message), header, and controls. Returns `true` when the shared
-    /// viewer preferences changed.
+    /// Draw the viewer into `view` (the whole tab content). Borrows the
+    /// centralized texture, applies last frame's pan/zoom gestures, then
+    /// paints the image (or message), header, and controls. Returns `true`
+    /// when the shared viewer preferences changed.
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
-        theme: &Theme,
+        view: ViewerPane<'_>,
         prefs: &mut ViewerPreferences,
-        title: &str,
-        previews: &PreviewStore,
-        pane: Option<Vec2>,
     ) -> bool {
+        let ViewerPane {
+            theme,
+            previews,
+            size: pane,
+            ..
+        } = view;
         // The store rather than the entry: this viewer *is* its node, so
         // handing it the whole store is one lookup by an id that cannot
         // disagree with the one keying the pane's widgets.
@@ -245,21 +268,23 @@ impl ImageViewer {
                         // the fit would.
                         None => image.fit(ImageFit::Contain),
                     });
-                    self.header(ui, theme, pane, title, shown);
-                    prefs_changed = self.controls(ui, theme, pane, prefs, shown);
+                    let shown = Shown {
+                        pane: view,
+                        image: shown,
+                    };
+                    self.header(ui, shown);
+                    prefs_changed = self.controls(ui, shown, prefs);
                 }
                 // Complementary to the image above, so this is the same
                 // either/or the enum states — never a second thing drawn over
                 // the picture. On the frosted readout pill, so the line stays
                 // legible over the checker/white backdrops too.
                 if let Some(hint) = source.hint() {
-                    let text = fmt!(ui, "{hint}");
-                    toolbar::readout_pill(
-                        ui,
-                        theme,
-                        Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
-                        text,
-                    );
+                    Readout {
+                        panel: Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
+                        text: fmt!(ui, "{hint}").into(),
+                    }
+                    .show(ui, theme);
                 }
             });
         prefs_changed
@@ -289,29 +314,21 @@ impl ImageViewer {
 
     /// The top-left readout: source node, native dimensions and pixel
     /// format, whether the view is texture-capped, and the current zoom.
-    /// (`title` is never empty — [`node_label`] supplies the fallback.)
-    fn header(
-        &self,
-        ui: &mut Ui,
-        theme: &Theme,
-        pane: Option<Vec2>,
-        title: &str,
-        shown: &DrawableImage,
-    ) {
+    fn header(&self, ui: &mut Ui, shown: Shown<'_>) {
         let readout = HeaderReadout {
-            title,
-            shown,
-            zoom: self.effective_view(ui, shown, pane).map(|v| v.zoom),
+            title: shown.pane.title,
+            shown: shown.image,
+            zoom: self
+                .effective_view(ui, shown.image, shown.pane.size)
+                .map(|v| v.zoom),
         };
-        let text = fmt!(ui, "{readout}");
-        toolbar::readout_pill(
-            ui,
-            theme,
-            Panel::hstack()
+        Readout {
+            panel: Panel::hstack()
                 .id_salt("viewer_header")
                 .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0)),
-            text,
-        );
+            text: fmt!(ui, "{readout}").into(),
+        }
+        .show(ui, shown.pane.theme);
     }
 
     /// The floating control panel in the pane's top-right corner — the
@@ -323,62 +340,54 @@ impl ImageViewer {
     /// changed. Drawn after the image so the buttons hit-test above the
     /// pane's gesture surface. Framing clicks land next frame (responses
     /// lag the record by one frame) — imperceptible.
-    fn controls(
-        &mut self,
-        ui: &mut Ui,
-        theme: &Theme,
-        pane: Option<Vec2>,
-        prefs: &mut ViewerPreferences,
-        shown: &DrawableImage,
-    ) -> bool {
-        let node_id = self.node_id;
+    fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, prefs: &mut ViewerPreferences) -> bool {
+        let (theme, pane) = (shown.pane.theme, shown.pane.size);
+        let controls = Controls {
+            node_id: self.node_id,
+            theme,
+        };
         let mut changed = false;
         Panel::vstack()
-            .id(toolbar::control_wid(node_id, "panel"))
+            .id(controls.wid("panel"))
             .size((Sizing::HUG, Sizing::HUG))
             .align(Align::new(HAlign::Right, VAlign::Top))
             .child_align(Align::new(HAlign::Right, VAlign::Top))
             .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
             .gap(BUTTON_GAP)
             .show(ui, |ui| {
-                let framing = Panel::hstack().id(toolbar::control_wid(node_id, "pill_framing"));
-                pill::show(ui, theme, framing, |ui| {
-                    if Chip::new(toolbar::control_wid(node_id, "fit"), "Fit to view").show(
+                let framing = Panel::hstack().id(controls.wid("pill_framing"));
+                pill::dress(framing, theme).show(ui, |ui| {
+                    if Chip::new(controls.wid("fit"), "Fit to view").show(
                         ui,
                         theme,
                         glyph::draw_fit,
                     ) {
                         self.reset_framing();
                     }
-                    if Chip::new(toolbar::control_wid(node_id, "100"), "Zoom to 100%").show(
+                    if Chip::new(controls.wid("100"), "Zoom to 100%").show(
                         ui,
                         theme,
                         glyph::draw_100,
                     ) && let Some(pane) = pane
-                        && let Some(v) = self.effective_view(ui, shown, Some(pane))
+                        && let Some(v) = self.effective_view(ui, shown.image, Some(pane))
                     {
                         self.view = Some(camera::zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
-                let appearance =
-                    Panel::vstack().id(toolbar::control_wid(node_id, "pill_appearance"));
-                pill::show(ui, theme, appearance, |ui| {
+                let appearance = Panel::vstack().id(controls.wid("pill_appearance"));
+                pill::dress(appearance, theme).show(ui, |ui| {
                     for (mode, key, tip) in BACKDROPS {
-                        let selected = prefs.background == mode;
-                        if Chip::new(toolbar::control_wid(node_id, key), tip).show(
-                            ui,
-                            theme,
-                            |ui, s, _| {
-                                glyph::draw_swatch(ui, s, theme, mode, selected);
-                            },
-                        ) && !selected
+                        let state = Toggle::from(prefs.background == mode);
+                        if Chip::new(controls.wid(key), tip).show(ui, theme, |ui, s, _| {
+                            Swatch { mode, state }.draw(ui, s, theme);
+                        }) && state == Toggle::Off
                         {
                             prefs.background = mode;
                             changed = true;
                         }
                     }
                     pill::rule(ui, theme);
-                    changed |= toolbar::filter_toggle(ui, theme, node_id, &mut prefs.mag_filter);
+                    changed |= controls.filter_toggle(ui, &mut prefs.mag_filter);
                 });
             });
         changed
@@ -413,8 +422,8 @@ impl ImageViewer {
             self.pan_anchor.latch(v.pan);
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
-        pan_zoom::fold_pan_drag(&mut self.pan_anchor, |&start| start, drag, &mut v.pan);
-        pan_zoom::fold_scroll_zoom(&mut v, ui, &resp, VIEWER_MIN_ZOOM, VIEWER_MAX_ZOOM);
+        self.pan_anchor.fold_pan(|&start| start, drag, &mut v.pan);
+        VIEWER_ZOOM.fold_scroll(&mut v, ui, &resp);
         self.view = Some(v);
     }
 }

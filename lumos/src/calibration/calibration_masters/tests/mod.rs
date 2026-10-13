@@ -4,7 +4,7 @@ mod dark_scale;
 mod real_data;
 mod synthetic;
 
-use crate::calibration::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
+use crate::calibration::calibration_masters::{DEFAULT_SIGMA_THRESHOLD, MasterBuild};
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
 use crate::calibration::defect_map::{DefectMap, HotPixels};
@@ -2146,15 +2146,17 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
         ..Recorder::default()
     };
     let masters = CalibrationMasters::build(
-        CalibrationSet {
-            dark: darks.as_slice(),
-            flat: flats.as_slice(),
-            bias: bias.as_slice(),
-            flat_dark: &[],
+        MasterBuild {
+            frames: CalibrationSet {
+                dark: darks.as_slice(),
+                flat: flats.as_slice(),
+                bias: bias.as_slice(),
+                flat_dark: &[],
+            },
+            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            cache: &cache,
         },
-        DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::with_cache_dir(directory.join("cache")),
-        &cache,
         &ProgressMonitor::unattended(),
     )
     .unwrap();
@@ -2211,15 +2213,17 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
         .collect();
     let cancel = CancelToken::new();
     let error = CalibrationMasters::build(
-        CalibrationSet {
-            dark: &[],
-            flat: &[],
-            bias: bias.as_slice(),
-            flat_dark: &[],
+        MasterBuild {
+            frames: CalibrationSet {
+                dark: &[],
+                flat: &[],
+                bias: bias.as_slice(),
+                flat_dark: &[],
+            },
+            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            cache: &Cancelling(cancel.clone()),
         },
-        DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::with_cache_dir(directory.join("cache")),
-        &Cancelling(cancel.clone()),
         &ProgressMonitor::new(ProgressCallback::default(), cancel),
     )
     .unwrap_err();

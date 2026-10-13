@@ -8,19 +8,20 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 use fits_well::FitsReader;
 use fits_well::header::Header;
-use fits_well::image::Data as FitsData;
 use fits_well::io::StreamReader;
 
 use crate::io::error::ImageError;
 use crate::io::fits::cfa;
 use crate::io::fits::decode::DecodedFitsImage;
+use crate::io::fits::decode::open_fits::OpenFits;
 use crate::io::fits::decode::pixels::HduDecode;
-use crate::io::fits::decode::plan::{self, FitsDecodePlan, FitsHduDescription};
+use crate::io::fits::decode::plan::{DecodeLimit, FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::selection;
 use crate::io::fits::fits_load_options::FitsChecksumPolicy;
 use crate::io::fits::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
+use crate::io::fits::hdu_list::HduList;
 use crate::io::load_context::LoadContext;
 
 /// A FITS file opened for one image: the reader, the HDU the options select, and that HDU's
@@ -55,23 +56,43 @@ impl SelectedFits {
         let reader = FitsReader::open(file).map_err(|source| ImageError::fits(path, source))?;
         context.check_cancelled(path)?;
         cfa::validate_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
-        let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
+        let selected = selection::select_image_hdu(
+            HduList {
+                path,
+                hdus: reader.hdus(),
+            },
+            &context.fits.hdu,
+        )?;
         let hdu = &reader.hdus()[selected.index];
         let lumos_cfa = cfa::validate_image_header(path, &hdu.header)?;
-        let plan = plan::preflight(
+        let limit = DecodeLimit {
             path,
-            FitsHduDescription::from_hdu(path, hdu, selected.index)?,
+            bytes: context.memory_limit_bytes,
+        };
+        let plan = FitsHduDescription::from_hdu(path, hdu, selected.index)?.plan(
             context.fits.cube,
             context.fits.float_scale,
-            context.memory_limit_bytes,
+            limit,
         )?;
-        let flags_hdu =
-            FlagsExtension::locate(path, reader.hdus(), selected.index, plan.dimensions.size())?;
+        let flags_hdu = FlagsExtension::locate(
+            HduList {
+                path,
+                hdus: reader.hdus(),
+            },
+            selected.index,
+            plan.dimensions.size(),
+        )?;
         if flags_hdu.is_some() {
-            plan.admit_flags_extension(path, context.memory_limit_bytes)?;
+            plan.admit_flags_extension(limit)?;
         }
-        let gain_hdu =
-            GainExtension::locate(path, reader.hdus(), selected.index, plan.dimensions.size())?;
+        let gain_hdu = GainExtension::locate(
+            HduList {
+                path,
+                hdus: reader.hdus(),
+            },
+            selected.index,
+            plan.dimensions.size(),
+        )?;
         let mut extension_bytes = ArrayVec::new();
         if flags_hdu.is_some() {
             extension_bytes.push(plan.dimensions.pixel_count() as u64);
@@ -130,13 +151,16 @@ impl SelectedFits {
         .read_stream(&mut self.reader, policy)?;
         if let Some(flags_hdu) = self.flags_hdu {
             context.check_cancelled(path)?;
-            let stored = read_extension(
-                &mut self.reader,
-                flags_hdu,
-                &[0..size.width, 0..size.height],
+            let stored = OpenFits {
+                reader: &mut self.reader,
                 path,
+            }
+            .read_extension(flags_hdu, &[0..size.width, 0..size.height])?;
+            decoded.flags = FlagsExtension::join(
+                path,
+                FlagsExtension::plane(stored, size),
+                decoded.flags.as_ref(),
             )?;
-            decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
         }
         if let Some(gain_hdu) = self.gain_hdu {
             context.check_cancelled(path)?;
@@ -147,28 +171,13 @@ impl SelectedFits {
                 .iter()
                 .map(|&extent| 0..extent)
                 .collect();
-            let stored = read_extension(&mut self.reader, gain_hdu, &shape, path)?;
+            let stored = OpenFits {
+                reader: &mut self.reader,
+                path,
+            }
+            .read_extension(gain_hdu, &shape)?;
             decoded.metadata.flat_gain = Some(Arc::new(GainExtension::decode(path, stored, size)?));
         }
         Ok(decoded)
     }
-}
-
-/// The samples of the extension at HDU `index` — flags or flat gain — over `section`, its whole
-/// shape, summed as they are read, and refused unless its checksum is valid.
-fn read_extension(
-    reader: &mut StreamReader<File>,
-    index: usize,
-    section: &[Range<usize>],
-    path: &Path,
-) -> Result<FitsData, ImageError> {
-    let fits = |source| ImageError::fits(path, source);
-    let mut sum = reader.begin_data_checksum(index).map_err(fits)?;
-    let stored = reader
-        .read_image_section_summed(index, section, &mut sum)
-        .map_err(fits)?
-        .into_samples();
-    let report = reader.finish_data_checksum(sum).map_err(fits)?;
-    selection::judge_checksum(report, index, path, FitsChecksumPolicy::RequireValid)?;
-    Ok(stored)
 }

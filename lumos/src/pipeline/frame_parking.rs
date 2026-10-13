@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
 use crate::image::linear_image::LinearImage;
@@ -90,12 +90,12 @@ impl FrameParking {
                     coverage: &warped.coverage,
                     confidence: &warped.confidence,
                 };
-                Ok(StoredFrame::spill(
-                    scratch,
-                    &warped.image,
-                    &quality,
+                Ok(SpillFrame {
+                    image: &warped.image,
+                    quality: &quality,
                     source_stats,
-                )?)
+                }
+                .spill(scratch)?)
             }
         }
     }

@@ -19,15 +19,15 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
-use crate::pipeline::align_stack_config::AlignStackConfig;
+use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
 use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::light_source::MosaicPreparation;
 use crate::platform::MappedFile;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
-use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::{Warp, WarpBuffers};
 use crate::scratch_pool::{Scratch, ScratchPool};
 
 /// The stage benches, then the entry point end to end.
@@ -113,8 +113,13 @@ fn park(c: &mut Criterion) {
             let warp = Pair::typical().similarity_warp();
             let mut buffers = WarpBuffers::build(parked.dimensions);
             let rows = ScratchPool::default();
-            let mut warp_parked =
-                || buffers.warp_into(&source, &warp, WarpParams::default(), &rows);
+            let mut warp_parked = || {
+                let job = Warp {
+                    transform: &warp,
+                    params: WarpParams::default(),
+                };
+                buffers.warp_into(&source, job, &rows);
+            };
             if cold {
                 b.iter_batched(
                     || assert!(parked.evict(), "the light's pages leave the page cache"),
@@ -167,8 +172,10 @@ fn end_to_end(c: &mut Criterion) {
             b.iter(|| {
                 AlignStackConfig::default()
                     .calibrate_align_stack_paths(
-                        &files.paths,
-                        masters,
+                        CalibratedLights {
+                            paths: &files.paths,
+                            masters,
+                        },
                         &ingest,
                         ProgressMonitor::unattended(),
                     )

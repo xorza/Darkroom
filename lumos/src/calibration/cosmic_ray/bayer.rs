@@ -5,6 +5,8 @@
 //! problem back into four mono detections, whose dense neighbours really are same-colour in the
 //! mosaic. Pattern-independent: phase alone fixes the colour, so no `CfaPattern` is needed.
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
@@ -17,11 +19,11 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// Phase-sized masks a phase's detection holds beside the mono detector's: the frame's [`KeptOut`]
-/// sampled to the phase, two, and the mask of the photosites it repaired.
-const PHASE_MASKS: usize = 3;
+/// sampled to the phase, two.
+const PHASE_MASKS: usize = 2;
 
-/// The Bayer detector: a mono detector, the lattice that deinterleaves the phases, and the buffers
-/// each phase is deinterleaved, kept out and found in.
+/// The Bayer detector: a mono detector, the lattice that deinterleaves the phases, the buffers
+/// each phase is deinterleaved and kept out in, and the mask of the photosites the four repaired.
 ///
 /// The detector and the buffers are reused across all four phases. `(0, 0)` is the largest phase
 /// and runs first, so no later one grows any allocation.
@@ -30,11 +32,11 @@ pub(super) struct BayerDetector<'a> {
     mono: MonoDetector<'a>,
     lattice: CfaLattice,
     pattern: CfaPattern,
-    plane: Vec<f32>,
+    plane: Buffer2<f32>,
     /// The frame's [`KeptOut`] sampled to the phase at hand.
     plane_kept_out: KeptOut,
-    /// The photosites the phase at hand repaired.
-    plane_found: BitBuffer2,
+    /// The photosites the phases repaired, the mosaic's size.
+    found: BitBuffer2,
 }
 
 impl<'a> BayerDetector<'a> {
@@ -43,54 +45,53 @@ impl<'a> BayerDetector<'a> {
             mono: MonoDetector::new(config, noise),
             lattice: CfaLattice::new(&CfaType::Bayer(pattern)),
             pattern,
-            plane: Vec::new(),
+            plane: Buffer2::default(),
             plane_kept_out: KeptOut::empty(),
-            plane_found: BitBuffer2::empty(),
+            found: BitBuffer2::empty(),
         }
     }
 
-    /// The bytes a detection on a `size` mosaic allocates beside it: the largest phase plane, the
-    /// mono detector's scratch over it, and the phase's [`PHASE_MASKS`]; nothing when even that
-    /// phase is too small to scan.
+    /// The bytes a detection on a `size` mosaic allocates beside it: the mask of what it repaired,
+    /// and the largest phase plane, the mono detector's scratch over it and the phase's
+    /// [`PHASE_MASKS`] — of which nothing when even that phase is too small to scan.
     pub(super) fn heap_bytes(size: Size2us) -> usize {
         let phase = CfaLattice::phase_size(size, Vec2us::ZERO);
-        match MonoDetector::heap_bytes(phase) {
-            0 => 0,
-            mono => {
-                phase.pixel_count() * size_of::<f32>()
-                    + mono
-                    + PHASE_MASKS * BitBuffer2::heap_bytes(phase)
-            }
-        }
+        let scanned = if MonoDetector::scans(phase) {
+            phase.pixel_count() * size_of::<f32>()
+                + MonoDetector::heap_bytes(phase)
+                + PHASE_MASKS * BitBuffer2::heap_bytes(phase)
+        } else {
+            0
+        };
+        BitBuffer2::heap_bytes(size) + scanned
     }
 
-    /// Clean every phase in place, marking every in-painted photosite in `found` (the mosaic's
-    /// size) and returning the total across the four.
+    /// Clean every phase of `data` in place; the mask of every photosite it in-painted, the
+    /// mosaic's size, which the detector holds until its next detection.
     pub(super) fn reject(
         &mut self,
-        data: &mut [f32],
-        size: Size2us,
+        data: &mut Buffer2<f32>,
         backgrounds: &PixelBackgrounds<'_>,
         kept_out: Option<&KeptOut>,
-        found: &mut BitBuffer2,
-    ) -> usize {
+    ) -> &BitBuffer2 {
+        let size = Size2us::from(&*data);
         let Self {
             mono,
             lattice,
             pattern,
             plane,
             plane_kept_out,
-            plane_found,
+            found,
         } = self;
-        let mut total = 0;
+        found.clear_to(size);
         for b in 0..2 {
             for a in 0..2 {
                 let phase = Vec2us::new(a, b);
                 let plane_size = CfaLattice::phase_size(size, phase);
-                if plane_size.width < 3 || plane_size.height < 3 {
+                if !MonoDetector::scans(plane_size) {
                     continue;
                 }
-                lattice.deinterleave(data, size, phase, plane);
+                lattice.deinterleave(data, phase, plane);
                 let colour = pattern.color_at(phase).index();
                 let local = |index: usize| {
                     let at = plane_size.point_of(index);
@@ -102,14 +103,13 @@ impl<'a> BayerDetector<'a> {
                     });
                     &*plane_kept_out
                 });
-                plane_found.clear_to(plane_size);
-                total += mono.reject(plane, plane_size, &local, phase_kept_out, plane_found);
-                plane_found.for_each_set(|pos| {
-                    found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
-                });
-                lattice.interleave(plane, size, phase, data);
+                mono.reject(plane, &local, phase_kept_out)
+                    .for_each_set(|pos| {
+                        found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
+                    });
+                lattice.interleave(plane, phase, data);
             }
         }
-        total
+        found
     }
 }

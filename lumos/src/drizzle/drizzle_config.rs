@@ -3,11 +3,11 @@
 use std::path::Path;
 
 use crate::combine::stack_config::StackConfig;
+use crate::config_value::ConfigValue;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::drizzle_run::DrizzleRun;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::error::InvalidConfigField;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
@@ -151,19 +151,13 @@ impl DrizzleConfig {
 
     /// Validate parameters before allocating or processing an output image.
     pub fn validate(&self) -> Result<(), DrizzleConfigError> {
-        InvalidConfigField::finite("scale", "finite and positive", self.scale, |value| {
-            value > 0.0
-        })?;
-        InvalidConfigField::finite("pixfrac", "finite and in (0, 1]", self.pixfrac, |value| {
-            value > 0.0 && value <= 1.0
-        })?;
-        InvalidConfigField::finite_only("fill_value", self.fill_value)?;
-        InvalidConfigField::finite(
-            "min_weight_fraction",
-            "finite and in [0, 1]",
-            self.min_weight_fraction,
-            |value| (0.0..=1.0).contains(&value),
-        )?;
+        ConfigValue::new("scale", self.scale)
+            .finite_and("finite and positive", |value| value > 0.0)?;
+        ConfigValue::new("pixfrac", self.pixfrac)
+            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
+        ConfigValue::new("fill_value", self.fill_value).finite()?;
+        ConfigValue::new("min_weight_fraction", self.min_weight_fraction)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
         if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {
             return Err(DrizzleConfigError::InvalidLanczosSampling {
                 scale: self.scale,

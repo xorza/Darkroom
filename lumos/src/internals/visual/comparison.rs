@@ -4,12 +4,11 @@
 
 use crate::internals::synthetic::metrics::match_catalogs;
 use crate::internals::synthetic::observe::ObservedSource;
-use crate::internals::visual::{ToneMap, gray_to_rgb};
-use crate::math::size2us::Size2us;
+use crate::internals::visual::{ToneMap, debug_file, gray_to_rgb, save_image};
 use crate::star_detection::star::Star;
 use glam::Vec2;
-use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
+use imaginarium::{Buffer2, Image};
 
 /// Colors for comparison images.
 mod colors {
@@ -22,78 +21,65 @@ mod colors {
     pub(super) const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
 }
 
-/// Create a comparison image showing ground truth and detected stars.
-///
-/// # Arguments
-/// * `pixels` - Background image pixels
-/// * `size` - Image dimensions
-/// * `ground_truth` - True star positions
-/// * `detected` - Detected stars
-/// * `match_radius` - Maximum distance for matching (in pixels)
-///
-/// # Returns
-/// RGB image with:
-/// - Blue circles: ground truth positions
-/// - Green circles: correctly detected
-/// - Red circles: missed stars
-/// - Yellow circles: false positives
-/// - Cyan crosses: detected centroids
-pub(super) fn create_comparison_image(
-    pixels: &[f32],
-    size: Size2us,
-    ground_truth: &[ObservedSource],
-    detected: &[Star],
-    match_radius: f32,
-) -> Image {
-    let mut image = gray_to_rgb(pixels, size, ToneMap::Clamp);
+/// Ground truth against the stars a detection found, drawn over the plane they were found on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Comparison<'a> {
+    pub(crate) ground_truth: &'a [ObservedSource],
+    pub(crate) detected: &'a [Star],
+    /// The greatest distance, in pixels, at which a detected star matches a true one.
+    pub(crate) match_radius: f32,
+}
 
-    // Match detected stars to ground truth
-    let truth_positions: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();
-    let detected_positions: Vec<glam::DVec2> = detected.iter().map(|s| s.pos).collect();
-    let pairs = match_catalogs(
-        &truth_positions,
-        &detected_positions,
-        f64::from(match_radius),
-    );
-    let matched_truth: Vec<usize> = pairs.iter().map(|&(ti, _)| ti).collect();
-    let matched_detected: Vec<usize> = pairs.iter().map(|&(_, di)| di).collect();
+impl Comparison<'_> {
+    /// `pixels` in RGB with: green circles on the true stars detected, red circles and magenta
+    /// crosses on those missed, cyan crosses on the matched detections, and yellow circles and
+    /// crosses on false positives.
+    fn image(&self, pixels: &Buffer2<f32>) -> Image {
+        let Self {
+            ground_truth,
+            detected,
+            match_radius,
+        } = *self;
+        let mut image = gray_to_rgb(pixels, ToneMap::Clamp);
+        let truth_positions: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();
+        let detected_positions: Vec<glam::DVec2> = detected.iter().map(|s| s.pos).collect();
+        let pairs = match_catalogs(
+            &truth_positions,
+            &detected_positions,
+            f64::from(match_radius),
+        );
+        let matched_truth: Vec<usize> = pairs.iter().map(|&(ti, _)| ti).collect();
+        let matched_detected: Vec<usize> = pairs.iter().map(|&(_, di)| di).collect();
 
-    // Draw ground truth stars
-    for (i, truth) in ground_truth.iter().enumerate() {
-        let cx = truth.pos.x as f32;
-        let cy = truth.pos.y as f32;
-        let radius = (truth.fwhm * 1.5).max(5.0);
-
-        // Color depends on whether it was detected
-        let color = if matched_truth.contains(&i) {
-            colors::GREEN // Detected
-        } else {
-            colors::RED // Missed
-        };
-
-        draw_circle(&mut image, Vec2::new(cx, cy), radius, color, 1.0);
-
-        // Draw true centroid position
-        if !matched_truth.contains(&i) {
-            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::MAGENTA, 1.0);
+        for (i, truth) in ground_truth.iter().enumerate() {
+            let centre = Vec2::new(truth.pos.x as f32, truth.pos.y as f32);
+            let radius = (truth.fwhm * 1.5).max(5.0);
+            if matched_truth.contains(&i) {
+                draw_circle(&mut image, centre, radius, colors::GREEN, 1.0);
+            } else {
+                draw_circle(&mut image, centre, radius, colors::RED, 1.0);
+                draw_cross(&mut image, centre, 3.0, colors::MAGENTA, 1.0);
+            }
         }
+
+        for (i, det) in detected.iter().enumerate() {
+            let centre = Vec2::new(det.pos.x as f32, det.pos.y as f32);
+            if matched_detected.contains(&i) {
+                draw_cross(&mut image, centre, 3.0, colors::CYAN, 1.0);
+            } else {
+                let radius = (det.fwhm * 0.7).max(4.0);
+                draw_circle(&mut image, centre, radius, colors::YELLOW, 1.0);
+                draw_cross(&mut image, centre, 3.0, colors::YELLOW, 1.0);
+            }
+        }
+
+        image
     }
 
-    // Draw detected stars
-    for (i, det) in detected.iter().enumerate() {
-        let cx = det.pos.x as f32;
-        let cy = det.pos.y as f32;
-
-        if matched_detected.contains(&i) {
-            // True positive - draw centroid cross
-            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::CYAN, 1.0);
-        } else {
-            // False positive - draw yellow circle
-            let radius = (det.fwhm * 0.7).max(4.0);
-            draw_circle(&mut image, Vec2::new(cx, cy), radius, colors::YELLOW, 1.0);
-            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::YELLOW, 1.0);
+    /// Write [`Self::image`] of `pixels` under `test_output/<name>`, when debug output is on.
+    pub(crate) fn save(&self, pixels: &Buffer2<f32>, name: &str) {
+        if debug_file(name).is_some() {
+            save_image(self.image(pixels), name);
         }
     }
-
-    image
 }

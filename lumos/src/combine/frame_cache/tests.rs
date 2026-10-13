@@ -11,6 +11,7 @@ use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -743,22 +744,16 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     };
     let spilled = FrameCache::from_stored_frames(
         vec![
-            StoredFrame::spill(
-                &scratch,
-                &image,
-                &FrameQuality::<Buffer2<f32>>::None,
-                FrameStats::measure(&image),
-            )
+            SpillFrame {
+                image: &image,
+                quality: &FrameQuality::<Buffer2<f32>>::None,
+                source_stats: FrameStats::measure(&image),
+            }
+            .spill(&scratch)
             .unwrap(),
         ],
         CacheCore::plain(
-            Tier::for_plan(
-                &RunPlan::of(1, &[frame], budget),
-                budget,
-                0,
-                temp_dir.path(),
-            )
-            .unwrap(),
+            Tier::for_plan(&RunPlan::of(1, &[frame], budget), 0, temp_dir.path()).unwrap(),
             dims,
         ),
         Normalization::None,

@@ -412,7 +412,7 @@ pub(super) fn read_cfa(
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
-            return read_bayer_cfa(header, height, Bayerpat::Required, unstated_bayer_pattern);
+            return Bayerpat::Required.read_cfa(header, height, unstated_bayer_pattern);
         }
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
             return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
@@ -425,7 +425,7 @@ pub(super) fn read_cfa(
         }
         None => {}
     }
-    read_bayer_cfa(header, height, Bayerpat::Optional, unstated_bayer_pattern)
+    Bayerpat::Optional.read_cfa(header, height, unstated_bayer_pattern)
 }
 
 /// Where a Lumos-written file records the row order its *source* had.
@@ -480,66 +480,69 @@ enum Bayerpat {
     Optional,
 }
 
-/// The Bayer type `header` declares for an image of `height` decoded rows.
-///
-/// The height is the decoded image's, not `NAXIS2`: a tile-compressed HDU is a binary table whose
-/// `NAXIS2` counts tile rows.
-fn read_bayer_cfa(
-    header: &Header,
-    height: usize,
-    keyword: Bayerpat,
-    unstated_bayer_pattern: Option<CfaPattern>,
-) -> fits_well::Result<Option<CfaType>> {
-    let Some(bayerpat) = header.get_text("BAYERPAT")? else {
-        return match keyword {
-            Bayerpat::Required => Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" }),
-            Bayerpat::Optional => Ok(None),
+impl Bayerpat {
+    /// The Bayer type `header` declares for an image of `height` decoded rows, `BAYERPAT` held to
+    /// this rule.
+    ///
+    /// The height is the decoded image's, not `NAXIS2`: a tile-compressed HDU is a binary table
+    /// whose `NAXIS2` counts tile rows.
+    fn read_cfa(
+        self,
+        header: &Header,
+        height: usize,
+        unstated_bayer_pattern: Option<CfaPattern>,
+    ) -> fits_well::Result<Option<CfaType>> {
+        let Some(bayerpat) = header.get_text("BAYERPAT")? else {
+            return match self {
+                Self::Required => Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" }),
+                Self::Optional => Ok(None),
+            };
         };
-    };
-    let stated = CfaPattern::from_bayerpat(bayerpat);
-    let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");
-    let mut pattern = match (stated, unstated, unstated_bayer_pattern) {
-        (Some(pattern), _, _) | (None, true, Some(pattern)) => pattern,
-        (None, true, None) => {
-            return Err(fits_well::FitsError::TypeMismatch {
-                name: "BAYERPAT".to_string(),
-                expected: "a Bayer phase; 'TRUE' states none, so FitsLoadOptions::unstated_bayer_pattern must give it",
-            });
+        let stated = CfaPattern::from_bayerpat(bayerpat);
+        let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");
+        let mut pattern = match (stated, unstated, unstated_bayer_pattern) {
+            (Some(pattern), _, _) | (None, true, Some(pattern)) => pattern,
+            (None, true, None) => {
+                return Err(fits_well::FitsError::TypeMismatch {
+                    name: "BAYERPAT".to_string(),
+                    expected: "a Bayer phase; 'TRUE' states none, so FitsLoadOptions::unstated_bayer_pattern must give it",
+                });
+            }
+            (None, false, _) => {
+                return Err(fits_well::FitsError::TypeMismatch {
+                    name: "BAYERPAT".to_string(),
+                    expected: "RGGB, BGGR, GRBG, or GBRG",
+                });
+            }
+        };
+
+        // `BAYERPAT` describes the top-down image and the rows are left in file order, so file row
+        // `f` of a `BOTTOM-UP` frame carries the phase of displayed row `H - 1 - f`. That is the
+        // opposite phase only when `H` is even: for odd `H`, `H - 1 - f ≡ f (mod 2)`, the declared
+        // pattern already matches the rows as stored, and flipping would invert a correct one and
+        // mis-debayer the entire frame. Odd visible heights are not hypothetical — LibRaw reports
+        // 4015 for the EOS 1500D. `ROWORDER` rather than the resolved order: the pattern is
+        // expressed against the rows as this file stores them, and a Lumos-written file separates
+        // that from which way up the sky is.
+        if read_declared_row_order(header)? == RowOrder::BottomUp && height.is_multiple_of(2) {
+            pattern = pattern.flip_vertical();
         }
-        (None, false, _) => {
-            return Err(fits_well::FitsError::TypeMismatch {
-                name: "BAYERPAT".to_string(),
-                expected: "RGGB, BGGR, GRBG, or GBRG",
-            });
+
+        // The offsets are in the stored image's own coordinates — where the pattern starts within
+        // the data as written — so they compose onto the pattern *after* the row-order correction
+        // above has put it in file-order terms. Applying them first would express them against a
+        // display orientation the samples were never rearranged into.
+        let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
+        let yoff = header.get_integer("YBAYROFF")?.unwrap_or(0);
+        if yoff & 1 != 0 {
+            pattern = pattern.flip_vertical();
         }
-    };
+        if xoff & 1 != 0 {
+            pattern = pattern.flip_horizontal();
+        }
 
-    // `BAYERPAT` describes the top-down image and the rows are left in file order, so file row `f`
-    // of a `BOTTOM-UP` frame carries the phase of displayed row `H - 1 - f`. That is the opposite
-    // phase only when `H` is even: for odd `H`, `H - 1 - f ≡ f (mod 2)`, the declared pattern
-    // already matches the rows as stored, and flipping would invert a correct one and mis-debayer
-    // the entire frame. Odd visible heights are not hypothetical — LibRaw reports 4015 for the
-    // EOS 1500D.
-    // `ROWORDER` rather than the resolved order: the pattern is expressed against the rows as this
-    // file stores them, and a Lumos-written file separates that from which way up the sky is.
-    if read_declared_row_order(header)? == RowOrder::BottomUp && height.is_multiple_of(2) {
-        pattern = pattern.flip_vertical();
+        Ok(Some(CfaType::Bayer(pattern)))
     }
-
-    // The offsets are in the stored image's own coordinates — where the pattern starts within the
-    // data as written — so they compose onto the pattern *after* the row-order correction above has
-    // put it in file-order terms. Applying them first would express them against a display
-    // orientation the samples were never rearranged into.
-    let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
-    let yoff = header.get_integer("YBAYROFF")?.unwrap_or(0);
-    if yoff & 1 != 0 {
-        pattern = pattern.flip_vertical();
-    }
-    if xoff & 1 != 0 {
-        pattern = pattern.flip_horizontal();
-    }
-
-    Ok(Some(CfaType::Bayer(pattern)))
 }
 
 fn read_xtrans_pattern(header: &Header) -> fits_well::Result<XTransPattern> {

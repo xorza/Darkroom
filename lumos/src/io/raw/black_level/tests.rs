@@ -1,5 +1,5 @@
 use crate::image::quality_flags::QualityFlags;
-use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack};
+use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
@@ -17,16 +17,20 @@ fn no_black() -> Box<[u32; 4104]> {
         .expect("4104 entries")
 }
 
-fn level(black: u32, cblack: &[u32; 4104], maximum: u32, filters: u32) -> BlackLevel {
-    BlackLevel::from_libraw(&LibrawBlack {
-        black,
+/// LibRaw's report of an RGGB sensor's `cblack`, with no DNG levels and no masked area.
+fn reported(cblack: &[u32; 4104]) -> LibrawBlack<'_> {
+    LibrawBlack {
+        black: 0,
         cblack,
-        maximum,
-        filters,
+        maximum: 0,
+        filters: RGGB,
         dng: None,
         masked: [0; 8],
-    })
-    .unwrap()
+    }
+}
+
+fn level(libraw: &LibrawBlack<'_>) -> BlackLevel {
+    BlackLevel::from_libraw(libraw).unwrap()
 }
 
 /// `adjust_bl`'s folds, by hand:
@@ -38,7 +42,11 @@ fn level(black: u32, cblack: &[u32; 4104], maximum: u32, filters: u32) -> BlackL
 /// - a 1×1 pattern of 20 on X-Trans adds to every channel, then joins the common level: 276.
 #[test]
 fn the_folds_are_libraws() {
-    let uniform = level(512, &no_black(), 16_383, RGGB);
+    let uniform = level(&LibrawBlack {
+        black: 512,
+        maximum: 16_383,
+        ..reported(&no_black())
+    });
     assert_eq!(uniform.common, 512.0);
     assert_eq!(uniform.channel, [0.0; 4]);
     assert_eq!(uniform.span(), 15_871.0);
@@ -46,7 +54,11 @@ fn the_folds_are_libraws() {
 
     let mut cblack = no_black();
     cblack[..4].copy_from_slice(&[10, 5, 15, 5]);
-    let per_channel = level(100, &cblack, 4096, RGGB);
+    let per_channel = level(&LibrawBlack {
+        black: 100,
+        maximum: 4096,
+        ..reported(&cblack)
+    });
     assert_eq!(per_channel.common, 105.0);
     assert_eq!(per_channel.channel, [5.0, 0.0, 10.0, 0.0]);
     assert_eq!(per_channel.of_channel(2), 115.0);
@@ -55,7 +67,11 @@ fn the_folds_are_libraws() {
     cblack[4] = 2;
     cblack[5] = 2;
     cblack[6..10].copy_from_slice(&[4, 8, 12, 16]);
-    let folded = level(200, &cblack, 16_383, RGGB);
+    let folded = level(&LibrawBlack {
+        black: 200,
+        maximum: 16_383,
+        ..reported(&cblack)
+    });
     assert_eq!(folded.common, 204.0);
     assert_eq!(folded.channel, [0.0, 4.0, 12.0, 8.0]);
     assert!(folded.repeat.is_none());
@@ -64,7 +80,12 @@ fn the_folds_are_libraws() {
     cblack[4] = 1;
     cblack[5] = 1;
     cblack[6] = 20;
-    let xtrans = level(256, &cblack, 4096, 9);
+    let xtrans = level(&LibrawBlack {
+        black: 256,
+        maximum: 4096,
+        filters: 9,
+        ..reported(&cblack)
+    });
     assert_eq!(xtrans.common, 276.0);
     assert_eq!(xtrans.channel, [0.0; 4]);
 }
@@ -82,7 +103,11 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     cblack[4] = 2;
     cblack[5] = 3;
     cblack[6..12].copy_from_slice(&[5, 7, 9, 11, 13, 15]);
-    let black = level(2047, &cblack, 15_000, RGGB);
+    let black = level(&LibrawBlack {
+        black: 2047,
+        maximum: 15_000,
+        ..reported(&cblack)
+    });
     assert_eq!(black.common, 2052.0);
     assert_eq!(black.span(), 12_948.0);
     let repeat = black.repeat.as_ref().unwrap();
@@ -108,11 +133,13 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
     let decoded = black.decode(
         &raw,
         layout,
-        channel,
-        2,
-        FlagRule {
-            zero_is_bad: true,
-            saturation,
+        Photosites {
+            channel,
+            period: 2,
+            rule: FlagRule {
+                zero_is_bad: true,
+                saturation,
+            },
         },
     );
     let flags = decoded.flags.unwrap();

@@ -7,17 +7,18 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::internals::assertions::assert_close;
-use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::images::{gray_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
+use crate::internals::synthetic::sky_field::SkyNoise;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::stack_product::quality_map::QualityMap;
 
-/// A flat `bg` with white Gaussian noise of `sigma`.
-fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
+/// A flat `bg` with white Gaussian `noise`.
+fn noisy(size: Size2us, bg: f32, noise: SkyNoise) -> Vec<f32> {
     let mut px = vec![bg; size.pixel_count()];
-    patterns::add_gaussian_noise(&mut px, sigma, seed);
+    patterns::add_gaussian_noise(&mut px, noise.sigma, noise.seed);
     px
 }
 
@@ -38,10 +39,10 @@ fn threshold_apply_hand_computed() {
 fn denoise_reduces_white_noise_and_preserves_mean() {
     let size = Size2us::new(128, 128);
     let (bg, sigma) = (0.5, 0.05);
-    let px = noisy(size, bg, sigma, 12345);
+    let px = noisy(size, bg, SkyNoise { sigma, seed: 12345 });
     let in_std = pixel_stats(&px).std as f32;
 
-    let mut img = gray(size, px);
+    let mut img = gray_image(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
 
@@ -59,9 +60,16 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
 #[test]
 fn higher_k_smooths_more() {
     let size = Size2us::new(96, 96);
-    let px = noisy(size, 0.5, 0.04, 7);
-    let mut img2 = gray(size, px.clone());
-    let mut img5 = gray(size, px);
+    let px = noisy(
+        size,
+        0.5,
+        SkyNoise {
+            sigma: 0.04,
+            seed: 7,
+        },
+    );
+    let mut img2 = gray_image(size, px.clone());
+    let mut img5 = gray_image(size, px);
     Denoise {
         k: 2.0,
         ..Default::default()
@@ -85,10 +93,17 @@ fn higher_k_smooths_more() {
 #[test]
 fn strength_zero_is_identity_and_blends_between() {
     let size = Size2us::new(64, 64);
-    let px = noisy(size, 0.5, 0.05, 3);
+    let px = noisy(
+        size,
+        0.5,
+        SkyNoise {
+            sigma: 0.05,
+            seed: 3,
+        },
+    );
 
     // strength 0 removes nothing — bit-for-bit identity.
-    let mut img0 = gray(size, px.clone());
+    let mut img0 = gray_image(size, px.clone());
     Denoise {
         strength: 0.0,
         ..Default::default()
@@ -104,8 +119,8 @@ fn strength_zero_is_identity_and_blends_between() {
     // The removed noise depends on the input alone, so the output is affine in the strength: half
     // strength is the midpoint of none and full, to the rounding of each scale's subtraction —
     // two per scale, over at most 6 scales, of values ≤ 0.8: 16ε of 0.8.
-    let mut half = gray(size, px.clone());
-    let mut full = gray(size, px.clone());
+    let mut half = gray_image(size, px.clone());
+    let mut full = gray_image(size, px.clone());
     Denoise {
         strength: 0.5,
         ..Default::default()
@@ -136,9 +151,16 @@ fn strength_zero_is_identity_and_blends_between() {
 #[test]
 fn hard_and_soft_thresholds_differ() {
     let size = Size2us::new(64, 64);
-    let px = noisy(size, 0.5, 0.05, 55);
-    let mut hard = gray(size, px.clone());
-    let mut soft = gray(size, px);
+    let px = noisy(
+        size,
+        0.5,
+        SkyNoise {
+            sigma: 0.05,
+            seed: 55,
+        },
+    );
+    let mut hard = gray_image(size, px.clone());
+    let mut soft = gray_image(size, px);
     Denoise {
         threshold: Threshold::Hard,
         ..Default::default()
@@ -168,13 +190,20 @@ fn denoise_preserves_bright_feature() {
     // A bright 8x8 block on a faintly-noisy background: hard thresholding keeps its large
     // coefficients, so the block stays bright while the flat background is smoothed.
     let size = Size2us::new(64, 64);
-    let mut px = noisy(size, 0.1, 0.02, 808);
+    let mut px = noisy(
+        size,
+        0.1,
+        SkyNoise {
+            sigma: 0.02,
+            seed: 808,
+        },
+    );
     for yy in 28..36 {
         for xx in 28..36 {
             px[yy * size.width + xx] = 0.9;
         }
     }
-    let mut img = gray(size, px);
+    let mut img = gray_image(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
 
@@ -206,19 +235,38 @@ fn denoise_preserves_bright_feature() {
 fn denoise_is_per_channel_on_rgb() {
     let size = Size2us::new(48, 48);
     let planes = [
-        noisy(size, 0.5, 0.03, 2024),
-        noisy(size, 0.5, 0.05, 4048),
-        noisy(size, 0.5, 0.04, 6072),
+        noisy(
+            size,
+            0.5,
+            SkyNoise {
+                sigma: 0.03,
+                seed: 2024,
+            },
+        ),
+        noisy(
+            size,
+            0.5,
+            SkyNoise {
+                sigma: 0.05,
+                seed: 4048,
+            },
+        ),
+        noisy(
+            size,
+            0.5,
+            SkyNoise {
+                sigma: 0.04,
+                seed: 6072,
+            },
+        ),
     ];
-    let mut img = rgb(
+    let mut img = rgb_image(
         size,
-        planes[0].clone(),
-        planes[1].clone(),
-        planes[2].clone(),
+        [planes[0].clone(), planes[1].clone(), planes[2].clone()],
     );
     Denoise::default().apply(&mut img).unwrap();
     for (channel, plane) in planes.into_iter().enumerate() {
-        let mut alone = gray(size, plane);
+        let mut alone = gray_image(size, plane);
         Denoise::default().apply(&mut alone).unwrap();
         assert_eq!(img.channel(channel).pixels(), alone.channel(0).pixels());
     }
@@ -227,12 +275,12 @@ fn denoise_is_per_channel_on_rgb() {
 #[test]
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
-    let mut tiny = gray(
+    let mut tiny = gray_image(
         Size2us::new(3, 3),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     );
     Denoise::default().apply(&mut tiny).unwrap();
-    let mut one = gray(Size2us::new(1, 1), vec![0.42]);
+    let mut one = gray_image(Size2us::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
     assert_eq!(
         one.channel(0).pixels(),
@@ -246,7 +294,14 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 #[test]
 fn a_zero_variance_plane_leaves_the_image() {
     let size = Size2us::new(64, 48);
-    let pixels = noisy(size, 0.3, 0.02, 7);
+    let pixels = noisy(
+        size,
+        0.3,
+        SkyNoise {
+            sigma: 0.02,
+            seed: 7,
+        },
+    );
     for threshold in [Threshold::Hard, Threshold::Soft] {
         let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels.clone());
         let variance = QualityMap::Shared(Buffer2::new_default(size.width, size.height));
@@ -266,7 +321,14 @@ fn a_zero_variance_plane_leaves_the_image() {
 #[test]
 fn the_variance_threshold_scales_with_the_data() {
     let size = Size2us::new(64, 64);
-    let pixels = noisy(size, 0.25, 0.03, 9);
+    let pixels = noisy(
+        size,
+        0.25,
+        SkyNoise {
+            sigma: 0.03,
+            seed: 9,
+        },
+    );
     let denoise = Denoise {
         threshold: Threshold::Hard,
         ..Denoise::default()

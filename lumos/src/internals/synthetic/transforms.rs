@@ -5,26 +5,51 @@ use crate::internals::test_rng::TestRng;
 use crate::star_detection::star::Star;
 use glam::DVec2;
 
-/// Generate random star positions within a bounded area (default 50-px margin).
-///
-/// Uses a deterministic LCG random number generator for reproducibility.
-pub(crate) fn generate_random_positions(
-    num_stars: usize,
-    width: f64,
-    height: f64,
-    seed: u64,
-) -> Vec<DVec2> {
-    let margin = 50.0;
-    let mut rng = TestRng::new(seed);
-    let mut stars = Vec::with_capacity(num_stars);
+/// Uniformly random stars over a square field, deterministic in `seed`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StarScatter {
+    pub(crate) count: usize,
+    /// The field's width and height, in pixels.
+    pub(crate) side: f64,
+    pub(crate) seed: u64,
+}
 
-    for _ in 0..num_stars {
-        let x = margin + rng.next_f64() * (width - 2.0 * margin);
-        let y = margin + rng.next_f64() * (height - 2.0 * margin);
-        stars.push(DVec2::new(x, y));
+impl StarScatter {
+    /// The star positions, 50 px clear of every edge.
+    pub(crate) fn positions(self) -> Vec<DVec2> {
+        self.points(50.0).collect()
     }
 
-    stars
+    /// The [`positions`](Self::positions) as stars of a uniform `fwhm`.
+    pub(crate) fn stars(self, fwhm: f32) -> Vec<Star> {
+        positions_to_stars(&self.positions(), fwhm)
+    }
+
+    /// Faint stars 10 px clear of every edge, as false detections.
+    pub(crate) fn spurious(self, fwhm: f32) -> Vec<Star> {
+        // Faint by construction: a spurious detection has to look like one to any grader that
+        // later learns to weigh SNR.
+        self.points(10.0)
+            .enumerate()
+            .map(|(i, pos)| {
+                Star::at(pos)
+                    .with_flux(100.0 - i as f32)
+                    .with_fwhm(fwhm)
+                    .with_snr(10.0)
+                    .with_peak(0.1)
+            })
+            .collect()
+    }
+
+    fn points(self, margin: f64) -> impl Iterator<Item = DVec2> {
+        let mut rng = TestRng::new(self.seed);
+        let span = self.side - 2.0 * margin;
+        (0..self.count).map(move |_| {
+            let x = margin + rng.next_f64() * span;
+            let y = margin + rng.next_f64() * span;
+            DVec2::new(x, y)
+        })
+    }
 }
 
 /// Convert positions to Star structs with uniform properties.
@@ -43,18 +68,6 @@ pub(crate) fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
         .collect()
 }
 
-/// Generate random star positions and convert to Star structs.
-pub(crate) fn generate_random_stars(
-    num_stars: usize,
-    width: f64,
-    height: f64,
-    seed: u64,
-    fwhm: f32,
-) -> Vec<Star> {
-    let positions = generate_random_positions(num_stars, width, height, seed);
-    positions_to_stars(&positions, fwhm)
-}
-
 /// Add positional noise to Stars.
 pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
     let mut rng = TestRng::new(seed);
@@ -70,43 +83,18 @@ pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) ->
         .collect()
 }
 
-/// Add random spurious stars (simulate false detections).
-pub(crate) fn add_spurious_star_list(
-    stars: &[Star],
-    count: usize,
-    width: f64,
-    height: f64,
-    seed: u64,
-    fwhm: f32,
-) -> Vec<Star> {
-    let margin = 10.0;
-    let mut result = stars.to_vec();
-    let mut rng = TestRng::new(seed);
-
-    for i in 0..count {
-        let x = margin + rng.next_f64() * (width - 2.0 * margin);
-        let y = margin + rng.next_f64() * (height - 2.0 * margin);
-        // Faint by construction: a spurious detection has to look like one to any grader that
-        // later learns to weigh SNR.
-        result.push(
-            Star::at(DVec2::new(x, y))
-                .with_flux(100.0 - i as f32)
-                .with_fwhm(fwhm)
-                .with_snr(10.0)
-                .with_peak(0.1),
-        );
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use crate::internals::synthetic::transforms::*;
 
     #[test]
     fn random_positions_stay_inside_the_margin_and_repeat_for_a_seed() {
-        let stars = generate_random_positions(100, 1000.0, 1000.0, 12345);
+        let scatter = StarScatter {
+            count: 100,
+            side: 1000.0,
+            seed: 12345,
+        };
+        let stars = scatter.positions();
         assert_eq!(stars.len(), 100);
 
         // Check all stars are within bounds (with margin)
@@ -116,8 +104,7 @@ mod tests {
         }
 
         // Check reproducibility
-        let stars2 = generate_random_positions(100, 1000.0, 1000.0, 12345);
-        assert_eq!(stars, stars2);
+        assert_eq!(stars, scatter.positions());
     }
 
     #[test]

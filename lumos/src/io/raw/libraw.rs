@@ -309,6 +309,7 @@ unsafe extern "C" fn poll_cancel(
 #[cfg(test)]
 pub(crate) mod internals {
     use common::CancelToken;
+    use imaginarium::Buffer2;
     use libraw_sys as sys;
 
     use crate::io::raw::error::{LibrawCode, RawError};
@@ -334,14 +335,15 @@ pub(crate) mod internals {
             unsafe { self.handle.as_mut().rawdata.sizes.flip = flip };
         }
 
-        /// `samples` as LibRaw's `open_bayer` reads a sensor dump: 16-bit little-endian, `side`
-        /// square under one-pixel margins, RGGB, maximum 65535, polling `cancel`.
+        /// `samples` as LibRaw's `open_bayer` reads a sensor dump: 16-bit little-endian, square
+        /// under one-pixel margins, RGGB, maximum 65535, polling `cancel`.
         pub(crate) fn open_bayer(
-            samples: &[u16],
-            side: u16,
+            samples: &Buffer2<u16>,
             dump: BayerDump,
             cancel: &CancelToken,
         ) -> Result<Self, RawError> {
+            assert_eq!(samples.width(), samples.height(), "a square dump");
+            let side = u16::try_from(samples.width()).expect("a side LibRaw's call can state");
             let file = samples
                 .iter()
                 .flat_map(|sample| sample.to_le_bytes())

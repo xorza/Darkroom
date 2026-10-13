@@ -5,8 +5,10 @@
 //! phase, whose dense neighbours are same-colour in the mosaic.
 
 use std::array;
+use std::fmt;
 use std::ops::Range;
 
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -17,7 +19,7 @@ use crate::scratch_pool::{ScratchPool, Shapeless};
 
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
-use crate::calibration::cosmic_ray::masks::CrMasks;
+use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
@@ -28,7 +30,7 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 ///
 /// Each buffer is written in full before it is read, so what the previous iteration — or the
 /// previous Bayer plane — left in it never matters; only the capacity does. The four Bayer phase
-/// planes differ by at most a row and a column, so one scratch serves all four: the `resize` in
+/// planes differ by at most a row and a column, so one scratch serves all four: the `reshape` in
 /// each producer keeps the largest allocation.
 ///
 /// Five planes, not the eight the stages name. `significance`, `fine` and `noise` hold each pass's
@@ -39,17 +41,17 @@ pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 #[derive(Debug, Default)]
 struct MonoScratch {
     /// The significance with its smooth part taken out, `S' = S − median₅(S)`.
-    significance: Vec<f32>,
+    significance: Buffer2<f32>,
     /// The object fine structure `F = median₃ − median₇(median₃)`.
-    fine: Vec<f32>,
+    fine: Buffer2<f32>,
     /// Per-pixel noise `N`.
-    noise: Vec<f32>,
+    noise: Buffer2<f32>,
     /// The window medians, one at a time: `median₇(median₃(I))`, then `median₅(I)`, then
     /// `median₅(S)`. Each is consumed by the step immediately after it, so the three never overlap.
-    median: Vec<f32>,
+    median: Buffer2<f32>,
     /// A stage's input, one at a time: `median₃(I)`, then `S = L⁺/(2N)`; then the read-only
-    /// snapshot [`replace_flagged`] gathers from.
-    staged: Vec<f32>,
+    /// snapshot [`Repair::apply`] gathers from.
+    staged: Buffer2<f32>,
 }
 
 /// The rows a stage's output can move by, beyond the rows a repair changed: `median₃` reaches 1,
@@ -83,15 +85,18 @@ pub(super) struct MonoDetector<'a> {
     changed: Vec<bool>,
     /// The bands of rows the stage at hand works, as [`rows_within`] gives them.
     bands: Vec<Range<usize>>,
+    /// Which rows a pass after the first works again.
+    #[cfg(test)]
+    recompute: Recompute,
 }
 
 /// Which rows a pass after the first works again.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Recompute {
     /// The rows a stage's reach takes from one the last repair changed: what a detection runs.
     ChangedRows,
     /// Every row: the oracle the update of changed rows is held to.
-    #[cfg(test)]
     EveryRow,
 }
 
@@ -105,20 +110,28 @@ impl<'a> MonoDetector<'a> {
             windows: ScratchPool::default(),
             changed: Vec::new(),
             bands: Vec::new(),
+            #[cfg(test)]
+            recompute: Recompute::ChangedRows,
         }
     }
 
+    /// Whether a detection scans a `size` plane: one under 3 pixels on either side is left as it
+    /// is.
+    pub(super) const fn scans(size: Size2us) -> bool {
+        size.width >= 3 && size.height >= 3
+    }
+
     /// The bytes a detection on a `size` plane allocates beside it: the scratch planes and the
-    /// masks, or nothing on a plane too small to scan.
+    /// masks, or on a plane too small to scan the empty mask of what it found alone.
     pub(super) fn heap_bytes(size: Size2us) -> usize {
-        if size.width < 3 || size.height < 3 {
-            return 0;
+        if !Self::scans(size) {
+            return BitBuffer2::heap_bytes(size);
         }
         MONO_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
     }
 
-    /// Detect and in-paint cosmic rays in one dense plane, in place, marking every in-painted pixel
-    /// in `found` (the plane's size) and returning how many there are.
+    /// Detect and in-paint cosmic rays in one dense plane, in place; the mask of every pixel it
+    /// in-painted, the plane's size, which the detector holds until its next detection.
     ///
     /// Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` →
     /// `S' = S − median₅(S)` → fine structure `F` → flag → grow → in-paint → iterate.
@@ -127,29 +140,11 @@ impl<'a> MonoDetector<'a> {
     /// plane.
     pub(super) fn reject(
         &mut self,
-        data: &mut [f32],
-        size: Size2us,
+        data: &mut Buffer2<f32>,
         local: &(dyn Fn(usize) -> PixelBackground + Sync),
         kept_out: Option<&KeptOut>,
-        found: &mut BitBuffer2,
-    ) -> usize {
-        self.reject_with(data, size, local, kept_out, found, Recompute::ChangedRows)
-    }
-
-    /// [`Self::reject`], each pass after the first working the rows `recompute` names.
-    fn reject_with(
-        &mut self,
-        data: &mut [f32],
-        size: Size2us,
-        local: &(dyn Fn(usize) -> PixelBackground + Sync),
-        kept_out: Option<&KeptOut>,
-        found: &mut BitBuffer2,
-        recompute: Recompute,
-    ) -> usize {
-        debug_assert_eq!(data.len(), size.pixel_count());
-        if size.width < 3 || size.height < 3 {
-            return 0;
-        }
+    ) -> &BitBuffer2 {
+        let size = Size2us::from(&*data);
         let Self {
             config,
             noise: noise_model,
@@ -158,8 +153,18 @@ impl<'a> MonoDetector<'a> {
             windows,
             changed,
             bands,
+            #[cfg(test)]
+            recompute,
         } = self;
+        if !Self::scans(size) {
+            masks.accumulated.clear_to(size);
+            return &masks.accumulated;
+        }
         masks.clear_to(size);
+        let noise_of = PixelNoise {
+            model: *noise_model,
+            local,
+        };
         let width = size.width;
         changed.clear();
         changed.resize(size.height, true);
@@ -179,7 +184,7 @@ impl<'a> MonoDetector<'a> {
                 &mut *median,
                 &mut *staged,
             ] {
-                plane.resize(size.pixel_count(), 0.0);
+                plane.reshape(size.width, size.height, 0.0);
             }
             let pix = &*data;
 
@@ -192,11 +197,15 @@ impl<'a> MonoDetector<'a> {
             // suppress every detection.
             rows_within(changed, MEDIAN3_REACH, bands);
             for band in bands.iter().cloned() {
-                median_window_rows(pix, size, 1, band, staged, windows);
+                WindowMedian { radius: 1 }.rows(pix, OutputBand::of(staged, band), windows);
             }
             rows_within(changed, FINE_REACH, bands);
             for band in bands.iter().cloned() {
-                median_window_rows(staged, size, 3, band.clone(), median, windows);
+                WindowMedian { radius: 3 }.rows(
+                    staged,
+                    OutputBand::of(median, band.clone()),
+                    windows,
+                );
                 let span = band.start * width..band.end * width;
                 for ((f, &m3), &m7) in fine[span.clone()]
                     .iter_mut()
@@ -209,15 +218,15 @@ impl<'a> MonoDetector<'a> {
 
             rows_within(changed, NOISE_REACH, bands);
             for band in bands.iter().cloned() {
-                median_window_rows(pix, size, 2, band.clone(), median, windows);
-                noise_map_rows(median, local, *noise_model, band, width, noise);
+                WindowMedian { radius: 2 }.rows(pix, OutputBand::of(median, band.clone()), windows);
+                noise_of.rows(median, OutputBand::of(noise, band));
             }
 
             // Significance S = L⁺/(2N), L⁺ the clipped Laplacian of the ×2-subsampled frame, then
             // S' = S − median₅(S) to strip smooth large-scale structure.
             rows_within(changed, S_REACH, bands);
             for band in bands.iter().cloned() {
-                laplacian_plus_rows(pix, size, band.clone(), staged);
+                laplacian_plus_rows(pix, OutputBand::of(staged, band.clone()));
                 let span = band.start * width..band.end * width;
                 for (l, &nz) in staged[span.clone()].iter_mut().zip(&noise[span]) {
                     *l /= 2.0 * nz;
@@ -225,7 +234,11 @@ impl<'a> MonoDetector<'a> {
             }
             rows_within(changed, SIGNIFICANCE_REACH, bands);
             for band in bands.iter().cloned() {
-                median_window_rows(staged, size, 2, band.clone(), median, windows);
+                WindowMedian { radius: 2 }.rows(
+                    staged,
+                    OutputBand::of(median, band.clone()),
+                    windows,
+                );
                 let span = band.start * width..band.end * width;
                 for ((v, &l), &m) in significance[span.clone()]
                     .iter_mut()
@@ -237,11 +250,19 @@ impl<'a> MonoDetector<'a> {
             }
 
             let never_flagged = kept_out.map(|kept_out| &kept_out.never_flagged);
-            if masks.detect_and_grow(significance, fine, noise, config, never_flagged) == 0 {
+            let planes = DetectionPlanes {
+                significance,
+                fine,
+                noise,
+            };
+            if masks.detect_and_grow(planes, config, never_flagged) == 0 {
                 break;
             }
-            let unread = kept_out.map(|kept_out| &kept_out.unread);
-            replace_flagged(data, size, &masks.accumulated, unread, staged, windows);
+            Repair {
+                flagged: &masks.accumulated,
+                unread: kept_out.map(|kept_out| &kept_out.unread),
+            }
+            .apply(data, staged, windows);
             changed.clear();
             changed.par_extend(data.par_chunks(width).zip(staged.par_chunks(width)).map(
                 |(now, before)| {
@@ -250,20 +271,44 @@ impl<'a> MonoDetector<'a> {
                         .any(|(now, before)| now.to_bits() != before.to_bits())
                 },
             ));
-            match recompute {
-                Recompute::ChangedRows => {}
-                #[cfg(test)]
-                Recompute::EveryRow => changed.fill(true),
+            #[cfg(test)]
+            if *recompute == Recompute::EveryRow {
+                changed.fill(true);
             }
         }
-
-        found.copy_from(&masks.accumulated);
-        masks.accumulated.count_ones()
+        &masks.accumulated
     }
 }
 
-/// Clipped Laplacian of the ×2-subsampled frame, block-averaged back down to `size`, over `rows` of
-/// `out`.
+/// The rows of a plane a stage writes: the band it works, from row `first` of a plane `width`
+/// wide.
+#[derive(Debug)]
+struct OutputBand<'a> {
+    first: usize,
+    width: usize,
+    pixels: &'a mut [f32],
+}
+
+impl<'a> OutputBand<'a> {
+    /// `rows` of `plane`.
+    fn of(plane: &'a mut Buffer2<f32>, rows: Range<usize>) -> Self {
+        let width = plane.width();
+        Self {
+            first: rows.start,
+            width,
+            pixels: &mut plane[rows.start * width..rows.end * width],
+        }
+    }
+
+    /// Where the band lies in its plane's pixels.
+    const fn span(&self) -> Range<usize> {
+        let start = self.first * self.width;
+        start..start + self.pixels.len()
+    }
+}
+
+/// Clipped Laplacian of the ×2-subsampled `data`, block-averaged back down to its size, over the
+/// rows of `out`.
 ///
 /// Convolves the ×2 image with `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clips negatives to 0 (keeping only
 /// sharp positive peaks), then averages each 2×2 block. Edge-clamped on the ×2 grid.
@@ -273,13 +318,14 @@ impl<'a> MonoDetector<'a> {
 /// a buffer four times pixel count, and the clipped Laplacian is averaged as it is produced rather
 /// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
 /// removed from every iteration; what remains is the result, written into the caller's buffer.
-fn laplacian_plus_rows(data: &[f32], size: Size2us, rows: Range<usize>, out: &mut [f32]) {
+fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
+    let size = Size2us::from(data);
     let (w2, h2) = (size.width * 2, size.height * 2);
     // The ×2 sample at (x2, y2), which is the native pixel under it.
     let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
 
-    let first = rows.start;
-    out[rows.start * size.width..rows.end * size.width]
+    let OutputBand { first, pixels, .. } = out;
+    pixels
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(row_in_band, row)| {
@@ -304,8 +350,8 @@ fn laplacian_plus_rows(data: &[f32], size: Size2us, rows: Range<usize>, out: &mu
         });
 }
 
-/// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
-/// every output sees a full window, over `rows` of `out`. Row-parallel.
+/// The median over a `(2r+1)²` window, `r` its radius, replicating the border pixel for
+/// out-of-bounds coordinates so every output sees a full window.
 ///
 /// Deliberately not star detection's own `median_filter::apply_3x3`, even
 /// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
@@ -319,20 +365,18 @@ fn laplacian_plus_rows(data: &[f32], size: Size2us, rows: Range<usize>, out: &mu
 /// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
 /// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
 /// gathers its replicated window and takes `median_mut`.
-fn median_window_rows(
-    data: &[f32],
-    size: Size2us,
-    r: usize,
-    rows: Range<usize>,
-    out: &mut [f32],
-    windows: &ScratchPool<WindowScratch>,
-) {
-    let side = 2 * r + 1;
-    let first = rows.start;
-    out[rows.start * size.width..rows.end * size.width]
-        .par_chunks_mut(size.width)
-        .enumerate()
-        .for_each_init(
+#[derive(Debug, Clone, Copy)]
+struct WindowMedian {
+    radius: usize,
+}
+
+impl WindowMedian {
+    /// The window medians of `data` over the rows of `out`. Row-parallel.
+    fn rows(self, data: &Buffer2<f32>, out: OutputBand<'_>, windows: &ScratchPool<WindowScratch>) {
+        let (size, r) = (Size2us::from(data), self.radius);
+        let side = 2 * r + 1;
+        let OutputBand { first, pixels, .. } = out;
+        pixels.par_chunks_mut(size.width).enumerate().for_each_init(
             || windows.acquire(),
             |scratch, (row_in_band, row)| {
                 let y = first + row_in_band;
@@ -373,6 +417,7 @@ fn median_window_rows(
                 }
             },
         );
+    }
 }
 
 /// The pixels one forgetful selection runs over at once: an AVX2 register of `i32`s.
@@ -441,23 +486,38 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
     }
 }
 
-/// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5` and each pixel's
-/// local background, over `rows`, `width` wide, of `out`.
-fn noise_map_rows(
-    m5: &[f32],
-    local: &(dyn Fn(usize) -> PixelBackground + Sync),
-    noise: NoiseModel,
-    rows: Range<usize>,
-    width: usize,
-    out: &mut [f32],
-) {
-    let span = rows.start * width..rows.end * width;
-    let first = span.start;
-    out[span.clone()]
-        .par_iter_mut()
-        .zip(&m5[span])
-        .enumerate()
-        .for_each(|(index, (out, &signal))| *out = noise.noise(signal, local(first + index)));
+/// Each pixel's noise `N`: the noise model at the pixel's local background.
+#[derive(Clone, Copy)]
+struct PixelNoise<'a> {
+    model: NoiseModel,
+    /// Each pixel's background sky and σ and its flat gain, by flat index into the plane.
+    local: &'a (dyn Fn(usize) -> PixelBackground + Sync),
+}
+
+/// Hand-written: the `local` closure has no `Debug`.
+impl fmt::Debug for PixelNoise<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PixelNoise")
+            .field("model", &self.model)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PixelNoise<'_> {
+    /// Each pixel's noise over the rows of `out`, from `m5`, the plane's median-filtered (CR-free)
+    /// signal estimate.
+    fn rows(self, m5: &Buffer2<f32>, out: OutputBand<'_>) {
+        let span = out.span();
+        let first = span.start;
+        let OutputBand { pixels, .. } = out;
+        pixels
+            .par_iter_mut()
+            .zip(&m5[span])
+            .enumerate()
+            .for_each(|(index, (out, &signal))| {
+                *out = self.model.noise(signal, (self.local)(first + index));
+            });
+    }
 }
 
 /// Into `bands`, the rows within `reach` of a row `changed` marks, as ascending, disjoint bands:
@@ -474,9 +534,9 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
     }
 }
 
-/// Replace masked pixels with the median of their 5×5 neighbors (edge-clamped) that neither `mask`
-/// nor `unread` holds; fully-masked neighborhoods (huge CRs) are left for the next iteration to
-/// shrink.
+/// The in-painting of the pixels `flagged` holds: each takes the median of its 5×5 neighbors
+/// (edge-clamped) that neither `flagged` nor `unread` holds; fully-flagged neighborhoods (huge CRs)
+/// are left for the next iteration to shrink.
 ///
 /// The frame copy is not what makes replacements independent of each other — writes land only on
 /// masked pixels and reads only on unmasked ones, so no replacement can consult a replaced
@@ -486,93 +546,108 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 /// pointer would be sound — the sets are disjoint — but measures *slower* on every run of
 /// `bench_cosmic_ray_reject_mono`: the false sharing costs more than the copy. The copy lands in
 /// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
-pub(super) fn replace_flagged(
-    data: &mut [f32],
-    size: Size2us,
-    mask: &BitBuffer2,
-    unread: Option<&BitBuffer2>,
-    snapshot: &mut Vec<f32>,
-    windows: &ScratchPool<WindowScratch>,
-) {
-    snapshot.clear();
-    snapshot.extend_from_slice(data);
-    let src: &[f32] = snapshot;
-    data.par_chunks_mut(size.width).enumerate().for_each_init(
-        || windows.acquire(),
-        |scratch, (y, row)| {
-            let buf = &mut scratch.values;
-            for (x, o) in row.iter_mut().enumerate() {
-                if !mask.get_at(Vec2us::new(x, y)) {
-                    continue;
-                }
-                buf.clear();
-                // The 5×5 window about `(x, y)`, replicated into the frame at both edges.
-                for dy in 0..=4 {
-                    let yy = (y + dy).saturating_sub(2).min(size.height - 1);
-                    for dx in 0..=4 {
-                        let xx = (x + dx).saturating_sub(2).min(size.width - 1);
-                        let j = size.index_of(Vec2us::new(xx, yy));
-                        if !mask.get(j) && unread.is_none_or(|unread| !unread.get(j)) {
-                            buf.push(src[j]);
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Repair<'a> {
+    pub(super) flagged: &'a BitBuffer2,
+    pub(super) unread: Option<&'a BitBuffer2>,
+}
+
+impl Repair<'_> {
+    /// In-paint `data` in place, reading its copy in `snapshot`.
+    pub(super) fn apply(
+        self,
+        data: &mut Buffer2<f32>,
+        snapshot: &mut Buffer2<f32>,
+        windows: &ScratchPool<WindowScratch>,
+    ) {
+        let Self {
+            flagged: mask,
+            unread,
+        } = self;
+        let size = Size2us::from(&*data);
+        snapshot.reshape(size.width, size.height, 0.0);
+        snapshot.copy_from_slice(data);
+        let src: &[f32] = snapshot;
+        data.par_chunks_mut(size.width).enumerate().for_each_init(
+            || windows.acquire(),
+            |scratch, (y, row)| {
+                let buf = &mut scratch.values;
+                for (x, o) in row.iter_mut().enumerate() {
+                    if !mask.get_at(Vec2us::new(x, y)) {
+                        continue;
+                    }
+                    buf.clear();
+                    // The 5×5 window about `(x, y)`, replicated into the frame at both edges.
+                    for dy in 0..=4 {
+                        let yy = (y + dy).saturating_sub(2).min(size.height - 1);
+                        for dx in 0..=4 {
+                            let xx = (x + dx).saturating_sub(2).min(size.width - 1);
+                            let j = size.index_of(Vec2us::new(xx, yy));
+                            if !mask.get(j) && unread.is_none_or(|unread| !unread.get(j)) {
+                                buf.push(src[j]);
+                            }
                         }
                     }
+                    if !buf.is_empty() {
+                        *o = median_mut(buf);
+                    }
                 }
-                if !buf.is_empty() {
-                    *o = median_mut(buf);
-                }
-            }
-        },
-    );
+            },
+        );
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
     use crate::background_mesh::colour_mesh::LocalBackground;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-    use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
-    use crate::calibration::cosmic_ray::mono::median_window_rows;
-    use crate::calibration::cosmic_ray::mono::{MonoDetector, MonoScratch, Recompute};
+    use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
+    use crate::calibration::cosmic_ray::mono::{
+        MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian,
+    };
     use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
     use crate::image::image_metadata::ImageMetadata;
-    use crate::math::size2us::Size2us;
     use crate::scratch_pool::ScratchPool;
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
-    pub(crate) fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
-        let mut out = vec![0.0; size.pixel_count()];
-        median_window_rows(
+    pub(crate) fn median_window(data: &Buffer2<f32>, r: usize) -> Buffer2<f32> {
+        let mut out = Buffer2::new_default(data.width(), data.height());
+        let rows = 0..data.height();
+        WindowMedian { radius: r }.rows(
             data,
-            size,
-            r,
-            0..size.height,
-            &mut out,
+            OutputBand::of(&mut out, rows),
             &ScratchPool::default(),
         );
         out
     }
 
+    /// A mono detector on `config`, against a flat background of sky 0.1 and σ 0.01.
+    fn detector(config: &CosmicRayConfig) -> MonoDetector<'_> {
+        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
+            .expect("the measured model needs nothing from the frame");
+        MonoDetector::new(config, noise)
+    }
+
+    const FLAT: PixelBackground = PixelBackground {
+        local: LocalBackground {
+            sky: 0.1,
+            noise: 0.01,
+        },
+        flat_gain: 1.0,
+    };
+
     /// Clean `data` as the mono detector does, each pass after the first working the rows
-    /// `recompute` names, against a flat background of sky 0.1 and σ 0.01; the pixels it found.
+    /// `recompute` names, against [`detector`]'s flat background; the pixels it found.
     pub(crate) fn reject_recomputing(
-        data: &mut [f32],
-        size: Size2us,
+        data: &mut Buffer2<f32>,
         config: &CosmicRayConfig,
         recompute: Recompute,
     ) -> BitBuffer2 {
-        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
-            .expect("the measured model needs nothing from the frame");
-        let local = |_| PixelBackground {
-            local: LocalBackground {
-                sky: 0.1,
-                noise: 0.01,
-            },
-            flat_gain: 1.0,
-        };
-        let mut found = BitBuffer2::new_default(size);
-        MonoDetector::new(config, noise)
-            .reject_with(data, size, &local, None, &mut found, recompute);
-        found
+        let mut detector = detector(config);
+        detector.recompute = recompute;
+        detector.reject(data, &|_| FLAT, None).clone()
     }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
@@ -581,22 +656,9 @@ pub(crate) mod internals {
     ///
     /// Destructured rather than summed through a helper, so a plane added to or dropped from
     /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.
-    pub(crate) fn mono_scratch_floats(
-        data: &mut [f32],
-        size: Size2us,
-        config: &CosmicRayConfig,
-    ) -> usize {
-        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
-            .expect("the measured model needs nothing from the frame");
-        let local = |_| PixelBackground {
-            local: LocalBackground {
-                sky: 0.1,
-                noise: 0.01,
-            },
-            flat_gain: 1.0,
-        };
-        let mut detector = MonoDetector::new(config, noise);
-        detector.reject(data, size, &local, None, &mut BitBuffer2::new_default(size));
+    pub(crate) fn mono_scratch_floats(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
+        let mut detector = detector(config);
+        detector.reject(data, &|_| FLAT, None);
         let MonoScratch {
             significance,
             fine,

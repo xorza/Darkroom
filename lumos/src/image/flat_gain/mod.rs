@@ -102,7 +102,7 @@ impl FlatGain {
         cfa_type: &CfaType,
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> Self {
-        let size = Size2us::new(divisor.width(), divisor.height());
+        let size = Size2us::from(divisor);
         let columns = nodes_along(size.width);
         let rows = nodes_along(size.height);
         let flat = NormalizedFlat {
@@ -333,7 +333,7 @@ impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
     /// known, for a colour the sensor has no photosite of.
     fn node_gain(&self, colour: usize, node: Vec2us) -> f32 {
         let divisor = self.divisor;
-        let size = Size2us::new(divisor.width(), divisor.height());
+        let size = Size2us::from(divisor);
         let mut half = STEP / 2;
         loop {
             let window = |extent: usize, centre: usize| {

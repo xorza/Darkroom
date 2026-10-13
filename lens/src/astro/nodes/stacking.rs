@@ -1,7 +1,8 @@
 //! Light-frame calibration, registration, and stacking node.
 
 use lumos::{
-    AlignStackConfig, CalibrationMasters, IngestConfig, LinearImage, QualityPlanes, Reference,
+    AlignStackConfig, CalibratedLights, CalibrationMasters, IngestConfig, LinearImage,
+    QualityPlanes, Reference,
 };
 use lumos::{ProgressCallback, ProgressMonitor};
 use scenarium::async_lambda;
@@ -80,7 +81,14 @@ pub(crate) fn register(library: &mut Library) {
                     let masters = masters_value
                         .as_custom::<Masters>()
                         .map_or(&empty, |masters| &masters.masters);
-                    config.calibrate_align_stack_paths(&lights, masters, &IngestConfig::default(), ProgressMonitor::new(ProgressCallback::default(), cancel))
+                    config.calibrate_align_stack_paths(
+                        CalibratedLights {
+                            paths: &lights,
+                            masters,
+                        },
+                        &IngestConfig::default(),
+                        ProgressMonitor::new(ProgressCallback::default(), cancel),
+                    )
                 })
                 .await?;
 

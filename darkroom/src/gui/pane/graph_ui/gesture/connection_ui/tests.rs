@@ -8,6 +8,7 @@ use crate::core::document::internals::DocFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::node_ui::port_row;
+use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, PrepassCtx};
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -28,7 +29,7 @@ fn fixture() -> Wired {
     let mut g = TestGraph::new();
     g.add("producer", NodeSpec::mult);
     g.instance("consumer", "producer");
-    g.wire("producer", 0, "consumer", 0);
+    g.wire("producer", "consumer");
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
     Wired {
@@ -48,12 +49,7 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     let Wired {
         producer, consumer, ..
     } = fixture();
-    let mut out = Requests::default();
-    commit_connection(
-        PortRef::input(consumer, 0),
-        PortRef::input(producer, 0),
-        &mut out,
-    );
+    connection(PortRef::input(consumer, 0), PortRef::input(producer, 0));
 }
 
 /// Run one canvas prepass with a wire latched from `start` and report whether
@@ -75,8 +71,11 @@ fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Opti
     // latched and no Esc either — these tests drive the wire directly rather
     // than through the bare-canvas classification.
     let geometry = CanvasGeometry::default();
-    let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, None, false);
-    connections.apply(arena.ui(), ctx, None, &mut out);
+    let ctx = CanvasCtx::new(
+        PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
+        &geometry,
+    );
+    connections.apply(arena.ui(), ctx, &mut out);
     assert!(
         out.document().is_empty(),
         "an untouched prepass emits nothing"

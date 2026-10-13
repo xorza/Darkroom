@@ -11,11 +11,20 @@ use super::*;
 use crate::internals::images::rgb_image;
 use crate::math::vec2us::Vec2us;
 
-/// An image of `value` with `pixel` set to `bright`.
-fn one_pixel_image(size: Size2us, value: f32, pixel: Vec2us, bright: f32) -> LinearImage {
-    let mut pixels = vec![value; size.pixel_count()];
-    pixels[size.index_of(pixel)] = bright;
-    gray_image(size, pixels)
+/// One pixel of an image set apart from its background.
+#[derive(Debug, Clone, Copy)]
+struct OnePixel {
+    at: Vec2us,
+    value: f32,
+}
+
+impl OnePixel {
+    /// An image of `background` with this pixel set.
+    fn on(self, size: Size2us, background: f32) -> LinearImage {
+        let mut pixels = vec![background; size.pixel_count()];
+        pixels[size.index_of(self.at)] = self.value;
+        gray_image(size, pixels)
+    }
 }
 
 /// A pixel-weight map that lets only `pixel` deposit.
@@ -25,15 +34,21 @@ fn only(size: Size2us, pixel: Vec2us) -> Buffer2<f32> {
     weights
 }
 
-/// Every pixel holding at least `gate` of the deepest weight reads `value`, and every other the
-/// fill: the gate is `min_weight_fraction`, and the product was made with it.
+/// The first way `product`, drizzled with `config` from a constant `value`, breaks this: every
+/// pixel holding at least the gate `min_weight_fraction` of the deepest weight reads `value`, every
+/// other the fill, and some pixel is covered.
 ///
 /// For a constant, `Σ v·wᵢ / Σwᵢ` leaves only rounding. A pixel sums at most [`MAX_DEPOSITS`]
 /// products, each product and sum rounding once against a running total of at most `Σ|wᵢ|·|v|`,
 /// and the division once more. `Σ|wᵢ|` is at most [`LOBE_EXCESS`] times the deepest weight, and
 /// a pixel that passed the gate holds at least `gate` of it, so the ratio carries the rounding of
 /// `Σ|wᵢ|` over `Σwᵢ` by at most `LOBE_EXCESS / gate`.
-fn assert_constant_or_fill(product: &StackProduct, value: f32, fill: f32, gate: f32, case: &str) {
+fn constant_or_fill_violation(
+    product: &StackProduct,
+    config: &DrizzleConfig,
+    value: f32,
+) -> Option<String> {
+    let (fill, gate) = (config.fill_value, config.min_weight_fraction);
     let weight = weight_plane(product);
     let deepest = weight.pixels().iter().copied().fold(0.0f32, f32::max);
     let threshold = (gate * deepest).max(f32::MIN_POSITIVE);
@@ -49,15 +64,18 @@ fn assert_constant_or_fill(product: &StackProduct, value: f32, fill: f32, gate: 
     {
         if w >= threshold {
             covered += 1;
-            assert!(
-                (actual - value).abs() <= bound,
-                "{case} pixel {index}: {actual}, expected {value} (weight {w})"
-            );
-        } else {
-            assert_eq!(actual, fill, "{case} pixel {index} (weight {w})");
+            if (actual - value).abs() > bound {
+                return Some(format!(
+                    "pixel {index}: {actual}, expected {value} (weight {w})"
+                ));
+            }
+        } else if actual != fill {
+            return Some(format!(
+                "pixel {index}: {actual}, expected the fill {fill} (weight {w})"
+            ));
         }
     }
-    assert!(covered > 0, "{case}: nothing was covered");
+    (covered == 0).then(|| "nothing was covered".to_owned())
 }
 
 /// A constant reads back as itself wherever enough weight landed, and as the fill everywhere else:
@@ -90,10 +108,14 @@ fn a_constant_reads_back_wherever_weight_landed() {
                     ..usual_config(kernel)
                 };
                 let product = drizzle_one(
-                    config,
+                    config.clone(),
                     &DrizzleFrame::new(constant_image(size, value), warp_of(*transform)),
                 );
-                assert_constant_or_fill(&product, value, FILL, GATE, &format!("{kernel:?} {name}"));
+                assert_eq!(
+                    constant_or_fill_violation(&product, &config, value),
+                    None,
+                    "{kernel:?} {name}"
+                );
             }
         }
     }
@@ -153,7 +175,11 @@ fn two_frames_combine_to_their_weighted_mean() {
 #[test]
 fn one_bright_pixel_fills_its_own_block() {
     let size = Size2us::new(6, 6);
-    let image = one_pixel_image(size, 0.0, Vec2us::new(1, 1), 2.0);
+    let image = OnePixel {
+        at: Vec2us::new(1, 1),
+        value: 2.0,
+    }
+    .on(size, 0.0);
     for kernel in [DrizzleKernel::Turbo, DrizzleKernel::Square] {
         for shift in [0, 1] {
             let transform = Transform::translation(DVec2::splat(0.5 * f64::from(shift)));
@@ -254,7 +280,13 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
     };
     let product = drizzle_plain(
         drizzle_frames(
-            vec![one_pixel_image(size, 0.0, Vec2us::new(0, 0), 1.0)],
+            vec![
+                OnePixel {
+                    at: Vec2us::new(0, 0),
+                    value: 1.0,
+                }
+                .on(size, 0.0),
+            ],
             &[Transform::translation(DVec2::new(0.1, 0.0))],
         ),
         &config,
@@ -289,7 +321,11 @@ fn lanczos_keeps_its_negative_lobes() {
     let product = drizzle_one(
         kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
         &DrizzleFrame::new(
-            one_pixel_image(size, 0.0, Vec2us::new(10, 10), 100.0),
+            OnePixel {
+                at: Vec2us::new(10, 10),
+                value: 100.0,
+            }
+            .on(size, 0.0),
             warp_of(Transform::translation(DVec2::new(0.5, 0.0))),
         ),
     );
@@ -433,10 +469,21 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
             config.clone(),
             &DrizzleFrame {
                 pixel_weight_map: Some(excluded.clone()),
-                ..DrizzleFrame::new(one_pixel_image(size, 4.0, pixel, 100.0), warp_of(transform))
+                ..DrizzleFrame::new(
+                    OnePixel {
+                        at: pixel,
+                        value: 100.0,
+                    }
+                    .on(size, 4.0),
+                    warp_of(transform),
+                )
             },
         );
-        assert_constant_or_fill(&product, 4.0, -1.0, GATE, &format!("{kernel:?}"));
+        assert_eq!(
+            constant_or_fill_violation(&product, &config, 4.0),
+            None,
+            "{kernel:?}"
+        );
 
         let mut alone = accumulator(ImageDimensions::new(size, 1), config);
         alone.add_image(
@@ -566,7 +613,7 @@ fn rgb_channels_drizzle_independently() {
         pixels[5] = value;
         pixels
     };
-    let image = rgb_image(size, plane(1.0), plane(2.0), plane(3.0));
+    let image = rgb_image(size, [plane(1.0), plane(2.0), plane(3.0)]);
     let mut acc = accumulator(
         ImageDimensions::new(size, 3),
         kernel_config(DrizzleKernel::Turbo, 2.0, 0.8),

@@ -1,5 +1,6 @@
 //! What bounds a RANSAC search: how long it runs, and which hypotheses are physically credible.
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Configuration for robust transform estimation.
@@ -56,51 +57,27 @@ impl Default for RansacConfig {
 
 impl RansacConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.max_iterations >= 1,
-            "ransac max_iterations",
-            "at least 1",
-            self.max_iterations as f64,
-        )?;
-        InvalidConfigField::check(
-            !self.local_optimization || self.lo_iterations >= 1,
-            "ransac lo_iterations",
+        ConfigValue::count("ransac max_iterations", self.max_iterations)
+            .must_be("at least 1", self.max_iterations >= 1)?;
+        ConfigValue::count("ransac lo_iterations", self.lo_iterations).must_be(
             "at least 1 when local_optimization is enabled",
-            self.lo_iterations as f64,
+            !self.local_optimization || self.lo_iterations >= 1,
         )?;
-        InvalidConfigField::finite(
-            "ransac confidence",
-            "finite and in [0, 1]",
-            self.confidence,
-            |value| (0.0..=1.0).contains(&value),
-        )?;
-        InvalidConfigField::finite(
-            "ransac min_inlier_ratio",
-            "finite and in (0, 1]",
-            self.min_inlier_ratio,
-            |value| value > 0.0 && value <= 1.0,
-        )?;
+        ConfigValue::new("ransac confidence", self.confidence)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
+        ConfigValue::new("ransac min_inlier_ratio", self.min_inlier_ratio)
+            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
         if let Some(max_rotation) = self.max_rotation {
-            InvalidConfigField::finite(
-                "ransac max_rotation",
-                "finite and positive",
-                max_rotation,
-                |value| value > 0.0,
-            )?;
+            ConfigValue::new("ransac max_rotation", max_rotation)
+                .finite_and("finite and positive", |value| value > 0.0)?;
         }
         if let Some(ScaleRange { min, max }) = self.scale_range {
-            InvalidConfigField::finite(
-                "ransac scale_range minimum",
-                "finite and positive",
-                min,
-                |value| value > 0.0,
-            )?;
-            InvalidConfigField::check_against(
-                max.is_finite() && max > min,
-                "ransac scale_range maximum",
+            ConfigValue::new("ransac scale_range minimum", min)
+                .finite_and("finite and positive", |value| value > 0.0)?;
+            ConfigValue::new("ransac scale_range maximum", max).must_be_against(
                 "finite and above the minimum",
-                max,
                 min,
+                max.is_finite() && max > min,
             )?;
         }
         Ok(())

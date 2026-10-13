@@ -82,7 +82,7 @@ pub enum DemosaicProvenance {
 /// FITS declares this with `ROWORDER`, and the rows are decoded in file order whatever it says —
 /// Siril's rule that "`ROWORDER` shall not be used to unflip the image data for stacking", which
 /// keeps a frame's samples where the file put them. Only the Bayer phase is corrected for it, in
-/// `read_bayer_cfa`.
+/// `Bayerpat::read_cfa`.
 ///
 /// The consequence is that two frames of one target declaring different orders load as vertically
 /// mirrored images. Registration cannot reconcile that — triangle matching rejects a mirrored field

@@ -14,7 +14,7 @@ use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
 
 use crate::core::io::preferences::Preferences;
 use crate::gui::MAIN_WINDOW;
-use crate::gui::app::App;
+use crate::gui::app::{App, LaunchInputs};
 
 /// Launch the Palantir desktop editor on `document` (the command-line
 /// argument, if there was one). The winit event loop owns the main thread, so
@@ -54,7 +54,14 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
             overlay.frame_stats = is_debug();
             ui.set_debug_overlay(overlay);
 
-            App::new(ui, handle, preferences, document)
+            App::new(
+                ui,
+                handle,
+                LaunchInputs {
+                    preferences,
+                    document,
+                },
+            )
         })?;
 
     // Between `build` and `run` because that is the only window that works on

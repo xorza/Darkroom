@@ -15,6 +15,7 @@ use ort::value::TensorRef;
 
 use imaginarium::Buffer2;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -55,12 +56,8 @@ impl TiledOnnxConfig {
     /// A stride that covers the frame at full weight: at least one pixel, and at most
     /// [`MAX_STRIDE`].
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            (1..=MAX_STRIDE).contains(&self.stride),
-            "ML tile stride",
-            "between 1 and 384",
-            self.stride as f64,
-        )
+        ConfigValue::count("ML tile stride", self.stride)
+            .must_be("between 1 and 384", (1..=MAX_STRIDE).contains(&self.stride))
     }
 }
 

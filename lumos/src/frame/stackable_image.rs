@@ -22,7 +22,7 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     const DECODER: DecoderKind;
 
     fn dimensions(&self) -> ImageDimensions;
-    fn channel(&self, channel: usize) -> &[f32];
+    fn channel(&self, channel: usize) -> &Buffer2<f32>;
     fn metadata(&self) -> &ImageMetadata;
     /// The mosaic pattern of an undemosaiced sensor frame; `None` for any other image.
     fn cfa_type(&self) -> Option<CfaType>;

@@ -43,7 +43,7 @@ impl<'a> BreakerProbe<'a> {
     pub(crate) fn crosses_wire(&self, wire: &Wire) -> bool {
         self.live
             .as_deref()
-            .is_some_and(|s| s.intersects_cubic(wire.p0, wire.p1, wire.p2, wire.p3))
+            .is_some_and(|s| s.intersects_wire(wire))
     }
 
     /// True if the active breaker polyline crosses `rect`. A no-op (false)

@@ -319,10 +319,12 @@ fn a_kept_cache_is_reused_by_the_next_run() {
         let path_refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
         let run = || {
             load_tiered::<LinearImage>(
-                &path_refs,
+                SteppedPaths {
+                    paths: &path_refs,
+                    step: &NoStep,
+                },
                 &config,
                 IngestRun::planned(RunMemory::new(1 << 30, memory_override), &ingest),
-                &NoStep,
             )
             .unwrap()
         };

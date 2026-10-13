@@ -24,7 +24,9 @@ fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
 /// Calibrate `light` by `prepared` alone, its saturation taken as flagged.
 fn divide(prepared: PreparedFlat, light: &mut CfaImage) {
     light.metadata.saturation_flagged = true;
-    CalibrationMasters::assemble(None, None, Some(prepared), None)
+    CalibrationMasters::builder()
+        .flat(prepared)
+        .build()
         .unwrap()
         .calibrate(light)
         .unwrap();

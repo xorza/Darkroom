@@ -77,14 +77,13 @@ impl<V: F64x4> PixelNodes<V> {
         nodes
     }
 
-    /// `profile` integrated over the pixels centred at `(x, y)`.
+    /// `profile` integrated over the pixels centred at `[x, y]`.
     #[inline(always)]
     fn integrate<S: Isa<F64 = V>, P: LaneProfile<S, N>, const N: usize>(
         &self,
         isa: S,
         profile: P,
-        x: V,
-        y: V,
+        [x, y]: [V; 2],
     ) -> Sample<V, N> {
         let zero = isa.splat_f64(0.0);
         let mut sum = Sample {
@@ -171,12 +170,12 @@ trait LaneSink<S: Isa> {
         match data.weights {
             None => {
                 for ((x, y), z) in lanes {
-                    self.sample(isa, load(isa, x, y, z), None);
+                    self.sample(isa, load(isa, [x, y, z]), None);
                 }
             }
             Some(weights) => {
                 for (((x, y), z), w) in lanes.zip(weights.as_chunks::<F64_LANES>().0) {
-                    self.sample(isa, load(isa, x, y, z), Some(isa.load_f64(w)));
+                    self.sample(isa, load(isa, [x, y, z]), Some(isa.load_f64(w)));
                 }
             }
         }
@@ -198,12 +197,7 @@ trait LaneSink<S: Isa> {
 }
 
 #[inline(always)]
-fn load<S: Isa>(
-    isa: S,
-    x: &[f64; F64_LANES],
-    y: &[f64; F64_LANES],
-    z: &[f64; F64_LANES],
-) -> Lanes<S::F64> {
+fn load<S: Isa>(isa: S, [x, y, z]: [&[f64; F64_LANES]; 3]) -> Lanes<S::F64> {
     Lanes {
         x: isa.load_f64(x),
         y: isa.load_f64(y),
@@ -225,7 +219,7 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for Chi2Sum<P, S:
         let residual = lanes.z
             - self
                 .nodes
-                .integrate::<S, P, N>(isa, self.profile, lanes.x, lanes.y)
+                .integrate::<S, P, N>(isa, self.profile, [lanes.x, lanes.y])
                 .value;
         let weighted = match weight {
             Some(w) => w * residual,
@@ -269,7 +263,8 @@ impl<P, V: F64x4, const N: usize> NormalSums<P, V, N> {
 impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P, S::F64, N> {
     #[inline(always)]
     fn sample(&mut self, isa: S, lanes: Lanes<S::F64>, weight: Option<S::F64>) {
-        let Sample { value, jacobian } = self.nodes.integrate(isa, self.profile, lanes.x, lanes.y);
+        let Sample { value, jacobian } =
+            self.nodes.integrate(isa, self.profile, [lanes.x, lanes.y]);
         let residual = lanes.z - value;
         let mut weighted = jacobian;
         let mut weighted_residual = residual;
@@ -374,9 +369,7 @@ pub(crate) mod internals {
     /// The first `n` samples of `stamp`, at the first `n` of `weights`.
     fn prefix<'a>(stamp: FitData<'a>, n: usize, weights: Option<&'a [f64]>) -> FitData<'a> {
         FitData::new(
-            &stamp.x[..n],
-            &stamp.y[..n],
-            &stamp.z[..n],
+            [&stamp.x[..n], &stamp.y[..n], &stamp.z[..n]],
             weights.map(|w| &w[..n]),
         )
     }

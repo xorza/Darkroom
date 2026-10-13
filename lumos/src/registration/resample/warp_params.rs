@@ -1,5 +1,6 @@
 //! [`WarpParams`]: how a warp resamples a frame, and the kernel it resamples with.
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Interpolation method for image resampling.
@@ -64,14 +65,10 @@ impl Default for WarpParams {
 
 impl WarpParams {
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite_only("warp border_value", self.border_value)?;
+        ConfigValue::new("warp border_value", self.border_value).finite()?;
         if let Some(threshold) = self.clamping_threshold {
-            InvalidConfigField::check(
-                (0.0..=1.0).contains(&threshold),
-                "warp clamping_threshold",
-                "between 0 and 1",
-                f64::from(threshold),
-            )?;
+            ConfigValue::new("warp clamping_threshold", threshold)
+                .must_be("between 0 and 1", (0.0..=1.0).contains(&threshold))?;
         }
         Ok(())
     }

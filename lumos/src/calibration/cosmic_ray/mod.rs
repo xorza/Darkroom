@@ -34,7 +34,6 @@ pub(crate) mod mono;
 pub(crate) mod noise_model;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
-use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_image::CfaImage;
@@ -49,6 +48,7 @@ use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
+use crate::image::masked_plane::MaskedPlane;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per colour.
@@ -59,10 +59,11 @@ const BACKGROUND_TILE_SIZE: usize = 64;
 /// is ~0 so a CR (F→0) doesn't divide by zero.
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
-/// Frame-sized masks a pass holds beside its detector's: [`KeptOut`]'s two and the mask of the
-/// pixels it repaired, or, before that mask exists, the three that building `KeptOut` holds at
-/// once.
-const PASS_MASKS: usize = 3;
+/// Frame-sized masks a pass holds beside its detector's: [`KeptOut`]'s two.
+const PASS_MASKS: usize = 2;
+
+/// Frame-sized masks building [`KeptOut`] holds at once, before the detector allocates anything.
+const KEPT_OUT_BUILD_MASKS: usize = 3;
 
 /// The detector a CFA type gets: one dense plane, or four Bayer phases. X-Trans gets none.
 #[derive(Debug, Clone, Copy)]
@@ -93,16 +94,17 @@ pub(crate) fn reject(
 ) -> Result<usize, CosmicRayError> {
     let layout = Layout::of(&image.cfa_type)?;
     let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
-    let size = Size2us::new(image.data.width(), image.data.height());
+    let size = Size2us::from(&image.data);
     let kept_out = KeptOut::of(&image.data, image.flags.as_ref());
     // Measured once, before any repair: a hit spoils a tile's statistics no more than a star does,
     // and the mesh's clip and median filter are what keep both out.
     let mesh = ColourMesh::measure(
-        &image.data,
+        MaskedPlane {
+            pixels: &image.data,
+            mask: kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
+        },
         &image.cfa_type,
         BACKGROUND_TILE_SIZE,
-        kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
-        &mut MeshWorkspace::default(),
     );
     // Through the checked accessor, then shared: the pixels below are borrowed apart from it.
     let flat_gain = image
@@ -112,25 +114,24 @@ pub(crate) fn reject(
         mesh: &mesh,
         flat_gain: flat_gain.as_deref(),
     };
-    let pixels = image.data.pixels_mut();
-    let mut found = BitBuffer2::new_default(size);
-    let count = match layout {
-        // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        Layout::Bayer(pattern) => BayerDetector::new(config, noise, pattern).reject(
-            pixels,
-            size,
-            &backgrounds,
-            kept_out.as_ref(),
-            &mut found,
-        ),
-        Layout::Mono => MonoDetector::new(config, noise).reject(
-            pixels,
-            size,
-            &|index| backgrounds.at(0, size.point_of(index)),
-            kept_out.as_ref(),
-            &mut found,
-        ),
+    // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
+    let mut bayer;
+    let mut mono;
+    let found = match layout {
+        Layout::Bayer(pattern) => {
+            bayer = BayerDetector::new(config, noise, pattern);
+            bayer.reject(&mut image.data, &backgrounds, kept_out.as_ref())
+        }
+        Layout::Mono => {
+            mono = MonoDetector::new(config, noise);
+            mono.reject(
+                &mut image.data,
+                &|index| backgrounds.at(0, size.point_of(index)),
+                kept_out.as_ref(),
+            )
+        }
     };
+    let count = found.count_ones();
     if count > 0 {
         image.add_flags_where(
             QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
@@ -141,7 +142,8 @@ pub(crate) fn reject(
 }
 
 /// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at
-/// its peak: the detector's planes and masks, and the pass's own [`PASS_MASKS`]. Left out are the
+/// its peak: the detector's planes and masks and the pass's own [`PASS_MASKS`], or the
+/// [`KEPT_OUT_BUILD_MASKS`] before them where those are more. Left out are the
 /// fixed sizes: the background mesh, a few tiles per colour and one tile's samples per worker,
 /// about 20 KB each, and the 256 KiB histogram the saturation level is ranked in.
 ///
@@ -153,7 +155,8 @@ pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> Result<usize, Cos
         Layout::Bayer(_) => BayerDetector::heap_bytes(size),
         Layout::Mono => MonoDetector::heap_bytes(size),
     };
-    Ok(detector + PASS_MASKS * BitBuffer2::heap_bytes(size))
+    let mask = BitBuffer2::heap_bytes(size);
+    Ok((detector + PASS_MASKS * mask).max(KEPT_OUT_BUILD_MASKS * mask))
 }
 
 #[cfg(feature = "internals")]

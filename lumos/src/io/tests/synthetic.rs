@@ -25,7 +25,7 @@ use crate::drizzle::error::DrizzleError;
 use crate::frame::frame_peek::FramePeek;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::sample_domain::{DomainMap, ScaleOrigin};
-use crate::ingest::frame_step::NoStep;
+use crate::ingest::frame_step::{NoStep, SteppedPaths};
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
@@ -60,9 +60,8 @@ fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> 
     decode::load_linear(&path, &LoadContext::default())
 }
 
-/// Write `image` with `header`'s cards to `dir/name.fits`.
-fn write_with_header(dir: &TempDir, name: &str, image: &Image, header: &Header) -> PathBuf {
-    let path = dir.join(format!("{name}.fits"));
+/// Write `image` with `header`'s cards to `path`.
+fn write_with_header(path: PathBuf, image: &Image, header: &Header) -> PathBuf {
     write_fits(&path, image, Some(header));
     path
 }
@@ -209,7 +208,11 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let pixels = vec![0.0f32, 16_384.0, 32_768.0, 65_535.0];
     let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let path = write_with_header(&dir, "float32_declared_scale", &image, &Header::new());
+    let path = write_with_header(
+        dir.join("float32_declared_scale.fits"),
+        &image,
+        &Header::new(),
+    );
 
     let with_scale = |scale| LoadContext {
         fits: FitsLoadOptions {
@@ -240,7 +243,11 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     // than the samples.
     let mut declaring = Header::new();
     declaring.set("DATAMAX", 65_535.0).unwrap();
-    let declaring_path = write_with_header(&dir, "float32_datamax_overridden", &image, &declaring);
+    let declaring_path = write_with_header(
+        dir.join("float32_datamax_overridden.fits"),
+        &image,
+        &declaring,
+    );
     let forced =
         decode::load_linear(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
     assert_eq!(forced.channel(0).pixels(), &*pixels);
@@ -268,7 +275,7 @@ fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let sigma_of = |name: &str, raw: &[u16]| {
         let image = Image::from_u16(vec![raw.len(), 1], raw).unwrap();
-        let path = write_with_header(&dir, name, &image, &header);
+        let path = write_with_header(dir.join(format!("{name}.fits")), &image, &header);
         decode::load_cfa(&path, &LoadContext::default())
             .unwrap()
             .metadata
@@ -305,7 +312,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         FitsRefusal::UndeclaredFloatScale { maximum: 65_535.0 }
     );
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let bare_path = write_with_header(&dir, "float32_bare", &image, &Header::new());
+    let bare_path = write_with_header(dir.join("float32_bare.fits"), &image, &Header::new());
     let normalized_options = LoadContext {
         fits: FitsLoadOptions {
             float_scale: FitsFloatScale::Normalized,
@@ -320,12 +327,19 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // contradict it.
     let mut normalized_header = Header::new();
     normalized_header.set("DATAMAX", 1.0).unwrap();
-    let contradicted = write_with_header(&dir, "float32_datamax_1_adu", &image, &normalized_header);
+    let contradicted = write_with_header(
+        dir.join("float32_datamax_1_adu.fits"),
+        &image,
+        &normalized_header,
+    );
     assert!(decode::load_linear(&contradicted, &LoadContext::default()).is_err());
     let unit_pixels = vec![-0.25f32, 0.0, 0.5, 1.0];
     let unit_image = Image::new(vec![4, 1], unit_pixels.clone()).unwrap();
-    let normalized_path =
-        write_with_header(&dir, "float32_datamax_1", &unit_image, &normalized_header);
+    let normalized_path = write_with_header(
+        dir.join("float32_datamax_1.fits"),
+        &unit_image,
+        &normalized_header,
+    );
     let normalized = decode::load_linear(&normalized_path, &LoadContext::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
     assert_eq!(normalized.metadata.data_max, Some(1.0));
@@ -334,7 +348,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // the 16-bit full scale. -5/65535 = -7.629511e-5, 0.5/65535 = 7.629511e-6, 65535/65535 = 1.
     let mut adu_header = Header::new();
     adu_header.set("DATAMAX", 65_535.0).unwrap();
-    let adu_path = write_with_header(&dir, "float32_datamax_adu", &image, &adu_header);
+    let adu_path = write_with_header(dir.join("float32_datamax_adu.fits"), &image, &adu_header);
     let adu = decode::load_linear(&adu_path, &LoadContext::default()).unwrap();
     let decoded = adu.channel(0).pixels();
     assert_close!(decoded[0], -7.629_511e-5, 1e-9, "{decoded:?}");
@@ -401,7 +415,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         for (keyword, value) in keywords {
             header.set(keyword, *value).unwrap();
         }
-        write_with_header(&dir, name, &image, &header)
+        write_with_header(dir.join(format!("{name}.fits")), &image, &header)
     };
     let mosaic = |name: &str, pattern: CfaPattern| {
         let path = dir.join(format!("{name}.fits"));
@@ -469,10 +483,12 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         );
         let cfa_set = single_thread.install(|| {
             FrameCache::from_cfa_paths(
-                &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
+                SteppedPaths {
+                    paths: &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
+                    step: &NoStep,
+                },
                 &config,
                 IngestRun::planned(memory, &ingest),
-                &NoStep,
             )
         });
         assert!(
@@ -511,7 +527,7 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     let load = |name: &str, bunit: &str| {
         let mut header = Header::new();
         header.set("BUNIT", bunit).unwrap();
-        let path = write_with_header(&dir, name, &image, &header);
+        let path = write_with_header(dir.join(format!("{name}.fits")), &image, &header);
         decode::load_linear(&path, &LoadContext::default())
             .unwrap()
             .metadata
@@ -556,7 +572,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let float_pixels = vec![1.0f32, 2.0, f32::NAN, 4.0, 8.0, 16.0];
     let float_image = Image::new(vec![3, 2], float_pixels).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let float_path = write_with_header(&dir, "float32_null", &float_image, &Header::new());
+    let float_path = write_with_header(dir.join("float32_null.fits"), &float_image, &Header::new());
     // ADU with no declared scale, which `Auto` refuses; the caller says how to read them.
     let float_context = LoadContext {
         fits: FitsLoadOptions {
@@ -579,7 +595,8 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         },
     )
     .unwrap();
-    let integer_path = write_with_header(&dir, "int16_blank", &integer_image, &Header::new());
+    let integer_path =
+        write_with_header(dir.join("int16_blank.fits"), &integer_image, &Header::new());
     let integer = decode::load_linear(&integer_path, &LoadContext::default()).unwrap();
 
     for (name, image) in [("float", &float), ("integer", &integer)] {
@@ -695,7 +712,7 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     // opens, and the mask — not the samples — is what says none of it is data.
     let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let path = write_with_header(&dir, "float32_all_null", &image, &Header::new());
+    let path = write_with_header(dir.join("float32_all_null.fits"), &image, &Header::new());
     let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
@@ -715,8 +732,8 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     let mut high_header = Header::new();
     high_header.set("DATAMAX", 65_535.0).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let low_path = write_with_header(&dir, "datamax_100", &image, &low_header);
-    let high_path = write_with_header(&dir, "datamax_65535", &image, &high_header);
+    let low_path = write_with_header(dir.join("datamax_100.fits"), &image, &low_header);
+    let high_path = write_with_header(dir.join("datamax_65535.fits"), &image, &high_header);
 
     let low = decode::load_linear(&low_path, &LoadContext::default()).unwrap();
     let high = decode::load_linear(&high_path, &LoadContext::default()).unwrap();
@@ -745,7 +762,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let mut mono_header = Header::new();
     mono_header.set("CFATYPE", "MONO").unwrap();
     let mono = Image::new(vec![2, 2], vec![0.125f32, 0.25, 0.375, 0.5]).unwrap();
-    let path = write_with_header(&dir, "mono_sensor", &mono, &mono_header);
+    let path = write_with_header(dir.join("mono_sensor.fits"), &mono, &mono_header);
     let loaded = LinearImage::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.125, 0.25, 0.375, 0.5]);
     assert_eq!(
@@ -757,7 +774,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     stale.set("BAYERPAT", "RGGB").unwrap();
     let samples: Vec<f32> = (0..12).map(|i| i as f32 / 16.0).collect();
     let cube = Image::new(vec![2, 2, 3], samples.clone()).unwrap();
-    let path = write_with_header(&dir, "stale_cube", &cube, &stale);
+    let path = write_with_header(dir.join("stale_cube.fits"), &cube, &stale);
     let context = LoadContext {
         fits: FitsLoadOptions {
             cube: FitsCubeInterpretation::Rgb,
@@ -789,7 +806,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let path = write_with_header(&dir, "bayer_cfa", &image, &header);
+    let path = write_with_header(dir.join("bayer_cfa.fits"), &image, &header);
 
     assert!(matches!(
         LinearImage::from_file(&path, &LoadContext::default()),
@@ -916,7 +933,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     pixels[10] = f32::NEG_INFINITY;
     let image = Image::new(vec![size.width, size.height], pixels).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let path = write_with_header(&dir, "nan_inf", &image, &Header::new());
+    let path = write_with_header(dir.join("nan_inf.fits"), &image, &Header::new());
 
     let masked = decode::load_linear(&path, &LoadContext::default()).unwrap();
     let nulls = masked.flags.as_ref().unwrap();
@@ -1027,7 +1044,7 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     let image = Image::from_u16(vec![4, 1], &[100, 3799, 3800, 4000]).unwrap();
     let mut header = Header::new();
     header.set("DATAMAX", 4000.0).unwrap();
-    let path = write_with_header(&dir, "uint16_datamax", &image, &header);
+    let path = write_with_header(dir.join("uint16_datamax.fits"), &image, &header);
     let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
     assert!(loaded.metadata.saturation_flagged);
     let flags = loaded.flags.as_ref().unwrap();
@@ -1036,7 +1053,7 @@ fn a_fits_datamax_flags_saturation_at_decode() {
         .collect();
     assert_eq!(saturated, [false, false, true, true]);
 
-    let path = write_with_header(&dir, "uint16_bare", &image, &Header::new());
+    let path = write_with_header(dir.join("uint16_bare.fits"), &image, &Header::new());
     let bare = decode::load_linear(&path, &LoadContext::default()).unwrap();
     assert!(!bare.metadata.saturation_flagged);
     assert!(bare.flags.is_none());

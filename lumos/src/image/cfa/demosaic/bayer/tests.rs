@@ -12,6 +12,7 @@ use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
+use imaginarium::Buffer2;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
@@ -103,33 +104,25 @@ fn flip_both_axes() {
     );
 }
 
-/// A frame must hold one sample per pixel of a size that is not empty.
+/// A frame takes its plane's size, which must not be empty.
 #[test]
 fn a_bayer_image_holds_its_size_in_samples() {
-    let bayer = BayerImage::new(&[0.0; 6], Size2us::new(3, 2), CfaPattern::Rggb);
+    let data = Buffer2::new_default(3, 2);
+    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
     assert_eq!(bayer.size, Size2us::new(3, 2));
-    for (samples, size) in [
-        (4, Size2us::new(0, 2)),
-        (4, Size2us::new(2, 0)),
-        (3, Size2us::new(2, 2)),
-    ] {
-        let data = vec![0.0f32; samples];
+    for size in [Size2us::new(0, 2), Size2us::new(2, 0)] {
+        let data = Buffer2::new_default(size.width, size.height);
         let refused = std::panic::catch_unwind(|| {
-            BayerImage::new(&data, size, CfaPattern::Rggb);
+            BayerImage::new(&data, CfaPattern::Rggb);
         });
-        assert!(refused.is_err(), "{samples} samples for {size:?}");
+        assert!(refused.is_err(), "{size:?}");
     }
-}
-
-fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::new(data, size, cfa)
 }
 
 #[test]
 fn cancelled_token_bails_the_demosaic() {
-    let size = Size2us::new(20, 20);
-    let data = vec![0.5f32; size.pixel_count()];
-    let bayer = make_bayer(&data, size, CfaPattern::Rggb);
+    let data = Buffer2::new_filled(20, 20, 0.5f32);
+    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
 
     // A live, tripped token bails at the first between-stage check rather than
     // running the whole demosaic.
@@ -151,10 +144,14 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
     } else {
         Size2us::new(96, 80)
     };
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| ((index * 37 + index / size.width * 11) % 1_024) as f32 / 1_023.0)
-        .collect();
-    let bayer = make_bayer(&data, size, CfaPattern::Rggb);
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|index| ((index * 37 + index / size.width * 11) % 1_024) as f32 / 1_023.0)
+            .collect(),
+    );
+    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
 
     let run = |threads| {
         ThreadPoolBuilder::new()
@@ -173,19 +170,24 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
 /// two sides of an edge — every output stays within it.
 const ROUNDING: f32 = 1.0 / (1 << 21) as f32;
 
-/// Demosaic `data` laid out as `size` under `pattern`, with no margins.
-fn demosaic(data: &[f32], size: Size2us, pattern: CfaPattern) -> [Vec<f32>; 3] {
-    rcd::demosaic(&make_bayer(data, size, pattern), &CancelToken::never()).unwrap()
+/// Demosaic `data` under `pattern`, with no margins.
+fn demosaic(data: &Buffer2<f32>, pattern: CfaPattern) -> [Vec<f32>; 3] {
+    rcd::demosaic(&BayerImage::new(data, pattern), &CancelToken::never()).unwrap()
 }
 
 /// A mosaic of `size` under `pattern` sampling each pixel's own colour of `scene`.
-fn mosaic(size: Size2us, pattern: CfaPattern, scene: impl Fn(Vec2us, usize) -> f32) -> Vec<f32> {
-    (0..size.pixel_count())
+fn mosaic(
+    size: Size2us,
+    pattern: CfaPattern,
+    scene: impl Fn(Vec2us, usize) -> f32,
+) -> Buffer2<f32> {
+    let pixels = (0..size.pixel_count())
         .map(|index| {
             let pos = size.point_of(index);
             scene(pos, pattern.color_at(pos).index())
         })
-        .collect()
+        .collect();
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// A constant colour per channel — uniform grey and two distinct (R, G, B) — through every phase
@@ -201,7 +203,7 @@ fn constant_colour_reconstructs_on_every_phase() {
     for pattern in CfaPattern::ALL {
         for colour in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = mosaic(size, pattern, |_, channel| colour[channel]);
-            let planes = demosaic(&data, size, pattern);
+            let planes = demosaic(&data, pattern);
             for (index, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
                 let native = pattern.color_at(pos).index();
                 assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
@@ -228,20 +230,28 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
     let large = Size2us::new(300, 280);
     let offset = 16;
     let mut rng = TestRng::new(7);
-    let samples: Vec<f32> = (0..large.pixel_count())
-        .map(|_| 0.1 + 0.8 * rng.next_f32())
-        .collect();
+    let samples = Buffer2::new(
+        large.width,
+        large.height,
+        (0..large.pixel_count())
+            .map(|_| 0.1 + 0.8 * rng.next_f32())
+            .collect(),
+    );
     let small = Size2us::new(240, 236);
-    let crop: Vec<f32> = (0..small.pixel_count())
-        .map(|index| {
-            let pos = small.point_of(index);
-            samples[large.index_of(Vec2us::new(pos.x + offset, pos.y + offset))]
-        })
-        .collect();
+    let crop = Buffer2::new(
+        small.width,
+        small.height,
+        (0..small.pixel_count())
+            .map(|index| {
+                let pos = small.point_of(index);
+                samples[large.index_of(Vec2us::new(pos.x + offset, pos.y + offset))]
+            })
+            .collect(),
+    );
     for pattern in CfaPattern::ALL {
-        let whole = demosaic(&samples, large, pattern);
+        let whole = demosaic(&samples, pattern);
         // An even offset keeps the crop on the larger frame's phase.
-        let part = demosaic(&crop, small, pattern);
+        let part = demosaic(&crop, pattern);
         for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
             for (index, value) in part_plane.iter().enumerate() {
                 let pos = small.point_of(index);
@@ -272,10 +282,11 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
 /// interpolated sample is balanced back by its own colour's gain.
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
-    let ramp = |size: Size2us| -> Vec<f32> {
-        (0..size.pixel_count())
+    let ramp = |size: Size2us| -> Buffer2<f32> {
+        let pixels = (0..size.pixel_count())
             .map(|i| i as f32 / size.pixel_count() as f32)
-            .collect()
+            .collect();
+        Buffer2::new(size.width, size.height, pixels)
     };
     let assert_native = |planes: &[Vec<f32>; 3],
                          data: &[f32],
@@ -303,7 +314,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let data = ramp(size);
     for pattern in CfaPattern::ALL {
         assert_native(
-            &demosaic(&data, size, pattern),
+            &demosaic(&data, pattern),
             &data,
             &|pos| pattern.color_at(pos).index(),
             size,
@@ -319,7 +330,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
         (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
     ] {
-        let mut cfa = make_cfa(size, data.clone(), cfa_type);
+        let mut cfa = make_cfa(size, data.pixels().to_vec(), cfa_type);
         cfa.metadata.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);
         let image = cfa.demosaic(passes, &CancelToken::never()).unwrap();
         let planes = [0, 1, 2].map(|channel| image.channel(channel).pixels().to_vec());
@@ -343,7 +354,7 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
     let slope = 0.125;
     for pattern in CfaPattern::ALL {
         let data = mosaic(size, pattern, |pos, _| (pos.x as f32 - 15.5) * slope);
-        let planes = demosaic(&data, size, pattern);
+        let planes = demosaic(&data, pattern);
         for y in 1..size.height - 1 {
             for x in 1..size.width - 1 {
                 let expected = (x as f32 - 15.5) * slope;
@@ -385,19 +396,20 @@ fn rcd_is_the_same_on_every_bayer_phase() {
             _ => 0.25 + diagonal - anti + 0.1 * (0.4 * x + 0.9 * y).cos(),
         }
     };
-    let mosaic = |pattern: CfaPattern, dx: usize, dy: usize| -> Vec<f32> {
+    let mosaic = |pattern: CfaPattern, dx: usize, dy: usize| -> Buffer2<f32> {
         let (cw, ch) = (w - dx, h - dy);
-        (0..cw * ch)
+        let pixels = (0..cw * ch)
             .map(|i| {
                 let (x, y) = (i % cw, i / cw);
                 scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)).index())
             })
-            .collect()
+            .collect();
+        Buffer2::new(cw, ch, pixels)
     };
 
     let base_data = mosaic(CfaPattern::Rggb, 0, 0);
     let base = rcd::demosaic(
-        &make_bayer(&base_data, Size2us::new(w, h), CfaPattern::Rggb),
+        &BayerImage::new(&base_data, CfaPattern::Rggb),
         &CancelToken::never(),
     )
     .unwrap();
@@ -414,11 +426,8 @@ fn rcd_is_the_same_on_every_bayer_phase() {
         );
         let (cw, ch) = (w - dx, h - dy);
         let data = mosaic(pattern, dx, dy);
-        let shifted = rcd::demosaic(
-            &make_bayer(&data, Size2us::new(cw, ch), pattern),
-            &CancelToken::never(),
-        )
-        .unwrap();
+        let shifted =
+            rcd::demosaic(&BayerImage::new(&data, pattern), &CancelToken::never()).unwrap();
         for y in MARGIN..ch - MARGIN {
             for x in MARGIN..cw - MARGIN {
                 for channel in 0..3 {
@@ -450,7 +459,7 @@ fn rcd_interpolates_along_an_edge() {
     for pattern in CfaPattern::ALL {
         for (name, across) in axes {
             let data = mosaic(size, pattern, |pos, _| side(across(pos)));
-            let planes = demosaic(&data, size, pattern);
+            let planes = demosaic(&data, pattern);
             for index in 0..size.pixel_count() {
                 let pos = size.point_of(index);
                 if pos
@@ -485,7 +494,7 @@ fn rcd_reproduces_a_linear_ramp_inside_the_border() {
     let size = Size2us::new(48, 40);
     let ramp = |pos: Vec2us| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
     for pattern in CfaPattern::ALL {
-        let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), size, pattern);
+        let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), pattern);
         for index in 0..size.pixel_count() {
             let pos = size.point_of(index);
             if pos
@@ -517,7 +526,10 @@ fn rcd_returns_a_flat_field_at_any_level() {
     let size = Size2us::new(32, 24);
     for pattern in CfaPattern::ALL {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2] {
-            let planes = demosaic(&vec![level; size.pixel_count()], size, pattern);
+            let planes = demosaic(
+                &Buffer2::new_filled(size.width, size.height, level),
+                pattern,
+            );
             for (channel, plane) in planes.iter().enumerate() {
                 for &value in plane {
                     assert_close!(
@@ -539,13 +551,21 @@ fn rcd_returns_a_flat_field_at_any_level() {
 fn rcd_is_odd() {
     let size = Size2us::new(40, 32);
     let mut rng = TestRng::new(11);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|_| 0.02 * (rng.next_f32() - 0.5))
-        .collect();
-    let negated: Vec<f32> = data.iter().map(|&value| -value).collect();
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|_| 0.02 * (rng.next_f32() - 0.5))
+            .collect(),
+    );
+    let negated = Buffer2::new(
+        size.width,
+        size.height,
+        data.iter().map(|&value| -value).collect(),
+    );
     for pattern in CfaPattern::ALL {
-        let planes = demosaic(&data, size, pattern);
-        let mirrored = demosaic(&negated, size, pattern);
+        let planes = demosaic(&data, pattern);
+        let mirrored = demosaic(&negated, pattern);
         for (channel, (plane, mirror)) in planes.iter().zip(&mirrored).enumerate() {
             for (index, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
                 assert_eq!(

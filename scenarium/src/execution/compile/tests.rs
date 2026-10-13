@@ -271,8 +271,8 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
     warmup.add("consumer", |n| {
         n.sink().input(DataType::String).input(DataType::Float)
     });
-    warmup.wire("emitter", 0, "consumer", 0);
-    warmup.wire("emitter", 1, "consumer", 1);
+    warmup.wire("emitter", "consumer");
+    warmup.wire(("emitter", 1), ("consumer", 1));
     warmup.subscribe("emitter", 0, "consumer");
 
     let subject = TestGraph::source_sink_loose();
@@ -330,7 +330,7 @@ fn pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
 /// [`pair`] with the producer wired into the consumer.
 fn wired_pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
     let mut g = pair(out_ty, in_ty);
-    g.wire("producer", 0, "consumer", 0);
+    g.wire("producer", "consumer");
     g
 }
 
@@ -477,7 +477,7 @@ fn stamps_each_output_with_the_resolved_type() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::String));
     g.add("pass", |n| n.pure().passthrough());
-    g.wire("producer", 0, "pass", 0);
+    g.wire("producer", "pass");
 
     assert_eq!(
         g.compile().output_types("pass"),
@@ -585,7 +585,7 @@ fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
     g.add("pass", |n| n.pure().passthrough());
     // Port 99 does not exist: the library shrank under a saved document.
     let dropped = OutputPort::new(g.id("producer"), 99);
-    g.wire("producer", 99, "pass", 0);
+    g.wire(("producer", 99), "pass");
 
     let mut types = OutputTypes::default();
     types.update(&g.graph, &g.library);

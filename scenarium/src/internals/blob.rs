@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
+use crate::data::codec::Codecs;
 use crate::internals::calls::Calls;
 use crate::library::Library;
 use crate::library::type_entry::TypeEntry;
@@ -58,13 +59,30 @@ pub(crate) struct BlobCodec {
     pub(crate) version: u32,
     /// Counts each decode.
     pub(crate) decodes: Calls,
+    pub(crate) fault: BlobFault,
+}
+
+/// The fault a [`BlobCodec`] injects.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlobFault {
+    #[default]
+    None,
     /// Encoding writes the bytes and then fails.
-    pub(crate) fail_encode: bool,
+    EncodeFails,
     /// Decoding reads none of the payload it is handed.
-    pub(crate) under_read: bool,
+    DecodeUnderReads,
 }
 
 impl BlobCodec {
+    /// A faultless codec at `version`, counting its decodes in `decodes`.
+    pub(crate) fn versioned(version: u32, decodes: Calls) -> Self {
+        Self {
+            version,
+            decodes,
+            fault: BlobFault::None,
+        }
+    }
+
     /// A library holding [`Blob`] with this codec.
     pub(crate) fn library(self) -> Library {
         let mut library = Library::default();
@@ -73,6 +91,11 @@ impl BlobCodec {
             TypeEntry::custom_with_codec("Blob", Arc::new(self)),
         );
         library
+    }
+
+    /// The codecs of [`Self::library`].
+    pub(crate) fn codecs(self) -> Codecs {
+        Codecs::clone(self.library().codecs())
     }
 }
 
@@ -92,7 +115,7 @@ impl CustomValueCodec for BlobCodec {
             .downcast_ref::<Blob>()
             .expect("BlobCodec is only registered for Blob");
         writer.write_all(&blob.0).await?;
-        if self.fail_encode {
+        if self.fault == BlobFault::EncodeFails {
             return Err("injected encode failure".into());
         }
         Ok(())
@@ -105,7 +128,7 @@ impl CustomValueCodec for BlobCodec {
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         self.decodes.bump();
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-        if !self.under_read {
+        if self.fault != BlobFault::DecodeUnderReads {
             reader.read_to_end(&mut bytes).await?;
         }
         Ok(Arc::new(Blob(bytes)))

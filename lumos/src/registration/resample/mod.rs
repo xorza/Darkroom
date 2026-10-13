@@ -15,7 +15,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
-    FrameSampler, RowOutput, SampleMethod, WindowAxes,
+    FrameSampler, RowOutput, SampleMethod, SampleRule, WindowAxes,
 };
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::resample::source_image::SourceImage;
@@ -110,14 +110,21 @@ impl Scratch for WarpBuffers {
     fn has_shape(&self, dimensions: ImageDimensions) -> bool {
         let size = dimensions.size();
         self.image.dimensions() == dimensions
-            && Size2us::new(self.coverage.width(), self.coverage.height()) == size
-            && Size2us::new(self.confidence.width(), self.confidence.height()) == size
+            && Size2us::from(&self.coverage) == size
+            && Size2us::from(&self.confidence) == size
     }
 }
 
+/// A warp to run: its transform, and how it samples.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Warp<'a> {
+    pub(crate) transform: &'a WarpTransform,
+    pub(crate) params: WarpParams,
+}
+
 impl WarpBuffers {
-    /// Warp `image` into these buffers, overwriting all three planes completely and replacing the
-    /// flags and the metadata; each worker leases its row scratch from `rows`.
+    /// Warp `image` by `warp` into these buffers, overwriting all three planes completely and
+    /// replacing the flags and the metadata; each worker leases its row scratch from `rows`.
     ///
     /// One pass over the output rows: each row's source positions are evaluated once — a SIP
     /// correction is the expensive part of a non-linear warp — and every channel, the quality maps
@@ -125,10 +132,13 @@ impl WarpBuffers {
     pub(crate) fn warp_into(
         &mut self,
         image: &SourceImage<'_>,
-        warp_transform: &WarpTransform,
-        config: WarpParams,
+        warp: Warp<'_>,
         rows: &ScratchPool<RowScratch>,
     ) {
+        let Warp {
+            transform: warp_transform,
+            params: config,
+        } = warp;
         // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
         // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
         // combine, where only a debug assert would notice. Once per frame, so the check is free.
@@ -150,7 +160,11 @@ impl WarpBuffers {
         let flagged = image
             .flags
             .map(|flags| FlaggedSources::new(image, flags, reach));
-        let sampler = FrameSampler::new(method, image, flagged.as_ref(), config.border_value);
+        let rule = SampleRule {
+            method,
+            border: config.border_value,
+        };
+        let sampler = FrameSampler::new(rule, image, flagged.as_ref());
         // The last frame's flags, dropped before this frame's plane is allocated so a worker never
         // holds two.
         self.image.flags = None;

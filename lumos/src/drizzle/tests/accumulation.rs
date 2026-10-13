@@ -434,9 +434,11 @@ fn drizzle_rgb_gives_each_channel_its_variance() {
     let size = Size2us::new(8, 8);
     let mut image = rgb_image(
         size,
-        vec![0.5; size.pixel_count()],
-        vec![0.3; size.pixel_count()],
-        vec![0.7; size.pixel_count()],
+        [
+            vec![0.5; size.pixel_count()],
+            vec![0.3; size.pixel_count()],
+            vec![0.7; size.pixel_count()],
+        ],
     );
     image.metadata.quantization_sigma = Some(0.125);
     let product = drizzle_plain(

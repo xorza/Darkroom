@@ -20,7 +20,39 @@ pub(super) struct SourcePosition {
     pub(super) fy: f32,
 }
 
+/// A sample's position along one axis: its integer cell, and the fraction within it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AxisPosition {
+    pub(super) cell: i32,
+    pub(super) frac: f32,
+}
+
+/// A sample's position in a source of `size`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SourceAt {
+    pub(super) position: SourcePosition,
+    pub(super) size: Size2us,
+}
+
 impl SourcePosition {
+    /// The position along x.
+    #[inline(always)]
+    pub(super) const fn x(self) -> AxisPosition {
+        AxisPosition {
+            cell: self.cell_x,
+            frac: self.fx,
+        }
+    }
+
+    /// The position along y.
+    #[inline(always)]
+    pub(super) const fn y(self) -> AxisPosition {
+        AxisPosition {
+            cell: self.cell_y,
+            frac: self.fy,
+        }
+    }
+
     /// `p` split, when it lies in the footprint of a `size` source — `[-½, w − ½] × [-½, h − ½]`,
     /// the area its pixels cover; `None` outside it or for a non-finite `p`.
     #[inline]

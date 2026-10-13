@@ -35,22 +35,22 @@ pub(crate) struct MultiThresholdParams {
     pub(crate) min_area: usize,
     /// How the pixels above a level join into regions — the labeling's own rule.
     pub(crate) connectivity: Connectivity,
+    /// The detection threshold at the component, in the units of its values — the lowest level of
+    /// the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
+    pub(crate) floor: f32,
 }
 
 impl MultiThresholdParams {
     /// Split `component` by its multi-threshold tree onto `out`: one region when it splits nowhere,
     /// else one region per star, brightest by flux above its level first. Returns how many it pushed.
-    ///
-    /// `floor` is the detection threshold at the component, in the units of its values — the lowest
-    /// level of the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
     pub(crate) fn deblend(
         self,
         component: &Component<'_>,
-        floor: f32,
         buffers: &mut DeblendBuffers,
         out: &mut Vec<Region>,
     ) -> usize {
         let params = self;
+        let floor = params.floor;
         debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
         debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
         let DeblendBuffers {

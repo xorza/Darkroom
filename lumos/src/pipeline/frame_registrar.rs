@@ -13,7 +13,7 @@ use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 use crate::registration::error::RegistrationError;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::resample::{RowScratch, WarpBuffers};
+use crate::registration::resample::{RowScratch, Warp, WarpBuffers};
 use crate::scratch_pool::ScratchPool;
 use crate::star_detection::star::Star;
 
@@ -149,12 +149,11 @@ impl<'a> FrameRegistrar<'a> {
         let warp = registration.warp_transform();
         let mut warped = self.warps.acquire();
         let image = image.into_resident();
-        warped.warp_into(
-            &SourceImage::of(&image),
-            &warp,
-            self.run.config.registration.warp,
-            &self.rows,
-        );
+        let job = Warp {
+            transform: &warp,
+            params: self.run.config.registration.warp,
+        };
+        warped.warp_into(&SourceImage::of(&image), job, &self.rows);
         drop(image);
         self.resolved.complete_one();
         let stored = self.parking.store(warped, stats)?;

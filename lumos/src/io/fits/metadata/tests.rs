@@ -9,8 +9,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::RowOrder;
 use crate::io::fits::metadata::{
-    self, Bayerpat, SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order,
-    read_row_order,
+    self, Bayerpat, SOURCE_ROW_ORDER, parse_sexagesimal, read_declared_row_order, read_row_order,
 };
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
@@ -24,7 +23,7 @@ fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {
 }
 
 fn pattern_of(header: &Header, height: usize) -> CfaPattern {
-    match read_bayer_cfa(header, height, Bayerpat::Required, None).unwrap() {
+    match Bayerpat::Required.read_cfa(header, height, None).unwrap() {
         Some(CfaType::Bayer(pattern)) => pattern,
         other => panic!("expected a Bayer pattern, got {other:?}"),
     }
@@ -197,23 +196,29 @@ fn invalid_sexagesimal_values_are_rejected() {
 fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
     let header = bayer_header("TRUE", None);
     assert!(matches!(
-        read_bayer_cfa(&header, 4, Bayerpat::Required, None),
+        Bayerpat::Required.read_cfa(&header, 4, None),
         Err(fits_well::FitsError::TypeMismatch { name, .. }) if name == "BAYERPAT"
     ));
     assert_eq!(
-        read_bayer_cfa(&header, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
+        Bayerpat::Required
+            .read_cfa(&header, 4, Some(CfaPattern::Grbg))
+            .unwrap(),
         Some(CfaType::Bayer(CfaPattern::Grbg))
     );
     // Bottom-up with an even height swaps GRBG's two rows: GR then BG becomes BG then GR, BGGR.
     let bottom_up = bayer_header("TRUE", Some("BOTTOM-UP"));
     assert_eq!(
-        read_bayer_cfa(&bottom_up, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
+        Bayerpat::Required
+            .read_cfa(&bottom_up, 4, Some(CfaPattern::Grbg))
+            .unwrap(),
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
     // A stated phase wins over the option, which only stands in for 'TRUE'.
     let stated = bayer_header("BGGR", None);
     assert_eq!(
-        read_bayer_cfa(&stated, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
+        Bayerpat::Required
+            .read_cfa(&stated, 4, Some(CfaPattern::Grbg))
+            .unwrap(),
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
 }

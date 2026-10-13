@@ -23,6 +23,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
+use crate::image::masked_plane::MaskedPlane;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::DomainMap;
@@ -64,7 +65,7 @@ impl StackableImage for CfaImage {
         self.flags.as_ref()
     }
 
-    fn channel(&self, c: usize) -> &[f32] {
+    fn channel(&self, c: usize) -> &Buffer2<f32> {
         assert!(c == 0, "CfaImage has only 1 channel, got {c}");
         &self.data
     }
@@ -233,7 +234,11 @@ impl CfaImage {
         let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         nulls.for_each_set(|pos| {
-            let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
+            let plane = MaskedPlane {
+                pixels: &self.data,
+                mask: Some(&mask),
+            };
+            let repaired = lattice.median(plane, pos, &mut scratch);
             self.data[size.index_of(pos)] = repaired;
         });
         self.add_flags_where(QualityFlags::REPAIRED, |index| nulls.get(index));
@@ -251,29 +256,18 @@ impl CfaImage {
         // fill under each null.
         self.repair_nulls();
         let size = self.size();
-        // Through the checked accessor, then shared: the grid is the flat's, not this frame's.
-        let flat_gain = self
-            .flat_gain()
-            .and_then(|_| self.metadata.flat_gain.clone());
-        let mut metadata = self.metadata;
         let cfa_type = self.cfa_type;
+        // Interpolation correlates neighbouring samples, which hides part of their noise from any
+        // later measurement, and mixes them, so one step's σ no longer bounds any of them. A mono
+        // sensor's samples pass through untouched and keep it.
+        let mosaic_noise = (cfa_type != CfaType::Mono).then(|| MosaicNoise::measure(&self));
+        let mut metadata = self.metadata;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = cfa_type.demosaiced_color();
             provenance.demosaic = cfa_type.demosaic_provenance(passes);
         }
-        // Interpolation correlates neighbouring samples, which hides part of their noise from any
-        // later measurement, and mixes them, so one step's σ no longer bounds any of them. A mono
-        // sensor's samples pass through untouched and keep it.
-        if cfa_type != CfaType::Mono {
-            let flags = self.flags.as_ref();
-            metadata.mosaic_noise = Some(MosaicNoise::measure(
-                self.data.pixels(),
-                size,
-                &cfa_type,
-                |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
-                metadata.quantization_sigma,
-                flat_gain.as_deref(),
-            ));
+        if mosaic_noise.is_some() {
+            metadata.mosaic_noise = mosaic_noise;
             metadata.quantization_sigma = None;
         }
         // The direction decisions compare neighbours of different colours, so the kernels balance
@@ -285,7 +279,6 @@ impl CfaImage {
             .map_or([1.0; 3], |[red, green, blue, _]| {
                 [red / green, 1.0, blue / green]
             });
-        let pixels = self.data.into_vec();
         // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest:
         // these pixels were reconstructed rather than measured, and the combine still has to know
         // that. Every other fact spreads as far as the demosaic reads.
@@ -295,14 +288,16 @@ impl CfaImage {
         }
 
         let mut image = match cfa_type {
-            CfaType::Mono => LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels),
+            CfaType::Mono => {
+                LinearImage::from_pixels(ImageDimensions::new(size, 1), self.data.into_vec())
+            }
             CfaType::Bayer(cfa_pattern) => {
-                let bayer = BayerImage::new(&pixels, size, cfa_pattern).with_gains(gains);
+                let bayer = BayerImage::new(&self.data, cfa_pattern).with_gains(gains);
                 let planes = rcd::demosaic(&bayer, cancel)?;
                 LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
             }
             CfaType::XTrans(pattern) => {
-                let xtrans = XTransImage::new(&pixels, size, pattern).with_gains(gains);
+                let xtrans = XTransImage::new(&self.data, pattern).with_gains(gains);
                 let planes = markesteijn::demosaic(&xtrans, passes, cancel)?;
                 LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
             }

@@ -56,15 +56,16 @@ impl QualityPlanes {
     }
 
     /// The bytes a combine's output holds a pixel: these planes for each of `channels`, the
-    /// combined pixels among them, `coverage_planes` coverage planes, and a flag byte when `flags`.
+    /// combined pixels among them, `coverage_planes` coverage planes, and a byte for each of
+    /// `flag_planes`.
     pub(crate) const fn pixel_bytes(
         self,
         channels: usize,
         coverage_planes: usize,
-        flags: bool,
+        flag_planes: usize,
     ) -> usize {
         (channels * self.resident_planes_per_channel() + coverage_planes) * size_of::<f32>()
-            + flags as usize
+            + flag_planes
     }
 
     /// The bytes a combine's output of `dimensions` holds before its frames are seen: one coverage
@@ -72,7 +73,7 @@ impl QualityPlanes {
     /// carry no quality planes, whose coverage is a constant, or no flags, which leave the flag
     /// plane out.
     pub(crate) const fn heap_bytes(self, dimensions: ImageDimensions) -> usize {
-        self.pixel_bytes(dimensions.channels(), self.coverage as usize, true)
+        self.pixel_bytes(dimensions.channels(), self.coverage as usize, 1)
             * dimensions.pixel_count()
     }
 

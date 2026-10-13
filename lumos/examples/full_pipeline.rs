@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    NoMasterCache, ProgressMonitor,
+    AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet,
+    DEFAULT_SIGMA_THRESHOLD, IngestConfig, MasterBuild, NoMasterCache, ProgressMonitor,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -55,8 +55,10 @@ fn main() {
     let step = Instant::now();
     let result = AlignStackConfig::default()
         .calibrate_align_stack_paths(
-            &light_paths,
-            &masters,
+            CalibratedLights {
+                paths: &light_paths,
+                masters: &masters,
+            },
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
@@ -113,15 +115,17 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     // Each role stacks under its own preset, the flats with the bias taken from every frame; the
     // set is assembled once every master exists.
     let masters = CalibrationMasters::build(
-        CalibrationSet {
-            dark: darks.as_slice(),
-            flat: flats.as_slice(),
-            bias: bias.as_slice(),
-            flat_dark: &[],
+        MasterBuild {
+            frames: CalibrationSet {
+                dark: darks.as_slice(),
+                flat: flats.as_slice(),
+                bias: bias.as_slice(),
+                flat_dark: &[],
+            },
+            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            cache: &NoMasterCache,
         },
-        DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::default(),
-        &NoMasterCache,
         &ProgressMonitor::unattended(),
     )
     .expect("failed to build calibration masters");

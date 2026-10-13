@@ -17,7 +17,7 @@ use crate::math::statistics;
 /// flattening the background drives them together.
 fn corner_background_spread(image: &LinearImage) -> f32 {
     let plane = image.intensity_plane();
-    let size = Size2us::new(plane.width(), plane.height());
+    let size = Size2us::from(&plane);
     let px = plane.pixels();
     let patch = 256.min(size.width / 4).min(size.height / 4);
     let inset = patch / 2;

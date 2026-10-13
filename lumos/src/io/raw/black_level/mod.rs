@@ -234,8 +234,8 @@ impl BlackLevel {
     /// error of a few 2⁻⁵³, and the f32 result can miss the correct rounding where the quotient
     /// lies that close to a halfway point.
     ///
-    /// A row's black level and saturation level repeat with its column: `channel` with
-    /// `channel_period` — 2 for a Bayer sensor, 6 for X-Trans, 1 for a mono one — and the black
+    /// A row's black level and saturation level repeat with its column: the photosite's channel
+    /// with its period — 2 for a Bayer sensor, 6 for X-Trans, 1 for a mono one — and the black
     /// pattern with its own width. Each row looks both up once per column phase rather than once
     /// per photosite. The flag plane is allocated zeroed and written only where a photosite holds a
     /// flag, so a frame that holds none touches none of its pages.
@@ -243,10 +243,13 @@ impl BlackLevel {
         &self,
         raw: &[u16],
         layout: SensorLayout,
-        channel: impl Fn(usize, usize) -> usize + Sync,
-        channel_period: usize,
-        rule: FlagRule,
+        photosites: Photosites<impl Fn(usize, usize) -> usize + Sync>,
     ) -> DecodedRaw {
+        let Photosites {
+            channel,
+            period: channel_period,
+            rule,
+        } = photosites;
         let span = self.span();
         let active = layout.active;
         let width = active.width.max(1);
@@ -332,6 +335,15 @@ pub(crate) struct FlagRule {
     pub(crate) zero_is_bad: bool,
     /// The raw value at which each LibRaw colour channel saturates, black included.
     pub(crate) saturation: [f64; 4],
+}
+
+/// How a sensor's photosites are read: the LibRaw channel of the photosite at column `x` and row
+/// `y`, `channel(x, y)`, repeating every `period` columns, and the rule that flags its value.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Photosites<C> {
+    pub(crate) channel: C,
+    pub(crate) period: usize,
+    pub(crate) rule: FlagRule,
 }
 
 #[cfg(test)]

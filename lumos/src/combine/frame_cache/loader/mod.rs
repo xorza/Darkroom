@@ -19,7 +19,7 @@ use crate::frame_store::tier::Tier;
 use crate::image::image_metadata::ImageMetadata;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
-use crate::ingest::frame_step::FrameStep;
+use crate::ingest::frame_step::{FrameStep, SteppedPaths};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::error::ImageError;
 use crate::io::load_context::LoadContext;
@@ -37,17 +37,17 @@ pub(super) struct LoadedCache {
 /// The stage of [`FramePeek::stages`] that decodes the frames.
 const DECODE: usize = 0;
 
-/// Load every frame into the tier its set fits, each through `step` when given.
+/// Load every frame into the tier its set fits, each through its step.
 ///
 /// A prepared frame is not what its source decodes to, so on the disk tier it is spilled for this
 /// run alone, never committed to the kept cache nor read back from it: a later run with another
 /// step, or none, would otherwise reuse it.
 pub(super) fn load_tiered<I: StackableImage>(
-    paths: &[&Path],
+    frames: SteppedPaths<'_, &Path, impl FrameStep<I, Error = SubtractionError>>,
     config: &StackConfig,
     run: IngestRun,
-    step: &impl FrameStep<I, Error = SubtractionError>,
 ) -> Result<LoadedCache, StackError> {
+    let SteppedPaths { paths, step } = frames;
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0];
 
@@ -91,7 +91,6 @@ pub(super) fn load_tiered<I: StackableImage>(
         .transpose()?;
     let tier = Tier::for_plan(
         &plan,
-        budget,
         if kept.is_some() {
             0
         } else {

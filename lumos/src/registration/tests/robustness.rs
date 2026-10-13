@@ -4,9 +4,7 @@
 
 use glam::DVec2;
 
-use crate::internals::synthetic::transforms::{
-    add_spurious_star_list, add_star_noise, generate_random_stars,
-};
+use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
 use crate::internals::test_rng::TestRng;
 use crate::registration::error::RegistrationError;
 use crate::registration::final_fit::FitModel;
@@ -15,7 +13,9 @@ use crate::registration::model_search::ModelSearch;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation};
+use crate::registration::tests::helpers::{
+    self, FWHM_NORMAL, FieldMotion, map_stars, max_deviation,
+};
 use crate::registration::transform::{Transform, TransformModel, TransformType};
 use crate::registration::triangle::voting::MatchIndices;
 use crate::star_detection::star::Star;
@@ -79,8 +79,12 @@ impl Scenario {
     }
 
     fn catalogs(&self) -> Catalogs {
-        let reference =
-            generate_random_stars(self.stars, self.side, self.side, self.seed, FWHM_NORMAL);
+        let reference = StarScatter {
+            count: self.stars,
+            side: self.side,
+            seed: self.seed,
+        }
+        .stars(FWHM_NORMAL);
         let images = add_star_noise(
             &map_stars(&reference, &self.truth),
             self.noise,
@@ -102,14 +106,14 @@ impl Scenario {
                 target.push(star);
             }
         }
-        target.extend(add_spurious_star_list(
-            &[],
-            self.spurious,
-            self.side,
-            self.side,
-            self.seed + 3,
-            FWHM_NORMAL,
-        ));
+        target.extend(
+            StarScatter {
+                count: self.spurious,
+                side: self.side,
+                seed: self.seed + 3,
+            }
+            .spurious(FWHM_NORMAL),
+        );
         Catalogs {
             reference,
             target,
@@ -160,14 +164,14 @@ impl Scenario {
         matched.sort_by_key(|m| (m.reference, m.target));
         assert_eq!(matched, catalogs.pairs, "{}: matched pairs", self.name);
 
-        let (low, high) = catalogs.pairs.iter().fold(
-            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
-            |(low, high), pair| {
-                let p = catalogs.reference[pair.reference].pos;
-                (low.min(p), high.max(p))
-            },
+        let deviation = max_deviation(
+            &found,
+            &self.truth,
+            catalogs
+                .pairs
+                .iter()
+                .map(|pair| catalogs.reference[pair.reference].pos),
         );
-        let deviation = max_deviation(&found, &self.truth, low, high);
         let bound = if self.noise == 0.0 {
             EXACT_FIT_PX
         } else {
@@ -192,17 +196,6 @@ impl Scenario {
             );
         }
     }
-}
-
-/// `s·R(θ)` about `(c, c)`, then `offset`: a similarity about the field's centre.
-fn about_centre(c: f64, offset: DVec2, angle_deg: f64, scale: f64) -> Transform {
-    let linear = Transform::similarity(DVec2::ZERO, angle_deg.to_radians(), scale);
-    let centre = DVec2::splat(c);
-    Transform::similarity(
-        centre + offset - linear.apply(centre),
-        angle_deg.to_radians(),
-        scale,
-    )
 }
 
 fn run(scenarios: &[Scenario]) {
@@ -240,17 +233,32 @@ fn every_model_recovers_an_exact_transform() {
         Scenario::new(
             "rotation about the centre",
             Euclidean,
-            about_centre(1000.0, DVec2::ZERO, 0.5, 1.0),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 0.5,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "rotation and translation",
             Euclidean,
-            about_centre(1000.0, DVec2::new(35.0, 25.0), 0.5, 1.0),
+            FieldMotion {
+                offset: DVec2::new(35.0, 25.0),
+                angle_deg: 0.5,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "similarity",
             Similarity,
-            about_centre(1000.0, DVec2::new(15.0, -10.0), 0.3, 1.002),
+            FieldMotion {
+                offset: DVec2::new(15.0, -10.0),
+                angle_deg: 0.3,
+                scale: 1.002,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "differential scale",
@@ -296,12 +304,22 @@ fn every_model_recovers_an_exact_transform() {
         Scenario::new(
             "similarity model on Euclidean data",
             Similarity,
-            about_centre(750.0, DVec2::new(20.0, 15.0), 0.6, 1.0),
+            FieldMotion {
+                offset: DVec2::new(20.0, 15.0),
+                angle_deg: 0.6,
+                scale: 1.0,
+            }
+            .about(750.0),
         ),
         Scenario::new(
             "affine model on similarity data",
             Affine,
-            about_centre(1000.0, DVec2::new(30.0, -20.0), 0.4, 1.005),
+            FieldMotion {
+                offset: DVec2::new(30.0, -20.0),
+                angle_deg: 0.4,
+                scale: 1.005,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "quarter-pixel translation",
@@ -316,12 +334,22 @@ fn every_model_recovers_an_exact_transform() {
         Scenario::new(
             "hundredth of a degree",
             Euclidean,
-            about_centre(1000.0, DVec2::ZERO, 0.01, 1.0),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 0.01,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "scale of 1.0005",
             Similarity,
-            about_centre(1000.0, DVec2::ZERO, 0.0, 1.0005),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 0.0,
+                scale: 1.0005,
+            }
+            .about(1000.0),
         ),
         Scenario {
             stars: 200,
@@ -331,7 +359,12 @@ fn every_model_recovers_an_exact_transform() {
             ..Scenario::new(
                 "dense field, large shift and scale",
                 Similarity,
-                about_centre(1500.0, DVec2::new(150.0, -100.0), 0.0, 1.008),
+                FieldMotion {
+                    offset: DVec2::new(150.0, -100.0),
+                    angle_deg: 0.0,
+                    scale: 1.008,
+                }
+                .about(1500.0),
             )
         },
     ]);
@@ -350,32 +383,62 @@ fn large_rotations_and_scales_register() {
         large(
             "45°",
             Euclidean,
-            about_centre(1000.0, DVec2::new(20.0, -15.0), 45.0, 1.0),
+            FieldMotion {
+                offset: DVec2::new(20.0, -15.0),
+                angle_deg: 45.0,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         large(
             "90°",
             Euclidean,
-            about_centre(1000.0, DVec2::ZERO, 90.0, 1.0),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 90.0,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         large(
             "−45°",
             Euclidean,
-            about_centre(1000.0, DVec2::new(-10.0, 25.0), -45.0, 1.0),
+            FieldMotion {
+                offset: DVec2::new(-10.0, 25.0),
+                angle_deg: -45.0,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         large(
             "scale 2",
             Similarity,
-            about_centre(1000.0, DVec2::ZERO, 0.0, 2.0),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 0.0,
+                scale: 2.0,
+            }
+            .about(1000.0),
         ),
         large(
             "scale ½",
             Similarity,
-            about_centre(1000.0, DVec2::ZERO, 0.0, 0.5),
+            FieldMotion {
+                offset: DVec2::ZERO,
+                angle_deg: 0.0,
+                scale: 0.5,
+            }
+            .about(1000.0),
         ),
         large(
             "scale 1.5 at 30°",
             Similarity,
-            about_centre(1000.0, DVec2::new(50.0, -30.0), 30.0, 1.5),
+            FieldMotion {
+                offset: DVec2::new(50.0, -30.0),
+                angle_deg: 30.0,
+                scale: 1.5,
+            }
+            .about(1000.0),
         ),
     ]);
 }
@@ -390,17 +453,32 @@ fn a_meridian_flip_registers_under_the_default_limits() {
         Scenario::new(
             "180°",
             Euclidean,
-            about_centre(1000.0, DVec2::new(12.0, -7.0), 180.0, 1.0),
+            FieldMotion {
+                offset: DVec2::new(12.0, -7.0),
+                angle_deg: 180.0,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "180° at scale 1.01",
             Similarity,
-            about_centre(1000.0, DVec2::new(-30.0, 4.0), 180.0, 1.01),
+            FieldMotion {
+                offset: DVec2::new(-30.0, 4.0),
+                angle_deg: 180.0,
+                scale: 1.01,
+            }
+            .about(1000.0),
         ),
         Scenario::new(
             "37°",
             Euclidean,
-            about_centre(1000.0, DVec2::new(5.0, 9.0), 37.0, 1.0),
+            FieldMotion {
+                offset: DVec2::new(5.0, 9.0),
+                angle_deg: 37.0,
+                scale: 1.0,
+            }
+            .about(1000.0),
         ),
     ]);
 }
@@ -434,7 +512,12 @@ fn missing_and_spurious_stars_are_left_out() {
             ..Scenario::new(
                 "20% spurious, rotated",
                 Euclidean,
-                about_centre(1000.0, DVec2::new(35.0, 25.0), 0.5, 1.0),
+                FieldMotion {
+                    offset: DVec2::new(35.0, 25.0),
+                    angle_deg: 0.5,
+                    scale: 1.0,
+                }
+                .about(1000.0),
             )
         },
         Scenario {
@@ -503,7 +586,12 @@ fn partial_overlap_matches_only_the_shared_stars() {
         overlapping(
             "rotated",
             Euclidean,
-            about_centre(1000.0, DVec2::new(600.0, 0.0), 0.5, 1.0),
+            FieldMotion {
+                offset: DVec2::new(600.0, 0.0),
+                angle_deg: 0.5,
+                scale: 1.0,
+            }
+            .about(1000.0),
             24,
         ),
     ]);
@@ -520,7 +608,12 @@ fn noisy_positions_fit_within_their_noise() {
             ..Scenario::new(
                 "similarity, ±0.5 px",
                 Similarity,
-                about_centre(1000.0, DVec2::new(15.0, -10.0), 0.3, 1.002),
+                FieldMotion {
+                    offset: DVec2::new(15.0, -10.0),
+                    angle_deg: 0.3,
+                    scale: 1.002,
+                }
+                .about(1000.0),
             )
         },
         Scenario {
@@ -531,7 +624,12 @@ fn noisy_positions_fit_within_their_noise() {
             ..Scenario::new(
                 "Euclidean, ±0.3 px, 10% missing, 5 spurious",
                 Euclidean,
-                about_centre(1000.0, DVec2::new(45.0, -30.0), 1.0, 1.0),
+                FieldMotion {
+                    offset: DVec2::new(45.0, -30.0),
+                    angle_deg: 1.0,
+                    scale: 1.0,
+                }
+                .about(1000.0),
             )
         },
         Scenario {
@@ -542,7 +640,12 @@ fn noisy_positions_fit_within_their_noise() {
             ..Scenario::new(
                 "Euclidean, ±0.5 px, 60% overlap",
                 Euclidean,
-                about_centre(1000.0, DVec2::new(800.0, 0.0), 0.5, 1.0),
+                FieldMotion {
+                    offset: DVec2::new(800.0, 0.0),
+                    angle_deg: 0.5,
+                    scale: 1.0,
+                }
+                .about(1000.0),
             )
         },
         Scenario {
@@ -592,7 +695,12 @@ fn the_smallest_catalogs_register_and_three_stars_do_not() {
         small(
             "eight stars",
             TransformType::Similarity,
-            about_centre(500.0, DVec2::new(10.0, -8.0), 0.5, 1.01),
+            FieldMotion {
+                offset: DVec2::new(10.0, -8.0),
+                angle_deg: 0.5,
+                scale: 1.01,
+            }
+            .about(500.0),
             8,
         ),
     ]);

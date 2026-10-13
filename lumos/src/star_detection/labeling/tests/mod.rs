@@ -32,11 +32,10 @@ mod shapes;
 /// tall crosses band boundaries whatever the machine's thread count.
 const STRIP_COUNTS: [usize; 5] = [1, 2, 3, 5, 8];
 
-/// A binary mask with its size.
+/// A binary mask.
 #[derive(Debug)]
 struct Mask {
-    size: Size2us,
-    data: Vec<bool>,
+    data: Buffer2<bool>,
 }
 
 impl Mask {
@@ -49,8 +48,7 @@ impl Mask {
             .flat_map(|row| row.bytes().map(|b| b == b'#'))
             .collect();
         Self {
-            size: Size2us::new(width, rows.len()),
-            data,
+            data: Buffer2::new(width, rows.len(), data),
         }
     }
 
@@ -62,11 +60,13 @@ impl Mask {
                 data.push(set(x, y));
             }
         }
-        Self { size, data }
+        Self {
+            data: Buffer2::new(size.width, size.height, data),
+        }
     }
 
     fn bits(&self) -> BitBuffer2 {
-        BitBuffer2::from_slice(self.size, &self.data)
+        BitBuffer2::from_plane(&self.data)
     }
 }
 
@@ -96,7 +96,7 @@ fn neighbours(connectivity: Connectivity) -> &'static [(isize, isize)] {
 /// Flood fill from each unlabelled foreground pixel in raster order: naive, slow and obviously
 /// correct, and numbered the way the labeler numbers.
 fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
-    let Size2us { width, height } = mask.size;
+    let Size2us { width, height } = Size2us::from(&mask.data);
     let mut labels = vec![0u32; mask.data.len()];
     let mut next = 0u32;
     let mut queue = VecDeque::new();
@@ -150,7 +150,7 @@ fn check(mask: &Mask) -> Labelings {
         let strips = STRIP_COUNTS
             .iter()
             .copied()
-            .filter(|&strips| strips <= mask.size.height);
+            .filter(|&strips| strips <= mask.data.height());
         for strips in strips {
             let map = label_in_strips(&bits, connectivity, strips);
             assert_eq!(

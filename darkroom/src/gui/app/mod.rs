@@ -9,7 +9,7 @@ use scenarium::ConstValue;
 use scenarium::FsPathMode;
 use scenarium::NodeId;
 
-use crate::core::document::open_document::OpenDocument;
+use crate::core::document::open_document::{LaunchSource, OpenDocument};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::error::PreferencesLoadError;
@@ -24,10 +24,11 @@ use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::app::session::Session;
 use crate::gui::dialogs;
+use crate::gui::frame_writes::FrameWrites;
 use crate::gui::pane::graph_ui::node_ui::port_row::PathPick;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
-use crate::gui::state::run_state::RunState;
+use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
 
 pub(crate) mod app_command;
@@ -120,21 +121,29 @@ impl PendingTransition {
     }
 }
 
+/// What the app is launched with, read before its window exists.
+#[derive(Debug)]
+pub(crate) struct LaunchInputs {
+    /// The preferences as loaded; a failure leaves the session on defaults it
+    /// does not save.
+    pub(crate) preferences: Result<Preferences, PreferencesLoadError>,
+    /// The document the command line named, if it named one.
+    pub(crate) document: Option<PathBuf>,
+}
+
 impl App {
-    /// Build the app before the first frame: open the startup document —
-    /// `document` when the command line named one, else the preferred one —
-    /// assemble runtime services, and push the resolved palantir theme onto
-    /// `Ui`. Document restore failures degrade to an empty document and are
-    /// retained in the shared status log rather than blocking launch.
+    /// Build the app before the first frame: open the startup document — the `launch` document when
+    /// the command line named one, else the preferred one — assemble runtime services, and push the
+    /// resolved palantir theme onto `Ui`. Document restore failures degrade to an empty document
+    /// and are retained in the shared status log rather than blocking launch.
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(
-        ui: &mut Ui,
-        handle: HostHandle,
-        preferences: Result<Preferences, PreferencesLoadError>,
-        document: Option<PathBuf>,
-    ) -> Self {
+    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, launch: LaunchInputs) -> Self {
+        let LaunchInputs {
+            preferences,
+            document,
+        } = launch;
         // The worker wakes the winit loop via the host handle (see
         // `crate::core::wake`).
         let wake: Wake = {
@@ -155,8 +164,10 @@ impl App {
         let mut runtime = RuntimeHost::new(wake, &preferences);
         let remembered = preferences.document_path.clone();
         let open = OpenDocument::open_at_launch(
-            document,
-            &mut preferences,
+            LaunchSource {
+                argument: document,
+                preferences: &mut preferences,
+            },
             &mut status,
             runtime.library.current(),
         );
@@ -584,8 +595,10 @@ impl palantir::App for App {
         // `draw_panels` skips a panel whose node is gone — so the lag costs
         // memory and nothing else.
         self.run_state.sync(
-            &self.runtime,
-            &mut self.status,
+            RunFeed {
+                runtime: &self.runtime,
+                status: &mut self.status,
+            },
             ui,
             &self.session.open.document,
         );
@@ -608,22 +621,22 @@ impl palantir::App for App {
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
-        let ctx = AppCtx::new(
-            &self.theme,
-            &library,
-            &self.run_state,
-            StatusInputs {
-                error: self.status.current(),
-                process_memory: self.process_memory.sample(Instant::now()),
-            },
-        );
+        let ctx = AppCtx::new(&self.theme, &library, &self.run_state).with_status(StatusInputs {
+            error: self.status.current(),
+            process_memory: self.process_memory.sample(Instant::now()),
+        });
         // Reset here rather than inside the frame: the queue is `App`'s, and
         // `record` runs twice on a frame carrying action input — the second
         // pass must not inherit what the first already ran.
         self.requests.clear();
-        let mut needs_relayout =
-            self.session
-                .frame(ui, ctx, &mut self.preferences, &mut self.requests);
+        let mut needs_relayout = self.session.frame(
+            ui,
+            ctx,
+            FrameWrites {
+                preferences: &mut self.preferences,
+                requests: &mut self.requests,
+            },
+        );
         // What the session left behind: every command the frame raised, in the
         // order it raised them — a keyboard chord and a click on the same
         // frame both land. Popped one at a time so the queue is not borrowed

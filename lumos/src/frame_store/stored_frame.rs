@@ -73,10 +73,13 @@ impl ReusedFrame {
                 .iter()
                 .map(|plane| Buffer2::new(size.width, size.height, plane.chunk(0..pixels).to_vec()))
                 .collect(),
-            flags: frame
-                .flags
-                .as_ref()
-                .map(|plane| PixelFlags::from_bytes(size, plane.chunk(0..pixels))),
+            flags: frame.flags.as_ref().map(|plane| {
+                PixelFlags::from_bytes(Buffer2::new(
+                    size.width,
+                    size.height,
+                    plane.chunk(0..pixels).to_vec(),
+                ))
+            }),
         };
         I::from_parts(parts, frame.source_stats.facts.cfa_type, metadata)
     }
@@ -103,45 +106,6 @@ impl StoredFrame {
         }
     }
 
-    /// Write the frame's channels, quality planes and flags to `store` and memory-map them back.
-    ///
-    /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
-    /// stage hand the same ones to the next frame rather than allocating a set that has to be
-    /// faulted in from scratch.
-    pub(crate) fn spill(
-        store: &impl PlaneStore,
-        image: &impl StackableImage,
-        quality: &FrameQuality<impl Borrow<Buffer2<f32>>>,
-        source_stats: FrameStats,
-    ) -> Result<Self, FrameStoreError> {
-        let channels = (0..image.dimensions().channels())
-            .map(|channel| store.store_channel(channel, image.channel(channel)))
-            .collect::<Result<_, _>>()?;
-        let samples = quality
-            .is_none()
-            .then(|| Self::spill_samples(store, image))
-            .transpose()?;
-        let quality = quality
-            .try_map(|plane, buffer| store.store_quality(plane, buffer.borrow().pixels()))?;
-        let flags = image
-            .flags()
-            .filter(|flags| keeps(flags, &quality))
-            .map(|flags| store.store_flags(flags.bytes()))
-            .transpose()?;
-        let flat_gain = image
-            .flat_gain()
-            .map(|gain| StoredGain::spill(store, gain))
-            .transpose()?;
-        Ok(Self {
-            channels,
-            samples,
-            quality,
-            flags,
-            flat_gain,
-            source_stats,
-        })
-    }
-
     /// Each slot's [`StratifiedSamples`] of `image`, written to `store`.
     fn spill_samples(
         store: &impl PlaneStore,
@@ -159,15 +123,20 @@ impl StoredFrame {
             .collect()
     }
 
-    /// [`Self::spill`] of `image` as it decoded, unwarped, then commit the files as a kept frame,
-    /// with the image's shape and metadata.
+    /// [`SpillFrame::spill`] of `image` as it decoded, unwarped, then commit the files as a kept
+    /// frame, with the image's shape and metadata.
     pub(crate) fn cache(
         spill: &FrameSpill<'_>,
         image: &impl StackableImage,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let quality = FrameQuality::for_unwarped(image);
-        let frame = Self::spill(spill, image, &quality, source_stats)?;
+        let frame = SpillFrame {
+            image,
+            quality: &quality,
+            source_stats,
+        }
+        .spill(spill)?;
         let carries = match (quality.mask(), &frame.flags) {
             (Some(_), _) => Carries::NullMask,
             (None, Some(_)) => Carries::Flags,
@@ -242,6 +211,56 @@ impl StoredFrame {
     }
 }
 
+/// A frame on its way to a [`PlaneStore`]: its image, its quality planes, and the statistics
+/// measured on its source.
+#[derive(Debug)]
+pub(crate) struct SpillFrame<'a, I, Q> {
+    pub(crate) image: &'a I,
+    pub(crate) quality: &'a FrameQuality<Q>,
+    pub(crate) source_stats: FrameStats,
+}
+
+impl<I: StackableImage, Q: Borrow<Buffer2<f32>>> SpillFrame<'_, I, Q> {
+    /// Write the frame's channels, quality planes and flags to `store` and memory-map them back.
+    ///
+    /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
+    /// stage hand the same ones to the next frame rather than allocating a set that has to be
+    /// faulted in from scratch.
+    pub(crate) fn spill(self, store: &impl PlaneStore) -> Result<StoredFrame, FrameStoreError> {
+        let Self {
+            image,
+            quality,
+            source_stats,
+        } = self;
+        let channels = (0..image.dimensions().channels())
+            .map(|channel| store.store_channel(channel, image.channel(channel)))
+            .collect::<Result<_, _>>()?;
+        let samples = quality
+            .is_none()
+            .then(|| StoredFrame::spill_samples(store, image))
+            .transpose()?;
+        let quality = quality
+            .try_map(|plane, buffer| store.store_quality(plane, buffer.borrow().pixels()))?;
+        let flags = image
+            .flags()
+            .filter(|flags| keeps(flags, &quality))
+            .map(|flags| store.store_flags(flags.bytes()))
+            .transpose()?;
+        let flat_gain = image
+            .flat_gain()
+            .map(|gain| StoredGain::spill(store, gain))
+            .transpose()?;
+        Ok(StoredFrame {
+            channels,
+            samples,
+            quality,
+            flags,
+            flat_gain,
+            source_stats,
+        })
+    }
+}
+
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use arrayvec::ArrayVec;
@@ -290,7 +309,7 @@ mod tests {
     use crate::frame::frame_quality::FrameQuality;
     use crate::frame::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
-    use crate::frame_store::stored_frame::StoredFrame;
+    use crate::frame_store::stored_frame::SpillFrame;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::math::size2us::Size2us;
@@ -315,7 +334,13 @@ mod tests {
             confidence: plane(0.5),
         };
         let stats = FrameStats::measure(&image);
-        let frame = StoredFrame::spill(&scratch, &image, &quality, stats).unwrap();
+        let frame = SpillFrame {
+            image: &image,
+            quality: &quality,
+            source_stats: stats,
+        }
+        .spill(&scratch)
+        .unwrap();
         assert_eq!(frame.planes().count(), 5);
         assert_eq!(frame.evict(), MappedFile::EVICTS);
         for (channel, level) in frame.channels.iter().zip([0.25, 0.5, 0.75]) {

@@ -42,6 +42,7 @@ mod bit_buffer2;
 mod calibration;
 mod combine;
 mod concurrency;
+mod config_value;
 mod drizzle;
 mod error;
 mod frame;
@@ -110,7 +111,9 @@ pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 
 pub use calibration::calibration_component::CalibrationComponent;
-pub use calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+pub use calibration::calibration_masters::{
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, MasterBuild,
+};
 pub use calibration::calibration_outcome::CalibrationOutcome;
 pub use calibration::calibration_set::CalibrationSet;
 pub use calibration::dark_scale::{DarkScale, DarkScaleSource};
@@ -183,7 +186,7 @@ pub use stack_product::quality_map::QualityMap;
 pub use stack_product::quality_planes::QualityPlanes;
 pub use stack_product::run_report::RunReport;
 
-pub use pipeline::align_stack_config::{AlignStackConfig, Reference};
+pub use pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 pub use pipeline::align_stack_result::{AlignStackResult, AlignmentSummary};
 pub use pipeline::error::AlignStackError;
 pub use pipeline::frame_registration::FrameRegistration;

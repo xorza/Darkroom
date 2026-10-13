@@ -147,9 +147,9 @@ impl Measured {
     fn windowed(&self, start: DVec2, expected_fwhm: f32) -> Option<WindowedCentroid> {
         WindowedCentroid::measure(
             &self.residual,
-            start,
             &MeasureGrid::new(expected_fwhm),
             WindowedInputs {
+                start,
                 offset: 0.0,
                 noise: StarNoise {
                     background_sigma: 0.01,

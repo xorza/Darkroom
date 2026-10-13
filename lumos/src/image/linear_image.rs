@@ -342,7 +342,7 @@ impl StackableImage for LinearImage {
         self.flags.as_ref()
     }
 
-    fn channel(&self, c: usize) -> &[f32] {
+    fn channel(&self, c: usize) -> &Buffer2<f32> {
         Self::channel(self, c)
     }
 
@@ -447,9 +447,7 @@ mod tests {
         // 2x1 RGB: pixels (0.1,0.2,0.3) and (0.4,0.5,0.6).
         let mut image = rgb_image(
             Size2us::new(2, 1),
-            vec![0.1, 0.4],
-            vec![0.2, 0.5],
-            vec![0.3, 0.6],
+            [vec![0.1, 0.4], vec![0.2, 0.5], vec![0.3, 0.6]],
         );
         image.map_rgb(|px| px.scale(2.0));
         assert_eq!(image.channel(0).pixels(), &[0.2, 0.8]);
@@ -470,9 +468,7 @@ mod tests {
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
         let rgb = rgb_image(
             Size2us::new(2, 1),
-            vec![0.3, 0.6],
-            vec![0.0, 0.6],
-            vec![0.0, 0.6],
+            [vec![0.3, 0.6], vec![0.0, 0.6], vec![0.0, 0.6]],
         );
         assert_eq!(
             rgb.intensity_plane().pixels(),
@@ -487,7 +483,7 @@ mod tests {
     /// the mapped intensity itself, clamped to `[0, 1]`.
     #[test]
     fn remap_intensity_moves_pixels_with_their_hue() {
-        let mut image = rgb_image(Size2us::new(1, 1), vec![0.2], vec![0.1], vec![0.1]);
+        let mut image = rgb_image(Size2us::new(1, 1), [vec![0.2], vec![0.1], vec![0.1]]);
         image.remap_intensity(|intensity| {
             Buffer2::new(1, 1, intensity.pixels().iter().map(|&i| 2.0 * i).collect())
         });
