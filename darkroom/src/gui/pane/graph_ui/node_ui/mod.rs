@@ -6,7 +6,7 @@ pub(super) mod port_color;
 pub(crate) mod port_row;
 pub(crate) mod preview_row;
 mod value_editor;
-pub(super) mod wid;
+pub(crate) mod wid;
 
 use crate::core::document::graph_view::StackedItem;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
