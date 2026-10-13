@@ -16,13 +16,15 @@
 //! type missing a bound its siblings have.
 
 use ::serde::{Deserialize, Serialize};
-use common::id_type;
+use common::Id;
 
-// A `NodeId` is unique across a whole document, so a bare one is an
-// unambiguous address. `FuncId` names a declaration in the library rather than
-// anything in a document.
-id_type!(NodeId);
-id_type!(FuncId);
+use crate::graph::func::Func;
+use crate::graph::node::Node;
+
+/// A node's id, unique across a whole document, so a bare one is an unambiguous address.
+pub type NodeId = Id<Node>;
+/// A declaration's id in the library, not anything in a document.
+pub type FuncId = Id<Func>;
 
 /// Address of a producer node's output port — the source side of a data
 /// binding (`Binding::Bind`).

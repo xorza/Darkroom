@@ -18,11 +18,12 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 ron = { workspace = true }
 bitcode = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
+uuid = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals", "introspect-derive"] }
-uuid = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }

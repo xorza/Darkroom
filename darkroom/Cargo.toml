@@ -36,9 +36,7 @@ ron = { workspace = true }
 sysinfo = { workspace = true }
 rfd = { workspace = true }
 zip = { workspace = true }
-tokio = { workspace = true }
-# Named by `common`'s `id_type!` expansion, not by a path written here.
-uuid = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -50,6 +48,7 @@ palantir = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }
 static_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
 
 [features]
 internals = ["dep:criterion", "palantir/internals"]

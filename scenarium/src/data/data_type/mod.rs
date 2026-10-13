@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use strum::VariantNames;
 
-use common::id_type;
+use common::Id;
 
 use crate::ConstValue;
 
@@ -19,7 +19,8 @@ impl<T: VariantNames> EnumVariants for T {
     }
 }
 
-id_type!(TypeId);
+/// The id of the custom type or enum a [`DataType::Custom`] or [`DataType::Enum`] names.
+pub type TypeId = Id<DataType>;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub enum FsPathMode {

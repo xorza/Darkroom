@@ -98,7 +98,7 @@ it.
 
 - **No backward compatibility.** Change serialized shapes and APIs freely: no
   migrations, compat shims, legacy deserializers or legacy-format tests.
-- **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `id_type!`
+- **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`
   UUID (`NodeId`, `FuncId`, `TypeId`, …), never hand-typed or invented, which
   can collide; `rg` it to confirm it is unique. A shipped id never changes:
   saved graphs bind to it.

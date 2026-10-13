@@ -35,9 +35,6 @@ pub(crate) trait Idx: Copy {
 /// conversions; `$what` names the space in the bound check, and is the only
 /// thing that differs between them. Doc comments pass through, so what a space
 /// *means* still lives at the declaration.
-///
-/// Sibling of [`id_type!`](common::id_type), which does this for the uuid
-/// identities on the authoring side.
 macro_rules! idx_type {
     ($(#[$meta:meta])* $vis:vis struct $name:ident, $what:literal) => {
         $(#[$meta])*

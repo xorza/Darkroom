@@ -14,11 +14,13 @@ use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::AsRawHandle as _;
 use std::path::Path;
 
-use windows_sys::Win32::Storage::FileSystem::{
+use windows::Win32::Foundation::{HANDLE, WIN32_ERROR};
+use windows::Win32::Storage::FileSystem::{
     FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
     FileBasicInfo, FileIdInfo, GetFileInformationByHandleEx, MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
+use windows::core::{Error, PCWSTR};
 
 use crate::file_utils::PublicationMode;
 use crate::file_utils::file_identity::FileId;
@@ -39,10 +41,8 @@ pub(super) fn replace(source: &Path, destination: &Path, mode: PublicationMode) 
     if mode == PublicationMode::Durable {
         flags |= MOVEFILE_WRITE_THROUGH;
     }
-    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    unsafe { MoveFileExW(PCWSTR(source.as_ptr()), PCWSTR(destination.as_ptr()), flags) }
+        .map_err(io_error)
 }
 
 /// Nothing: `MOVEFILE_WRITE_THROUGH` already returns once the rename is on disk.
@@ -64,7 +64,7 @@ pub(super) fn stated(_metadata: &Metadata) -> Stated {
 pub(super) fn observe(path: &Path) -> io::Result<Observed> {
     let file = OpenOptions::new()
         .access_mode(0)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
         .open(path)?;
     let metadata = file.metadata()?;
     let file_id = query::<FILE_ID_INFO>(&file, FileIdInfo).map(|info| FileId {
@@ -87,11 +87,22 @@ fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> Option<T>
     let mut info = T::default();
     let answered = unsafe {
         GetFileInformationByHandleEx(
-            file.as_raw_handle(),
+            HANDLE(file.as_raw_handle()),
             class,
             (&raw mut info).cast::<c_void>(),
             u32::try_from(size_of::<T>()).expect("a file information struct's size fits u32"),
         )
     };
-    (answered != 0).then_some(info)
+    answered.is_ok().then_some(info)
+}
+
+/// `error` as the `io::Error` of its Win32 code, which `io::ErrorKind` reads: the crate's own
+/// conversion keeps the HRESULT, which it does not.
+fn io_error(error: Error) -> io::Error {
+    match WIN32_ERROR::from_error(&error) {
+        Some(code) => io::Error::from_raw_os_error(
+            i32::try_from(code.0).expect("a Win32 error code is 16 bits"),
+        ),
+        None => error.into(),
+    }
 }

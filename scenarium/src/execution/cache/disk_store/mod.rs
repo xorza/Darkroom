@@ -54,7 +54,7 @@ impl DiskStore {
 
     fn node_path(&self, node_id: NodeId) -> Option<PathBuf> {
         let mut buf = [0u8; 32];
-        let name = node_id.as_uuid().simple().encode_lower(&mut buf);
+        let name = node_id.hex(&mut buf);
         Some(self.root.as_ref()?.join(name))
     }
 

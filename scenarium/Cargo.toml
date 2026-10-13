@@ -11,10 +11,9 @@ workspace = true
 [dependencies]
 common = { workspace = true }
 serde = { workspace = true }
-uuid = { workspace = true }
 thiserror = { workspace = true }
 strum = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
@@ -28,4 +27,4 @@ internals = []
 common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }
 ron = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
