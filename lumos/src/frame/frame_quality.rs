@@ -28,11 +28,9 @@ use crate::image::quality_flags::QualityFlags;
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::frame_sampler` establishes that — a pixel the warp has no sample for
 /// takes zero for both, and every sample it takes has positive coverage and confidence — and
-/// [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans on
+/// `ingest::frame_check::FrameCheck::quality_pair` holds caller-supplied planes to it, because the combine leans on
 /// it: a sample that clears the coverage floor is guaranteed a positive confidence to divide its
 /// noise by, and `SlotPlanes::noise_variance` a non-zero one too.
-///
-/// [`FrameCheck::quality_pair`]: crate::ingest::frame_check::FrameCheck::quality_pair
 #[derive(Debug, Clone)]
 pub(crate) enum FrameQuality<P> {
     /// No quality planes at all — a frame that was never warped and whose source declared every

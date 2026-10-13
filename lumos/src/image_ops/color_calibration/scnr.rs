@@ -1,6 +1,6 @@
 //! [`Scnr`]: the residual green cast removed from a colour-balanced image.
 
-use crate::image_ops::rgb::Rgb;
+use crate::image::rgb::Rgb;
 
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;

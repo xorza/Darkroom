@@ -5,13 +5,18 @@ use std::path::Path;
 
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::frame_cache::FrameCache;
+use crate::combine::frame_cache::slots::Slots;
+use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::combine::rejection::Rejection;
 use crate::combine::stack;
 use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack::{FrameSet, FrameSource};
 use crate::config_value::ConfigValue;
+use crate::frame::frame_peek::FramePeek;
+use crate::frame_store::stored_layout::StoredLayout;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
+use crate::memory::stage::{Stage, Units};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -304,6 +309,47 @@ impl StackConfig {
             quality: QualityPlanes::STANDARD,
             min_survivors: DEFAULT_MIN_SURVIVORS,
         }
+    }
+
+    /// The stages of a run that decodes `frame_count` frames such as `peek` straight into a combine
+    /// under this configuration, on `workers`: each frame decoded and measured; the normalization;
+    /// the combine, whose rows read every frame as it decoded. A frame may carry a mask its decode
+    /// alone reveals, so the normalization is charged as over a set that shares only some pixels,
+    /// which holds more than one every frame covers.
+    pub(crate) fn stages(&self, peek: FramePeek, frame_count: usize, workers: usize) -> [Stage; 3] {
+        let dimensions = peek.dimensions;
+        let decoded = peek.footprint(workers);
+        let kept = decoded.kept;
+        [
+            Stage {
+                kept,
+                held: 0,
+                in_flight: decoded.transient(),
+                units: Units::Frames,
+            },
+            Stage {
+                kept,
+                held: PlannedNormalization {
+                    frame_count,
+                    dimensions,
+                    slots: Slots::new(peek.mosaic, dimensions.channels()),
+                    normalization: self.normalization,
+                    coverage: SetCoverage::Common,
+                    threads: workers,
+                }
+                .heap_bytes(),
+                in_flight: 0,
+                units: Units::Whole,
+            },
+            Stage {
+                kept,
+                held: self.quality.heap_bytes(dimensions),
+                in_flight: frame_count
+                    * StoredLayout::decoded(dimensions).pixel_bytes()
+                    * dimensions.width(),
+                units: Units::Rows(dimensions.height()),
+            },
+        ]
     }
 
     /// Validate configuration parameters.

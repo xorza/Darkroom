@@ -9,13 +9,13 @@ use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::ccd_noise::CcdNoise;
-use crate::math::noise::mosaic_noise::MosaicNoise;
-use crate::math::noise::mrs_noise::{MrsNoise, PixelGains};
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::ccd_noise::CcdNoise;
+use crate::noise::mosaic_noise::MosaicNoise;
+use crate::noise::mrs_noise::{MrsNoise, PixelGains};
 use imaginarium::Buffer2;
 
 /// Per-frame statistics, per slot: a channel, or a colour of a mosaic, whose one channel holds three

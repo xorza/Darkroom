@@ -375,10 +375,10 @@ pub(crate) mod bench;
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;
     use crate::image::linear_image::LinearImage;
+    use crate::image::quality_map::QualityMap;
     use crate::registration::transform::Transform;
     use crate::registration::transform::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
-    use crate::stack_product::quality_map::QualityMap;
     use crate::stack_product::run_report::RunReport;
 
     impl DrizzleAccumulator {

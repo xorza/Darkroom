@@ -1,4 +1,4 @@
-use crate::image_ops::rgb::Rgb;
+use crate::image::rgb::Rgb;
 use crate::internals::assertions::assert_close;
 
 #[test]

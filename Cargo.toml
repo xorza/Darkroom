@@ -35,7 +35,6 @@ thiserror = { version = "2.0" }
 bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 glam = { version = "0.34", features = ["serde"] }
 strum = { version = "0.28" }
-strum_macros = { version = "0.28" }
 rand = { version = "0.10" }
 tokio = { version = "1.53", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }

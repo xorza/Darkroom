@@ -33,6 +33,7 @@ use crate::image::image_provenance::{
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::quality_map::QualityMap;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
@@ -41,17 +42,16 @@ use crate::internals::assertions::{assert_close, bits};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
-use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::run_memory::RunMemory;
+use crate::noise::mosaic_noise::MosaicNoise;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
-use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// The combine, with no progress reported and no cancel.

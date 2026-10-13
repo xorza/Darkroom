@@ -26,13 +26,13 @@ use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::error::FrameDimensionMismatch;
 use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_map::QualityMap;
 use crate::io::load_context::LoadContext;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
-use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are

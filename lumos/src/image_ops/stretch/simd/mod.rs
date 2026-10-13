@@ -159,7 +159,7 @@ impl<V: F32x8> SplatCurve<V> {
 
 #[cfg(test)]
 mod internals {
-    use crate::image_ops::rgb::Rgb;
+    use crate::image::rgb::Rgb;
     use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
     use crate::image_ops::stretch::{ToneCurve, color_preserve_pixel};
 

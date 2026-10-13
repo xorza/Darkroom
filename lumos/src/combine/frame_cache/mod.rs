@@ -48,6 +48,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::quality_map::QualityMap;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_step::{FrameStep, NoStep, SteppedPaths};
 use crate::ingest::ingest_run::IngestRun;
@@ -59,7 +60,6 @@ use crate::recycle;
 use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
-use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 use crate::stack_product::run_report::RunReport;
 

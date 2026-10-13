@@ -38,15 +38,15 @@
 //! stretch instead ties an object's color to its brightness and burns bright star cores toward
 //! white.
 
-use crate::image_ops::rgb::Rgb;
+use crate::image::rgb::Rgb;
 use arrayvec::ArrayVec;
 use common::IntrospectEnum;
 use rayon::prelude::*;
 
+use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
-use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::math::statistics::median_mad::MedianMad;

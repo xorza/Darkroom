@@ -33,15 +33,9 @@ pub(crate) mod hdr;
 pub(crate) mod local_contrast;
 #[cfg(feature = "ml")]
 pub(crate) mod ml;
-pub(crate) mod rgb;
 pub(crate) mod stretch;
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
-
-/// Samples per rayon work item. Parallelizing per sample drowns a cheap per-pixel op in rayon's
-/// recursive split/join overhead (it dominated SCNR); a coarse block amortizes that while staying
-/// load-balanced and letting the inner loop auto-vectorize.
-pub(crate) const SAMPLES_PER_BLOCK: usize = 8192;

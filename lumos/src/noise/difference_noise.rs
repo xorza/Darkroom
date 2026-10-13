@@ -6,12 +6,12 @@ use arrayvec::ArrayVec;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::binned_samples::BinnedSamples;
-use crate::math::noise::mosaic_sampling::MosaicSampling;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::binned_samples::BinnedSamples;
+use crate::noise::mosaic_sampling::MosaicSampling;
 use imaginarium::Buffer2;
 
 /// The noise standard deviation of each colour of a CFA mosaic, from differences of same-colour
@@ -111,11 +111,11 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::internals::test_rng::TestRng;
-    use crate::math::noise::difference_noise::DifferenceNoise;
-    use crate::math::noise::mosaic_sampling::MosaicSampling;
     use crate::math::size2us::Size2us;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::math::vec2us::Vec2us;
+    use crate::noise::difference_noise::DifferenceNoise;
+    use crate::noise::mosaic_sampling::MosaicSampling;
 
     /// Each colour of a Bayer mosaic reads its own noise, through a gradient the differences
     /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: every row holds 255 pairs of

@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::error::InvalidFlatGain;
-use crate::math::noise::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::noise::gain_bins::GainBins;
 
 /// Pixels between the grid's nodes on each axis.
 ///

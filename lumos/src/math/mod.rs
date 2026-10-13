@@ -4,7 +4,6 @@
 //!
 //! - [`sum`]: Sum, accumulate, and scale operations
 //! - [`statistics`]: Median, MAD, and sigma-clipped statistics
-//! - [`noise`]: White-noise estimators that exclude the signal
 //! - [`wavelet`]: The à trous (starlet) B3-spline transform
 //! - [`lanczos`]: The windowed-sinc resampling kernel
 //! - [`fwhm`]: FWHM/sigma conversion for Gaussian profiles
@@ -31,7 +30,6 @@ pub(crate) mod lanczos;
 pub(crate) mod linear_system;
 pub(crate) mod lm_controller;
 pub(crate) mod lstsq;
-pub(crate) mod noise;
 pub(crate) mod pixel_gaussian;
 pub(crate) mod pixel_quadrature;
 pub(crate) mod statistics;

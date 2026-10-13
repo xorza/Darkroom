@@ -29,9 +29,9 @@ use crate::image::image_provenance::{
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::fits::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
-use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
+use crate::noise::mosaic_noise::MosaicNoise;
 
 fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {
     FrameStats {

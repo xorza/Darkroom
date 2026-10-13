@@ -5,6 +5,9 @@ use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 use crate::combine::stack_config::*;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::pipeline::align_stack_config::AlignStackConfig;
 
 #[test]
@@ -388,4 +391,48 @@ fn validate_invalid_config_returns_exact_errors() {
     for (config, expected) in structural {
         assert_eq!(config.validate(), Err(expected));
     }
+}
+
+/// Three 100 × 100 RGGB mosaics stacked to the image alone, with no normalization. A frame
+/// resides as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a
+/// row over 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and
+/// holds 49 000 more in work; the normalization holds nothing; the combine holds the image and its
+/// flag byte, 5 B a pixel, 50 000 B, and a row reads three frames of 5 B a pixel over 100 pixels,
+/// 1500 B.
+#[test]
+fn stages_charge_the_decode_the_normalization_and_the_combine() {
+    let peek = FramePeek {
+        dimensions: ImageDimensions::new((100, 100), 1),
+        decoder_bytes: 0,
+        mosaic: Some(CfaType::Bayer(CfaPattern::Rggb)),
+    };
+    let config = StackConfig {
+        normalization: Normalization::None,
+        quality: QualityPlanes::IMAGE_ONLY,
+        ..StackConfig::light()
+    };
+    let kept = 50_000;
+    assert_eq!(
+        config.stages(peek, 3, 1),
+        [
+            Stage {
+                kept,
+                held: 0,
+                in_flight: 49_000,
+                units: Units::Frames,
+            },
+            Stage {
+                kept,
+                held: 0,
+                in_flight: 0,
+                units: Units::Whole,
+            },
+            Stage {
+                kept,
+                held: 50_000,
+                in_flight: 1500,
+                units: Units::Rows(100),
+            },
+        ]
+    );
 }

@@ -3,6 +3,7 @@ use std::path::Path;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
+use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame::stackable_image::{ImageParts, StackableImage};
 use crate::frame_store::decode_cache::cache_key::DecoderKind;
@@ -15,9 +16,8 @@ use crate::image::image_provenance::{
 };
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
+use crate::image::rgb::Rgb;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::image_ops::SAMPLES_PER_BLOCK;
-use crate::image_ops::rgb::Rgb;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode as fits_decode;
 use crate::io::input_format::InputFormat;
@@ -285,7 +285,7 @@ impl LinearImage {
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
     /// `map`, then move every pixel to its new intensity with its hue kept
     /// ([`Rgb::with_intensity`]); L takes the new intensity clamped to `[0, 1]`. The shape shared
-    /// by the display enhancers ([`crate::image_ops::hdr`], [`crate::image_ops::local_contrast`]).
+    /// by the display enhancers (`image_ops::hdr`, `image_ops::local_contrast`).
     pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
         let mapped = map(&self.intensity_plane());
         if !self.is_rgb() {

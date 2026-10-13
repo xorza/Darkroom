@@ -32,9 +32,9 @@ use crate::io::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::input_format::InputFormat;
 use crate::io::load_context::LoadContext;
 use crate::io::raw;
-use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::noise::mosaic_noise::MosaicNoise;
 
 use crate::frame::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;

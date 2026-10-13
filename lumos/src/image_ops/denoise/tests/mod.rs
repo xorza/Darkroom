@@ -5,6 +5,7 @@ use imaginarium::Buffer2;
 
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
+use crate::image::quality_map::QualityMap;
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::internals::assertions::assert_close;
 use crate::internals::images::{gray_image, rgb_image};
@@ -13,7 +14,6 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::SkyNoise;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
-use crate::stack_product::quality_map::QualityMap;
 
 /// A flat `bg` with white Gaussian `noise`.
 fn noisy(size: Size2us, bg: f32, noise: SkyNoise) -> Vec<f32> {
