@@ -7,7 +7,7 @@ use glam::DVec2;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, max_deviation};
@@ -51,13 +51,15 @@ impl Rendered {
     /// Five of those, √2 for the distance. Every matched pair is a true one: its offset from the
     /// truth is within the same five σ.
     fn check(&self) {
-        let scene = Scene::random_field(
+        let scene = Scene::scatter(
             self.size,
-            self.stars,
-            (6.0, 16.0),
+            Scatter {
+                count: self.stars,
+                flux: (6.0, 16.0),
+                placement: Placement::Uniform { margin: 16.0 },
+                seed: self.seed,
+            },
             BackgroundField::Uniform { level: 0.1 },
-            16.0,
-            self.seed,
         );
         let reference = render(&scene, &self.camera, &Observation::reference(self.seed));
         let target = render(
@@ -86,14 +88,14 @@ impl Rendered {
         let n = result.num_inliers() as f64;
         let pair_sigma = sigma * 2f64.sqrt();
         let bound = 5.0 * pair_sigma * (2.0 * 7.0 / n).sqrt();
-        let (low, high) = result.matched_stars().iter().fold(
-            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
-            |(low, high), m| {
-                let p = reference_stars[m.indices.reference].pos;
-                (low.min(p), high.max(p))
-            },
+        let deviation = max_deviation(
+            &result.transform(),
+            &self.truth,
+            result
+                .matched_stars()
+                .iter()
+                .map(|m| reference_stars[m.indices.reference].pos),
         );
-        let deviation = max_deviation(&result.transform(), &self.truth, low, high);
         assert!(
             deviation <= bound,
             "{}: the fit strays {deviation} px from the truth over {n} pairs, bound {bound} (σ {sigma})",

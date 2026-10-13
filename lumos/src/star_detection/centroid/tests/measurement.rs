@@ -26,9 +26,9 @@ fn windowed_centroid_limits() {
     let measure = |residual: &Buffer2<f32>, from: DVec2| {
         WindowedCentroid::measure(
             residual,
-            from,
             &grid,
             WindowedInputs {
+                start: from,
                 offset: 0.0,
                 noise: StarNoise {
                     background_sigma: 0.01,
@@ -191,9 +191,9 @@ fn the_windowed_centroid_reports_its_propagated_noise() {
 
     let measured = WindowedCentroid::measure(
         &Measured::flat(&noisy, 0.1, noise).residual,
-        centre,
         &grid,
         WindowedInputs {
+            start: centre,
             offset: 0.0,
             noise: StarNoise {
                 background_sigma: f64::from(noise),
@@ -427,8 +427,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
     let sky_at_fit = StampBackground::measure(
-        &measured.residual,
-        None,
+        MaskedPlane::from(&measured.residual),
         star.pos,
         MeasureGrid::new(4.0).annulus,
     )
@@ -609,11 +608,26 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
         masked.set_at(Vec2us::new(x, 32), true);
         filled[(x, 32)] = 0.02;
     }
-    let all = StampBackground::measure(&star.residual, None, centre, annulus).unwrap();
-    let without = StampBackground::measure(&filled, Some(&masked), centre, annulus).unwrap();
+    let all = StampBackground::measure(MaskedPlane::from(&star.residual), centre, annulus).unwrap();
+    let without = StampBackground::measure(
+        MaskedPlane {
+            pixels: &filled,
+            mask: Some(&masked),
+        },
+        centre,
+        annulus,
+    )
+    .unwrap();
     assert_eq!(without.samples, all.samples - right.count());
-    let unfilled =
-        StampBackground::measure(&star.residual, Some(&masked), centre, annulus).unwrap();
+    let unfilled = StampBackground::measure(
+        MaskedPlane {
+            pixels: &star.residual,
+            mask: Some(&masked),
+        },
+        centre,
+        annulus,
+    )
+    .unwrap();
     assert_eq!(
         (without.offset, without.noise),
         (unfilled.offset, unfilled.noise)

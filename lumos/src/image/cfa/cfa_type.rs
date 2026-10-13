@@ -27,6 +27,16 @@ pub enum CfaType {
     XTrans(XTransPattern),
 }
 
+/// What LibRaw reports of a sensor's colour filters: its `filters` word, its count of `colors`,
+/// the letters `cdesc` names them by, and the `xtrans` layout it keeps apart.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LibrawFilters {
+    pub(crate) filters: u32,
+    pub(crate) colors: i32,
+    pub(crate) cdesc: [u8; 4],
+    pub(crate) xtrans: [[u8; 6]; 6],
+}
+
 impl CfaType {
     /// The colour slot of the photosite at `pos`: its
     /// [`CfaColour::index`](crate::image::cfa::cfa_colour::CfaColour::index) under a mosaic, and 0,
@@ -101,12 +111,13 @@ impl CfaType {
     /// CMYG laid out in a Bayer word's phases would otherwise demosaic as RGB with the wrong
     /// filters. An X-Trans sensor whose layout is not one is an error: the file is corrupt, not
     /// exotic.
-    pub(crate) fn from_libraw(
-        filters: u32,
-        colors: i32,
-        cdesc: [u8; 4],
-        xtrans: [[u8; 6]; 6],
-    ) -> Result<Option<Self>, XTransPatternError> {
+    pub(crate) fn from_libraw(libraw: &LibrawFilters) -> Result<Option<Self>, XTransPatternError> {
+        let LibrawFilters {
+            filters,
+            colors,
+            cdesc,
+            xtrans,
+        } = *libraw;
         if colors == 1 {
             return Ok(Some(Self::Mono));
         }

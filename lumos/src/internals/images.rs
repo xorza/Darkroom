@@ -15,15 +15,7 @@ pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
     LinearImage::from(Buffer2::new(size.width, size.height, pixels))
 }
 
-/// Three-channel image from planar values, one `Vec` per channel.
-pub(crate) fn rgb_image(
-    size: Size2us,
-    red: Vec<f32>,
-    green: Vec<f32>,
-    blue: Vec<f32>,
-) -> LinearImage {
-    LinearImage::from_planar_channels(
-        ImageDimensions::new((size.width, size.height), 3),
-        [red, green, blue],
-    )
+/// Three-channel image from planar values, one `Vec` per channel: red, green and blue.
+pub(crate) fn rgb_image(size: Size2us, channels: [Vec<f32>; 3]) -> LinearImage {
+    LinearImage::from_planar_channels(ImageDimensions::new((size.width, size.height), 3), channels)
 }

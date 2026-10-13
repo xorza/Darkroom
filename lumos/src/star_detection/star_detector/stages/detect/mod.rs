@@ -39,16 +39,30 @@ struct ExtractionResult {
     deblended_components: usize,
 }
 
+/// The plane a detection runs on, and its pixels with no data, which join no component.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DetectionInput<'a> {
+    pub(crate) plane: &'a DetectionPlane,
+    pub(crate) no_data: Option<&'a BitBuffer2>,
+}
+
+/// A detection plane, and the connected components labelled on its threshold mask.
+#[derive(Debug, Clone, Copy)]
+struct LabelledPlane<'a> {
+    plane: &'a DetectionPlane,
+    labels: &'a LabelMap,
+}
+
 impl DetectResult {
     /// Detect star candidate regions on `plane`: threshold it against its own noise, leaving out
     /// the pixels with no data, label the connected components, deblend them, and keep the regions
     /// whose size and place the configuration allows.
     pub(crate) fn from_plane(
-        plane: &DetectionPlane,
-        no_data: Option<&BitBuffer2>,
+        input: DetectionInput<'_>,
         config: &ExtractionConfig,
         pool: &mut DetectionResources,
     ) -> Self {
+        let DetectionInput { plane, no_data } = input;
         let mut mask = pool.acquire_bit();
         plane.threshold(config.sigma_threshold, &mut mask);
         // A pixel with no data holds a fill, not a measurement, and must not join a component.
@@ -59,7 +73,11 @@ impl DetectResult {
 
         let label_map = pool.labeler.label(&mask, config.connectivity);
         let connected_components = label_map.num_labels();
-        let extraction = extract_candidates(plane, label_map, config, &pool.deblend);
+        let labelled = LabelledPlane {
+            plane,
+            labels: label_map,
+        };
+        let extraction = extract_candidates(labelled, config, &pool.deblend);
 
         Self {
             regions: extraction.regions,
@@ -73,11 +91,14 @@ impl DetectResult {
 /// Deblend every labelled component on `plane`, then keep the regions within the configured area
 /// and clear of the edge margin.
 fn extract_candidates(
-    plane: &DetectionPlane,
-    label_map: &LabelMap,
+    labelled: LabelledPlane<'_>,
     config: &ExtractionConfig,
     deblend_buffers: &ScratchPool<DeblendBuffers>,
 ) -> ExtractionResult {
+    let LabelledPlane {
+        plane,
+        labels: label_map,
+    } = labelled;
     let values = &plane.values;
     let size = Size2us::new(values.width(), values.height());
     // `ExtractionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know
@@ -128,15 +149,11 @@ fn extract_candidates(
                         min_separation: config.deblend_min_separation,
                         min_area: config.min_area,
                         connectivity: config.connectivity,
-                    }
-                    .deblend(
-                        &component,
-                        plane
+                        floor: plane
                             .noise
                             .threshold_at(component.peak().pos, config.sigma_threshold),
-                        &mut buffers,
-                        &mut acc.regions,
-                    ),
+                    }
+                    .deblend(&component, &mut buffers, &mut acc.regions),
                     Deblend::LocalMaxima { min_prominence } => LocalMaximaParams {
                         min_separation: config.deblend_min_separation,
                         min_prominence,
@@ -180,7 +197,7 @@ pub(crate) mod internals {
     use crate::star_detection::detection_plane::DetectionPlane;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
-    use crate::star_detection::star_detector::stages::detect::DetectResult;
+    use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
     use imaginarium::Buffer2;
 
     /// Detect stars in `residual` taken as the detection plane, its noise `sky`, with a throwaway
@@ -209,7 +226,14 @@ pub(crate) mod internals {
                 floor: sky.floor,
             },
         };
-        DetectResult::from_plane(&plane, None, config, &mut pool)
+        DetectResult::from_plane(
+            DetectionInput {
+                plane: &plane,
+                no_data: None,
+            },
+            config,
+            &mut pool,
+        )
     }
 }
 

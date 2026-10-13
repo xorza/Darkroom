@@ -16,7 +16,7 @@ pub(crate) mod spline;
 pub(crate) mod tile_stats;
 
 use crate::background_mesh::mesh_axis::MeshAxis;
-use crate::background_mesh::spline::solve_natural_spline_d2;
+use crate::background_mesh::spline::natural_spline::NaturalSpline;
 use crate::background_mesh::tile_stats::{
     TileComponent, TileD2y, TileInput, TileScratch, TileStats,
 };
@@ -303,7 +303,11 @@ impl BackgroundMesh {
                 for (ty, value) in spline_values.iter_mut().enumerate() {
                     *value = stats[(tx, ty)].get(component);
                 }
-                solve_natural_spline_d2(spline_values, centers_y, spline_d2, spline_scratch);
+                NaturalSpline {
+                    values: spline_values,
+                    centers: centers_y,
+                }
+                .second_derivatives(spline_d2, spline_scratch);
                 for (ty, &d) in spline_d2.iter().enumerate() {
                     *d2y[ty * tiles_x + tx].get_mut(component) = d;
                 }

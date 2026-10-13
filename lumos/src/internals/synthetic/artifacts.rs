@@ -4,68 +4,73 @@
 //! - Cosmic rays
 //! - CFA (Bayer) pattern artifacts
 
+use std::ops::Range;
+
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_colour::CfaColour;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 
-/// Add random cosmic ray hits to the image.
-///
-/// Returns the positions of added cosmic rays for verification.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "synthetic fixtures are small images with non-negative coordinates"
-)]
-pub(crate) fn add_cosmic_rays(
-    pixels: &mut [f32],
-    width: usize,
-    count: usize,
-    amplitude_range: (f32, f32),
-    seed: u64,
-) -> Vec<Vec2us> {
-    let height = pixels.len() / width;
-    let mut positions = Vec::with_capacity(count);
+/// `count` random cosmic-ray hits, each of an amplitude drawn uniformly from `amplitude`, placed
+/// by the generator `seed` starts.
+#[derive(Debug, Clone)]
+pub(crate) struct CosmicRays {
+    pub(crate) count: usize,
+    pub(crate) amplitude: Range<f32>,
+    pub(crate) seed: u64,
+}
 
-    let mut rng = TestRng::new(seed);
+impl CosmicRays {
+    /// Add the hits to `pixels`; where each landed, for verification.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
+    pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) -> Vec<Vec2us> {
+        let Self {
+            count,
+            amplitude,
+            seed,
+        } = self;
+        let (width, height) = (pixels.width(), pixels.height());
+        let mut positions = Vec::with_capacity(count);
 
-    for _ in 0..count {
-        let x = (rng.next_f32() * width as f32) as usize;
-        let y = (rng.next_f32() * height as f32) as usize;
-        let amp = amplitude_range.0 + rng.next_f32() * (amplitude_range.1 - amplitude_range.0);
+        let mut rng = TestRng::new(seed);
 
-        // Single pixel hit (most cosmic rays)
-        pixels[y * width + x] += amp;
+        for _ in 0..count {
+            let x = (rng.next_f32() * width as f32) as usize;
+            let y = (rng.next_f32() * height as f32) as usize;
+            let amp = amplitude.start + rng.next_f32() * (amplitude.end - amplitude.start);
 
-        // Some cosmic rays have slight bleeding
-        if rng.next_f32() > 0.7 {
-            let bleed = amp * 0.15;
-            if x > 0 {
-                pixels[y * width + x - 1] += bleed;
+            // Single pixel hit (most cosmic rays)
+            pixels[y * width + x] += amp;
+
+            // Some cosmic rays have slight bleeding
+            if rng.next_f32() > 0.7 {
+                let bleed = amp * 0.15;
+                if x > 0 {
+                    pixels[y * width + x - 1] += bleed;
+                }
+                if x < width - 1 {
+                    pixels[y * width + x + 1] += bleed;
+                }
             }
-            if x < width - 1 {
-                pixels[y * width + x + 1] += bleed;
-            }
+
+            positions.push(Vec2us::new(x, y));
         }
 
-        positions.push(Vec2us::new(x, y));
+        positions
     }
-
-    positions
 }
 
 /// Add CFA (Bayer) pattern artifacts.
 ///
 /// This simulates the checkerboard pattern visible in debayered images
 /// when color channels have different sensitivities.
-pub(crate) fn add_bayer_pattern(
-    pixels: &mut [f32],
-    width: usize,
-    strength: f32,
-    pattern: CfaPattern,
-) {
-    let height = pixels.len() / width;
-
-    // Apply slight variations to simulate different color channel gains
+pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, pattern: CfaPattern) {
+    let (width, height) = (pixels.width(), pixels.height());
     let r_factor = 1.0 + strength * 0.5;
     let b_factor = 1.0 - strength * 0.3;
 
@@ -89,11 +94,14 @@ mod tests {
 
     #[test]
     fn cosmic_rays_count() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.0f32; width * height];
+        let mut pixels = Buffer2::new_default(64, 64);
 
-        let positions = add_cosmic_rays(&mut pixels, width, 10, (0.5, 1.0), 12345);
+        let positions = CosmicRays {
+            count: 10,
+            amplitude: 0.5..1.0,
+            seed: 12345,
+        }
+        .add_to(&mut pixels);
 
         assert_eq!(positions.len(), 10);
 

@@ -7,7 +7,7 @@ use crate::image::pixel_flags::Reach;
 use crate::math::floor_i32::FloorI32;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
 use crate::registration::resample::warp_params::InterpolationMethod;
 use crate::registration::transform::TransformType;
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -253,9 +253,10 @@ impl WarpKernel {
         distance.lanes_lt(isa.splat_f32(self.reach)).keep(weight)
     }
 
-    /// The taps of the sample at `cell + frac` and their weights, into `axis`.
+    /// The taps of the sample at `at` and their weights, into `axis`.
     #[inline(always)]
-    pub(crate) fn axis<S: Isa>(&self, isa: S, cell: i32, frac: f32, axis: &mut TapAxis) {
+    pub(crate) fn axis<S: Isa>(&self, isa: S, at: AxisPosition, axis: &mut TapAxis) {
+        let AxisPosition { cell, frac } = at;
         let TapRange { first, count } = self.taps(frac);
         axis.reset(cell + first, count);
         for (chunk, offset) in (0..count)

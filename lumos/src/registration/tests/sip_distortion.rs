@@ -7,7 +7,7 @@
 use glam::DVec2;
 
 use crate::internals::synthetic::distortion::RadialField;
-use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
+use crate::internals::synthetic::transforms::{StarScatter, positions_to_stars};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers;
@@ -21,7 +21,12 @@ use crate::registration::transform::{Transform, TransformType};
 /// still leaves 0.22 px on them.
 #[test]
 fn register_with_sip_recovers_barrel_distortion() {
-    let ref_pos = generate_random_positions(120, 1024.0, 1024.0, 42);
+    let ref_pos = StarScatter {
+        count: 120,
+        side: 1024.0,
+        seed: 42,
+    }
+    .positions();
     let field = RadialField {
         transform: Transform::translation(DVec2::new(7.0, -4.0)),
         ..RadialField::new(DVec2::new(512.0, 512.0), 1e-8)

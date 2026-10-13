@@ -46,20 +46,32 @@ impl PsfModel {
         }
     }
 
-    /// Render a source of total `flux` centered at (`x`, `y`) into `pixels`, scaling the PSF
-    /// width by `seeing_scale` (1.0 == nominal). Amplitudes are normalized so the rendered
-    /// profile integrates to `flux` (flux is conserved up to the kernel's radius truncation).
-    pub(crate) fn render(
-        &self,
-        pixels: &mut Buffer2<f32>,
-        x: f32,
-        y: f32,
-        flux: f32,
-        seeing_scale: f32,
-    ) {
+    /// This PSF under seeing that scales its width by `scale` (1.0 == nominal).
+    pub(crate) const fn with_seeing(self, scale: f32) -> Self {
+        match self {
+            Self::Gaussian {
+                fwhm,
+                eccentricity,
+                angle,
+            } => Self::Gaussian {
+                fwhm: fwhm * scale,
+                eccentricity,
+                angle,
+            },
+            Self::Moffat { fwhm, beta } => Self::Moffat {
+                fwhm: fwhm * scale,
+                beta,
+            },
+        }
+    }
+
+    /// Render a source of total `flux` centred at `centre` into `pixels`. Amplitudes are
+    /// normalized so the rendered profile integrates to `flux` (flux is conserved up to the
+    /// kernel's radius truncation).
+    pub(crate) fn render(&self, pixels: &mut Buffer2<f32>, centre: Vec2, flux: f32) {
         let (profile, amplitude) = match *self {
             Self::Moffat { fwhm, beta } => {
-                let alpha = fwhm::to_alpha(fwhm * seeing_scale, beta);
+                let alpha = fwhm::to_alpha(fwhm, beta);
                 (
                     StarProfile::Moffat { alpha, beta },
                     flux * (beta - 1.0) / (PI * alpha * alpha),
@@ -71,7 +83,7 @@ impl PsfModel {
                 angle,
             } => {
                 // σ_maj·σ_min == σ² so total flux is independent of eccentricity.
-                let sigma = fwhm::to_sigma(fwhm * seeing_scale);
+                let sigma = fwhm::to_sigma(fwhm);
                 let one_minus_e2 = 1.0 - eccentricity * eccentricity;
                 let sigma_major = sigma / one_minus_e2.sqrt().sqrt();
                 let sigma_minor = sigma_major * one_minus_e2.sqrt();
@@ -85,7 +97,7 @@ impl PsfModel {
                 )
             }
         };
-        SyntheticStar::new(Vec2::new(x, y), amplitude, profile).add_to(pixels);
+        SyntheticStar::new(centre, amplitude, profile).add_to(pixels);
     }
 }
 
@@ -111,15 +123,16 @@ impl Default for FlatField {
 impl FlatField {
     /// The response of every photosite of a `size` sensor behind `cfa_type`'s filters: its
     /// colour's gain times the vignette.
-    pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Vec<f32> {
-        (0..size.pixel_count())
+    pub(crate) fn render(&self, size: Size2us, cfa_type: &CfaType) -> Buffer2<f32> {
+        let pixels = (0..size.pixel_count())
             .map(|index| {
                 let pos = size.point_of(index);
                 let gain = self.colour_gain[cfa_type.color_at(pos)];
                 self.vignette
                     .map_or(gain, |vignette| gain * vignette.at(size, pos.x, pos.y))
             })
-            .collect()
+            .collect();
+        Buffer2::new(size.width, size.height, pixels)
     }
 }
 

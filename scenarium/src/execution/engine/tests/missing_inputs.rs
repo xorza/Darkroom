@@ -83,8 +83,8 @@ async fn optional_bind_to_gated_upstream_is_gated() {
         // mult[0] (required) gets a real value; mult[1] is the only bind to
         // the gated sum and is *optional*, so this exercises optional-bind
         // propagation specifically. mult and print end up gated.
-        g.wire("get_b", 0, "mult", 0);
-        g.wire("sum", 0, "mult", 1);
+        g.wire("get_b", "mult");
+        g.wire("sum", ("mult", 1));
         g.edit_func("mult", |func| func.inputs[1].required = false);
     });
 

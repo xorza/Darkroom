@@ -18,7 +18,6 @@ use crate::io::error::{FitsRefusal, ImageError};
 use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::plan::FitsDecodePlan;
-use crate::io::fits::decode::selection;
 
 use crate::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
@@ -72,7 +71,7 @@ impl HduDecode<'_> {
             let report = sections
                 .finish_checksum()
                 .map_err(|source| ImageError::fits(path, source))?;
-            selection::judge_checksum(report, index, path, policy)
+            policy.judge(report, index, path)
         })
     }
 
@@ -328,13 +327,12 @@ impl HduDecode<'_> {
             let ChunkScan {
                 nulls: chunk_nulls,
                 scan: chunk_scan,
-            } = convert_and_scan(
-                samples,
-                section.scaling(),
-                plan.sample_scale.divisor,
-                &mut output[start..start + expected_chunk],
-                &context.cancel,
-            )
+            } = Conversion {
+                scaling: section.scaling(),
+                divisor: f64::from(plan.sample_scale.divisor),
+                cancel: &context.cancel,
+            }
+            .scan(samples, &mut output[start..start + expected_chunk])
             .map_err(|Cancelled| ImageError::cancelled(path))?;
             scan = scan.merge(chunk_scan);
             // Each chunk locates its nulls in its own index space; the plane's is what a caller can
@@ -489,53 +487,46 @@ impl SampleScan {
     }
 }
 
-/// Convert a section of stored samples into the pipeline's domain in `out`, locate the FITS nulls
-/// it carries, and scan it for its [`SampleScan`], in one parallel pass.
-///
-/// Each sample is `(BZERO + BSCALE·raw) / divisor` in `f64`, narrowed to `f32` once: an
-/// intermediate `f32` would round the physical value and then the quotient. The quotient divides
-/// rather than multiplying by a reciprocal, which `f64` does not hold exactly for a span like
-/// 65535. A NaN or ±inf survives the division, and a finite sample the division pushes past
-/// `f32::MAX` narrows to an infinity, so the finite test after it catches nulls and overflows both.
-///
-/// Each work item runs three plain loops over its samples, which vectorize, rather than one loop
-/// whose branches keep it scalar: the stored integers' OR, the conversion, and the finite scan of
-/// what it wrote, still in cache.
-fn convert_and_scan(
-    samples: FitsView<'_>,
-    scaling: Scaling,
-    divisor: f32,
-    out: &mut [f32],
-    cancel: &CancelToken,
-) -> Result<ChunkScan, Cancelled> {
-    let convert = Conversion {
-        scaling,
-        divisor: f64::from(divisor),
-    };
-    match samples {
-        FitsView::U8(stored) => convert.integers(stored, out, cancel),
-        FitsView::I16(stored) => convert.integers(stored, out, cancel),
-        FitsView::I32(stored) => convert.integers(stored, out, cancel),
-        FitsView::I64(stored) => convert.integers(stored, out, cancel),
-        FitsView::F32(stored) => convert.floats(stored, out, cancel),
-        FitsView::F64(stored) => convert.floats(stored, out, cancel),
-    }
-}
-
-/// The scaling and the divisor one section converts by.
+/// The scaling and the divisor one section converts by, and the token that stops it between work
+/// items.
 #[derive(Debug, Clone, Copy)]
-struct Conversion {
+struct Conversion<'a> {
     scaling: Scaling,
     divisor: f64,
+    cancel: &'a CancelToken,
 }
 
-impl Conversion {
+impl Conversion<'_> {
+    /// Convert a section of stored samples into the pipeline's domain in `out`, locate the FITS
+    /// nulls it carries, and scan it for its [`SampleScan`], in one parallel pass.
+    ///
+    /// Each sample is `(BZERO + BSCALE·raw) / divisor` in `f64`, narrowed to `f32` once: an
+    /// intermediate `f32` would round the physical value and then the quotient. The quotient
+    /// divides rather than multiplying by a reciprocal, which `f64` does not hold exactly for a
+    /// span like
+    /// 65535. A NaN or ±inf survives the division, and a finite sample the division pushes past
+    ///        `f32::MAX` narrows to an infinity, so the finite test after it catches nulls and
+    ///        overflows both.
+    ///
+    /// Each work item runs three plain loops over its samples, which vectorize, rather than one
+    /// loop whose branches keep it scalar: the stored integers' OR, the conversion, and the finite
+    /// scan of what it wrote, still in cache.
+    fn scan(self, samples: FitsView<'_>, out: &mut [f32]) -> Result<ChunkScan, Cancelled> {
+        match samples {
+            FitsView::U8(stored) => self.integers(stored, out),
+            FitsView::I16(stored) => self.integers(stored, out),
+            FitsView::I32(stored) => self.integers(stored, out),
+            FitsView::I64(stored) => self.integers(stored, out),
+            FitsView::F32(stored) => self.floats(stored, out),
+            FitsView::F64(stored) => self.floats(stored, out),
+        }
+    }
+
     /// Integer samples, the `BLANK` sentinel a NaN and no part of the stored integers' OR.
     fn integers<T: Copy + Sync + Into<i64>>(
         self,
         stored: &[T],
         out: &mut [f32],
-        cancel: &CancelToken,
     ) -> Result<ChunkScan, Cancelled> {
         let Scaling {
             bscale,
@@ -545,7 +536,7 @@ impl Conversion {
         // A sentinel no stored value matches when the HDU declares none.
         let blank = blank.unwrap_or(i64::MIN);
         let divisor = self.divisor;
-        self.each_chunk(stored, out, cancel, |stored, out| {
+        self.each_chunk(stored, out, |stored, out| {
             let mut raw_bits = 0u64;
             for &raw in stored {
                 let raw: i64 = raw.into();
@@ -567,11 +558,10 @@ impl Conversion {
         self,
         stored: &[T],
         out: &mut [f32],
-        cancel: &CancelToken,
     ) -> Result<ChunkScan, Cancelled> {
         let Scaling { bscale, bzero, .. } = self.scaling;
         let divisor = self.divisor;
-        self.each_chunk(stored, out, cancel, |stored, out| {
+        self.each_chunk(stored, out, |stored, out| {
             for (pixel, &raw) in out.iter_mut().zip(stored) {
                 *pixel = ((bzero + bscale * raw.into()) / divisor) as f32;
             }
@@ -585,9 +575,9 @@ impl Conversion {
         self,
         stored: &[T],
         out: &mut [f32],
-        cancel: &CancelToken,
         convert: impl Fn(&[T], &mut [f32]) -> u64 + Sync,
     ) -> Result<ChunkScan, Cancelled> {
+        let cancel = self.cancel;
         Cancelled::check(cancel)?;
         debug_assert_eq!(stored.len(), out.len());
         out.par_chunks_mut(CHUNK_SAMPLES)

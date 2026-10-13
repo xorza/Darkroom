@@ -24,7 +24,7 @@ async fn unused_output_marked_skip() {
     });
     g.add("sink", |n| n.sink().input(DataType::Int));
     // Consume only output 0; output 1 has no consumer.
-    g.wire("split", 0, "sink", 0);
+    g.wire("split", "sink");
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
@@ -77,7 +77,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
         }
     };
     g.add("sink_a", sink(Arc::clone(&received)));
-    g.wire("split", 0, "sink_a", 0);
+    g.wire("split", "sink_a");
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
@@ -86,7 +86,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     // cached value does not cover the new demand, so `split` must re-run.
     e.edit(|g| {
         g.add("sink_b", sink(Arc::clone(&received)));
-        g.wire("split", 1, "sink_b", 0);
+        g.wire(("split", 1), "sink_b");
     });
     e.run_sinks().await;
 

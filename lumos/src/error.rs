@@ -35,7 +35,8 @@ impl FrameDimensionMismatch {
     }
 
     /// `Ok(())` when `actual` matches, else the rejection of frame `index`: the Result-returning
-    /// counterpart to `assert_eq!` for frame geometry, in [`InvalidConfigField::check`]'s shape.
+    /// counterpart to `assert_eq!` for frame geometry, in
+    /// [`ConfigValue::must_be`](crate::config_value::ConfigValue::must_be)'s shape.
     pub(crate) fn check(
         index: usize,
         expected: ImageDimensions,
@@ -79,63 +80,6 @@ pub struct InvalidConfigField {
     pub bound: Option<f64>,
 }
 
-impl InvalidConfigField {
-    /// `Ok(())` when `accepted` holds, else the rejection of `value` for `field`.
-    ///
-    /// The Result-returning counterpart to `assert!` for config validation. `expected` completes
-    /// the sentence "`<field>` must be …".
-    pub(crate) fn check(
-        accepted: bool,
-        field: &'static str,
-        expected: &'static str,
-        value: impl Into<f64>,
-    ) -> Result<(), Self> {
-        if accepted {
-            Ok(())
-        } else {
-            Err(Self {
-                field,
-                expected,
-                value: value.into(),
-                bound: None,
-            })
-        }
-    }
-
-    /// [`check`](Self::check) for a float field, whose bound is almost always "finite, and …".
-    /// `accepted` states only that second half; finiteness is enforced here so no call site
-    /// repeats it.
-    pub(crate) fn finite(
-        field: &'static str,
-        expected: &'static str,
-        value: impl Into<f64>,
-        accepted: impl FnOnce(f64) -> bool,
-    ) -> Result<(), Self> {
-        let value = value.into();
-        Self::check(value.is_finite() && accepted(value), field, expected, value)
-    }
-
-    /// [`finite`](Self::finite) for a field with no bound beyond being a real number.
-    pub(crate) fn finite_only(field: &'static str, value: impl Into<f64>) -> Result<(), Self> {
-        Self::finite(field, "finite", value, |_| true)
-    }
-
-    /// [`check`](Self::check) for a bound that is itself a config value — `expected` names the
-    /// other field and `bound` carries what it held, so the message can state both.
-    pub(crate) fn check_against(
-        accepted: bool,
-        field: &'static str,
-        expected: &'static str,
-        value: impl Into<f64>,
-        bound: impl Into<f64>,
-    ) -> Result<(), Self> {
-        Self::check(accepted, field, expected, value).map_err(|invalid| Self {
-            bound: Some(bound.into()),
-            ..invalid
-        })
-    }
-}
-
 /// Returned by a decode or demosaic stage that saw its cancel token set. A marker only: the
 /// partial buffers are dropped, and the caller reports the cancellation as its own error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,7 +106,7 @@ impl Cancelled {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+    use crate::error::FrameDimensionMismatch;
     use crate::image::image_dimensions::ImageDimensions;
 
     #[test]
@@ -181,40 +125,6 @@ mod tests {
         assert!(
             FrameDimensionMismatch::check(0, expected, ImageDimensions::new((100, 100), 1))
                 .is_err()
-        );
-    }
-
-    #[test]
-    fn a_rejection_states_the_field_the_range_and_the_value() {
-        let plain =
-            InvalidConfigField::check(false, "sigma_threshold", "finite and positive", 0.0f32)
-                .unwrap_err();
-        assert_eq!(
-            plain.to_string(),
-            "sigma_threshold must be finite and positive, got 0"
-        );
-        assert_eq!(plain.bound, None);
-
-        // A count widens exactly, and prints without a fractional part.
-        let counted = InvalidConfigField::check(false, "tile_size", "between 16 and 256", 300u32)
-            .unwrap_err();
-        assert_eq!(
-            counted.to_string(),
-            "tile_size must be between 16 and 256, got 300"
-        );
-
-        let against =
-            InvalidConfigField::check_against(false, "max_area", "at least min_area", 3u32, 5u32)
-                .unwrap_err();
-        assert_eq!(
-            against.to_string(),
-            "max_area must be at least min_area (5), got 3"
-        );
-        assert_eq!(against.bound, Some(5.0));
-
-        assert_eq!(
-            InvalidConfigField::check(true, "sigma_threshold", "finite and positive", f32::NAN),
-            Ok(())
         );
     }
 }

@@ -2,7 +2,7 @@ use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::observe::*;
-use crate::internals::synthetic::scene::BackgroundField;
+use crate::internals::synthetic::scene::{BackgroundField, TrueSource};
 use crate::math::size2us::Size2us;
 
 /// Where the brightest pixel is.
@@ -29,8 +29,10 @@ fn ideal_render_equals_clean() {
     // Dim scene so the clean peak stays below saturation (no clamp difference).
     let scene = Scene::single(
         Size2us::new(64, 64),
-        DVec2::new(32.0, 32.0),
-        2.0,
+        TrueSource {
+            pos: DVec2::new(32.0, 32.0),
+            flux: 2.0,
+        },
         BackgroundField::Uniform { level: 0.1 },
     );
     let frame = render(&scene, &Camera::ideal(3.0), &Observation::reference(1));
@@ -46,8 +48,10 @@ fn ideal_render_equals_clean() {
 fn source_lands_at_transformed_position() {
     let scene = Scene::single(
         Size2us::new(64, 64),
-        DVec2::new(20.0, 20.0),
-        5.0,
+        TrueSource {
+            pos: DVec2::new(20.0, 20.0),
+            flux: 5.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let obs = Observation {
@@ -64,8 +68,10 @@ fn source_lands_at_transformed_position() {
 fn flux_conserved_in_clean() {
     let scene = Scene::single(
         Size2us::new(81, 81),
-        DVec2::new(40.0, 40.0),
-        50.0,
+        TrueSource {
+            pos: DVec2::new(40.0, 40.0),
+            flux: 50.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let frame = render(&scene, &Camera::ideal(4.0), &Observation::reference(1));
@@ -126,8 +132,10 @@ fn noise_raises_variance_but_keeps_mean() {
 fn dither_shifts_peak() {
     let scene = Scene::single(
         Size2us::new(64, 64),
-        DVec2::new(20.0, 32.0),
-        5.0,
+        TrueSource {
+            pos: DVec2::new(20.0, 32.0),
+            flux: 5.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let frame = |dx: f64| {
@@ -177,8 +185,10 @@ fn saturation_clamps_bright_source() {
     // A flux-20 source at fwhm 3 has a clean peak ~2.0; the well clips it at `saturation`.
     let scene = Scene::single(
         Size2us::new(64, 64),
-        DVec2::new(32.0, 32.0),
-        20.0,
+        TrueSource {
+            pos: DVec2::new(32.0, 32.0),
+            flux: 20.0,
+        },
         BackgroundField::Uniform { level: 0.1 },
     );
     let camera = Camera {

@@ -20,6 +20,7 @@ use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
 use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -113,7 +114,7 @@ impl ExtractBackground {
         let samples = collect_samples(plane, self.tile_size, workspace);
         let terms = Monomial::up_to(effective_degree(samples.len(), self.degree));
         let polynomial = self.fit_surface(&samples, &terms)?;
-        let surface = Surface::new(&polynomial, Size2us::new(plane.width(), plane.height()));
+        let surface = Surface::new(&polynomial, Size2us::from(plane));
         let mean = surface.mean();
         if self.mode == BackgroundMode::Divide && mean <= 0.0 {
             return Err(OpError::NonPositiveBackground { mean });
@@ -180,30 +181,17 @@ impl ExtractBackground {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            (1..=4).contains(&self.degree),
-            "background extraction degree",
-            "between 1 and 4",
-            self.degree as f64,
-        )?;
-        InvalidConfigField::check(
-            self.tile_size >= 8,
-            "background extraction tile_size",
-            "at least 8",
-            self.tile_size as f64,
-        )?;
-        InvalidConfigField::finite(
+        ConfigValue::count("background extraction degree", self.degree)
+            .must_be("between 1 and 4", (1..=4).contains(&self.degree))?;
+        ConfigValue::count("background extraction tile_size", self.tile_size)
+            .must_be("at least 8", self.tile_size >= 8)?;
+        ConfigValue::new(
             "background extraction rejection_sigma",
-            "finite and positive",
             self.rejection_sigma,
-            |value| value > 0.0,
-        )?;
-        InvalidConfigField::finite(
-            "background extraction divide_floor",
-            "finite and in (0, 1]",
-            self.divide_floor,
-            |value| value > 0.0 && value <= 1.0,
         )
+        .finite_and("finite and positive", |value| value > 0.0)?;
+        ConfigValue::new("background extraction divide_floor", self.divide_floor)
+            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)
     }
 }
 
@@ -227,7 +215,7 @@ fn collect_samples(
     tile: usize,
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
-    let size = Size2us::new(channel.width(), channel.height());
+    let size = Size2us::from(channel);
     let grid = workspace.tile_stats(
         channel,
         None,

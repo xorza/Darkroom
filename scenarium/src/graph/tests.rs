@@ -136,7 +136,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
             n.output(DataType::Int)
         });
         g.instance("consumer", "f");
-        g.wire("f", 0, "consumer", 0);
+        g.wire("f", "consumer");
         g.graph.validate_with(&g.library)
     };
 
@@ -164,8 +164,8 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
     g.add("int_src", |n| n.pure().output(DataType::Int));
     g.add("str_sink", |n| n.sink().input(DataType::String));
     g.add("int_sink", |n| n.sink().input(DataType::Int));
-    g.wire("int_src", 0, "str_sink", 0);
-    g.wire("int_src", 0, "int_sink", 0);
+    g.wire("int_src", "str_sink");
+    g.wire("int_src", "int_sink");
 
     assert!(g.graph.validate_with(&g.library).is_ok());
     let compiled = g.compile();
@@ -225,8 +225,8 @@ fn resolve_output_type_follows_passthrough_chain() {
     g.add("src", |n| n.pure().output(DataType::Int));
     g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
-    g.wire("src", 0, "pass1", 0);
-    g.wire("pass1", 0, "pass2", 0);
+    g.wire("src", "pass1");
+    g.wire("pass1", "pass2");
 
     // The producer reports its own declared type.
     assert_eq!(g.output_type("src", 0), DataType::Int);
@@ -289,9 +289,9 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
     g.add("sink", |n| n.sink().input(DataType::Float));
-    g.wire("float_src", 0, "pass1", 0);
-    g.wire("pass1", 0, "pass2", 0);
-    g.wire("pass2", 0, "sink", 0);
+    g.wire("float_src", "pass1");
+    g.wire("pass1", "pass2");
+    g.wire("pass2", "sink");
 
     // The valid Float chain binds the sink to its passthrough producer
     // (passthroughs are real func nodes — only boundaries short-circuit).
@@ -305,7 +305,7 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     // pass2.out both retype to String, so the *two-hops-down* sink edge is
     // the one now incompatible — it lowers as unbound while the authored
     // wire survives in the document.
-    g.wire("str_src", 0, "pass1", 0);
+    g.wire("str_src", "pass1");
     assert_eq!(g.compile().producer("sink", 0), None);
     assert_eq!(
         g.graph.bindings.get(&InputPort::new(g.id("sink"), 0)),
@@ -344,8 +344,8 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
     g.instance("b", "a");
     g.instance("c", "a");
     g.instance("d", "a");
-    g.wire("a", 0, "b", 0);
-    g.wire("b", 0, "c", 0);
+    g.wire("a", "b");
+    g.wire("b", "c");
 
     let closes = |from: &str, to: &str| g.graph.produces_cycle(g.id(from), g.id(to));
     assert!(closes("b", "a"), "b → a closes a → b");
@@ -374,11 +374,11 @@ fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
             .input(DataType::Any)
             .wildcard(0)
     });
-    g.wire("a", 0, "b", 0);
+    g.wire("a", "b");
     // The only wire into `wide` sits on port 2, behind a literal on port 0 and
     // nothing at all on port 1.
     g.constant("wide", 0, 7i64);
-    g.wire("b", 0, "wide", 2);
+    g.wire("b", ("wide", 2));
 
     let closes = |from: &str, to: &str| g.graph.produces_cycle(g.id(from), g.id(to));
     assert!(

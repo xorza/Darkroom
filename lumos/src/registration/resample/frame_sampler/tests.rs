@@ -9,13 +9,13 @@ use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
-    FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
+    FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, SampleRule, WindowAxes,
 };
 use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -79,12 +79,13 @@ impl Oracle<'_> {
                 .is_none_or(|validity| Self::at(validity, Self::index(x, y)) == 1.0)
     }
 
-    /// The taps of `filter` at `stretch` around `cell + frac` and their f32 weights, from the
+    /// The taps of `filter` at `stretch` around `at` and their f32 weights, from the
     /// definitions: the fixed window of `2·radius` taps unstretched, every tap whose f32 distance
     /// is within the reach otherwise, and a tap at or past the reach weighing zero. The reach stops
     /// short of the stretched radius by where the kernel falls under `w = 2⁻²⁷`: `a·√w/(1 + √w)`
     /// for Lanczos-`a`, `√(2w)` for Catmull-Rom, `w` for the tent.
-    fn axis(filter: Filter, stretch: f32, cell: i32, frac: f32) -> Vec<(i64, f32)> {
+    fn axis(filter: Filter, stretch: f32, at: AxisPosition) -> Vec<(i64, f32)> {
+        let AxisPosition { cell, frac } = at;
         let w = 2f64.powi(-27);
         let (radius, tolerance) = match filter {
             Filter::Bilinear => (1, w),
@@ -242,8 +243,8 @@ impl Oracle<'_> {
                 flags: self.carried(index),
             };
         };
-        let xs = Self::axis(filter, stretch, position.cell_x, position.fx);
-        let ys = Self::axis(filter, stretch, position.cell_y, position.fy);
+        let xs = Self::axis(filter, stretch, position.x());
+        let ys = Self::axis(filter, stretch, position.y());
         let sums = self.sums(&xs, &ys);
         let coverage = if sums.all_in {
             1.0
@@ -254,8 +255,8 @@ impl Oracle<'_> {
         let (xs, ys, sums, clamp) = if accepted {
             (xs, ys, sums, clamp.filter(|_| filter != Filter::Bilinear))
         } else {
-            let xs = Self::axis(Filter::Bilinear, stretch, position.cell_x, position.fx);
-            let ys = Self::axis(Filter::Bilinear, stretch, position.cell_y, position.fy);
+            let xs = Self::axis(Filter::Bilinear, stretch, position.x());
+            let ys = Self::axis(Filter::Bilinear, stretch, position.y());
             let fallback = self.sums(&xs, &ys);
             if fallback.total <= 0.0 || coverage <= 0.0 {
                 return self.no_data();
@@ -471,7 +472,14 @@ fn every_pixel_follows_the_rules() {
             );
             let source = SourceImage::of(&rgb);
             let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
-            let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
+            let sampler = FrameSampler::new(
+                SampleRule {
+                    method,
+                    border: -7.0,
+                },
+                &source,
+                sources.as_ref(),
+            );
             let oracle = Oracle {
                 planes: sampler.sources.iter().copied().collect(),
                 validity: sources.as_ref().and_then(FlaggedSources::validity),
@@ -549,7 +557,14 @@ fn every_tier_samples_to_portables_bits() {
         for flagged in [false, true] {
             let source = SourceImage::of(&rgb);
             let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
-            let sampler = FrameSampler::new(method, &source, sources.as_ref(), -7.0);
+            let sampler = FrameSampler::new(
+                SampleRule {
+                    method,
+                    border: -7.0,
+                },
+                &source,
+                sources.as_ref(),
+            );
             let reference = sample(Tier::portable(), &sampler, &positions);
             for tier in Tier::supported() {
                 let sampled = sample(tier, &sampler, &positions);
@@ -577,19 +592,28 @@ fn every_tier_samples_to_portables_bits() {
     }
 }
 
-/// A Lanczos3 window on a source of `width × 9`: one row of `values` at row 4, the rest
-/// `background`, sampled at `(x, 4 + fy)` with the clamp at `threshold`.
-fn clamped_sample(values: &[f32], background: f32, position: DVec2, threshold: Option<f32>) -> f32 {
-    let size = Size2us::new(values.len(), 9);
+/// A Lanczos3 window on a source of `16 × 9` at `background`, but for a `bright` pixel at (7, 4),
+/// sampled at (8.5, 4), whose taps 6..=11 put the bright one 1.5 px away, with the clamp at
+/// `threshold`.
+fn clamped_sample(bright: f32, background: f32, threshold: Option<f32>) -> f32 {
+    let size = Size2us::new(16, 9);
     let mut pixels = vec![background; size.pixel_count()];
-    pixels[4 * size.width..5 * size.width].copy_from_slice(values);
+    pixels[4 * size.width + 7] = bright;
+    let position = DVec2::new(8.5, 4.0);
     let image = LinearImage::from_pixels(ImageDimensions::new((size.width, 9), 1), pixels);
     let method = SampleMethod::Filter(FilterSampling {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
         clamp: threshold.map(RingingClamp::new),
     });
     let source = SourceImage::of(&image);
-    let sampler = FrameSampler::new(method, &source, None, 0.0);
+    let sampler = FrameSampler::new(
+        SampleRule {
+            method,
+            border: 0.0,
+        },
+        &source,
+        None,
+    );
     let positions = [SourcePosition::within(position, size)];
     sample(Tier::portable(), &sampler, &positions).channels[0][0]
 }
@@ -628,24 +652,17 @@ fn a_bright_pixel_keeps_its_undershoot_within_the_clamp() {
         row.iter().filter(|&&w| w < 0.0).sum::<f64>(),
     );
     let total = positive + negative;
-    // Output sample at x = 8.5 reads taps 6..=11; the bright pixel at 7 is 1.5 px away.
-    let line = |bright: f32, background: f32| {
-        let mut values = vec![background; 16];
-        values[7] = bright;
-        values
-    };
-    let position = DVec2::new(8.5, 4.0);
     let tolerance = |scale: f64| 40.0 * f64::from(f32::EPSILON) * scale;
 
     let (bright, background) = (1000.0, 10.0);
-    let unclamped = clamped_sample(&line(bright, background), background, position, None);
+    let unclamped = clamped_sample(bright, background, None);
     let expected = f64::from(background) + f64::from(bright - background) * row[1] / total;
     assert!(
         (f64::from(unclamped) - expected).abs() < tolerance(1000.0) + 1e-4,
         "{unclamped} against {expected}"
     );
     assert!(unclamped < -120.0, "{unclamped}");
-    let clamped = clamped_sample(&line(bright, background), background, position, Some(0.3));
+    let clamped = clamped_sample(bright, background, Some(0.3));
     assert!((clamped - background).abs() < 1e-3, "{clamped}");
 
     let soft_bright = 36.8;
@@ -656,12 +673,7 @@ fn a_bright_pixel_keeps_its_undershoot_within_the_clamp() {
     assert!((ratio - 0.5).abs() < 1e-3, "{ratio}");
     let keep = 1.0 - ((ratio - 0.3) / 0.7).powi(2);
     let expected = (light_positive + keep * light_negative) / (positive + keep * negative);
-    let soft = clamped_sample(
-        &line(soft_bright, background),
-        background,
-        position,
-        Some(0.3),
-    );
+    let soft = clamped_sample(soft_bright, background, Some(0.3));
     assert!(
         (f64::from(soft) - expected).abs() < tolerance(40.0) + 1e-5,
         "{soft} against {expected}"
@@ -694,7 +706,14 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
     });
     let source = SourceImage::of(&image);
     let sources = FlaggedSources::new(&source, image.flags.as_ref().unwrap(), method.reach());
-    let sampler = FrameSampler::new(method, &source, Some(&sources), -7.0);
+    let sampler = FrameSampler::new(
+        SampleRule {
+            method,
+            border: -7.0,
+        },
+        &source,
+        Some(&sources),
+    );
     let positions = [SourcePosition::within(DVec2::new(8.5, 8.5), size)];
     let Sampled {
         channels,
@@ -734,7 +753,14 @@ fn coverage_and_confidence_vanish_together() {
             size,
         );
         let source = SourceImage::of(&rgb);
-        let sampler = FrameSampler::new(sample_method, &source, None, 0.0);
+        let sampler = FrameSampler::new(
+            SampleRule {
+                method: sample_method,
+                border: 0.0,
+            },
+            &source,
+            None,
+        );
         let sampled = sample(Tier::portable(), &sampler, &positions);
         for (&coverage, &confidence) in sampled.coverage.iter().zip(&sampled.confidence) {
             assert_eq!(
@@ -797,7 +823,14 @@ fn a_halved_nyquist_grating_does_not_alias() {
         clamp: Some(RingingClamp::new(0.3)),
     });
     let source = SourceImage::of(&image);
-    let sampler = FrameSampler::new(unstretched, &source, None, 0.0);
+    let sampler = FrameSampler::new(
+        SampleRule {
+            method: unstretched,
+            border: 0.0,
+        },
+        &source,
+        None,
+    );
     let positions = [SourcePosition::within(DVec2::new(20.0, 20.0), size)];
     let aliased = sample(Tier::portable(), &sampler, &positions).channels[0][0];
     assert!((aliased - 2.0).abs() < 1e-5, "{aliased}");
@@ -836,7 +869,14 @@ fn filters_reproduce_their_polynomials() {
     };
     let at = |method, image: &LinearImage, p: DVec2| {
         let source = SourceImage::of(image);
-        let sampler = FrameSampler::new(method, &source, None, 0.0);
+        let sampler = FrameSampler::new(
+            SampleRule {
+                method,
+                border: 0.0,
+            },
+            &source,
+            None,
+        );
         sample(
             Tier::portable(),
             &sampler,
@@ -897,7 +937,14 @@ fn filters_reproduce_their_polynomials() {
             size,
         );
         let source = SourceImage::of(&constant);
-        let sampler = FrameSampler::new(sample_method, &source, None, 9.0);
+        let sampler = FrameSampler::new(
+            SampleRule {
+                method: sample_method,
+                border: 9.0,
+            },
+            &source,
+            None,
+        );
         let sampled = sample(Tier::portable(), &sampler, &positions(size));
         for (&value, &coverage) in sampled.channels[0].iter().zip(&sampled.coverage) {
             if coverage > 0.0 {

@@ -31,13 +31,13 @@ use glam::DVec2;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
-use crate::internals::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
+use crate::internals::synthetic::artifacts::{CosmicRays, add_bayer_pattern};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::fixtures::{
     STAR_FIELD_FLUX, STAR_FIELD_FWHM, STAR_FIELD_MARGIN, STAR_FIELD_SKY, star_field,
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
@@ -105,13 +105,6 @@ fn detected_positions(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVe
         .collect()
 }
 
-/// Source placement for a forward-model detection scenario.
-#[derive(Debug, Clone, Copy)]
-pub(super) enum Placement {
-    Uniform { margin: f64 },
-    Cluster,
-}
-
 /// A compact forward-model detection scenario shared by the pipeline and stage tests.
 ///
 /// Defaults to a clean, brightly-detected uniform field; override fields per test. `frame()`
@@ -162,23 +155,16 @@ impl Default for Scenario {
 
 impl Scenario {
     pub(super) fn frame(&self) -> SimFrame {
-        let scene = match self.placement {
-            Placement::Uniform { margin } => Scene::random_field(
-                self.size,
-                self.num_stars,
-                self.flux,
-                self.background.clone(),
-                margin,
-                self.seed,
-            ),
-            Placement::Cluster => Scene::cluster(
-                self.size,
-                self.num_stars,
-                self.flux,
-                self.background.clone(),
-                self.seed,
-            ),
-        };
+        let scene = Scene::scatter(
+            self.size,
+            Scatter {
+                count: self.num_stars,
+                flux: self.flux,
+                placement: self.placement,
+                seed: self.seed,
+            },
+            self.background.clone(),
+        );
         let camera = Camera {
             psf: self.psf.unwrap_or_else(|| PsfModel::gaussian(self.fwhm)),
             full_well_e: self.full_well_e,
@@ -190,24 +176,25 @@ impl Scenario {
         // Artifacts off the light path, applied to the pixels post-render; the truth records where
         // the cosmic rays landed.
         if self.cosmic_rays > 0 || self.bayer {
-            let mut px = frame.image.channel(0).pixels().to_vec();
+            let mut px = frame.image.channel(0).clone();
             if self.cosmic_rays > 0 {
-                frame.truth.cosmic_rays = add_cosmic_rays(
-                    &mut px,
-                    self.size.width,
-                    self.cosmic_rays,
-                    (0.5, 1.0),
-                    self.seed + 1000,
-                );
+                frame.truth.cosmic_rays = CosmicRays {
+                    count: self.cosmic_rays,
+                    amplitude: 0.5..1.0,
+                    seed: self.seed + 1000,
+                }
+                .add_to(&mut px);
             }
             if self.bayer {
-                add_bayer_pattern(&mut px, self.size.width, 0.08, CfaPattern::Rggb);
+                add_bayer_pattern(&mut px, 0.08, CfaPattern::Rggb);
             }
-            for p in &mut px {
+            for p in px.pixels_mut() {
                 *p = p.clamp(0.0, 1.0);
             }
-            frame.image =
-                LinearImage::from_planar_channels(ImageDimensions::new(self.size, 1), [px]);
+            frame.image = LinearImage::from_planar_channels(
+                ImageDimensions::new(self.size, 1),
+                [px.into_vec()],
+            );
         }
         frame
     }

@@ -54,20 +54,20 @@ pub(crate) mod ring_reference;
 pub(crate) mod sampling;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
-use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::defect_map::defect_summary::{ColourDefects, DefectSummary};
-use crate::calibration::defect_map::ring_reference::RingReference;
+use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
+use crate::calibration::defect_map::sampling::ColourResiduals;
 use crate::calibration::error::CalibrationError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 use common::CancelToken;
-use imaginarium::Buffer2;
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
@@ -283,12 +283,11 @@ impl DefectMap {
         let lattice = CfaLattice::new(&image.cfa_type);
         let mut scratch = Gathered::default();
         for &idx in self.hot.indices.iter().chain(&self.cold_indices) {
-            image.data[idx] = lattice.median(
-                &image.data,
-                self.dimensions.point_of(idx),
-                Some(mask),
-                &mut scratch,
-            );
+            let plane = MaskedPlane {
+                pixels: &image.data,
+                mask: Some(mask),
+            };
+            image.data[idx] = lattice.median(plane, self.dimensions.point_of(idx), &mut scratch);
         }
         for indices in [&self.hot.indices, &self.cold_indices] {
             image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), indices);
@@ -333,21 +332,24 @@ fn detect_hot_pixels(
     }
 
     let data = &image.data;
-    let size = Size2us::new(data.width(), data.height());
+    let size = Size2us::from(data);
     let total = size.pixel_count();
     let cfa_type = image.cfa_type;
     let background = ColourMesh::measure(
-        data,
+        MaskedPlane::from(data),
         &cfa_type,
         DARK_BACKGROUND_TILE_SIZE,
-        None,
-        &mut MeshWorkspace::default(),
     );
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
     let sigma_floor = residual_sigma_floor(image);
-    let stats = compute_per_color_residual_stats(data, cfa_type, &background, sigma_floor);
+    let residuals = ColourResiduals {
+        data,
+        cfa_type,
+        background: &background,
+    };
+    let stats = compute_per_color_residual_stats(residuals, sigma_floor);
 
     // The broad model reads each colour's tile skies rather than same-color neighbour medians, so a
     // compact same-color cluster remains an outlier instead of becoming its own local reference.
@@ -368,7 +370,7 @@ fn detect_hot_pixels(
             if residual <= median + cut {
                 return None;
             }
-            match ring.at(size, |index| f64::from(data[index]), &cfa_type, point) {
+            match ring.at(RingFrame::of(data), &cfa_type, point) {
                 Some(level) => {
                     let excess = data[i] - level;
                     (excess > cut).then_some((i, excess))
@@ -417,7 +419,7 @@ fn detect_cold_pixels(
     }
 
     let data = &image.data;
-    let size = Size2us::new(data.width(), data.height());
+    let size = Size2us::from(data);
     let total = size.pixel_count();
     let lattice = CfaLattice::new(&image.cfa_type);
 
@@ -427,7 +429,8 @@ fn detect_cold_pixels(
             if cancel.is_cancelled() {
                 return None;
             }
-            let local = lattice.median(data, size.point_of(i), None, scratch);
+            let plane = MaskedPlane::from(data);
+            let local = lattice.median(plane, size.point_of(i), scratch);
             (data[i] < dead_fraction * local).then_some(i)
         })
         .flatten()
@@ -459,16 +462,14 @@ struct ColorStats {
 /// turn every representable deviation into a defect. A color with no samples gets `sigma = ∞` so
 /// it never flags.
 fn compute_per_color_residual_stats(
-    data: &Buffer2<f32>,
-    cfa_type: CfaType,
-    background: &ColourMesh,
+    residuals: ColourResiduals<'_>,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
-    let num_colors = cfa_type.num_colors();
+    let num_colors = residuals.cfa_type.num_colors();
     let mut stats = ArrayVec::new();
 
     for color in 0..num_colors {
-        let mut samples = sampling::color_residual_samples(data, cfa_type, color, background);
+        let mut samples = residuals.samples(color);
 
         if samples.is_empty() {
             stats.push(ColorStats {

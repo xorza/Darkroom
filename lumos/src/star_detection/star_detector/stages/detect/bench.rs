@@ -15,7 +15,7 @@ use crate::star_detection::bench::Stages;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
-use crate::star_detection::star_detector::stages::detect::extract_candidates;
+use crate::star_detection::star_detector::stages::detect::{LabelledPlane, extract_candidates};
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Dense;
@@ -42,7 +42,16 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 }
             });
             let buffers = ScratchPool::default();
-            b.iter(|| extract_candidates(&stages.plane, labels, &config, &buffers));
+            b.iter(|| {
+                extract_candidates(
+                    LabelledPlane {
+                        plane: &stages.plane,
+                        labels,
+                    },
+                    &config,
+                    &buffers,
+                )
+            });
         });
     }
 }

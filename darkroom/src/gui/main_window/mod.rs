@@ -13,7 +13,7 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::relayout::Relayout;
-use crate::core::io::preferences::Preferences;
+use crate::gui::frame_writes::FrameWrites;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 use crate::gui::main_window::dock_panes::DockPanes;
@@ -135,13 +135,11 @@ impl MainWindow {
         request_relayout
     }
 
-    pub(crate) fn frame(
-        &mut self,
-        ui: &mut Ui,
-        cx: WindowCtx<'_>,
-        prefs: &mut Preferences,
-        out: &mut Requests,
-    ) {
+    pub(crate) fn frame(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, writes: FrameWrites<'_>) {
+        let FrameWrites {
+            preferences: prefs,
+            requests: out,
+        } = writes;
         // The frame's world without the document, for the surfaces below that
         // read one and not the other: the chrome bands take the app context,
         // the panes take the whole thing.

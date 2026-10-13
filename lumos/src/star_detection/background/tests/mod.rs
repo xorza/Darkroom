@@ -7,6 +7,7 @@ use std::num::NonZeroUsize;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
+use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::background_map;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
@@ -97,39 +98,52 @@ fn plane_skies_come_back_exactly() {
     }
 }
 
-/// The second derivatives of the natural cubic spline through `(xs, ys)`, by the textbook
-/// tridiagonal system in f64: `h₋·m₋ + 2(h₋ + h₊)·m + h₊·m₊ = 6·(slope₊ − slope₋)`, `m` 0 at both
-/// ends.
-fn natural_spline(xs: &[f64], ys: &[f64]) -> Vec<f64> {
-    let n = xs.len();
-    let mut m = vec![0.0; n];
-    let (mut diagonal, mut rhs) = (vec![0.0; n], vec![0.0; n]);
-    for i in 1..n - 1 {
-        let (left, right) = (xs[i] - xs[i - 1], xs[i + 1] - xs[i]);
-        diagonal[i] = 2.0 * (left + right);
-        rhs[i] = 6.0 * ((ys[i + 1] - ys[i]) / right - (ys[i] - ys[i - 1]) / left);
-        if i > 1 {
-            let factor = left / diagonal[i - 1];
-            diagonal[i] -= factor * left;
-            rhs[i] -= factor * rhs[i - 1];
-        }
-    }
-    for i in (1..n - 1).rev() {
-        m[i] = (rhs[i] - (xs[i + 1] - xs[i]) * m[i + 1]) / diagonal[i];
-    }
-    m
+/// The natural cubic spline through `(xs, ys)`, in f64.
+#[derive(Debug)]
+struct ReferenceSpline<'a> {
+    xs: &'a [f64],
+    ys: &'a [f64],
+    /// The second derivative at each knot.
+    m: Vec<f64>,
 }
 
-/// That spline at `x`, the end intervals' cubics continued past the outer knots.
-fn spline_at(xs: &[f64], ys: &[f64], m: &[f64], x: f64) -> f64 {
-    let k = xs[1..xs.len() - 1]
-        .iter()
-        .take_while(|&&knot| knot <= x)
-        .count();
-    let h = xs[k + 1] - xs[k];
-    let a = (xs[k + 1] - x) / h;
-    let b = 1.0 - a;
-    a * ys[k] + b * ys[k + 1] + ((a.powi(3) - a) * m[k] + (b.powi(3) - b) * m[k + 1]) * h * h / 6.0
+impl<'a> ReferenceSpline<'a> {
+    /// The second derivatives by the textbook tridiagonal system:
+    /// `h₋·m₋ + 2(h₋ + h₊)·m + h₊·m₊ = 6·(slope₊ − slope₋)`, `m` 0 at both ends.
+    fn through(xs: &'a [f64], ys: &'a [f64]) -> Self {
+        let n = xs.len();
+        let mut m = vec![0.0; n];
+        let (mut diagonal, mut rhs) = (vec![0.0; n], vec![0.0; n]);
+        for i in 1..n - 1 {
+            let (left, right) = (xs[i] - xs[i - 1], xs[i + 1] - xs[i]);
+            diagonal[i] = 2.0 * (left + right);
+            rhs[i] = 6.0 * ((ys[i + 1] - ys[i]) / right - (ys[i] - ys[i - 1]) / left);
+            if i > 1 {
+                let factor = left / diagonal[i - 1];
+                diagonal[i] -= factor * left;
+                rhs[i] -= factor * rhs[i - 1];
+            }
+        }
+        for i in (1..n - 1).rev() {
+            m[i] = (rhs[i] - (xs[i + 1] - xs[i]) * m[i + 1]) / diagonal[i];
+        }
+        Self { xs, ys, m }
+    }
+
+    /// The spline at `x`, the end intervals' cubics continued past the outer knots.
+    fn at(&self, x: f64) -> f64 {
+        let Self { xs, ys, m } = self;
+        let k = xs[1..xs.len() - 1]
+            .iter()
+            .take_while(|&&knot| knot <= x)
+            .count();
+        let h = xs[k + 1] - xs[k];
+        let a = (xs[k + 1] - x) / h;
+        let b = 1.0 - a;
+        a * ys[k]
+            + b * ys[k + 1]
+            + ((a.powi(3) - a) * m[k] + (b.powi(3) - b) * m[k + 1]) * h * h / 6.0
+    }
 }
 
 /// Along one axis, five tiles of 32 px hold a checkerboard `vᵢ ± aᵢ`, the same across the other
@@ -154,9 +168,9 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
     let centres: Vec<f64> = (0..5).map(|i| 15.5 + 32.0 * f64::from(i)).collect();
     let skies: Vec<f64> = SKY.iter().map(|&v| f64::from(v)).collect();
     let sigmas: Vec<f64> = SPREAD.iter().map(|&a| f64::from(mad_to_sigma(a))).collect();
-    let (sky_m, sigma_m) = (
-        natural_spline(&centres, &skies),
-        natural_spline(&centres, &sigmas),
+    let (sky_spline, sigma_spline) = (
+        ReferenceSpline::through(&centres, &skies),
+        ReferenceSpline::through(&centres, &sigmas),
     );
 
     let bound = 4.0 * f64::from(f32::EPSILON) * 0.75;
@@ -178,8 +192,8 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
         for y in 0..height {
             for x in 0..width {
                 let at = if along_x { x } else { y } as f64;
-                let sky = spline_at(&centres, &skies, &sky_m, at);
-                let sigma = spline_at(&centres, &sigmas, &sigma_m, at).clamp(sigmas[0], sigmas[4]);
+                let sky = sky_spline.at(at);
+                let sigma = sigma_spline.at(at).clamp(sigmas[0], sigmas[4]);
                 let axis = if along_x { "x" } else { "y" };
                 let (got_sky, got_sigma) = (
                     f64::from(background.background[(x, y)]),
@@ -260,7 +274,7 @@ fn refine_masks_the_stars_and_their_halos_out() {
             }),
             ..config.clone()
         };
-        BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
+        BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources)
             .refine(
                 &pixels,
                 PlaneSpec {
@@ -284,16 +298,17 @@ fn refine_masks_the_stars_and_their_halos_out() {
     );
     // A configuration that refines nothing hands the estimate back as it came, with no sources.
     let mut resources = DetectionResources::new(size);
-    let untouched = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources).refine(
-        &pixels,
-        PlaneSpec {
-            prefilter: Prefilter::None,
-            matched: None,
-            mask: None,
-            background: &config,
-        },
-        &mut resources,
-    );
+    let untouched =
+        BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources).refine(
+            &pixels,
+            PlaneSpec {
+                prefilter: Prefilter::None,
+                matched: None,
+                mask: None,
+                background: &config,
+            },
+            &mut resources,
+        );
     assert!(untouched.sources.is_none());
     assert_eq!(
         untouched.estimate.background.pixels(),
@@ -342,19 +357,20 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     };
     let mut resources = DetectionResources::new(Size2us::new(96, 64));
 
-    let first = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
+    let first = BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources);
     let expected_background = first.background.pixels().to_vec();
     let expected_noise = first.noise.pixels().to_vec();
     drop(first);
 
-    let second = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources);
+    let second = BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources);
     assert_eq!(second.background.pixels(), expected_background);
     assert_eq!(second.noise.pixels(), expected_noise);
     drop(second);
 
     resources.reshape(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
-    let resized = BackgroundEstimate::estimate(&resized_pixels, None, &config, &mut resources);
+    let resized =
+        BackgroundEstimate::estimate(MaskedPlane::from(&resized_pixels), &config, &mut resources);
     assert_eq!(resized.background.width(), 48);
     assert_eq!(resized.background.height(), 32);
     assert!(

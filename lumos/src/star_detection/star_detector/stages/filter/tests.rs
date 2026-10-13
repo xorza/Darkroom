@@ -14,8 +14,10 @@ fn filter(stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
     FilterOutcome::from_stars(
         stars,
         config,
-        &mut Vec::new(),
-        &mut DuplicateScratch::default(),
+        FilterScratch {
+            values: &mut Vec::new(),
+            duplicates: &mut DuplicateScratch::default(),
+        },
     )
 }
 

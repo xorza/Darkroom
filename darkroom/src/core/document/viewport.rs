@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// world scale factor. The image viewer reuses the same algebra over a
 /// different content space — `pan` is the image's top-left offset in
 /// pane-local px, `zoom` is display px per texel — which is why
-/// `pan_zoom::zoom_about` and `fold_scroll_zoom` serve both.
+/// `pan_zoom::ZoomRange` serves both.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Viewport {
     pub(crate) pan: Vec2,

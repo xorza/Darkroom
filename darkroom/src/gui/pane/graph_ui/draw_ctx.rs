@@ -13,7 +13,7 @@ use crate::gui::pane::graph_ui::paint::inspectors::Inspectors;
 use crate::gui::theme::Theme;
 
 /// Read-only context threaded top to bottom through everything the graph
-/// canvas records. `Copy` (a canvas context plus three shared refs), so it's
+/// canvas records. `Copy` (a canvas context plus its [`PaintFacts`]), so it's
 /// passed by value — copying it while a borrow of the scene's node pool is
 /// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
 /// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
@@ -33,33 +33,30 @@ pub(crate) struct DrawCtx<'a> {
     /// already inside, so holding any of it again beside this would be two
     /// paths to one ref.
     canvas: CanvasCtx<'a>,
+    facts: PaintFacts<'a>,
+}
+
+/// What only the paint pass knows: which nodes read as selected this frame,
+/// which panels are open, and what the viewport keeps.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PaintFacts<'a> {
     /// Effective selection to paint: the graph's committed set or,
     /// mid-rubber-band, the live sweep — one type, so the draw substitutes
     /// them without caring which it got, and the gesture never writes its
     /// preview into the document.
-    selected: Selection<'a>,
+    pub(super) selected: Selection<'a>,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
-    inspectors: &'a Inspectors,
+    pub(super) inspectors: &'a Inspectors,
     /// What the viewport keeps. Carried here rather than passed beside the
     /// context because every reader of one is a reader of the
     /// other: a pass that records nodes decides per node whether to.
-    cull: CullRegion,
+    pub(super) cull: CullRegion,
 }
 
 impl<'a> DrawCtx<'a> {
-    pub(super) const fn new(
-        canvas: CanvasCtx<'a>,
-        selected: Selection<'a>,
-        inspectors: &'a Inspectors,
-        cull: CullRegion,
-    ) -> Self {
-        Self {
-            canvas,
-            selected,
-            inspectors,
-            cull,
-        }
+    pub(super) const fn new(canvas: CanvasCtx<'a>, facts: PaintFacts<'a>) -> Self {
+        Self { canvas, facts }
     }
 
     /// The palette and metrics this pass paints from, off the pane's context.
@@ -76,16 +73,16 @@ impl<'a> DrawCtx<'a> {
     }
 
     pub(crate) const fn inspectors(self) -> &'a Inspectors {
-        self.inspectors
+        self.facts.inspectors
     }
 
     pub(crate) const fn cull(self) -> CullRegion {
-        self.cull
+        self.facts.cull
     }
 
     /// Whether `key` paints selected this pass.
     pub(crate) fn is_selected(self, key: NodeId) -> bool {
-        self.selected.contains(key)
+        self.facts.selected.contains(key)
     }
 }
 

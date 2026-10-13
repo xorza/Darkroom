@@ -12,6 +12,7 @@
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+use imaginarium::Buffer2;
 
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///
@@ -52,10 +53,10 @@ impl<'a> Kernel2d<'a> {
         self.weights[ky * self.size + kx]
     }
 
-    /// One output pixel of the 2D convolution of the image `input` of `size` at `pos`, mirrored on
-    /// both axes.
+    /// One output pixel of the 2D convolution of the image `input` at `pos`, mirrored on both axes.
     #[inline]
-    fn convolve_pixel(self, input: &[f32], size: Size2us, pos: Vec2us) -> f32 {
+    fn convolve_pixel(self, input: &Buffer2<f32>, pos: Vec2us) -> f32 {
+        let size = Size2us::from(input);
         let radius = self.radius() as isize;
         let mut sum = 0.0f32;
         for ky in 0..self.size() {
@@ -167,14 +168,13 @@ impl Kernel for ConvolveRow<'_> {
     }
 }
 
-/// One output row `y` of the column pass over the image `input` of `size`, tap by tap across the
+/// One output row `y` of the column pass over the image `input`, tap by tap across the
 /// whole row: the column taps are whole rows, mirrored at the image's top and bottom, so no pixel
 /// needs the scalar form.
 #[derive(Debug)]
 pub(super) struct ConvolveColsRow<'a> {
-    pub(super) input: &'a [f32],
+    pub(super) input: &'a Buffer2<f32>,
     pub(super) out_row: &'a mut [f32],
-    pub(super) size: Size2us,
     pub(super) y: usize,
     pub(super) kernel: &'a [f32],
 }
@@ -187,35 +187,32 @@ impl Kernel for ConvolveColsRow<'_> {
         let Self {
             input,
             out_row,
-            size,
             y,
             kernel,
         } = self;
-        debug_assert_eq!(input.len(), size.pixel_count(), "the input fills the image");
+        let size = Size2us::from(input);
         debug_assert_eq!(out_row.len(), size.width, "one output row");
         let radius = radius_of(kernel);
         out_row.fill(0.0);
         for (k, &weight) in kernel.iter().enumerate() {
             let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
-            add_weighted(
-                isa,
-                out_row,
-                &input[sy * size.width..][..size.width],
+            WeightedTap {
+                input: input.row(sy),
                 weight,
-            );
+            }
+            .add_to(isa, out_row);
         }
     }
 }
 
-/// One output row `y` of the 2D convolution of the image `input` of `size` (mirror edges on both
+/// One output row `y` of the 2D convolution of the image `input` (mirror edges on both
 /// axes): tap by tap over the pixels whose window lies inside the row, each tap's source row
 /// mirrored at the image's top and bottom, and the scalar per-pixel form for the pixels whose
 /// window crosses the row's ends.
 #[derive(Debug)]
 pub(super) struct Convolve2dRow<'a> {
-    pub(super) input: &'a [f32],
+    pub(super) input: &'a Buffer2<f32>,
     pub(super) output_row: &'a mut [f32],
-    pub(super) size: Size2us,
     pub(super) y: usize,
     pub(super) kernel: Kernel2d<'a>,
 }
@@ -228,10 +225,10 @@ impl Kernel for Convolve2dRow<'_> {
         let Self {
             input,
             output_row,
-            size,
             y,
             kernel,
         } = self;
+        let size = Size2us::from(input);
         debug_assert_eq!(output_row.len(), size.width, "one output row");
         let radius = kernel.radius();
         let interior = radius..size.width.saturating_sub(radius).max(radius);
@@ -239,10 +236,10 @@ impl Kernel for Convolve2dRow<'_> {
         let (head, rest) = output_row.split_at_mut(interior.start.min(size.width));
         let (inside, tail) = rest.split_at_mut(interior.len());
         for (x, out) in head.iter_mut().enumerate() {
-            *out = kernel.convolve_pixel(input, size, Vec2us::new(x, y));
+            *out = kernel.convolve_pixel(input, Vec2us::new(x, y));
         }
         for (x, out) in (interior.end..).zip(tail) {
-            *out = kernel.convolve_pixel(input, size, Vec2us::new(x, y));
+            *out = kernel.convolve_pixel(input, Vec2us::new(x, y));
         }
         if inside.is_empty() {
             return;
@@ -250,32 +247,41 @@ impl Kernel for Convolve2dRow<'_> {
         inside.fill(0.0);
         for ky in 0..kernel.size() {
             let sy = mirror_index(y as isize + ky as isize - radius as isize, size.height);
-            let row = &input[sy * size.width..][..size.width];
+            let row = input.row(sy);
             for kx in 0..kernel.size() {
-                add_weighted(
-                    isa,
-                    inside,
-                    &row[kx..kx + interior.len()],
-                    kernel.at(ky, kx),
-                );
+                WeightedTap {
+                    input: &row[kx..kx + interior.len()],
+                    weight: kernel.at(ky, kx),
+                }
+                .add_to(isa, inside);
             }
         }
     }
 }
 
-/// `output[i] += input[i] · weight` over two slices of one length, unfused: one tap of a
-/// convolution, in the order the scalar sum adds it.
-#[inline(always)]
-fn add_weighted<S: Isa>(isa: S, output: &mut [f32], input: &[f32], weight: f32) {
-    debug_assert_eq!(output.len(), input.len(), "one input per output");
-    let lanes = isa.splat_f32(weight);
-    let (output_chunks, output_tail) = output.as_chunks_mut::<F32_LANES>();
-    let (input_chunks, input_tail) = input.as_chunks::<F32_LANES>();
-    for (out, samples) in output_chunks.iter_mut().zip(input_chunks) {
-        (isa.load_f32(out) + isa.load_f32(samples) * lanes).store(out);
-    }
-    for (out, &sample) in output_tail.iter_mut().zip(input_tail) {
-        *out += sample * weight;
+/// One tap of a convolution over a row: the input samples it reads, and their weight.
+#[derive(Debug, Clone, Copy)]
+struct WeightedTap<'a> {
+    input: &'a [f32],
+    weight: f32,
+}
+
+impl WeightedTap<'_> {
+    /// `output[i] += input[i] · weight` over two slices of one length, unfused, in the order the
+    /// scalar sum adds it.
+    #[inline(always)]
+    fn add_to<S: Isa>(self, isa: S, output: &mut [f32]) {
+        let Self { input, weight } = self;
+        debug_assert_eq!(output.len(), input.len(), "one input per output");
+        let lanes = isa.splat_f32(weight);
+        let (output_chunks, output_tail) = output.as_chunks_mut::<F32_LANES>();
+        let (input_chunks, input_tail) = input.as_chunks::<F32_LANES>();
+        for (out, samples) in output_chunks.iter_mut().zip(input_chunks) {
+            (isa.load_f32(out) + isa.load_f32(samples) * lanes).store(out);
+        }
+        for (out, &sample) in output_tail.iter_mut().zip(input_tail) {
+            *out += sample * weight;
+        }
     }
 }
 
@@ -306,9 +312,9 @@ mod internals {
                 for (k, &kval) in self.kernel.iter().enumerate() {
                     let sy = mirror_index(
                         self.y as isize + k as isize - radius as isize,
-                        self.size.height,
+                        self.input.height(),
                     );
-                    sum += self.input[sy * self.size.width + x] * kval;
+                    sum += self.input.row(sy)[x] * kval;
                 }
                 *out = sum;
             }
@@ -322,7 +328,7 @@ mod internals {
             for (x, out) in self.output_row.iter_mut().enumerate() {
                 *out = self
                     .kernel
-                    .convolve_pixel(self.input, self.size, Vec2us::new(x, self.y));
+                    .convolve_pixel(self.input, Vec2us::new(x, self.y));
             }
         }
     }

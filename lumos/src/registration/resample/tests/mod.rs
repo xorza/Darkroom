@@ -14,7 +14,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
-use crate::registration::resample::{WarpBuffers, WarpResult};
+use crate::registration::resample::{Warp, WarpBuffers, WarpResult};
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::scratch_pool::{Scratch, ScratchPool};
@@ -310,11 +310,18 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(&SourceImage::of(image), transform, params, &rows);
+                    sentinel.warp_into(&SourceImage::of(image), Warp { transform, params }, &rows);
 
                     let mut reused = WarpBuffers::build(dimensions);
-                    reused.warp_into(&SourceImage::of(&previous), &transforms[0], params, &rows);
-                    reused.warp_into(&SourceImage::of(image), transform, params, &rows);
+                    reused.warp_into(
+                        &SourceImage::of(&previous),
+                        Warp {
+                            transform: &transforms[0],
+                            params,
+                        },
+                        &rows,
+                    );
+                    reused.warp_into(&SourceImage::of(image), Warp { transform, params }, &rows);
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {

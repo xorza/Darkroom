@@ -2,7 +2,7 @@ use common::CancelToken;
 
 use crate::error::Cancelled;
 use crate::io::fits::decode::pixels::{
-    ChunkScan, FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, convert_and_scan, fill_nulls,
+    ChunkScan, Conversion, FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, fill_nulls,
 };
 use fits_well::image::{Scaling, View as FitsView};
 
@@ -19,11 +19,16 @@ struct Converted {
     scan: ChunkScan,
 }
 
-/// `samples` through [`convert_and_scan`], with the converted samples beside the scan.
+/// `samples` through [`Conversion::scan`], with the converted samples beside the scan.
 fn convert(samples: FitsView<'_>, scaling: Scaling, divisor: f32) -> Converted {
     let mut out = vec![0.0; samples.len()];
-    let scan =
-        convert_and_scan(samples, scaling, divisor, &mut out, &CancelToken::never()).unwrap();
+    let scan = Conversion {
+        scaling,
+        divisor: f64::from(divisor),
+        cancel: &CancelToken::never(),
+    }
+    .scan(samples, &mut out)
+    .unwrap();
     Converted { samples: out, scan }
 }
 
@@ -32,13 +37,12 @@ fn cancellation_stops_chunk_validation() {
     let cancel = CancelToken::new();
     cancel.cancel();
     assert_eq!(
-        convert_and_scan(
-            FitsView::F32(&[1.0, 2.0]),
-            IDENTITY,
-            1.0,
-            &mut [0.0; 2],
-            &cancel
-        )
+        Conversion {
+            scaling: IDENTITY,
+            divisor: 1.0,
+            cancel: &cancel,
+        }
+        .scan(FitsView::F32(&[1.0, 2.0]), &mut [0.0; 2])
         .unwrap_err(),
         Cancelled
     );

@@ -6,10 +6,11 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::background_mesh::BackgroundMesh;
-use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::spline::spline_segment::SplineSegment;
+use crate::background_mesh::spline::natural_spline::NaturalSpline;
+use crate::background_mesh::spline::spline_segment::{SplineNode, SplineSegment};
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::masked_plane::MaskedPlane;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
@@ -98,15 +99,15 @@ pub(super) fn noise_floor_from(grid: &BackgroundMesh, values: &mut Vec<f32>) -> 
 }
 
 impl BackgroundEstimate {
-    /// Estimate background and noise for the image, leaving out the pixels `mask` sets.
+    /// Estimate background and noise for the plane, leaving out the pixels its mask sets.
     ///
     /// Performs tiled sigma-clipped statistics with natural bicubic spline interpolation.
     pub(crate) fn estimate(
-        pixels: &Buffer2<f32>,
-        mask: Option<&BitBuffer2>,
+        plane: MaskedPlane<'_>,
         config: &BackgroundConfig,
         resources: &mut DetectionResources,
     ) -> Self {
+        let MaskedPlane { pixels, mask } = plane;
         let mut background = resources.acquire_f32();
         let mut noise = resources.acquire_f32();
 
@@ -178,7 +179,11 @@ impl BackgroundEstimate {
             if let Some(mask) = spec.mask {
                 sources.or_with(mask);
             }
-            self = Self::estimate(pixels, Some(&sources), spec.background, resources);
+            let plane = MaskedPlane {
+                pixels,
+                mask: Some(&sources),
+            };
+            self = Self::estimate(plane, spec.background, resources);
         }
         RefinedBackground {
             estimate: self,
@@ -320,29 +325,28 @@ fn interpolate_row(row: Row<'_>, grid: &BackgroundMesh, scratch: &mut Interpolat
     let node_noise = &mut scratch.node_noise[..tiles_x];
 
     for tx in 0..tiles_x {
-        let f0_bg = grid.stats[(tx, ty0)].sky;
-        let f1_bg = grid.stats[(tx, ty1)].sky;
-        let d0_bg = grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty0));
-        let d1_bg = grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty1));
-        node_bg[tx] = SplineSegment::new(f0_bg, f1_bg, d0_bg, d1_bg, hy).eval(ty);
-
-        let f0_n = grid.stats[(tx, ty0)].sigma;
-        let f1_n = grid.stats[(tx, ty1)].sigma;
-        let d0_n = grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty0));
-        let d1_n = grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty1));
-        node_noise[tx] = SplineSegment::new(f0_n, f1_n, d0_n, d1_n, hy).eval(ty);
+        let node = |component: TileComponent, ty: usize| SplineNode {
+            value: grid.stats[(tx, ty)].get(component),
+            d2: grid.d2y(component, Vec2us::new(tx, ty)),
+        };
+        let column = |component| SplineSegment::new(node(component, ty0), node(component, ty1), hy);
+        node_bg[tx] = column(TileComponent::Sky).eval(ty);
+        node_noise[tx] = column(TileComponent::Sigma).eval(ty);
     }
 
     let d2x_bg = &mut scratch.d2x_bg[..tiles_x];
     let d2x_noise = &mut scratch.d2x_noise[..tiles_x];
 
-    solve_natural_spline_d2(node_bg, centers_x, d2x_bg, &mut scratch.spline_scratch);
-    solve_natural_spline_d2(
-        node_noise,
-        centers_x,
-        d2x_noise,
-        &mut scratch.spline_scratch,
-    );
+    NaturalSpline {
+        values: node_bg,
+        centers: centers_x,
+    }
+    .second_derivatives(d2x_bg, &mut scratch.spline_scratch);
+    NaturalSpline {
+        values: node_noise,
+        centers: centers_x,
+    }
+    .second_derivatives(d2x_noise, &mut scratch.spline_scratch);
 
     if tiles_x == 1 {
         bg_row.fill(node_bg[0]);
@@ -363,18 +367,19 @@ fn interpolate_row(row: Row<'_>, grid: &BackgroundMesh, scratch: &mut Interpolat
         let cx0 = centers_x[tx0];
         let hx = centers_x[tx1] - cx0;
         let inv_hx = 1.0 / hx;
+        let segment = |values: &[f32], d2: &[f32]| {
+            let node = |tx: usize| SplineNode {
+                value: values[tx],
+                d2: d2[tx],
+            };
+            SplineSegment::new(node(tx0), node(tx1), hx)
+        };
 
         InterpolateSegment {
             bg_out: &mut bg_row[x..segment_end],
             noise_out: &mut noise_row[x..segment_end],
-            bg: SplineSegment::new(node_bg[tx0], node_bg[tx1], d2x_bg[tx0], d2x_bg[tx1], hx),
-            noise: SplineSegment::new(
-                node_noise[tx0],
-                node_noise[tx1],
-                d2x_noise[tx0],
-                d2x_noise[tx1],
-                hx,
-            ),
+            bg: segment(node_bg, d2x_bg),
+            noise: segment(node_noise, d2x_noise),
             ramp: SegmentRamp {
                 start: (x as f32 - cx0) * inv_hx,
                 step: inv_hx,

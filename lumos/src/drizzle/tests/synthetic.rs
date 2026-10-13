@@ -9,7 +9,7 @@ use glam::DVec2;
 use super::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Scene, TrueSource};
 
 /// One rendered frame per dither offset, and the transform that registers each.
 #[derive(Debug)]
@@ -97,8 +97,10 @@ fn drizzle_conserves_total_flux() {
     let size = Size2us::new(64, 64);
     let scene = Scene::single(
         size,
-        DVec2::new(32.0, 32.0),
-        5.0,
+        TrueSource {
+            pos: DVec2::new(32.0, 32.0),
+            flux: 5.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
@@ -133,8 +135,10 @@ fn drizzle_places_star_at_its_reference_position() {
     let size = Size2us::new(64, 64);
     let scene = Scene::single(
         size,
-        DVec2::new(28.0, 36.0),
-        5.0,
+        TrueSource {
+            pos: DVec2::new(28.0, 36.0),
+            flux: 5.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
@@ -160,8 +164,10 @@ fn drizzle_dithering_recovers_resolution() {
     // PSF peak stays unsaturated (otherwise both peaks clip at 1.0 and the comparison is moot).
     let scene = Scene::single(
         size,
-        DVec2::new(24.3, 24.7),
-        2.0,
+        TrueSource {
+            pos: DVec2::new(24.3, 24.7),
+            flux: 2.0,
+        },
         BackgroundField::Uniform { level: 0.0 },
     );
     let offs = [-1.0 / 3.0, 0.0, 1.0 / 3.0];
@@ -203,8 +209,10 @@ fn drizzle_quality_maps_have_their_closed_form() {
     let size = Size2us::new(64, 64);
     let scene = Scene::single(
         size,
-        DVec2::new(32.0, 32.0),
-        5.0,
+        TrueSource {
+            pos: DVec2::new(32.0, 32.0),
+            flux: 5.0,
+        },
         BackgroundField::Uniform { level: 0.1 },
     );
     let mut frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);

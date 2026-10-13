@@ -6,6 +6,7 @@ use std::path::Path;
 use fits_well::io::Hdu;
 
 use crate::io::error::{FitsRefusal, ImageError};
+use crate::io::fits::hdu_list::HduList;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
@@ -29,13 +30,10 @@ struct Claim {
 }
 
 impl ExtensionClaims {
-    /// The `extension` HDUs of `hdus`, refused unless each names one image of the file that no
+    /// The `extension` HDUs of `file`, refused unless each names one image of the file that no
     /// other names.
-    pub(crate) fn of(
-        path: &Path,
-        hdus: &[Hdu],
-        extension: LumosExtension,
-    ) -> Result<Self, ImageError> {
+    pub(crate) fn of(file: HduList<'_>, extension: LumosExtension) -> Result<Self, ImageError> {
+        let HduList { path, hdus } = file;
         let mut images = Vec::new();
         let mut claims = Vec::new();
         for (index, hdu) in hdus.iter().enumerate() {
@@ -60,7 +58,7 @@ impl ExtensionClaims {
             } else if hdu.is_image()
                 && hdu.data_bytes > 0
                 && !Self::describes_another(path, hdu)?
-                && let Some(name) = image_name(path, hdus, index)?
+                && let Some(name) = image_name(file, index)?
             {
                 images.push(name);
             }
@@ -96,11 +94,10 @@ impl ExtensionClaims {
     /// The extension for the image at HDU `image`; `None` when it has none.
     pub(crate) fn for_image(
         &self,
-        path: &Path,
-        hdus: &[Hdu],
+        file: HduList<'_>,
         image: usize,
     ) -> Result<Option<usize>, ImageError> {
-        let Some(name) = image_name(path, hdus, image)? else {
+        let Some(name) = image_name(file, image)? else {
             return Ok(None);
         };
         Ok(self
@@ -124,9 +121,9 @@ impl ExtensionClaims {
 
 /// The name an extension refers to the image at HDU `index` by: its `EXTNAME`, or [`PRIMARY`] for
 /// an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(path: &Path, hdus: &[Hdu], index: usize) -> Result<Option<String>, ImageError> {
-    let extname = metadata::read_text(&hdus[index].header, "EXTNAME")
-        .map_err(|source| ImageError::fits(path, source))?;
+fn image_name(file: HduList<'_>, index: usize) -> Result<Option<String>, ImageError> {
+    let extname = metadata::read_text(&file.hdus[index].header, "EXTNAME")
+        .map_err(|source| ImageError::fits(file.path, source))?;
     Ok(match extname {
         Some(extname) => Some(extname),
         None => (index == 0).then(|| PRIMARY.to_owned()),

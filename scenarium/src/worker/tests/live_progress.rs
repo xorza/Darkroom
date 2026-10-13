@@ -95,7 +95,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
                 Ok(())
             }))
     });
-    graph.wire("first", 0, "second", 0);
+    graph.wire("first", "second");
     let compiled = graph.program();
 
     let entries = Arc::clone(&patch_entries);

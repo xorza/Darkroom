@@ -147,12 +147,13 @@ fn a_stage_runs_as_wide_as_its_budget_leaves() {
 fn a_decoded_stack_charges_its_frames_scratch_and_output() {
     let frame = plane(4);
     let stack = |kept, scratch, output_planes: usize, normalization_planes: usize| {
-        decoded_stack(
+        DecodedStack {
             kept,
             scratch,
-            output_planes * frame,
-            normalization_planes * frame,
-        )
+            output_bytes: output_planes * frame,
+            normalization_bytes: normalization_planes * frame,
+        }
+        .stages()
     };
     let resident =
         |stages: &[Stage], usable| RunPlan::of(10, stages, Budget::new(usable, 8)).resident;
@@ -506,7 +507,14 @@ fn a_plan_never_overshoots_its_budget() {
             ]
             .map(|decode| found_reference(plane_bytes, decode, 0).to_vec())
             .into_iter()
-            .chain([decoded_stack(plane_bytes, plane_bytes, 0, 0).to_vec()])
+            .chain([DecodedStack {
+                kept: plane_bytes,
+                scratch: plane_bytes,
+                output_bytes: 0,
+                normalization_bytes: 0,
+            }
+            .stages()
+            .to_vec()])
             .collect();
             for stages in &runs {
                 for &workers in &[1usize, 8, 32] {
@@ -634,25 +642,36 @@ fn found_reference(plane_bytes: usize, decode: Footprint, output_bytes: usize) -
     ]
 }
 
-/// The stages of a stack decoded straight into the combine: each frame kept at `kept` with
-/// `scratch` of statistics beside it; a normalization holding `normalization_bytes`; a combine
-/// holding `output_bytes`.
-const fn decoded_stack(
+/// A stack decoded straight into the combine: each frame kept at `kept` with `scratch` of
+/// statistics beside it; a normalization holding `normalization_bytes`; a combine holding
+/// `output_bytes`.
+#[derive(Debug, Clone, Copy)]
+struct DecodedStack {
     kept: usize,
     scratch: usize,
     output_bytes: usize,
     normalization_bytes: usize,
-) -> [Stage; 3] {
-    [
-        Stage {
+}
+
+impl DecodedStack {
+    const fn stages(self) -> [Stage; 3] {
+        let Self {
             kept,
-            held: 0,
-            in_flight: scratch,
-            units: Units::Frames,
-        },
-        normalize(kept, normalization_bytes),
-        combine(kept, output_bytes),
-    ]
+            scratch,
+            output_bytes,
+            normalization_bytes,
+        } = self;
+        [
+            Stage {
+                kept,
+                held: 0,
+                in_flight: scratch,
+                units: Units::Frames,
+            },
+            normalize(kept, normalization_bytes),
+            combine(kept, output_bytes),
+        ]
+    }
 }
 
 const fn normalize(kept: usize, held: usize) -> Stage {

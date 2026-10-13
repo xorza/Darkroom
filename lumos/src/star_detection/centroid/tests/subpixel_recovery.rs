@@ -102,9 +102,9 @@ fn the_position_sigma_matches_the_scatter() {
                 background_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
             let windowed = WindowedCentroid::measure(
                 &residual,
-                truth.round(),
                 &grid,
                 WindowedInputs {
+                    start: truth.round(),
                     offset: 0.0,
                     noise: StarNoise {
                         background_sigma: f64::from(NOISE),

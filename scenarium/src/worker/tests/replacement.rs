@@ -49,7 +49,7 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
         })
     });
     graph.add("sink", NodeSpec::records);
-    graph.wire("source", 0, "sink", 0);
+    graph.wire("source", "sink");
 
     let mut w = TestWorker::over(graph);
     let source = w.id("source");

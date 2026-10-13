@@ -4,13 +4,15 @@ use std::array;
 
 use serde::{Deserialize, Serialize};
 
+use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::flat_gain::FlatGain;
+use crate::image::quality_flags::QualityFlags;
 use crate::math::noise::difference_noise::DifferenceNoise;
 use crate::math::noise::mosaic_sampling::MosaicSampling;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
+use imaginarium::Buffer2;
 
 /// The white noise of each colour of the mosaic a frame was demosaiced from, measured before the
 /// interpolation correlated neighbouring pixels: a measurement of the demosaiced frame reads less
@@ -49,27 +51,26 @@ impl MosaicNoise {
         DifferenceNoise::heap_bytes(size, cfa_type).max(medians * size_of::<f32>())
     }
 
-    /// Measured on `mosaic`, a row-major `size` image of a three-colour `cfa_type`, over the
-    /// photosites `excluded` does not name, under the flat `gain` divided it by when one did.
-    pub(crate) fn measure(
-        mosaic: &[f32],
-        size: Size2us,
-        cfa_type: &CfaType,
-        excluded: impl Fn(usize) -> bool,
-        quantization_sigma: Option<f32>,
-        gain: Option<&FlatGain>,
-    ) -> Self {
+    /// Measured on `image`, an undemosaiced mosaic of three colours, over the photosites no flag
+    /// names, under the flat gain that divided it when one did.
+    pub(crate) fn measure(image: &impl StackableImage) -> Self {
+        let cfa_type = image
+            .cfa_type()
+            .expect("the noise of a mosaic is measured on the mosaic");
         assert_eq!(
             cfa_type.num_colors(),
             3,
             "a mosaic of three colours, not {cfa_type:?}"
         );
+        let flags = image.flags();
         let sampling = MosaicSampling {
-            size,
-            cfa_type,
-            excluded,
+            size: image.dimensions().size(),
+            cfa_type: &cfa_type,
+            excluded: |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
             per_colour: MAX_STATISTIC_SAMPLES,
         };
+        let mosaic = image.channel(0);
+        let gain = image.flat_gain();
         let (sigma, read_share) = match gain {
             Some(gain) => {
                 let splits = DifferenceNoise::estimate_split(mosaic, &sampling, gain);
@@ -89,7 +90,7 @@ impl MosaicNoise {
             sigma,
             read_share,
             sky: colour_medians(mosaic, &sampling),
-            quantization_sigma,
+            quantization_sigma: image.metadata().quantization_sigma,
         }
     }
 }
@@ -97,7 +98,7 @@ impl MosaicNoise {
 /// The median of each colour of `mosaic` over the photosites `sampling` takes. A colour with no
 /// sample reads 0.
 fn colour_medians(
-    mosaic: &[f32],
+    mosaic: &Buffer2<f32>,
     sampling: &MosaicSampling<'_, impl Fn(usize) -> bool>,
 ) -> [f32; 3] {
     let mut samples = sampling.photosite_counts().map(Vec::with_capacity);
@@ -113,6 +114,8 @@ fn colour_medians(
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::math::noise::difference_noise::DifferenceNoise;
@@ -141,9 +144,13 @@ mod tests {
         let size = Size2us::new(64, 64);
         let rggb = CfaType::Bayer(CfaPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
-        let mosaic: Vec<f32> = (0..size.pixel_count())
-            .map(|index| levels[rggb.color_at(size.point_of(index))])
-            .collect();
+        let mosaic = Buffer2::new(
+            64,
+            64,
+            (0..size.pixel_count())
+                .map(|index| levels[rggb.color_at(size.point_of(index))])
+                .collect(),
+        );
         let sampling = MosaicSampling {
             size,
             cfa_type: &rggb,

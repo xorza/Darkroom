@@ -17,7 +17,6 @@
 
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::relayout::Relayout;
-use crate::core::io::preferences::Preferences;
 use crate::gui::app::app_command::AppCommand;
 use crate::gui::app::app_command::file_command::FileCommand;
 use crate::gui::app::app_command::run_command::RunCommand;
@@ -28,6 +27,7 @@ use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 
 use crate::gui::app::app_ctx::AppCtx;
+use crate::gui::frame_writes::FrameWrites;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -70,7 +70,7 @@ impl Session {
 
     /// Run one frame of the edit pipeline against `ctx` — the frame's
     /// read-only world — draining everything it raises against the document
-    /// and leaving the app tier queued in `requests` for the shell.
+    /// and leaving the app tier queued in the `writes` requests for the shell.
     ///
     /// The frame splits into a **navigation phase** (settle which tab is
     /// active, from frame-top inputs) and an **edit phase** (mutate the
@@ -85,9 +85,12 @@ impl Session {
         &mut self,
         ui: &mut Ui,
         ctx: AppCtx<'_>,
-        preferences: &mut Preferences,
-        requests: &mut Requests,
+        writes: FrameWrites<'_>,
     ) -> Relayout {
+        let FrameWrites {
+            preferences,
+            requests,
+        } = writes;
         // The frame's relayout accumulator, owned here for exactly as long as
         // the frame it describes. Every pass that can strand
         // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
@@ -137,8 +140,14 @@ impl Session {
         //    `AppCommand`, so they need no drain of their own and simply have
         //    to land before `App` takes the tier.
         menu_shortcut(ui, requests);
-        self.main_window
-            .frame(ui, WindowCtx::new(ctx, &self.open), preferences, requests);
+        self.main_window.frame(
+            ui,
+            WindowCtx::new(ctx, &self.open),
+            FrameWrites {
+                preferences,
+                requests,
+            },
+        );
         // Graph edits the record surfaced (node select, cache toggle, const
         // edit), plus the tab strip's dock ops.
         needs_relayout |= self.open.drain_requests(requests.document(), ctx.library());

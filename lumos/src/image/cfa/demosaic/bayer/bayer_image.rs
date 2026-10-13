@@ -2,6 +2,7 @@
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::size2us::Size2us;
+use imaginarium::Buffer2;
 
 /// A Bayer frame the demosaic reads: its samples row by row — calibration may put them outside
 /// `[0, 1]` — its size, and its pattern anchored at its first pixel.
@@ -17,15 +18,14 @@ pub(crate) struct BayerImage<'a> {
 
 impl<'a> BayerImage<'a> {
     /// # Panics
-    /// When `data` does not hold one sample per pixel of `size`, or `size` is empty.
-    pub(crate) fn new(data: &'a [f32], size: Size2us, pattern: CfaPattern) -> Self {
+    /// When `data` is empty.
+    pub(crate) fn new(data: &'a Buffer2<f32>, pattern: CfaPattern) -> Self {
+        let size = Size2us::from(data);
         assert!(
-            size.width > 0 && size.height > 0 && data.len() == size.pixel_count(),
-            "a Bayer frame of {}x{} holds {} samples",
-            size.width,
-            size.height,
-            data.len()
+            size.width > 0 && size.height > 0,
+            "a Bayer frame of {size} holds no samples"
         );
+        let data = data.pixels();
         debug_assert!(
             data.iter().all(|v| v.is_finite()),
             "BayerImage data contains NaN or Infinity values"

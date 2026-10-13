@@ -85,7 +85,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     for (leg, config, rays_kept) in legs {
         let found = detect(config);
         if leg == "defaults" {
-            let mut overlay = gray_to_rgb(pixels.pixels(), size, ToneMap::AutoRange);
+            let mut overlay = gray_to_rgb(pixels, ToneMap::AutoRange);
             for ray in &rays {
                 draw_cross(
                     &mut overlay,

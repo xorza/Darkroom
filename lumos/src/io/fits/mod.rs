@@ -9,6 +9,7 @@ pub(crate) mod fits_load_options;
 pub(crate) mod fits_transfer_provenance;
 pub(crate) mod flags_extension;
 pub(crate) mod gain_extension;
+pub(crate) mod hdu_list;
 pub(crate) mod lumos_extension;
 pub(crate) mod metadata;
 pub(crate) mod sample_type_record;

@@ -185,13 +185,6 @@ impl BitBuffer2 {
         self.words.fill(fill);
     }
 
-    #[inline]
-    pub(crate) fn copy_from(&mut self, other: &Self) {
-        debug_assert_eq!(self.size, other.size, "size mismatch");
-        debug_assert_eq!(self.stride, other.stride, "stride mismatch");
-        self.words.copy_from_slice(&other.words);
-    }
-
     /// Count the number of set bits (true values, excluding padding).
     #[inline]
     pub(crate) fn count_ones(&self) -> usize {
@@ -391,6 +384,8 @@ impl Index<usize> for BitBuffer2 {
 
 #[cfg(test)]
 mod internals {
+    use imaginarium::Buffer2;
+
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
 
@@ -400,18 +395,9 @@ mod internals {
             (0..self.size.pixel_count()).map(|index| self.get(index))
         }
 
-        pub(crate) fn from_slice(size: Size2us, data: &[bool]) -> Self {
-            assert_eq!(
-                data.len(),
-                size.pixel_count(),
-                "data length {} does not match dimensions {}x{}={}",
-                data.len(),
-                size.width,
-                size.height,
-                size.pixel_count()
-            );
-
-            let mut buffer = Self::new_default(size);
+        /// The mask `data` holds, a bit a pixel.
+        pub(crate) fn from_plane(data: &Buffer2<bool>) -> Self {
+            let mut buffer = Self::new_default(Size2us::from(data));
             buffer.fill_from_predicate(|index| data[index]);
             buffer
         }

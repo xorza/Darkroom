@@ -11,9 +11,10 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
+use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Scene, TrueSource};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
@@ -44,7 +45,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter(|| {
                 WindowedCentroid::measure(
                     black_box(&measured.residual),
-                    measured.start,
                     &measured.grid,
                     measured.inputs(),
                 )
@@ -104,7 +104,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
         let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
         let at = measured.centre();
-        let measure = || StampBackground::measure(black_box(&measured.residual), None, at, annulus);
+        let measure = || {
+            StampBackground::measure(
+                MaskedPlane::from(black_box(&measured.residual)),
+                at,
+                annulus,
+            )
+        };
         assert!(measure().is_some(), "the annulus lies inside the frame");
         b.iter(measure);
     });
@@ -146,7 +152,11 @@ impl Measured {
         let sigma = f64::from(fwhm::to_sigma(star.fwhm));
         let pos = DVec2::new(64.3, 64.7);
         let flux = (0.5 * TAU * sigma * sigma) as f32;
-        let scene = Scene::single(SIZE, pos, flux, BackgroundField::Uniform { level: SKY });
+        let scene = Scene::single(
+            SIZE,
+            TrueSource { pos, flux },
+            BackgroundField::Uniform { level: SKY },
+        );
         let camera = Camera {
             psf,
             ..Camera::realistic(star.fwhm)
@@ -172,6 +182,7 @@ impl Measured {
         let shot = f64::from(SKY) / f64::from(camera.full_well_e);
         let read = f64::from(camera.read_noise_e / camera.full_well_e);
         WindowedInputs {
+            start: self.start,
             offset: 0.0,
             noise: StarNoise {
                 background_sigma: (shot + read * read).sqrt(),
@@ -182,7 +193,7 @@ impl Measured {
 
     /// The windowed centroid, which the fits and the annulus start from in production.
     fn centre(&self) -> DVec2 {
-        WindowedCentroid::measure(&self.residual, self.start, &self.grid, self.inputs())
+        WindowedCentroid::measure(&self.residual, &self.grid, self.inputs())
             .expect("a bright star's centroid converges")
             .pos
     }

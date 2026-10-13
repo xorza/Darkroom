@@ -10,7 +10,7 @@
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
-use crate::internals::synthetic::noise::{add_dark_current, add_read_noise, apply_shot_noise};
+use crate::internals::synthetic::noise::{DarkCurrent, ReadNoise, apply_shot_noise};
 use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
@@ -76,18 +76,13 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     let height = scene.size.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let mut clean = Buffer2::new(width, height, scene.background.render(scene.size));
+    let mut clean = scene.background.render(scene.size);
     let mut observed = Vec::with_capacity(scene.sources.len());
-    let recovered_fwhm = camera.psf.fwhm() * obs.seeing_scale;
+    let psf = camera.psf.with_seeing(obs.seeing_scale);
+    let recovered_fwhm = psf.fwhm();
     for src in &scene.sources {
         let p = obs.transform.apply(src.pos);
-        camera.psf.render(
-            &mut clean,
-            p.x as f32,
-            p.y as f32,
-            src.flux,
-            obs.seeing_scale,
-        );
+        psf.render(&mut clean, p.as_vec2(), src.flux);
         observed.push(ObservedSource {
             pos: p,
             flux: src.flux,
@@ -108,13 +103,12 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     // 4 + 5. Shot noise and dark current — skipped for a noiseless sensor.
     if !camera.noiseless {
         apply_shot_noise(&mut raw, camera.full_well_e, &mut rng);
-        add_dark_current(
-            &mut raw,
-            camera.dark_current_e_per_s,
-            obs.exposure_s,
-            camera.full_well_e,
-            &mut rng,
-        );
+        DarkCurrent {
+            e_per_s: camera.dark_current_e_per_s,
+            exposure_s: obs.exposure_s,
+            full_well_e: camera.full_well_e,
+        }
+        .add_to(&mut raw, &mut rng);
     }
 
     // 6. Dead pixels collect no charge.
@@ -140,7 +134,11 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
 
     // 8. Read noise, at readout.
     if !camera.noiseless {
-        add_read_noise(&mut raw, camera.read_noise_e, camera.full_well_e, &mut rng);
+        ReadNoise {
+            sigma_e: camera.read_noise_e,
+            full_well_e: camera.full_well_e,
+        }
+        .add_to(&mut raw, &mut rng);
     }
 
     // 9. Hot pixels spiked.

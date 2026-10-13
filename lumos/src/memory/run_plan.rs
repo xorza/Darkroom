@@ -13,6 +13,8 @@ const MAX_STAGES: usize = 4;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RunPlan {
     pub(crate) resident: bool,
+    /// The budget the run is planned under, which its combine is budgeted against too.
+    pub(crate) budget: Budget,
     widths: ArrayVec<Width, MAX_STAGES>,
 }
 
@@ -52,7 +54,11 @@ impl RunPlan {
                 stage.width(budget, frame_count, placement)
             })
             .collect();
-        Self { resident, widths }
+        Self {
+            resident,
+            budget,
+            widths,
+        }
     }
 
     /// The units stage `stage` runs at once.

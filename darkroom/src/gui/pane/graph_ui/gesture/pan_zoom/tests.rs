@@ -90,36 +90,31 @@ fn zoom_about_holds_the_pivot_and_clamps() {
         },
         Case {
             pan: Vec2::new(10.0, 10.0),
-            zoom: CANVAS_MAX_ZOOM * 0.9,
+            zoom: CANVAS_ZOOM.max * 0.9,
             pivot: Vec2::new(100.0, 100.0),
             factor: 5.0,
-            expected_zoom: CANVAS_MAX_ZOOM,
+            expected_zoom: CANVAS_ZOOM.max,
         },
         Case {
             pan: Vec2::new(10.0, 10.0),
-            zoom: CANVAS_MIN_ZOOM * 1.1,
+            zoom: CANVAS_ZOOM.min * 1.1,
             pivot: Vec2::new(100.0, 100.0),
             factor: 0.01,
-            expected_zoom: CANVAS_MIN_ZOOM,
+            expected_zoom: CANVAS_ZOOM.min,
         },
     ];
     for Case {
-        mut pan,
-        mut zoom,
+        pan,
+        zoom,
         pivot,
         factor,
         expected_zoom,
     } in cases
     {
         let world_before = (pivot - pan) / zoom;
-        zoom_about(
-            &mut pan,
-            &mut zoom,
-            pivot,
-            factor,
-            CANVAS_MIN_ZOOM,
-            CANVAS_MAX_ZOOM,
-        );
+        let mut v = Viewport { pan, zoom };
+        CANVAS_ZOOM.zoom_about(&mut v, pivot, factor);
+        let Viewport { pan, zoom } = v;
         assert_eq!(zoom, expected_zoom, "factor {factor}");
         // Four f32 roundings lie between the two world points: the effective
         // factor, the scaled offset, and the two subtractions.
@@ -164,7 +159,7 @@ fn fit_target_centers_at_the_tighter_scale() {
         // pan = (400, 300) - (50000, 50000)·0.1 = (-4600, -4700).
         (
             Rect::new(0.0, 0.0, 100_000.0, 100_000.0),
-            CANVAS_MIN_ZOOM,
+            CANVAS_ZOOM.min,
             Vec2::new(-4600.0, -4700.0),
         ),
     ];
@@ -185,15 +180,12 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
     let pan0 = Vec2::new(5.0, 7.0);
     let zoom0 = 1.25;
     for bad in [0.0_f32, -0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let (mut pan, mut zoom) = (pan0, zoom0);
-        zoom_about(
-            &mut pan,
-            &mut zoom,
-            Vec2::new(50.0, 50.0),
-            bad,
-            CANVAS_MIN_ZOOM,
-            CANVAS_MAX_ZOOM,
-        );
+        let mut v = Viewport {
+            pan: pan0,
+            zoom: zoom0,
+        };
+        CANVAS_ZOOM.zoom_about(&mut v, Vec2::new(50.0, 50.0), bad);
+        let Viewport { pan, zoom } = v;
         assert_eq!(pan, pan0, "pan moved on bad factor {bad}");
         assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
     }

@@ -45,7 +45,7 @@ impl DrizzleShape {
         );
         let spill_bytes = (self.drizzled().heap_bytes(self.output) as u64)
             .saturating_mul(self.frame_count as u64);
-        Tier::for_plan(&plan, budget, spill_bytes, &run.cache_dir)
+        Tier::for_plan(&plan, spill_bytes, &run.cache_dir)
             .map(|tier| tier.holding_beside(self.depth_bytes()))
             .map_err(|source| DrizzleError::Stack(source.into()))
     }
@@ -134,7 +134,7 @@ impl DrizzleShape {
                 kept,
                 held: stack
                     .quality
-                    .pixel_bytes(output.channels(), coverage_planes, true)
+                    .pixel_bytes(output.channels(), coverage_planes, 1)
                     * output.pixel_count()
                     + depth,
                 in_flight: frame_count * drizzled.pixel_bytes() * output.width(),

@@ -52,16 +52,25 @@ impl Kernel for InterpolateSegment<'_> {
             // 2²⁴ pixels.
             let index = isa.splat_f32((chunk * F32_LANES) as f32) + lanes;
             let t = start + index * step;
-            let t_ct = t * (one - t);
-            let two_minus_t = two - t;
-            let one_plus_t = one + t;
-            bg.eval(t, t_ct, two_minus_t, one_plus_t)
-                .store_partial(bg_out);
-            noise
-                .eval(t, t_ct, two_minus_t, one_plus_t)
-                .store_partial(noise_out);
+            let basis = Basis {
+                t,
+                t_ct: t * (one - t),
+                two_minus_t: two - t,
+                one_plus_t: one + t,
+            };
+            bg.eval(basis).store_partial(bg_out);
+            noise.eval(basis).store_partial(noise_out);
         }
     }
+}
+
+/// The terms of a segment's cubic at the parameter `t`, which every segment evaluated there shares.
+#[derive(Debug, Clone, Copy)]
+struct Basis<V> {
+    t: V,
+    t_ct: V,
+    two_minus_t: V,
+    one_plus_t: V,
 }
 
 /// One [`SplineSegment`]'s coefficients, splat across the lanes.
@@ -86,7 +95,13 @@ impl<V: F32x8> Coefficients<V> {
 
     /// `f0 + t·(f1 − f0) − t·(1 − t)·((2 − t)·a + (1 + t)·b)`, in [`SplineSegment::eval`]'s order.
     #[inline(always)]
-    fn eval(self, t: V, t_ct: V, two_minus_t: V, one_plus_t: V) -> V {
+    fn eval(self, basis: Basis<V>) -> V {
+        let Basis {
+            t,
+            t_ct,
+            two_minus_t,
+            one_plus_t,
+        } = basis;
         self.f0 + t * self.rise - t_ct * (two_minus_t * self.a + one_plus_t * self.b)
     }
 }

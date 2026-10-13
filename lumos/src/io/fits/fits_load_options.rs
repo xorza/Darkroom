@@ -1,7 +1,12 @@
+use std::path::Path;
+
+use fits_well::io::{ChecksumReport, ChecksumStatus};
 use serde::Serialize;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::sample_domain::Pedestal;
+use crate::io::error::{FitsRefusal, ImageError};
+use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 
 /// Selects the image HDU decoded from a FITS container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,6 +82,61 @@ pub enum FitsChecksumPolicy {
     VerifyIfPresent,
     /// Require both `DATASUM` and `CHECKSUM` to be present and valid.
     RequireValid,
+}
+
+impl FitsChecksumPolicy {
+    /// HDU `index`'s checksum `report` under this policy, of the file at `path`: an error where
+    /// the policy refuses it, else the provenance it gives. Not for [`Self::Ignore`], which reads
+    /// nothing.
+    pub(crate) fn judge(
+        self,
+        report: ChecksumReport,
+        index: usize,
+        path: &Path,
+    ) -> Result<FitsChecksumProvenance, ImageError> {
+        match self {
+            Self::Ignore => unreachable!("ignore policy returned before verification"),
+            Self::VerifyIfPresent => {
+                if report.datasum == ChecksumStatus::Invalid
+                    || report.checksum == ChecksumStatus::Invalid
+                {
+                    return Err(ImageError::fits_unsupported(
+                        path,
+                        FitsRefusal::InvalidChecksum { hdu: index, report },
+                    ));
+                }
+            }
+            Self::RequireValid => {
+                if report.datasum != ChecksumStatus::Valid
+                    || report.checksum != ChecksumStatus::Valid
+                {
+                    return Err(ImageError::fits_unsupported(
+                        path,
+                        FitsRefusal::ChecksumRequired { hdu: index, report },
+                    ));
+                }
+            }
+        }
+        Ok(checksum_provenance(report))
+    }
+}
+
+fn checksum_state(status: ChecksumStatus) -> FitsChecksumState {
+    match status {
+        ChecksumStatus::Absent => FitsChecksumState::Absent,
+        ChecksumStatus::Unknown => FitsChecksumState::Unknown,
+        ChecksumStatus::Valid => FitsChecksumState::Valid,
+        ChecksumStatus::Invalid => {
+            unreachable!("invalid FITS checksum is rejected before provenance is constructed")
+        }
+    }
+}
+
+fn checksum_provenance(report: ChecksumReport) -> FitsChecksumProvenance {
+    FitsChecksumProvenance {
+        datasum: checksum_state(report.datasum),
+        checksum: checksum_state(report.checksum),
+    }
 }
 
 /// FITS-specific selection and validation policy.

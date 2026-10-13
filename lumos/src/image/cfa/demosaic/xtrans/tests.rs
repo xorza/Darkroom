@@ -9,6 +9,7 @@ use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 #[test]
 fn xtrans_pattern_color_at() {
@@ -160,18 +161,19 @@ fn the_hexagons_are_dcraws() {
     assert_eq!(hexagons.solitary(), Vec2us::new(2, 2));
 }
 
-/// A frame must hold one sample per pixel of a size that is not empty.
+/// A frame takes its plane's size, which must not be empty.
 #[test]
 fn an_xtrans_image_holds_its_size_in_samples() {
-    let image = XTransImage::new(&[0.5; 36], Size2us::new(6, 6), XTRANS_PATTERN);
+    let data = Buffer2::new_filled(6, 6, 0.5);
+    let image = XTransImage::new(&data, XTRANS_PATTERN);
     assert_eq!(image.size, Size2us::new(6, 6));
     assert_eq!(image.read(1, 2), 0.5);
-    for (samples, size) in [(24, Size2us::new(0, 4)), (30, Size2us::new(6, 6))] {
-        let data = vec![0.5f32; samples];
+    for size in [Size2us::new(0, 4), Size2us::new(6, 0)] {
+        let data = Buffer2::new_default(size.width, size.height);
         let refused = std::panic::catch_unwind(|| {
-            XTransImage::new(&data, size, XTRANS_PATTERN);
+            XTransImage::new(&data, XTRANS_PATTERN);
         });
-        assert!(refused.is_err(), "{samples} samples for {size:?}");
+        assert!(refused.is_err(), "{size:?}");
     }
 }
 
@@ -184,7 +186,10 @@ fn a_uniform_frame_demosaics_to_itself() {
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2, 0.5] {
             let rgb = markesteijn::demosaic(
-                &XTransImage::new(&vec![level; size.pixel_count()], size, XTRANS_PATTERN),
+                &XTransImage::new(
+                    &Buffer2::new_filled(size.width, size.height, level),
+                    XTRANS_PATTERN,
+                ),
                 passes,
                 &CancelToken::never(),
             )
@@ -212,17 +217,25 @@ fn a_uniform_frame_demosaics_to_itself() {
 fn markesteijn_is_odd() {
     let size = Size2us::new(96, 96);
     let mut rng = TestRng::new(13);
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let stripe = (index % size.width + index / size.width) % 7 < 3;
-            (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
-        })
-        .collect();
-    let negated: Vec<f32> = data.iter().map(|&value| -value).collect();
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|index| {
+                let stripe = (index % size.width + index / size.width) % 7 < 3;
+                (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
+            })
+            .collect(),
+    );
+    let negated = Buffer2::new(
+        size.width,
+        size.height,
+        data.iter().map(|&value| -value).collect(),
+    );
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
-        let demosaic = |data: &[f32]| {
+        let demosaic = |data: &Buffer2<f32>| {
             markesteijn::demosaic(
-                &XTransImage::new(data, size, XTRANS_PATTERN),
+                &XTransImage::new(data, XTRANS_PATTERN),
                 passes,
                 &CancelToken::never(),
             )
@@ -246,11 +259,15 @@ fn markesteijn_is_odd() {
 fn f32_demosaic_preserves_signed_native_samples() {
     let size = Size2us::new(18, 18);
     let pattern = XTRANS_PATTERN;
-    let data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| (index % 17) as f32 * 0.25 - 2.0)
-        .collect();
+    let data = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|index| (index % 17) as f32 * 0.25 - 2.0)
+            .collect(),
+    );
     let rgb = markesteijn::demosaic(
-        &XTransImage::new(&data, size, pattern),
+        &XTransImage::new(&data, pattern),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )
@@ -277,13 +294,21 @@ fn f32_demosaic_preserves_signed_native_samples() {
 fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let size = Size2us::new(18, 18);
     let pedestal = 0.375;
-    let base: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.2 + (index * 37 % 101) as f32 / 200.0)
-        .collect();
-    let shifted: Vec<f32> = base.iter().map(|value| value + pedestal).collect();
-    let run = |data: &[f32]| {
+    let base = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|index| 0.2 + (index * 37 % 101) as f32 / 200.0)
+            .collect(),
+    );
+    let shifted = Buffer2::new(
+        size.width,
+        size.height,
+        base.iter().map(|value| value + pedestal).collect(),
+    );
+    let run = |data: &Buffer2<f32>| {
         markesteijn::demosaic(
-            &XTransImage::new(data, size, XTRANS_PATTERN),
+            &XTransImage::new(data, XTRANS_PATTERN),
             MarkesteijnPasses::One,
             &CancelToken::never(),
         )
@@ -305,18 +330,22 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     }
 
     let contrast = Size2us::new(30, 30);
-    let blocks: Vec<f32> = (0..contrast.pixel_count())
-        .map(|index| {
-            let (x, y) = (index % contrast.width, index / contrast.width);
-            if (x / 2 + y / 3) % 2 == 0 {
-                0.008
-            } else {
-                0.977
-            }
-        })
-        .collect();
+    let blocks = Buffer2::new(
+        contrast.width,
+        contrast.height,
+        (0..contrast.pixel_count())
+            .map(|index| {
+                let (x, y) = (index % contrast.width, index / contrast.width);
+                if (x / 2 + y / 3) % 2 == 0 {
+                    0.008
+                } else {
+                    0.977
+                }
+            })
+            .collect(),
+    );
     let rgb = markesteijn::demosaic(
-        &XTransImage::new(&blocks, contrast, XTRANS_PATTERN),
+        &XTransImage::new(&blocks, XTRANS_PATTERN),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )

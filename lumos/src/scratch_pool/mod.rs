@@ -70,7 +70,7 @@ impl<T: Default + Clone + Send> Scratch for Buffer2<T> {
     }
 
     fn has_shape(&self, shape: Size2us) -> bool {
-        Size2us::new(self.width(), self.height()) == shape
+        Size2us::from(self) == shape
     }
 }
 

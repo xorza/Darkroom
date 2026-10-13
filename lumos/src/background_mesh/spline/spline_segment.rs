@@ -23,10 +23,19 @@ pub(crate) struct SplineSegment {
     pub(crate) b: f32,
 }
 
+/// One node of a natural cubic spline: its value, and the spline's second derivative there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SplineNode {
+    pub(crate) value: f32,
+    pub(crate) d2: f32,
+}
+
 impl SplineSegment {
-    /// The interval of width `h` between values `f0`, `f1` with second derivatives `d0`, `d1`; a
-    /// zero-width interval is the constant `f0`.
-    pub(crate) const fn new(f0: f32, f1: f32, d0: f32, d1: f32, h: f32) -> Self {
+    /// The interval of width `h` from node `left` to node `right`; a zero-width interval is the
+    /// constant at `left`.
+    pub(crate) const fn new(left: SplineNode, right: SplineNode, h: f32) -> Self {
+        let SplineNode { value: f0, d2: d0 } = left;
+        let SplineNode { value: f1, d2: d1 } = right;
         if h <= 0.0 {
             return Self {
                 f0,

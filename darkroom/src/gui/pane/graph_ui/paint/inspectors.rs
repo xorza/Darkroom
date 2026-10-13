@@ -121,7 +121,7 @@ impl Inspectors {
                 }
             }
         }
-        if outside_action(ui, outcome.body_acted) {
+        if outcome.body_acted || canvas_acted(ui) {
             self.close_unpinned();
         }
     }
@@ -160,118 +160,147 @@ impl Inspectors {
                 .node_world_rect(node)
                 .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            let ncx = node.with_hover(wid::hovered(ui, node.id));
-            draw_one(ui, ncx, mode, pos);
+            let ncx = node.with_hover(wid::hover(ui, node.id));
+            InspectPanel {
+                node: ncx,
+                mode,
+                pos,
+            }
+            .show(ui);
         }
     }
 }
 
-fn draw_one(ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
-    let (theme, node) = (ncx.theme(), ncx);
-    let logs = ncx.graph_ctx.run_state().logs(node.id);
-    let error = ncx.graph_ctx.run_state().error(node.id);
-    // The outline is the *pinned* signal, in the same accent the header's
-    // `i` chip uses for its open/pinned states — one color means
-    // "inspector held open" on both ends. A transient panel rides on its
-    // shadow alone. Width stays constant so pin-cycling never reflows.
-    let border = match mode {
-        InspectMode::Pinned => theme.colors.badge_graph,
-        InspectMode::Open => RgbaF32::TRANSPARENT,
-    };
-    let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-        .with_border(Stroke::new(border, theme.card.border_width))
-        // Same elevation swatch as the node bodies, so every floating
-        // surface casts one kind of shadow (bigger blur — the panel sits higher).
-        .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
-    Panel::vstack()
-        .id(inspect_panel_wid(node.id))
-        .position(pos)
-        .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
-        .sense(Sense::CLICK)
-        .padding(Spacing::all(8.0))
-        .gap(3.0)
-        .background(chrome)
-        .show(ui, |ui| {
-            let title = if node.name().is_empty() {
-                "(unnamed)"
-            } else {
-                node.name()
-            };
-            let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
-            line(ui, title, title_style(theme, ui));
-            // The kind line earns its row only when it says something the
-            // title doesn't — an unrenamed node repeats its func name.
-            if !repeated_kind {
-                line(ui, node.kind_label(), muted_style(theme, ui));
-            }
+/// One open inspection panel: its node, how it is held open, and where it
+/// sits in canvas-world coords.
+#[derive(Debug, Clone, Copy)]
+struct InspectPanel<'a> {
+    node: NodeCtx<'a>,
+    mode: InspectMode,
+    pos: Vec2,
+}
 
-            // Status right under the title — the most-glanceable fact.
-            // The colored line is self-labeling; no section header.
-            let status_color =
-                node_widget::exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
-            let status = status_text(ui, node.exec_status());
-            line(
-                ui,
-                status,
-                TextStyle {
-                    color: status_color,
-                    ..body_style(theme, ui)
-                },
-            );
-            // The actual failure cause beneath the bare "errored" line, in
-            // the error color — this is what turns a generic status into
-            // an actionable message (e.g. "no light frames provided").
-            if let Some(message) = error {
+impl InspectPanel<'_> {
+    fn show(self, ui: &mut Ui) {
+        let Self {
+            node: ncx,
+            mode,
+            pos,
+        } = self;
+        let (theme, node) = (ncx.theme(), ncx);
+        let logs = ncx.graph_ctx.run_state().logs(node.id);
+        let error = ncx.graph_ctx.run_state().error(node.id);
+        // The outline is the *pinned* signal, in the same accent the header's
+        // `i` chip uses for its open/pinned states — one color means
+        // "inspector held open" on both ends. A transient panel rides on its
+        // shadow alone. Width stays constant so pin-cycling never reflows.
+        let border = match mode {
+            InspectMode::Pinned => theme.colors.badge_graph,
+            InspectMode::Open => RgbaF32::TRANSPARENT,
+        };
+        let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+            .with_border(Stroke::new(border, theme.card.border_width))
+            // Same elevation swatch as the node bodies, so every floating
+            // surface casts one kind of shadow (bigger blur — the panel sits higher).
+            .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
+        Panel::vstack()
+            .id(inspect_panel_wid(node.id))
+            .position(pos)
+            .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
+            .sense(Sense::CLICK)
+            .padding(Spacing::all(8.0))
+            .gap(3.0)
+            .background(chrome)
+            .show(ui, |ui| {
+                let title = if node.name().is_empty() {
+                    "(unnamed)"
+                } else {
+                    node.name()
+                };
+                let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
+                line(ui, title, title_style(theme, ui));
+                // The kind line earns its row only when it says something the
+                // title doesn't — an unrenamed node repeats its func name.
+                if !repeated_kind {
+                    line(ui, node.kind_label(), muted_style(theme, ui));
+                }
+
+                // Status right under the title — the most-glanceable fact.
+                // The colored line is self-labeling; no section header.
+                let status_color = node_widget::exec_color(theme, node.exec_status())
+                    .unwrap_or(ui.theme().text.color);
+                let status = status_text(ui, node.exec_status());
                 line(
                     ui,
-                    message,
+                    status,
                     TextStyle {
-                        color: theme.status.error,
+                        color: status_color,
                         ..body_style(theme, ui)
                     },
                 );
-            }
-            if node.sink() {
-                line(ui, "sink", muted_style(theme, ui));
-            }
-            if !node.description().is_empty() {
-                line(ui, node.description(), muted_style(theme, ui));
-            }
-
-            let library = ncx.graph_ctx.library();
-            if node.inputs().len() > 0 {
-                section(ui, theme, "Inputs");
-                for input in node.inputs() {
-                    let val = value_str(ui, input.binding());
-                    port_row(ui, theme, library, input.name(), input.ty(), Some(val));
-                }
-            }
-
-            if node.outputs().len() > 0 {
-                section(ui, theme, "Outputs");
-                for output in node.outputs() {
-                    port_row(ui, theme, library, output.name(), output.ty(), None);
-                }
-            }
-
-            // Log: this node's lines from the last run, level-colored.
-            // Capped to the most recent few so the panel can't grow
-            // unbounded.
-            if !logs.is_empty() {
-                section(ui, theme, "Log");
-                let start = logs.len().saturating_sub(LOG_LINE_CAP);
-                for entry in &logs[start..] {
+                // The actual failure cause beneath the bare "errored" line, in
+                // the error color — this is what turns a generic status into
+                // an actionable message (e.g. "no light frames provided").
+                if let Some(message) = error {
                     line(
                         ui,
-                        &entry.message,
+                        message,
                         TextStyle {
-                            color: log_color(theme, ui, entry.level),
+                            color: theme.status.error,
                             ..body_style(theme, ui)
                         },
                     );
                 }
-            }
-        });
+                if node.sink() {
+                    line(ui, "sink", muted_style(theme, ui));
+                }
+                if !node.description().is_empty() {
+                    line(ui, node.description(), muted_style(theme, ui));
+                }
+
+                let library = ncx.graph_ctx.library();
+                if node.inputs().len() > 0 {
+                    section(ui, theme, "Inputs");
+                    for input in node.inputs() {
+                        let val = value_str(ui, input.binding());
+                        InspectedPort {
+                            label: PortLabel::resolve(library, input.name(), input.ty()),
+                            value: Some(val),
+                        }
+                        .show(ui, theme);
+                    }
+                }
+
+                if node.outputs().len() > 0 {
+                    section(ui, theme, "Outputs");
+                    for output in node.outputs() {
+                        InspectedPort {
+                            label: PortLabel::resolve(library, output.name(), output.ty()),
+                            value: None,
+                        }
+                        .show(ui, theme);
+                    }
+                }
+
+                // Log: this node's lines from the last run, level-colored.
+                // Capped to the most recent few so the panel can't grow
+                // unbounded.
+                if !logs.is_empty() {
+                    section(ui, theme, "Log");
+                    let start = logs.len().saturating_sub(LOG_LINE_CAP);
+                    for entry in &logs[start..] {
+                        line(
+                            ui,
+                            &entry.message,
+                            TextStyle {
+                                color: log_color(theme, ui, entry.level),
+                                ..body_style(theme, ui)
+                            },
+                        );
+                    }
+                }
+            });
+    }
 }
 
 /// `RgbaF32` for a log line by level: info reads as muted body text, warn
@@ -284,22 +313,21 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
     }
 }
 
-/// Did the user act outside any inspection panel this frame? Clicking a
-/// node body, clicking bare canvas, or panning/zooming the canvas all
-/// count; clicks inside a panel or on a chip don't (those widgets
-/// capture the press, so neither the canvas nor a body sees it).
-fn outside_action(ui: &Ui, body_acted: bool) -> bool {
+/// Did the user act on the bare canvas this frame — the canvas half of an
+/// action outside every inspection panel, beside a node body acted on?
+/// Clicking or panning/zooming the canvas counts; clicks inside a panel or on
+/// a chip don't (those widgets capture the press, so the canvas never sees
+/// it).
+fn canvas_acted(ui: &Ui) -> bool {
     let oc = ui.response_for(canvas::outer_wid());
     // Any-button drag: left rubber-bands, middle pans, right scribbles
     // the breaker — all of them count as "acted on the canvas".
     let dragged = oc.left.drag.is_live() || oc.middle.drag.is_live() || oc.right.drag.is_live();
-    let canvas_acted = oc.left.clicked()
+    oc.left.clicked()
         || dragged
         || oc.scroll.lines != Vec2::ZERO
         || oc.scroll.pixels != Vec2::ZERO
-        || oc.scroll.zoom != ZoomFactor::ONE;
-    // The node half comes off the draw that just ran.
-    canvas_acted || body_acted
+        || oc.scroll.zoom != ZoomFactor::ONE
 }
 
 fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
@@ -324,21 +352,21 @@ fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
 /// One port row, two tiers: a muted label line (the port name, plus its
 /// type when the two differ), then the value on its own full-strength
 /// line — so a long value wraps cleanly instead of orphaning its tail
-/// tokens mid-`name: type = value` string. `None` value renders the label
+/// tokens mid-`name: type = value` string. A `None` value renders the label
 /// alone (an output that hasn't run).
-fn port_row(
-    ui: &mut Ui,
-    theme: &Theme,
-    library: &Library,
-    name: &str,
-    ty: &DataType,
-    val: Option<TextInput<'static>>,
-) {
-    let label = PortLabel::resolve(library, name, ty);
-    let text = fmt!(ui, "{label}");
-    line(ui, text, muted_style(theme, ui));
-    if let Some(v) = val {
-        line(ui, v, body_style(theme, ui));
+#[derive(Debug)]
+struct InspectedPort<'a> {
+    label: PortLabel<'a>,
+    value: Option<TextInput<'static>>,
+}
+
+impl InspectedPort<'_> {
+    fn show(self, ui: &mut Ui, theme: &Theme) {
+        let text = fmt!(ui, "{}", self.label);
+        line(ui, text, muted_style(theme, ui));
+        if let Some(v) = self.value {
+            line(ui, v, body_style(theme, ui));
+        }
     }
 }
 

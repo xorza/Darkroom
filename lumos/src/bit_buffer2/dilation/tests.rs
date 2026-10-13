@@ -4,43 +4,36 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::bit_buffer2::dilation::dilate_mask;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use imaginarium::Buffer2;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
 fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
-    dilated.copy_from(mask);
+    dilated.clone_from(mask);
     dilate_mask(dilated, radius, &mut BitBuffer2::new_default(mask.size));
 }
 
-/// Verify dilation result against a naive O(n²×r²) disk dilation.
-fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
-    let size = Size2us::new(mask.size.width, mask.size.height);
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let mut expected = false;
-            for sy in y.saturating_sub(radius)..=(y + radius).min(size.height - 1) {
-                for sx in x.saturating_sub(radius)..=(x + radius).min(size.width - 1) {
-                    let distance_squared = sx.abs_diff(x).pow(2) + sy.abs_diff(y).pow(2);
-                    if distance_squared <= radius * radius && mask.get_at(Vec2us::new(sx, sy)) {
-                        expected = true;
-                        break;
-                    }
-                }
-                if expected {
-                    break;
-                }
-            }
-            assert_eq!(
-                dilated.get_at(Vec2us::new(x, y)),
-                expected,
-                "{ctx} mismatch at ({x}, {y})"
-            );
-        }
-    }
+/// The first pixel where `dilated` differs from a naive O(n²×r²) disk dilation of `mask`.
+fn naive_mismatch(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize) -> Option<Vec2us> {
+    let size = mask.size;
+    (0..size.pixel_count())
+        .map(|index| size.point_of(index))
+        .find(|&at| {
+            let near = |sy: usize, sx: usize| {
+                sx.abs_diff(at.x).pow(2) + sy.abs_diff(at.y).pow(2) <= radius * radius
+                    && mask.get_at(Vec2us::new(sx, sy))
+            };
+            let expected = (at.y.saturating_sub(radius)..=(at.y + radius).min(size.height - 1))
+                .any(|sy| {
+                    (at.x.saturating_sub(radius)..=(at.x + radius).min(size.width - 1))
+                        .any(|sx| near(sy, sx))
+                });
+            dilated.get_at(at) != expected
+        })
 }
 
 #[test]
 fn dilate_mask_empty() {
-    let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &[false; 9]);
+    let mask = BitBuffer2::from_plane(&Buffer2::new(3, 3, [false; 9].to_vec()));
     let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
     dilate_into(&mask, 1, &mut dilated);
     assert!(dilated.iter().all(|x| !x));
@@ -49,9 +42,9 @@ fn dilate_mask_empty() {
 #[test]
 fn dilate_mask_single_pixel_radius_0() {
     // Radius 0 should not expand
-    let mut mask_data = vec![false; 9];
+    let mut mask_data = Buffer2::new_default(3, 3);
     mask_data[4] = true; // center
-    let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
+    let mask = BitBuffer2::from_plane(&mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
     dilate_into(&mask, 0, &mut dilated);
 
@@ -117,11 +110,11 @@ fn a_pixel_dilates_into_a_disk() {
 #[test]
 fn dilate_mask_preserves_original_pixels() {
     // Original pixels should always be in dilated result
-    let mut mask_data = vec![false; 25];
+    let mut mask_data = Buffer2::new_default(5, 5);
     mask_data[0] = true;
     mask_data[12] = true; // center
     mask_data[24] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
+    let mask = BitBuffer2::from_plane(&mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
     dilate_into(&mask, 1, &mut dilated);
 
@@ -135,7 +128,7 @@ fn dilate_mask_preserves_original_pixels() {
 #[should_panic(expected = "radius must be <= 63")]
 fn dilate_mask_radius_above_63_panics() {
     // Radius > 63 is out of contract (production caps dilation at 50).
-    let mask = BitBuffer2::from_slice(Size2us::new(200, 1), &[false; 200]);
+    let mask = BitBuffer2::from_plane(&Buffer2::new(200, 1, [false; 200].to_vec()));
     let mut dilated = BitBuffer2::new_filled(Size2us::new(200, 1), false);
     dilate_into(&mask, 64, &mut dilated);
 }
@@ -291,15 +284,15 @@ fn dilation_matches_the_brute_force_reference() {
                 }
             }
         }
-        let mask = BitBuffer2::from_slice(case.size, &data);
+        let mask = BitBuffer2::from_plane(&Buffer2::new(case.size.width, case.size.height, data));
         for &radius in case.radii {
             let mut dilated = BitBuffer2::new_filled(case.size, false);
             dilate_into(&mask, radius, &mut dilated);
-            assert_naive_dilation(
-                &mask,
-                &dilated,
-                radius,
-                &format!("{} r={radius}", case.name),
+            assert_eq!(
+                naive_mismatch(&mask, &dilated, radius),
+                None,
+                "{} r={radius}",
+                case.name
             );
         }
     }

@@ -169,11 +169,11 @@ impl TestGraph {
         g.add("sum", |n| n.sum().cache(CacheMode::Ram));
         g.add("mult", |n| n.mult().cache(CacheMode::Ram));
         g.add("Print", |n| n.records().cache(CacheMode::Ram));
-        g.wire("get_a", 0, "sum", 0);
-        g.wire("get_b", 0, "sum", 1);
-        g.wire("sum", 0, "mult", 0);
-        g.wire("get_b", 0, "mult", 1);
-        g.wire("mult", 0, "Print", 0);
+        g.wire("get_a", "sum");
+        g.wire("get_b", ("sum", 1));
+        g.wire("sum", "mult");
+        g.wire("get_b", ("mult", 1));
+        g.wire("mult", "Print");
         g.graph
             .validate()
             .expect("the fixture graph is well formed");
@@ -188,7 +188,7 @@ impl TestGraph {
         g.add("source", |n| n.pure().output(DataType::Int));
         g.add("sink", NodeSpec::records);
         g.add("loose", |n| n.pure().output(DataType::Int));
-        g.wire("source", 0, "sink", 0);
+        g.wire("source", "sink");
         g
     }
 
@@ -199,10 +199,15 @@ impl TestGraph {
             .unwrap_or_else(|| panic!("no node named {name:?} in this fixture"))
     }
 
-    /// Bind `consumer`'s input `input` to `producer`'s output `out`.
-    pub fn wire(&mut self, producer: &str, out: usize, consumer: &str, input: usize) {
-        let binding = Binding::bind(self.id(producer), out);
-        self.set(consumer, input, binding);
+    /// Bind `consumer`'s input to `producer`'s output: a bare name is the node's port 0.
+    pub fn wire<'a>(
+        &mut self,
+        producer: impl Into<NamedPort<'a>>,
+        consumer: impl Into<NamedPort<'a>>,
+    ) {
+        let (producer, consumer) = (producer.into(), consumer.into());
+        let binding = Binding::bind(self.id(producer.node), producer.index);
+        self.set(consumer.node, consumer.index, binding);
     }
 
     /// Put a literal on `consumer`'s input `input`.
@@ -371,6 +376,32 @@ impl TestGraph {
 /// The body both `fails` methods install, so the two cannot drift.
 fn failing_lambda(message: &'static str) -> FuncLambda {
     async_lambda!(move |_| { Err(lambda::failure(message)) })
+}
+
+/// A port of a fixture's node, by the node's name: a bare `&str` is its port 0, a
+/// `(name, index)` pair any other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamedPort<'a> {
+    pub node: &'a str,
+    pub index: usize,
+}
+
+impl<'a> From<&'a str> for NamedPort<'a> {
+    fn from(node: &'a str) -> Self {
+        Self { node, index: 0 }
+    }
+}
+
+impl<'a> From<&'a String> for NamedPort<'a> {
+    fn from(node: &'a String) -> Self {
+        Self::from(node.as_str())
+    }
+}
+
+impl<'a> From<(&'a str, usize)> for NamedPort<'a> {
+    fn from((node, index): (&'a str, usize)) -> Self {
+        Self { node, index }
+    }
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the

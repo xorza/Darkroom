@@ -5,6 +5,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
+use crate::image::masked_plane::MaskedPlane;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::bench;
 use crate::star_detection::resources::DetectionResources;
@@ -17,7 +18,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let pixels = field.render(FRAME).image.channel(0).clone();
             let config = bench::config(field).background;
             let mut resources = DetectionResources::new(FRAME);
-            b.iter(|| BackgroundEstimate::estimate(&pixels, None, &config, &mut resources));
+            b.iter(|| {
+                BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources)
+            });
         });
     }
 }

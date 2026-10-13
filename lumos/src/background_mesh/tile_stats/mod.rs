@@ -8,7 +8,7 @@ use std::fmt::Formatter;
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Shapeless;
@@ -263,8 +263,10 @@ impl TileStats {
             ClippedStats::sigma_clipped(
                 detrended,
                 deviations,
-                CLIP_KAPPA,
-                input.sigma_clip_iterations,
+                SigmaClip {
+                    kappa: CLIP_KAPPA,
+                    iterations: input.sigma_clip_iterations,
+                },
             )
         };
         let mut slope = TileSlope::default();

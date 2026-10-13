@@ -4,7 +4,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::distortion::tps::distortion_map::DistortionMap;
 use crate::registration::distortion::tps::tests::{
-    EXACT_PX, assert_dvec2_near, fit_default, square_source_4,
+    EXACT_PX, assert_near, fit_default, square_source_4,
 };
 
 /// `DistortionMap` from pure translation: grid dimensions, vectors, and statistics.
@@ -25,7 +25,10 @@ fn distortion_map_translation() {
     for gy in 0..map.grid.height {
         for gx in 0..map.grid.width {
             let d = map.get(Vec2us::new(gx, gy)).unwrap();
-            assert_dvec2_near(d, shift, EXACT_PX, &format!("grid ({gx},{gy})"));
+            assert!(
+                d.abs_diff_eq(shift, EXACT_PX),
+                "grid ({gx},{gy}): {d} vs {shift}"
+            );
         }
     }
 
@@ -80,12 +83,12 @@ fn distortion_map_interpolation() {
 
     // At grid point (0, 0): should be ~(10, 5)
     let d0 = map.interpolate(DVec2::new(0.0, 0.0));
-    assert_dvec2_near(d0, shift, EXACT_PX, "interp at grid point");
+    assert_near(d0, shift, EXACT_PX);
 
     // At midpoint between grid nodes (37.5, 62.5):
     // For uniform translation, bilinear interpolation of constant field = constant
     let d_mid = map.interpolate(DVec2::new(37.5, 62.5));
-    assert_dvec2_near(d_mid, shift, EXACT_PX, "interp at midpoint");
+    assert_near(d_mid, shift, EXACT_PX);
 }
 
 /// `DistortionMap` with non-uniform distortion: verify gradient.
@@ -124,8 +127,8 @@ fn distortion_map_non_uniform_gradient() {
 
     // The field is linear, which the spline holds exactly and the map's bilinear interpolation
     // reproduces.
-    assert_dvec2_near(d_left, DVec2::new(1.25, 2.0), EXACT_PX, "left");
-    assert_dvec2_near(d_right, DVec2::new(8.75, 2.0), EXACT_PX, "right");
+    assert_near(d_left, DVec2::new(1.25, 2.0), EXACT_PX);
+    assert_near(d_right, DVec2::new(8.75, 2.0), EXACT_PX);
 }
 
 /// Past the grid the distortion is the nearest edge's, not zero: under a uniform shift of (10, 5)
@@ -143,6 +146,10 @@ fn distortion_map_holds_its_edge_past_the_grid() {
         DVec2::new(50.0, 1000.0),
         DVec2::new(-1e6, 1e6),
     ] {
-        assert_dvec2_near(map.interpolate(p), shift, EXACT_PX, &format!("{p}"));
+        assert!(
+            map.interpolate(p).abs_diff_eq(shift, EXACT_PX),
+            "{p}: {} vs {shift}",
+            map.interpolate(p)
+        );
     }
 }

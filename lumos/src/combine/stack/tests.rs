@@ -19,6 +19,7 @@ use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -38,7 +39,7 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
 use crate::internals::assertions::{assert_close, bits};
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::size2us::Size2us;
@@ -73,10 +74,10 @@ fn stack_frame(image: LinearImage, quality: FrameQuality<Buffer2<f32>>) -> Stack
     frame
 }
 
+/// A cache of one-row mono frames, each quantized with its `source_sigmas` step.
 fn make_cfa_stack_cache(
     frame_pixels: Vec<Vec<f32>>,
     source_sigmas: &[f32],
-    dimensions: ImageDimensions,
     normalization: Normalization,
 ) -> FrameCache {
     assert_eq!(frame_pixels.len(), source_sigmas.len());
@@ -84,11 +85,8 @@ fn make_cfa_stack_cache(
         .into_iter()
         .zip(source_sigmas)
         .map(|(pixels, &sigma)| {
-            let mut image = internals::cfa::make_cfa(
-                Size2us::new(dimensions.width(), dimensions.height()),
-                pixels,
-                CfaType::Mono,
-            );
+            let mut image =
+                internals::cfa::make_cfa(Size2us::new(pixels.len(), 1), pixels, CfaType::Mono);
             image.metadata.quantization_sigma = Some(sigma);
             image
         })
@@ -105,9 +103,8 @@ fn make_cfa_stack_cache(
 /// - A σ-clip that rejects the 100 among eight frames of σ 0.01 still states 0.01.
 #[test]
 fn a_master_states_the_largest_step_of_its_inputs() {
-    let dimensions = ImageDimensions::new((2, 1), 1);
     let stated = |pixels: Vec<Vec<f32>>, sigmas: &[f32], config: StackConfig| {
-        let cache = make_cfa_stack_cache(pixels, sigmas, dimensions, config.normalization);
+        let cache = make_cfa_stack_cache(pixels, sigmas, config.normalization);
         let product = run_stacking(&cache, &config).expect("this cache is never cancelled");
         product.image.metadata.quantization_sigma
     };
@@ -227,8 +224,13 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 let stored = frames
                     .into_iter()
                     .map(|f| {
-                        StoredFrame::spill(&run_scratch, &f.image, &f.quality, f.source_stats)
-                            .unwrap()
+                        SpillFrame {
+                            image: &f.image,
+                            quality: &f.quality,
+                            source_stats: f.source_stats,
+                        }
+                        .spill(&run_scratch)
+                        .unwrap()
                     })
                     .collect();
                 stack_stored_frames(
@@ -1021,7 +1023,6 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
     let with_sigmas = make_cfa_stack_cache(
         vec![vec![0.4; 2], vec![0.2; 2]],
         &[0.01, 0.02],
-        dimensions,
         Normalization::None,
     );
 
@@ -1397,7 +1398,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
         .collect();
     let sky = Sky {
         level: 0.1,
-        noise: 0.0,
+        noise: None,
         clamp: false,
     };
     let field = |shift: f32, gain: f32, noise: f32, seed: u64| {
@@ -1405,12 +1406,19 @@ fn registered_global_normalization_uses_paired_signal_samples() {
             .iter()
             .map(|&(center, peak)| (center + Vec2::new(shift, 0.0), peak))
             .collect();
-        let mut pixels: Vec<f32> = SkyField::render(size, sky, 1.5, &shifted, 0)
-            .pixels
-            .pixels()
-            .iter()
-            .map(|&value| value * gain)
-            .collect();
+        let mut pixels: Vec<f32> = SkyField::render(
+            size,
+            sky,
+            GaussianStars {
+                sigma: 1.5,
+                peaks: &shifted,
+            },
+        )
+        .pixels
+        .pixels()
+        .iter()
+        .map(|&value| value * gain)
+        .collect();
         patterns::add_gaussian_noise(&mut pixels, noise, seed);
         LinearImage::from_pixels(dims, pixels)
     };
@@ -1430,7 +1438,15 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let norms = cache.frame_norms.as_ref().unwrap();
     let gain = f64::from(norms[1].slots[0].gain);
 
-    let truth = SkyField::render(size, sky, 1.5, &stars, 0).pixels;
+    let truth = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 1.5,
+            peaks: &stars,
+        },
+    )
+    .pixels;
     let mean = truth.pixels().iter().map(|&t| f64::from(t)).sum::<f64>() / truth.len() as f64;
     let spread: f64 = truth
         .pixels()

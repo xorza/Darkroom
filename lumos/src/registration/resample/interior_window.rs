@@ -4,11 +4,10 @@
 //! The sums are [`TapWindow`](crate::registration::resample::tap_window::TapWindow)'s for such a
 //! window, from the same weights; only the order of their additions differs.
 
-use crate::math::size2us::Size2us;
-use crate::registration::resample::kernel::warp_kernel::{TapRange, WarpKernel};
+use crate::registration::resample::kernel::warp_kernel::WarpKernel;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::source_position::SourceAt;
 use crate::registration::resample::tap_window::RowLanes;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 
@@ -34,18 +33,16 @@ struct AxisMoments {
 }
 
 impl<V: F32x8> InteriorWindow<V> {
-    /// The window of `kernel` at `position` over `x` and `y` taps of at most a vector each;
-    /// `None` when some tap lies outside a `size` source.
+    /// The window of `kernel` at a position in its source; `None` when the kernel's taps there
+    /// span more than a vector on either axis, or some tap lies outside the source.
     #[inline(always)]
-    pub(crate) fn new<S: Isa<F32 = V>>(
-        isa: S,
-        kernel: &WarpKernel,
-        position: SourcePosition,
-        x: TapRange,
-        y: TapRange,
-        size: Size2us,
-    ) -> Option<Self> {
-        debug_assert!(x.count <= F32_LANES && y.count <= F32_LANES);
+    pub(crate) fn new<S: Isa<F32 = V>>(isa: S, kernel: &WarpKernel, at: SourceAt) -> Option<Self> {
+        let SourceAt { position, size } = at;
+        let x = kernel.taps(position.fx);
+        let y = kernel.taps(position.fy);
+        if x.count > F32_LANES || y.count > F32_LANES {
+            return None;
+        }
         let first_x = usize::try_from(position.cell_x + x.first).ok()?;
         let first_y = usize::try_from(position.cell_y + y.first).ok()?;
         if first_x + x.count > size.width || first_y + y.count > size.height {

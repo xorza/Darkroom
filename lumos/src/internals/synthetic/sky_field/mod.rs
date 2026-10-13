@@ -16,17 +16,30 @@ use crate::math::vec2us::Vec2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-/// The sky a field is drawn on. Named fields because the three values are all small floats and
-/// positionally interchangeable at a call site.
+/// The sky a field is drawn on.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sky {
     /// Flat background level.
     pub(crate) level: f32,
-    /// Sigma of the Gaussian noise added per pixel; `0.0` for a noiseless sky.
-    pub(crate) noise: f32,
+    /// The Gaussian noise added per pixel; `None` for a noiseless sky.
+    pub(crate) noise: Option<SkyNoise>,
     /// Clamp to `[0, 1]` after adding noise. Leave off when the test injects values above the
     /// ceiling afterwards — cosmic rays, for one.
     pub(crate) clamp: bool,
+}
+
+/// Gaussian noise of `sigma`, deterministic in `seed`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SkyNoise {
+    pub(crate) sigma: f32,
+    pub(crate) seed: u64,
+}
+
+/// Round Gaussian stars of width `sigma`, each `(centre, peak above the sky)`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GaussianStars<'a> {
+    pub(crate) sigma: f32,
+    pub(crate) peaks: &'a [(Vec2, f32)],
 }
 
 /// A rendered field and where its stars are.
@@ -38,24 +51,19 @@ pub(crate) struct SkyField {
 }
 
 impl SkyField {
-    /// Draw `stars`, each `(centre, peak above the sky)`, as round Gaussians of width `sigma`.
+    /// Draw `stars` on `sky`.
     #[expect(
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn render(
-        size: Size2us,
-        sky: Sky,
-        sigma: f32,
-        stars: &[(Vec2, f32)],
-        seed: u64,
-    ) -> Self {
+    pub(crate) fn render(size: Size2us, sky: Sky, stars: GaussianStars<'_>) -> Self {
+        let GaussianStars { sigma, peaks } = stars;
         let mut pixels = Buffer2::new_filled(size.width, size.height, sky.level);
-        for &(center, peak) in stars {
+        for &(center, peak) in peaks {
             SyntheticStar::new(center, peak, StarProfile::gaussian(sigma)).add_to(&mut pixels);
         }
-        if sky.noise > 0.0 {
-            patterns::add_gaussian_noise(pixels.pixels_mut(), sky.noise, seed);
+        if let Some(SkyNoise { sigma, seed }) = sky.noise {
+            patterns::add_gaussian_noise(pixels.pixels_mut(), sigma, seed);
         }
         if sky.clamp {
             for p in &mut pixels {
@@ -64,7 +72,7 @@ impl SkyField {
         }
         Self {
             pixels,
-            centers: stars
+            centers: peaks
                 .iter()
                 .map(|&(c, _)| Vec2us::new(c.x.round() as usize, c.y.round() as usize))
                 .collect(),

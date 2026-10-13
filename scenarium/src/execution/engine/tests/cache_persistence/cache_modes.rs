@@ -17,11 +17,11 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "sum", 0);
-    g.wire("src", 0, "sum", 1);
-    g.wire("sum", 0, "mult", 0);
-    g.wire("src", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("src", "sum");
+    g.wire("src", ("sum", 1));
+    g.wire("sum", "mult");
+    g.wire("src", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
@@ -187,11 +187,11 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     g.add("a", |n| n.sum().cache(CacheMode::None));
     g.add("b", |n| n.mult().cache(CacheMode::Disk));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "a", 0);
-    g.wire("src", 0, "a", 1);
-    g.wire("a", 0, "b", 0);
-    g.wire("a", 0, "b", 1);
-    g.wire("b", 0, "print", 0);
+    g.wire("src", "a");
+    g.wire("src", ("a", 1));
+    g.wire("a", "b");
+    g.wire("a", ("b", 1));
+    g.wire("b", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let cold = e.run_sinks().await;
@@ -229,7 +229,7 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
         g.add("print", NodeSpec::records);
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
-        g.wire("mult", 0, "print", 0);
+        g.wire("mult", "print");
 
         let mut e = TestEngine::over(g).with_disk_store(dir.path());
         e.run_sinks().await;
@@ -263,9 +263,9 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     g.add("print", NodeSpec::records);
     g.constant("sum", 0, 2i64);
     g.constant("sum", 1, 3i64);
-    g.wire("sum", 0, "mult", 0);
+    g.wire("sum", "mult");
     g.constant("mult", 1, 4i64);
-    g.wire("mult", 0, "print", 0);
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let cold = e.run_sinks().await;

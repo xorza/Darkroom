@@ -32,6 +32,7 @@ use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::math::lstsq::Lstsq;
 use crate::registration::point_normalization::PointNormalization;
@@ -66,15 +67,11 @@ impl Default for SipConfig {
 
 impl SipConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            (2..=MAX_ORDER).contains(&self.order),
-            "SIP order",
-            "between 2 and 5",
-            self.order as f64,
-        )?;
+        ConfigValue::count("SIP order", self.order)
+            .must_be("between 2 and 5", (2..=MAX_ORDER).contains(&self.order))?;
         if let Some(reference_point) = self.reference_point {
-            InvalidConfigField::finite_only("SIP reference_point x", reference_point.x)?;
-            InvalidConfigField::finite_only("SIP reference_point y", reference_point.y)?;
+            ConfigValue::new("SIP reference_point x", reference_point.x).finite()?;
+            ConfigValue::new("SIP reference_point y", reference_point.y).finite()?;
         }
         Ok(())
     }

@@ -1,14 +1,17 @@
+use imaginarium::Buffer2;
+
 use crate::internals::assertions::assert_close;
 use crate::internals::test_rng::TestRng;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 
-fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Vec<f32> {
+fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
-    (0..size.pixel_count())
+    let pixels = (0..size.pixel_count())
         .map(|_| sigma * rng.next_gaussian_f32())
-        .collect()
+        .collect();
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// White Gaussian noise of σ = 1 reads its σ. Two fresh frames of 10⁶ analysed pixels: each
@@ -21,7 +24,6 @@ fn white_noise_reads_its_own_sigma() {
         .map(|seed| {
             f64::from(MrsNoise::estimate(
                 &white_noise(size, 1.0, seed * 104_729),
-                size,
                 |_| false,
             ))
         })
@@ -39,19 +41,23 @@ fn white_noise_reads_its_own_sigma() {
 fn a_ramp_leaves_the_noise_estimate() {
     let size = Size2us::new(512, 512);
     let noise = white_noise(size, 0.01, 3);
-    let ramped: Vec<f32> = noise
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| value + (index % 512) as f32 / 512.0)
-        .collect();
-    let plain = MrsNoise::estimate(&noise, size, |_| false);
-    let with_ramp = MrsNoise::estimate(&ramped, size, |_| false);
+    let ramped = Buffer2::new(
+        512,
+        512,
+        noise
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| value + (index % 512) as f32 / 512.0)
+            .collect(),
+    );
+    let plain = MrsNoise::estimate(&noise, |_| false);
+    let with_ramp = MrsNoise::estimate(&ramped, |_| false);
     assert!(
         (with_ramp - plain).abs() < 0.001 * plain,
         "{plain} against {with_ramp}"
     );
     assert!((plain - 0.01).abs() < 0.000_2, "{plain}");
-    let mut copy = ramped;
+    let mut copy = ramped.into_vec();
     assert_close!(MedianMad::of_mut(&mut copy).sigma(), 0.371, 0.001);
 }
 
@@ -62,20 +68,24 @@ fn excluded_pixels_leave_the_estimate() {
     let size = Size2us::new(512, 512);
     let left = white_noise(size, 0.01, 5);
     let right = white_noise(size, 0.05, 6);
-    let frame: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            if index % 512 < 256 {
-                left[index]
-            } else {
-                right[index]
-            }
-        })
-        .collect();
-    let sigma = MrsNoise::estimate(&frame, size, |index| index % 512 >= 256);
+    let frame = Buffer2::new(
+        512,
+        512,
+        (0..size.pixel_count())
+            .map(|index| {
+                if index % 512 < 256 {
+                    left[index]
+                } else {
+                    right[index]
+                }
+            })
+            .collect(),
+    );
+    let sigma = MrsNoise::estimate(&frame, |index| index % 512 >= 256);
     assert!((sigma - 0.01).abs() < 0.000_3, "{sigma}");
     // A constant frame has no noise.
     assert_eq!(
-        MrsNoise::estimate(&vec![0.5; size.pixel_count()], size, |_| false),
+        MrsNoise::estimate(&Buffer2::new_filled(512, 512, 0.5), |_| false),
         0.0
     );
 }
@@ -95,7 +105,7 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
             for x in 8..40 {
                 frame[24 * 48 + x] += 1.0;
             }
-            MrsNoise::estimate(&frame, size, |_| false)
+            MrsNoise::estimate(&frame, |_| false)
         })
         .collect();
     assert!(estimates.iter().all(|&sigma| sigma > 0.0), "{estimates:?}");

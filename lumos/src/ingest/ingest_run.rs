@@ -25,22 +25,24 @@ pub(crate) struct IngestRun {
     pub(crate) progress: ProgressCallback,
 }
 
+/// What the machine a run is on offers it: the memory it can take, and the workers to run on.
+#[derive(Debug, Clone, Copy)]
+struct RunHost {
+    memory: RunMemory,
+    workers: usize,
+}
+
 impl IngestRun {
     pub(crate) fn new(config: &IngestConfig, monitor: ProgressMonitor) -> Self {
-        Self::of(
-            RunMemory::read(config.memory_override),
-            rayon::current_num_threads(),
-            config,
-            monitor,
-        )
+        let host = RunHost {
+            memory: RunMemory::read(config.memory_override),
+            workers: rayon::current_num_threads(),
+        };
+        Self::of(host, config, monitor)
     }
 
-    fn of(
-        memory: RunMemory,
-        workers: usize,
-        config: &IngestConfig,
-        monitor: ProgressMonitor,
-    ) -> Self {
+    fn of(host: RunHost, config: &IngestConfig, monitor: ProgressMonitor) -> Self {
+        let RunHost { memory, workers } = host;
         let ProgressMonitor { progress, cancel } = monitor;
         let budget = memory.budget(workers);
         Self {
@@ -68,19 +70,18 @@ impl IngestRun {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::ingest::ingest_config::IngestConfig;
-    use crate::ingest::ingest_run::IngestRun;
+    use crate::ingest::ingest_run::{IngestRun, RunHost};
     use crate::memory::run_memory::RunMemory;
     use crate::progress::progress_monitor::ProgressMonitor;
 
     impl IngestRun {
         /// A run planned against `memory` rather than the system's reading, under `config`.
         pub(crate) fn planned(memory: RunMemory, config: &IngestConfig) -> Self {
-            Self::of(
+            let host = RunHost {
                 memory,
-                rayon::current_num_threads(),
-                config,
-                ProgressMonitor::unattended(),
-            )
+                workers: rayon::current_num_threads(),
+            };
+            Self::of(host, config, ProgressMonitor::unattended())
         }
     }
 }
@@ -93,7 +94,7 @@ mod tests {
     use common::CancelToken;
 
     use crate::ingest::ingest_config::IngestConfig;
-    use crate::ingest::ingest_run::IngestRun;
+    use crate::ingest::ingest_run::{IngestRun, RunHost};
     use crate::io::fits::fits_load_options::FitsNullPolicy;
     use crate::memory::budget::Budget;
     use crate::memory::run_memory::RunMemory;
@@ -120,9 +121,12 @@ mod tests {
             ..IngestConfig::with_cache_dir("cache".into())
         };
         config.fits.nulls = FitsNullPolicy::Reject;
+        let host = RunHost {
+            memory: RunMemory::new(8_000, Some(100)),
+            workers: 3,
+        };
         let run = IngestRun::of(
-            RunMemory::new(8_000, Some(100)),
-            3,
+            host,
             &config,
             ProgressMonitor::new(progress, cancel.clone()),
         );

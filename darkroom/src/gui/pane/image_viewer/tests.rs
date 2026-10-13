@@ -151,7 +151,13 @@ fn the_frame_that_first_draws_a_viewer_uploads_and_frames_it() {
     let mut passes = 0u32;
     let first = h.frame(|ui| {
         passes += 1;
-        viewer.show(ui, &theme, &mut prefs, "img", &store, pane);
+        let view = ViewerPane {
+            theme: &theme,
+            title: "img",
+            previews: &store,
+            size: pane,
+        };
+        viewer.show(ui, view, &mut prefs);
     });
 
     assert_eq!(

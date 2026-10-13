@@ -204,36 +204,31 @@ impl Samples for Coefficients {
 }
 
 impl MrsNoise {
-    /// The noise standard deviation of `plane`, a row-major `size` image, over the pixels
-    /// `excluded` does not name; `0` when no pixel remains or the image is constant.
-    pub(crate) fn estimate(
-        plane: &[f32],
-        size: Size2us,
-        excluded: impl Fn(usize) -> bool + Sync,
-    ) -> f32 {
+    /// The noise standard deviation of `plane` over the pixels `excluded` does not name; `0` when
+    /// no pixel remains or the image is constant.
+    pub(crate) fn estimate(plane: &Buffer2<f32>, excluded: impl Fn(usize) -> bool + Sync) -> f32 {
+        let size = Size2us::from(plane);
         let plane = NoisePlane {
             samples: plane,
-            size,
             excluded,
         };
         sigma(plane.coefficients().all(), size) as f32
     }
 
-    /// The background of `plane` under a flat whose gain at pixel `index` is `gain(index)`: the
-    /// noise measured over each of `bins` on its own — the support thresholds against the bin's
-    /// own σ — and fitted by [`BackgroundSplit::fit`].
+    /// The background of `plane` under the flat `gains` names: the noise measured over each of
+    /// its bins on its own — the support thresholds against the bin's own σ — and fitted by
+    /// [`BackgroundSplit::fit`].
     pub(crate) fn estimate_split(
-        plane: &[f32],
-        size: Size2us,
+        plane: &Buffer2<f32>,
         excluded: impl Fn(usize) -> bool + Sync,
-        gain: impl Fn(usize) -> f32 + Sync,
-        bins: &GainBins,
+        gains: PixelGains<'_, impl Fn(usize) -> f32 + Sync>,
     ) -> BackgroundSplit {
+        let size = Size2us::from(plane);
         let plane = NoisePlane {
             samples: plane,
-            size,
             excluded,
         };
+        let PixelGains { gain, bins } = gains;
         let binned = BinnedSamples::of(plane.coefficients(), bins, |coefficients, position| {
             gain(coefficients.index[position])
         });
@@ -265,12 +260,18 @@ impl MrsNoise {
     }
 }
 
-/// A plane whose noise is estimated: its samples, row-major over `size`, less the pixels
-/// `excluded` names.
+/// The gain a flat applied to a plane: `gain(index)` at the pixel of row-major `index`, and the
+/// bins its gains fall in.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PixelGains<'a, G> {
+    pub(crate) gain: G,
+    pub(crate) bins: &'a GainBins,
+}
+
+/// A plane whose noise is estimated: its samples, less the pixels `excluded` names.
 #[derive(Debug)]
 struct NoisePlane<'a, E> {
-    samples: &'a [f32],
-    size: Size2us,
+    samples: &'a Buffer2<f32>,
     excluded: E,
 }
 
@@ -279,8 +280,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
     /// and row-major within a tile: each tile writes its core into its own share of columns sized
     /// for every core pixel, and the shares close up over the pixels excluded.
     fn coefficients(&self) -> Coefficients {
-        let size = self.size;
-        debug_assert_eq!(self.samples.len(), size.pixel_count());
+        let size = Size2us::from(self.samples);
         let scales = SCALES.min(wavelet::max_scales(size));
         let tiles = tiles(size);
         let mut coefficients =
@@ -312,9 +312,9 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
     ) -> usize {
         let Self {
             samples: plane,
-            size,
             excluded,
         } = self;
+        let size = Size2us::from(*plane);
         debug_assert_eq!(share.index.len(), tile.core.area());
         let region = tile.region;
         let (width, height) = (region.width(), region.height());

@@ -8,7 +8,7 @@ use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::{
-    TestComponent, deblend_multi_threshold_test, make_test_component, separated_pair,
+    Ladder, TestComponent, deblend_multi_threshold_test, make_test_component, separated_pair,
 };
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::region::Region;
@@ -49,7 +49,7 @@ fn local_vs_multi_threshold_single_star() {
 
     // Multi-threshold deblending (default: n_thresholds=32, min_separation=3, min_contrast=0.005)
     let mt_result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -73,7 +73,7 @@ fn local_vs_multi_threshold_two_stars() {
 
     // Multi-threshold deblending
     let mt_result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), Ladder::STANDARD);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");

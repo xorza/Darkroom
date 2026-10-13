@@ -71,10 +71,10 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() {
     });
     g.add("mult", NodeSpec::mult);
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "disabled", 0);
-    g.wire("src", 0, "mult", 0);
-    g.wire("disabled", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("src", "disabled");
+    g.wire("src", "mult");
+    g.wire("disabled", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g);
     e.edit(|g| g.disable("disabled"));
@@ -110,10 +110,10 @@ async fn disabling_a_producer_rekeys_its_cached_consumer() {
     });
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
     g.add("print", NodeSpec::records);
-    g.wire("src", 0, "feed", 0);
-    g.wire("src", 0, "mult", 0);
-    g.wire("feed", 0, "mult", 1);
-    g.wire("mult", 0, "print", 0);
+    g.wire("src", "feed");
+    g.wire("src", "mult");
+    g.wire("feed", ("mult", 1));
+    g.wire("mult", "print");
 
     let mut e = TestEngine::over(g);
     assert_eq!(e.run_sinks().await.logs(), ["49"]);

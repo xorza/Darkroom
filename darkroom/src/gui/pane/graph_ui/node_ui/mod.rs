@@ -1,5 +1,6 @@
 pub(super) mod header;
 mod memory_row;
+pub(super) mod node_record;
 pub(super) mod node_widget;
 pub(super) mod port_color;
 pub(crate) mod port_row;
@@ -8,10 +9,10 @@ mod value_editor;
 pub(super) mod wid;
 
 use crate::core::document::graph_view::StackedItem;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::group_drag::GroupDrag;
+use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 use crate::gui::requests::Requests;
 use palantir::{Track, Ui};
 use scenarium::NodeId;
@@ -55,6 +56,16 @@ pub(super) struct NodeUI {
     paint_order: Vec<StackedItem>,
 }
 
+/// The canvas pass every node body records in: the draw context, the breaker
+/// probe the bodies mark hits against, and the queue their widgets raise edits
+/// into.
+#[derive(Debug)]
+pub(super) struct NodePass<'a, 'p> {
+    pub(super) dcx: DrawCtx<'a>,
+    pub(super) probe: &'a mut BreakerProbe<'p>,
+    pub(super) out: &'a mut Requests,
+}
+
 /// What one record pass's node draw saw but could not act on itself.
 ///
 /// Each drives state the draw itself holds *shared* — the inspection panels
@@ -86,7 +97,7 @@ impl NodeUI {
         self.drag.in_flight()
     }
 
-    /// Record the widget tree of every scene node retained by `cull` (plus
+    /// Record the widget tree of every scene node `pass` retains (plus
     /// the focus-owning node — see the loop comment), skipping off-screen ones
     /// entirely, and report what the draw saw but could not act on — see
     /// [`NodeDrawOutcome`]. Emits selection/raise intents for body clicks and
@@ -94,13 +105,8 @@ impl NodeUI {
     /// their own presses via `Sense::CLICK`, so drags don't latch off the port
     /// grabs); `prepass` converts the anchor into `GraphIntent::MoveSelection`
     /// on later frames.
-    pub(super) fn draw_all(
-        &mut self,
-        ui: &mut Ui,
-        dcx: DrawCtx<'_>,
-        probe: &mut BreakerProbe<'_>,
-        out: &mut Requests,
-    ) -> NodeDrawOutcome {
+    pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> NodeDrawOutcome {
+        let dcx = pass.dcx;
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
         // across save/load and tab switches; `GraphIntent::Raise` lifts a
@@ -142,8 +148,8 @@ impl NodeUI {
             {
                 continue;
             }
-            let ncx = n.with_hover(wid::hovered(ui, n.id));
-            let node = node_widget::NodeWidget::new(self, ncx).show(ui, dcx, probe, out);
+            let ncx = n.with_hover(wid::hover(ui, n.id));
+            let node = node_widget::NodeWidget::new(self, ncx).show(ui, pass);
             if node.inspect_toggled {
                 outcome.inspect_toggled.get_or_insert(n.id);
             }
@@ -163,13 +169,7 @@ impl NodeUI {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(
-        &mut self,
-        ui: &Ui,
-        graph_ctx: GraphCtx<'_>,
-        cancelled: bool,
-        out: &mut Requests,
-    ) {
-        self.drag.advance(ui, graph_ctx, cancelled, out);
+    pub(super) fn prepass(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) {
+        self.drag.advance(ui, cx, out);
     }
 }

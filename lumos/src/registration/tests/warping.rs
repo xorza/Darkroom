@@ -63,93 +63,90 @@ fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
 /// Per-method PSNR and NCC thresholds for roundtrip warp tests.
 type MethodThresholds = &'static [(InterpolationMethod, f64, f64)];
 
-/// Common helper for roundtrip warp tests.
-///
-/// Creates a star field, warps forward then inverse, and checks that the
-/// central region matches the original within per-method thresholds.
-fn assert_roundtrip(
+/// A roundtrip warp test: a star field of `seed` warped by `forward` then by its inverse, whose
+/// central region, `margin` pixels in from each edge, matches the original within per-method
+/// thresholds.
+#[derive(Debug, Clone, Copy)]
+struct Roundtrip {
     seed: u64,
     forward: Transform,
-    label: &str,
     margin: usize,
     thresholds: MethodThresholds,
-) {
-    let ref_buf = star_field(Size2us::new(256, 256), 30, seed)
-        .image
-        .channel(0)
-        .clone();
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-    let inverse = forward.inverse();
+}
 
-    for &(method, min_psnr, min_ncc) in thresholds {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
+impl Roundtrip {
+    fn check(self) {
+        let ref_buf = star_field(Size2us::new(256, 256), 30, self.seed)
+            .image
+            .channel(0)
+            .clone();
+        let inverse = self.forward.inverse();
+        let model = self.forward.transform_type();
 
-        let CentralRegions {
-            a: central_ref,
-            b: central_restored,
-        } = extract_central_region(
-            ref_buf.pixels(),
-            restored.pixels(),
-            Size2us::new(width, height),
-            margin,
-        );
+        for &(method, min_psnr, min_ncc) in self.thresholds {
+            let warped = do_warp(&ref_buf, &self.forward, method);
+            let restored = do_warp(&warped, &inverse, method);
 
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        let ncc = compute_ncc(&central_ref, &central_restored);
+            let CentralRegions {
+                a: central_ref,
+                b: central_restored,
+            } = extract_central_region(&ref_buf, &restored, self.margin);
 
-        assert!(
-            psnr > min_psnr,
-            "{label} {method:?}: PSNR {psnr} < {min_psnr} dB",
-        );
-        assert!(ncc > min_ncc, "{label} {method:?}: NCC {ncc} < {min_ncc}");
+            let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
+            let ncc = compute_ncc(&central_ref, &central_restored);
+
+            assert!(
+                psnr > min_psnr,
+                "{model:?} {method:?}: PSNR {psnr} < {min_psnr} dB",
+            );
+            assert!(ncc > min_ncc, "{model:?} {method:?}: NCC {ncc} < {min_ncc}");
+        }
     }
 }
 
 #[test]
 fn warp_translation_roundtrip() {
-    assert_roundtrip(
-        11111,
-        Transform::translation(DVec2::new(10.5, -7.3)),
-        "Translation",
-        20,
-        &[
+    Roundtrip {
+        seed: 11111,
+        forward: Transform::translation(DVec2::new(10.5, -7.3)),
+        margin: 20,
+        thresholds: &[
             (InterpolationMethod::Nearest, 15.0, 0.25),
             (InterpolationMethod::Bilinear, 22.0, 0.70),
             (InterpolationMethod::Lanczos3, 25.0, 0.80),
         ],
-    );
+    }
+    .check();
 }
 
 #[test]
 fn warp_euclidean_roundtrip() {
-    assert_roundtrip(
-        22222,
-        Transform::euclidean(DVec2::new(5.0, -3.0), 2.0_f64.to_radians()),
-        "Euclidean",
-        30,
-        &[
+    Roundtrip {
+        seed: 22222,
+        forward: Transform::euclidean(DVec2::new(5.0, -3.0), 2.0_f64.to_radians()),
+        margin: 30,
+        thresholds: &[
             (InterpolationMethod::Nearest, 12.0, 0.25),
             (InterpolationMethod::Bilinear, 25.0, 0.85),
             (InterpolationMethod::Lanczos3, 30.0, 0.90),
         ],
-    );
+    }
+    .check();
 }
 
 #[test]
 fn warp_similarity_roundtrip() {
-    assert_roundtrip(
-        33333,
-        Transform::similarity(DVec2::new(8.0, -5.0), 1.5_f64.to_radians(), 1.02),
-        "Similarity",
-        40,
-        &[
+    Roundtrip {
+        seed: 33333,
+        forward: Transform::similarity(DVec2::new(8.0, -5.0), 1.5_f64.to_radians(), 1.02),
+        margin: 40,
+        thresholds: &[
             (InterpolationMethod::Nearest, 12.0, 0.85),
             (InterpolationMethod::Bilinear, 22.0, 0.85),
             (InterpolationMethod::Lanczos3, 28.0, 0.85),
         ],
-    );
+    }
+    .check();
 }
 
 #[test]
@@ -167,17 +164,17 @@ fn warp_affine_roundtrip() {
     ]);
     assert_eq!(forward.transform_type(), TransformType::Affine);
 
-    assert_roundtrip(
-        44444,
+    Roundtrip {
+        seed: 44444,
         forward,
-        "Affine",
-        40,
-        &[
+        margin: 40,
+        thresholds: &[
             (InterpolationMethod::Nearest, 12.0, 0.85),
             (InterpolationMethod::Bilinear, 22.0, 0.85),
             (InterpolationMethod::Lanczos3, 26.0, 0.85),
         ],
-    );
+    }
+    .check();
 }
 
 #[test]
@@ -186,17 +183,17 @@ fn warp_homography_roundtrip() {
     let forward = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.00005, 0.00003]);
     assert_eq!(forward.transform_type(), TransformType::Homography);
 
-    assert_roundtrip(
-        55555,
+    Roundtrip {
+        seed: 55555,
         forward,
-        "Homography",
-        50,
-        &[
+        margin: 50,
+        thresholds: &[
             (InterpolationMethod::Nearest, 10.0, 0.80),
             (InterpolationMethod::Bilinear, 20.0, 0.80),
             (InterpolationMethod::Lanczos3, 24.0, 0.80),
         ],
-    );
+    }
+    .check();
 }
 
 /// A wider kernel restores a sub-pixel roundtrip better: bilinear below Catmull-Rom, and each
@@ -210,7 +207,6 @@ fn interpolation_quality_ordering() {
         .image
         .channel(0)
         .clone();
-    let size = Size2us::new(ref_buf.width(), ref_buf.height());
     let forward = Transform::similarity(DVec2::new(3.7, -2.3), 1.0_f64.to_radians(), 1.01);
     let inverse = forward.inverse();
     let psnr = |method| {
@@ -219,7 +215,7 @@ fn interpolation_quality_ordering() {
             ..WarpParams::with_method(method)
         };
         let restored = warp_with(&warp_with(&ref_buf, &forward, params), &inverse, params);
-        let central = extract_central_region(ref_buf.pixels(), restored.pixels(), size, 50);
+        let central = extract_central_region(&ref_buf, &restored, 50);
         compute_psnr(&central.a, &central.b, 1.0)
     };
     for pair in [
@@ -278,7 +274,9 @@ struct CentralRegions {
 }
 
 /// Extract central region of two images for comparison (avoids border artifacts).
-fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) -> CentralRegions {
+fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> CentralRegions {
+    let size = Size2us::from(a);
+    debug_assert_eq!(size, Size2us::from(b), "two images of one size");
     let inner_width = size.width - 2 * margin;
     let inner_height = size.height - 2 * margin;
 

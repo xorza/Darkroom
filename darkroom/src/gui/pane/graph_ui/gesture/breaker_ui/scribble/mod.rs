@@ -4,6 +4,8 @@ use glam::Vec2;
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
+use crate::gui::pane::graph_ui::paint::wire::Wire;
+
 /// Polyline samples closer than this (in inner-canvas world units)
 /// are dropped — keeps the breaker from accumulating sub-pixel
 /// duplicates on a slow drag.
@@ -141,7 +143,7 @@ impl Scribble {
         ];
         for (a, b) in self.segments() {
             for &(e0, e1) in &edges {
-                if segments_intersect(a, b, e0, e1) {
+                if segments_intersect((a, b), (e0, e1)) {
                     return true;
                 }
             }
@@ -149,11 +151,11 @@ impl Scribble {
         false
     }
 
-    /// True if any cubic-bezier sample-segment crosses any breaker
-    /// segment. Samples the bezier into `BEZIER_SAMPLES` chords; this
-    /// runs once per connection per frame while the gesture is
-    /// active, so we don't cache.
-    pub(super) fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
+    /// True if any sample-segment of `wire` crosses any breaker segment.
+    /// Samples the cubic into `BEZIER_SAMPLES` chords; this runs once per
+    /// connection per frame while the gesture is active, so we don't cache.
+    pub(super) fn intersects_wire(&self, wire: &Wire) -> bool {
+        let Wire { p0, p1, p2, p3 } = *wire;
         // A cubic stays inside its control points' box, and so does every
         // chord between two of its samples.
         if self.points.len() < 2
@@ -163,10 +165,9 @@ impl Scribble {
         }
         let mut prev = p0;
         for i in 1..=BEZIER_SAMPLES {
-            let t = i as f32 / BEZIER_SAMPLES as f32;
-            let next = cubic_point(p0, p1, p2, p3, t);
-            for (b0, b1) in self.segments() {
-                if segments_intersect(prev, next, b0, b1) {
+            let next = wire.at(i as f32 / BEZIER_SAMPLES as f32);
+            for segment in self.segments() {
+                if segments_intersect((prev, next), segment) {
                     return true;
                 }
             }
@@ -176,17 +177,11 @@ impl Scribble {
     }
 }
 
-fn cubic_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
-    let u = 1.0 - t;
-    let uu = u * u;
-    let tt = t * t;
-    p0 * (uu * u) + p1 * (3.0 * uu * t) + p2 * (3.0 * u * tt) + p3 * (tt * t)
-}
-
-/// Standard 2D segment–segment intersection: proper-crossing only
-/// (no collinear-overlap), which is enough for "did the breaker
-/// scribble cross this wire?".
-fn segments_intersect(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2) -> bool {
+/// Standard 2D segment–segment intersection of `a` and `b`, each by its two
+/// ends: proper-crossing only (no collinear-overlap), which is enough for "did
+/// the breaker scribble cross this wire?".
+fn segments_intersect(a: (Vec2, Vec2), b: (Vec2, Vec2)) -> bool {
+    let ((a1, a2), (b1, b2)) = (a, b);
     let o1 = orient(a1, a2, b1);
     let o2 = orient(a1, a2, b2);
     let o3 = orient(b1, b2, a1);

@@ -90,7 +90,7 @@ impl CfaPattern {
     /// What a `BOTTOM-UP` FITS needs when its height is **even**: `BAYERPAT` describes the top-down
     /// image, and reversing an even number of rows lands every row on the opposite phase. An odd
     /// height leaves the phases where they were, so the caller must not flip there — see
-    /// `read_bayer_cfa`, which is where that parity is checked.
+    /// `Bayerpat::read_cfa`, which is where that parity is checked.
     #[must_use]
     pub const fn flip_vertical(self) -> Self {
         match self {

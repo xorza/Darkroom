@@ -65,42 +65,53 @@ fn dark(count: usize, saturated: usize) -> HotDark {
     HotDark { dark, hot }
 }
 
-/// A light of `exposure` s at `temperature` °C whose dark signal is `scale` times the dark's, on a
-/// sky that slopes along both axes, a star of amplitude 0.2 and σ 1 px on each of the first
-/// `starred` hot pixels, and Gaussian noise.
-fn light(
-    hot: &[(Vec2us, f32)],
+/// A light of `exposure` s at `temperature` °C whose dark signal is `scale` times the dark's.
+#[derive(Debug, Clone, Copy)]
+struct Light {
     scale: f32,
+    /// How many of the hot pixels, from the first, a star sits on.
     starred: usize,
     exposure: f64,
     temperature: f64,
-) -> CfaImage {
-    let mut rng = TestRng::new(27);
-    let mut pixels: Vec<f32> = (0..SIZE.pixel_count())
-        .map(|index| {
-            let point = SIZE.point_of(index);
-            let sky = 0.1 + 2e-4 * point.x as f32 + 1e-4 * point.y as f32;
-            BIAS + scale * DARK_CURRENT + sky + LIGHT_NOISE * rng.next_gaussian_f32()
-        })
-        .collect();
-    for &(position, excess) in hot {
-        pixels[SIZE.index_of(position)] += scale * excess;
-    }
-    for &(centre, _) in &hot[..starred] {
-        for dy in -3i32..=3 {
-            for dx in -3i32..=3 {
-                let at = Vec2us::new(
-                    centre.x.wrapping_add_signed(dx as isize),
-                    centre.y.wrapping_add_signed(dy as isize),
-                );
-                pixels[SIZE.index_of(at)] += 0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).exp();
+}
+
+impl Light {
+    /// The light over the dark's `hot` pixels, on a sky that slopes along both axes, a star of
+    /// amplitude 0.2 and σ 1 px on each of the first `starred` of them, and Gaussian noise.
+    fn render(self, hot: &[(Vec2us, f32)]) -> CfaImage {
+        let Self {
+            scale,
+            starred,
+            exposure,
+            temperature,
+        } = self;
+        let mut rng = TestRng::new(27);
+        let mut pixels: Vec<f32> = (0..SIZE.pixel_count())
+            .map(|index| {
+                let point = SIZE.point_of(index);
+                let sky = 0.1 + 2e-4 * point.x as f32 + 1e-4 * point.y as f32;
+                BIAS + scale * DARK_CURRENT + sky + LIGHT_NOISE * rng.next_gaussian_f32()
+            })
+            .collect();
+        for &(position, excess) in hot {
+            pixels[SIZE.index_of(position)] += scale * excess;
+        }
+        for &(centre, _) in &hot[..starred] {
+            for dy in -3i32..=3 {
+                for dx in -3i32..=3 {
+                    let at = Vec2us::new(
+                        centre.x.wrapping_add_signed(dx as isize),
+                        centre.y.wrapping_add_signed(dy as isize),
+                    );
+                    pixels[SIZE.index_of(at)] += 0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).exp();
+                }
             }
         }
+        let mut light = make_cfa(SIZE, pixels, CfaType::Mono);
+        light.metadata.exposure_time = Some(exposure);
+        light.metadata.ccd_temp = Some(temperature);
+        light
     }
-    let mut light = make_cfa(SIZE, pixels, CfaType::Mono);
-    light.metadata.exposure_time = Some(exposure);
-    light.metadata.ccd_temp = Some(temperature);
-    light
 }
 
 fn masters(dark: CfaImage) -> CalibrationMasters {
@@ -137,7 +148,13 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
     let HotDark { dark, hot } = dark(256, 5);
     let masters = masters(dark);
     for (scale, temperature) in [(1.37f32, -10.0), (1.42, -7.0)] {
-        let mut light = light(&hot, scale, 10, 300.0, temperature);
+        let mut light = Light {
+            scale,
+            starred: 10,
+            exposure: 300.0,
+            temperature,
+        }
+        .render(&hot);
         let outcome = masters.calibrate(&mut light).unwrap();
         let Some(DarkScale {
             factor,
@@ -178,7 +195,13 @@ fn too_few_hot_pixels_fall_back_to_the_exposures() {
     let HotDark { dark, hot } = dark(50, 0);
     let masters = masters(dark);
     for (exposure, ratio) in [(300.0, 1.0), (750.0, 2.5)] {
-        let mut light = light(&hot, 1.0, 0, exposure, -10.0);
+        let mut light = Light {
+            scale: 1.0,
+            starred: 0,
+            exposure,
+            temperature: -10.0,
+        }
+        .render(&hot);
         assert_eq!(
             masters.calibrate(&mut light).unwrap().dark_scale,
             Some(DarkScale {

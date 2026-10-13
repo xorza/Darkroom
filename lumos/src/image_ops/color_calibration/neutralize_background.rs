@@ -4,7 +4,7 @@ use crate::image_ops::rgb::Rgb;
 
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
-use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::subsample::Subsample;
 
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
@@ -56,5 +56,13 @@ pub(super) fn channel_backgrounds(image: &LinearImage) -> Rgb {
 /// One channel's robust (sigma-clipped median) background, from a [`Subsample`] of the plane.
 fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
     let mut s = Subsample::statistic_values(plane);
-    ClippedStats::sigma_clipped(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
+    ClippedStats::sigma_clipped(
+        &mut s,
+        scratch,
+        SigmaClip {
+            kappa: BACKGROUND_KAPPA,
+            iterations: BACKGROUND_ITERATIONS,
+        },
+    )
+    .median
 }

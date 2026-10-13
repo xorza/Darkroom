@@ -67,12 +67,15 @@ impl CrMasks {
     /// saturated stars and bad pixels out with `goodpix`.
     pub(super) fn detect_and_grow(
         &mut self,
-        significance: &[f32],
-        f: &[f32],
-        noise: &[f32],
+        planes: DetectionPlanes<'_>,
         cfg: &CosmicRayConfig,
         never_flagged: Option<&BitBuffer2>,
     ) -> usize {
+        let DetectionPlanes {
+            significance,
+            fine: f,
+            noise,
+        } = planes;
         let Self {
             accumulated,
             primary,
@@ -84,13 +87,17 @@ impl CrMasks {
             allowed(i) && significance[i] > cfg.sigclip && significance[i] > cfg.objlim * f_norm
         });
         primary.and_not(accumulated);
-        grow_box(primary, flags, accumulated, |i| {
-            allowed(i) && significance[i] > cfg.sigclip
-        });
+        Growth {
+            accumulated,
+            keep: |i| allowed(i) && significance[i] > cfg.sigclip,
+        }
+        .grow_box(primary, flags);
         let lowered = cfg.sigclip * cfg.sigfrac;
-        grow_box(flags, primary, accumulated, |i| {
-            allowed(i) && significance[i] > lowered
-        });
+        Growth {
+            accumulated,
+            keep: |i| allowed(i) && significance[i] > lowered,
+        }
+        .grow_box(flags, primary);
         let flags = primary;
 
         // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`.
@@ -109,52 +116,66 @@ impl CrMasks {
     }
 }
 
-/// Into `dest`, the pixels of the 3×3 box about any pixel of `source` that `keep` passes, by
-/// row-major index, and that `accumulated` does not hold.
-///
-/// Word by word: a row's three neighbouring source rows, each smeared one pixel either way across
-/// word boundaries, give the box; `keep` is asked only of the bits that survive it, which a sparse
-/// mask keeps few.
-fn grow_box(
-    source: &BitBuffer2,
-    dest: &mut BitBuffer2,
-    accumulated: &BitBuffer2,
-    keep: impl Fn(usize) -> bool + Sync,
-) {
-    let Size2us { width, height } = source.size;
-    let words_per_row = source.words_per_row();
-    let used_words = width.div_ceil(64);
-    let last_bits = width - used_words.saturating_sub(1) * 64;
-    dest.words
-        .par_chunks_mut(words_per_row.max(1))
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            out_row.fill(0);
-            for (w, out) in out_row[..used_words].iter_mut().enumerate() {
-                let mut boxed = 0u64;
-                for source_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
-                    let row = &source.words[source_y * words_per_row..][..used_words];
-                    boxed |= row[w] | (row[w] << 1) | (row[w] >> 1);
-                    if w > 0 {
-                        boxed |= row[w - 1] >> 63;
+/// What one pass of a detection decides by, a value per pixel each: the significance with its
+/// smooth part taken out `S'`, the object fine structure `F`, and the noise `N`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DetectionPlanes<'a> {
+    pub(super) significance: &'a [f32],
+    pub(super) fine: &'a [f32],
+    pub(super) noise: &'a [f32],
+}
+
+/// The pixels a growth may take: those `keep` passes, by row-major index, that `accumulated`
+/// does not hold.
+#[derive(Debug, Clone, Copy)]
+struct Growth<'a, K> {
+    accumulated: &'a BitBuffer2,
+    keep: K,
+}
+
+impl<K: Fn(usize) -> bool + Sync> Growth<'_, K> {
+    /// Into `dest`, the pixels of the 3×3 box about any pixel of `source` the growth may take.
+    ///
+    /// Word by word: a row's three neighbouring source rows, each smeared one pixel either way
+    /// across word boundaries, give the box; `keep` is asked only of the bits that survive it,
+    /// which a sparse mask keeps few.
+    fn grow_box(self, source: &BitBuffer2, dest: &mut BitBuffer2) {
+        let Self { accumulated, keep } = self;
+        let Size2us { width, height } = source.size;
+        let words_per_row = source.words_per_row();
+        let used_words = width.div_ceil(64);
+        let last_bits = width - used_words.saturating_sub(1) * 64;
+        dest.words
+            .par_chunks_mut(words_per_row.max(1))
+            .enumerate()
+            .for_each(|(y, out_row)| {
+                out_row.fill(0);
+                for (w, out) in out_row[..used_words].iter_mut().enumerate() {
+                    let mut boxed = 0u64;
+                    for source_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+                        let row = &source.words[source_y * words_per_row..][..used_words];
+                        boxed |= row[w] | (row[w] << 1) | (row[w] >> 1);
+                        if w > 0 {
+                            boxed |= row[w - 1] >> 63;
+                        }
+                        if w + 1 < used_words {
+                            boxed |= row[w + 1] << 63;
+                        }
                     }
-                    if w + 1 < used_words {
-                        boxed |= row[w + 1] << 63;
+                    if w + 1 == used_words && last_bits < 64 {
+                        boxed &= (1u64 << last_bits) - 1;
+                    }
+                    let mut candidates = boxed & !accumulated.words[y * words_per_row + w];
+                    while candidates != 0 {
+                        let bit = candidates.trailing_zeros() as usize;
+                        if keep(y * width + w * 64 + bit) {
+                            *out |= 1 << bit;
+                        }
+                        candidates &= candidates - 1;
                     }
                 }
-                if w + 1 == used_words && last_bits < 64 {
-                    boxed &= (1u64 << last_bits) - 1;
-                }
-                let mut candidates = boxed & !accumulated.words[y * words_per_row + w];
-                while candidates != 0 {
-                    let bit = candidates.trailing_zeros() as usize;
-                    if keep(y * width + w * 64 + bit) {
-                        *out |= 1 << bit;
-                    }
-                    candidates &= candidates - 1;
-                }
-            }
-        });
+            });
+    }
 }
 
 #[cfg(test)]

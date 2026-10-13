@@ -6,6 +6,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use imaginarium::Buffer2;
 
 /// The farthest a same-colour neighbour can be in a row: the X-Trans period.
 const MAX_REACH: usize = 6;
@@ -31,9 +32,9 @@ pub(crate) struct Pair {
 }
 
 impl Pair {
-    /// The photosite's sample less its neighbour's, in the row-major `mosaic` sampled.
-    pub(crate) fn difference(self, mosaic: &[f32], size: Size2us) -> f32 {
-        let row = &mosaic[self.y * size.width..(self.y + 1) * size.width];
+    /// The photosite's sample less its neighbour's, in the `mosaic` sampled.
+    pub(crate) fn difference(self, mosaic: &Buffer2<f32>) -> f32 {
+        let row = mosaic.row(self.y);
         row[self.x] - row[self.neighbour]
     }
 

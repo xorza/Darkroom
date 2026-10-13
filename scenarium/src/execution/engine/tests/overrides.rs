@@ -26,7 +26,7 @@ async fn an_override_sets_its_target_aside_while_it_delivers() {
             })
     });
     g.add("Print", |n| n.sink().input(DataType::Int).observes(|_| ()));
-    g.wire("pick", 0, "Print", 0);
+    g.wire("pick", "Print");
     g.constant("pick", 0, 3i64);
     let mut e = TestEngine::over(g);
     let overridden = |e: &TestEngine| {
@@ -40,7 +40,7 @@ async fn an_override_sets_its_target_aside_while_it_delivers() {
     assert_eq!(e.run_sinks().await.ran(), ["pick", "Print"]);
     assert_eq!(e.output_i64("pick", 0), Some(300), "100·3 + 0");
 
-    e.edit(|g| g.wire("config", 0, "pick", 1));
+    e.edit(|g| g.wire("config", ("pick", 1)));
     assert!(overridden(&e));
     assert_eq!(e.run_sinks().await.ran(), ["config", "pick", "Print"]);
     assert_eq!(e.output_i64("pick", 0), Some(7), "100·0 + 7");

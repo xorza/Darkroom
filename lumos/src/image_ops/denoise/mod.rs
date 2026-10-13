@@ -19,6 +19,7 @@ use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
@@ -161,9 +162,7 @@ impl Denoise {
                     );
                     PlaneNoise::Variance(plane.pixels())
                 }
-                ImageNoise::Measured => {
-                    PlaneNoise::White(MrsNoise::estimate(plane.pixels(), size, excluded))
-                }
+                ImageNoise::Measured => PlaneNoise::White(MrsNoise::estimate(plane, excluded)),
             };
             let channel = Channel {
                 samples: plane.pixels_mut(),
@@ -237,21 +236,12 @@ impl Denoise {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.scales >= 1,
-            "denoise scales",
-            "at least 1",
-            self.scales as f64,
-        )?;
-        InvalidConfigField::finite("denoise k", "finite and positive", self.k, |value| {
-            value > 0.0
-        })?;
-        InvalidConfigField::finite(
-            "denoise strength",
-            "finite and in [0, 1]",
-            self.strength,
-            |value| (0.0..=1.0).contains(&value),
-        )
+        ConfigValue::count("denoise scales", self.scales)
+            .must_be("at least 1", self.scales >= 1)?;
+        ConfigValue::new("denoise k", self.k)
+            .finite_and("finite and positive", |value| value > 0.0)?;
+        ConfigValue::new("denoise strength", self.strength)
+            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }
 

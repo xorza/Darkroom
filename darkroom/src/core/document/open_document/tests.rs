@@ -7,7 +7,7 @@ use glam::Vec2;
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::open_document::OpenDocument;
+use crate::core::document::open_document::{LaunchSource, OpenDocument};
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -50,14 +50,26 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     let mut status = StatusLog::default();
 
     // A remembered path with reopening on comes back as the open document.
-    let open =
-        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
+    let open = OpenDocument::open_at_launch(
+        LaunchSource {
+            argument: None,
+            preferences: &mut preferences,
+        },
+        &mut status,
+        &Library::default(),
+    );
     assert_eq!(open.path, Some(path.clone()));
 
     // Reopening off: empty document, but the path stays remembered.
     preferences.load_last_document = false;
-    let open =
-        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
+    let open = OpenDocument::open_at_launch(
+        LaunchSource {
+            argument: None,
+            preferences: &mut preferences,
+        },
+        &mut status,
+        &Library::default(),
+    );
     assert!(open.path.is_none());
     assert_eq!(preferences.document_path, Some(path));
     assert_eq!(status.lines().count(), 0, "neither path reports a failure");
@@ -65,8 +77,14 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     // An unloadable path degrades to an empty document and is forgotten.
     preferences.load_last_document = true;
     preferences.document_path = Some("invalid.json".into());
-    let open =
-        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
+    let open = OpenDocument::open_at_launch(
+        LaunchSource {
+            argument: None,
+            preferences: &mut preferences,
+        },
+        &mut status,
+        &Library::default(),
+    );
     assert!(open.path.is_none());
     assert_eq!(preferences.document_path, None);
     assert_eq!(
@@ -102,8 +120,10 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
         "the fixture has to differ before the load"
     );
     let open = OpenDocument::open_at_launch(
-        Some(argument),
-        &mut preferences,
+        LaunchSource {
+            argument: Some(argument),
+            preferences: &mut preferences,
+        },
         &mut status,
         &Library::default(),
     );
@@ -119,8 +139,10 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     // not what failed.
     let missing = dir.join("missing.darkroom");
     let open = OpenDocument::open_at_launch(
-        Some(missing.clone()),
-        &mut preferences,
+        LaunchSource {
+            argument: Some(missing.clone()),
+            preferences: &mut preferences,
+        },
         &mut status,
         &Library::default(),
     );

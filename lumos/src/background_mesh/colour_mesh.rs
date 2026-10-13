@@ -5,8 +5,8 @@ use imaginarium::Buffer2;
 
 use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::background_mesh::tile_stats::TileStats;
-use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::masked_plane::MaskedPlane;
 use crate::math::vec2us::Vec2us;
 
 /// The σ-clip passes of each tile, as the star detection's background takes by default.
@@ -42,15 +42,14 @@ struct Span {
 }
 
 impl ColourMesh {
-    /// The mesh of `pixels` under `cfa`, in tiles of `tile_size`, leaving out the pixels `excluded`
-    /// holds.
-    pub(crate) fn measure(
-        pixels: &Buffer2<f32>,
-        cfa: &CfaType,
-        tile_size: usize,
-        excluded: Option<&BitBuffer2>,
-        workspace: &mut MeshWorkspace,
-    ) -> Self {
+    /// The mesh of `plane` under `cfa`, in tiles of `tile_size`, leaving out the pixels its mask
+    /// names.
+    pub(crate) fn measure(plane: MaskedPlane<'_>, cfa: &CfaType, tile_size: usize) -> Self {
+        let MaskedPlane {
+            pixels,
+            mask: excluded,
+        } = plane;
+        let workspace = &mut MeshWorkspace::default();
         let params = MeshParams {
             tile_size,
             sigma_clip_iterations: SIGMA_CLIP_ITERATIONS,
@@ -168,7 +167,7 @@ mod tests {
                 })
                 .collect(),
         );
-        let mesh = ColourMesh::measure(&pixels, &cfa, 64, None, &mut MeshWorkspace::default());
+        let mesh = ColourMesh::measure(MaskedPlane::from(&pixels), &cfa, 64);
         for position in [
             Vec2us::new(31, 31),
             Vec2us::new(64, 10),

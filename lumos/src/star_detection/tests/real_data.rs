@@ -16,6 +16,7 @@ use crate::registration::transform::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
+use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
@@ -151,12 +152,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     let out = |name: &str| format!("rho-opiuchi-inspect/{name}");
     let save = |pixels: &Buffer2<f32>, name: &str| {
-        visual::save(
-            pixels.pixels(),
-            size,
-            &out(name),
-            visual::ToneMap::AutoRange,
-        );
+        visual::save(pixels, &out(name), visual::ToneMap::AutoRange);
         println!("Saved: {name}");
     };
 
@@ -196,8 +192,10 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     // The stage itself, on the same plane, saw what these images show.
     let stage = DetectResult::from_plane(
-        &plane,
-        frame.no_data.as_deref(),
+        DetectionInput {
+            plane: &plane,
+            no_data: frame.no_data.as_deref(),
+        },
         &config.extraction,
         &mut pool,
     );

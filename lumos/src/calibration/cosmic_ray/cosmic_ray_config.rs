@@ -1,5 +1,6 @@
 //! What the cosmic-ray detector thresholds against.
 
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Laplacian-edge cosmic-ray detection parameters. Defaults match ccdproc/astroscrappy.
@@ -36,37 +37,17 @@ impl CosmicRayConfig {
     /// growth fraction of the detection threshold, at least one pass, and a positive gain when one
     /// is given.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite(
-            "cosmic-ray sigclip",
-            "finite and positive",
-            self.sigclip,
-            |v| v > 0.0,
-        )?;
-        InvalidConfigField::finite(
-            "cosmic-ray objlim",
-            "finite and positive",
-            self.objlim,
-            |v| v > 0.0,
-        )?;
-        InvalidConfigField::finite(
-            "cosmic-ray sigfrac",
-            "finite and in (0, 1]",
-            self.sigfrac,
-            |v| v > 0.0 && v <= 1.0,
-        )?;
-        InvalidConfigField::check(
-            self.niter >= 1,
-            "cosmic-ray niter",
-            "at least 1",
-            self.niter as f64,
-        )?;
+        ConfigValue::new("cosmic-ray sigclip", self.sigclip)
+            .finite_and("finite and positive", |v| v > 0.0)?;
+        ConfigValue::new("cosmic-ray objlim", self.objlim)
+            .finite_and("finite and positive", |v| v > 0.0)?;
+        ConfigValue::new("cosmic-ray sigfrac", self.sigfrac)
+            .finite_and("finite and in (0, 1]", |v| v > 0.0 && v <= 1.0)?;
+        ConfigValue::count("cosmic-ray niter", self.niter)
+            .must_be("at least 1", self.niter >= 1)?;
         if let NoiseEstimation::Gain { electrons_per_adu } = self.noise {
-            InvalidConfigField::finite(
-                "cosmic-ray electrons_per_adu",
-                "finite and positive",
-                electrons_per_adu,
-                |v| v > 0.0,
-            )?;
+            ConfigValue::new("cosmic-ray electrons_per_adu", electrons_per_adu)
+                .finite_and("finite and positive", |v| v > 0.0)?;
         }
         Ok(())
     }

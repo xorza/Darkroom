@@ -110,8 +110,8 @@ mod tests {
     fn build_stars_is_channel_agnostic_over_rgb() {
         // Same (o, s) pairs as above, spread one per channel of a single RGB pixel instead of
         // three mono pixels — pins that the unscreen is per-sample, with no channel meaning.
-        let mut orig = rgb_image(Size2us::new(1, 1), vec![0.75], vec![1.0], vec![0.5]);
-        let starless = rgb_image(Size2us::new(1, 1), vec![0.5], vec![0.0], vec![1.0]);
+        let mut orig = rgb_image(Size2us::new(1, 1), [vec![0.75], vec![1.0], vec![0.5]]);
+        let starless = rgb_image(Size2us::new(1, 1), [vec![0.5], vec![0.0], vec![1.0]]);
         build_stars(&mut orig, &starless);
         assert_eq!(orig.channel(0).pixels(), &[0.5]);
         assert_eq!(orig.channel(1).pixels(), &[1.0]);

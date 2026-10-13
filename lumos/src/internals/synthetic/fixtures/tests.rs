@@ -1,11 +1,13 @@
 use crate::internals::synthetic::fixtures::*;
 use crate::internals::synthetic::metrics::pixel_stats;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
-fn region_sum(px: &Buffer2<f32>, x0: usize, y0: usize, size: usize) -> f64 {
+/// The sum of the `side`-pixel square of `px` whose top-left corner is `corner`.
+fn region_sum(px: &Buffer2<f32>, corner: Vec2us, side: usize) -> f64 {
     let mut s = 0.0;
-    for y in y0..y0 + size {
-        for x in x0..x0 + size {
+    for y in corner.y..corner.y + side {
+        for x in corner.x..corner.x + side {
             s += f64::from(px[(x, y)]);
         }
     }
@@ -37,7 +39,7 @@ fn cluster_field_is_denser_at_center() {
     assert_eq!(frame.truth.sources.len(), 400);
     let px = frame.image.channel(0);
     // Central 40×40 carries much more flux than a corner 40×40.
-    let center = region_sum(px, 80, 80, 40);
-    let corner = region_sum(px, 2, 2, 40);
+    let center = region_sum(px, Vec2us::new(80, 80), 40);
+    let corner = region_sum(px, Vec2us::new(2, 2), 40);
     assert!(center > corner * 3.0, "center {center} corner {corner}");
 }

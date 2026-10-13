@@ -5,9 +5,10 @@
 //! [`Observation`](crate::internals::synthetic::observe::Observation) render it forward into a
 //! frame; a lumos stage runs backward and is graded against this truth.
 
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::backgrounds::{
-    NebulaConfig, Vignette, add_gradient_background, add_nebula_background, add_uniform_background,
-    add_vignette_background,
+    Gradient, NebulaConfig, Vignette, add_uniform_background,
 };
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
@@ -28,24 +29,20 @@ pub(crate) struct TrueSource {
 #[derive(Debug, Clone)]
 pub(crate) enum BackgroundField {
     Uniform { level: f32 },
-    Gradient { start: f32, end: f32, angle: f32 },
+    Gradient(Gradient),
     Vignette(Vignette),
     Nebula(NebulaConfig),
 }
 
 impl BackgroundField {
     /// Render this background into a fresh `size`-sized buffer of normalized values.
-    pub(crate) fn render(&self, size: Size2us) -> Vec<f32> {
-        let mut pixels = vec![0.0f32; size.pixel_count()];
+    pub(crate) fn render(&self, size: Size2us) -> Buffer2<f32> {
+        let mut pixels = Buffer2::new_default(size.width, size.height);
         match self {
             Self::Uniform { level } => add_uniform_background(&mut pixels, *level),
-            Self::Gradient { start, end, angle } => {
-                add_gradient_background(&mut pixels, size, *start, *end, *angle);
-            }
-            Self::Vignette(vignette) => {
-                add_vignette_background(&mut pixels, size, *vignette);
-            }
-            Self::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
+            Self::Gradient(gradient) => gradient.add_to(&mut pixels),
+            Self::Vignette(vignette) => vignette.add_to(&mut pixels),
+            Self::Nebula(cfg) => cfg.add_to(&mut pixels),
         }
         pixels
     }
@@ -83,99 +80,98 @@ pub(crate) struct Scene {
     pub(crate) background: BackgroundField,
 }
 
+/// Where [`Scene::scatter`] puts its sources.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Placement {
+    /// Uniformly over the frame, `margin` pixels clear of every edge.
+    Uniform { margin: f64 },
+    /// Most sources packed into a central Gaussian core, the rest a sparse halo — a crowded
+    /// cluster for deblend/labeling stress.
+    Cluster,
+}
+
+/// A random population of sources: how many, how bright and where.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Scatter {
+    pub(crate) count: usize,
+    /// Fluxes are drawn **log-uniformly** in this range: a realistic brightness spread, not a
+    /// flat one.
+    pub(crate) flux: (f32, f32),
+    pub(crate) placement: Placement,
+    pub(crate) seed: u64,
+}
+
 impl Scene {
-    /// A single source at `pos` with `flux` over `background`. Useful for precise
-    /// photometric/astrometric verification.
-    pub(crate) fn single(
-        size: Size2us,
-        pos: DVec2,
-        flux: f32,
-        background: BackgroundField,
-    ) -> Self {
+    /// A single `source` over `background`. Useful for precise photometric/astrometric
+    /// verification.
+    pub(crate) fn single(size: Size2us, source: TrueSource, background: BackgroundField) -> Self {
         Self {
             size,
-            sources: vec![TrueSource { pos, flux }],
+            sources: vec![source],
             background,
         }
     }
 
-    /// A uniformly-random field of `count` sources over `background`.
-    ///
-    /// Fluxes are drawn **log-uniformly** in `flux_range` (a realistic brightness spread, not a
-    /// flat one); `margin` keeps sources off the edges. Deterministic in `seed`.
-    pub(crate) fn random_field(
-        size: Size2us,
-        count: usize,
-        flux_range: (f32, f32),
-        background: BackgroundField,
-        margin: f64,
-        seed: u64,
-    ) -> Self {
-        let flux_dist = LogUniformFlux::new(flux_range);
-        let mut rng = TestRng::new(seed);
-        let mut sources = Vec::with_capacity(count);
-        for _ in 0..count {
-            let x = margin + rng.next_f64() * (size.width as f64 - 2.0 * margin);
-            let y = margin + rng.next_f64() * (size.height as f64 - 2.0 * margin);
-            sources.push(TrueSource {
-                pos: DVec2::new(x, y),
-                flux: flux_dist.sample(&mut rng),
-            });
-        }
-        Self {
-            size,
-            sources,
-            background,
-        }
-    }
-
-    /// A centrally-concentrated field: most sources packed into a Gaussian core, the rest a
-    /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
-    /// `flux_range`; deterministic in `seed`.
+    /// The sources `scatter` draws over `background`. Deterministic in its seed.
     #[expect(
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn cluster(
-        size: Size2us,
-        count: usize,
-        flux_range: (f32, f32),
-        background: BackgroundField,
-        seed: u64,
-    ) -> Self {
-        let flux_dist = LogUniformFlux::new(flux_range);
+    pub(crate) fn scatter(size: Size2us, scatter: Scatter, background: BackgroundField) -> Self {
+        let Scatter {
+            count,
+            flux,
+            placement,
+            seed,
+        } = scatter;
+        let flux_dist = LogUniformFlux::new(flux);
         let mut rng = TestRng::new(seed);
-        let (cx, cy) = (size.width as f64 / 2.0, size.height as f64 / 2.0);
-        let core_sigma = size.width.min(size.height) as f64 * 0.12;
-        let core_count = (count as f64 * 0.8) as usize;
-        let margin = 4.0;
-
-        let mut sources = Vec::with_capacity(count);
-        for i in 0..count {
-            let pos = if i < core_count {
-                // Rejection-sample a central Gaussian back into bounds.
-                loop {
-                    let x = cx + f64::from(rng.next_gaussian_f32()) * core_sigma;
-                    let y = cy + f64::from(rng.next_gaussian_f32()) * core_sigma;
-                    if x >= margin
-                        && x < size.width as f64 - margin
-                        && y >= margin
-                        && y < size.height as f64 - margin
-                    {
-                        break DVec2::new(x, y);
+        let sources = match placement {
+            Placement::Uniform { margin } => (0..count)
+                .map(|_| {
+                    let x = margin + rng.next_f64() * (size.width as f64 - 2.0 * margin);
+                    let y = margin + rng.next_f64() * (size.height as f64 - 2.0 * margin);
+                    TrueSource {
+                        pos: DVec2::new(x, y),
+                        flux: flux_dist.sample(&mut rng),
                     }
+                })
+                .collect(),
+            Placement::Cluster => {
+                let (cx, cy) = (size.width as f64 / 2.0, size.height as f64 / 2.0);
+                let core_sigma = size.width.min(size.height) as f64 * 0.12;
+                let core_count = (count as f64 * 0.8) as usize;
+                let margin = 4.0;
+
+                let mut sources = Vec::with_capacity(count);
+                for i in 0..count {
+                    let pos = if i < core_count {
+                        // Rejection-sample a central Gaussian back into bounds.
+                        loop {
+                            let x = cx + f64::from(rng.next_gaussian_f32()) * core_sigma;
+                            let y = cy + f64::from(rng.next_gaussian_f32()) * core_sigma;
+                            if x >= margin
+                                && x < size.width as f64 - margin
+                                && y >= margin
+                                && y < size.height as f64 - margin
+                            {
+                                break DVec2::new(x, y);
+                            }
+                        }
+                    } else {
+                        DVec2::new(
+                            margin + rng.next_f64() * (size.width as f64 - 2.0 * margin),
+                            margin + rng.next_f64() * (size.height as f64 - 2.0 * margin),
+                        )
+                    };
+                    sources.push(TrueSource {
+                        pos,
+                        flux: flux_dist.sample(&mut rng),
+                    });
                 }
-            } else {
-                DVec2::new(
-                    margin + rng.next_f64() * (size.width as f64 - 2.0 * margin),
-                    margin + rng.next_f64() * (size.height as f64 - 2.0 * margin),
-                )
-            };
-            sources.push(TrueSource {
-                pos,
-                flux: flux_dist.sample(&mut rng),
-            });
-        }
+                sources
+            }
+        };
         Self {
             size,
             sources,
@@ -199,25 +195,27 @@ mod tests {
         assert_eq!(buf.len(), 32 * 16);
         assert!(buf.iter().all(|&p| p == 0.25));
 
-        let bg = BackgroundField::Gradient {
+        let bg = BackgroundField::Gradient(Gradient {
             start: 0.0,
             end: 1.0,
             angle: 0.0,
-        };
+        });
         let buf = bg.render(Size2us::new(64, 4));
         assert_eq!((buf[0], buf[63], buf[64], buf[127]), (0.0, 1.0, 0.0, 1.0));
     }
 
     #[test]
-    fn random_field_count_bounds_and_reproducibility() {
+    fn uniform_scatter_count_bounds_and_reproducibility() {
         let bg = BackgroundField::Uniform { level: 0.05 };
-        let a = Scene::random_field(
+        let a = Scene::scatter(
             Size2us::new(200, 200),
-            50,
-            (1.0, 100.0),
+            Scatter {
+                count: 50,
+                flux: (1.0, 100.0),
+                placement: Placement::Uniform { margin: 10.0 },
+                seed: 42,
+            },
             bg.clone(),
-            10.0,
-            42,
         );
         assert_eq!(a.sources.len(), 50);
         for s in &a.sources {
@@ -226,7 +224,16 @@ mod tests {
             assert!(s.flux >= 1.0 && s.flux <= 100.0);
         }
         // Same seed → identical scene.
-        let b = Scene::random_field(Size2us::new(200, 200), 50, (1.0, 100.0), bg, 10.0, 42);
+        let b = Scene::scatter(
+            Size2us::new(200, 200),
+            Scatter {
+                count: 50,
+                flux: (1.0, 100.0),
+                placement: Placement::Uniform { margin: 10.0 },
+                seed: 42,
+            },
+            bg,
+        );
         for (sa, sb) in a.sources.iter().zip(&b.sources) {
             assert_eq!(sa.pos, sb.pos);
             assert_eq!(sa.flux, sb.flux);
@@ -237,8 +244,10 @@ mod tests {
     fn single_source_scene() {
         let scene = Scene::single(
             Size2us::new(64, 64),
-            DVec2::new(32.0, 32.0),
-            5.0,
+            TrueSource {
+                pos: DVec2::new(32.0, 32.0),
+                flux: 5.0,
+            },
             BackgroundField::Uniform { level: 0.0 },
         );
         assert_eq!(scene.sources.len(), 1);
@@ -253,12 +262,15 @@ mod tests {
     #[test]
     fn cluster_is_centrally_concentrated() {
         let size = Size2us::new(400usize, 400usize);
-        let scene = Scene::cluster(
+        let scene = Scene::scatter(
             size,
-            500,
-            (1.0, 10.0),
+            Scatter {
+                count: 500,
+                flux: (1.0, 10.0),
+                placement: Placement::Cluster,
+                seed: 7,
+            },
             BackgroundField::Uniform { level: 0.0 },
-            7,
         );
         assert_eq!(scene.sources.len(), 500);
 

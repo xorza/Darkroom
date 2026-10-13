@@ -7,6 +7,7 @@ use crate::registration::resample::kernel::internals::bicubic_kernel;
 use crate::registration::resample::kernel::warp_kernel::{
     Filter, TapAxis, TapRange, WarpKernel, largest_singular_value,
 };
+use crate::registration::resample::source_position::AxisPosition;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;
@@ -33,7 +34,11 @@ impl Kernel for Axis<'_> {
 
     #[inline(always)]
     fn run<S: Isa>(self, isa: S) {
-        self.kernel.axis(isa, 10, self.frac, self.axis);
+        let at = AxisPosition {
+            cell: 10,
+            frac: self.frac,
+        };
+        self.kernel.axis(isa, at, self.axis);
     }
 }
 

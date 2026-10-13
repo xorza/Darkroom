@@ -141,36 +141,49 @@ pub(crate) mod internals {
         }
     }
 
+    /// What a test sets of a multi-threshold deblend: the ladder's levels, the peaks' least
+    /// separation, and a branch's least share of the flux.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct Ladder {
+        pub(super) n_thresholds: usize,
+        pub(super) min_separation: usize,
+        pub(super) min_contrast: f32,
+    }
+
+    impl Ladder {
+        /// SExtractor's ladder: 32 levels, peaks 3 px apart, branches of 0.5% of the flux.
+        pub(super) const STANDARD: Self = Self {
+            n_thresholds: 32,
+            min_separation: 3,
+            min_contrast: 0.005,
+        };
+    }
+
     /// The multi-threshold deblender on `component` with fresh buffers and 8-connectivity, its
     /// ladder floored at the component's faintest pixel — the detection threshold a synthetic
     /// component cut at a positive level stands for.
     pub(super) fn deblend_multi_threshold_test(
         component: &Component<'_>,
-        n_thresholds: usize,
-        min_separation: usize,
-        min_contrast: f32,
+        ladder: Ladder,
     ) -> Vec<Region> {
         let floor = component
             .pixels()
             .map(|p| p.value)
             .fold(f32::INFINITY, f32::min);
-        deblend_multi_threshold_floored(
-            component,
-            floor,
-            n_thresholds,
-            min_separation,
-            min_contrast,
-        )
+        deblend_multi_threshold_floored(component, floor, ladder)
     }
 
     /// [`deblend_multi_threshold_test`] with the ladder's floor given.
     pub(super) fn deblend_multi_threshold_floored(
         component: &Component<'_>,
         floor: f32,
-        n_thresholds: usize,
-        min_separation: usize,
-        min_contrast: f32,
+        ladder: Ladder,
     ) -> Vec<Region> {
+        let Ladder {
+            n_thresholds,
+            min_separation,
+            min_contrast,
+        } = ladder;
         let mut regions = Vec::new();
         MultiThresholdParams {
             n_thresholds,
@@ -178,13 +191,9 @@ pub(crate) mod internals {
             min_separation,
             min_area: 1,
             connectivity: Connectivity::Eight,
-        }
-        .deblend(
-            component,
             floor,
-            &mut DeblendBuffers::default(),
-            &mut regions,
-        );
+        }
+        .deblend(component, &mut DeblendBuffers::default(), &mut regions);
         regions
     }
 }

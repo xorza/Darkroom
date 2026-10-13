@@ -14,12 +14,9 @@ pub(super) struct FitData<'a> {
 }
 
 impl<'a> FitData<'a> {
-    pub(super) const fn new(
-        x: &'a [f64],
-        y: &'a [f64],
-        z: &'a [f64],
-        weights: Option<&'a [f64]>,
-    ) -> Self {
+    /// The samples at `[x, y, z]`, weighted by `weights`.
+    pub(super) const fn new(xyz: [&'a [f64]; 3], weights: Option<&'a [f64]>) -> Self {
+        let [x, y, z] = xyz;
         debug_assert!(
             x.len() == y.len() && y.len() == z.len(),
             "x, y and z are indexed in lockstep"
@@ -108,7 +105,7 @@ pub(crate) mod internals {
 
     impl<'a> FitData<'a> {
         pub(crate) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
-            Self::new(x, y, z, None)
+            Self::new([x, y, z], None)
         }
     }
 
@@ -299,7 +296,7 @@ pub(crate) mod internals {
         );
         for w in [1.0, 2.0] {
             let weights = vec![w; stamp.x.len()];
-            let weighted = FitData::new(&stamp.x, &stamp.y, &stamp.z, Some(&weights));
+            let weighted = FitData::new([&stamp.x, &stamp.y, &stamp.z], Some(&weights));
             compare(
                 &format!("weight {w}"),
                 &model.batch_build_normal_equations(weighted, params),

@@ -11,7 +11,7 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::new_node_ui;
-use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::{PaletteRow, PaletteRows};
+use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRow;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::{SEARCH_ROW_GAP, Search};
 
 /// One row of a category's palette list: a library `Func` or a built-in
@@ -40,7 +40,29 @@ impl<'a> PaletteEntry<'a> {
         }
     }
 
-    /// The identity [`PaletteRows`] keeps for this entry.
+    /// The declaration the row lists and its node is named after.
+    fn func(self) -> &'a Func {
+        match self {
+            PaletteEntry::Func(f) => f,
+            PaletteEntry::Special(s) => s.func(),
+        }
+    }
+
+    /// The node a pick of this row adds. A special node's `Func` is hardcoded
+    /// rather than library-registered, so the node it spawns is a
+    /// `NodeKind::Special` — `Node::new` reads the same hardcoded func for
+    /// its name and cache mode, which is the only thing that differs from a
+    /// library row.
+    fn node(self) -> Node {
+        match self {
+            PaletteEntry::Func(f) => f.into(),
+            PaletteEntry::Special(s) => Node::new(NodeKind::Special(s)),
+        }
+    }
+
+    /// The identity
+    /// [`PaletteRows`](crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows)
+    /// keeps for this entry.
     pub(super) const fn row(self) -> PaletteRow {
         match self {
             PaletteEntry::Func(f) => PaletteRow::Func(f.id),
@@ -49,19 +71,34 @@ impl<'a> PaletteEntry<'a> {
     }
 }
 
-/// Everything one palette open lists, plus where a pick lands. Built once
-/// per body from state the whole body shares, so the column and row helpers
-/// take one borrow rather than four threaded parameters.
+/// Everything one palette open lists, plus where a pick lands and how the
+/// frame lays it out. Built once per body from state the whole body shares,
+/// so the column and row helpers take one borrow rather than four threaded
+/// parameters.
 #[derive(Debug)]
 pub(super) struct NodePalette<'a> {
-    graph_ctx: GraphCtx<'a>,
+    pub(super) graph_ctx: GraphCtx<'a>,
     /// World position the open captured — every intent a row raises places
     /// its node here.
-    pos: Vec2,
+    pub(super) pos: Vec2,
+    /// The most height the results may scroll in.
+    pub(super) scroll_cap: f32,
+    pub(super) opening: Opening,
 }
 
-/// One category's rows, ready to record: a run inside [`PaletteRows`], not a
-/// list of its own.
+/// Whether the palette opened this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Opening {
+    /// Opened this frame: the search field takes the focus, and the rows are
+    /// filtered afresh against the library as it is now.
+    Fresh,
+    /// Open since an earlier frame.
+    Standing,
+}
+
+/// One category's rows, ready to record: a run inside
+/// [`PaletteRows`](crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows),
+/// not a list of its own.
 #[derive(Debug)]
 struct PaletteColumn<'a> {
     category: &'a str,
@@ -69,10 +106,6 @@ struct PaletteColumn<'a> {
 }
 
 impl<'a> NodePalette<'a> {
-    pub(super) const fn new(graph_ctx: GraphCtx<'a>, pos: Vec2) -> Self {
-        Self { graph_ctx, pos }
-    }
-
     /// Every row the palette can list, in no particular order: the library's
     /// funcs, then the built-in specials.
     fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
@@ -120,18 +153,14 @@ impl PaletteColumn<'_> {
 }
 
 impl NodePalette<'_> {
-    /// Record the search field and the rows it matches. `opened` is the
-    /// frame the palette opened: it takes the focus, and filters the rows
-    /// afresh against the library as it is now.
+    /// Record the search field and the rows `search` matches.
     pub(super) fn body(
         &self,
         ui: &mut Ui,
         popup: &CloseHandle,
         search: &mut Search,
-        rows: &mut PaletteRows,
-        scroll_cap: f32,
-        opened: bool,
     ) -> Option<GraphIntent> {
+        let opened = self.opening == Opening::Fresh;
         let mut chosen: Option<GraphIntent> = None;
 
         let search_id = new_node_ui::search_field_wid();
@@ -152,21 +181,23 @@ impl NodePalette<'_> {
         }
         // Folded after the field records, so it reflects this frame's typing.
         if search.fold() || opened {
-            rows.refilter(self.graph_ctx.library(), self.entries(), &search.folded);
+            search
+                .rows
+                .refilter(self.graph_ctx.library(), self.entries(), &search.folded);
         }
         let library = self.graph_ctx.library();
 
         Scroll::vertical()
             .id(new_node_ui::results_wid())
             .size((Sizing::HUG, Sizing::HUG))
-            .max_size((f32::INFINITY, scroll_cap))
+            .max_size((f32::INFINITY, self.scroll_cap))
             .show(ui, |ui| {
                 Panel::hstack()
                     .id_salt("new_node_columns")
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(12.0)
                     .show(ui, |ui| {
-                        for rows in rows.columns() {
+                        for rows in search.rows.columns() {
                             // A column whose funcs all left the library since
                             // the filtering has nothing to record.
                             let Some(first) = rows.iter().find_map(|row| row.entry(library)) else {
@@ -187,56 +218,29 @@ impl NodePalette<'_> {
 }
 
 impl PaletteEntry<'_> {
-    /// Record this row and, on click, the intent it raises.
+    /// Record this row and, on click, the `AddNode` it raises.
     ///
-    /// The three graph-shaped rows differ only in what the document has to
-    /// resolve: a library graph brings the localized copy, one of this
-    /// graph's own definitions is named by id, and neither builds bindings
-    /// here — the commit gate seeds them off the definition it resolves.
+    /// A library entry and a special node name their node after the same
+    /// `Func` and seed the same default bindings from it, so only the `Node`
+    /// value itself differs — and it is built only on a click, so an
+    /// unclicked row, every row most frames, never pays for one.
     fn show(
         self,
         ui: &mut Ui,
         popup: &CloseHandle,
         palette: &NodePalette<'_>,
     ) -> Option<GraphIntent> {
-        let pos = palette.pos;
-        match self {
-            PaletteEntry::Func(func) => add_from_func(ui, popup, pos, func, || func.into()),
-            // A special node's `Func` is hardcoded rather than
-            // library-registered, so the node it spawns is a
-            // `NodeKind::Special` — `Node::new` reads the same hardcoded func
-            // for its name and cache mode, which is the only thing that
-            // differs from a library row.
-            PaletteEntry::Special(special) => add_from_func(ui, popup, pos, special.func(), || {
-                Node::new(NodeKind::Special(special))
-            }),
-        }
+        let func = self.func();
+        menu_row(ui, popup, func).then(|| {
+            let node_id = NodeId::unique();
+            GraphIntent::AddNode {
+                pos: palette.pos,
+                node_id,
+                node: self.node(),
+                bindings: func.default_bindings(node_id).collect(),
+            }
+        })
     }
-}
-
-/// Record a `Func`-shaped row and, on click, the `AddNode` it raises.
-///
-/// Shared by the library entry and the special node: both name their node
-/// after the same `Func` and seed the same default bindings from it, so
-/// only the `Node` value itself differs. Built by a closure rather than
-/// passed in, so an unclicked row — every row, most frames — never pays
-/// for one.
-fn add_from_func(
-    ui: &mut Ui,
-    popup: &CloseHandle,
-    pos: Vec2,
-    func: &Func,
-    node: impl FnOnce() -> Node,
-) -> Option<GraphIntent> {
-    menu_row(ui, popup, func).then(|| {
-        let node_id = NodeId::unique();
-        GraphIntent::AddNode {
-            pos,
-            node_id,
-            node: node(),
-            bindings: func.default_bindings(node_id).collect(),
-        }
-    })
 }
 
 /// Record a row for `func`, hovering its description as a tooltip. The

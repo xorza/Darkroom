@@ -3,7 +3,7 @@
 use std::f64::consts::{PI, SQRT_2};
 
 use crate::internals::assertions::assert_close;
-use crate::math::statistics::clipped_stats::ClippedStats;
+use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::*;
 
@@ -74,7 +74,14 @@ fn sigma_clipped_degenerate_inputs() {
     for case in &cases {
         let mut values = case.values.to_vec();
         let mut deviations = Vec::new();
-        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
+        let stats = ClippedStats::sigma_clipped(
+            &mut values,
+            &mut deviations,
+            SigmaClip {
+                kappa: 3.0,
+                iterations: 3,
+            },
+        );
         assert_close!(
             stats.median,
             case.median,
@@ -198,7 +205,14 @@ fn sigma_clip_rejects_nan_input() {
     values[5] = f32::NAN;
     values[15] = f32::NAN;
     let mut deviations = Vec::new();
-    ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
+    ClippedStats::sigma_clipped(
+        &mut values,
+        &mut deviations,
+        SigmaClip {
+            kappa: 3.0,
+            iterations: 3,
+        },
+    );
 }
 
 /// Statistics a case's hand derivation gives, where it gives them.
@@ -473,7 +487,11 @@ fn sigma_clipped_over_every_sample_shape() {
         let expected = reference_clip(&values, kappa, iterations);
         let count = values.len();
         deviations.clear();
-        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, kappa, iterations);
+        let stats = ClippedStats::sigma_clipped(
+            &mut values,
+            &mut deviations,
+            SigmaClip { kappa, iterations },
+        );
         assert_eq!(values.len(), count, "{name}: the slice keeps its length");
         assert_eq!(
             (stats.median, stats.sigma, stats.mean),
@@ -503,7 +521,14 @@ fn sigma_clipped_reports_one_median_on_every_exit() {
     let mut deviations = Vec::new();
     for iterations in [0, 3] {
         let mut values = vec![1.0f32, 2.0, 3.0, 4.0];
-        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, iterations);
+        let stats = ClippedStats::sigma_clipped(
+            &mut values,
+            &mut deviations,
+            SigmaClip {
+                kappa: 3.0,
+                iterations,
+            },
+        );
         assert_eq!(stats.median, 2.5, "{iterations} iterations");
     }
 }
@@ -515,7 +540,14 @@ fn sigma_clipped_stricter_kappa_clips_harder() {
     let clip = |values: &[f32], kappa: f32, deviations: &mut Vec<f32>| {
         let mut values = values.to_vec();
         deviations.clear();
-        ClippedStats::sigma_clipped(&mut values, deviations, kappa, 3)
+        ClippedStats::sigma_clipped(
+            &mut values,
+            deviations,
+            SigmaClip {
+                kappa,
+                iterations: 3,
+            },
+        )
     };
 
     // 0..39 plus one outlier at 60. Both runs start at median 20: the deviations |x − 20| are
@@ -578,11 +610,25 @@ fn sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
 
     let mut heap_values = base.clone();
     let mut heap_scratch: Vec<f32> = Vec::new();
-    let heap = ClippedStats::sigma_clipped(&mut heap_values, &mut heap_scratch, 3.0, 3);
+    let heap = ClippedStats::sigma_clipped(
+        &mut heap_values,
+        &mut heap_scratch,
+        SigmaClip {
+            kappa: 3.0,
+            iterations: 3,
+        },
+    );
 
     let mut stack_values = base;
     let mut stack_scratch: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let stack = ClippedStats::sigma_clipped(&mut stack_values, &mut stack_scratch, 3.0, 3);
+    let stack = ClippedStats::sigma_clipped(
+        &mut stack_values,
+        &mut stack_scratch,
+        SigmaClip {
+            kappa: 3.0,
+            iterations: 3,
+        },
+    );
 
     assert_eq!(heap.median, stack.median);
     assert_eq!(heap.sigma, stack.sigma);
@@ -596,7 +642,14 @@ fn sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
 fn sigma_clipped_stack_scratch_too_small_panics() {
     let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
     let mut deviations: arrayvec::ArrayVec<f32, 4> = arrayvec::ArrayVec::new();
-    let _ = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
+    let _ = ClippedStats::sigma_clipped(
+        &mut values,
+        &mut deviations,
+        SigmaClip {
+            kappa: 3.0,
+            iterations: 2,
+        },
+    );
 }
 
 #[test]
@@ -630,12 +683,26 @@ fn sigma_clipped_stats_iterations_improve_result() {
     let ClippedStats {
         median: median_0iter,
         ..
-    } = ClippedStats::sigma_clipped(&mut values_0iter, &mut deviations, 2.5, 0);
+    } = ClippedStats::sigma_clipped(
+        &mut values_0iter,
+        &mut deviations,
+        SigmaClip {
+            kappa: 2.5,
+            iterations: 0,
+        },
+    );
     deviations.clear();
     let ClippedStats {
         median: median_3iter,
         ..
-    } = ClippedStats::sigma_clipped(&mut values_3iter, &mut deviations, 2.5, 3);
+    } = ClippedStats::sigma_clipped(
+        &mut values_3iter,
+        &mut deviations,
+        SigmaClip {
+            kappa: 2.5,
+            iterations: 3,
+        },
+    );
 
     assert_eq!(
         median_0iter, 0.32,

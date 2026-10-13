@@ -12,7 +12,6 @@ use imaginarium::Buffer2;
 
 use crate::internals::synthetic::background_map;
 use crate::internals::visual::{ToneMap, save};
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
@@ -50,8 +49,7 @@ impl Filtered {
         );
         if let Some(name) = name {
             save(
-                output.pixels(),
-                Size2us::new(width, height),
+                &output,
                 &format!("synthetic_starfield/stage_conv_{name}_filtered"),
                 ToneMap::AutoRange,
             );

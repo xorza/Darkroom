@@ -5,6 +5,7 @@ use std::ops::Range;
 
 use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::GesdScratch;
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
 
@@ -42,16 +43,11 @@ impl GesdConfig {
 
     /// Validate the significance level and the outlier cap: either at its bound disables the test.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite("alpha", "finite and in (0, 1)", self.alpha, |value| {
-            value > 0.0 && value < 1.0
-        })?;
+        ConfigValue::new("alpha", self.alpha)
+            .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
         match self.max_outliers {
-            Some(max_outliers) => InvalidConfigField::check(
-                max_outliers >= 1,
-                "max_outliers",
-                "at least 1",
-                max_outliers as f64,
-            ),
+            Some(max_outliers) => ConfigValue::count("max_outliers", max_outliers)
+                .must_be("at least 1", max_outliers >= 1),
             None => Ok(()),
         }
     }

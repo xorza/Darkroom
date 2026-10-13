@@ -25,6 +25,7 @@ use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::theme::color;
+use crate::gui::widgets::hover::Hover;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
@@ -115,6 +116,17 @@ impl Wire {
         }
     }
 
+    /// The point at parameter `t` along the curve, in Bernstein form.
+    pub(crate) fn at(&self, t: f32) -> Vec2 {
+        let u = 1.0 - t;
+        let uu = u * u;
+        let tt = t * t;
+        self.p0 * (uu * u)
+            + self.p1 * (3.0 * uu * t)
+            + self.p2 * (3.0 * u * tt)
+            + self.p3 * (tt * t)
+    }
+
     /// Emit the stroked curve (round caps). The single place the wire
     /// `Shape` is built, so data and event curves can't drift in width
     /// policy, cap, or primitive.
@@ -177,10 +189,10 @@ impl WirePass<'_, '_> {
     /// renderers so they can't drift in culling, emphasis, or alarm color.
     ///
     /// A wire the cull drops is not probed either: the scribble is always
-    /// on-screen, so it can't have crossed an off-screen curve. `tint` is
-    /// called only for a wire that survives *both* the cull and the breaker,
-    /// so a family pays for resolving its endpoint colors only where they
-    /// actually show.
+    /// on-screen, so it can't have crossed an off-screen curve. The ends'
+    /// `tint` is called only for a wire that survives *both* the cull and the
+    /// breaker, so a family pays for resolving its endpoint colors only where
+    /// they actually show.
     ///
     /// Recording the hit stays with the caller — only it knows the domain key
     /// to hand `probe.mark_broken_*`.
@@ -188,26 +200,40 @@ impl WirePass<'_, '_> {
         &self,
         ui: &mut Ui,
         wire: &Wire,
-        endpoint_hover: bool,
-        tint: impl FnOnce() -> WireTint,
+        ends: WireEnds<impl FnOnce() -> WireTint>,
     ) -> bool {
+        let WireEnds {
+            hover: endpoint,
+            tint,
+        } = ends;
         if !self.dcx.cull().keeps_wire(wire) {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);
-        let stroke = self
-            .emphasis
-            .stroke(self.dcx.theme().stroke_width, broken, endpoint_hover);
+        let mark = match (broken, endpoint) {
+            (true, _) => WireMark::Broken,
+            (false, Hover::Over) => WireMark::EndpointHovered,
+            (false, Hover::Rest) => WireMark::Plain,
+        };
+        let stroke = self.emphasis.stroke(self.dcx.theme().stroke_width, mark);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let paint = if broken {
             WirePaint::from(self.dcx.theme().colors.connection_broken)
         } else {
-            self.emphasis.paint(tint(), stroke.hovered)
+            self.emphasis.paint(tint(), stroke.tier)
         };
         wire.add(ui, stroke.width, paint);
         broken
     }
+}
+
+/// What a committed wire's ends bring to its paint: whether an endpoint glyph
+/// is hovered, and `tint`, which resolves the colors the ends paint it with.
+#[derive(Debug)]
+pub(crate) struct WireEnds<F> {
+    pub(crate) hover: Hover,
+    pub(crate) tint: F,
 }
 
 /// The endpoint colors a family paints a wire with *before* this frame's
@@ -250,9 +276,41 @@ const WIRE_DRAG_FADE: f32 = 0.35;
 /// one connection stays traceable through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
 
+/// Whether any wire gesture — a new-connection drag, a subscription drag, a
+/// breaker scribble — is in flight this pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WireSet {
+    /// No gesture: the standing set paints at its rest tier.
+    Standing,
+    /// A gesture fades the standing set so the preview, candidate ports, and
+    /// broken-alarm wires pop.
+    Faded,
+}
+
+/// What marks one wire this frame, before the pass's tier applies. A broken
+/// wire never *also* reads as hovered: the alarm hue wins outright.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WireMark {
+    Plain,
+    /// An endpoint glyph is hovered.
+    EndpointHovered,
+    /// The active breaker crosses it.
+    Broken,
+}
+
+/// The tier a wire's paint runs through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tier {
+    /// The rest-dim tint (or the fade, while a gesture is in flight) at base
+    /// width.
+    Rest,
+    /// Full-strength color and the width lift.
+    Emphasized,
+}
+
 /// Per-pass emphasis state shared by every wire renderer, resolved once in
 /// the canvas frame. The tiers: while any wire gesture is in flight
-/// (`fading`) the standing set drops to [`WIRE_DRAG_FADE`] alpha and hover
+/// ([`WireSet::Faded`]) the standing set drops to [`WIRE_DRAG_FADE`] alpha and hover
 /// is off; at rest, endpoint colors pull toward the canvas; a hovered (or
 /// broken-alarm) wire gets full strength and a width lift.
 ///
@@ -264,27 +322,33 @@ const WIRE_HOVER_WIDTH: f32 = 1.25;
 /// fresh on screen.
 #[derive(Debug)]
 pub(crate) struct WireEmphasis {
-    fading: bool,
+    set: WireSet,
     canvas_bg: RgbaF32,
 }
 
 impl WireEmphasis {
-    /// Resolve this frame's emphasis inputs. `fading` is "any wire gesture
-    /// is active" — the callers OR together the two drag controllers and
-    /// the breaker.
-    pub(crate) const fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
-        Self { fading, canvas_bg }
+    /// Resolve this frame's emphasis inputs. `set` is faded while any wire
+    /// gesture is active — the callers OR together the two drag controllers
+    /// and the breaker.
+    pub(crate) const fn resolve(canvas_bg: RgbaF32, set: WireSet) -> Self {
+        Self { set, canvas_bg }
     }
 
-    /// This frame's paint tier for one wire, folding the two rules both
-    /// renderers need: a broken wire never *also* reads
-    /// as hovered (the alarm hue wins outright), and either state takes the
-    /// width lift.
-    fn stroke(&self, base_width: f32, broken: bool, endpoint_hover: bool) -> WireStroke {
-        let hovered = !broken && self.hovered(endpoint_hover);
+    /// This frame's paint tier and width for one wire marked `mark`: a broken
+    /// wire paints at its rest tier — the caller takes the flat alarm color
+    /// instead — and, like a hovered one, takes the width lift.
+    fn stroke(&self, base_width: f32, mark: WireMark) -> WireStroke {
+        let tier = match mark {
+            WireMark::EndpointHovered if self.set == WireSet::Standing => Tier::Emphasized,
+            WireMark::Plain | WireMark::EndpointHovered | WireMark::Broken => Tier::Rest,
+        };
+        let lifted = match mark {
+            WireMark::Broken => Tier::Emphasized,
+            WireMark::Plain | WireMark::EndpointHovered => tier,
+        };
         WireStroke {
-            hovered,
-            width: width(base_width, hovered || broken),
+            tier,
+            width: width(base_width, lifted),
         }
     }
 
@@ -292,9 +356,9 @@ impl WireEmphasis {
     /// through this frame's tier. Distinct ends ramp `p0` → `p3` over a
     /// white stroke, so the ramp's colors are the ones that show. Equal
     /// ends paint flat rather than ramping between two identical stops.
-    fn paint(&self, tint: WireTint, emphasized: bool) -> WirePaint {
-        let start = self.tint(tint.start, emphasized);
-        let end = self.tint(tint.end, emphasized);
+    fn paint(&self, tint: WireTint, tier: Tier) -> WirePaint {
+        let start = self.tint(tint.start, tier);
+        let end = self.tint(tint.end, tier);
         if start == end {
             return WirePaint::from(start);
         }
@@ -304,32 +368,24 @@ impl WireEmphasis {
         }
     }
 
-    /// Whether this wire is hover-emphasized: an endpoint glyph is
-    /// hovered. Never while a gesture fades the set — the snap target's
-    /// forced endpoint hover must not re-emphasize a faded wire.
-    const fn hovered(&self, endpoint_hovered: bool) -> bool {
-        !self.fading && endpoint_hovered
-    }
-
-    /// The tiered color for a (non-broken) wire endpoint.
-    fn tint(&self, c: RgbaF32, emphasized: bool) -> RgbaF32 {
-        if self.fading {
-            c.with_alpha(WIRE_DRAG_FADE)
-        } else if emphasized {
-            c
-        } else {
-            color::toward(c, self.canvas_bg, WIRE_REST_DIM)
+    /// The tiered color for a (non-broken) wire endpoint. While a gesture
+    /// fades the set the fade wins over the tier — the snap target's forced
+    /// endpoint hover must not re-emphasize a faded wire.
+    fn tint(&self, c: RgbaF32, tier: Tier) -> RgbaF32 {
+        match (self.set, tier) {
+            (WireSet::Faded, _) => c.with_alpha(WIRE_DRAG_FADE),
+            (WireSet::Standing, Tier::Emphasized) => c,
+            (WireSet::Standing, Tier::Rest) => color::toward(c, self.canvas_bg, WIRE_REST_DIM),
         }
     }
 }
 
-/// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
+/// The tiered stroke width. Broken-alarm wires take the emphasized width
 /// too: full width against the faded rest of the set is the alarm.
-fn width(base: f32, emphasized: bool) -> f32 {
-    if emphasized {
-        base * WIRE_HOVER_WIDTH
-    } else {
-        base
+fn width(base: f32, tier: Tier) -> f32 {
+    match tier {
+        Tier::Emphasized => base * WIRE_HOVER_WIDTH,
+        Tier::Rest => base,
     }
 }
 
@@ -338,9 +394,9 @@ fn width(base: f32, emphasized: bool) -> f32 {
 /// straight back to the caller, the only party that can record the hit.
 #[derive(Clone, Copy, Debug)]
 struct WireStroke {
-    /// Paints at full strength rather than the rest-dim tint. Never set for a
-    /// broken wire — the alarm read wins outright.
-    hovered: bool,
+    /// [`Tier::Emphasized`] paints at full strength rather than the rest-dim
+    /// tint. Never for a broken wire — the alarm read wins outright.
+    tier: Tier,
     width: f32,
 }
 

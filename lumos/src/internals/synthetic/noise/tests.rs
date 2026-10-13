@@ -54,7 +54,11 @@ fn read_noise_has_expected_sigma() {
     // read_noise 5 e at 10_000 e full well → σ_norm = 5e-4, mean 0.
     let mut rng = TestRng::new(5);
     let mut pixels = vec![0.0f32; 100_000];
-    add_read_noise(&mut pixels, 5.0, 10_000.0, &mut rng);
+    ReadNoise {
+        sigma_e: 5.0,
+        full_well_e: 10_000.0,
+    }
+    .add_to(&mut pixels, &mut rng);
     let stats = pixel_stats(&pixels);
     let (mean, var) = (stats.mean, stats.std * stats.std);
     assert!(mean.abs() < 1e-5, "mean {mean}");
@@ -66,7 +70,12 @@ fn dark_current_adds_expected_pedestal() {
     // 0.1 e/s for 100 s = 10 e mean → normalized 10/10_000 = 1e-3.
     let mut rng = TestRng::new(6);
     let mut pixels = vec![0.0f32; 100_000];
-    add_dark_current(&mut pixels, 0.1, 100.0, 10_000.0, &mut rng);
+    DarkCurrent {
+        e_per_s: 0.1,
+        exposure_s: 100.0,
+        full_well_e: 10_000.0,
+    }
+    .add_to(&mut pixels, &mut rng);
     let mean = pixel_stats(&pixels).mean;
     assert!((mean - 1e-3).abs() < 5e-5, "mean {mean}");
 }
@@ -75,7 +84,11 @@ fn dark_current_adds_expected_pedestal() {
 fn read_noise_zero_is_noop() {
     let mut rng = TestRng::new(7);
     let mut pixels = vec![0.3f32; 100];
-    add_read_noise(&mut pixels, 0.0, 10_000.0, &mut rng);
+    ReadNoise {
+        sigma_e: 0.0,
+        full_well_e: 10_000.0,
+    }
+    .add_to(&mut pixels, &mut rng);
     assert!(pixels.iter().all(|&p| p == 0.3));
 }
 

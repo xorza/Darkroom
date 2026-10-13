@@ -14,7 +14,10 @@
 //! *between* them is [`Viewport::to_world`](crate::core::document::viewport::Viewport::to_world),
 //! on the camera itself.
 
-use palantir::WidgetId;
+use glam::Vec2;
+use palantir::{Ui, WidgetId};
+
+use crate::gui::graph_ctx::GraphCtx;
 
 /// Stable id for the outer (pan-capture) canvas — the rect the gestures poll,
 /// the backdrop paints, and the cull measures against.
@@ -26,4 +29,15 @@ pub(crate) fn outer_wid() -> WidgetId {
 /// for resolving the canvas's pre-transform origin in connection draws.
 pub(super) fn inner_wid() -> WidgetId {
     WidgetId::from_hash("graph.canvas.inner")
+}
+
+/// The pointer in canvas-world coords, or `None` off-window. `canvas_origin`
+/// is the inner canvas's pre-transform origin.
+pub(crate) fn world_pointer(
+    ui: &mut Ui,
+    graph_ctx: GraphCtx<'_>,
+    canvas_origin: Vec2,
+) -> Option<Vec2> {
+    ui.pointer_pos()
+        .map(|p| graph_ctx.viewport().to_world(p - canvas_origin))
 }

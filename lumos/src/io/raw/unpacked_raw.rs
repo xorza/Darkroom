@@ -23,7 +23,9 @@ use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::error::ImageError;
 use crate::io::load_context::LoadContext;
 use crate::io::raw;
-use crate::io::raw::black_level::{BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack};
+use crate::io::raw::black_level::{
+    BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
+};
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
@@ -71,6 +73,16 @@ pub(super) struct UnpackedRaw {
     /// The decoder LibRaw chose: a lossy codec — Canon's C-RAW, Fuji's lossy RAF — quantizes past
     /// one ADU without passing its codes through the curve at all.
     decoder: RawDecoder,
+}
+
+/// The two ways a RAW frame leaves LibRaw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawPath {
+    /// The sensor's mosaic as it was read, normalized and not clipped.
+    Mosaic,
+    /// LibRaw's demosaiced output: its 16-bit samples divided by their integer maximum, which
+    /// clipped them.
+    Processed,
 }
 
 impl UnpackedRaw {
@@ -189,15 +201,17 @@ impl UnpackedRaw {
         }
     }
 
-    /// The metadata both paths record: the file's own, the samples' `domain`, and how the decode
-    /// made them — `color`, `demosaic`, and whether it `clipped` them.
-    fn metadata(
-        &self,
-        domain: SampleDomain,
-        color: ColorProvenance,
-        demosaic: DemosaicProvenance,
-        clipped: bool,
-    ) -> ImageMetadata {
+    /// The metadata both paths record: the file's own, the samples' `domain`, and how `path`
+    /// made them.
+    fn metadata(&self, domain: SampleDomain, path: RawPath) -> ImageMetadata {
+        let (color, demosaic, clipped) = match path {
+            RawPath::Mosaic => (ColorProvenance::SensorCfa, DemosaicProvenance::None, false),
+            RawPath::Processed => (
+                ColorProvenance::Unspecified,
+                DemosaicProvenance::LibRaw,
+                true,
+            ),
+        };
         ImageMetadata {
             domain: Some(domain),
             iso: self.iso,
@@ -236,9 +250,11 @@ impl UnpackedRaw {
         self.black_level.decode(
             raw,
             self.layout,
-            self.channel_map(),
-            self.cfa_type.map_or(1, |cfa_type| cfa_type.period()),
-            self.flag_rule(),
+            Photosites {
+                channel: self.channel_map(),
+                period: self.cfa_type.map_or(1, |cfa_type| cfa_type.period()),
+                rule: self.flag_rule(),
+            },
         )
     }
 
@@ -287,9 +303,7 @@ impl UnpackedRaw {
             saturation_flagged: true,
             ..self.metadata(
                 Self::sample_domain(self.black_level.span()),
-                ColorProvenance::SensorCfa,
-                DemosaicProvenance::None,
-                false,
+                RawPath::Mosaic,
             )
         };
         Ok(CfaImage {
@@ -388,13 +402,8 @@ impl UnpackedRaw {
             image.channels(),
             start.elapsed().as_secs_f64() * 1000.0
         );
-        image.metadata = self.metadata(
-            Self::sample_domain(self.processed_span),
-            ColorProvenance::Unspecified,
-            DemosaicProvenance::LibRaw,
-            // LibRaw's 16-bit output divided by its integer maximum.
-            true,
-        );
+        image.metadata =
+            self.metadata(Self::sample_domain(self.processed_span), RawPath::Processed);
         Ok(image)
     }
 }

@@ -288,12 +288,13 @@ fn median_at_side_edges() {
         2.1, 2.2, 2.3, 2.4, 2.5,
     ];
 
-    let left = median_at_left_edge(&pixels, 5, 1);
+    let pixels = Buffer2::new(5, 5, pixels);
+    let left = median_at_left_edge(&pixels, 1);
     assert!(
         (left - 0.65).abs() < 1e-6,
         "left edge median should be 0.65, got {left}"
     );
-    let right = median_at_right_edge(&pixels, 5, 1);
+    let right = median_at_right_edge(&pixels, 1);
     assert!(
         (right - 0.95).abs() < 1e-6,
         "right edge median should be 0.95, got {right}"
@@ -343,7 +344,7 @@ fn median_at_edge_truth_table() {
     ];
 
     for case in cases {
-        let actual = median_at_edge(&pixels, Size2us::new(4, 4), case.pos);
+        let actual = median_at_edge(&Buffer2::new(4, 4, pixels.clone()), case.pos);
         assert!((actual - case.expected).abs() < 1e-6, "{case:?}");
     }
 }

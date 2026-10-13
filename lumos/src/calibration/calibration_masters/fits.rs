@@ -26,9 +26,10 @@ use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::io::error::{FitsWriteError, ImageError};
 use crate::io::fits::cfa::{CfaFitsHdu, CfaFitsHduMetadata};
-use crate::io::fits::decode;
+use crate::io::fits::decode::open_fits::OpenFits;
 use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FlagsExtension};
+use crate::io::fits::hdu_list::HduList;
 use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 
@@ -105,14 +106,16 @@ pub(super) fn load(path: &Path, context: &LoadContext) -> Result<CalibrationMast
     }
     // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
     // trustworthy as one just built — and neither can exist in a state the other would reject.
-    let masters = CalibrationMasters::assemble(
-        bundle.master(indices.masters.bias, MasterRole::Bias)?,
-        bundle.master(indices.masters.dark, MasterRole::Dark)?,
-        bundle
-            .master(indices.masters.flat, MasterRole::Flat)?
-            .map(PreparedFlat::from_divisor),
-        bundle.defect_map(indices.defects)?,
-    )?;
+    let masters = CalibrationMasters::builder()
+        .bias(bundle.master(indices.masters.bias, MasterRole::Bias)?)
+        .dark(bundle.master(indices.masters.dark, MasterRole::Dark)?)
+        .flat(
+            bundle
+                .master(indices.masters.flat, MasterRole::Flat)?
+                .map(PreparedFlat::from_divisor),
+        )
+        .defect_map(bundle.defect_map(indices.defects)?)
+        .build()?;
     Ok(masters)
 }
 
@@ -168,7 +171,11 @@ impl BundleReader<'_> {
     /// Where each component's HDU sits.
     fn indices(&self) -> Result<BundleIndices, BundleError> {
         // Each master finds its own flags when it is read; this refuses one that names none.
-        FlagsExtension::check_claims(self.path, self.reader.hdus()).map_err(BundleError::Flags)?;
+        FlagsExtension::check_claims(HduList {
+            path: self.path,
+            hdus: self.reader.hdus(),
+        })
+        .map_err(BundleError::Flags)?;
         let mut indices = BundleIndices::default();
         for (hdu, unit) in self.reader.hdus().iter().enumerate().skip(1) {
             let extname = unit
@@ -217,12 +224,16 @@ impl BundleReader<'_> {
             datasum: FitsChecksumState::Valid,
             checksum: FitsChecksumState::Valid,
         };
-        decode::read_cfa_hdu(&mut self.reader, index, self.path, self.context, checksum)
-            .map(Some)
-            .map_err(|source| match source {
-                ImageError::Cancelled { .. } => BundleError::Cancelled,
-                source => BundleError::Master { role, source },
-            })
+        OpenFits {
+            reader: &mut self.reader,
+            path: self.path,
+        }
+        .read_cfa_hdu(index, self.context, checksum)
+        .map(Some)
+        .map_err(|source| match source {
+            ImageError::Cancelled { .. } => BundleError::Cancelled,
+            source => BundleError::Master { role, source },
+        })
     }
 
     /// The defect map at HDU `index`, when the bundle holds one.

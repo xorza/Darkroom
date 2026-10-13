@@ -14,7 +14,7 @@ use crate::combine::frame_cache::frame_chunk::ChunkCopy;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::image::linear_image::LinearImage;
 use crate::platform::MappedFile;
 
@@ -101,6 +101,12 @@ impl Warped {
     }
 
     fn spill(&self, stats: FrameStats) -> StoredFrame {
-        StoredFrame::spill(&self.scratch, &self.image, &self.quality, stats).unwrap()
+        SpillFrame {
+            image: &self.image,
+            quality: &self.quality,
+            source_stats: stats,
+        }
+        .spill(&self.scratch)
+        .unwrap()
     }
 }

@@ -7,15 +7,15 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
-use crate::calibration::cosmic_ray::masks::CrMasks;
+use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
+use crate::calibration::cosmic_ray::mono::Repair;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
-use crate::calibration::cosmic_ray::mono::replace_flagged;
 use crate::calibration::cosmic_ray::*;
 use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::image::pixel_flags::PixelFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane};
-use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::median_mut;
@@ -27,7 +27,10 @@ use crate::scratch_pool::ScratchPool;
 fn synthetic_field() -> SkyField {
     let sky = Sky {
         level: 0.05,
-        noise: 0.003,
+        noise: Some(SkyNoise {
+            sigma: 0.003,
+            seed: 7,
+        }),
         clamp: false,
     };
     let stars = [
@@ -35,7 +38,14 @@ fn synthetic_field() -> SkyField {
         (Vec2::new(44.0, 30.0), 0.45),
         (Vec2::new(32.0, 50.0), 0.7),
     ];
-    SkyField::render(Size2us::new(64, 64), sky, 1.3, &stars, 7)
+    SkyField::render(
+        Size2us::new(64, 64),
+        sky,
+        GaussianStars {
+            sigma: 1.3,
+            peaks: &stars,
+        },
+    )
 }
 
 #[test]
@@ -44,7 +54,7 @@ fn removes_cosmic_rays_preserves_stars() {
         pixels: mut data,
         centers: star_cores,
     } = synthetic_field();
-    let size = Size2us::new(data.width(), data.height());
+    let size = Size2us::from(&data);
     // Single-pixel CRs at empty positions + a short horizontal streak.
     let crs = [
         Vec2us::new(10, 10),
@@ -105,7 +115,7 @@ fn sigclip_controls_sensitivity() {
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
-    let size = Size2us::new(data.width(), data.height());
+    let size = Size2us::from(&data);
     data[size.index_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
     let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
@@ -135,7 +145,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
-    let size = Size2us::new(data.width(), data.height());
+    let size = Size2us::from(&data);
     let cr = Vec2us::new(15, 33);
     data[size.index_of(cr)] = 0.99;
     for noise in [
@@ -170,12 +180,22 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     let size = Size2us::new(48, 48);
     let sky = Sky {
         level: 0.05,
-        noise: 0.003,
+        noise: Some(SkyNoise {
+            sigma: 0.003,
+            seed: 11,
+        }),
         clamp: false,
     };
     let SkyField {
         pixels: mut data, ..
-    } = SkyField::render(size, sky, 2.5, &[(Vec2::new(24.0, 24.0), 0.6)], 11);
+    } = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 2.5,
+            peaks: &[(Vec2::new(24.0, 24.0), 0.6)],
+        },
+    );
     let core = Vec2us::new(24, 24);
     let star = data[size.index_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
@@ -239,13 +259,23 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     let size = Size2us::new(48, 48);
     let sky = Sky {
         level: 0.05,
-        noise: 0.003,
+        noise: Some(SkyNoise {
+            sigma: 0.003,
+            seed: 13,
+        }),
         clamp: false,
     };
     // σ = 1.0 → FWHM ≈ 2.35 px in the mosaic.
     let SkyField {
         pixels: mut data, ..
-    } = SkyField::render(size, sky, 1.0, &[(Vec2::new(24.0, 24.0), 0.6)], 13);
+    } = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 1.0,
+            peaks: &[(Vec2::new(24.0, 24.0), 0.6)],
+        },
+    );
     let core = Vec2us::new(24, 24);
     let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
     for &p in &crs {
@@ -273,13 +303,14 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     );
 }
 
-/// An independently written reference for [`replace_flagged`], asserting the property that makes
+/// An independently written reference for [`Repair::apply`], asserting the property that makes
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
 /// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
 /// that, and this is what would catch a change that broke it.
-fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &BitBuffer2) -> Vec<f32> {
-    let src = pixels.to_vec();
-    let mut out = pixels.to_vec();
+fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2) -> Buffer2<f32> {
+    let size = Size2us::from(pixels);
+    let src = pixels;
+    let mut out = pixels.clone();
     let (wi, hi) = (size.width as isize, size.height as isize);
     for y in 0..size.height {
         for x in 0..size.width {
@@ -307,10 +338,10 @@ fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &BitBuffer2
 }
 
 #[test]
-fn replace_flagged_matches_a_snapshot_reference() {
+fn a_repair_matches_a_snapshot_reference() {
     let size = Size2us::new(12, 12);
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
-    let pixels: Vec<f32> = (0..size.pixel_count()).map(|i| i as f32).collect();
+    let pixels = Buffer2::new(12, 12, (0..size.pixel_count()).map(|i| i as f32).collect());
 
     let mut mask = BitBuffer2::new_default(size);
     let at = |x, y| size.index_of(Vec2us::new(x, y));
@@ -330,17 +361,14 @@ fn replace_flagged_matches_a_snapshot_reference() {
         }
     }
 
-    let want = replace_flagged_via_snapshot(&pixels, size, &mask);
+    let want = repair_via_snapshot(&pixels, &mask);
 
     let mut got = pixels.clone();
-    replace_flagged(
-        &mut got,
-        size,
-        &mask,
-        None,
-        &mut Vec::new(),
-        &ScratchPool::default(),
-    );
+    Repair {
+        flagged: &mask,
+        unread: None,
+    }
+    .apply(&mut got, &mut Buffer2::default(), &ScratchPool::default());
 
     assert_eq!(got, want);
     // The fully-masked interior keeps its original value rather than picking up a neighbour.
@@ -508,24 +536,28 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
     let crowded = vec![10.0f32; larger.pixel_count()];
     let flat = vec![0.0f32; larger.pixel_count()];
     let unit = vec![1.0f32; larger.pixel_count()];
+    let crowded = DetectionPlanes {
+        significance: &crowded,
+        fine: &flat,
+        noise: &unit,
+    };
     assert_eq!(
-        masks.detect_and_grow(&crowded, &flat, &unit, &cfg, None),
+        masks.detect_and_grow(crowded, &cfg, None),
         larger.pixel_count()
     );
     masks.clear_to(size);
-    assert_eq!(
-        masks.detect_and_grow(&significance, &fine, &noise, &cfg, None),
-        4
-    );
+    let planes = DetectionPlanes {
+        significance: &significance,
+        fine: &fine,
+        noise: &noise,
+    };
+    assert_eq!(masks.detect_and_grow(planes, &cfg, None), 4);
     let flagged: Vec<usize> = (0..size.pixel_count())
         .filter(|&index| masks.accumulated.get(index))
         .collect();
     assert_eq!(flagged, [at(2, 1), at(3, 1), at(4, 1), at(2, 2)]);
     // A second pass finds nothing new: every pixel it would take is held already.
-    assert_eq!(
-        masks.detect_and_grow(&significance, &fine, &noise, &cfg, None),
-        0
-    );
+    assert_eq!(masks.detect_and_grow(planes, &cfg, None), 0);
 }
 
 /// Every window median is the value `median_mut` picks from the pixel's replicated window, to the
@@ -562,7 +594,7 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
             })
             .collect();
         for r in [1, 2, 3] {
-            let medians = median_window(&data, size, r);
+            let medians = median_window(&Buffer2::new(width, height, data.clone()), r);
             for y in 0..height {
                 for x in 0..width {
                     let mut window = Vec::new();
@@ -595,11 +627,22 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
 fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
     let sky = Sky {
         level: 0.05,
-        noise: 0.003,
+        noise: Some(SkyNoise {
+            sigma: 0.003,
+            seed: 11,
+        }),
         clamp: false,
     };
     let size = Size2us::new(64, 64);
-    let mut data = SkyField::render(size, sky, 1.6, &[(Vec2::new(30.0, 30.0), 40.0)], 11).pixels;
+    let mut data = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 1.6,
+            peaks: &[(Vec2::new(30.0, 30.0), 40.0)],
+        },
+    )
+    .pixels;
     let hit = Vec2us::new(44, 30);
     data[size.index_of(hit)] = 2.0;
     for value in data.pixels_mut() {
@@ -716,11 +759,22 @@ fn the_local_recompute_is_the_full_one() {
     let size = Size2us::new(96, 96);
     let sky = Sky {
         level: 0.1,
-        noise: 0.01,
+        noise: Some(SkyNoise {
+            sigma: 0.01,
+            seed: 23,
+        }),
         clamp: false,
     };
     let stars = [(Vec2::new(20.0, 70.0), 0.8), (Vec2::new(60.0, 30.0), 0.5)];
-    let mut data = SkyField::render(size, sky, 1.5, &stars, 23).pixels;
+    let mut data = SkyField::render(
+        size,
+        sky,
+        GaussianStars {
+            sigma: 1.5,
+            peaks: &stars,
+        },
+    )
+    .pixels;
     let mut hits = Vec::new();
     for (centre, half) in [
         ((10, 10), 0),
@@ -739,10 +793,10 @@ fn the_local_recompute_is_the_full_one() {
         data[size.index_of(hit)] = 0.9;
     }
     let config = CosmicRayConfig::default();
-    let mut local = data.pixels().to_vec();
-    let mut full = data.pixels().to_vec();
-    let found_local = reject_recomputing(&mut local, size, &config, Recompute::ChangedRows);
-    let found_full = reject_recomputing(&mut full, size, &config, Recompute::EveryRow);
+    let mut local = data.clone();
+    let mut full = data;
+    let found_local = reject_recomputing(&mut local, &config, Recompute::ChangedRows);
+    let found_full = reject_recomputing(&mut full, &config, Recompute::EveryRow);
     assert!(
         hits.iter().all(|&hit| found_full.get_at(hit)),
         "every hit is found"

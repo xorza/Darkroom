@@ -22,8 +22,8 @@ use crate::gui::app::app_command::prefs_command::PrefsCommand;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::GraphUI;
-use crate::gui::pane::image_viewer::{self, ImageViewer};
-use crate::gui::pane::preferences;
+use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane};
+use crate::gui::pane::preferences::PreferencesForm;
 use crate::gui::requests::Requests;
 
 /// Everything a pane's body needs, borrowed for one record pass.
@@ -64,7 +64,11 @@ impl DockTabs for DockPanes<'_> {
                     .draw(ui, GraphCtx::new(cx, self.output_types), self.out);
             }
             TabRef::Preferences => {
-                preferences::show(ui, app.theme(), self.prefs, self.out);
+                PreferencesForm {
+                    theme: app.theme(),
+                    out: self.out,
+                }
+                .show(ui, self.prefs);
             }
             TabRef::ImageViewer(node_id) => {
                 let title = image_viewer::node_label(cx.document(), node_id);
@@ -75,14 +79,13 @@ impl DockTabs for DockPanes<'_> {
                     .or_insert_with(|| ImageViewer::new(node_id));
                 // Viewer-toolbar edits ride the same in-place prefs path
                 // as the Preferences tab.
-                if viewer.show(
-                    ui,
-                    app.theme(),
-                    &mut self.prefs.viewer,
+                let pane = ViewerPane {
+                    theme: app.theme(),
                     title,
                     previews,
-                    size.map(Vec2::from),
-                ) {
+                    size: size.map(Vec2::from),
+                };
+                if viewer.show(ui, pane, &mut self.prefs.viewer) {
                     self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                 }
             }

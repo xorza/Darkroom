@@ -52,18 +52,25 @@ impl FilterRejection {
     }
 }
 
+/// The scratch a filter pass sorts in: the values its medians take, and the grid duplicates are
+/// found on.
+#[derive(Debug)]
+pub(crate) struct FilterScratch<'a> {
+    pub(crate) values: &'a mut Vec<f32>,
+    pub(crate) duplicates: &'a mut DuplicateScratch,
+}
+
 impl FilterOutcome {
-    /// Filter stars by quality metrics, remove duplicates, and sort by flux, with `values` and
-    /// `duplicates` as scratch.
+    /// Filter stars by quality metrics, remove duplicates, and sort by flux, in `scratch`.
     ///
     /// Returns the filtered stars and rejection statistics. Stars are returned
     /// sorted by flux (brightest first).
     pub(crate) fn from_stars(
         mut stars: Vec<Star>,
         config: &FilterConfig,
-        values: &mut Vec<f32>,
-        duplicates: &mut DuplicateScratch,
+        scratch: FilterScratch<'_>,
     ) -> Self {
+        let FilterScratch { values, duplicates } = scratch;
         let mut diagnostics = QualityFilterDiagnostics::default();
 
         stars.retain(|star| {

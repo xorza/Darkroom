@@ -4,7 +4,7 @@ use palantir::CloseHandle;
 use palantir::prelude::*;
 use scenarium::NodeId;
 
-use crate::gui::pane::graph_ui::paint::anchored_menu::AnchoredMenu;
+use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape};
 
 /// A context popup latched by a right-click on a node's body — the whole shape
 /// a canvas node menu takes, from the trigger scan to the pick. Wraps
@@ -64,9 +64,13 @@ impl NodeContextMenu {
         body: impl FnOnce(&mut Ui, &CloseHandle, NodeId) -> Option<T>,
     ) -> Option<NodePick<T>> {
         let node_id = self.node_id?;
+        let shape = PopupShape {
+            id_salt,
+            max_height: None,
+        };
         let choice = self
             .menu
-            .show(ui, id_salt, None, |ui, popup| body(ui, popup, node_id))?;
+            .show(ui, shape, |ui, popup| body(ui, popup, node_id))?;
         Some(NodePick { node_id, choice })
     }
 }

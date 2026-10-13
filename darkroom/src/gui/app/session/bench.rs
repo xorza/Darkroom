@@ -48,8 +48,9 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
+use crate::gui::app::app_ctx::AppCtx;
 use crate::gui::app::session::Session;
+use crate::gui::frame_writes::FrameWrites;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -240,19 +241,16 @@ impl Editor {
             .previews
             .reconcile(&self.session.open.document);
         self.session.reconcile_caches();
-        let ctx = AppCtx::new(
-            &self.theme,
-            &self.library,
-            &self.run_state,
-            StatusInputs {
-                error: None,
-                process_memory: 0,
+        let ctx = AppCtx::new(&self.theme, &self.library, &self.run_state);
+        self.requests.clear();
+        let relayout = self.session.frame(
+            ui,
+            ctx,
+            FrameWrites {
+                preferences: &mut self.preferences,
+                requests: &mut self.requests,
             },
         );
-        self.requests.clear();
-        let relayout = self
-            .session
-            .frame(ui, ctx, &mut self.preferences, &mut self.requests);
         assert!(
             self.requests.pop_app().is_none(),
             "a frame with no input raises no app command"
@@ -280,41 +278,47 @@ fn stacked_frame(level: f32) -> DynamicValue {
     DynamicValue::from_custom(lens::Image::from(image))
 }
 
-/// Measure `scenario` on `backend`: build the frame with `build` in the case, run it through
-/// [`SETTLE_FRAMES`], check its paint, then time frames.
-fn measure<F>(
-    group: &mut BenchmarkGroup<'_, WallTime>,
+/// One editor-frame case: the made graph in `scenario`, painted on `backend`.
+#[derive(Debug, Clone, Copy)]
+struct FrameCase {
     scenario: Scenario,
     backend: Backend,
-    build: impl Fn() -> F,
-) where
-    F: FnMut(&mut Editor, u32) -> FramePaint,
-{
-    group.bench_function(backend.case(scenario.label()), |b| {
-        let mut frame = build();
-        let mut editor = Editor::new();
-        let mut n = 0u32;
-        let mut step = || {
-            let paint = frame(&mut editor, n);
-            n = n.wrapping_add(1);
-            paint
-        };
-        for _ in 0..SETTLE_FRAMES {
-            step();
-        }
-        let paint = step();
-        if scenario == Scenario::Cached {
-            assert_eq!(paint, FramePaint::Skip, "a still editor paints nothing");
-        } else {
-            assert_ne!(
-                paint,
-                FramePaint::Skip,
-                "{} reaches paint",
-                scenario.label()
-            );
-        }
-        b.iter(&mut step);
-    });
+}
+
+impl FrameCase {
+    /// Measure the case: build the frame with `build` in the case, run it
+    /// through [`SETTLE_FRAMES`], check its paint, then time frames.
+    fn measure<F>(self, group: &mut BenchmarkGroup<'_, WallTime>, build: impl Fn() -> F)
+    where
+        F: FnMut(&mut Editor, u32) -> FramePaint,
+    {
+        let Self { scenario, backend } = self;
+        group.bench_function(backend.case(scenario.label()), |b| {
+            let mut frame = build();
+            let mut editor = Editor::new();
+            let mut n = 0u32;
+            let mut step = || {
+                let paint = frame(&mut editor, n);
+                n = n.wrapping_add(1);
+                paint
+            };
+            for _ in 0..SETTLE_FRAMES {
+                step();
+            }
+            let paint = step();
+            if scenario == Scenario::Cached {
+                assert_eq!(paint, FramePaint::Skip, "a still editor paints nothing");
+            } else {
+                assert_ne!(
+                    paint,
+                    FramePaint::Skip,
+                    "{} reaches paint",
+                    scenario.label()
+                );
+            }
+            b.iter(&mut step);
+        });
+    }
 }
 
 /// `integration/editor_frame/<backend>/<scenario>`: one whole editor frame of the made graph.
@@ -322,8 +326,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
     let mut group = Kind::Integration.group(c, "editor_frame", Scale::Frame);
     for backend in backends.all() {
         for scenario in Scenario::ALL {
+            let case = FrameCase { scenario, backend };
             match backend {
-                Backend::Cpu => measure(&mut group, scenario, backend, || {
+                Backend::Cpu => case.measure(&mut group, || {
                     let mut harness = UiHarness::with_text(BENCH_SURFACE).scale(BENCH_DPR);
                     harness.ui().set_theme(Theme::default().palantir);
                     let mut frontend = FrontendHarness::new(harness);
@@ -338,7 +343,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: Backends) {
                         frontend.frame(|ui| editor.record(ui)).paint()
                     }
                 }),
-                Backend::Gpu => measure(&mut group, scenario, backend, || {
+                Backend::Gpu => case.measure(&mut group, || {
                     let gpu = BenchGpu::shared(Timing::PassOnly);
                     let target = gpu.target("darkroom.editor_frame", BENCH_SURFACE);
                     let mut host = gpu

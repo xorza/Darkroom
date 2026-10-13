@@ -19,14 +19,13 @@ use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
 use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
-use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, ROW_GAP};
+use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue, ROW_GAP};
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
 /// normal node's so a thumbnail has somewhere to be; the body still hugs
@@ -52,7 +51,8 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
-pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
+pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
+    let ncx = rec.node;
     let theme = ncx.theme();
     let node = ncx;
     let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
@@ -96,7 +96,7 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
     // open just activates it.
     if content.left.clicked() {
-        out.push_view(DockOperation::OpenTab {
+        rec.out.push_view(DockOperation::OpenTab {
             tab: TabRef::ImageViewer(node.id),
         });
     }
@@ -130,12 +130,11 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
                 .gap(ROW_GAP)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    support::labeled_value(
-                        ui,
-                        theme,
-                        "Source",
-                        Bytes::new(image.source_bytes as u64),
-                    );
+                    LabeledValue {
+                        label: "Source",
+                        value: Bytes::new(image.source_bytes as u64),
+                    }
+                    .show(ui, theme);
                 });
         });
 }

@@ -12,6 +12,7 @@ use crate::io::raw::unpacked_raw::{instrument, saturation_level};
 use crate::io::raw::*;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use imaginarium::Buffer2;
 
 /// A dump at black `black`, with no other option.
 fn black(black: u32) -> BayerDump {
@@ -91,10 +92,10 @@ fn load_rejects_invalid_files() {
     }
 }
 
-/// A synthetic camera file through LibRaw's `open_bayer`, unpacked: `samples` laid out `side`
-/// square under one-pixel margins, RGGB, as `dump` describes it.
-fn bayer_dump(samples: &[u16], side: usize, dump: BayerDump) -> Result<UnpackedRaw, RawError> {
-    let libraw = Libraw::open_bayer(samples, side as u16, dump, &CancelToken::never())?;
+/// A synthetic camera file through LibRaw's `open_bayer`, unpacked: the square `samples` under
+/// one-pixel margins, RGGB, as `dump` describes it.
+fn bayer_dump(samples: &Buffer2<u16>, dump: BayerDump) -> Result<UnpackedRaw, RawError> {
+    let libraw = Libraw::open_bayer(samples, dump, &CancelToken::never())?;
     UnpackedRaw::unpack(libraw, Path::new("bayer-dump"), 1)
 }
 
@@ -114,8 +115,8 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
             1000 + ((x * 7 + y * 13) % 5) as u16 * 3
         }
     };
-    let samples = |margin: u16| -> Vec<u16> {
-        (0..SIDE * SIDE)
+    let samples = |margin: u16| -> Buffer2<u16> {
+        let pixels = (0..SIDE * SIDE)
             .map(|index| {
                 let (x, y) = (index % SIDE, index / SIDE);
                 if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
@@ -124,17 +125,18 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
                     visible(x - 1, y - 1)
                 }
             })
-            .collect()
+            .collect();
+        Buffer2::new(SIDE, SIDE, pixels)
     };
     let context = LoadContext::default();
     let preview = |margin| {
-        bayer_dump(&samples(margin), SIDE, black(1004))
+        bayer_dump(&samples(margin), black(1004))
             .unwrap()
             .into_linear_image(&context)
     };
     let dark = preview(0).unwrap();
     let bright = preview(65_535).unwrap();
-    let science = bayer_dump(&samples(0), SIDE, black(1004))
+    let science = bayer_dump(&samples(0), black(1004))
         .unwrap()
         .into_cfa_image()
         .unwrap()
@@ -335,14 +337,13 @@ fn a_stated_linear_limit_sets_the_saturation_level_within_its_bounds() {
 fn the_raw_values_settle_no_data_and_saturation() {
     const SIDE: usize = 24;
     let flags_for = |procflags: u8| {
-        let mut samples = vec![2000u16; SIDE * SIDE];
+        let mut samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
         samples[7 * SIDE + 5] = 0;
         samples[0] = 0;
         samples[10 * SIDE + 10] = 62_309;
         samples[12 * SIDE + 12] = 62_308;
         let raw = bayer_dump(
             &samples,
-            SIDE,
             BayerDump {
                 procflags,
                 ..black(1000)
@@ -375,20 +376,23 @@ fn the_raw_values_settle_no_data_and_saturation() {
 fn the_decode_takes_the_masked_means_libraw_truncates() {
     const SIDE: usize = 26;
     let parity = |row: usize, col: usize| (row % 2) * 2 + col % 2;
-    let samples: Vec<u16> = (0..SIDE * SIDE)
-        .map(|index| {
-            let (row, col) = (index / SIDE, index % SIDE);
-            if col < 2 {
-                let p = parity(row, col);
-                (2048 + p + usize::from(row / 2 <= p)) as u16
-            } else {
-                3000
-            }
-        })
-        .collect();
+    let samples = Buffer2::new(
+        SIDE,
+        SIDE,
+        (0..SIDE * SIDE)
+            .map(|index| {
+                let (row, col) = (index / SIDE, index % SIDE);
+                if col < 2 {
+                    let p = parity(row, col);
+                    (2048 + p + usize::from(row / 2 <= p)) as u16
+                } else {
+                    3000
+                }
+            })
+            .collect(),
+    );
     let raw = bayer_dump(
         &samples,
-        SIDE,
         BayerDump {
             mask: Some([0, 0, SIDE as i32, 2]),
             ..BayerDump::default()
@@ -420,28 +424,28 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
 #[test]
 fn a_value_past_the_bit_depth_is_corrupt_data() {
     const SIDE: usize = 24;
-    let mut samples = vec![2000u16; SIDE * SIDE];
+    let mut samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
     samples[10 * SIDE + 10] = 20_000;
     let narrow = BayerDump {
         otherflags: 0x20,
         ..BayerDump::default()
     };
     assert!(matches!(
-        bayer_dump(&samples, SIDE, narrow),
+        bayer_dump(&samples, narrow),
         Err(RawError::CorruptData)
     ));
-    assert!(bayer_dump(&samples, SIDE, BayerDump::default()).is_ok());
+    assert!(bayer_dump(&samples, BayerDump::default()).is_ok());
     samples[10 * SIDE + 10] = 16_000;
-    assert!(bayer_dump(&samples, SIDE, narrow).is_ok());
+    assert!(bayer_dump(&samples, narrow).is_ok());
 }
 
 /// A cancel the load's token sees stops LibRaw at its next stage, and reads as the load's own
 /// cancel rather than as a failure of the file.
 #[test]
 fn a_cancelled_token_stops_libraw() {
-    let samples = vec![2000u16; 24 * 24];
+    let samples = Buffer2::new_filled(24, 24, 2000u16);
     let cancel = CancelToken::new();
-    let libraw = Libraw::open_bayer(&samples, 24, BayerDump::default(), &cancel).unwrap();
+    let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &cancel).unwrap();
     cancel.cancel();
     let path = Path::new("bayer-dump");
     let error = UnpackedRaw::unpack(libraw, path, 1).unwrap_err();
@@ -459,9 +463,8 @@ fn a_cancelled_token_stops_libraw() {
 /// in place, and the raw buffer of as many samples it unpacks into.
 #[test]
 fn the_peek_counts_the_file_and_the_raw_buffer() {
-    let samples = vec![2000u16; 24 * 24];
-    let libraw =
-        Libraw::open_bayer(&samples, 24, BayerDump::default(), &CancelToken::never()).unwrap();
+    let samples = Buffer2::new_filled(24, 24, 2000u16);
+    let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     let info = frame_info(&libraw).unwrap();
     assert_eq!(info.dimensions, ImageDimensions::new((22, 22), 1));
     assert_eq!(info.decoder_bytes, 1152 + 1152);
@@ -474,8 +477,8 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
 #[test]
 fn libraws_processing_declares_its_own_span() {
     const SIDE: usize = 24;
-    let samples = vec![2000u16; SIDE * SIDE];
-    let image = bayer_dump(&samples, SIDE, black(1000))
+    let samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
+    let image = bayer_dump(&samples, black(1000))
         .unwrap()
         .processed_by_libraw()
         .unwrap();

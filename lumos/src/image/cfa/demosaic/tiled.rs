@@ -38,6 +38,27 @@ pub(crate) struct TilePlace {
     pub(crate) size: Size2us,
 }
 
+impl TilePlace {
+    /// The frame row past the tile's last.
+    pub(crate) const fn bottom(self) -> usize {
+        self.top + self.size.height
+    }
+
+    /// The frame column past the tile's last.
+    pub(crate) const fn right(self) -> usize {
+        self.left + self.size.width
+    }
+}
+
+/// One pixel of the frame a kernel writes: its flat `index`, its `native` colour, and the `sample`
+/// the input holds there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NativePixel {
+    pub(crate) index: usize,
+    pub(crate) native: usize,
+    pub(crate) sample: f32,
+}
+
 /// The frame's output planes, which every tile writes at the pixels it alone owns.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OutputPlanes {
@@ -97,29 +118,28 @@ impl OutputPlanes {
         }
     }
 
-    /// Channel `channel` of the pixel at `index` of the frame: `value`, as a kernel computed it in
-    /// balanced units, brought back by the channel's `gain` — but where the channel is the pixel's
-    /// `native` colour, its own `sample`, as the input held it, so it leaves exact.
+    /// The three channels of `pixel`: each of `values`, as a kernel computed it in balanced units,
+    /// brought back by its channel's gain of `gains` — but at the pixel's native colour its own
+    /// sample, as the input held it, so it leaves exact.
     ///
     /// # Safety
     ///
-    /// The planes cover the frame, and no other tile writes `index`.
+    /// The planes cover the frame, and no other tile writes the pixel.
     #[inline(always)]
-    pub(crate) unsafe fn write(
-        self,
-        channel: usize,
-        index: usize,
-        native: usize,
-        sample: f32,
-        value: f32,
-        gain: f32,
-    ) {
-        let value = if channel == native {
-            sample
-        } else {
-            value / gain
-        };
-        unsafe { self.planes[channel].get().add(index).write(value) };
+    pub(crate) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3], gains: [f32; 3]) {
+        let NativePixel {
+            index,
+            native,
+            sample,
+        } = pixel;
+        for (channel, (value, gain)) in values.into_iter().zip(gains).enumerate() {
+            let value = if channel == native {
+                sample
+            } else {
+                value / gain
+            };
+            unsafe { self.planes[channel].get().add(index).write(value) };
+        }
     }
 }
 

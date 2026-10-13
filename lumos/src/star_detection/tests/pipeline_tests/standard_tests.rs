@@ -1,10 +1,10 @@
 //! Star detection on typical forward-model fields, held to what their truth decides exactly (see
-//! [`run_test`]).
+//! [`PipelineCase::check`]).
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::camera::PsfModel;
 use crate::internals::synthetic::scene::BackgroundField;
-use crate::star_detection::tests::pipeline_tests::run_test;
+use crate::star_detection::tests::pipeline_tests::PipelineCase;
 use crate::star_detection::tests::{Scenario, synthetic_config};
 
 /// Test: Sparse field with well-separated stars.
@@ -18,7 +18,13 @@ fn pipeline_sparse_field() {
     }
     .frame();
 
-    run_test("sparse_field", "pipeline", &frame, &synthetic_config(), 12);
+    PipelineCase {
+        label: "pipeline_sparse_field",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 12,
+    }
+    .check();
 }
 
 /// Test: Dense field with many stars.
@@ -32,7 +38,13 @@ fn pipeline_dense_field() {
     }
     .frame();
 
-    run_test("dense_field", "pipeline", &frame, &synthetic_config(), 19);
+    PipelineCase {
+        label: "pipeline_dense_field",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 19,
+    }
+    .check();
 }
 
 /// Test: Moffat profile stars (more realistic PSF).
@@ -55,7 +67,13 @@ fn pipeline_moffat_profile() {
     }
     .frame();
 
-    run_test("moffat_profile", "pipeline", &frame, &synthetic_config(), 8);
+    PipelineCase {
+        label: "pipeline_moffat_profile",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 8,
+    }
+    .check();
 }
 
 /// Test: a wider PSF, 4.5 px.
@@ -70,7 +88,13 @@ fn pipeline_wider_psf() {
     }
     .frame();
 
-    run_test("wider_psf", "pipeline", &frame, &synthetic_config(), 12);
+    PipelineCase {
+        label: "pipeline_wider_psf",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 12,
+    }
+    .check();
 }
 
 /// Test: Wide dynamic range (bright to faint stars).
@@ -86,7 +110,13 @@ fn pipeline_dynamic_range() {
     }
     .frame();
 
-    run_test("dynamic_range", "pipeline", &frame, &synthetic_config(), 16);
+    PipelineCase {
+        label: "pipeline_dynamic_range",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 16,
+    }
+    .check();
 }
 
 /// Test: Low noise (ideal conditions).
@@ -103,5 +133,11 @@ fn pipeline_low_noise() {
     }
     .frame();
 
-    run_test("low_noise", "pipeline", &frame, &synthetic_config(), 13);
+    PipelineCase {
+        label: "pipeline_low_noise",
+        frame: &frame,
+        config: &synthetic_config(),
+        min_decided: 13,
+    }
+    .check();
 }

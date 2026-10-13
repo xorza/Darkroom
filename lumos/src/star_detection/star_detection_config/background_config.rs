@@ -3,6 +3,7 @@
 use std::num::NonZeroUsize;
 
 use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams};
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Strategy for refining background estimation.
@@ -42,24 +43,12 @@ impl BackgroundRefinement {
                 mask_dilation,
                 mask_sigma,
             }) => {
-                InvalidConfigField::check(
-                    iterations.get() <= 10,
-                    "background refinement iterations",
-                    "at most 10",
-                    iterations.get() as f64,
-                )?;
-                InvalidConfigField::check(
-                    *mask_dilation <= 50,
-                    "background refinement mask_dilation",
-                    "at most 50",
-                    *mask_dilation as f64,
-                )?;
-                InvalidConfigField::finite(
-                    "background refinement mask_sigma",
-                    "finite and positive",
-                    *mask_sigma,
-                    |value| value > 0.0,
-                )
+                ConfigValue::count("background refinement iterations", iterations.get())
+                    .must_be("at most 10", iterations.get() <= 10)?;
+                ConfigValue::count("background refinement mask_dilation", *mask_dilation)
+                    .must_be("at most 50", *mask_dilation <= 50)?;
+                ConfigValue::new("background refinement mask_sigma", *mask_sigma)
+                    .finite_and("finite and positive", |value| value > 0.0)
             }
         }
     }
@@ -102,18 +91,10 @@ impl BackgroundConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            (16..=256).contains(&self.tile_size),
-            "tile_size",
-            "between 16 and 256",
-            self.tile_size as f64,
-        )?;
-        InvalidConfigField::check(
-            self.sigma_clip_iterations <= 10,
-            "sigma_clip_iterations",
-            "at most 10",
-            self.sigma_clip_iterations as f64,
-        )?;
+        ConfigValue::count("tile_size", self.tile_size)
+            .must_be("between 16 and 256", (16..=256).contains(&self.tile_size))?;
+        ConfigValue::count("sigma_clip_iterations", self.sigma_clip_iterations)
+            .must_be("at most 10", self.sigma_clip_iterations <= 10)?;
         self.refinement.validate()
     }
 }

@@ -12,6 +12,7 @@ use imaginarium::Buffer2;
 use crate::image::flat_gain::{self, FlatGain, GainGrid};
 use crate::io::error::{FitsRefusal, FitsWriteError, ImageError};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
+use crate::io::fits::hdu_list::HduList;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::math::size2us::Size2us;
 
@@ -59,15 +60,13 @@ impl GainExtension {
     /// it has none. Refused when a gain extension names no image of the file, two name one, or it
     /// is not this version's.
     pub(crate) fn locate(
-        path: &Path,
-        hdus: &[Hdu],
+        file: HduList<'_>,
         image: usize,
         size: Size2us,
     ) -> Result<Option<usize>, ImageError> {
-        let found =
-            ExtensionClaims::of(path, hdus, LumosExtension::Gain)?.for_image(path, hdus, image)?;
+        let found = ExtensionClaims::of(file, LumosExtension::Gain)?.for_image(file, image)?;
         if let Some(index) = found {
-            Self::check(path, &hdus[index], size)?;
+            Self::check(file.path, &file.hdus[index], size)?;
         }
         Ok(found)
     }

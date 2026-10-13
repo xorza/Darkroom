@@ -50,21 +50,18 @@ impl NodeMenuUi {
     /// action always targets a coherent set ("select then act"). A pick lands
     /// frames later, so that selection is committed well before it is read
     /// back.
+    ///
+    /// Returns the selection edit, when the node needs one.
     pub(crate) fn open_on(
         &mut self,
         ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         node: NodeId,
-        out: &mut Requests,
-    ) {
-        if !self.menu.open_on(ui, node) {
-            return;
-        }
-        if !graph_ctx.is_selected(node) {
-            out.push_graph(GraphIntent::SetSelection {
-                to: BTreeSet::from([node]),
-            });
-        }
+    ) -> Option<GraphIntent> {
+        let select = self.menu.open_on(ui, node) && !graph_ctx.is_selected(node);
+        select.then(|| GraphIntent::SetSelection {
+            to: BTreeSet::from([node]),
+        })
     }
 
     /// Record the menu and resolve this frame's pick onto `out` — a run as

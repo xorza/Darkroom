@@ -17,10 +17,7 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
-use std::fs::File;
 use std::path::Path;
-
-use fits_well::io::StreamReader;
 
 use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
@@ -28,10 +25,6 @@ use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
-use crate::io::fits::cfa;
-use crate::io::fits::decode::hdu_sections::HduSections;
-use crate::io::fits::decode::pixels::HduDecode;
-use crate::io::fits::decode::plan::FitsHduDescription;
 use crate::io::fits::decode::selected_fits::SelectedFits;
 
 use crate::image::image_metadata::ImageMetadata;
@@ -39,13 +32,11 @@ use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
-use crate::io::fits::fits_checksum_provenance::FitsChecksumProvenance;
-use crate::io::fits::fits_load_options::FitsCubeInterpretation;
-use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::metadata;
 use crate::io::load_context::LoadContext;
 
 mod hdu_sections;
+pub(crate) mod open_fits;
 mod pixels;
 mod plan;
 mod selected_fits;
@@ -165,58 +156,6 @@ pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, I
     SelectedFits::open(path, context)?
         .read(path, context)?
         .into_cfa(path)
-}
-
-/// The Lumos CFA image in HDU `index` of a file already open, with its flags extension,
-/// under the caller's `context` — its cancellation, memory limit and float scale — with the
-/// checksum state the caller verified for both. Held to the version check every file entry point
-/// applies; an HDU that is not a Lumos CFA image is refused.
-pub(crate) fn read_cfa_hdu(
-    reader: &mut StreamReader<File>,
-    index: usize,
-    path: &Path,
-    context: &LoadContext,
-    checksum: FitsChecksumProvenance,
-) -> Result<CfaImage, ImageError> {
-    context.check_cancelled(path)?;
-    let hdu = &reader.hdus()[index];
-    if !cfa::validate_image_header(path, &hdu.header)? {
-        return Err(ImageError::fits_unsupported(
-            path,
-            FitsRefusal::NotLumosCfa { hdu: index },
-        ));
-    }
-    let plan = plan::preflight(
-        path,
-        FitsHduDescription::from_hdu(path, hdu, index)?,
-        FitsCubeInterpretation::Reject,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let size = plan.dimensions.size();
-    let flags_hdu = FlagsExtension::locate(path, reader.hdus(), index, size)?;
-    if flags_hdu.is_some() {
-        plan.admit_flags_extension(path, context.memory_limit_bytes)?;
-    }
-    let header = reader.hdus()[index].header.clone();
-    let selected = selection::selected_hdu(path, reader.hdus(), index)?;
-    let mut decoded = HduDecode {
-        hdu: selected,
-        header: &header,
-        plan: &plan,
-        path,
-        context,
-    }
-    .read(&mut HduSections::new(reader, index), |_| Ok(checksum))?;
-    if let Some(flags_hdu) = flags_hdu {
-        context.check_cancelled(path)?;
-        let stored = reader
-            .read_image(flags_hdu)
-            .map_err(|source| ImageError::fits(path, source))?
-            .decode();
-        decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
-    }
-    decoded.into_cfa(path)
 }
 
 pub(crate) fn cfa_frame_info(

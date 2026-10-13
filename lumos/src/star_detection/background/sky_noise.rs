@@ -2,7 +2,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::bit_buffer2::BitBuffer2;
+use crate::image::masked_plane::MaskedPlane;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::{self, Planes};
@@ -24,14 +24,14 @@ pub(crate) struct SkyNoise {
 }
 
 impl SkyNoise {
-    /// The noise of `pixels` alone, by the background estimate's mesh, leaving out the pixels
-    /// `mask` sets: for a plane whose sky is already out, whose σ is all a threshold needs.
+    /// The noise of `plane` alone, by the background estimate's mesh, leaving out the pixels its
+    /// mask sets: for a plane whose sky is already out, whose σ is all a threshold needs.
     pub(crate) fn measure(
-        pixels: &Buffer2<f32>,
-        mask: Option<&BitBuffer2>,
+        plane: MaskedPlane<'_>,
         config: &BackgroundConfig,
         resources: &mut DetectionResources,
     ) -> Self {
+        let MaskedPlane { pixels, mask } = plane;
         let mut noise = resources.acquire_f32();
         let workspace = &mut resources.background;
         let tile_grid = workspace.mesh.compute(pixels, mask, config.mesh_params());

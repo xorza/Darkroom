@@ -15,8 +15,8 @@ use scenarium::NodeId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
+use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
 use crate::gui::requests::Requests;
 
 /// One in-flight group drag, or none.
@@ -32,23 +32,29 @@ pub(crate) struct GroupDrag {
     anchor: Option<Anchor>,
 }
 
-/// The latched drag: what was grabbed, where every moving member started,
-/// and whose response drives it.
+/// What a press grabbed: the node, every node moving with it, and the widget
+/// whose drag drives them.
 #[derive(Debug)]
-struct Anchor {
+pub(crate) struct Grab {
     /// The node the pointer grabbed, which [`GroupDrag::advance`] checks
     /// against the scene.
-    grabbed: NodeId,
+    pub(crate) node: NodeId,
     /// Every node moving with this drag, at its position when the drag
     /// latched: the whole selection when the grabbed node was already
-    /// selected, else just the grabbed one. Shared with each frame's intent,
-    /// so a frame copies no list.
-    members: Arc<[DragStart]>,
+    /// selected, else just the grabbed one. Includes the grabbed node itself.
+    /// Shared with each frame's intent, so a frame copies no list.
+    pub(crate) members: Arc<[DragStart]>,
     /// The widget whose drag delta drives the gesture, captured at latch so
-    /// later frames can `ui.response_for(widget_id)` without the caller
-    /// having to remember which of its several grab targets started it.
-    widget_id: WidgetId,
-    /// The undo gesture every frame of this drag folds into.
+    /// later frames can `ui.response_for(handle)` without the caller having
+    /// to remember which of its several grab targets started it.
+    pub(crate) handle: WidgetId,
+}
+
+/// The latched drag: what was grabbed, and the undo gesture every frame of
+/// it folds into.
+#[derive(Debug)]
+struct Anchor {
+    grab: Grab,
     gesture: GestureId,
 }
 
@@ -65,19 +71,10 @@ impl GroupDrag {
         self.anchor.is_some()
     }
 
-    /// Start (or replace) the gesture. `members` includes the grabbed node
-    /// itself.
-    pub(crate) fn latch(
-        &mut self,
-        grabbed: NodeId,
-        members: Arc<[DragStart]>,
-        widget_id: WidgetId,
-        out: &mut Requests,
-    ) {
+    /// Start (or replace) the gesture on `grab`.
+    pub(crate) fn latch(&mut self, grab: Grab, out: &mut Requests) {
         self.anchor = Some(Anchor {
-            grabbed,
-            members,
-            widget_id,
+            grab,
             gesture: out.open_gesture(),
         });
     }
@@ -87,34 +84,29 @@ impl GroupDrag {
     /// A caller that also latches fresh drags skips its own scan while this
     /// returns `true`.
     ///
-    /// `cancelled` (Esc) puts every member back where the drag latched it and
+    /// A cancelling Esc puts every member back where the drag latched it and
     /// ends the drag; the undo gesture then ends where it began and records
     /// nothing.
     ///
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn advance(
-        &mut self,
-        ui: &Ui,
-        graph_ctx: GraphCtx<'_>,
-        cancelled: bool,
-        out: &mut Requests,
-    ) -> bool {
+    pub(crate) fn advance(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) -> bool {
+        let graph_ctx = cx.graph_ctx();
         // A node deleted mid-drag (breaker swipe, undo) takes its drag with
         // it: left in place the anchor would emit against a missing node, and
         // could fire again if a fresh node reused the id.
         if self
             .anchor
             .as_ref()
-            .is_some_and(|anchor| !graph_ctx.contains(anchor.grabbed))
+            .is_some_and(|anchor| !graph_ctx.contains(anchor.grab.node))
         {
             self.anchor = None;
         }
         let Some(anchor) = &self.anchor else {
             return false;
         };
-        let resp = ui.response_for(anchor.widget_id);
+        let resp = ui.response_for(anchor.grab.handle);
         // `drag_started` on a still-active anchor means a *new* gesture just
         // latched on the same widget. Emitting with the stale start
         // positions would snap the group back to the previous gesture's
@@ -123,7 +115,7 @@ impl GroupDrag {
             self.anchor = None;
             return false;
         }
-        if cancelled {
+        if cx.cancelled() {
             out.push_graph(anchor.frame(Vec2::ZERO));
             self.anchor = None;
             return true;
@@ -147,7 +139,7 @@ impl Anchor {
     fn frame(&self, offset: Vec2) -> GraphIntent {
         GraphIntent::MoveSelection {
             gesture: self.gesture,
-            members: Arc::clone(&self.members),
+            members: Arc::clone(&self.grab.members),
             offset,
         }
     }

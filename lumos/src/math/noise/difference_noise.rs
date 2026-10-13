@@ -12,6 +12,7 @@ use crate::math::noise::mosaic_sampling::MosaicSampling;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
+use imaginarium::Buffer2;
 
 /// The noise standard deviation of each colour of a CFA mosaic, from differences of same-colour
 /// neighbours.
@@ -25,19 +26,20 @@ use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 pub(crate) struct DifferenceNoise;
 
 impl DifferenceNoise {
-    /// The noise standard deviation of each colour of `mosaic`, a row-major image, over the pairs
-    /// `sampling` takes, indexed by colour. A colour with fewer than two pairs reads `0`.
+    /// The noise standard deviation of each colour of `mosaic` over the pairs `sampling` takes,
+    /// indexed by colour. A colour with fewer than two pairs reads `0`.
     pub(crate) fn estimate(
-        mosaic: &[f32],
+        mosaic: &Buffer2<f32>,
         sampling: &MosaicSampling<'_, impl Fn(usize) -> bool>,
     ) -> ArrayVec<f32, 3> {
+        debug_assert_eq!(Size2us::from(mosaic), sampling.size, "the mosaic sampled");
         let mut differences: ArrayVec<Vec<f32>, 3> = sampling
             .pair_counts()
             .into_iter()
             .map(Vec::with_capacity)
             .collect();
         sampling.for_each_pair(|pair| {
-            differences[pair.colour].push(pair.difference(mosaic, sampling.size));
+            differences[pair.colour].push(pair.difference(mosaic));
         });
         differences.iter_mut().map(|colour| sigma(colour)).collect()
     }
@@ -46,10 +48,11 @@ impl DifferenceNoise {
     /// each of the colour's gain bins on its own, a pair at the mean of its two photosites' gain,
     /// and fitted by [`BackgroundSplit::fit`].
     pub(crate) fn estimate_split(
-        mosaic: &[f32],
+        mosaic: &Buffer2<f32>,
         sampling: &MosaicSampling<'_, impl Fn(usize) -> bool>,
         gain: &FlatGain,
     ) -> ArrayVec<BackgroundSplit, 3> {
+        debug_assert_eq!(Size2us::from(mosaic), sampling.size, "the mosaic sampled");
         let mut binned: ArrayVec<BinnedSamples<Vec<f32>>, 3> = sampling
             .pair_counts()
             .into_iter()
@@ -59,7 +62,7 @@ impl DifferenceNoise {
             binned[pair.colour].push(
                 gain.bins(pair.colour),
                 pair.gain(gain),
-                pair.difference(mosaic, sampling.size),
+                pair.difference(mosaic),
             );
         });
         binned
@@ -103,6 +106,8 @@ fn sigma(differences: &mut [f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::internals::test_rng::TestRng;
@@ -124,13 +129,17 @@ mod tests {
         let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
-        let mosaic: Vec<f32> = (0..size.pixel_count())
-            .map(|index| {
-                let (x, y) = (index % 512, index / 512);
-                let colour = cfa_type.color_at(Vec2us::new(x, y));
-                0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
-            })
-            .collect();
+        let mosaic = Buffer2::new(
+            512,
+            512,
+            (0..size.pixel_count())
+                .map(|index| {
+                    let (x, y) = (index % 512, index / 512);
+                    let colour = cfa_type.color_at(Vec2us::new(x, y));
+                    0.2 + 0.3 * (x as f32 / 512.0) + sigmas[colour] * rng.next_gaussian_f32()
+                })
+                .collect(),
+        );
         for per_colour in [MAX_STATISTIC_SAMPLES, 43_690] {
             let sampling = MosaicSampling {
                 size,

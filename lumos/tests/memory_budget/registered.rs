@@ -3,8 +3,8 @@
 //! `AlignStackConfig::align_stack_images`.
 
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CosmicRayConfig, LinearImage, ProgressMonitor, Reference,
-    RunReport,
+    AlignStackConfig, CalibratedLights, CalibrationMasters, CosmicRayConfig, LinearImage,
+    ProgressMonitor, Reference, RunReport,
 };
 
 use crate::alone::alone;
@@ -46,8 +46,10 @@ impl Mosaics<'_> {
         let run = session.measure(|| {
             config
                 .calibrate_align_stack_paths(
-                    &paths,
-                    &CalibrationMasters::default(),
+                    CalibratedLights {
+                        paths: &paths,
+                        masters: &CalibrationMasters::default(),
+                    },
                     &ingest,
                     ProgressMonitor::unattended(),
                 )

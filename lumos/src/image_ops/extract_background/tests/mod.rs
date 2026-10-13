@@ -5,7 +5,7 @@ use crate::image_ops::extract_background::*;
 use crate::image_ops::stretch::{Stretch, StretchMethod};
 use crate::internals::assertions::assert_close;
 use crate::internals::images::gray_image;
-use crate::internals::images::rgb_image as rgb;
+use crate::internals::images::rgb_image;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 
@@ -19,7 +19,7 @@ fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn gray(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
+fn gray_of(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
     gray_image(size, fill(size, f))
 }
 
@@ -78,7 +78,7 @@ fn subtract_removes_linear_gradients_per_channel() {
     let r = fill(size, dyadic_plane);
     let g = fill(size, |x, y| dyadic_plane(size.width - 1 - x, y));
     let b = fill(size, |x, y| 0.25 + y as f32 / 4096.0 + x as f32 / 8192.0);
-    let mut img = rgb(size, r, g, b);
+    let mut img = rgb_image(size, [r, g, b]);
     ExtractBackground {
         degree: 1,
         tile_size: 40,
@@ -128,7 +128,7 @@ fn subtract_leaves_a_flat_sky_and_its_stars_unchanged() {
 #[test]
 fn divide_corrects_a_planar_falloff() {
     let size = Size2us::new(160, 160);
-    let mut img = gray(size, dyadic_plane);
+    let mut img = gray_of(size, dyadic_plane);
     ExtractBackground {
         degree: 2,
         tile_size: 20,
@@ -153,7 +153,7 @@ fn divide_floor_caps_the_gain() {
     let size = Size2us::new(160, 32);
     let falloff = |x: usize, _: usize| x as f32 / 1024.0 + 1.0 / 64.0;
     let run = |divide_floor| {
-        let mut img = gray(size, falloff);
+        let mut img = gray_of(size, falloff);
         ExtractBackground {
             degree: 1,
             tile_size: 16,
@@ -191,7 +191,7 @@ fn divide_refuses_a_sky_with_no_positive_mean_and_changes_nothing() {
     let size = Size2us::new(64, 64);
     let negative = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
     let positive = fill(size, |x, _| 0.25 + x as f32 / 1024.0);
-    let mut img = rgb(size, positive.clone(), negative.clone(), positive.clone());
+    let mut img = rgb_image(size, [positive.clone(), negative.clone(), positive.clone()]);
     let error = ExtractBackground {
         degree: 1,
         tile_size: 16,
@@ -308,7 +308,7 @@ fn higher_degree_fits_cubic_better() {
         0.4 + 0.2 * nx - 0.3 * nx * nx + 0.25 * nx * nx * nx + 0.15 * ny * ny * ny
     };
     let resid_energy = |degree| {
-        let mut img = gray(size, cubic);
+        let mut img = gray_of(size, cubic);
         ExtractBackground {
             degree,
             tile_size: 20,
@@ -336,7 +336,7 @@ fn higher_degree_fits_cubic_better() {
 
 #[test]
 fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
-    let mut img = gray(Size2us::new(8, 64), |x, y| {
+    let mut img = gray_of(Size2us::new(8, 64), |x, y| {
         0.2 + 0.01 * x as f32 + 0.001 * y as f32
     });
     let before = img.channel(0).pixels().to_vec();

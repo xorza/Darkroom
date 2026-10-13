@@ -6,7 +6,7 @@
 
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 
 /// The total-flux range of [`star_field`]'s stars, log-uniform: bright, and clear of saturation on
@@ -25,15 +25,19 @@ pub(crate) const STAR_FIELD_FWHM: f32 = 4.0;
 /// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
 /// the general-purpose populated field.
 pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
-    let scene = Scene::random_field(
+    let scene = Scene::scatter(
         size,
-        num_stars,
-        STAR_FIELD_FLUX,
+        Scatter {
+            count: num_stars,
+            flux: STAR_FIELD_FLUX,
+            placement: Placement::Uniform {
+                margin: STAR_FIELD_MARGIN,
+            },
+            seed,
+        },
         BackgroundField::Uniform {
             level: STAR_FIELD_SKY,
         },
-        STAR_FIELD_MARGIN,
-        seed,
     );
     render(
         &scene,
@@ -45,12 +49,15 @@ pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame
 /// A crowded central cluster of `num_stars` with heavy blending over a dark sky — for
 /// deblend, labeling, and crowded-detection stress.
 pub(crate) fn cluster_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
-    let scene = Scene::cluster(
+    let scene = Scene::scatter(
         size,
-        num_stars,
-        (5.0, 20.0),
+        Scatter {
+            count: num_stars,
+            flux: (5.0, 20.0),
+            placement: Placement::Cluster,
+            seed,
+        },
         BackgroundField::Uniform { level: 0.05 },
-        seed,
     );
     render(
         &scene,

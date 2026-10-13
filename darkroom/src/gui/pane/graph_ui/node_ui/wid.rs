@@ -18,6 +18,8 @@ use scenarium::NodeId;
 use crate::core::document::port_ref::PortRef;
 use crate::gui::event_ref::EventRef;
 
+use crate::gui::widgets::hover::Hover;
+
 /// A node-keyed widget id under `tag`.
 pub(crate) fn node(tag: &'static str, node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, node_id))
@@ -90,6 +92,6 @@ pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 /// lets the record pass settle it at the node body — one
 /// [`NodeCtx::with_hover`](crate::gui::graph_ctx::node_ctx::NodeCtx::with_hover)
 /// per node — before the subtree that reads it has recorded.
-pub(crate) fn hovered(ui: &Ui, node_id: NodeId) -> bool {
-    ui.is_hover_within(body(node_id))
+pub(crate) fn hover(ui: &Ui, node_id: NodeId) -> Hover {
+    Hover::from(ui.is_hover_within(body(node_id)))
 }

@@ -52,41 +52,57 @@ pub(crate) fn apply_shot_noise(pixels: &mut [f32], full_well_e: f32, rng: &mut T
     }
 }
 
-/// Add Gaussian read noise (σ given in electrons) to a normalized signal in place.
-///
-/// The normalized standard deviation is `read_noise_e / full_well_e`.
-pub(crate) fn add_read_noise(
-    pixels: &mut [f32],
-    read_noise_e: f32,
-    full_well_e: f32,
-    rng: &mut TestRng,
-) {
-    assert!(full_well_e > 0.0, "full_well_e must be positive");
-    if read_noise_e <= 0.0 {
-        return;
-    }
-    let sigma = read_noise_e / full_well_e;
-    for p in pixels.iter_mut() {
-        *p += rng.next_gaussian_f32() * sigma;
+/// Gaussian read noise of `sigma_e` electrons on a sensor of `full_well_e`: a normalized σ of
+/// `sigma_e / full_well_e`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReadNoise {
+    pub(crate) sigma_e: f32,
+    pub(crate) full_well_e: f32,
+}
+
+impl ReadNoise {
+    /// Add the noise to a normalized signal in place.
+    pub(crate) fn add_to(self, pixels: &mut [f32], rng: &mut TestRng) {
+        let Self {
+            sigma_e: read_noise_e,
+            full_well_e,
+        } = self;
+        assert!(full_well_e > 0.0, "full_well_e must be positive");
+        if read_noise_e <= 0.0 {
+            return;
+        }
+        let sigma = read_noise_e / full_well_e;
+        for p in pixels.iter_mut() {
+            *p += rng.next_gaussian_f32() * sigma;
+        }
     }
 }
 
-/// Add a Poisson-distributed dark-current pedestal of mean `dark_current_e_per_s *
-/// exposure_s` electrons per pixel, in normalized units, in place.
-pub(super) fn add_dark_current(
-    pixels: &mut [f32],
-    dark_current_e_per_s: f32,
-    exposure_s: f32,
-    full_well_e: f32,
-    rng: &mut TestRng,
-) {
-    assert!(full_well_e > 0.0, "full_well_e must be positive");
-    let lambda = dark_current_e_per_s * exposure_s;
-    if lambda <= 0.0 {
-        return;
-    }
-    for p in pixels.iter_mut() {
-        *p += poisson(rng, lambda) / full_well_e;
+/// A Poisson-distributed dark-current pedestal of mean `e_per_s · exposure_s` electrons per pixel,
+/// on a sensor of `full_well_e`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DarkCurrent {
+    pub(crate) e_per_s: f32,
+    pub(crate) exposure_s: f32,
+    pub(crate) full_well_e: f32,
+}
+
+impl DarkCurrent {
+    /// Add the pedestal to a normalized signal in place.
+    pub(crate) fn add_to(self, pixels: &mut [f32], rng: &mut TestRng) {
+        let Self {
+            e_per_s: dark_current_e_per_s,
+            exposure_s,
+            full_well_e,
+        } = self;
+        assert!(full_well_e > 0.0, "full_well_e must be positive");
+        let lambda = dark_current_e_per_s * exposure_s;
+        if lambda <= 0.0 {
+            return;
+        }
+        for p in pixels.iter_mut() {
+            *p += poisson(rng, lambda) / full_well_e;
+        }
     }
 }
 

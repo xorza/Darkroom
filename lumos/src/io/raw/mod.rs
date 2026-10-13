@@ -12,7 +12,7 @@ use std::{ffi, fs};
 
 use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::cfa_type::{CfaType, LibrawFilters};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::io::error::ImageError;
@@ -91,12 +91,12 @@ fn colour_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
 /// The mosaic LibRaw's state `data` describes — see [`CfaType::from_libraw`].
 fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawError> {
     let idata = &data.idata;
-    Ok(CfaType::from_libraw(
-        idata.filters,
-        idata.colors,
-        colour_description(idata.cdesc),
-        xtrans_pattern_from_libraw(idata.xtrans),
-    )?)
+    Ok(CfaType::from_libraw(&LibrawFilters {
+        filters: idata.filters,
+        colors: idata.colors,
+        cdesc: colour_description(idata.cdesc),
+        xtrans: xtrans_pattern_from_libraw(idata.xtrans),
+    })?)
 }
 
 /// Read `path` whole and open it in LibRaw, which then parses the bytes in place, polling the

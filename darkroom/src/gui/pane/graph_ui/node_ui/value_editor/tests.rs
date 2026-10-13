@@ -15,15 +15,18 @@ use crate::gui::theme::Theme;
 #[test]
 fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
     let theme = Theme::default();
-    let editor = &theme.const_value_editor.drag_value.editor;
     let id = WidgetId::from_hash("value_editor::mirror");
+    let field = Field {
+        theme: &theme.const_value_editor,
+        id,
+    };
     let value = ConstValue::Int(42);
     let mut h = UiHarness::new(UVec2::new(200, 60));
 
     let mut buffered = String::new();
     for frame in 0..3 {
         h.frame(|ui| {
-            let committed = buffered_text_edit(ui, editor, id, &value, format_any, 80.0);
+            let committed = field.text(ui, &value, format_any);
             assert!(
                 committed.is_none(),
                 "frame {frame}: an unfocused editor commits nothing"
@@ -44,7 +47,12 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
     for frame in 0..3 {
         h.frame(|ui| {
             assert!(
-                read_only_label(ui, &theme.const_value_editor, read_only, &value).is_none(),
+                Field {
+                    theme: &theme.const_value_editor,
+                    id: read_only,
+                }
+                .read_only(ui, &value)
+                .is_none(),
                 "frame {frame}: a read-only field never commits"
             );
             buffered = ui
@@ -66,9 +74,8 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
 #[test]
 fn escape_drops_the_draft_and_enter_or_blur_commits() {
     #[derive(Debug)]
-    struct Field<'a> {
-        editor: &'a TextEditTheme,
-        id: WidgetId,
+    struct Probe<'a> {
+        field: Field<'a>,
         value: ConstValue,
     }
     /// Every commit any pass of a frame produced, and the text the field ends with.
@@ -77,21 +84,14 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         commits: Vec<String>,
         text: String,
     }
-    impl Field<'_> {
+    impl Probe<'_> {
         fn frame(&self, h: &mut UiHarness) -> Framed {
             let mut commits = Vec::new();
             let mut text = String::new();
             h.frame(|ui| {
-                commits.extend(buffered_text_edit(
-                    ui,
-                    self.editor,
-                    self.id,
-                    &self.value,
-                    format_any,
-                    80.0,
-                ));
+                commits.extend(self.field.text(ui, &self.value, format_any));
                 text.clone_from(
-                    &ui.state::<EditBuffer>(self.id)
+                    &ui.state::<EditBuffer>(self.field.id)
                         .expect("the editor keeps its buffer")
                         .text,
                 );
@@ -100,7 +100,7 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
         }
 
         fn focus_and_type(&self, h: &mut UiHarness) {
-            let center = h.rect(self.id).expect("field arranged").center();
+            let center = h.rect(self.field.id).expect("field arranged").center();
             h.click_at(center);
             assert!(self.frame(h).commits.is_empty(), "focusing commits nothing");
             h.key(Key::Char('7'));
@@ -109,9 +109,11 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     }
 
     let theme = Theme::default();
-    let field = Field {
-        editor: &theme.const_value_editor.drag_value.editor,
-        id: WidgetId::from_hash("value_editor::commit_rules"),
+    let field = Probe {
+        field: Field {
+            theme: &theme.const_value_editor,
+            id: WidgetId::from_hash("value_editor::commit_rules"),
+        },
         value: ConstValue::Int(42),
     };
     let mut h = UiHarness::new(UVec2::new(200, 60));

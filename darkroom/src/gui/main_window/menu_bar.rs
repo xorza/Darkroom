@@ -24,33 +24,35 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
         });
 }
 
-/// One menu-bar dropdown: a flat trigger button that toggles a
-/// `ContextMenu` of [`MenuItem`] rows. `build` populates the popup and raises
-/// whatever a pick means. Centralizes the trigger + anchor + open plumbing so
-/// each menu is just its label + rows.
-fn dropdown(
-    ui: &mut Ui,
-    theme: &Theme,
+/// One menu-bar dropdown: a flat trigger button labelled `label` that toggles
+/// a `ContextMenu` of [`MenuItem`] rows. Centralizes the trigger + anchor +
+/// open plumbing so each menu is just its label + rows.
+#[derive(Clone, Copy, Debug)]
+struct Dropdown {
     label: &'static str,
-    build: impl FnOnce(&mut Ui, &CloseHandle),
-) {
-    let trigger = Button::new()
-        .label(label)
-        .style(&theme.menu_button)
-        .show(ui)
-        .snapshot();
-    if trigger.left.clicked()
-        && let Some(rect) = trigger.rect
-    {
-        ContextMenu::open(ui, trigger.id, Vec2::new(rect.min.x, rect.max().y));
+}
+
+impl Dropdown {
+    /// `build` populates the popup and raises whatever a pick means.
+    fn show(self, ui: &mut Ui, theme: &Theme, build: impl FnOnce(&mut Ui, &CloseHandle)) {
+        let trigger = Button::new()
+            .label(self.label)
+            .style(&theme.menu_button)
+            .show(ui)
+            .snapshot();
+        if trigger.left.clicked()
+            && let Some(rect) = trigger.rect
+        {
+            ContextMenu::open(ui, trigger.id, Vec2::new(rect.min.x, rect.max().y));
+        }
+        ContextMenu::for_id(trigger.id).show(ui, |ui, popup| {
+            build(ui, popup);
+        });
     }
-    ContextMenu::for_id(trigger.id).show(ui, |ui, popup| {
-        build(ui, popup);
-    });
 }
 
 fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
-    dropdown(ui, theme, "File", |ui, popup| {
+    Dropdown { label: "File" }.show(ui, theme, |ui, popup| {
         if MenuItem::new("New").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::New));
         }

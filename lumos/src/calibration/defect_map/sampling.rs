@@ -25,18 +25,28 @@ struct CfaSamplePhase {
     sample_count: usize,
 }
 
-/// The residuals over the colour mesh of `target_color`'s stratified sample of `data`.
-pub(super) fn color_residual_samples(
-    data: &Buffer2<f32>,
-    cfa_type: CfaType,
-    target_color: usize,
-    background: &ColourMesh,
-) -> Vec<f32> {
-    let size = Size2us::new(data.width(), data.height());
-    color_sample_indices(size, cfa_type, target_color)
-        .into_iter()
-        .map(|index| data[index] - background.at(target_color, size.point_of(index)).sky)
-        .collect()
+/// A master's samples over its colour mesh, read colour by colour of its `cfa_type`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ColourResiduals<'a> {
+    pub(super) data: &'a Buffer2<f32>,
+    pub(super) cfa_type: CfaType,
+    pub(super) background: &'a ColourMesh,
+}
+
+impl ColourResiduals<'_> {
+    /// The residuals of `target_color`'s stratified sample.
+    pub(super) fn samples(self, target_color: usize) -> Vec<f32> {
+        let Self {
+            data,
+            cfa_type,
+            background,
+        } = self;
+        let size = Size2us::from(data);
+        color_sample_indices(size, cfa_type, target_color)
+            .into_iter()
+            .map(|index| data[index] - background.at(target_color, size.point_of(index)).sky)
+            .collect()
+    }
 }
 
 /// The sorted flat indices of `target_color`'s stratified sample of a `size` frame: every

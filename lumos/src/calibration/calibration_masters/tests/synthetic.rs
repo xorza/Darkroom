@@ -15,7 +15,7 @@ use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, SensorDe
 use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
@@ -79,13 +79,15 @@ fn calibrate_removes_vignette_dark_and_bias() {
 fn calibrate_recovers_star_field_through_a_noisy_light() {
     let size = Size2us::new(96, 96);
     let (bias, dark) = (0.05f32, 0.02f32);
-    let scene = Scene::random_field(
+    let scene = Scene::scatter(
         size,
-        12,
-        (3.0, 9.0),
+        Scatter {
+            count: 12,
+            flux: (3.0, 9.0),
+            placement: Placement::Uniform { margin: 14.0 },
+            seed: 7,
+        },
         BackgroundField::Uniform { level: 0.1 },
-        14.0,
-        7,
     );
     let camera = Camera {
         dark_current_e_per_s: 0.0,
@@ -141,13 +143,15 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
         ..Camera::realistic(4.0)
     };
     let expose = |level: f32, seed: u64| {
-        let scene = Scene::random_field(
+        let scene = Scene::scatter(
             size,
-            0,
-            (1.0, 1.0),
+            Scatter {
+                count: 0,
+                flux: (1.0, 1.0),
+                placement: Placement::Uniform { margin: 0.0 },
+                seed,
+            },
             BackgroundField::Uniform { level },
-            0.0,
-            seed,
         );
         let frame = render(&scene, &camera, &Observation::reference(seed));
         make_cfa(

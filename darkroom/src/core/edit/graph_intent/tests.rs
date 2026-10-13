@@ -628,33 +628,23 @@ fn commit_rejects_cycle_forming_bind() {
     );
 }
 
-/// Commit `intent` expecting it to be rejected as malformed, and check nothing
-/// leaked through it — the gate exists to keep a malformed payload out of the
-/// write half.
-#[track_caller]
-fn assert_invalid(doc: &mut Document, library: &Library, intent: GraphIntent, what: &str) {
+/// What leaked through a commit of `intent` expected to be refused as
+/// malformed — the gate exists to keep a malformed payload out of the write
+/// half — or `None` when the refusal held.
+fn refusal_leak(doc: &mut Document, library: &Library, intent: GraphIntent) -> Option<String> {
     let nodes = doc.graph.len();
-    match intent.commit(doc, library) {
-        Err(_) => {}
-        other => panic!("{what}: expected a MalformedIntent, got {other:?}"),
+    if let Ok(outcome) = intent.commit(doc, library) {
+        return Some(format!("expected a MalformedIntent, got {outcome:?}"));
     }
-    assert_eq!(
-        doc.graph.len(),
-        nodes,
-        "{what}: a refused intent must not mutate the graph"
-    );
+    if doc.graph.len() != nodes {
+        return Some(format!(
+            "a refused intent mutated the graph: {nodes} nodes became {}",
+            doc.graph.len()
+        ));
+    }
     doc.validate()
-        .unwrap_or_else(|e| panic!("{what}: document invalid after a refusal: {e}"));
-}
-
-/// Commit `intent` expecting it to yield no step — the silent drop widgets
-/// rely on, which is an `Ok` outcome and not an error.
-#[track_caller]
-fn assert_quiet(doc: &mut Document, library: &Library, intent: GraphIntent, what: &str) {
-    match intent.commit(doc, library) {
-        Ok(None) => {}
-        other => panic!("{what}: expected no step, got {other:?}"),
-    }
+        .err()
+        .map(|e| format!("document invalid after a refusal: {e}"))
 }
 
 #[test]
@@ -666,17 +656,23 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     let live = fixture.stub_at(Vec2::ZERO);
     let mut doc = fixture.doc;
 
-    assert_invalid(
-        &mut doc,
-        &fixture.library,
-        GraphIntent::add_node(Vec2::ZERO, live, DocFixture::stub_node()),
-        "AddNode over a live id",
+    assert_eq!(
+        refusal_leak(
+            &mut doc,
+            &fixture.library,
+            GraphIntent::add_node(Vec2::ZERO, live, DocFixture::stub_node())
+        ),
+        None,
+        "AddNode over a live id"
     );
-    assert_invalid(
-        &mut doc,
-        &fixture.library,
-        GraphIntent::add_node(Vec2::ZERO, NodeId::nil(), DocFixture::stub_node()),
-        "AddNode with a nil id",
+    assert_eq!(
+        refusal_leak(
+            &mut doc,
+            &fixture.library,
+            GraphIntent::add_node(Vec2::ZERO, NodeId::nil(), DocFixture::stub_node())
+        ),
+        None,
+        "AddNode with a nil id"
     );
 
     // Intents commit one at a time, so an id repeated *within* one batch is
@@ -689,11 +685,14 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
             .unwrap()
             .is_some()
     );
-    assert_invalid(
-        &mut doc,
-        &fixture.library,
-        GraphIntent::add_node(Vec2::ONE, repeated, DocFixture::stub_node()),
-        "a second AddNode repeating an id from the same batch",
+    assert_eq!(
+        refusal_leak(
+            &mut doc,
+            &fixture.library,
+            GraphIntent::add_node(Vec2::ONE, repeated, DocFixture::stub_node())
+        ),
+        None,
+        "a second AddNode repeating an id from the same batch"
     );
 }
 
@@ -772,7 +771,11 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
     ];
     for (what, intent) in cases {
-        assert_invalid(&mut doc, &fixture.library, intent, what);
+        assert_eq!(
+            refusal_leak(&mut doc, &fixture.library, intent),
+            None,
+            "{what}"
+        );
     }
 
     // The refusal names the field it held to, not just the check.
@@ -869,8 +872,12 @@ fn stale_references_still_refuse_quietly() {
             drag(&[member(gone, Vec2::ZERO)], Vec2::ZERO),
         ),
     ];
+    // The silent drop widgets rely on is an `Ok` outcome, not an error.
     for (what, intent) in cases {
-        assert_quiet(&mut doc, &fixture.library, intent, what);
+        match intent.commit(&mut doc, &fixture.library) {
+            Ok(None) => {}
+            other => panic!("{what}: expected no step, got {other:?}"),
+        }
     }
     assert!(doc.graph.bindings.is_empty(), "nothing was written");
     doc.validate().expect("document stays valid");

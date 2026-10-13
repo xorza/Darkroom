@@ -13,8 +13,8 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::detection_result::{
     DetectionDiagnostics, DetectionResult,
 };
-use crate::star_detection::star_detector::stages::detect::DetectResult;
-use crate::star_detection::star_detector::stages::filter::FilterOutcome;
+use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
+use crate::star_detection::star_detector::stages::filter::{FilterOutcome, FilterScratch};
 use crate::star_detection::star_detector::stages::fwhm;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 
@@ -56,8 +56,10 @@ impl StarDetector {
         let plane = frame.detection_plane(fwhm.value(), &self.config, resources);
         frame.drop_sources();
         let detect_result = DetectResult::from_plane(
-            &plane,
-            frame.no_data.as_deref(),
+            DetectionInput {
+                plane: &plane,
+                no_data: frame.no_data.as_deref(),
+            },
             &self.config.extraction,
             resources,
         );
@@ -85,8 +87,10 @@ impl StarDetector {
         } = FilterOutcome::from_stars(
             stars,
             &self.config.filter,
-            &mut resources.values,
-            &mut resources.duplicates,
+            FilterScratch {
+                values: &mut resources.values,
+                duplicates: &mut resources.duplicates,
+            },
         );
         diagnostics.quality_filter = quality_filter;
 

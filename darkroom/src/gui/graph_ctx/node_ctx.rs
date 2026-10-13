@@ -12,6 +12,7 @@ use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
+use crate::gui::widgets::hover::Hover;
 
 /// The `kind_label` a node reports when the library holds no func for it —
 /// see [`NodeCtx::missing`].
@@ -64,19 +65,19 @@ pub(crate) struct NodeCtx<'a> {
     /// What the last run said about this node, looked up once when the node
     /// resolves rather than at every status, memory or port read.
     run: Option<&'a NodeRunState>,
-    /// Whether the pointer is over this node's body — `false` until a caller
-    /// that holds a `Ui` sets it through [`Self::with_hover`].
+    /// Whether the pointer is over this node's body — [`Hover::Rest`] until a
+    /// caller that holds a `Ui` sets it through [`Self::with_hover`].
     ///
     /// Two things hang off it, the const editors' hover-revealed chips
     /// ([`Self::sve`]) and whether the port rows build tooltips at all
     /// ([`Self::tips`]). One field rather than a `&ConstValueEditorTheme` and a
-    /// `bool` threaded down beside each other, where no signature would say the
+    /// flag threaded down beside each other, where no signature would say the
     /// two are the same fact.
     ///
     /// Not resolved in [`Self::resolve`] because that takes no `Ui` — and
     /// must not, since it is what the whole frame reads nodes through. The
     /// record pass sets it once per node body instead.
-    hovered: bool,
+    hover: Hover,
 }
 
 impl<'a> NodeCtx<'a> {
@@ -102,7 +103,7 @@ impl<'a> NodeCtx<'a> {
             node,
             func,
             run: graph_ctx.run_state().node(node_id),
-            hovered: false,
+            hover: Hover::Rest,
         }
     }
 
@@ -110,17 +111,17 @@ impl<'a> NodeCtx<'a> {
     /// record pass for everything below the node body that asks it.
     ///
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
-    /// `gui::pane::graph_ui::node_ui`'s (`wid::hovered`), and this type sits below
+    /// `gui::pane::graph_ui::node_ui`'s (`wid::hover`), and this type sits below
     /// that module.
-    pub(crate) const fn with_hover(self, hovered: bool) -> Self {
-        Self { hovered, ..self }
+    pub(crate) const fn with_hover(self, hover: Hover) -> Self {
+        Self { hover, ..self }
     }
 
     /// Whether the port rows build their hover tooltips: their text is
     /// composed per port per frame, and no port can be showing one while the
     /// pointer is elsewhere, so only the node under it pays.
     pub(crate) const fn tips(self) -> bool {
-        self.hovered
+        matches!(self.hover, Hover::Over)
     }
 
     /// The const-editor styling this node's value cells paint with. Pointer
@@ -129,10 +130,9 @@ impl<'a> NodeCtx<'a> {
     /// the neighborhood, and geometry never changes.
     pub(crate) const fn sve(self) -> &'a ConstValueEditorTheme {
         let theme = self.graph_ctx.theme();
-        if self.hovered {
-            &theme.const_value_editor_revealed
-        } else {
-            &theme.const_value_editor
+        match self.hover {
+            Hover::Over => &theme.const_value_editor_revealed,
+            Hover::Rest => &theme.const_value_editor,
         }
     }
 

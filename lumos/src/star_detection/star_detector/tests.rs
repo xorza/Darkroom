@@ -1,12 +1,13 @@
 use glam::DVec2;
 
 use crate::internals::images::gray_image;
+use crate::internals::synthetic::scene::Placement;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
 use crate::star_detection::star_detector::detection_result::*;
 use crate::star_detection::star_detector::*;
-use crate::star_detection::tests::{Placement, Scenario};
+use crate::star_detection::tests::Scenario;
 
 /// A Gaussian star of FWHM 2 keeps all its flux on a demosaiced frame: the
 /// detection plane takes the 3×3 median there, and measurement reads the plane no filter
@@ -47,7 +48,7 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
         .map(|&value| 0.1 + value + 0.001 * rng.next_gaussian_f32())
         .collect();
     let frame = |demosaic| {
-        let mut image = rgb_image(size, channel.clone(), channel.clone(), channel.clone());
+        let mut image = rgb_image(size, [channel.clone(), channel.clone(), channel.clone()]);
         image.metadata.provenance = Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,

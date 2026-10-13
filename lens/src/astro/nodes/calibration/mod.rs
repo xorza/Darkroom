@@ -10,7 +10,8 @@ use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
-    IngestConfig, LoadContext, MasterBuildError, MasterCache, MasterInputs, MasterRole,
+    IngestConfig, LoadContext, MasterBuild, MasterBuildError, MasterCache, MasterInputs,
+    MasterRole,
 };
 use lumos::{FitsWriteError, ProgressCallback, ProgressMonitor};
 use scenarium::Invocation;
@@ -74,18 +75,20 @@ struct MastersRequest {
 impl MastersRequest {
     fn build(&self, cancel: &CancelToken) -> Result<CalibrationMasters, BuildMastersError> {
         CalibrationMasters::build(
-            CalibrationSet {
-                dark: self.frames.dark.as_slice(),
-                flat: self.frames.flat.as_slice(),
-                bias: self.frames.bias.as_slice(),
-                flat_dark: self.frames.flat_dark.as_slice(),
+            MasterBuild {
+                frames: CalibrationSet {
+                    dark: self.frames.dark.as_slice(),
+                    flat: self.frames.flat.as_slice(),
+                    bias: self.frames.bias.as_slice(),
+                    flat_dark: self.frames.flat_dark.as_slice(),
+                },
+                sigma_threshold: self.sigma,
+                cache: &SourceDirectoryCache {
+                    caching: self.caching,
+                    cancel,
+                },
             },
-            self.sigma,
             &IngestConfig::default(),
-            &SourceDirectoryCache {
-                caching: self.caching,
-                cancel,
-            },
             &ProgressMonitor::new(ProgressCallback::default(), cancel.clone()),
         )
     }

@@ -35,7 +35,7 @@ fn every_isolated_star_is_one_candidate() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = Size2us::from(&pixels);
     let background = background_estimate(&pixels);
     let candidates = detect_stars_test(
         &background.residual_of(&pixels),
@@ -45,7 +45,7 @@ fn every_isolated_star_is_one_candidate() {
     let found = peaks(&candidates);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
 
-    let mut overlay = gray_to_rgb(pixels.pixels(), size, ToneMap::AutoRange);
+    let mut overlay = gray_to_rgb(&pixels, ToneMap::AutoRange);
     for star in &stars {
         draw_circle(
             &mut overlay,
@@ -140,7 +140,7 @@ fn the_threshold_decides_per_star() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = Size2us::from(&pixels);
     let background = background_estimate(&pixels);
     let residual = background.residual_of(&pixels);
     let sky = background.sky_noise();
@@ -185,7 +185,7 @@ fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = Size2us::from(&pixels);
     let background = background_estimate(&pixels);
     let residual = background.residual_of(&pixels);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();

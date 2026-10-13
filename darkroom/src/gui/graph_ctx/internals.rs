@@ -11,7 +11,7 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use crate::core::document::internals::{self, DocFixture};
 use crate::core::document::open_document::OpenDocument;
-use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
+use crate::gui::app::app_ctx::AppCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::state::run_state::RunState;
@@ -74,7 +74,7 @@ impl GraphCtxFixture {
             output_types,
         } = self;
         output_types.update(&open.document.graph, library);
-        let app = AppCtx::new(theme, library, run_state, StatusInputs::default());
+        let app = AppCtx::new(theme, library, run_state);
         GraphCtx::new(WindowCtx::new(app, open), output_types)
     }
 }

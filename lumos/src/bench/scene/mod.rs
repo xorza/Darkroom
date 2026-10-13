@@ -10,11 +10,11 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
-use crate::internals::synthetic::artifacts::add_cosmic_rays;
-use crate::internals::synthetic::backgrounds::Vignette;
+use crate::internals::synthetic::artifacts::CosmicRays;
+use crate::internals::synthetic::backgrounds::{Gradient, Vignette};
 use crate::internals::synthetic::camera::{Camera, SensorDefects};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
@@ -35,11 +35,11 @@ const FILTER_GAIN: [f32; 3] = [1.0 / 2.13, 1.0, 1.0 / 1.71];
 /// The sky of every field, `level` times the first exposure's: a gradient, as light pollution or
 /// the moon lays one.
 const fn sky(level: f32) -> BackgroundField {
-    BackgroundField::Gradient {
+    BackgroundField::Gradient(Gradient {
         start: 0.08 * level,
         end: 0.12 * level,
         angle: 0.6,
-    }
+    })
 }
 
 /// The range of the stars' total fluxes, drawn log-uniform. At the FWHM below, 0.5 peaks at 0.036,
@@ -123,12 +123,20 @@ impl Field {
     /// The true sky of the field over a frame of `size`.
     pub(crate) fn scene(self, size: Size2us) -> Scene {
         let (stars, seed) = (at_density(self.stars(), size), self.seed());
-        match self {
-            Self::Sparse | Self::Typical => {
-                Scene::random_field(size, stars, FLUX, sky(1.0), 16.0, seed)
-            }
-            Self::Dense => Scene::cluster(size, stars, FLUX, sky(1.0), seed),
-        }
+        let placement = match self {
+            Self::Sparse | Self::Typical => Placement::Uniform { margin: 16.0 },
+            Self::Dense => Placement::Cluster,
+        };
+        Scene::scatter(
+            size,
+            Scatter {
+                count: stars,
+                flux: FLUX,
+                placement,
+                seed,
+            },
+            sky(1.0),
+        )
     }
 
     /// The field calibrated, on a mono sensor of `size`.
@@ -278,15 +286,13 @@ impl Field {
             Shot::Field => 0,
             Shot::Sequence { index, .. } => index,
         };
-        let pixels = image.data.pixels_mut();
-        add_cosmic_rays(
-            pixels,
-            size.width,
-            at_density(COSMIC_RAYS, size),
-            (0.3, 1.0),
-            self.seed() ^ 0xC05 ^ ((index as u64) << 16),
-        );
-        for pixel in pixels {
+        CosmicRays {
+            count: at_density(COSMIC_RAYS, size),
+            amplitude: 0.3..1.0,
+            seed: self.seed() ^ 0xC05 ^ ((index as u64) << 16),
+        }
+        .add_to(&mut image.data);
+        for pixel in image.data.pixels_mut() {
             *pixel = pixel.min(1.0);
         }
         image

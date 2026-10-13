@@ -106,14 +106,9 @@ async fn chain_peak(relay_mode: CacheMode) -> usize {
     }
     g.add("sink", |n| n.sink().input(tracked()));
     for stage in 1..4 {
-        g.wire(
-            &format!("relay{}", stage - 1),
-            0,
-            &format!("relay{stage}"),
-            0,
-        );
+        g.wire(&format!("relay{}", stage - 1), &format!("relay{stage}"));
     }
-    g.wire("relay3", 0, "sink", 0);
+    g.wire("relay3", "sink");
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
@@ -167,7 +162,7 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
                 }
             ))
         });
-        g.wire("relay", 0, &format!("probe{probe}"), 0);
+        g.wire("relay", &format!("probe{probe}"));
     }
 
     // The engine stays bound: dropping it drops its cache, which would

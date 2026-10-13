@@ -30,23 +30,12 @@ pub(super) fn square_source_4() -> Vec<DVec2> {
 /// few dozen points with coordinates up to 1000 px rounds to ~1e-13 px; 1e-9 holds it.
 pub(super) const EXACT_PX: f64 = 1e-9;
 
-/// Assert that point `a` is within `tol` of point `b` (per-component).
-pub(super) fn assert_dvec2_near(a: DVec2, b: DVec2, tol: f64, msg: &str) {
+/// Assert that `got` lies within `tol` of `expected` on each axis.
+#[track_caller]
+pub(super) fn assert_near(got: DVec2, expected: DVec2, tol: f64) {
     assert!(
-        (a.x - b.x).abs() < tol,
-        "{}: x mismatch: got {} expected {} (diff {})",
-        msg,
-        a.x,
-        b.x,
-        (a.x - b.x).abs()
-    );
-    assert!(
-        (a.y - b.y).abs() < tol,
-        "{}: y mismatch: got {} expected {} (diff {})",
-        msg,
-        a.y,
-        b.y,
-        (a.y - b.y).abs()
+        got.abs_diff_eq(expected, tol),
+        "{got} vs {expected}, beyond {tol}"
     );
 }
 
@@ -62,16 +51,14 @@ pub(super) fn fit_default(source: &[DVec2], target: &[DVec2]) -> ThinPlateSpline
     .unwrap()
 }
 
-/// Verify that all control points are interpolated exactly (within tol).
-fn assert_control_points_exact(
-    tps: &ThinPlateSpline,
-    source: &[DVec2],
-    target: &[DVec2],
-    tol: f64,
-) {
+/// Verify that all control points are interpolated exactly (within [`EXACT_PX`]).
+fn assert_control_points_exact(tps: &ThinPlateSpline, source: &[DVec2], target: &[DVec2]) {
     for (i, (&src, &tgt)) in source.iter().zip(target.iter()).enumerate() {
         let t = tps.transform(src);
-        assert_dvec2_near(t, tgt, tol, &format!("Control point {i}"));
+        assert!(
+            t.abs_diff_eq(tgt, EXACT_PX),
+            "control point {i}: {t} vs {tgt}"
+        );
     }
 }
 
@@ -140,22 +127,12 @@ fn compute_normalization_square() {
 
     // The box corner normalizes to the unit corner: (100 - 50) / 50 = 1.
     let corner = DVec2::new(100.0, 100.0);
-    assert_dvec2_near(norm.normalize(corner), DVec2::ONE, 1e-12, "normalized");
-    assert_dvec2_near(norm.denormalize(DVec2::ONE), corner, 1e-12, "denormalized");
+    assert_near(norm.normalize(corner), DVec2::ONE, 1e-12);
+    assert_near(norm.denormalize(DVec2::ONE), corner, 1e-12);
     // A displacement carries no center, only the scale.
     let delta = DVec2::new(25.0, -50.0);
-    assert_dvec2_near(
-        norm.normalize_delta(delta),
-        DVec2::new(0.5, -1.0),
-        1e-12,
-        "normalized delta",
-    );
-    assert_dvec2_near(
-        norm.denormalize_delta(DVec2::new(0.5, -1.0)),
-        delta,
-        1e-12,
-        "denormalized delta",
-    );
+    assert_near(norm.normalize_delta(delta), DVec2::new(0.5, -1.0), 1e-12);
+    assert_near(norm.denormalize_delta(DVec2::new(0.5, -1.0)), delta, 1e-12);
 }
 
 /// Test normalization with a rectangular bounding box (wider than tall).
@@ -177,11 +154,10 @@ fn compute_normalization_rectangle() {
     );
 
     // The short axis stays inside [-1, 1]: (20 - 50) / 100 = -0.3.
-    assert_dvec2_near(
+    assert_near(
         norm.normalize(DVec2::new(10.0, 20.0)),
         DVec2::new(-1.0, -0.3),
         1e-12,
-        "normalized",
     );
 }
 
@@ -197,7 +173,7 @@ fn compute_normalization_coincident() {
     // All points identical, range = (0, 0), scale falls back to 1.0
     assert_eq!(norm, PointNormalization::new(DVec2::new(42.0, 17.0), 1.0));
     // With scale 1 the mapping is a pure translation, so the points land on the origin.
-    assert_dvec2_near(norm.normalize(points[0]), DVec2::ZERO, 1e-12, "normalized");
+    assert_near(norm.normalize(points[0]), DVec2::ZERO, 1e-12);
 }
 
 /// Empty input returns None.
@@ -311,7 +287,7 @@ fn tps_exact_interpolation() {
     ];
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 }
 
 /// Three points (minimum) should be interpolated exactly with a simple translation.
@@ -326,7 +302,7 @@ fn tps_three_points_exact() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(3.0, 7.0)).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
     assert_eq!(tps.num_control_points(), 3);
 }
 
@@ -337,11 +313,11 @@ fn tps_identity() {
     let tps = fit_default(&points, &points);
 
     // Control points
-    assert_control_points_exact(&tps, &points, &points, EXACT_PX);
+    assert_control_points_exact(&tps, &points, &points);
 
     // Interior point: (25, 75) -> (25, 75)
     let t = tps.transform(DVec2::new(25.0, 75.0));
-    assert_dvec2_near(t, DVec2::new(25.0, 75.0), EXACT_PX, "interior identity");
+    assert_near(t, DVec2::new(25.0, 75.0), EXACT_PX);
 
     // Bending energy should be zero for identity
     assert!(
@@ -360,11 +336,11 @@ fn tps_translation() {
     let tps = fit_default(&source, &target);
 
     // Control points
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Interior: (50,50) -> (60,55). Translation is affine, so TPS reproduces exactly.
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, DVec2::new(60.0, 55.0), EXACT_PX, "interior translation");
+    assert_near(t, DVec2::new(60.0, 55.0), EXACT_PX);
 
     // Bending energy should be ~0 for affine transforms
     assert!(
@@ -383,11 +359,11 @@ fn tps_scaling() {
     let tps = fit_default(&source, &target);
 
     // Control points
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Interior: (50,50)*1.1 = (55,55)
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, DVec2::new(55.0, 55.0), EXACT_PX, "interior scaling");
+    assert_near(t, DVec2::new(55.0, 55.0), EXACT_PX);
 
     // Bending energy should be ~0 for affine
     assert!(
@@ -411,7 +387,7 @@ fn tps_rotation() {
         .collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Interior: rotate (50, 50) by 10 degrees
     // cos(10deg) = 0.98481, sin(10deg) = 0.17365
@@ -419,7 +395,7 @@ fn tps_rotation() {
     // y' = 50*0.17365 + 50*0.98481 = 50*(0.17365 + 0.98481) = 50*1.15846 = 57.923
     let expected = DVec2::new(50.0 * cos_a - 50.0 * sin_a, 50.0 * sin_a + 50.0 * cos_a);
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, expected, EXACT_PX, "interior rotation");
+    assert_near(t, expected, EXACT_PX);
 }
 
 /// Barrel distortion on a dense grid: control points exact, midpoints close.
@@ -460,7 +436,7 @@ fn tps_barrel_distortion() {
     assert!((expected.x - 398.0).abs() < 1e-6, "hand-check x");
     assert!((expected.y - 602.0).abs() < 1e-6, "hand-check y");
     let t = tps.transform(test_s);
-    assert_dvec2_near(t, expected, EXACT_PX, "barrel control point");
+    assert_near(t, expected, EXACT_PX);
 
     // Interior point (450, 550) -- between grid nodes at 100px spacing.
     // d = (-50, 50), r^2 = 5000, factor = 1.005
@@ -474,7 +450,7 @@ fn tps_barrel_distortion() {
     // Between control points the spline interpolates a cubic it cannot hold: it measures 2.5e-3 px
     // off at this cell centre, and 5e-3 holds that.
     let t_mid = tps.transform(test_mid);
-    assert_dvec2_near(t_mid, expected_mid, 5e-3, "barrel midpoint");
+    assert_near(t_mid, expected_mid, 5e-3);
 }
 
 /// Large deformation: control points are still interpolated exactly.
@@ -490,7 +466,7 @@ fn tps_large_deformation() {
     ];
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Non-affine deformation must produce nonzero bending energy.
     // Compare with identity (zero energy) to ensure it's actually different.
@@ -662,17 +638,12 @@ fn tps_large_coordinates() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Interior: translation is affine, so midpoint should be exact
     // (10050, 10050) + (5, 3) = (10055, 10053)
     let t = tps.transform(DVec2::new(offset + 50.0, offset + 50.0));
-    assert_dvec2_near(
-        t,
-        DVec2::new(offset + 55.0, offset + 53.0),
-        1e-3,
-        "large offset interior",
-    );
+    assert_near(t, DVec2::new(offset + 55.0, offset + 53.0), 1e-3);
 }
 
 /// Extreme coordinate offset (100k): still works thanks to normalization.
@@ -713,7 +684,7 @@ fn tps_extreme_coordinates() {
     assert_eq!(target[0], expected_0, "hand-check target[0]");
     let t0 = tps.transform(source[0]);
     // Coordinates of 1e5 round a hundred times coarser than the 1000 px the bound is set for.
-    assert_dvec2_near(t0, expected_0, 100.0 * EXACT_PX, "extreme coord point 0");
+    assert_near(t0, expected_0, 100.0 * EXACT_PX);
 }
 
 /// Clustered points: two groups far apart, pure translation.
@@ -733,11 +704,11 @@ fn tps_clustered_points() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
+    assert_control_points_exact(&tps, &source, &target);
 
     // Between clusters: pure translation is affine, so (500,500) -> (505,503).
     let t = tps.transform(DVec2::new(500.0, 500.0));
-    assert_dvec2_near(t, DVec2::new(505.0, 503.0), EXACT_PX, "between clusters");
+    assert_near(t, DVec2::new(505.0, 503.0), EXACT_PX);
 }
 
 /// Batch transform must produce identical results to single transform, and
@@ -779,7 +750,10 @@ fn tps_transform_points_consistency_and_correctness() {
         assert_eq!(trans, single, "batch vs single {i}");
 
         // Absolute correctness
-        assert_dvec2_near(trans, exp, EXACT_PX, &format!("absolute value {i}"));
+        assert!(
+            trans.abs_diff_eq(exp, EXACT_PX),
+            "absolute value {i}: {trans} vs {exp}"
+        );
     }
 }
 
@@ -892,9 +866,9 @@ fn tps_different_translations_produce_different_results() {
     let result_b = tps_b.transform(test_pt);
 
     // A translates in x: (50,50) -> (60,50)
-    assert_dvec2_near(result_a, DVec2::new(60.0, 50.0), EXACT_PX, "translation A");
+    assert_near(result_a, DVec2::new(60.0, 50.0), EXACT_PX);
     // B translates in y: (50,50) -> (50,60)
-    assert_dvec2_near(result_b, DVec2::new(50.0, 60.0), EXACT_PX, "translation B");
+    assert_near(result_b, DVec2::new(50.0, 60.0), EXACT_PX);
 
     // Results must differ
     assert!(
@@ -926,7 +900,7 @@ fn tps_extra_control_point_changes_behavior() {
     let r5 = tps_5.transform(test_pt);
 
     // 4-point model is pure translation: (45,55) -> (50,58)
-    assert_dvec2_near(r4, DVec2::new(50.0, 58.0), EXACT_PX, "4-point affine");
+    assert_near(r4, DVec2::new(50.0, 58.0), EXACT_PX);
 
     // 5-point model pushes toward the extra control point's displacement
     // So x should be > 50 and the results should differ

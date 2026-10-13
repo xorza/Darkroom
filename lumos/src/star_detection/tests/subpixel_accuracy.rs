@@ -10,10 +10,9 @@ use glam::DVec2;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{match_catalogs, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
-use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::tests::{
     MATCH_RADIUS, detected_positions, synthetic_config, truth_positions,
 };
@@ -36,31 +35,17 @@ fn median_shift(reference: &[DVec2], shifted: &[DVec2]) -> DVec2 {
     DVec2::new(dx[dx.len() / 2], dy[dy.len() / 2])
 }
 
-/// Render `scene` shifted by `shift` (independent noise via `seed`) and return its detections.
-fn shifted_detections(
-    scene: &Scene,
-    camera: &Camera,
-    shift: DVec2,
-    seed: u64,
-    config: &StarDetectionConfig,
-) -> Vec<DVec2> {
-    let obs = Observation {
-        transform: Transform::translation(shift),
-        seed,
-        ..Observation::reference(seed)
-    };
-    detected_positions(&render(scene, camera, &obs), config)
-}
-
 #[test]
 fn subpixel_shift_recovered_across_offsets() {
-    let scene = Scene::random_field(
+    let scene = Scene::scatter(
         Size2us::new(256, 256),
-        24,
-        (8.0, 14.0),
+        Scatter {
+            count: 24,
+            flux: (8.0, 14.0),
+            placement: Placement::Uniform { margin: 16.0 },
+            seed: 42,
+        },
         BackgroundField::Uniform { level: 0.1 },
-        16.0,
-        42,
     );
     let camera = Camera::realistic(4.0);
     let config = synthetic_config();
@@ -80,7 +65,13 @@ fn subpixel_shift_recovered_across_offsets() {
         DVec2::new(-0.2, 0.3),
     ];
     for (i, shift) in shifts.into_iter().enumerate() {
-        let shifted_det = shifted_detections(&scene, &camera, shift, 100 + i as u64, &config);
+        // Each shift renders with its own noise.
+        let seed = 100 + i as u64;
+        let shifted = Observation {
+            transform: Transform::translation(shift),
+            ..Observation::reference(seed)
+        };
+        let shifted_det = detected_positions(&render(&scene, &camera, &shifted), &config);
         let recovered = median_shift(&ref_det, &shifted_det);
         assert!(
             (recovered - shift).length() < 0.1,
