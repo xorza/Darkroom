@@ -2,9 +2,6 @@
 
 use std::fmt::Debug;
 
-use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
-use crate::combine::stack_config::StackConfig;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::stored_layout::StoredLayout;
@@ -12,7 +9,6 @@ use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::footprint::Footprint;
-use crate::memory::stage::{Stage, Units};
 
 /// What one frame is worth to a memory estimate, before the rest of the set is read: its geometry,
 /// and what its decoder holds while it makes it.
@@ -57,52 +53,6 @@ impl FramePeek {
             workers,
         ))
     }
-
-    /// The stages of a run that decodes `frame_count` such frames straight into a combine under
-    /// `config`, on `workers`: each frame decoded and measured; the normalization; the combine,
-    /// whose rows read every frame as it decoded. A frame may carry a mask its decode alone
-    /// reveals, so the normalization is charged as over a set that shares only some pixels, which
-    /// holds more than one every frame covers.
-    pub(crate) fn stages(
-        self,
-        frame_count: usize,
-        config: &StackConfig,
-        workers: usize,
-    ) -> [Stage; 3] {
-        let dimensions = self.dimensions;
-        let decoded = self.footprint(workers);
-        let kept = decoded.kept;
-        [
-            Stage {
-                kept,
-                held: 0,
-                in_flight: decoded.transient(),
-                units: Units::Frames,
-            },
-            Stage {
-                kept,
-                held: PlannedNormalization {
-                    frame_count,
-                    dimensions,
-                    slots: Slots::new(self.mosaic, dimensions.channels()),
-                    normalization: config.normalization,
-                    coverage: SetCoverage::Common,
-                    threads: workers,
-                }
-                .heap_bytes(),
-                in_flight: 0,
-                units: Units::Whole,
-            },
-            Stage {
-                kept,
-                held: config.quality.heap_bytes(dimensions),
-                in_flight: frame_count
-                    * StoredLayout::decoded(dimensions).pixel_bytes()
-                    * dimensions.width(),
-                units: Units::Rows(dimensions.height()),
-            },
-        ]
-    }
 }
 
 impl From<CfaFrameInfo> for FramePeek {
@@ -120,9 +70,7 @@ impl From<CfaFrameInfo> for FramePeek {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combine::stack_config::Normalization;
     use crate::image::cfa::cfa_pattern::CfaPattern;
-    use crate::stack_product::quality_planes::QualityPlanes;
 
     /// A 100 × 100 one-channel frame resides as 40 000 B of samples and 10 000 B of flags.
     ///
@@ -133,11 +81,6 @@ mod tests {
     /// bytes and a region of 28 bytes a pixel, 610 000, the tile's 136 bytes of bookkeeping, and a
     /// row of 100 pixels, 400 B, for each worker to smooth through: a peak of 660 536 B on one
     /// worker, and 2800 B more on eight.
-    ///
-    /// Three such mosaics stacked to the image alone, with no normalization: the decode keeps
-    /// 50 000 B a frame and holds 49 000 more in work; the normalization holds nothing; the combine
-    /// holds the image and its flag byte, 5 B a pixel, 50 000 B, and a row reads three frames of
-    /// 5 B a pixel over 100 pixels, 1500 B.
     #[test]
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
         let rggb = Some(CfaType::Bayer(CfaPattern::Rggb));
@@ -159,35 +102,5 @@ mod tests {
                 );
             }
         }
-
-        let config = StackConfig {
-            normalization: Normalization::None,
-            quality: QualityPlanes::IMAGE_ONLY,
-            ..StackConfig::light()
-        };
-        let kept = 50_000;
-        assert_eq!(
-            peek(rggb, 0).stages(3, &config, 1),
-            [
-                Stage {
-                    kept,
-                    held: 0,
-                    in_flight: 49_000,
-                    units: Units::Frames,
-                },
-                Stage {
-                    kept,
-                    held: 0,
-                    in_flight: 0,
-                    units: Units::Whole,
-                },
-                Stage {
-                    kept,
-                    held: 50_000,
-                    in_flight: 1500,
-                    units: Units::Rows(100),
-                },
-            ]
-        );
     }
 }

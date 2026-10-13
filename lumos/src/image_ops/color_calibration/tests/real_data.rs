@@ -2,7 +2,7 @@
 //! background in the linear domain, stretch, and SCNR — writing viewable JPEGs at each step so the
 //! green cast can be seen disappearing. Gated behind the `real-data` feature.
 
-use crate::image_ops::rgb::Rgb;
+use crate::image::rgb::Rgb;
 use crate::internals::visual;
 
 use crate::image_ops::color_calibration::neutralize_background;

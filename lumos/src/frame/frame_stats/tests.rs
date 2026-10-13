@@ -12,10 +12,10 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::ccd_noise::CcdNoise;
 
 const SEED: u64 = 7;
 

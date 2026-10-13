@@ -8,6 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
 
+/// Samples per rayon work item. Parallelizing per sample drowns a cheap per-pixel op in rayon's
+/// recursive split/join overhead (it dominated SCNR); a coarse block amortizes that while staying
+/// load-balanced and letting the inner loop auto-vectorize.
+pub(crate) const SAMPLES_PER_BLOCK: usize = 8192;
+
 /// The `f32` samples of a 2 MiB transparent huge page.
 const HUGE_PAGE_SAMPLES: usize = 2 * 1024 * 1024 / size_of::<f32>();
 

@@ -3,8 +3,8 @@
 use imaginarium::Buffer2;
 
 use crate::image::linear_image::LinearImage;
+use crate::image::quality_map::QualityMap;
 use crate::math::size2us::Size2us;
-use crate::stack_product::quality_map::QualityMap;
 
 /// The share of frames that reached each pixel, in `[0, 1]`.
 ///
@@ -55,8 +55,8 @@ pub(crate) mod internals {
 
     use imaginarium::Buffer2;
 
+    use crate::image::quality_map::QualityMap;
     use crate::stack_product::coverage::Coverage;
-    use crate::stack_product::quality_map::QualityMap;
 
     impl Coverage {
         /// The measured planes, or `None` when coverage is uniform and no plane exists.

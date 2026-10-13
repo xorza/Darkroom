@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
+use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
-use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::MlError;
 use crate::image_ops::ml::backend::TiledOnnxConfig;
 use rayon::prelude::*;

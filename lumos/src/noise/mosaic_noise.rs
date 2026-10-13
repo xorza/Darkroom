@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::noise::difference_noise::DifferenceNoise;
-use crate::math::noise::mosaic_sampling::MosaicSampling;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
+use crate::noise::difference_noise::DifferenceNoise;
+use crate::noise::mosaic_sampling::MosaicSampling;
 use imaginarium::Buffer2;
 
 /// The white noise of each colour of the mosaic a frame was demosaiced from, measured before the
@@ -118,11 +118,11 @@ mod tests {
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
-    use crate::math::noise::difference_noise::DifferenceNoise;
-    use crate::math::noise::mosaic_noise::{MosaicNoise, colour_medians};
-    use crate::math::noise::mosaic_sampling::MosaicSampling;
     use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
+    use crate::noise::difference_noise::DifferenceNoise;
+    use crate::noise::mosaic_noise::{MosaicNoise, colour_medians};
+    use crate::noise::mosaic_sampling::MosaicSampling;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
     /// row, three of each of its two colours: 6 red, 12 green and 6 blue, 24 pairs at 4 bytes and a

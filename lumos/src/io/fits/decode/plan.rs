@@ -155,7 +155,7 @@ impl<'a> FitsHduDescription<'a> {
     /// from Siril: with `DATAMAX` absent it scans the data instead (three sampled pixels on the
     /// partial-read path, which is why its full and partial reads can disagree about the same
     /// file). A divisor read off each frame's own extrema differs frame to frame, which is exactly
-    /// what [`crate::combine`] rejects a frame set for. The scan still decides one thing: a frame
+    /// what `combine` rejects a frame set for. The scan still decides one thing: a frame
     /// taken as normalized whose samples reach past Siril's threshold is refused rather than loaded
     /// as it stands ([`SampleScale::verify_normalized`]).
     fn sample_scale(

@@ -39,7 +39,7 @@ impl GainBins {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::noise::gain_bins::GainBins;
+    use crate::noise::gain_bins::GainBins;
 
     /// Sixteen gains 1 to 16 cut into eight bins of two: the bounds are the gains at ranks 2, 4,
     /// …, 14, so 3, 5, …, 15, and a gain falls in the bin whose bound it has not reached.

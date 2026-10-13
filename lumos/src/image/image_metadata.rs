@@ -13,8 +13,8 @@ use crate::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrd
 use crate::image::quality_flags::SATURATION_FRACTION;
 use crate::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::fits::sample_type_record::SampleTypeRecord;
-use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::size2us::Size2us;
+use crate::noise::mosaic_noise::MosaicNoise;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

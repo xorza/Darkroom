@@ -5,7 +5,7 @@ use std::mem;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image_ops::SAMPLES_PER_BLOCK;
+use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::math::fwhm;
 use crate::math::pixel_quadrature::PixelQuadrature;
 use crate::star_detection::convolution;

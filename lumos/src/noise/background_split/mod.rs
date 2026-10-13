@@ -1,6 +1,6 @@
 //! [`BackgroundSplit`]: a frame's background noise split by how a flat amplified it.
 
-use crate::math::noise::binned_samples::GainBin;
+use crate::noise::binned_samples::GainBin;
 
 /// The background variance of a flat-divided frame: `σ²·(ρ·g² + (1 − ρ)·g)` at a pixel the flat
 /// multiplied by `g = 1/f`.

@@ -8,7 +8,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::image::linear_image::LinearImage;
 use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::noise::mrs_noise::MrsNoise;
+use crate::noise::mrs_noise::MrsNoise;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;

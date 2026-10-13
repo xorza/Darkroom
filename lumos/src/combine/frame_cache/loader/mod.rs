@@ -34,7 +34,7 @@ pub(super) struct LoadedCache {
     pub(super) core: CacheCore,
 }
 
-/// The stage of [`FramePeek::stages`] that decodes the frames.
+/// The stage of [`StackConfig::stages`] that decodes the frames.
 const DECODE: usize = 0;
 
 /// Load every frame into the tier its set fits, each through its step.
@@ -72,7 +72,7 @@ pub(super) fn load_tiered<I: StackableImage>(
     let budget = run.budget;
     let plan = RunPlan::of(
         paths.len(),
-        &peek.stages(paths.len(), config, budget.workers()),
+        &config.stages(peek, paths.len(), budget.workers()),
         budget,
     );
     tracing::info!(

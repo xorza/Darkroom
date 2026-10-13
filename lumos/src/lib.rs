@@ -53,6 +53,7 @@ mod ingest;
 mod io;
 mod math;
 mod memory;
+mod noise;
 mod pipeline;
 mod platform;
 mod progress;
@@ -106,9 +107,9 @@ pub use io::load_context::LoadContext;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
-pub use math::noise::mosaic_noise::MosaicNoise;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
+pub use noise::mosaic_noise::MosaicNoise;
 
 pub use calibration::calibration_component::CalibrationComponent;
 pub use calibration::calibration_masters::{
@@ -175,6 +176,7 @@ pub use frame::capture_condition::CaptureCondition;
 pub use frame::frame_plane::FramePlane;
 pub use frame_store::error::{ConditionMismatch, FrameStoreError};
 pub use image::flag_counts::FlagCounts;
+pub use image::quality_map::QualityMap;
 pub use ingest::error::AdmissionError;
 pub use ingest::ingest_config::IngestConfig;
 pub use progress::progress_callback::ProgressCallback;
@@ -182,7 +184,6 @@ pub use progress::progress_monitor::ProgressMonitor;
 pub use progress::stacking_progress::{StackingProgress, StackingStage};
 pub use stack_product::StackProduct;
 pub use stack_product::coverage::Coverage;
-pub use stack_product::quality_map::QualityMap;
 pub use stack_product::quality_planes::QualityPlanes;
 pub use stack_product::run_report::RunReport;
 

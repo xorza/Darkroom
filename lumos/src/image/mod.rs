@@ -15,4 +15,6 @@ pub(crate) mod masked_plane;
 pub(crate) mod pixel_flags;
 pub(crate) mod preview_image;
 pub(crate) mod quality_flags;
+pub(crate) mod quality_map;
+pub(crate) mod rgb;
 pub(crate) mod sample_domain;

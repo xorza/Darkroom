@@ -13,9 +13,9 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::vec2us::Vec2us;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::ccd_noise::CcdNoise;
 
 fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {
     FrameStats {

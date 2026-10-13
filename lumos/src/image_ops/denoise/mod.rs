@@ -19,16 +19,16 @@ use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
-use crate::image_ops::SAMPLES_PER_BLOCK;
+use crate::image::quality_map::QualityMap;
 use crate::image_ops::error::OpError;
-use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;
-use crate::stack_product::quality_map::QualityMap;
+use crate::noise::mrs_noise::MrsNoise;
 use std::mem;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.

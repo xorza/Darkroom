@@ -32,13 +32,13 @@ use crate::image::cfa::demosaic;
 use crate::io::fits::decode as fits_decode;
 use crate::io::raw;
 use crate::math::{
-    dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, noise, pixel_quadrature,
-    statistics, sum, wavelet,
+    dmat3, floor_i32, lanczos, linear_system, lm_controller, lstsq, pixel_quadrature, statistics,
+    sum, wavelet,
 };
 use crate::registration::resample;
 use crate::star_detection::star_detector;
 use crate::{
-    background_mesh, bit_buffer2, combine, drizzle, image_ops, pipeline, registration,
+    background_mesh, bit_buffer2, combine, drizzle, image_ops, noise, pipeline, registration,
     star_detection,
 };
 

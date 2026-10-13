@@ -7,7 +7,7 @@ use std::ops::Range;
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
-use crate::math::noise::gain_bins::{GAIN_BINS, GainBins};
+use crate::noise::gain_bins::{GAIN_BINS, GainBins};
 
 /// The fewest samples a bin is measured over: a bin with fewer merges with its neighbours in gain.
 /// A variance over 256 samples carries a standard error of √(2/256) ≈ 9%.
@@ -227,8 +227,8 @@ impl<S: Samples> BinnedSamples<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::noise::binned_samples::BinnedSamples;
-    use crate::math::noise::gain_bins::GainBins;
+    use crate::noise::binned_samples::BinnedSamples;
+    use crate::noise::gain_bins::GainBins;
 
     /// Bins under 256 samples merge with their neighbours up in gain: over bounds 3, 5, …, 15, 300
     /// samples at gain 1 fill bin 0 alone; 100 each at gains 3, 5 and 7 fill bins 1 to 3 only together,

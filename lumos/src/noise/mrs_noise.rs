@@ -7,13 +7,13 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::binned_samples::{BinnedSamples, Samples};
-use crate::math::noise::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::binned_samples::{BinnedSamples, Samples};
+use crate::noise::gain_bins::GainBins;
 
 /// The noise standard deviation of an image by Starck & Murtagh's multiresolution-support method
 /// (PASP 110, 1998), as PixInsight's `NoiseMRS` computes it.
@@ -653,7 +653,7 @@ impl Sums {
 mod tests {
     use statrs::distribution::{ContinuousCDF, Normal};
 
-    use crate::math::noise::mrs_noise::{FIRST_LAYER_RESPONSE, K, K_SIGMA_RESPONSE};
+    use crate::noise::mrs_noise::{FIRST_LAYER_RESPONSE, K, K_SIGMA_RESPONSE};
 
     /// The first layer's response, `δ − h` for the 2-D B3 kernel `h = b bᵀ` with
     /// `b = [1, 4, 6, 4, 1]/16`, summed in squares tap by tap rather than by the closed form.

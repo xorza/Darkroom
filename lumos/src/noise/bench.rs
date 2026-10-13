@@ -7,10 +7,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Kind, Scale};
-use crate::math::noise::binned_samples::BinnedSamples;
-use crate::math::noise::gain_bins::GainBins;
-use crate::math::noise::mrs_noise::{MrsNoise, PixelGains};
 use crate::math::size2us::Size2us;
+use crate::noise::binned_samples::BinnedSamples;
+use crate::noise::gain_bins::GainBins;
+use crate::noise::mrs_noise::{MrsNoise, PixelGains};
 
 /// One tile of the MRS grid, and a frame the 4 × 4 grid covers in part.
 const SIDES: [usize; 2] = [1_024, 4_096];
@@ -19,7 +19,7 @@ const SAMPLES: usize = 1_000_000;
 const GAINS: usize = 4_096;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/noise", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "noise", Scale::Sample);
     group.throughput(Throughput::Elements(GAINS as u64));
     group.bench_function(BenchmarkId::new("gain_bin", GAINS), |b| {
         let bins = GainBins::of(&mut vignette(GAINS));
@@ -33,7 +33,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     });
     group.finish();
 
-    let mut group = Kind::Atomic.group(c, "math/noise/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "noise/frame", Scale::Frame);
     group.throughput(Throughput::Elements(SAMPLES as u64));
     group.bench_function(BenchmarkId::new("binned_measure", SAMPLES), |b| {
         let samples = fixture::sky(SAMPLES, 4);

@@ -1,5 +1,5 @@
-use crate::math::noise::background_split::BackgroundSplit;
-use crate::math::noise::binned_samples::GainBin;
+use crate::noise::background_split::BackgroundSplit;
+use crate::noise::binned_samples::GainBin;
 
 fn bins(points: &[(f64, f64)]) -> Vec<GainBin> {
     points
