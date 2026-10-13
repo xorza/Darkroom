@@ -1,12 +1,14 @@
 use super::*;
 
-/// 2x1 RGB whose planes are (0.125, 0.5), (0.25, 0.625), (0.375, 0.75) — dyadic, so the
+/// The planes of a 2x1 RGB image: (0.125, 0.5), (0.25, 0.625), (0.375, 0.75) — dyadic, so the
 /// round-trip between layouts is exact.
+fn planes() -> [Vec<f32>; 3] {
+    [vec![0.125f32, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]]
+}
+
+/// [`planes`] as a `lumos` image.
 fn planar_master() -> LinearImage {
-    LinearImage::from_planar_channels(
-        lumos::ImageDimensions::new((2, 1), 3),
-        [vec![0.125f32, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]],
-    )
+    LinearImage::from_planar_channels(ImageDimensions::new((2, 1), 3), planes())
 }
 
 /// The interleaved samples `planar_master` repacks to, in pixel order.
@@ -51,9 +53,11 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
     assert!(matches!(interleaved.planar(), Cow::Owned(_)));
     assert_eq!(interleaved.planar().channel(1).pixels(), &[0.25, 0.625]);
 
-    let planar = Image::from(planar_master());
+    let planar = Image::from_planes(2, 1, planes());
     assert!(matches!(planar.planar(), Cow::Borrowed(_)));
+    assert_eq!(planar.planar().channel(2).pixels(), &[0.375, 0.75]);
     assert!(matches!(planar.interleaved(), Cow::Owned(_)));
+    assert_eq!(planar.interleaved().bytes(), interleaved_bytes());
 }
 
 /// An input already produced by another astro node is planar, so `Image::take_planar` hands its
@@ -62,7 +66,7 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
 /// plane allocation tells the two apart.
 #[test]
 fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
-    let dimensions = lumos::ImageDimensions::new((4, 3), 1);
+    let dimensions = ImageDimensions::new((4, 3), 1);
 
     let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
     let planes = planar.channel(0).pixels().as_ptr();

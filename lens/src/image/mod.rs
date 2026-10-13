@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use lumos::LinearImage;
+use lumos::{ImageDimensions, LinearImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -57,6 +57,22 @@ enum Pixels {
 }
 
 impl Image {
+    /// A planar image of `width × height`, in the layout the `lumos` nodes publish: one `f32`
+    /// plane per channel, gray from one plane and RGB from three.
+    ///
+    /// # Panics
+    /// When `planes` holds neither one nor three planes, or a plane does not hold
+    /// `width × height` samples.
+    pub fn from_planes(
+        width: usize,
+        height: usize,
+        planes: impl IntoIterator<Item = Vec<f32>>,
+    ) -> Self {
+        let planes: Vec<Vec<f32>> = planes.into_iter().collect();
+        let dimensions = ImageDimensions::new((width, height), planes.len());
+        Self::from(LinearImage::from_planar_channels(dimensions, planes))
+    }
+
     /// A required image input to process, named `name`.
     pub(crate) fn input(name: &str) -> FuncInput {
         FuncInput::required(name, IMAGE_DATA_TYPE).description("Image to process.")
