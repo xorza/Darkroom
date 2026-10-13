@@ -15,18 +15,20 @@ pub enum QualityMap {
 }
 
 impl QualityMap {
-    pub(crate) fn from_pixels(pixels: LinearPixels) -> Self {
-        match pixels {
-            LinearPixels::L(plane) => Self::Shared(plane),
-            LinearPixels::Rgb(planes) => Self::PerChannel(planes),
-        }
-    }
-
     /// The quality plane of an image channel.
     pub const fn channel(&self, channel: usize) -> &Buffer2<f32> {
         match self {
             Self::Shared(plane) => plane,
             Self::PerChannel(planes) => &planes[channel],
+        }
+    }
+}
+
+impl From<LinearPixels> for QualityMap {
+    fn from(pixels: LinearPixels) -> Self {
+        match pixels {
+            LinearPixels::L(plane) => Self::Shared(plane),
+            LinearPixels::Rgb(planes) => Self::PerChannel(planes),
         }
     }
 }

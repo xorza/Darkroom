@@ -3,15 +3,16 @@
 
 use std::path::Path;
 
-use common::CancelToken;
-
 use crate::combine::error::{StackConfigError, StackError};
+use crate::combine::frame_cache::FrameCache;
 use crate::combine::rejection::Rejection;
 use crate::combine::stack;
-use crate::combine::stack::StackFrame;
+use crate::combine::stack::stack_frame::StackFrame;
+use crate::combine::stack::{FrameSet, FrameSource};
 use crate::error::InvalidConfigField;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::ingest::ingest_run::IngestRun;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -195,8 +196,7 @@ impl Combine {
 /// # Examples
 ///
 /// ```no_run
-/// use common::CancelToken;
-/// use lumos::{Combine, IngestConfig, ProgressCallback, Rejection, StackConfig};
+/// use lumos::{Combine, IngestConfig, ProgressMonitor, Rejection, StackConfig};
 ///
 /// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
 /// let ingest = IngestConfig::default();
@@ -205,8 +205,7 @@ impl Combine {
 /// let result = StackConfig::light().stack_paths(
 ///     &paths,
 ///     &ingest,
-///     ProgressCallback::default(),
-///     CancelToken::never(),
+///     ProgressMonitor::unattended(),
 /// )?;
 ///
 /// // Light frames by another method, normalized and weighted as lights still.
@@ -217,8 +216,7 @@ impl Combine {
 /// let result = config.stack_paths(
 ///     &paths,
 ///     &ingest,
-///     ProgressCallback::default(),
-///     CancelToken::never(),
+///     ProgressMonitor::unattended(),
 /// )?;
 /// # Ok::<(), lumos::StackError>(())
 /// ```
@@ -346,9 +344,7 @@ impl StackConfig {
 
         Ok(())
     }
-}
 
-impl StackConfig {
     /// Stack multiple images from disk into a single result.
     ///
     /// This is the main entry point for stacking frames stored as files. To stack frames already
@@ -378,11 +374,10 @@ impl StackConfig {
     ///
     /// # Examples
     ///
-    /// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
+    /// Pass [`ProgressMonitor::unattended()`] when you neither follow nor cancel the run.
     ///
     /// ```no_run
-    /// use common::CancelToken;
-    /// use lumos::{Combine, IngestConfig, ProgressCallback, StackConfig};
+    /// use lumos::{Combine, IngestConfig, ProgressMonitor, StackConfig};
     ///
     /// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
     /// let ingest = IngestConfig::default();
@@ -390,8 +385,7 @@ impl StackConfig {
     /// let result = config.stack_paths(
     ///     &paths,
     ///     &ingest,
-    ///     ProgressCallback::default(),
-    ///     CancelToken::never(),
+    ///     ProgressMonitor::unattended(),
     /// )?;
     /// let median = StackConfig {
     ///     combine: Combine::median(),
@@ -400,27 +394,34 @@ impl StackConfig {
     /// let result = median.stack_paths(
     ///     &paths,
     ///     &ingest,
-    ///     ProgressCallback::default(),
-    ///     CancelToken::never(),
+    ///     ProgressMonitor::unattended(),
     /// )?;
     /// # Ok::<(), lumos::StackError>(())
     /// ```
-    pub fn stack_paths<P: AsRef<Path> + Sync>(
+    pub fn stack_paths<P: AsRef<Path>>(
         &self,
         paths: &[P],
         ingest: &IngestConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<StackProduct, StackError> {
-        stack::stack_paths(paths, self, ingest, progress, cancel)
+        let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
+        let set = FrameSet {
+            source: FrameSource::Paths,
+            count: paths.len(),
+        };
+        // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
+        // The cancel token rides on the cache from construction, so the load loop polls it too.
+        stack::combine_cached(self, set, || {
+            FrameCache::from_paths(&paths, self, IngestRun::new(ingest, monitor))
+        })
     }
 
     /// Stack frames already held in memory into a single result.
     ///
     /// The in-memory counterpart to [`Self::stack_paths`]: skips the disk round-trip when the
     /// caller already owns the decoded frames (e.g. straight off calibration or warping). The
-    /// frames are consumed. Pass [`ProgressCallback::default()`] when you don't need progress
-    /// reporting.
+    /// frames are consumed. Pass [`ProgressMonitor::unattended()`] when you neither follow nor
+    /// cancel the run.
     ///
     /// Each [`StackFrame`] may carry per-pixel `coverage` and `confidence`. Coverage gates
     /// inclusion; confidence divides the sample's noise variance, for rejection and the variance
@@ -435,10 +436,15 @@ impl StackConfig {
     pub fn stack_images(
         &self,
         frames: Vec<StackFrame>,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<StackProduct, StackError> {
-        stack::stack_images(frames, self, progress, cancel)
+        let set = FrameSet {
+            source: FrameSource::Memory,
+            count: frames.len(),
+        };
+        stack::combine_cached(self, set, || {
+            FrameCache::from_stack_frames(frames, self.normalization, monitor)
+        })
     }
 }
 

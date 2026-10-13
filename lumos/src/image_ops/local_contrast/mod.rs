@@ -54,8 +54,27 @@ impl LocalContrast {
         if self.strength == 0.0 {
             return Ok(());
         }
-        image.remap_intensity(|intensity| clahe_map(intensity, self));
+        image.remap_intensity(|intensity| self.map(intensity));
         Ok(())
+    }
+
+    /// The CLAHE mapping on the combined intensity plane; [`Self::apply`] computes the intensity,
+    /// runs this, then remaps the image's channels to it.
+    #[expect(clippy::cast_sign_loss, reason = "a square root is non-negative")]
+    fn map(&self, intensity: &Buffer2<f32>) -> Buffer2<f32> {
+        // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is
+        // meaningful; on a small image this caps the requested tile count (a no-op on a real
+        // megapixel frame).
+        let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * N_BINS) as f64)
+            .sqrt() as usize)
+            .max(1);
+        let tiles = self.tiles.min(max_tiles);
+        let grid = TileGrid {
+            columns: TileAxis::new(intensity.width(), tiles),
+            rows: TileAxis::new(intensity.height(), tiles),
+        };
+        let luts = grid.luts(intensity, self.clip_limit);
+        grid.apply(intensity, &luts, self.strength)
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
@@ -80,61 +99,10 @@ impl LocalContrast {
     }
 }
 
-/// The CLAHE mapping on the combined intensity plane; [`LocalContrast::apply`] computes the
-/// intensity, runs this, then remaps the image's channels to it.
-#[expect(clippy::cast_sign_loss, reason = "a square root is non-negative")]
-fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
-    // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is meaningful;
-    // on a small image this caps the requested tile count (a no-op on a real megapixel frame).
-    let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * N_BINS) as f64).sqrt()
-        as usize)
-        .max(1);
-    let tiles = config.tiles.min(max_tiles);
-    let columns = TileAxis::new(intensity.width(), tiles);
-    let rows = TileAxis::new(intensity.height(), tiles);
-    let luts = build_tile_luts(intensity, &columns, &rows, config.clip_limit);
-    apply_luts(intensity, &luts, &columns, &rows, config.strength)
-}
-
 /// A tile's mapping: the clipped histogram's cumulative fraction at each bin edge, `N_BINS + 1`
 /// nodes from 0 to 1. Between edges the mapping is linear, the CDF of the histogram's own
 /// piecewise-uniform density — so a value maps continuously, not to its bin's one level.
 type TileLut = [f32; N_BINS + 1];
-
-/// One mapping per tile, row-major.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "the clip limit is at least 1 by construction"
-)]
-fn build_tile_luts(
-    intensity: &Buffer2<f32>,
-    columns: &TileAxis,
-    rows: &TileAxis,
-    clip_limit: f32,
-) -> Vec<TileLut> {
-    let mut luts = vec![[0.0f32; N_BINS + 1]; columns.tiles() * rows.tiles()];
-    luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
-        let (tx, ty) = (idx % columns.tiles(), idx / columns.tiles());
-        let (x0, x1) = (columns.bounds[tx], columns.bounds[tx + 1]);
-        let mut hist = [0u32; N_BINS];
-        for y in rows.bounds[ty]..rows.bounds[ty + 1] {
-            for &v in &intensity.row(y)[x0..x1] {
-                hist[bin_of(v)] += 1;
-            }
-        }
-        let count: u32 = hist.iter().sum();
-        let clip = (clip_limit * count as f32 / N_BINS as f32).max(1.0) as u32;
-        clip_histogram(&mut hist, clip);
-        let total: u32 = hist.iter().sum();
-        let mut cum = 0u32;
-        lut[0] = 0.0;
-        for (b, &c) in hist.iter().enumerate() {
-            cum += c;
-            lut[b + 1] = cum as f32 / total as f32;
-        }
-    });
-    luts
-}
 
 /// Clip every bin at `clip` and hand the excess back evenly: an equal share to every bin, and the
 /// remainder one apiece to bins spread across the range at a stride of `N_BINS / remainder`, as
@@ -217,35 +185,70 @@ impl TileAxis {
     }
 }
 
-/// Map each pixel's intensity through the bilinearly-interpolated four-tile mapping, blended with
-/// the original by `strength`.
-fn apply_luts(
-    intensity: &Buffer2<f32>,
-    luts: &[TileLut],
-    columns: &TileAxis,
-    rows: &TileAxis,
-    strength: f32,
-) -> Buffer2<f32> {
-    let size = Size2us::new(intensity.width(), intensity.height());
-    let column_blends: Vec<Blend> = (0..size.width).map(|x| columns.blend(x)).collect();
-    let mut out = Buffer2::new_default(size.width, size.height);
-    out.pixels_mut()
-        .par_chunks_mut(size.width)
-        .enumerate()
-        .for_each(|(y, orow)| {
-            let row = rows.blend(y);
-            let (top, bottom) = (row.lower * columns.tiles(), row.upper * columns.tiles());
-            for ((o, &v), column) in orow.iter_mut().zip(intensity.row(y)).zip(&column_blends) {
-                let at = |tile: usize| map_through(&luts[tile], v);
-                let upper_row = at(top + column.lower)
-                    + column.weight * (at(top + column.upper) - at(top + column.lower));
-                let lower_row = at(bottom + column.lower)
-                    + column.weight * (at(bottom + column.upper) - at(bottom + column.lower));
-                let mapped = upper_row + row.weight * (lower_row - upper_row);
-                *o = v + strength * (mapped - v);
+/// The tiles over a plane: how its columns and its rows split.
+#[derive(Debug)]
+struct TileGrid {
+    columns: TileAxis,
+    rows: TileAxis,
+}
+
+impl TileGrid {
+    /// One mapping per tile, row-major.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the clip limit is at least 1 by construction"
+    )]
+    fn luts(&self, intensity: &Buffer2<f32>, clip_limit: f32) -> Vec<TileLut> {
+        let Self { columns, rows } = self;
+        let mut luts = vec![[0.0f32; N_BINS + 1]; columns.tiles() * rows.tiles()];
+        luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
+            let (tx, ty) = (idx % columns.tiles(), idx / columns.tiles());
+            let (x0, x1) = (columns.bounds[tx], columns.bounds[tx + 1]);
+            let mut hist = [0u32; N_BINS];
+            for y in rows.bounds[ty]..rows.bounds[ty + 1] {
+                for &v in &intensity.row(y)[x0..x1] {
+                    hist[bin_of(v)] += 1;
+                }
+            }
+            let count: u32 = hist.iter().sum();
+            let clip = (clip_limit * count as f32 / N_BINS as f32).max(1.0) as u32;
+            clip_histogram(&mut hist, clip);
+            let total: u32 = hist.iter().sum();
+            let mut cum = 0u32;
+            lut[0] = 0.0;
+            for (b, &c) in hist.iter().enumerate() {
+                cum += c;
+                lut[b + 1] = cum as f32 / total as f32;
             }
         });
-    out
+        luts
+    }
+
+    /// Map each pixel's intensity through the bilinearly-interpolated four-tile mapping, blended
+    /// with the original by `strength`.
+    fn apply(&self, intensity: &Buffer2<f32>, luts: &[TileLut], strength: f32) -> Buffer2<f32> {
+        let Self { columns, rows } = self;
+        let size = Size2us::new(intensity.width(), intensity.height());
+        let column_blends: Vec<Blend> = (0..size.width).map(|x| columns.blend(x)).collect();
+        let mut out = Buffer2::new_default(size.width, size.height);
+        out.pixels_mut()
+            .par_chunks_mut(size.width)
+            .enumerate()
+            .for_each(|(y, orow)| {
+                let row = rows.blend(y);
+                let (top, bottom) = (row.lower * columns.tiles(), row.upper * columns.tiles());
+                for ((o, &v), column) in orow.iter_mut().zip(intensity.row(y)).zip(&column_blends) {
+                    let at = |tile: usize| map_through(&luts[tile], v);
+                    let upper_row = at(top + column.lower)
+                        + column.weight * (at(top + column.upper) - at(top + column.lower));
+                    let lower_row = at(bottom + column.lower)
+                        + column.weight * (at(bottom + column.upper) - at(bottom + column.lower));
+                    let mapped = upper_row + row.weight * (lower_row - upper_row);
+                    *o = v + strength * (mapped - v);
+                }
+            });
+        out
+    }
 }
 
 /// `v` through `lut`, linear between its bin edges.

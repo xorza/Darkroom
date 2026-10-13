@@ -6,7 +6,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::urect::URect;
-use crate::star_detection::deblend::component::Assignment;
+use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::deblend::local_maxima::*;
 use crate::star_detection::labeling::LabelMap;
@@ -37,18 +37,20 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
     make_test_component(size, &stars)
 }
 
-/// [`find_local_maxima`] into a fresh list.
+/// `LocalMaximaParams::find_local_maxima` into a fresh list.
 fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Pixel> {
     let mut peaks = Vec::new();
     let mut pixels = ComponentPixels::default();
     pixels.fill(component);
-    find_local_maxima(
-        component,
-        &pixels,
+    LocalMaximaParams {
         min_separation,
         min_prominence,
-        &mut Vec::new(),
+    }
+    .find_local_maxima(
+        component,
+        &pixels,
         Kept {
+            maxima: &mut Vec::new(),
             peaks: &mut peaks,
             occupied: &mut Vec::new(),
         },
@@ -56,7 +58,7 @@ fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32)
     peaks
 }
 
-/// [`deblend_local_maxima`] into a fresh list.
+/// `LocalMaximaParams::deblend` into a fresh list.
 fn deblended(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Region> {
     let mut regions = Vec::new();
     LocalMaximaParams {
@@ -411,7 +413,7 @@ fn voronoi_assignment_and_its_tie() {
 
 /// A full-box component of random values, quantized to 16 levels so neighbouring maxima often tie,
 /// and its label map: hundreds of local maxima, many equal in value and in distance.
-fn noise_component(size: Size2us, seed: u64) -> (Buffer2<f32>, LabelMap, ComponentData) {
+fn noise_component(size: Size2us, seed: u64) -> TestComponent {
     let mut rng = TestRng::new(seed);
     let pixels = Buffer2::new(
         size.width,
@@ -426,7 +428,11 @@ fn noise_component(size: Size2us, seed: u64) -> (Buffer2<f32>, LabelMap, Compone
         label: 1,
         area: size.pixel_count(),
     };
-    (pixels, labels, data)
+    TestComponent {
+        pixels,
+        labels,
+        data,
+    }
 }
 
 /// The windowed suppression and the cell-grid split give what the plain definitions give: every
@@ -442,7 +448,11 @@ fn fast_paths_match_the_definitions() {
         (4, 8, 0.1),
         (5, 2, 0.95),
     ] {
-        let (pixels, labels, data) = noise_component(Size2us::new(61, 43), seed);
+        let TestComponent {
+            pixels,
+            labels,
+            data,
+        } = noise_component(Size2us::new(61, 43), seed);
         let component = Component::new(&data, &pixels, &labels);
 
         let mut candidates: Vec<Pixel> = component

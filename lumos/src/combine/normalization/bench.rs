@@ -12,6 +12,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
+use crate::combine::normalization::slot_planes::SlotPlanes;
 use crate::combine::stack_config::Normalization;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
@@ -51,11 +52,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let dimensions = ImageDimensions::new(FRAME, 1);
         b.iter(|| {
             FrameNorm::measure(
-                &frames,
-                dimensions,
-                Slots::new(None, 1),
+                SlotPlanes {
+                    frames: &frames,
+                    dimensions,
+                    slots: Slots::new(None, 1),
+                    cancel: &CancelToken::never(),
+                },
                 Normalization::Global,
-                &CancelToken::never(),
             )
             .unwrap()
         });

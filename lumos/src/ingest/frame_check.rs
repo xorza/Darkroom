@@ -8,7 +8,8 @@
 use common::CancelToken;
 
 use crate::error::Cancelled;
-use crate::frame::frame_quality::{FramePlane, FrameQuality};
+use crate::frame::frame_plane::FramePlane;
+use crate::frame::frame_quality::FrameQuality;
 use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
@@ -63,14 +64,14 @@ impl FrameCheck<'_> {
                 confidence,
             } => self.quality_pair(
                 FramePlane::Coverage,
-                coverage.chunk(0, pixel_count),
-                confidence.chunk(0, pixel_count),
+                coverage.chunk(0..pixel_count),
+                confidence.chunk(0..pixel_count),
             ),
             FrameQuality::Drizzled { drops } => drops.iter().try_for_each(|drops| {
                 self.quality_pair(
                     FramePlane::DropWeight,
-                    drops.weight.chunk(0, pixel_count),
-                    drops.confidence.chunk(0, pixel_count),
+                    drops.weight.chunk(0..pixel_count),
+                    drops.confidence.chunk(0..pixel_count),
                 )
             }),
             FrameQuality::None | FrameQuality::Mask { .. } => Ok(()),
@@ -83,7 +84,7 @@ impl FrameCheck<'_> {
         channels: &[StoredPlane],
         pixel_count: usize,
     ) -> Result<(), AdmissionError> {
-        self.sample_channels(channels.iter().map(|plane| plane.chunk(0, pixel_count)))
+        self.sample_channels(channels.iter().map(|plane| plane.chunk(0..pixel_count)))
     }
 
     /// A frame-quality pair: the `support` plane, a warp's coverage or a drizzle's drop weight,
@@ -91,9 +92,9 @@ impl FrameCheck<'_> {
     ///
     /// That agreement — `support == 0` exactly where `confidence == 0`, the invariant
     /// [`FrameQuality`] documents — is what lets the combine gate a sample on support and be sure
-    /// of a positive confidence to divide its noise by, and what keeps `source_noise_variance`'s
-    /// reciprocal finite. The warp and the drizzle produce planes that satisfy it; this is where
-    /// caller-supplied and spilled ones are held to it.
+    /// of a positive confidence to divide its noise by, and what keeps
+    /// `SlotPlanes::noise_variance`'s reciprocal finite. The warp and the drizzle produce planes
+    /// that satisfy it; this is where caller-supplied and spilled ones are held to it.
     ///
     /// One walk over the pair rather than one per plane, so the pairing costs nothing beyond the
     /// range checks that were already reading both.

@@ -9,8 +9,8 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::RowOrder;
 use crate::io::fits::metadata::{
-    SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order, read_metadata,
-    read_row_order, write_image_metadata,
+    self, Bayerpat, SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order,
+    read_row_order,
 };
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
@@ -24,7 +24,7 @@ fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {
 }
 
 fn pattern_of(header: &Header, height: usize) -> CfaPattern {
-    match read_bayer_cfa(header, height, true, None).unwrap() {
+    match read_bayer_cfa(header, height, Bayerpat::Required, None).unwrap() {
         Some(CfaType::Bayer(pattern)) => pattern,
         other => panic!("expected a Bayer pattern, got {other:?}"),
     }
@@ -197,23 +197,23 @@ fn invalid_sexagesimal_values_are_rejected() {
 fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
     let header = bayer_header("TRUE", None);
     assert!(matches!(
-        read_bayer_cfa(&header, 4, true, None),
+        read_bayer_cfa(&header, 4, Bayerpat::Required, None),
         Err(fits_well::FitsError::TypeMismatch { name, .. }) if name == "BAYERPAT"
     ));
     assert_eq!(
-        read_bayer_cfa(&header, 4, true, Some(CfaPattern::Grbg)).unwrap(),
+        read_bayer_cfa(&header, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
         Some(CfaType::Bayer(CfaPattern::Grbg))
     );
     // Bottom-up with an even height swaps GRBG's two rows: GR then BG becomes BG then GR, BGGR.
     let bottom_up = bayer_header("TRUE", Some("BOTTOM-UP"));
     assert_eq!(
-        read_bayer_cfa(&bottom_up, 4, true, Some(CfaPattern::Grbg)).unwrap(),
+        read_bayer_cfa(&bottom_up, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
     // A stated phase wins over the option, which only stands in for 'TRUE'.
     let stated = bayer_header("BGGR", None);
     assert_eq!(
-        read_bayer_cfa(&stated, 4, true, Some(CfaPattern::Grbg)).unwrap(),
+        read_bayer_cfa(&stated, 4, Bayerpat::Required, Some(CfaPattern::Grbg)).unwrap(),
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
 }
@@ -234,7 +234,7 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     header.set("GAIN", 120.0).unwrap();
     header.set("CCD-TEMP", -300.0).unwrap();
     header.set("CCDTEMP", -10.0).unwrap();
-    let metadata = read_metadata(&header, SampleType::U16);
+    let metadata = metadata::read(&header, SampleType::U16);
     assert_eq!(metadata.xbinning, None);
     assert_eq!(metadata.exposure_time, None);
     assert_eq!(metadata.calibration, CalibrationState::NONE);
@@ -250,10 +250,10 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     assert_eq!(metadata.dec_deg, None);
 
     header.set("EXPTIME", -1.0).unwrap();
-    assert_eq!(read_metadata(&header, SampleType::U16).exposure_time, None);
+    assert_eq!(metadata::read(&header, SampleType::U16).exposure_time, None);
     header.set("EXPOSURE", 0.0).unwrap();
     assert_eq!(
-        read_metadata(&header, SampleType::U16).exposure_time,
+        metadata::read(&header, SampleType::U16).exposure_time,
         Some(0.0)
     );
 }
@@ -266,7 +266,7 @@ fn numeric_keywords_hold_their_ranges() {
     use crate::io::fits::metadata::{MetadataField as Field, read_data_max};
 
     let read = |header: &Header, field: Field| -> Option<f64> {
-        let metadata = read_metadata(header, SampleType::U16);
+        let metadata = metadata::read(header, SampleType::U16);
         match field {
             Field::ExposureTime => metadata.exposure_time,
             Field::Gain => metadata.gain,
@@ -346,7 +346,7 @@ fn wcs_pointing_follows_the_axis_types() {
         header.set("CTYPE2", types[1]).unwrap();
         header.set("CRVAL1", 83.8).unwrap();
         header.set("CRVAL2", -5.4).unwrap();
-        let metadata = read_metadata(&header, SampleType::F32);
+        let metadata = metadata::read(&header, SampleType::F32);
         [metadata.ra_deg, metadata.dec_deg]
     };
     assert_eq!(wcs(["RA---TAN", "DEC--TAN"]), [Some(83.8), Some(-5.4)]);
@@ -359,10 +359,10 @@ fn wcs_pointing_follows_the_axis_types() {
 /// `PIXSIZE1`, `FRAMETYP`, `FILT-1`, `BLKLEVEL`, …) all land where the standard keyword does.
 #[test]
 fn every_alias_reads_into_its_field() {
-    use crate::io::fits::metadata::{MetadataField, read_data_max, write_image_metadata};
+    use crate::io::fits::metadata::{MetadataField, read_data_max};
 
     let read = |header: &Header, field: MetadataField| -> Option<String> {
-        let metadata = read_metadata(header, SampleType::U16);
+        let metadata = metadata::read(header, SampleType::U16);
         let text = |value: Option<String>| value;
         let real = |value: Option<f64>| value.map(|value| format!("{value}"));
         let integer = |value: Option<i64>| value.map(|value| format!("{value}"));
@@ -440,9 +440,9 @@ fn every_alias_reads_into_its_field() {
     let mut header = Header::new();
     header.set("EXPOSURE", 30.0).unwrap();
     header.set("TEMPERAT", -10.0).unwrap();
-    let metadata = read_metadata(&header, SampleType::U16);
+    let metadata = metadata::read(&header, SampleType::U16);
     let mut written = Header::new();
-    write_image_metadata(&mut written, &metadata, None).unwrap();
+    metadata::write_image(&mut written, &metadata, None).unwrap();
     assert_eq!(written.get_real("EXPTIME").unwrap(), Some(30.0));
     assert_eq!(written.get_real("CCD-TEMP").unwrap(), Some(-10.0));
     assert_eq!(written.get_real("EXPOSURE").unwrap(), None);
@@ -478,7 +478,7 @@ fn the_calibration_record_round_trips() {
             unverified_dark,
             ..Default::default()
         };
-        write_image_metadata(&mut header, &metadata, None).unwrap();
+        metadata::write_image(&mut header, &metadata, None).unwrap();
         for (keyword, set) in [
             ("LUMCALB", calibration.bias),
             ("LUMCALD", calibration.thermal),
@@ -492,7 +492,7 @@ fn the_calibration_record_round_trips() {
                 "{calibration:?}, {unverified_dark:?}: {keyword}"
             );
         }
-        let read = read_metadata(&header, SampleType::F32);
+        let read = metadata::read(&header, SampleType::F32);
         assert_eq!(
             (read.calibration, read.unverified_dark),
             (calibration, unverified_dark)

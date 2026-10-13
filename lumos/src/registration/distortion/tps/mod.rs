@@ -17,11 +17,11 @@
 //!
 //! where U(r) = r² log(r). Use when distortion is non-radial or non-uniform.
 
+mod distortion_map;
+
 use glam::DVec2;
 
 use crate::math::linear_system;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::distortion::SINGULAR_THRESHOLD;
 use crate::registration::point_normalization::PointNormalization;
 
@@ -58,29 +58,21 @@ struct ThinPlateSpline {
 }
 
 impl ThinPlateSpline {
-    /// Fit a thin-plate spline to a set of control point correspondences.
-    ///
-    /// # Arguments
-    /// * `source_points` - Source (reference) point positions
-    /// * `target_points` - Target point positions
-    /// * `config` - TPS configuration
-    ///
-    /// # Returns
-    /// A fitted TPS model, or None if fitting fails (e.g., singular matrix)
+    /// The spline through `source_points` onto `target_points`, paired by index; `None` for
+    /// fewer than three points or a singular system.
     fn fit(source_points: &[DVec2], target_points: &[DVec2], config: TpsConfig) -> Option<Self> {
+        debug_assert_eq!(
+            source_points.len(),
+            target_points.len(),
+            "control points pair by index"
+        );
         let n = source_points.len();
         if n < 3 {
-            return None; // Need at least 3 points for TPS
-        }
-
-        if source_points.len() != target_points.len() {
             return None;
         }
 
-        // Compute normalization: center and scale coordinates to [-1, 1] range.
-        // This dramatically improves conditioning of the TPS system matrix because
-        // the kernel r^2*ln(r) amplifies scale differences (e.g. r=7200 gives ~4.6e8
-        // while affine terms are O(6000)).
+        // Coordinates in [-1, 1] condition the system: the kernel r²·ln(r) amplifies scale
+        // differences (r = 7200 gives ~4.6e8 while the affine terms are O(6000)).
         let norm = compute_normalization(source_points);
 
         let src_norm: Vec<DVec2> = source_points.iter().map(|&p| norm.normalize(p)).collect();
@@ -102,7 +94,7 @@ impl ThinPlateSpline {
         let mut matrix = vec![0.0; matrix_size * matrix_size];
         let at = |row: usize, col: usize| row * matrix_size + col;
 
-        // Fill K matrix (upper-left n×n block)
+        // K, the upper-left n×n block.
         for i in 0..n {
             for j in 0..n {
                 matrix[at(i, j)] = if i == j {
@@ -113,7 +105,7 @@ impl ThinPlateSpline {
             }
         }
 
-        // Fill P matrix (upper-right n×3 block) and P^T (lower-left 3×n block)
+        // P, the upper-right n×3 block, and Pᵀ, the lower-left 3×n.
         for i in 0..n {
             let p = src_norm[i];
             matrix[at(i, n)] = 1.0;
@@ -125,9 +117,6 @@ impl ThinPlateSpline {
             matrix[at(n + 2, i)] = p.y;
         }
 
-        // Lower-right 3×3 block is zeros (already initialized)
-
-        // Right-hand side vectors (normalized target coordinates)
         let mut solution_x = vec![0.0; matrix_size];
         let mut solution_y = vec![0.0; matrix_size];
 
@@ -143,7 +132,6 @@ impl ThinPlateSpline {
         scratch.copy_from_slice(&matrix);
         linear_system::solve_in_place(&mut scratch, &mut solution_y, SINGULAR_THRESHOLD)?;
 
-        // Extract weights and affine coefficients
         let weights_x: Vec<f64> = solution_x[..n].to_vec();
         let weights_y: Vec<f64> = solution_y[..n].to_vec();
 
@@ -160,13 +148,7 @@ impl ThinPlateSpline {
         })
     }
 
-    /// Transform a point using the fitted TPS model.
-    ///
-    /// # Arguments
-    /// * `p` - Source point coordinates
-    ///
-    /// # Returns
-    /// Transformed coordinates
+    /// The spline at `p`, in pixels.
     fn transform(&self, p: DVec2) -> DVec2 {
         self.transform_normalized(self.norm.normalize(p))
     }
@@ -186,13 +168,7 @@ impl ThinPlateSpline {
         self.norm.denormalize(DVec2::new(tx, ty))
     }
 
-    /// Transform multiple points efficiently.
-    ///
-    /// # Arguments
-    /// * `points` - Source points to transform
-    ///
-    /// # Returns
-    /// Vector of transformed points
+    /// [`Self::transform`] of every point.
     fn transform_points(&self, points: &[DVec2]) -> Vec<DVec2> {
         points.iter().map(|&p| self.transform(p)).collect()
     }
@@ -219,12 +195,11 @@ impl ThinPlateSpline {
         energy
     }
 
-    /// Get the number of control points.
     const fn num_control_points(&self) -> usize {
         self.control_points.len()
     }
 
-    /// Get the control points (in normalized coordinates, not pixel space).
+    /// The control points, in the normalized coordinates the fit is held in.
     fn control_points(&self) -> &[DVec2] {
         &self.control_points
     }
@@ -257,7 +232,7 @@ fn compute_normalization(points: &[DVec2]) -> PointNormalization {
     let center = (min + max) * 0.5;
     let range = max - min;
     let scale = range.x.max(range.y) * 0.5;
-    // Guard against degenerate case (all points coincident)
+    // Coincident points have no extent to scale by.
     let scale = if scale < 1e-12 { 1.0 } else { scale };
     PointNormalization::new(center, scale)
 }
@@ -268,106 +243,6 @@ fn compute_normalization(points: &[DVec2]) -> PointNormalization {
 #[inline]
 fn tps_kernel(r: f64) -> f64 {
     if r < 1e-10 { 0.0 } else { r * r * r.ln() }
-}
-
-/// Distortion map for visualizing local distortions.
-///
-/// This structure stores the distortion vectors at a grid of points,
-/// useful for visualization and analysis.
-#[derive(Debug, Clone)]
-struct DistortionMap {
-    /// Extent of the grid in grid points
-    grid: Size2us,
-    /// Grid spacing in pixels
-    spacing: f64,
-    /// Distortion vectors at each grid point
-    vectors: Vec<DVec2>,
-    /// Maximum distortion magnitude
-    max_magnitude: f64,
-    /// Mean distortion magnitude
-    mean_magnitude: f64,
-}
-
-impl DistortionMap {
-    /// Create a distortion map from a TPS model.
-    ///
-    /// # Arguments
-    /// * `tps` - The thin-plate spline model
-    /// * `image_width` - Image width in pixels
-    /// * `image_height` - Image height in pixels
-    /// * `grid_spacing` - Spacing between grid points
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "a size over a positive grid spacing is non-negative"
-    )]
-    fn from_tps(tps: &ThinPlateSpline, image: Size2us, grid_spacing: f64) -> Self {
-        let grid = Size2us::new(
-            (image.width as f64 / grid_spacing).ceil() as usize + 1,
-            (image.height as f64 / grid_spacing).ceil() as usize + 1,
-        );
-
-        let mut vectors = Vec::with_capacity(grid.pixel_count());
-        let mut max_magnitude = 0.0f64;
-        let mut sum_magnitude = 0.0;
-
-        for gy in 0..grid.height {
-            for gx in 0..grid.width {
-                let p = DVec2::new(gx as f64 * grid_spacing, gy as f64 * grid_spacing);
-                let t = tps.transform(p);
-                let d = t - p;
-                let magnitude = d.length();
-
-                vectors.push(d);
-                max_magnitude = max_magnitude.max(magnitude);
-                sum_magnitude += magnitude;
-            }
-        }
-
-        let mean_magnitude = sum_magnitude / vectors.len() as f64;
-
-        Self {
-            grid,
-            spacing: grid_spacing,
-            vectors,
-            max_magnitude,
-            mean_magnitude,
-        }
-    }
-
-    /// Get the distortion vector at a grid position.
-    fn get(&self, point: Vec2us) -> Option<DVec2> {
-        self.grid
-            .contains(point)
-            .then(|| self.vectors[self.grid.index_of(point)])
-    }
-
-    /// Interpolate the distortion at an arbitrary position: bilinear inside the grid, and the
-    /// nearest edge's value past it, never a zero the map did not measure.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "the grid coordinate is clamped to the grid, so it is non-negative"
-    )]
-    fn interpolate(&self, p: DVec2) -> DVec2 {
-        let gx = (p.x / self.spacing).clamp(0.0, (self.grid.width - 1) as f64);
-        let gy = (p.y / self.spacing).clamp(0.0, (self.grid.height - 1) as f64);
-
-        let gx0 = gx.floor() as usize;
-        let gy0 = gy.floor() as usize;
-        let gx1 = (gx0 + 1).min(self.grid.width - 1);
-        let gy1 = (gy0 + 1).min(self.grid.height - 1);
-
-        let fx = gx - gx0 as f64;
-        let fy = gy - gy0 as f64;
-
-        let at = |x, y| self.vectors[self.grid.index_of(Vec2us::new(x, y))];
-        let (v00, v10, v01, v11) = (at(gx0, gy0), at(gx1, gy0), at(gx0, gy1), at(gx1, gy1));
-
-        // Bilinear interpolation
-        (1.0 - fx) * (1.0 - fy) * v00
-            + fx * (1.0 - fy) * v10
-            + (1.0 - fx) * fy * v01
-            + fx * fy * v11
-    }
 }
 
 #[cfg(test)]

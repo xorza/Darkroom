@@ -90,12 +90,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
             ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
         };
         let product = config
-            .drizzle_cfa_images(
-                frames,
-                ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .drizzle_cfa_images(frames, ingest, ProgressMonitor::unattended())
             .unwrap()
             .product;
         assert_eq!(
@@ -200,8 +195,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     .drizzle_cfa_images(
         frames,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap()
     .product;
@@ -292,8 +286,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
         .drizzle_cfa_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product
@@ -345,8 +338,7 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     .drizzle_cfa_images(
         vec![frame(CfaPattern::Rggb), frame(CfaPattern::Bggr)],
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap_err();
     assert!(

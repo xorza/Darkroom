@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
 
 /// One same-colour neighbour of a phase: its offset, and its squared distance, which orders the
@@ -51,8 +51,8 @@ impl CfaLattice {
             CfaType::Bayer(_) => (2, 5),
             CfaType::XTrans(_) => (6, 6),
         };
-        // The pattern is periodic, so a neighbour's colour is its phase's: shifting by whole periods
-        // keeps every position non-negative.
+        // The pattern is periodic, so a neighbour's colour is its phase's: shifting by whole
+        // periods keeps every position non-negative.
         let shift = (radius.unsigned_abs() as usize).div_ceil(period) * period;
         let mut taps = Vec::new();
         let mut starts = Vec::with_capacity(period * period + 1);
@@ -98,22 +98,24 @@ impl CfaLattice {
         &self.taps[self.starts[phase] as usize..self.starts[phase + 1] as usize]
     }
 
-    /// The nearest `count` same-colour neighbours of `position` that lie inside `size` and that
-    /// `accept` takes, by flat index into `values`, and every other one at the distance of the last:
-    /// a group of equal distance is taken whole. Fewer when the window runs out.
-    pub(crate) fn gather(
+    /// The median of `position`'s nearest neighbours under its filter that `mask` does not name, so
+    /// a defect is never repaired from another: 8 with their ties for mono and Bayer, which on a
+    /// Bayer sensor are the four at 2 and the four at 2√2 of its own phase, and 24 with their ties
+    /// for X-Trans; fewer where the frame's edge cuts the window. The pixel's own value when none
+    /// is valid.
+    pub(crate) fn median(
         &self,
-        values: &[f32],
-        size: Size2us,
+        pixels: &Buffer2<f32>,
         position: Vec2us,
-        count: usize,
-        accept: impl Fn(usize) -> bool,
-        out: &mut Gathered,
-    ) {
-        out.values.clear();
-        out.distances.clear();
+        mask: Option<&BitBuffer2>,
+        scratch: &mut Gathered,
+    ) -> f32 {
+        let size = Size2us::new(pixels.width(), pixels.height());
+        let count = if self.period == 6 { 24 } else { 8 };
+        scratch.values.clear();
+        scratch.distances.clear();
         for tap in self.stencil(position) {
-            if out.values.len() >= count && out.distances.last() != Some(&tap.distance2) {
+            if scratch.values.len() >= count && scratch.distances.last() != Some(&tap.distance2) {
                 break;
             }
             let (Some(x), Some(y)) = (
@@ -126,38 +128,15 @@ impl CfaLattice {
                 continue;
             }
             let index = y * size.width + x;
-            if accept(index) {
-                out.values.push(values[index]);
-                out.distances.push(tap.distance2);
+            if !mask.is_some_and(|mask| mask.get(index)) {
+                scratch.values.push(pixels[index]);
+                scratch.distances.push(tap.distance2);
             }
         }
-    }
-
-    /// The median of `position`'s nearest neighbours under its filter that `mask` does not name, so
-    /// a defect is never repaired from another: 8 with their ties for mono and Bayer, which on a
-    /// Bayer sensor are the four at 2 and the four at 2√2 of its own phase, and 24 with their ties
-    /// for X-Trans. The pixel's own value when none is valid.
-    pub(crate) fn median(
-        &self,
-        pixels: &Buffer2<f32>,
-        position: Vec2us,
-        mask: Option<&BitBuffer2>,
-        scratch: &mut Gathered,
-    ) -> f32 {
-        let size = Size2us::new(pixels.width(), pixels.height());
-        let count = if self.period == 6 { 24 } else { 8 };
-        self.gather(
-            pixels.pixels(),
-            size,
-            position,
-            count,
-            |index| !mask.is_some_and(|mask| mask.get(index)),
-            scratch,
-        );
         if scratch.values.is_empty() {
             return pixels[size.index_of(position)];
         }
-        median_mut(&mut scratch.values)
+        statistics::median_mut(&mut scratch.values)
     }
 
     /// Copy phase `(a, b)` of a 2-periodic mosaic into a dense plane of its
@@ -220,11 +199,12 @@ impl CfaLattice {
     }
 }
 
-/// The values one [`CfaLattice::gather`] took, with each one's squared distance, nearest first.
+/// The neighbours one [`CfaLattice::median`] took, with each one's squared distance, nearest
+/// first: scratch a caller keeps across medians.
 #[derive(Debug, Default)]
 pub(crate) struct Gathered {
-    pub(crate) values: Vec<f32>,
-    pub(crate) distances: Vec<i32>,
+    values: Vec<f32>,
+    distances: Vec<i32>,
 }
 
 #[cfg(test)]
@@ -273,8 +253,8 @@ mod tests {
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
     }
 
-    /// Every X-Trans phase takes whole shells of equal distance: no same-colour neighbour outside the
-    /// selection is as near as the farthest one in it, so no direction at a shared distance is
+    /// Every X-Trans phase takes whole shells of equal distance: no same-colour neighbour outside
+    /// the selection is as near as the farthest one in it, so no direction at a shared distance is
     /// favoured. And the selection holds at least the 24 asked for.
     #[test]
     fn x_trans_takes_whole_shells() {

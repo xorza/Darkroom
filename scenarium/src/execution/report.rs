@@ -132,6 +132,7 @@ pub(crate) trait RunReporter: Send + Debug {
 pub(crate) mod internals {
     use crate::execution::error::RunError;
     use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus};
+    use crate::execution::report::{RunPhase, RunReporter};
     use crate::graph::identity::NodeId;
 
     impl ExecutionOutcome {
@@ -165,8 +166,6 @@ pub(crate) mod internals {
             }
         }
     }
-
-    use crate::execution::report::{RunPhase, RunReporter};
 
     /// Discards a run's live feedback, for the tests that only assert on the final outcome.
     /// Production always has a host listening, so this stays test-only.

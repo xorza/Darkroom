@@ -9,9 +9,8 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use rayon::prelude::*;
-
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// A borrowed square 2D convolution kernel, stored row-major.
@@ -25,10 +24,9 @@ pub(super) struct Kernel2d<'a> {
 }
 
 impl<'a> Kernel2d<'a> {
-    /// Panics if `weights` is not exactly `size × size` — a cold, once-per-image check,
-    /// not per row or per pixel.
+    /// `weights` is exactly `size × size`.
     pub(super) fn new(weights: &'a [f32], size: usize) -> Self {
-        assert_eq!(
+        debug_assert_eq!(
             weights.len(),
             size * size,
             "a {size}x{size} kernel needs {} weights",
@@ -52,6 +50,22 @@ impl<'a> Kernel2d<'a> {
     #[inline]
     pub(super) const fn at(self, ky: usize, kx: usize) -> f32 {
         self.weights[ky * self.size + kx]
+    }
+
+    /// One output pixel of the 2D convolution of the image `input` of `size` at `pos`, mirrored on
+    /// both axes.
+    #[inline]
+    fn convolve_pixel(self, input: &[f32], size: Size2us, pos: Vec2us) -> f32 {
+        let radius = self.radius() as isize;
+        let mut sum = 0.0f32;
+        for ky in 0..self.size() {
+            let sy = mirror_index(pos.y as isize + ky as isize - radius, size.height);
+            for kx in 0..self.size() {
+                let sx = mirror_index(pos.x as isize + kx as isize - radius, size.width);
+                sum += input[sy * size.width + sx] * self.at(ky, kx);
+            }
+        }
+        sum
     }
 }
 
@@ -92,47 +106,15 @@ fn convolve_pixel_scalar(input: &[f32], kernel: &[f32], x: usize) -> f32 {
     sum
 }
 
-/// One output pixel of the 2D convolution at `(x, y)`, mirrored on both axes.
-#[inline]
-fn convolve_2d_pixel(
-    input: &[f32],
-    size: Size2us,
-    x: usize,
-    y: usize,
-    kernel: Kernel2d<'_>,
-) -> f32 {
-    let radius = kernel.radius() as isize;
-    let mut sum = 0.0f32;
-    for ky in 0..kernel.size() {
-        let sy = mirror_index(y as isize + ky as isize - radius, size.height);
-        for kx in 0..kernel.size() {
-            let sx = mirror_index(x as isize + kx as isize - radius, size.width);
-            sum += input[sy * size.width + sx] * kernel.at(ky, kx);
-        }
-    }
-    sum
-}
-
-/// Convolve one row with an odd 1D kernel (mirror edges), on the widest Isa this CPU has.
-#[inline]
-pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32]) {
-    ConvolveRow {
-        input,
-        output,
-        kernel,
-    }
-    .dispatch();
-}
-
-/// [`convolve_row`] as a kernel: a vector of pixels at a time where the whole window lies inside
-/// the row, each lane summing its taps in a register, and the scalar per-pixel form at the
-/// mirrored ends. The last vector overlaps the one before it and recomputes a few pixels to the
-/// same values.
+/// One row convolved with an odd 1D kernel (mirror edges): a vector of pixels at a time where the
+/// whole window lies inside the row, each lane summing its taps in a register, and the scalar
+/// per-pixel form at the mirrored ends. The last vector overlaps the one before it and recomputes a
+/// few pixels to the same values.
 #[derive(Debug)]
-struct ConvolveRow<'a> {
-    input: &'a [f32],
-    output: &'a mut [f32],
-    kernel: &'a [f32],
+pub(super) struct ConvolveRow<'a> {
+    pub(super) input: &'a [f32],
+    pub(super) output: &'a mut [f32],
+    pub(super) kernel: &'a [f32],
 }
 
 impl Kernel for ConvolveRow<'_> {
@@ -185,40 +167,16 @@ impl Kernel for ConvolveRow<'_> {
     }
 }
 
-/// Column (vertical) convolution over the whole image. Each output row depends on input rows
-/// `[y-radius, y+radius]` (mirror edges), so rows are independent and computed in parallel across
-/// rayon workers — one row per chunk, vectors across the columns within a row.
-pub(super) fn convolve_cols_direct(
-    input: &[f32],
-    output: &mut [f32],
-    size: Size2us,
-    kernel: &[f32],
-) {
-    assert_eq!(input.len(), size.pixel_count(), "the input fills the image");
-    output
-        .par_chunks_mut(size.width)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            ConvolveColsRow {
-                input,
-                out_row,
-                size,
-                y,
-                kernel,
-            }
-            .dispatch();
-        });
-}
-
-/// One output row `y` of the column pass, tap by tap across the whole row: the column taps are
-/// whole rows, mirrored at the image's top and bottom, so no pixel needs the scalar form.
+/// One output row `y` of the column pass over the image `input` of `size`, tap by tap across the
+/// whole row: the column taps are whole rows, mirrored at the image's top and bottom, so no pixel
+/// needs the scalar form.
 #[derive(Debug)]
-struct ConvolveColsRow<'a> {
-    input: &'a [f32],
-    out_row: &'a mut [f32],
-    size: Size2us,
-    y: usize,
-    kernel: &'a [f32],
+pub(super) struct ConvolveColsRow<'a> {
+    pub(super) input: &'a [f32],
+    pub(super) out_row: &'a mut [f32],
+    pub(super) size: Size2us,
+    pub(super) y: usize,
+    pub(super) kernel: &'a [f32],
 }
 
 impl Kernel for ConvolveColsRow<'_> {
@@ -233,6 +191,7 @@ impl Kernel for ConvolveColsRow<'_> {
             y,
             kernel,
         } = self;
+        debug_assert_eq!(input.len(), size.pixel_count(), "the input fills the image");
         debug_assert_eq!(out_row.len(), size.width, "one output row");
         let radius = radius_of(kernel);
         out_row.fill(0.0);
@@ -248,36 +207,17 @@ impl Kernel for ConvolveColsRow<'_> {
     }
 }
 
-/// Convolve one output row `y` with a 2D kernel (mirror edges on both axes), on the widest Isa
-/// this CPU has.
-#[inline]
-pub(super) fn convolve_2d_row(
-    input: &[f32],
-    output_row: &mut [f32],
-    size: Size2us,
-    y: usize,
-    kernel: Kernel2d<'_>,
-) {
-    Convolve2dRow {
-        input,
-        output_row,
-        size,
-        y,
-        kernel,
-    }
-    .dispatch();
-}
-
-/// [`convolve_2d_row`] as a kernel: tap by tap over the pixels whose window lies inside the row,
-/// each tap's source row mirrored at the image's top and bottom, and the scalar per-pixel form for
-/// the pixels whose window crosses the row's ends.
+/// One output row `y` of the 2D convolution of the image `input` of `size` (mirror edges on both
+/// axes): tap by tap over the pixels whose window lies inside the row, each tap's source row
+/// mirrored at the image's top and bottom, and the scalar per-pixel form for the pixels whose
+/// window crosses the row's ends.
 #[derive(Debug)]
-struct Convolve2dRow<'a> {
-    input: &'a [f32],
-    output_row: &'a mut [f32],
-    size: Size2us,
-    y: usize,
-    kernel: Kernel2d<'a>,
+pub(super) struct Convolve2dRow<'a> {
+    pub(super) input: &'a [f32],
+    pub(super) output_row: &'a mut [f32],
+    pub(super) size: Size2us,
+    pub(super) y: usize,
+    pub(super) kernel: Kernel2d<'a>,
 }
 
 impl Kernel for Convolve2dRow<'_> {
@@ -299,10 +239,10 @@ impl Kernel for Convolve2dRow<'_> {
         let (head, rest) = output_row.split_at_mut(interior.start.min(size.width));
         let (inside, tail) = rest.split_at_mut(interior.len());
         for (x, out) in head.iter_mut().enumerate() {
-            *out = convolve_2d_pixel(input, size, x, y, kernel);
+            *out = kernel.convolve_pixel(input, size, Vec2us::new(x, y));
         }
         for (x, out) in (interior.end..).zip(tail) {
-            *out = convolve_2d_pixel(input, size, x, y, kernel);
+            *out = kernel.convolve_pixel(input, size, Vec2us::new(x, y));
         }
         if inside.is_empty() {
             return;
@@ -340,51 +280,50 @@ fn add_weighted<S: Isa>(isa: S, output: &mut [f32], input: &[f32], weight: f32) 
 }
 
 #[cfg(feature = "internals")]
-pub(crate) mod internals {
+mod internals {
     #[cfg(test)]
-    use crate::math::size2us::Size2us;
-    use crate::star_detection::convolution::simd::convolve_pixel_scalar;
+    use crate::math::vec2us::Vec2us;
     #[cfg(test)]
-    use crate::star_detection::convolution::simd::{Kernel2d, convolve_2d_pixel, mirror_index};
+    use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_index};
+    use crate::star_detection::convolution::simd::{ConvolveRow, convolve_pixel_scalar};
 
-    /// The scalar row convolution the kernel is tested and benched against.
-    pub(crate) fn convolve_row_scalar(input: &[f32], output: &mut [f32], kernel: &[f32]) {
-        for (x, out) in output.iter_mut().enumerate() {
-            *out = convolve_pixel_scalar(input, kernel, x);
-        }
-    }
-
-    /// The scalar column pass over one output row, mirrored at the image's top and bottom.
-    #[cfg(test)]
-    pub(crate) fn convolve_cols_row_scalar(
-        input: &[f32],
-        out_row: &mut [f32],
-        size: Size2us,
-        y: usize,
-        kernel: &[f32],
-    ) {
-        let radius = kernel.len() / 2;
-        for (x, out) in out_row.iter_mut().enumerate() {
-            let mut sum = 0.0f32;
-            for (k, &kval) in kernel.iter().enumerate() {
-                let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
-                sum += input[sy * size.width + x] * kval;
+    impl ConvolveRow<'_> {
+        /// The scalar row convolution the kernel is tested and benched against.
+        pub(super) fn run_scalar(self) {
+            for (x, out) in self.output.iter_mut().enumerate() {
+                *out = convolve_pixel_scalar(self.input, self.kernel, x);
             }
-            *out = sum;
         }
     }
 
-    /// The scalar 2D convolution of one output row.
     #[cfg(test)]
-    pub(super) fn convolve_2d_row_scalar(
-        input: &[f32],
-        output_row: &mut [f32],
-        size: Size2us,
-        y: usize,
-        kernel: Kernel2d<'_>,
-    ) {
-        for (x, out) in output_row.iter_mut().enumerate() {
-            *out = convolve_2d_pixel(input, size, x, y, kernel);
+    impl ConvolveColsRow<'_> {
+        /// The scalar column pass over one output row, mirrored at the image's top and bottom.
+        pub(super) fn run_scalar(self) {
+            let radius = self.kernel.len() / 2;
+            for (x, out) in self.out_row.iter_mut().enumerate() {
+                let mut sum = 0.0f32;
+                for (k, &kval) in self.kernel.iter().enumerate() {
+                    let sy = mirror_index(
+                        self.y as isize + k as isize - radius as isize,
+                        self.size.height,
+                    );
+                    sum += self.input[sy * self.size.width + x] * kval;
+                }
+                *out = sum;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    impl Convolve2dRow<'_> {
+        /// The scalar 2D convolution of one output row.
+        pub(super) fn run_scalar(self) {
+            for (x, out) in self.output_row.iter_mut().enumerate() {
+                *out = self
+                    .kernel
+                    .convolve_pixel(self.input, self.size, Vec2us::new(x, self.y));
+            }
         }
     }
 }

@@ -9,7 +9,7 @@ use tokio::io::{
 
 use crate::data::codec;
 use crate::data::codec::Codecs;
-use crate::data::codec::error::CodecFormatError;
+use crate::data::codec::error::{CodecFormatError, FrameError};
 use crate::execution::cache::digest::Digest;
 use crate::graph::func::lambda::OutputDemand;
 use crate::{ConstValue, DynamicValue, TypeId};
@@ -55,262 +55,249 @@ struct BlobHeader {
     descriptors: Vec<OutputDescriptor>,
 }
 
-pub(super) async fn write<W>(
-    writer: &mut W,
-    digest: Digest,
-    outputs: &[DynamicValue],
-    codecs: &Codecs,
-) -> codec::error::Result<()>
+/// A blob being written: the stream, the digest it is stored under, and the
+/// codecs its custom values encode with.
+#[derive(Debug)]
+pub(super) struct BlobWriter<'a, W> {
+    pub(super) writer: &'a mut W,
+    pub(super) digest: Digest,
+    pub(super) codecs: &'a Codecs,
+}
+
+impl<W> BlobWriter<'_, W>
 where
     W: AsyncWrite + AsyncSeek + Unpin + Send,
 {
-    let output_count =
-        u32::try_from(outputs.len()).expect("a node output count must fit in the cache format");
-    let mut fixed = [0; FIXED_LEN];
-    fixed[..8].copy_from_slice(MAGIC);
-    fixed[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-    fixed[12..44].copy_from_slice(&digest.0);
-    fixed[44..48].copy_from_slice(&output_count.to_le_bytes());
-    writer.write_all(&fixed).await?;
+    pub(super) async fn write(self, outputs: &[DynamicValue]) -> codec::error::Result<()> {
+        let Self {
+            writer,
+            digest,
+            codecs,
+        } = self;
+        let output_count =
+            u32::try_from(outputs.len()).expect("a node output count must fit in the cache format");
+        let mut fixed = [0; FIXED_LEN];
+        fixed[..8].copy_from_slice(MAGIC);
+        fixed[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+        fixed[12..44].copy_from_slice(&digest.0);
+        fixed[44..48].copy_from_slice(&output_count.to_le_bytes());
+        writer.write_all(&fixed).await?;
 
-    for value in outputs {
-        write_descriptor(writer, descriptor_for(value, codecs)?).await?;
-    }
-
-    let body_start = u64::try_from(header_len(outputs.len()))
-        .expect("a cache header length must fit in the file format");
-    debug_assert_eq!(writer.stream_position().await?, body_start);
-
-    for (index, value) in outputs.iter().enumerate() {
-        if matches!(value, DynamicValue::Unbound) {
-            continue;
+        for value in outputs {
+            write_descriptor(writer, descriptor_for(value, codecs)?).await?;
         }
-        let payload_start = writer.stream_position().await?;
-        match value {
-            DynamicValue::Unbound => unreachable!(),
-            DynamicValue::Static(value) => write_static(writer, value).await?,
-            DynamicValue::Custom(value) => {
-                let type_id = value.type_id();
-                let codec = codecs
-                    .get(type_id)
-                    .expect("custom output codec was checked while writing descriptors");
-                codec
-                    .encode(value.as_ref(), writer)
-                    .await
-                    .map_err(|source| CodecFormatError::Encode { type_id, source })?;
+
+        let body_start = u64::try_from(header_len(outputs.len()))
+            .expect("a cache header length must fit in the file format");
+        debug_assert_eq!(writer.stream_position().await?, body_start);
+
+        for (index, value) in outputs.iter().enumerate() {
+            if matches!(value, DynamicValue::Unbound) {
+                continue;
             }
+            let payload_start = writer.stream_position().await?;
+            match value {
+                DynamicValue::Unbound => unreachable!(),
+                DynamicValue::Static(value) => write_static(writer, value).await?,
+                DynamicValue::Custom(value) => {
+                    let type_id = value.type_id();
+                    let codec = codecs
+                        .get(type_id)
+                        .expect("custom output codec was checked while writing descriptors");
+                    codec
+                        .encode(value.as_ref(), writer)
+                        .await
+                        .map_err(|source| CodecFormatError::Encode { type_id, source })?;
+                }
+            }
+            let payload_end = writer.stream_position().await?;
+            let payload_len = payload_end
+                .checked_sub(payload_start)
+                .expect("a streaming cache writer cannot move before its payload start");
+            writer
+                .seek(SeekFrom::Start(descriptor_payload_len_offset(index)))
+                .await?;
+            writer.write_all(&payload_len.to_le_bytes()).await?;
+            writer.seek(SeekFrom::Start(payload_end)).await?;
         }
-        let payload_end = writer.stream_position().await?;
-        let payload_len = payload_end
-            .checked_sub(payload_start)
-            .expect("a streaming cache writer cannot move before its payload start");
-        writer
-            .seek(SeekFrom::Start(descriptor_payload_len_offset(index)))
+
+        let body_end = writer.stream_position().await?;
+        let body_len = body_end
+            .checked_sub(body_start)
+            .expect("a streaming cache writer cannot move before its body start");
+        writer.seek(SeekFrom::Start(BODY_LEN_OFFSET)).await?;
+        writer.write_all(&body_len.to_le_bytes()).await?;
+        writer.seek(SeekFrom::Start(body_end)).await?;
+        Ok(())
+    }
+}
+
+/// A blob being read: the stream, the length its framing must add up to, the
+/// digest it has to be stored under to serve, and the codecs its custom values
+/// decode with.
+#[derive(Debug)]
+pub(super) struct BlobReader<'a, R> {
+    pub(super) reader: &'a mut R,
+    pub(super) file_len: u64,
+    pub(super) digest: Digest,
+    pub(super) codecs: &'a Codecs,
+}
+
+impl<R> BlobReader<'_, R>
+where
+    R: AsyncRead + Unpin + Send,
+{
+    pub(super) async fn covers_outputs(
+        &mut self,
+        outputs: &[DynamicValue],
+    ) -> codec::error::Result<bool> {
+        let prefix = self
+            .scan_header(|index, descriptor| {
+                outputs
+                    .get(index)
+                    .is_some_and(|value| descriptor_covers(descriptor, value))
+            })
             .await?;
-        writer.write_all(&payload_len.to_le_bytes()).await?;
-        writer.seek(SeekFrom::Start(payload_end)).await?;
+        Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
     }
 
-    let body_end = writer.stream_position().await?;
-    let body_len = body_end
-        .checked_sub(body_start)
-        .expect("a streaming cache writer cannot move before its body start");
-    writer.seek(SeekFrom::Start(BODY_LEN_OFFSET)).await?;
-    writer.write_all(&body_len.to_le_bytes()).await?;
-    writer.seek(SeekFrom::Start(body_end)).await?;
-    Ok(())
-}
+    /// Whether this blob can serve `demand` under its digest: [`read`](Self::read) stopped
+    /// after its header check. Reads the fixed prefix plus one descriptor per output and stops,
+    /// so a reuse verdict costs one small sequential read instead of decoding the body. Sharing
+    /// `read_header` is what keeps a probe's verdict and the later read's from drifting apart.
+    pub(super) async fn covers_demand(
+        &mut self,
+        demand: &[OutputDemand],
+    ) -> codec::error::Result<bool> {
+        Ok(self.read_header(demand).await?.is_some())
+    }
 
-pub(super) async fn covers_outputs<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-    outputs: &[DynamicValue],
-    codecs: &Codecs,
-) -> codec::error::Result<bool>
-where
-    R: AsyncRead + Unpin + Send,
-{
-    let prefix = scan_header(reader, file_len, digest, codecs, |index, descriptor| {
-        outputs
-            .get(index)
-            .is_some_and(|value| descriptor_covers(descriptor, value))
-    })
-    .await?;
-    Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
-}
+    pub(super) async fn read(
+        &mut self,
+        demand: &[OutputDemand],
+    ) -> codec::error::Result<Option<Vec<DynamicValue>>> {
+        let Some(header) = self.read_header(demand).await? else {
+            return Ok(None);
+        };
+        let mut values = Vec::with_capacity(header.descriptors.len());
+        for descriptor in header.descriptors {
+            let value = match descriptor.kind {
+                OutputKind::Unbound => DynamicValue::Unbound,
+                OutputKind::Static => {
+                    let mut payload = (&mut *self.reader).take(descriptor.payload_len);
+                    let value = read_static(&mut payload, descriptor.payload_len).await?;
+                    require_consumed(&payload)?;
+                    DynamicValue::Static(value)
+                }
+                OutputKind::Custom { type_id, .. } => {
+                    let codec = self
+                        .codecs
+                        .get(type_id)
+                        .expect("custom codec was validated while reading the header");
+                    let mut payload = (&mut *self.reader).take(descriptor.payload_len);
+                    let value = codec
+                        .decode(&mut payload, descriptor.payload_len)
+                        .await
+                        .map_err(|source| CodecFormatError::Decode { type_id, source })?;
+                    require_consumed(&payload)?;
+                    DynamicValue::Custom(value)
+                }
+            };
+            values.push(value);
+        }
+        Ok(Some(values))
+    }
 
-/// Whether this blob can serve `demand` under `digest`: [`read`] stopped after its header check.
-/// Reads the fixed prefix plus one descriptor per output and stops, so a reuse verdict costs one
-/// small sequential read instead of decoding the body. Sharing `read_header` is what keeps a
-/// probe's verdict and the later read's from drifting apart.
-pub(super) async fn covers_demand<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-    codecs: &Codecs,
-    demand: &[OutputDemand],
-) -> codec::error::Result<bool>
-where
-    R: AsyncRead + Unpin + Send,
-{
-    Ok(read_header(reader, file_len, digest, codecs, demand)
-        .await?
-        .is_some())
-}
+    /// The blob's descriptors, or `None` when it cannot serve `demand` — a different digest, a
+    /// different arity, a codec version the library no longer has, or a demanded output the
+    /// blob left `Unbound`. Undemanded outputs may be missing; that is what makes a narrow
+    /// snapshot reusable by a run that wants less than the one which wrote it.
+    async fn read_header(
+        &mut self,
+        demand: &[OutputDemand],
+    ) -> codec::error::Result<Option<BlobHeader>> {
+        let mut descriptors = Vec::new();
+        let prefix = self
+            .scan_header(|index, descriptor| {
+                let Some(output_demand) = demand.get(index) else {
+                    return false;
+                };
+                if !output_demand.is_skip() && matches!(descriptor.kind, OutputKind::Unbound) {
+                    return false;
+                }
+                descriptors.push(descriptor);
+                true
+            })
+            .await?;
+        Ok(prefix
+            .filter(|prefix| prefix.output_count == demand.len())
+            .map(|_| BlobHeader { descriptors }))
+    }
 
-pub(super) async fn read<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-    codecs: &Codecs,
-    demand: &[OutputDemand],
-) -> codec::error::Result<Option<Vec<DynamicValue>>>
-where
-    R: AsyncRead + Unpin + Send,
-{
-    let Some(header) = read_header(reader, file_len, digest, codecs, demand).await? else {
-        return Ok(None);
-    };
-    let mut values = Vec::with_capacity(header.descriptors.len());
-    for descriptor in header.descriptors {
-        let value = match descriptor.kind {
-            OutputKind::Unbound => DynamicValue::Unbound,
-            OutputKind::Static => {
-                let mut payload = (&mut *reader).take(descriptor.payload_len);
-                let value = read_static(&mut payload, descriptor.payload_len).await?;
-                require_consumed(&payload)?;
-                DynamicValue::Static(value)
-            }
-            OutputKind::Custom { type_id, .. } => {
-                let codec = codecs
+    async fn scan_header(
+        &mut self,
+        mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
+    ) -> codec::error::Result<Option<HeaderPrefix>> {
+        let Some(prefix) = self.read_prefix().await? else {
+            return Ok(None);
+        };
+        let mut payload_sum = 0u64;
+        for index in 0..prefix.output_count {
+            let descriptor = read_descriptor(self.reader).await?;
+            payload_sum = payload_sum
+                .checked_add(descriptor.payload_len)
+                .ok_or(FrameError::PayloadLengthOverflow)?;
+            if let OutputKind::Custom { type_id, version } = descriptor.kind
+                && self
+                    .codecs
                     .get(type_id)
-                    .expect("custom codec was validated while reading the header");
-                let mut payload = (&mut *reader).take(descriptor.payload_len);
-                let value = codec
-                    .decode(&mut payload, descriptor.payload_len)
-                    .await
-                    .map_err(|source| CodecFormatError::Decode { type_id, source })?;
-                require_consumed(&payload)?;
-                DynamicValue::Custom(value)
+                    .is_none_or(|codec| codec.version() != version)
+            {
+                return Ok(None);
             }
-        };
-        values.push(value);
-    }
-    Ok(Some(values))
-}
-
-/// The blob's descriptors, or `None` when it cannot serve `demand` — a different digest, a
-/// different arity, a codec version the library no longer has, or a demanded output the
-/// blob left `Unbound`. Undemanded outputs may be missing; that is what makes a narrow
-/// snapshot reusable by a run that wants less than the one which wrote it.
-async fn read_header<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-    codecs: &Codecs,
-    demand: &[OutputDemand],
-) -> codec::error::Result<Option<BlobHeader>>
-where
-    R: AsyncRead + Unpin + Send,
-{
-    let mut descriptors = Vec::new();
-    let prefix = scan_header(reader, file_len, digest, codecs, |index, descriptor| {
-        let Some(output_demand) = demand.get(index) else {
-            return false;
-        };
-        if !output_demand.is_skip() && matches!(descriptor.kind, OutputKind::Unbound) {
-            return false;
+            if !accept(index, descriptor) {
+                return Ok(None);
+            }
         }
-        descriptors.push(descriptor);
-        true
-    })
-    .await?;
-    Ok(prefix
-        .filter(|prefix| prefix.output_count == demand.len())
-        .map(|_| BlobHeader { descriptors }))
-}
+        if payload_sum != prefix.body_len {
+            return Err(FrameError::BodyLengthMismatch.into());
+        }
+        Ok(Some(prefix))
+    }
 
-async fn scan_header<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-    codecs: &Codecs,
-    mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
-) -> codec::error::Result<Option<HeaderPrefix>>
-where
-    R: AsyncRead + Unpin,
-{
-    let Some(prefix) = read_prefix(reader, file_len, digest).await? else {
-        return Ok(None);
-    };
-    let mut payload_sum = 0u64;
-    for index in 0..prefix.output_count {
-        let descriptor = read_descriptor(reader).await?;
-        payload_sum = payload_sum
-            .checked_add(descriptor.payload_len)
-            .ok_or_else(|| invalid_data("cache payload lengths overflow u64"))?;
-        if let OutputKind::Custom { type_id, version } = descriptor.kind
-            && codecs
-                .get(type_id)
-                .is_none_or(|codec| codec.version() != version)
-        {
+    async fn read_prefix(&mut self) -> codec::error::Result<Option<HeaderPrefix>> {
+        let mut bytes = [0; FIXED_LEN];
+        self.reader.read_exact(&mut bytes).await?;
+        if &bytes[..8] != MAGIC {
+            return Err(FrameError::WrongMagic.into());
+        }
+        if u32::from_le_bytes(bytes[8..12].try_into().unwrap()) != FORMAT_VERSION {
+            return Err(FrameError::UnsupportedVersion.into());
+        }
+        let stored_digest = Digest(bytes[12..44].try_into().unwrap());
+        let output_count = u32::from_le_bytes(bytes[44..48].try_into().unwrap()) as usize;
+        let body_len = u64::from_le_bytes(bytes[48..56].try_into().unwrap());
+        let header_len = checked_header_len(output_count)
+            .and_then(|header_len| u64::try_from(header_len).ok())
+            .ok_or(FrameError::HeaderLengthOverflow)?;
+        let expected_file_len = header_len
+            .checked_add(body_len)
+            .ok_or(FrameError::FileLengthOverflow)?;
+        if expected_file_len != self.file_len {
+            return Err(FrameError::FileLengthMismatch.into());
+        }
+        if stored_digest != self.digest {
             return Ok(None);
         }
-        if !accept(index, descriptor) {
-            return Ok(None);
-        }
+        Ok(Some(HeaderPrefix {
+            output_count,
+            body_len,
+        }))
     }
-    if payload_sum != prefix.body_len {
-        return Err(invalid_data(
-            "cache descriptor lengths do not equal the declared body length",
-        ));
-    }
-    Ok(Some(prefix))
-}
-
-async fn read_prefix<R>(
-    reader: &mut R,
-    file_len: u64,
-    digest: Digest,
-) -> codec::error::Result<Option<HeaderPrefix>>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut bytes = [0; FIXED_LEN];
-    reader.read_exact(&mut bytes).await?;
-    if &bytes[..8] != MAGIC {
-        return Err(invalid_data("cache header has the wrong magic"));
-    }
-    if u32::from_le_bytes(bytes[8..12].try_into().unwrap()) != FORMAT_VERSION {
-        return Err(invalid_data("cache header has an unsupported version"));
-    }
-    let stored_digest = Digest(bytes[12..44].try_into().unwrap());
-    let output_count = u32::from_le_bytes(bytes[44..48].try_into().unwrap()) as usize;
-    let body_len = u64::from_le_bytes(bytes[48..56].try_into().unwrap());
-    let header_len = checked_header_len(output_count)
-        .ok_or_else(|| invalid_data("cache header length overflow"))?;
-    let header_len = u64::try_from(header_len)
-        .map_err(|_| invalid_data("cache header length does not fit in the file format"))?;
-    let expected_file_len = header_len
-        .checked_add(body_len)
-        .ok_or_else(|| invalid_data("cache file length overflow"))?;
-    if expected_file_len != file_len {
-        return Err(invalid_data(
-            "cache header and body lengths do not equal the file length",
-        ));
-    }
-    if stored_digest != digest {
-        return Ok(None);
-    }
-    Ok(Some(HeaderPrefix {
-        output_count,
-        body_len,
-    }))
 }
 
 /// The first custom type among `outputs` that `codecs` cannot encode — the
-/// verdict [`write()`] would reach, answered before anything is written.
+/// verdict [`BlobWriter::write`] would reach, answered before anything is written.
 pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<TypeId> {
     outputs.iter().find_map(|value| match value {
         DynamicValue::Custom(value) if codecs.get(value.type_id()).is_none() => {
@@ -372,7 +359,7 @@ async fn read_descriptor(
     let mut bytes = [0; DESCRIPTOR_LEN];
     reader.read_exact(&mut bytes).await?;
     if bytes[1..4] != [0; 3] {
-        return Err(invalid_data("cache descriptor reserved bytes are not zero"));
+        return Err(FrameError::ReservedBytes.into());
     }
     let type_id_bytes: [u8; 16] = bytes[4..20].try_into().unwrap();
     let version = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
@@ -380,15 +367,13 @@ async fn read_descriptor(
     let kind = match bytes[0] {
         0 => {
             if type_id_bytes != [0; 16] || version != 0 || payload_len != 0 {
-                return Err(invalid_data("unbound cache descriptor carries metadata"));
+                return Err(FrameError::UnboundMetadata.into());
             }
             OutputKind::Unbound
         }
         1 => {
             if type_id_bytes != [0; 16] || version != 0 {
-                return Err(invalid_data(
-                    "static cache descriptor carries codec metadata",
-                ));
+                return Err(FrameError::StaticMetadata.into());
             }
             OutputKind::Static
         }
@@ -396,7 +381,7 @@ async fn read_descriptor(
             type_id: TypeId::from_u128(u128::from_le_bytes(type_id_bytes)),
             version,
         },
-        _ => return Err(invalid_data("cache descriptor has an unknown value tag")),
+        _ => return Err(FrameError::UnknownValueTag.into()),
     };
     Ok(OutputDescriptor { kind, payload_len })
 }
@@ -478,9 +463,7 @@ async fn read_static(
             match read_u8(reader).await? {
                 0 => Ok(ConstValue::Bool(false)),
                 1 => Ok(ConstValue::Bool(true)),
-                _ => Err(CodecFormatError::Frame(
-                    "cached boolean is not encoded as zero or one".into(),
-                )),
+                _ => Err(FrameError::InvalidBool.into()),
             }
         }
         4 => Ok(ConstValue::String(read_string(reader, payload_len).await?)),
@@ -489,9 +472,7 @@ async fn read_static(
             read_strings(reader, payload_len).await?,
         )),
         7 => Ok(ConstValue::Enum(read_string(reader, payload_len).await?)),
-        _ => Err(CodecFormatError::Frame(
-            "cached const value has an unknown variant".into(),
-        )),
+        _ => Err(FrameError::UnknownConstVariant.into()),
     }
 }
 
@@ -503,15 +484,12 @@ async fn read_string(
     let expected_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(byte_len))
-        .ok_or_else(|| CodecFormatError::Frame("cached string length overflow".into()))?;
+        .ok_or(FrameError::StringLengthOverflow)?;
     require_payload_len(payload_len, expected_len)?;
-    let byte_len = usize::try_from(byte_len)
-        .map_err(|_| CodecFormatError::Frame("cached string does not fit in memory".into()))?;
+    let byte_len = usize::try_from(byte_len).map_err(|_| FrameError::StringTooLarge)?;
     let mut bytes = vec![0; byte_len];
     reader.read_exact(&mut bytes).await?;
-    String::from_utf8(bytes).map_err(|error| {
-        CodecFormatError::Frame(format!("cached string is not valid UTF-8: {error}"))
-    })
+    Ok(String::from_utf8(bytes).map_err(FrameError::InvalidUtf8)?)
 }
 
 async fn read_strings(
@@ -522,33 +500,25 @@ async fn read_strings(
     let minimum_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(value_count.checked_mul(8)?))
-        .ok_or_else(|| CodecFormatError::Frame("cached path list length overflow".into()))?;
+        .ok_or(FrameError::PathListLengthOverflow)?;
     if minimum_len > payload_len {
-        return Err(CodecFormatError::Frame(
-            "cached path list count exceeds its payload".into(),
-        ));
+        return Err(FrameError::PathCountExceedsPayload.into());
     }
-    let value_count = usize::try_from(value_count)
-        .map_err(|_| CodecFormatError::Frame("cached path count does not fit in memory".into()))?;
+    let value_count = usize::try_from(value_count).map_err(|_| FrameError::PathCountTooLarge)?;
     let mut expected_len = minimum_len;
     let mut values = Vec::with_capacity(value_count);
     for _ in 0..value_count {
         let byte_len = read_u64(reader).await?;
         expected_len = expected_len
             .checked_add(byte_len)
-            .ok_or_else(|| CodecFormatError::Frame("cached path list length overflow".into()))?;
+            .ok_or(FrameError::PathListLengthOverflow)?;
         if expected_len > payload_len {
-            return Err(CodecFormatError::Frame(
-                "cached path length exceeds its payload".into(),
-            ));
+            return Err(FrameError::PathLengthExceedsPayload.into());
         }
-        let byte_len = usize::try_from(byte_len)
-            .map_err(|_| CodecFormatError::Frame("cached path does not fit in memory".into()))?;
+        let byte_len = usize::try_from(byte_len).map_err(|_| FrameError::PathTooLarge)?;
         let mut bytes = vec![0; byte_len];
         reader.read_exact(&mut bytes).await?;
-        values.push(String::from_utf8(bytes).map_err(|error| {
-            CodecFormatError::Frame(format!("cached path is not valid UTF-8: {error}"))
-        })?);
+        values.push(String::from_utf8(bytes).map_err(FrameError::InvalidUtf8)?);
     }
     require_payload_len(payload_len, expected_len)?;
     Ok(values)
@@ -572,9 +542,7 @@ fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> codec::error::Result<()> 
     if reader.limit() == 0 {
         Ok(())
     } else {
-        Err(CodecFormatError::Frame(
-            "cached payload decoder did not consume its complete region".into(),
-        ))
+        Err(FrameError::PayloadNotConsumed.into())
     }
 }
 
@@ -582,9 +550,7 @@ fn require_payload_len(actual: u64, expected: u64) -> codec::error::Result<()> {
     if actual == expected {
         Ok(())
     } else {
-        Err(CodecFormatError::Frame(format!(
-            "cached static payload has length {actual}, expected {expected}"
-        )))
+        Err(FrameError::PayloadLength { actual, expected }.into())
     }
 }
 
@@ -610,16 +576,14 @@ fn descriptor_payload_len_offset(index: usize) -> u64 {
         + PAYLOAD_LEN_OFFSET
 }
 
-fn invalid_data(message: &'static str) -> CodecFormatError {
-    CodecFormatError::Frame(message.into())
-}
-
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::execution::cache::disk_store::format::FORMAT_VERSION;
+
     /// Rewrite `blob`'s format version to the one before the current: the header a blob from an
     /// earlier build carries, which every read refuses.
     pub(crate) fn age_format(blob: &mut [u8]) {
-        let older = super::FORMAT_VERSION - 1;
+        let older = FORMAT_VERSION - 1;
         blob[8..12].copy_from_slice(&older.to_le_bytes());
     }
 }

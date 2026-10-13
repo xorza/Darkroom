@@ -1,8 +1,7 @@
 //! Frames drizzled onto a finer grid and combined: `DrizzleConfig::drizzle_paths` of linear files.
 
-use common::CancelToken;
 use glam::DVec2;
-use lumos::{DrizzleConfig, DrizzleFrame, ProgressCallback, Transform, WarpTransform};
+use lumos::{DrizzleConfig, DrizzleFrame, ProgressMonitor, Transform, WarpTransform};
 
 use crate::budget::Budget;
 use crate::session::Session;
@@ -40,12 +39,7 @@ fn a_spilled_drizzle_stays_within_its_budget() {
     let ingest = session.ingest(budget);
     let run = session.measure(|| {
         drizzle
-            .drizzle_paths(
-                frames,
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .drizzle_paths(frames, &ingest, ProgressMonitor::unattended())
             .unwrap()
     });
     let report = &run.value.product.report;

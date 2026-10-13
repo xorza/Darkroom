@@ -3,5 +3,5 @@
 //! plain one ([`unique`]).
 
 pub(crate) mod column;
-pub(crate) mod set;
+pub(crate) mod idx_set;
 pub(crate) mod unique;

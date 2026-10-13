@@ -6,12 +6,15 @@ use scenarium::{
     InputPort, Library, Node, NodeId, NodeKind, Subscription, internals,
 };
 
-use super::{DUPLICATE_OFFSET, GraphIntent};
+use crate::core::document::Document;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::{Document, Viewport};
-use crate::core::edit::error::MalformedIntent;
+use crate::core::document::viewport::Viewport;
+use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::graph_intent::{DUPLICATE_OFFSET, GraphIntent};
 use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::core::edit::step::undo_step::UndoStep;
 
@@ -71,18 +74,18 @@ fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphInten
 fn click_raises_unless_shift_deselects() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
     let sel = |ids: &[NodeId]| ids.iter().copied().collect::<BTreeSet<_>>();
-    let click = |shift, selected: BTreeSet<NodeId>, key| {
-        GraphIntent::click(shift, &selected, key).collect::<Vec<_>>()
+    let click = |mode, selected: BTreeSet<NodeId>, key| {
+        GraphIntent::click(mode, &selected, key).collect::<Vec<_>>()
     };
 
     // Plain click on an unselected node: select it, then raise it.
-    let out = click(false, sel(&[]), a);
+    let out = click(ClickMode::Replace, sel(&[]), a);
     assert_eq!(out.len(), 2);
     assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
     assert!(matches!(out[1], GraphIntent::Raise { key } if key == a));
 
     // Plain click on an already-selected node still raises it.
-    let out = click(false, sel(&[a]), a);
+    let out = click(ClickMode::Replace, sel(&[a]), a);
     assert!(
         out.iter()
             .any(|i| matches!(i, GraphIntent::Raise { key } if *key == a)),
@@ -90,7 +93,7 @@ fn click_raises_unless_shift_deselects() {
     );
 
     // Shift-click adding a fresh node to the selection raises it.
-    let out = click(true, sel(&[a]), b);
+    let out = click(ClickMode::Toggle, sel(&[a]), b);
     assert!(
         out.iter()
             .any(|i| matches!(i, GraphIntent::Raise { key } if *key == b)),
@@ -98,7 +101,7 @@ fn click_raises_unless_shift_deselects() {
     );
 
     // Shift-click removing a node does NOT raise it.
-    let out = click(true, sel(&[a, b]), b);
+    let out = click(ClickMode::Toggle, sel(&[a, b]), b);
     assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
     assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
 }
@@ -242,7 +245,7 @@ fn raising_the_frontmost_item_records_no_step() {
 
 /// `a -> b` inside the selection, `c -> b` crossing out of it: the fixture the
 /// two duplicate tests share, so the only thing that differs between them is
-/// the `include_incoming` flag. `b` also carries a Const on input 1, and `a`
+/// their `IncomingWires`. `b` also carries a Const on input 1, and `a`
 /// emits to `b`.
 #[derive(Debug)]
 struct CrossingWire {
@@ -305,7 +308,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&doc, false);
+    let intents = GraphIntent::duplicate(&doc, IncomingWires::Drop);
     let steps = commit_all(&mut doc, &library, intents);
     doc.validate().expect("a duplicate leaves a valid document");
 
@@ -369,9 +372,9 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         .expect("a redone duplicate leaves a valid document");
 }
 
-/// The same selection over the same crossing wire, with `include_incoming`:
+/// The same selection over the same crossing wire, with `IncomingWires::Keep`:
 /// the clone keeps the wire from the producer outside the set — pointing at
-/// the original, since that producer wasn't copied. The flag is the only
+/// the original, since that producer wasn't copied. That is the only
 /// difference from the case above, where the same edge is dropped.
 #[test]
 fn duplicate_keeps_external_producers_on_request() {
@@ -384,7 +387,7 @@ fn duplicate_keeps_external_producers_on_request() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&doc, true);
+    let intents = GraphIntent::duplicate(&doc, IncomingWires::Keep);
     commit_all(&mut doc, &library, intents);
     let b_clone = clone_of(&doc, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
@@ -399,7 +402,7 @@ fn duplicate_keeps_external_producers_on_request() {
 fn duplicate_of_nothing_asks_for_nothing() {
     let mut fixture = DocFixture::default();
     fixture.stub_at(Vec2::ZERO);
-    assert!(GraphIntent::duplicate(&fixture.doc, false).is_empty());
+    assert!(GraphIntent::duplicate(&fixture.doc, IncomingWires::Drop).is_empty());
 }
 
 #[test]
@@ -771,6 +774,41 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     for (what, intent) in cases {
         assert_invalid(&mut doc, &fixture.library, intent, what);
     }
+
+    // The refusal names the field it held to, not just the check.
+    let refused = |intent: GraphIntent, doc: &mut Document| {
+        intent
+            .commit(doc, &fixture.library)
+            .expect_err("a malformed payload is refused")
+    };
+    assert!(matches!(
+        refused(subscribe(live, NodeId::nil(), true), &mut doc),
+        MalformedIntent::NilNodeId {
+            role: Role::SetSubscriptionSubscriber
+        }
+    ));
+    assert!(matches!(
+        refused(drag(&[member(live, nan)], Vec2::ZERO), &mut doc),
+        MalformedIntent::NonFinitePosition {
+            role: Role::MoveSelection,
+            ..
+        }
+    ));
+    assert!(matches!(
+        refused(
+            seeded(vec![(InputPort::new(fresh, 0), Binding::bind(ghost, 0))]),
+            &mut doc
+        ),
+        MalformedIntent::NodeAbsent {
+            role: Role::BindingProducer,
+            node_id,
+        } if node_id == ghost
+    ));
+    assert_eq!(
+        Role::SetInputProducer.to_string(),
+        "SetInput producer",
+        "a role reads as the intent and field it names"
+    );
 }
 
 #[test]

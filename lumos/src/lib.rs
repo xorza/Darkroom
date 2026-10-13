@@ -16,7 +16,7 @@
 //!
 //! What the stages share: RAM and memory-mapped frame storage, the plan that keeps a run inside
 //! its memory, the combined image and the per-pixel planes beside it ([`StackProduct`]), and
-//! progress ([`ProgressCallback`]).
+//! the progress and cancel a caller follows and stops a run by ([`ProgressMonitor`]).
 //!
 //! # Quick Start
 //!
@@ -57,7 +57,6 @@ mod platform;
 mod progress;
 mod registration;
 mod scratch_pool;
-
 mod simd;
 mod stack_product;
 mod star_detection;
@@ -93,14 +92,14 @@ pub use image::preview_image::{PreviewImage, PreviewPixels};
 pub use image::quality_flags::QualityFlags;
 pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use io::PREVIEW_IMAGE_EXTENSIONS;
-pub use io::error::ImageError;
-pub use io::fits::options::{
+pub use io::error::{FitsAllocation, FitsRefusal, ImageError, ScientificRefusal};
+pub use io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+pub use io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
     FitsNullPolicy,
 };
-pub use io::fits::provenance::{
-    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
-};
+pub use io::fits::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+pub use io::fits::lumos_extension::LumosExtension;
 pub use io::load_context::LoadContext;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
@@ -116,8 +115,9 @@ pub use calibration::calibration_set::CalibrationSet;
 pub use calibration::dark_scale::{DarkScale, DarkScaleSource};
 pub use calibration::defect_map::defect_summary::{ColourDefects, DefectSummary};
 pub use calibration::master_cache::{
-    CachedMaster, MasterCache, MasterInputs, MasterRecipe, NoMasterCache, SubtractedFrames,
+    CachedMaster, MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
 };
+pub use calibration::master_recipe::MasterRecipe;
 pub use calibration::master_role::MasterRole;
 
 pub use star_detection::roundness::Roundness;
@@ -141,9 +141,9 @@ pub use star_detection::star_detector::detection_result::{
 
 pub use registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use registration::error::{
-    FailedModel, RansacFailureReason, RegistrationCatalog, RegistrationError,
+    FailedModel, RansacFailureReason, RegistrationCatalog, RegistrationError, StarField,
 };
-pub use registration::ransac::ransac_config::RansacConfig;
+pub use registration::ransac::ransac_config::{RansacConfig, ScaleRange};
 pub use registration::registration_config::{RegistrationConfig, RegistrationMatchingConfig};
 pub use registration::registration_result::{RegistrationResult, StarMatch};
 pub use registration::resample::WarpResult;
@@ -163,17 +163,18 @@ pub use combine::rejection::sigma_bounds::SigmaBounds;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
-pub use combine::stack::StackFrame;
+pub use combine::stack::stack_frame::StackFrame;
 pub use combine::stack_config::{
     Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
 };
-pub use frame::capture_conditions::CaptureCondition;
-pub use frame::frame_quality::FramePlane;
+pub use frame::capture_condition::CaptureCondition;
+pub use frame::frame_plane::FramePlane;
 pub use frame_store::error::{ConditionMismatch, FrameStoreError};
 pub use image::flag_counts::FlagCounts;
 pub use ingest::error::AdmissionError;
 pub use ingest::ingest_config::IngestConfig;
 pub use progress::progress_callback::ProgressCallback;
+pub use progress::progress_monitor::ProgressMonitor;
 pub use progress::stacking_progress::{StackingProgress, StackingStage};
 pub use stack_product::StackProduct;
 pub use stack_product::coverage::Coverage;

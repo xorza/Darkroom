@@ -160,8 +160,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
         .drizzle_images(
             drizzle_frames(images.clone(), &transforms),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product;

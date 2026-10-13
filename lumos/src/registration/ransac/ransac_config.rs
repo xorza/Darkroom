@@ -21,8 +21,22 @@ pub struct RansacConfig {
     /// Maximum absolute rotation in radians, or `None` for any. Default: `None` — a meridian flip
     /// turns the field by 180°, and an alt-az mount turns it through a session.
     pub max_rotation: Option<f64>,
-    /// Accepted uniform-scale range. Default: 0.8 to 1.2.
-    pub scale_range: Option<(f64, f64)>,
+    /// Accepted uniform-scale range, or `None` for any. Default: 0.8 to 1.2.
+    pub scale_range: Option<ScaleRange>,
+}
+
+/// The uniform scales a hypothesis may have, both ends included.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScaleRange {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl ScaleRange {
+    /// Whether `scale` lies outside the range.
+    pub(crate) const fn excludes(self, scale: f64) -> bool {
+        scale < self.min || scale > self.max
+    }
 }
 
 impl Default for RansacConfig {
@@ -35,7 +49,7 @@ impl Default for RansacConfig {
             local_optimization: true,
             lo_iterations: 10,
             max_rotation: None,
-            scale_range: Some((0.8, 1.2)),
+            scale_range: Some(ScaleRange { min: 0.8, max: 1.2 }),
         }
     }
 }
@@ -74,19 +88,19 @@ impl RansacConfig {
                 |value| value > 0.0,
             )?;
         }
-        if let Some((min_scale, max_scale)) = self.scale_range {
+        if let Some(ScaleRange { min, max }) = self.scale_range {
             InvalidConfigField::finite(
                 "ransac scale_range minimum",
                 "finite and positive",
-                min_scale,
+                min,
                 |value| value > 0.0,
             )?;
             InvalidConfigField::check_against(
-                max_scale.is_finite() && max_scale > min_scale,
+                max.is_finite() && max > min,
                 "ransac scale_range maximum",
                 "finite and above the minimum",
-                max_scale,
-                min_scale,
+                max,
+                min,
             )?;
         }
         Ok(())

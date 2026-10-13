@@ -23,7 +23,7 @@ impl DetectorPool {
         config: &StarDetectionConfig,
         max_concurrent: usize,
     ) -> Result<Self, InvalidConfigField> {
-        assert!(max_concurrent > 0, "max_concurrent must be > 0");
+        debug_assert!(max_concurrent > 0, "max_concurrent must be > 0");
         let detectors = (0..max_concurrent)
             .map(|_| StarDetector::from_config(config.clone()))
             .collect::<Result<_, _>>()?;

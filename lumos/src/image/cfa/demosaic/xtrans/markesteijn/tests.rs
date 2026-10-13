@@ -1,7 +1,7 @@
 use crate::image::cfa::demosaic::tiled::TilePlace;
-use crate::image::cfa::demosaic::xtrans::internals::{make_xtrans, test_pattern};
 use crate::image::cfa::demosaic::xtrans::markesteijn::*;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::prelude::*;
 
 const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasses::Three];
@@ -69,7 +69,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
         }),
     ];
     let size = Size2us::new(WIDTH, HEIGHT);
-    let pattern = test_pattern();
+    let pattern = XTRANS_PATTERN;
     for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
         for ((name, scene), expected) in scenes.into_iter().zip(digests) {
             let data: Vec<f32> = (0..size.pixel_count())
@@ -108,7 +108,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
 /// up to 6e-8.
 #[test]
 fn constant_colour_reconstructs_to_rounding_at_every_size() {
-    let pattern = test_pattern();
+    let pattern = XTRANS_PATTERN;
     for side in [12, 24, 25, 37, 130] {
         let size = Size2us::new(side, side);
         for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
@@ -147,11 +147,21 @@ fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
         .collect();
     let zeros = vec![0.0f32; size.pixel_count()];
     for passes in PASSES {
-        let planes = demosaic(&make_xtrans(&ramp, size), passes, &CancelToken::never()).unwrap();
+        let planes = demosaic(
+            &XTransImage::new(&ramp, size, XTRANS_PATTERN),
+            passes,
+            &CancelToken::never(),
+        )
+        .unwrap();
         for (i, &v) in planes.iter().flatten().enumerate() {
             assert!(v.is_finite(), "{passes:?}: {v} at {i}");
         }
-        let planes = demosaic(&make_xtrans(&zeros, size), passes, &CancelToken::never()).unwrap();
+        let planes = demosaic(
+            &XTransImage::new(&zeros, size, XTRANS_PATTERN),
+            passes,
+            &CancelToken::never(),
+        )
+        .unwrap();
         for &v in planes.iter().flatten() {
             assert_eq!(v.to_bits(), 0, "{passes:?}");
         }
@@ -173,7 +183,7 @@ fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
 fn margin_is_the_least_that_reads_only_computed_colours() {
     const POISON: f32 = 1000.0;
     const READ_REACH: usize = 4;
-    let pattern = test_pattern();
+    let pattern = XTRANS_PATTERN;
     let mut rng = TestRng::new(5);
     for passes in PASSES {
         let mut least = 0;
@@ -231,10 +241,10 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
     let samples: Vec<f32> = (0..large.pixel_count())
         .map(|_| 0.1 + 0.8 * rng.next_f32())
         .collect();
-    let rows = *test_pattern().rows();
+    let rows = *XTRANS_PATTERN.rows();
     for passes in PASSES {
         let whole = demosaic(
-            &XTransImage::new(&samples, large, test_pattern()),
+            &XTransImage::new(&samples, large, XTRANS_PATTERN),
             passes,
             &CancelToken::never(),
         )

@@ -5,8 +5,8 @@ use imaginarium::ColorFormat;
 use palantir::internals::ui_harness::UiHarness;
 
 use crate::core::document::internals::DocFixture;
-use crate::core::preview::preview_func;
-use crate::gui::state::preview_store::internals::opaque_image_value;
+use crate::core::preview;
+use crate::gui::state::preview_store;
 
 /// The header line: the fixed head, then the two clauses that come and go
 /// — the capped-texture note and the zoom readout. Both are conditional,
@@ -135,11 +135,11 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
 fn the_frame_that_first_draws_a_viewer_uploads_and_frames_it() {
     let mut h = UiHarness::arena();
     let mut fixture = DocFixture::default();
-    let node = fixture.add(&preview_func(Arc::default()));
+    let node = fixture.add(&preview::func(Arc::default()));
     let mut store = PreviewStore::default();
     // 2×1 (see `opaque_image_value`) — the full texture keeps the source's
     // own dimensions, so the assertion can name them.
-    store.ingest_preview(h.ui(), node, opaque_image_value());
+    store.ingest_preview(h.ui(), node, preview_store::internals::opaque_image_value());
 
     let theme = Theme::default();
     let mut prefs = ViewerPreferences::default();

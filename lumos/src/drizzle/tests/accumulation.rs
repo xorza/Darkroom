@@ -10,7 +10,8 @@ use common::TempDir;
 use super::*;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::ingest::error::AdmissionError;
-use crate::registration::distortion::sip::SipPolynomial;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::registration::distortion::sip::SipModel;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -19,11 +20,8 @@ use crate::registration::distortion::sip::SipPolynomial;
 fn a_flat_frame_at_scale_2_covers_every_cell() {
     let size = Size2us::new(100, 100);
     let product = drizzle_one(
-        size,
         DrizzleConfig::default(),
-        constant_image(size, 0.5),
-        &Transform::identity(),
-        None,
+        &DrizzleFrame::new(constant_image(size, 0.5), warp_of(Transform::identity())),
     );
     assert!(product.image.channel(0).pixels().iter().all(|&p| p == 0.5));
     assert!(weight_plane(&product).pixels().iter().all(|&w| w == 0.25));
@@ -40,8 +38,7 @@ fn drizzle_paths_refuses_before_decoding() {
     .drizzle_paths(
         Vec::<DrizzleFrame<PathBuf>>::new(),
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 
@@ -59,8 +56,7 @@ fn drizzle_paths_refuses_before_decoding() {
             warp_of(Transform::identity()),
         )],
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
 }
@@ -107,8 +103,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
         .drizzle_images(
             drizzle_frames(loaded, &transforms),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product;
@@ -118,8 +113,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
         .drizzle_paths(
             frames(&paths),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product;
@@ -136,12 +130,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     };
     let run_kept = || {
         config
-            .drizzle_paths(
-                frames(&paths),
-                &kept,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .drizzle_paths(frames(&paths), &kept, ProgressMonitor::unattended())
             .unwrap()
             .product
     };
@@ -167,8 +156,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
         config.drizzle_paths(
             frames(&missing),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never()
+            ProgressMonitor::unattended()
         ),
         Err(DrizzleError::ImageLoad(_))
     ));
@@ -176,8 +164,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
         config.drizzle_paths(
             frames(&paths),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            cancelled
+            ProgressMonitor::new(ProgressCallback::default(), cancelled)
         ),
         Err(DrizzleError::Cancelled)
     ));
@@ -192,8 +179,7 @@ fn drizzle_images_empty() {
     .drizzle_images(
         Vec::new(),
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -221,8 +207,7 @@ fn drizzle_admits_each_frame_before_it_deposits() {
     .drizzle_images(
         frames,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap_err();
     assert!(
@@ -261,8 +246,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
     .drizzle_images(
         frames,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        cancel,
+        ProgressMonitor::new(ProgressCallback::default(), cancel),
     );
     assert!(
         matches!(result.unwrap_err(), DrizzleError::Cancelled),
@@ -286,8 +270,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
         .drizzle_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never()
+            ProgressMonitor::unattended()
         )
         .is_ok()
     );
@@ -307,7 +290,11 @@ fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2)
         .iter()
         .map(|&r| transform.apply(r + field(r - center)))
         .collect();
-    let sip = SipPolynomial::fitted_under(&transform, &reference, &target, 3, center);
+    let sip = SipModel {
+        order: 3,
+        origin: center,
+    }
+    .fitted_under(&transform, &reference, &target);
     WarpTransform::with_sip(transform, sip)
 }
 
@@ -336,8 +323,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
         .drizzle_images(
             vec![DrizzleFrame::new(image.clone(), warp.clone())],
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap();
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
@@ -426,8 +412,7 @@ fn drizzle_images_dimension_mismatch() {
     .drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(
         result.unwrap_err(),
@@ -504,8 +489,7 @@ fn weight_and_inverse_variance_maps() {
         .drizzle_images(
             drizzle_frames(images, &transforms),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product;
@@ -545,8 +529,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         .drizzle_images(
             drizzle_frames(vec![image.clone()], &[transform]),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product
@@ -637,8 +620,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
             ],
         ),
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap()
     .product;
@@ -779,8 +761,9 @@ fn band_count_does_not_change_the_result() {
 #[test]
 fn a_band_scan_covers_every_reaching_drop() {
     let image = constant_image(Size2us::new(16, 12), 1.0);
-    let scan = |warp: &WarpTransform, width: usize, output_margin: f64, input_margin: f64| {
-        band_scan(&image, warp, 1.0, 0..4, width, output_margin, input_margin).collect::<Vec<_>>()
+    let scan = |warp: &WarpTransform, width: usize, output: f64, input: f64| {
+        let frame = DrizzleFrame::new(image.clone(), warp.clone());
+        band_scan(&frame, width, DropReach { output, input }).collect::<Vec<_>>()
     };
     let rows = |warp: &WarpTransform, width: usize, output_margin: f64, input_margin: f64| {
         let scanned = scan(warp, width, output_margin, input_margin);
@@ -898,11 +881,8 @@ fn a_null_pixel_deposits_nothing() {
     let mut image = gray_image(size, pixels);
     image.flags = PixelFlags::of_non_finite(size, &[&nulls]);
     let product = drizzle_one(
-        size,
         kernel_config(DrizzleKernel::Square, 1.0, 1.0),
-        image,
-        &Transform::identity(),
-        None,
+        &DrizzleFrame::new(image, warp_of(Transform::identity())),
     );
     for y in 0..size.height {
         for x in 0..size.width {

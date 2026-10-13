@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::{Document, Viewport};
+use crate::core::document::Document;
+use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 

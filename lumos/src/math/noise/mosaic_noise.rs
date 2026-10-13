@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
 use crate::math::noise::difference_noise::DifferenceNoise;
+use crate::math::noise::mosaic_sampling::MosaicSampling;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
-use crate::math::vec2us::Vec2us;
 
 /// The white noise of each colour of the mosaic a frame was demosaiced from, measured before the
 /// interpolation correlated neighbouring pixels: a measurement of the demosaiced frame reads less
@@ -37,9 +37,15 @@ impl MosaicNoise {
     /// `cfa_type`: the larger of the pairs its noise is measured over and the samples its medians
     /// are, which it holds one after the other.
     pub(crate) fn heap_bytes(size: Size2us, cfa_type: &CfaType) -> usize {
-        let medians: usize = sample_counts(size, cfa_type, &|_| false, MAX_STATISTIC_SAMPLES)
-            .iter()
-            .sum();
+        let medians: usize = MosaicSampling {
+            size,
+            cfa_type,
+            excluded: |_| false,
+            per_colour: MAX_STATISTIC_SAMPLES,
+        }
+        .photosite_counts()
+        .iter()
+        .sum();
         DifferenceNoise::heap_bytes(size, cfa_type).max(medians * size_of::<f32>())
     }
 
@@ -58,17 +64,22 @@ impl MosaicNoise {
             3,
             "a mosaic of three colours, not {cfa_type:?}"
         );
+        let sampling = MosaicSampling {
+            size,
+            cfa_type,
+            excluded,
+            per_colour: MAX_STATISTIC_SAMPLES,
+        };
         let (sigma, read_share) = match gain {
             Some(gain) => {
-                let splits =
-                    DifferenceNoise::estimate_split(mosaic, size, cfa_type, &excluded, gain);
+                let splits = DifferenceNoise::estimate_split(mosaic, &sampling, gain);
                 (
                     array::from_fn(|colour| splits[colour].variance.sqrt()),
                     array::from_fn(|colour| splits[colour].read_share),
                 )
             }
             None => (
-                DifferenceNoise::estimate(mosaic, size, cfa_type, &excluded)
+                DifferenceNoise::estimate(mosaic, &sampling)
                     .into_inner()
                     .expect("one σ per colour"),
                 [0.0; 3],
@@ -77,65 +88,27 @@ impl MosaicNoise {
         Self {
             sigma,
             read_share,
-            sky: colour_medians(mosaic, size, cfa_type, excluded, MAX_STATISTIC_SAMPLES),
+            sky: colour_medians(mosaic, &sampling),
             quantization_sigma,
         }
     }
 }
 
-/// The median of each colour of a mosaic, over the rows that keep each colour to at most about
-/// `per_colour` samples, skipping the pixels `excluded` names. A colour with no sample reads 0.
+/// The median of each colour of `mosaic` over the photosites `sampling` takes. A colour with no
+/// sample reads 0.
 fn colour_medians(
     mosaic: &[f32],
-    size: Size2us,
-    cfa_type: &CfaType,
-    excluded: impl Fn(usize) -> bool,
-    per_colour: usize,
+    sampling: &MosaicSampling<'_, impl Fn(usize) -> bool>,
 ) -> [f32; 3] {
-    let mut samples = sample_counts(size, cfa_type, &excluded, per_colour).map(Vec::with_capacity);
-    for_each_sample(size, cfa_type, &excluded, per_colour, |index, colour| {
-        samples[colour].push(mosaic[index]);
-    });
+    let mut samples = sampling.photosite_counts().map(Vec::with_capacity);
+    sampling.for_each_photosite(|index, colour| samples[colour].push(mosaic[index]));
     samples.map(|mut colour| {
         if colour.is_empty() {
             0.0
         } else {
-            median_mut(&mut colour)
+            statistics::median_mut(&mut colour)
         }
     })
-}
-
-/// How many samples of each colour [`colour_medians`] takes under `excluded` and `per_colour`.
-fn sample_counts(
-    size: Size2us,
-    cfa_type: &CfaType,
-    excluded: &impl Fn(usize) -> bool,
-    per_colour: usize,
-) -> [usize; 3] {
-    let mut counts = [0; 3];
-    for_each_sample(size, cfa_type, excluded, per_colour, |_, colour| {
-        counts[colour] += 1;
-    });
-    counts
-}
-
-/// The index and colour of every photosite that `excluded` does not name, in the rows
-/// [`CfaType::sampled_rows`] takes for `per_colour` samples a colour.
-fn for_each_sample(
-    size: Size2us,
-    cfa_type: &CfaType,
-    excluded: &impl Fn(usize) -> bool,
-    per_colour: usize,
-    mut visit: impl FnMut(usize, usize),
-) {
-    for y in cfa_type.sampled_rows(size, per_colour) {
-        for x in 0..size.width {
-            let index = y * size.width + x;
-            if !excluded(index) {
-                visit(index, cfa_type.color_at(Vec2us::new(x, y)));
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -143,7 +116,8 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::math::noise::difference_noise::DifferenceNoise;
-    use crate::math::noise::mosaic_noise::{MosaicNoise, colour_medians, sample_counts};
+    use crate::math::noise::mosaic_noise::{MosaicNoise, colour_medians};
+    use crate::math::noise::mosaic_sampling::MosaicSampling;
     use crate::math::size2us::Size2us;
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
@@ -170,10 +144,13 @@ mod tests {
         let mosaic: Vec<f32> = (0..size.pixel_count())
             .map(|index| levels[rggb.color_at(size.point_of(index))])
             .collect();
-        assert_eq!(
-            sample_counts(size, &rggb, &|_| false, 682),
-            [512, 1024, 512]
-        );
-        assert_eq!(colour_medians(&mosaic, size, &rggb, |_| false, 682), levels);
+        let sampling = MosaicSampling {
+            size,
+            cfa_type: &rggb,
+            excluded: |_| false,
+            per_colour: 682,
+        };
+        assert_eq!(sampling.photosite_counts(), [512, 1024, 512]);
+        assert_eq!(colour_medians(&mosaic, &sampling), levels);
     }
 }

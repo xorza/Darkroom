@@ -8,14 +8,14 @@
 
 mod tier_equivalence;
 
-use crate::combine::stack::StackFrame;
+use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
 use crate::internals::prelude::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 
 const W: usize = 128;
 const H: usize = 128;
@@ -57,7 +57,7 @@ fn frame_set(scene: &Scene, camera: &Camera, n: usize, base_seed: u64) -> FrameS
 fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
     config
-        .stack_images(frames, ProgressCallback::default(), CancelToken::never())
+        .stack_images(frames, ProgressMonitor::unattended())
         .expect("stack")
         .image
 }

@@ -8,7 +8,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use imaginarium::FileFormat;
 use serde::{Deserialize, Serialize};
 
-use crate::io::fits::provenance::FitsTransferProvenance;
+use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;

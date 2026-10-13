@@ -103,6 +103,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
 #[test]
 fn filter_fwhm_outliers_over_every_case() {
     /// One `filter_fwhm_outliers` call and the stars it must leave behind.
+    #[derive(Debug)]
     struct Case {
         name: &'static str,
         /// `(fwhm, flux)` pairs, brightest first.
@@ -264,6 +265,7 @@ fn filter_fwhm_outliers_over_every_case() {
 fn remove_duplicate_stars_over_every_geometry() {
     type Path = fn(&mut Vec<Star>, f32) -> usize;
 
+    #[derive(Debug)]
     struct Case {
         /// `(x, y, flux)` in input order — the order the function actually honours.
         stars: Vec<(f64, f64, f32)>,

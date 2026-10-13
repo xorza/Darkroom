@@ -11,6 +11,7 @@
 use palantir::{Key, Shortcut, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
@@ -56,7 +57,10 @@ pub(crate) fn emit(
     // Ctrl+D drops wires from producers outside the selection; keeping them
     // is the node menu's second Duplicate pick, which has a label to say so.
     if duplicate {
-        out.extend_graph(GraphIntent::duplicate(graph_ctx.document(), false));
+        out.extend_graph(GraphIntent::duplicate(
+            graph_ctx.document(),
+            IncomingWires::Drop,
+        ));
     }
     if delete {
         out.extend_graph(

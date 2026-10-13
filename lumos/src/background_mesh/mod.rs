@@ -11,15 +11,15 @@
 
 pub(crate) mod colour_mesh;
 pub(crate) mod mesh_axis;
+pub(crate) mod mesh_workspace;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
-pub(crate) mod workspace;
 
 use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::tile_stats::{Eligible, TileComponent, TileD2y, TileStats};
-use crate::background_mesh::workspace::TileScratch;
-use crate::bit_buffer2::BitBuffer2;
+use crate::background_mesh::tile_stats::{
+    TileComponent, TileD2y, TileInput, TileScratch, TileStats,
+};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::urect::URect;
@@ -53,9 +53,9 @@ impl BackgroundMesh {
     /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline
     /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
     ///
-    /// Constructed and populated only by `MeshWorkspace`.
+    /// Constructed and populated only by [`MeshWorkspace`](mesh_workspace::MeshWorkspace).
     fn new_uninit(dimensions: Size2us, tile_size: usize) -> Self {
-        assert!(
+        debug_assert!(
             dimensions.width > 0 && dimensions.height > 0 && tile_size > 0,
             "BackgroundMesh needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
             dimensions.width,
@@ -104,37 +104,18 @@ impl BackgroundMesh {
         low..=high
     }
 
-    /// Find the tile index whose center is at or before the given Y position.
+    /// The last tile row whose centre is at or before `pos`, or the first when none is.
     #[inline]
     pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
-        // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
-        let tiles_y = self.stats.height();
-
-        // Binary search for largest tile index with center <= pos
-        let mut lo = 0;
-        let mut hi = tiles_y;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            if self.centers_y[mid] <= pos {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        lo.saturating_sub(1)
+        self.centers_y
+            .partition_point(|&centre| centre <= pos)
+            .saturating_sub(1)
     }
 
     /// Every tile's statistics, a bad tile's taken from its good neighbours (see
     /// [`Self::fill_bad_tiles`]). When the mask leaves no good tile at all, it covers too much to
     /// leave a sky anywhere, and every tile is measured without it.
-    fn fill_tile_stats(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        mask: Option<&BitBuffer2>,
-        eligible: Option<&Eligible<'_>>,
-        sigma_clip_iterations: usize,
-        tile_scratch: &ScratchPool<TileScratch>,
-    ) {
+    fn fill_tile_stats(&mut self, input: &TileInput<'_>, tile_scratch: &ScratchPool<TileScratch>) {
         let tiles_x = self.stats.width();
         let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
         let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
@@ -155,14 +136,7 @@ impl BackgroundMesh {
             .for_each_init(
                 || tile_scratch.acquire(),
                 |scratch, (index, (out, measured))| {
-                    let stats = TileStats::compute(
-                        pixels,
-                        mask,
-                        eligible,
-                        tile_at(index),
-                        sigma_clip_iterations,
-                        scratch,
-                    );
+                    let stats = TileStats::compute(input, tile_at(index), scratch);
                     *measured = stats.is_some();
                     *out = stats.unwrap_or_default();
                 },
@@ -171,6 +145,10 @@ impl BackgroundMesh {
             return;
         }
         if !self.measured.contains(&true) {
+            let unmasked = TileInput {
+                mask: None,
+                ..*input
+            };
             self.stats
                 .pixels_mut()
                 .par_iter_mut()
@@ -180,15 +158,8 @@ impl BackgroundMesh {
                     |scratch, (index, out)| {
                         // An eligibility test that takes no pixel of a tile leaves it nothing to
                         // measure, mask or not.
-                        *out = TileStats::compute(
-                            pixels,
-                            None,
-                            eligible,
-                            tile_at(index),
-                            sigma_clip_iterations,
-                            scratch,
-                        )
-                        .unwrap_or_default();
+                        *out = TileStats::compute(&unmasked, tile_at(index), scratch)
+                            .unwrap_or_default();
                     },
                 );
             return;

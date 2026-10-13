@@ -42,7 +42,7 @@ type ResolveCase = (
 );
 
 #[test]
-fn resolve_matches_claims_each_star_once_by_votes() {
+fn resolve_claims_each_star_once_by_votes() {
     let cases: [ResolveCase; 7] = [
         // No conflicts: all three, 10/10, 8/10, 6/10.
         (
@@ -73,7 +73,7 @@ fn resolve_matches_claims_each_star_once_by_votes() {
         (&[], 1, &[]),
     ];
     for (entries, min_votes, expected) in cases {
-        let matches = resolve_matches(&mut vote_matrix_from_entries(entries), 5, 5, min_votes);
+        let matches = vote_matrix_from_entries(entries).resolve(5, 5, min_votes);
         let resolved: Vec<(usize, usize, f64)> = matches
             .iter()
             .map(|m| (m.indices.reference, m.indices.target, m.confidence))
@@ -91,7 +91,6 @@ fn resolve_matches_claims_each_star_once_by_votes() {
 fn similar_triangles_vote_for_their_vertices() {
     let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
     let reference = triangles_of(&IRREGULAR, 4);
-    let invariant_tree = build_invariant_tree(&reference).unwrap();
     let diagonal: Vec<(usize, usize, usize)> = (0..5).map(|i| (i, i, 6)).collect();
     for (target, check_orientation, expected) in [
         (IRREGULAR, true, diagonal.clone()),
@@ -102,12 +101,7 @@ fn similar_triangles_vote_for_their_vertices() {
             check_orientation,
             ..Default::default()
         };
-        let mut votes = vote_for_correspondences(
-            &triangles_of(&target, 4),
-            &reference,
-            &invariant_tree,
-            &config,
-        );
+        let mut votes = cast_votes(&triangles_of(&target, 4), reference.clone(), &config);
         assert_eq!(
             votes.nonzero_entries(),
             expected,
@@ -129,13 +123,7 @@ fn a_near_isosceles_triangle_votes_in_both_orders() {
     let with_apex = |x: f64| [base[0], base[1], DVec2::new(x, 3.0)];
     let reference = triangles_of(&with_apex(4.99), 3);
     let target = triangles_of(&with_apex(5.01), 3);
-    let invariant_tree = build_invariant_tree(&reference).unwrap();
-    let mut votes = vote_for_correspondences(
-        &target,
-        &reference,
-        &invariant_tree,
-        &TriangleConfig::default(),
-    );
+    let mut votes = cast_votes(&target, reference, &TriangleConfig::default());
     assert_eq!(
         votes.nonzero_entries(),
         vec![(0, 0, 1), (1, 1, 1), (2, 2, 1)]
@@ -156,11 +144,9 @@ fn dissimilar_triangles_do_not_vote() {
         DVec2::new(100.0, 0.0),
         DVec2::new(50.0, 1.0),
     ];
-    let reference = triangles_of(&equilateral, 3);
-    let mut votes = vote_for_correspondences(
+    let mut votes = cast_votes(
         &triangles_of(&thin, 3),
-        &reference,
-        &build_invariant_tree(&reference).unwrap(),
+        triangles_of(&equilateral, 3),
         &TriangleConfig::default(),
     );
     assert!(votes.nonzero_entries().is_empty());

@@ -9,6 +9,7 @@ mod astro;
 mod config_node;
 mod fs_watch;
 mod image;
+mod node_spec;
 mod random;
 
 // Published surface — only what darkroom consumes. Everything else (config

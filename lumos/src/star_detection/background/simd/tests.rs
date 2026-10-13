@@ -1,37 +1,36 @@
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::star_detection::background::simd::internals::interpolate_segment_cubic_scalar;
-use crate::star_detection::background::simd::{
-    InterpolateSegment, SegmentRamp, interpolate_segment_cubic,
-};
+use crate::simd::Kernel;
+use crate::star_detection::background::simd::{InterpolateSegment, SegmentRamp};
 
 #[test]
 #[should_panic(expected = "assertion")]
 fn cubic_segment_simd_mismatched_lengths_panics() {
     // The kernel walks both outputs in lockstep, so a mismatch would leave the longer one's tail
-    // unwritten: rejected in release builds too.
+    // unwritten.
     let mut bg = vec![0.0f32; 8];
     let mut noise = vec![0.0f32; 4];
-    interpolate_segment_cubic(
-        &mut bg,
-        &mut noise,
-        SplineSegment {
+    InterpolateSegment {
+        bg_out: &mut bg,
+        noise_out: &mut noise,
+        bg: SplineSegment {
             f0: 100.0,
             f1: 200.0,
             a: -5.0,
             b: 3.0,
         },
-        SplineSegment {
+        noise: SplineSegment {
             f0: 5.0,
             f1: 10.0,
             a: -0.5,
             b: 0.3,
         },
-        SegmentRamp {
+        ramp: SegmentRamp {
             start: 0.0,
             step: 0.1,
         },
-    );
+    }
+    .dispatch();
 }
 
 /// The absolute terms of `segment.eval(t)`, which bound its rounding error.
@@ -72,7 +71,14 @@ fn cubic_segment_matches_scalar() {
         let mut noise_scalar = vec![0.0f32; width];
         let mut bg_simd = vec![0.0f32; width];
         let mut noise_simd = vec![0.0f32; width];
-        interpolate_segment_cubic_scalar(&mut bg_scalar, &mut noise_scalar, bg, noise, ramp);
+        InterpolateSegment {
+            bg_out: &mut bg_scalar,
+            noise_out: &mut noise_scalar,
+            bg,
+            noise,
+            ramp,
+        }
+        .run_scalar();
         tier.run(InterpolateSegment {
             bg_out: &mut bg_simd,
             noise_out: &mut noise_simd,
@@ -94,26 +100,27 @@ fn cubic_segment_simd_endpoints() {
     let mut noise = vec![0.0f32; 2];
 
     // t=0 for first pixel, t=1 for second pixel
-    interpolate_segment_cubic(
-        &mut bg,
-        &mut noise,
-        SplineSegment {
+    InterpolateSegment {
+        bg_out: &mut bg,
+        noise_out: &mut noise,
+        bg: SplineSegment {
             f0: 100.0,
             f1: 200.0,
             a: -10.0,
             b: 7.0,
         },
-        SplineSegment {
+        noise: SplineSegment {
             f0: 5.0,
             f1: 15.0,
             a: -1.0,
             b: 0.5,
         },
-        SegmentRamp {
+        ramp: SegmentRamp {
             start: 0.0,
             step: 1.0,
         },
-    );
+    }
+    .dispatch();
 
     // f(0) = 1*100 + 0*200 + 0*1*(1*a + 0*b) = 100
     assert!(
@@ -148,26 +155,27 @@ fn cubic_segment_simd_midpoint() {
     let mut noise = vec![0.0f32; 1];
 
     // Expected: (100+200)/2 - 0.375*(-8+16) = 150 - 3 = 147
-    interpolate_segment_cubic(
-        &mut bg,
-        &mut noise,
-        SplineSegment {
+    InterpolateSegment {
+        bg_out: &mut bg,
+        noise_out: &mut noise,
+        bg: SplineSegment {
             f0: 100.0,
             f1: 200.0,
             a: -8.0,
             b: 16.0,
         },
-        SplineSegment {
+        noise: SplineSegment {
             f0: 0.0,
             f1: 0.0,
             a: 0.0,
             b: 0.0,
         },
-        SegmentRamp {
+        ramp: SegmentRamp {
             start: 0.5,
             step: 1.0,
         },
-    );
+    }
+    .dispatch();
 
     assert!(
         (bg[0] - 147.0).abs() < 1e-4,
@@ -189,23 +197,24 @@ fn cubic_segment_simd_linear_when_no_correction() {
         step: 1.0 / 49.0,
     };
 
-    interpolate_segment_cubic(
-        &mut bg,
-        &mut noise,
-        SplineSegment {
+    InterpolateSegment {
+        bg_out: &mut bg,
+        noise_out: &mut noise,
+        bg: SplineSegment {
             f0,
             f1,
             a: 0.0,
             b: 0.0,
         },
-        SplineSegment {
+        noise: SplineSegment {
             f0: 5.0,
             f1: 10.0,
             a: 0.0,
             b: 0.0,
         },
         ramp,
-    );
+    }
+    .dispatch();
 
     for (i, &b) in bg.iter().enumerate() {
         let t = i as f32 * ramp.step;
@@ -234,7 +243,14 @@ fn cubic_segment_simd_extrapolates_past_the_knots() {
         start: -0.5,
         step: 0.2,
     };
-    interpolate_segment_cubic(&mut bg, &mut noise, segment, segment, ramp);
+    InterpolateSegment {
+        bg_out: &mut bg,
+        noise_out: &mut noise,
+        bg: segment,
+        noise: segment,
+        ramp,
+    }
+    .dispatch();
 
     for (i, expected) in [(0, 41.75f32), (9, 231.326)] {
         let bound = 7.0 * f32::EPSILON * eval_magnitude(segment, ramp.t_at(i));

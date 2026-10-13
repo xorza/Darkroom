@@ -33,7 +33,7 @@ impl ColourRaster {
             .map(|row| {
                 (0..period)
                     .filter(|&column| cfa_type.color_at(Vec2us::new(column, row)) == colour)
-                    .map(|column| column as u8)
+                    .map(|column| u8::try_from(column).expect("a column within the period"))
                     .collect()
             })
             .collect();

@@ -3,11 +3,14 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
+use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::scnr::Scnr;
+use crate::image_ops::denoise::Denoise;
+use crate::image_ops::stretch::Stretch;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
-use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
+use crate::math::statistics;
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
@@ -25,9 +28,9 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
         .filter(|&i| i % width != width - 1)
         .map(|i| px[i + 1] - px[i])
         .collect();
-    let median = median_mut(&mut diffs);
+    let median = statistics::median_mut(&mut diffs);
     let mut scratch = Vec::new();
-    mad_to_sigma(mad_with_scratch(&diffs, median, &mut scratch))
+    statistics::mad_to_sigma(statistics::mad_with_scratch(&diffs, median, &mut scratch))
 }
 
 #[test]
@@ -39,7 +42,6 @@ fn denoise_reduces_linear_noise() {
     // Neutralize the background first so denoising runs on color-calibrated linear data.
     NeutralizeBackground.apply(&mut img).unwrap();
 
-    // Measure pixel-scale noise per channel before and after denoising (both in the linear domain).
     let before: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
     Denoise::default().apply(&mut img).unwrap();
     let after: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
@@ -59,7 +61,6 @@ fn denoise_reduces_linear_noise() {
         );
     }
 
-    // Finish the display chain — stretch then clean any residual green — and save the final image.
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     visual::save_linear(&img, "denoise/stacked_light_denoised");

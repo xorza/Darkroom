@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// The mounts of this process's mount namespace, as `proc(5)` lists them in
-/// `/proc/self/mountinfo`. Linux only: elsewhere [`Self::read`] finds none.
+/// `/proc/self/mountinfo`.
 #[derive(Debug, Default)]
 pub(crate) struct MountTable {
     /// In the order the kernel lists them, so a later mount over the same point shadows an earlier.

@@ -13,12 +13,13 @@
 
 use thiserror::Error;
 
-use crate::execution::index::{NodeIdx, OutputAddr};
-use crate::graph::error::GraphValidationError;
-use crate::graph::identity::{FuncId, NodeId};
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
+
+use crate::execution::index::{NodeIdx, OutputAddr};
+use crate::graph::error::GraphValidationError;
+use crate::graph::identity::{FuncId, NodeId};
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -29,7 +30,7 @@ use std::fmt::Formatter;
 #[derive(Debug, Error)]
 #[error("invalid graph: {source}")]
 pub struct CompileError {
-    #[source]
+    #[from]
     pub source: GraphValidationError,
 }
 

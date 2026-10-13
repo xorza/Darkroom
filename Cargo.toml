@@ -23,6 +23,7 @@ common-derive = { path = "common/common-derive" }
 scenarium = { path = "scenarium" }
 lumos = { path = "lumos" }
 lens = { path = "lens" }
+darkroom = { path = "darkroom" }
 palantir = { path = "palantir" }
 imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
@@ -49,6 +50,7 @@ proc-macro2 = { version = "1.0" }
 syn = { version = "3.0", default-features = false, features = [
     "clone-impls",
     "derive",
+    "extra-traits",
     "parsing",
     "printing",
     "proc-macro",

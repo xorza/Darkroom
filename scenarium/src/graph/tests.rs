@@ -12,8 +12,8 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
 use crate::internals;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
-use crate::{ConstValue, DataType, DetachedNode};
-use common::{SerdeFormat, deserialize, serialize};
+use crate::{ConstValue, DataType, DetachedNode, DetachedNodeParts};
+use common::SerdeFormat;
 use std::panic;
 use std::panic::AssertUnwindSafe;
 
@@ -59,8 +59,8 @@ fn cache_mode_round_trips() {
         g.cache("src", mode);
 
         for format in SerdeFormat::ALL {
-            let bytes = serialize(&g.graph, format).unwrap();
-            let back: Graph = deserialize(&bytes, format).unwrap();
+            let bytes = format.serialize(&g.graph).unwrap();
+            let back: Graph = format.deserialize(&bytes).unwrap();
             assert_eq!(
                 back.find_by_name("src").unwrap().cache,
                 mode,
@@ -519,7 +519,12 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     assert_eq!(detached.subscriptions().len(), 1);
 
     let rebuild = |bindings: Vec<BindingEntry>, subscriptions: Vec<Subscription>| {
-        DetachedNode::new(sum, detached.node().clone(), bindings, subscriptions)
+        DetachedNode::new(DetachedNodeParts {
+            node_id: sum,
+            node: detached.node().clone(),
+            bindings,
+            subscriptions,
+        })
     };
     let mut reversed = detached.bindings().to_vec();
     reversed.reverse();
@@ -543,12 +548,12 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let own = detached.subscriptions()[0];
     let refusals = [
         (
-            DetachedNode::new(
-                NodeId::nil(),
-                detached.node().clone(),
-                Vec::new(),
-                Vec::new(),
-            ),
+            DetachedNode::new(DetachedNodeParts {
+                node_id: NodeId::nil(),
+                node: detached.node().clone(),
+                bindings: Vec::new(),
+                subscriptions: Vec::new(),
+            }),
             DetachedNodeError::NilNodeId,
         ),
         (
@@ -576,13 +581,17 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
 
     // Serialized, a record round-trips; deserializing goes through the same
     // refusals, so a record edited into a nil id fails to decode.
-    let bytes = serialize(&detached, SerdeFormat::Bitcode).unwrap();
-    let decoded: DetachedNode = deserialize(&bytes, SerdeFormat::Bitcode).unwrap();
+    let bytes = SerdeFormat::Bitcode.serialize(&detached).unwrap();
+    let decoded: DetachedNode = SerdeFormat::Bitcode.deserialize(&bytes).unwrap();
     assert_eq!(decoded, detached);
-    let text = String::from_utf8(serialize(&detached, SerdeFormat::Ron).unwrap()).unwrap();
+    let text = String::from_utf8(SerdeFormat::Ron.serialize(&detached).unwrap()).unwrap();
     let nil = text.replace(&sum.to_string(), &NodeId::nil().to_string());
     assert_ne!(nil, text, "the id is spelled in the text");
-    assert!(deserialize::<DetachedNode>(nil.as_bytes(), SerdeFormat::Ron).is_err());
+    assert!(
+        SerdeFormat::Ron
+            .deserialize::<DetachedNode>(nil.as_bytes())
+            .is_err()
+    );
 
     g.graph.attach_node(detached.clone());
     assert_eq!(g.graph, before);
@@ -635,8 +644,8 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     let graph = TestGraph::sample().graph;
     for format in SerdeFormat::ALL {
-        let serialized = serialize(&graph, format)?;
-        let deserialized: Graph = deserialize(&serialized, format)?;
+        let serialized = format.serialize(&graph)?;
+        let deserialized: Graph = format.deserialize(&serialized)?;
         assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");
     }
     Ok(())
@@ -651,7 +660,7 @@ fn loading_rejects_a_corrupt_graph() {
     // A mirror of `Graph`'s wire shape. `RawValue` keeps every field's exact text,
     // so the duplicated entry below is the only thing authored. The mirror names
     // every field, so a new one on `Graph` fails its decode, which points here.
-    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct WireGraph {
         nodes: Box<RawValue>,
         bindings: Vec<Box<RawValue>>,
@@ -663,8 +672,9 @@ fn loading_rejects_a_corrupt_graph() {
         InputPort::new(g.id("sum"), 0),
         Binding::bind(NodeId::unique(), 0),
     );
-    let bytes = serialize(&g.graph, SerdeFormat::Bitcode).unwrap();
-    let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode)
+    let bytes = SerdeFormat::Bitcode.serialize(&g.graph).unwrap();
+    let decoded: Graph = SerdeFormat::Bitcode
+        .deserialize(&bytes)
         .expect("a structurally broken graph still decodes; validation is what rejects it");
     let error = decoded
         .validate()
@@ -682,8 +692,8 @@ fn loading_rejects_a_corrupt_graph() {
     nil_key
         .nodes
         .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
-    let bytes = serialize(&nil_key, SerdeFormat::Bitcode).unwrap();
-    let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode).unwrap();
+    let bytes = SerdeFormat::Bitcode.serialize(&nil_key).unwrap();
+    let decoded: Graph = SerdeFormat::Bitcode.deserialize(&bytes).unwrap();
     assert!(matches!(
         decoded.validate(),
         Err(GraphValidationError::NilNodeId)
@@ -695,7 +705,8 @@ fn loading_rejects_a_corrupt_graph() {
     let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
     wire.bindings.push(wire.bindings[0].clone());
     let bytes = ser::to_string(&wire).unwrap().into_bytes();
-    let error = deserialize::<Graph>(&bytes, SerdeFormat::Ron)
+    let error = SerdeFormat::Ron
+        .deserialize::<Graph>(&bytes)
         .expect_err("a duplicate input port cannot decode into the binding map");
     assert!(
         error
@@ -902,8 +913,8 @@ fn a_node_authored_against_other_ports_is_refused_by_name() {
 #[test]
 fn a_signature_round_trips_and_an_older_document_has_none() -> TestResult {
     let node = Node::from(&signed_func());
-    let encoded = serialize(&node, SerdeFormat::Ron)?;
-    let decoded: Node = deserialize(&encoded, SerdeFormat::Ron)?;
+    let encoded = SerdeFormat::Ron.serialize(&node)?;
+    let decoded: Node = SerdeFormat::Ron.deserialize(&encoded)?;
     assert_eq!(decoded, node);
 
     let older: String = String::from_utf8(encoded)?
@@ -912,7 +923,7 @@ fn a_signature_round_trips_and_an_older_document_has_none() -> TestResult {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(!older.contains("signature"), "the older form has no field");
-    let decoded: Node = deserialize(older.as_bytes(), SerdeFormat::Ron)?;
+    let decoded: Node = SerdeFormat::Ron.deserialize(older.as_bytes())?;
     assert_eq!(decoded.signature, None);
     Ok(())
 }

@@ -4,42 +4,10 @@ use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::ops::Add;
-use std::ops::AddAssign;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{ConstValue, TypeId};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RamUsage {
-    pub cpu: usize,
-    pub gpu: usize,
-}
-
-impl RamUsage {
-    pub const fn total(&self) -> usize {
-        self.cpu + self.gpu
-    }
-}
-
-impl Add for RamUsage {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            cpu: self.cpu + rhs.cpu,
-            gpu: self.gpu + rhs.gpu,
-        }
-    }
-}
-
-impl AddAssign for RamUsage {
-    fn add_assign(&mut self, rhs: Self) {
-        self.cpu += rhs.cpu;
-        self.gpu += rhs.gpu;
-    }
-}
+use crate::{ConstValue, RamUsage, TypeId};
 
 pub trait CustomValue: Send + Sync + Display + 'static {
     fn type_id(&self) -> TypeId;

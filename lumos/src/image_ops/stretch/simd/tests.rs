@@ -1,6 +1,5 @@
 //! Every tier against the scalar curve.
 
-use crate::image_ops::stretch::simd::internals::{asinh_color_preserve_scalar, asinh_plane_scalar};
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
@@ -26,8 +25,15 @@ fn asinh_color_preserve_matches_scalar() {
             shape.row(width, 2),
         ];
         let mut simd = scalar.clone();
-        let [r, g, b] = &mut scalar;
-        asinh_color_preserve_scalar(r, g, b, black, curve);
+        let [red, green, blue] = &mut scalar;
+        AsinhColorPreserve {
+            red,
+            green,
+            blue,
+            black,
+            curve,
+        }
+        .run_scalar();
         let [red, green, blue] = &mut simd;
         tier.run(AsinhColorPreserve {
             red,
@@ -129,7 +135,12 @@ fn asinh_plane_matches_scalar() {
     assert_simd_matches_scalar(SWEEP_WIDTHS, 10.0 * f32::EPSILON, |tier, shape, width| {
         let mut scalar = shape.row(width, 0);
         let mut simd = scalar.clone();
-        asinh_plane_scalar(&mut scalar, black, curve);
+        AsinhPlane {
+            plane: &mut scalar,
+            black,
+            curve,
+        }
+        .run_scalar();
         tier.run(AsinhPlane {
             plane: &mut simd,
             black,
@@ -147,12 +158,24 @@ fn a_nan_sample_is_black_on_every_path() {
     let curve = AsinhCurve::new(0.05);
     let black = BlackPoint::new(0.02);
     let mut scalar = [f32::NAN, 0.5];
-    asinh_plane_scalar(&mut scalar, black, curve);
+    AsinhPlane {
+        plane: &mut scalar,
+        black,
+        curve,
+    }
+    .run_scalar();
     assert_eq!(scalar[0], 0.0);
     let mut red = [f32::NAN, 0.3];
     let mut green = [0.2, f32::NAN];
     let mut blue = [0.2, 0.2];
-    asinh_color_preserve_scalar(&mut red, &mut green, &mut blue, black, curve);
+    AsinhColorPreserve {
+        red: &mut red,
+        green: &mut green,
+        blue: &mut blue,
+        black,
+        curve,
+    }
+    .run_scalar();
     assert_eq!([red, green, blue], [[0.0; 2]; 3]);
     for tier in Tier::supported() {
         let mut plane = [f32::NAN, 0.5];

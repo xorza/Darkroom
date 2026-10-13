@@ -1,14 +1,23 @@
 //! Configuration for the registration module.
 
+use std::time::Instant;
+
+use glam::DVec2;
+
 use crate::error::InvalidConfigField;
-use crate::registration;
-use crate::registration::distortion::sip::SipConfig;
-use crate::registration::error::RegistrationError;
-use crate::registration::ransac::ransac_config::RansacConfig;
+use crate::math::statistics::median_mut;
+use crate::registration::distortion::sip::{SipConfig, SipModel};
+use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
+use crate::registration::final_fit::fit_catalogs::FitCatalogs;
+use crate::registration::kd_tree::KdTree;
+use crate::registration::model_search::ModelSearch;
+use crate::registration::point_pairs::PointPairs;
+use crate::registration::ransac::ransac_config::{RansacConfig, ScaleRange};
 use crate::registration::registration_result::RegistrationResult;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::{TransformModel, TransformType};
 use crate::registration::triangle::triangle_config::TriangleConfig;
+use crate::registration::tuning;
 use crate::star_detection::star::Star;
 
 /// Configuration for the star-matching stage.
@@ -190,7 +199,86 @@ impl RegistrationConfig {
         ref_stars: &[Star],
         target_stars: &[Star],
     ) -> Result<RegistrationResult, RegistrationError> {
-        registration::register(ref_stars, target_stars, self)
+        self.validate()?;
+        validate_catalog(ref_stars, RegistrationCatalog::Reference)?;
+        validate_catalog(target_stars, RegistrationCatalog::Target)?;
+        let start = Instant::now();
+
+        // The gate is keyed to the transform model unless `min_stars` overrides it.
+        let required_stars = self.matching.required_stars(self.transform_type);
+        for stars in [ref_stars, target_stars] {
+            if stars.len() < required_stars {
+                return Err(RegistrationError::InsufficientStars {
+                    found: stars.len(),
+                    required: required_stars,
+                });
+            }
+        }
+
+        let max_sigma = tuning::max_sigma_from_fwhm(median_fwhm(ref_stars, target_stars));
+        let catalogs = FitCatalogs::new(ref_stars, target_stars).ok_or(
+            RegistrationError::InsufficientStars {
+                found: 0,
+                required: required_stars,
+            },
+        )?;
+        let sip = self.sip.as_ref().map(|sip| SipModel {
+            order: sip.order,
+            origin: sip
+                .reference_point
+                .unwrap_or_else(|| bounding_box_centre(ref_stars)),
+        });
+
+        // The brightest `max_stars` of each set, as trees: triangle matching forms its triangles
+        // over both, and RANSAC samples their matches for every model.
+        let brightest = |stars: &[Star]| {
+            KdTree::build(
+                stars
+                    .iter()
+                    .take(self.matching.max_stars)
+                    .map(|s| s.pos)
+                    .collect(),
+            )
+            .expect("the star gates leave at least three stars in each set")
+        };
+        let ref_tree = brightest(ref_stars);
+        let target_tree = brightest(target_stars);
+
+        let t0 = Instant::now();
+        let matches = self
+            .matching
+            .triangle
+            .match_trees(&ref_tree, &target_tree, max_sigma);
+        let triangle_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        tracing::debug!(
+            triangle_ms,
+            num_matches = matches.len(),
+            "Triangle matching complete"
+        );
+
+        if matches.len() < self.matching.min_matches {
+            return Err(RegistrationError::NoMatchingPatterns);
+        }
+
+        let search = ModelSearch {
+            pairs: PointPairs::from_matches(&matches, ref_tree.points(), target_tree.points()),
+            confidences: matches.iter().map(|m| m.confidence).collect(),
+            catalogs: &catalogs,
+            max_sigma,
+            config: self,
+        };
+        let fit = search.fit(self.transform_type, sip)?;
+
+        let result = RegistrationResult::new(fit.warp.transform, fit.warp.sip, fit.matches)
+            .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+        let rms_error = result.rms_error();
+        if rms_error > self.max_rms_error {
+            return Err(RegistrationError::AccuracyTooLow {
+                rms_error,
+                max_allowed: self.max_rms_error,
+            });
+        }
+        Ok(result)
     }
 
     /// Fast configuration: fewer iterations, lower quality, faster.
@@ -283,7 +371,7 @@ impl RegistrationConfig {
         Self {
             ransac: RansacConfig {
                 max_rotation: None,
-                scale_range: Some((0.5, 2.0)),
+                scale_range: Some(ScaleRange { min: 0.5, max: 2.0 }),
                 ..Default::default()
             },
             ..Self::default()
@@ -331,16 +419,56 @@ impl RegistrationConfig {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
-
-    pub(crate) fn warp_params(method: InterpolationMethod) -> WarpParams {
-        WarpParams {
-            method,
-            ..Default::default()
+fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), RegistrationError> {
+    for (index, star) in stars.iter().enumerate() {
+        if !star.pos.x.is_finite() || !star.pos.y.is_finite() {
+            return Err(RegistrationError::InvalidStarPosition {
+                catalog,
+                index,
+                position: star.pos,
+            });
+        }
+        let fields = [
+            (StarField::Fwhm, f64::from(star.fwhm)),
+            (StarField::Flux, f64::from(star.flux)),
+            (StarField::Snr, f64::from(star.snr)),
+            (StarField::Peak, f64::from(star.peak)),
+            (StarField::Sharpness, f64::from(star.sharpness)),
+            (StarField::Eccentricity, f64::from(star.eccentricity)),
+            (StarField::Ground, f64::from(star.roundness.ground)),
+            (StarField::Sround, f64::from(star.roundness.sround)),
+            (StarField::PositionSigma, star.position_sigma),
+        ];
+        if let Some(&(field, value)) = fields.iter().find(|(_, value)| !value.is_finite()) {
+            return Err(RegistrationError::InvalidStarField {
+                catalog,
+                index,
+                field,
+                value,
+            });
         }
     }
+    Ok(())
+}
+
+/// The centre of the stars' bounding box: the SIP origin when none is configured, shared by every
+/// frame registered to the same reference.
+pub(super) fn bounding_box_centre(stars: &[Star]) -> DVec2 {
+    let (low, high) = stars.iter().fold(
+        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+        |(low, high), star| (low.min(star.pos), high.max(star.pos)),
+    );
+    (low + high) / 2.0
+}
+
+/// The median FWHM over both catalogs.
+pub(super) fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
+    let mut fwhms: Vec<f32> = ref_stars
+        .iter()
+        .chain(target_stars)
+        .map(|s| s.fwhm)
+        .collect();
+    f64::from(median_mut(&mut fwhms))
 }
 
 #[cfg(test)]

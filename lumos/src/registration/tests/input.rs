@@ -1,7 +1,11 @@
 //! Registration's handling of the star lists it is handed: too few, degenerate FWHM,
 //! mismatched counts.
 
-use crate::registration::*;
+use crate::internals::prelude::*;
+use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
+use crate::registration::registration_config::{RegistrationConfig, median_fwhm};
+use crate::registration::tuning;
+use crate::star_detection::star::Star;
 
 // Registration reads only `pos` and `fwhm`, so these fixtures set the FWHM under test and
 // leave everything else — position included — at its `Star::at` default.
@@ -85,8 +89,9 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
         };
         stars[3].pos = DVec2::new(f64::NAN, 4.0);
 
-        let error =
-            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
+        let error = RegistrationConfig::default()
+            .register(&ref_stars, &target_stars)
+            .unwrap_err();
         match error {
             RegistrationError::InvalidStarPosition {
                 catalog: actual,
@@ -116,8 +121,9 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
         stars[5].fwhm = f32::INFINITY;
         stars[6].snr = f32::NAN;
 
-        let error =
-            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
+        let error = RegistrationConfig::default()
+            .register(&ref_stars, &target_stars)
+            .unwrap_err();
         match error {
             RegistrationError::InvalidStarField {
                 catalog: actual,
@@ -126,7 +132,7 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
                 value,
             } => {
                 assert_eq!(actual, catalog);
-                assert_eq!((index, field), (5, "FWHM"));
+                assert_eq!((index, field), (5, StarField::Fwhm));
                 assert_eq!(value, f64::INFINITY);
             }
             other => panic!("expected invalid star FWHM, got {other:?}"),
@@ -136,14 +142,15 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = 2.0;
-        let error =
-            register(&ref_stars, &target_stars, &RegistrationConfig::default()).unwrap_err();
+        let error = RegistrationConfig::default()
+            .register(&ref_stars, &target_stars)
+            .unwrap_err();
         assert!(
             matches!(
                 error,
                 RegistrationError::InvalidStarField {
                     index: 6,
-                    field: "SNR",
+                    field: StarField::Snr,
                     ..
                 }
             ),

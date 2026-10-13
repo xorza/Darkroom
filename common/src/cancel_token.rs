@@ -89,7 +89,6 @@ mod tests {
         token.cancel();
         token.reset();
         assert!(!token.is_cancelled(), "a never-token can't be cancelled");
-        // Default is a never-token.
         assert!(!CancelToken::default().is_cancelled());
     }
 }

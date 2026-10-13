@@ -18,10 +18,9 @@ use common::internals;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, IngestConfig,
-    NoMasterCache, ProgressCallback,
+    NoMasterCache, ProgressMonitor,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -59,8 +58,7 @@ fn main() {
             &light_paths,
             &masters,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("calibrate_align_stack failed");
     tracing::info!(
@@ -124,8 +122,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::default(),
         &NoMasterCache,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        &ProgressMonitor::unattended(),
     )
     .expect("failed to build calibration masters");
 

@@ -1,4 +1,4 @@
-//! Results and failures from registered stacking pipelines.
+//! [`AlignStackResult`]: what a registered stack produced, and how each light registered.
 
 use crate::pipeline::frame_registration::FrameRegistration;
 use crate::stack_product::StackProduct;
@@ -44,19 +44,4 @@ pub struct AlignStackResult {
     /// Per-frame star-detection funnel, in input order — every frame the pipeline detected on,
     /// including those registration later dropped, so an index here matches an input index.
     pub detection: Vec<DetectionDiagnostics>,
-}
-
-impl AlignStackResult {
-    pub(crate) const fn from_product(
-        product: StackProduct,
-        reference: usize,
-        frames: Vec<FrameRegistration>,
-        detection: Vec<DetectionDiagnostics>,
-    ) -> Self {
-        Self {
-            product,
-            alignment: AlignmentSummary { reference, frames },
-            detection,
-        }
-    }
 }

@@ -7,7 +7,7 @@
 use glam::Vec2;
 use palantir::{Rect, Size};
 
-use crate::core::document::Viewport;
+use crate::core::document::viewport::Viewport;
 use crate::gui::pane::graph::paint::wire::Wire;
 
 /// World-space slack added around the viewport so paint that extends past

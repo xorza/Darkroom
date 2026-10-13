@@ -54,11 +54,10 @@ pub(crate) mod ring_reference;
 pub(crate) mod sampling;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
-use crate::background_mesh::workspace::MeshWorkspace;
+use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::defect_map::defect_summary::{ColourDefects, DefectSummary};
 use crate::calibration::defect_map::ring_reference::RingReference;
-use crate::calibration::defect_map::sampling::collect_color_residual_samples;
 use crate::calibration::error::CalibrationError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
@@ -195,9 +194,7 @@ impl DefectMap {
     /// dark background exceeds `median + sigma_threshold·σ` — and store them. Calls are chainable
     /// with `?`, in any order.
     ///
-    /// # Panics
-    ///
-    /// If the dark is not the map's sensor size.
+    /// The dark is the map's sensor size.
     ///
     /// # Errors
     ///
@@ -223,9 +220,7 @@ impl DefectMap {
     /// of their same-color local-neighbourhood median — and store them. The local reference makes
     /// this robust to vignetting and dust, where a global cut cannot be.
     ///
-    /// # Panics
-    ///
-    /// If the flat is not the map's sensor size.
+    /// The flat is the map's sensor size.
     ///
     /// # Errors
     ///
@@ -245,7 +240,7 @@ impl DefectMap {
     /// Every master feeding one map corrects the same sensor.
     fn assert_dimensions(&self, master: &CfaImage) {
         let size = master.size();
-        assert!(
+        debug_assert!(
             size == self.dimensions,
             "a {size:?} master cannot feed a defect map for {:?}",
             self.dimensions
@@ -265,9 +260,7 @@ impl DefectMap {
     /// [`QualityFlags::REPAIRED`]: the value left there is the neighbours', and a combine with
     /// other frames at that pixel can leave it out.
     ///
-    /// # Panics
-    ///
-    /// If the image is not the map's sensor size.
+    /// The image is the map's sensor size.
     pub(crate) fn correct(&self, image: &mut CfaImage) {
         self.assert_dimensions(image);
         if self.count == 0 {
@@ -310,11 +303,11 @@ impl DefectMap {
 }
 
 /// Maximum number of samples per color channel for median estimation.
-pub(super) const MAX_MEDIAN_SAMPLES: usize = 100_000;
+const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Broad dark-current model tile size. Each tile has enough Bayer red/blue samples for a robust
 /// median while remaining much smaller than normal sensor-scale gradients and amp glow.
-pub(super) const DARK_BACKGROUND_TILE_SIZE: usize = 64;
+const DARK_BACKGROUND_TILE_SIZE: usize = 64;
 
 /// `1 / Φ⁻¹(0.99)`: the 1st percentile of `N(m, σ)` lies `Φ⁻¹(0.99)·σ` below `m`, so this turns
 /// that distance back into σ.
@@ -481,7 +474,7 @@ fn compute_per_color_residual_stats(
     let mut stats = ArrayVec::new();
 
     for color in 0..num_colors {
-        let mut samples = collect_color_residual_samples(data, cfa_type, color, background);
+        let mut samples = sampling::color_residual_samples(data, cfa_type, color, background);
 
         if samples.is_empty() {
             stats.push(ColorStats {

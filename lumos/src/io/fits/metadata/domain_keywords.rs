@@ -1,5 +1,5 @@
-//! The keywords that carry an image's [`SampleDomain`], quantization σ and saturation record
-//! through a lumos-written FITS file.
+//! The keywords that carry an image's [`SampleDomain`](crate::SampleDomain), quantization σ and
+//! saturation record through a lumos-written FITS file.
 //!
 //! The samples go out already normalized, so the domain they were normalized in is the one set of
 //! facts a reader cannot recover from the data. Every field is written, the origin of an assumed
@@ -9,7 +9,8 @@
 use fits_well::FitsError;
 use fits_well::header::Header;
 
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::sample_domain::{Pedestal, ScaleOrigin};
 
 /// The scale the samples were normalized by. See `SampleScale` in the decoder for how a reader
 /// uses it.
@@ -28,13 +29,10 @@ const ASSUMED: &str = "ASSUMED";
 const REMOVED: &str = "REMOVED";
 const KEPT: &str = "KEPT";
 
-pub(super) fn write(
-    header: &mut Header,
-    domain: Option<&SampleDomain>,
-    quantization_sigma: Option<f32>,
-    saturation_flagged: bool,
-) -> fits_well::Result<()> {
-    if let Some(domain) = domain {
+/// Write what `metadata` says its samples are worth: the domain, the quantization σ, and whether
+/// every saturated pixel is flagged.
+pub(super) fn write(header: &mut Header, metadata: &ImageMetadata) -> fits_well::Result<()> {
+    if let Some(domain) = &metadata.domain {
         header.set(SAMPLE_SCALE, domain.scale)?;
         header.set(
             SCALE_ORIGIN,
@@ -58,7 +56,7 @@ pub(super) fn write(
             header.set("BUNIT", unit.as_str())?;
         }
     }
-    if let Some(sigma) = quantization_sigma {
+    if let Some(sigma) = metadata.quantization_sigma {
         if !sigma.is_finite() || sigma < 0.0 {
             return Err(FitsError::KeywordOutOfRange {
                 name: QUANTIZATION_SIGMA,
@@ -66,7 +64,7 @@ pub(super) fn write(
         }
         header.set(QUANTIZATION_SIGMA, f64::from(sigma))?;
     }
-    if saturation_flagged {
+    if metadata.saturation_flagged {
         header.set(SATURATION_FLAGGED, true)?;
     }
     Ok(())

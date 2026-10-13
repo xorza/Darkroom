@@ -17,18 +17,15 @@ mod simd;
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
+use crate::star_detection::centroid;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
 use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp::StampFit;
-use crate::star_detection::centroid::stamp::StampGrid;
-use crate::star_detection::centroid::star_noise::StarNoise;
-use crate::star_detection::centroid::{
-    MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE, fit_is_plausible, position_sigma,
-};
+use crate::star_detection::centroid::stamp;
+use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
+use crate::star_detection::centroid::{MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE};
 use glam::DVec2;
-use imaginarium::Buffer2;
 use std::ops::RangeInclusive;
 
 /// A converged 2D Gaussian fitted to one star stamp: where its centre landed and its
@@ -55,7 +52,7 @@ pub(super) struct GaussianFit {
 struct Gaussian2D {
     /// The widest σ the fit may take, in px: the stamp radius.
     max_sigma: f64,
-    /// The smallest amplitude the fit may take; see [`StampFit::min_amplitude`].
+    /// The smallest amplitude the fit may take; see `stamp::min_amplitude`.
     min_amplitude: f64,
     /// The midpoint until [`StampFit::fit`] sets the order the profile needs.
     quadrature: PixelQuadrature,
@@ -153,23 +150,22 @@ impl LMModel<7> for Gaussian2D {
 }
 
 impl GaussianFit {
-    /// Fit the elliptical Gaussian to a star stamp via Levenberg-Marquardt, in f64. When `noise` is
-    /// set, each pixel is weighted by `1/σ²` from the
-    /// CCD noise model so the shot-noisy bright core doesn't bias the fit; `None` is a plain
-    /// unweighted fit.
+    /// Fit the elliptical Gaussian to a star stamp via Levenberg-Marquardt, in f64. When
+    /// `inputs.noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
+    /// shot-noisy bright core doesn't bias the fit; `None` is a plain unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain seven
     /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
-    /// ([`fit_is_plausible`]), or an amplitude or shape pinned at one of
+    /// ([`centroid::fit_is_plausible`]), or an amplitude or shape pinned at one of
     /// [`Gaussian2D::constrain`]'s bounds.
-    pub(super) fn new(
-        pixels: &Buffer2<f32>,
-        pos: DVec2,
-        grid: &StampGrid,
-        background: f32,
-        noise: Option<StarNoise>,
-    ) -> Option<Self> {
-        let mut fit = StampFit::prepare::<7>(pixels, pos, grid, background, noise)?;
+    pub(super) fn new(inputs: FitInputs<'_>) -> Option<Self> {
+        let FitInputs {
+            pos,
+            grid,
+            background,
+            ..
+        } = inputs;
+        let mut fit = StampFit::prepare::<7>(inputs)?;
         let amplitude_seed = fit.amplitude_seed()?;
 
         // A round seed; the fit finds the elongation and its angle.
@@ -184,8 +180,7 @@ impl GaussianFit {
             f64::from(background),
         ];
 
-        let mut model =
-            Gaussian2D::new(grid.radius as f64, StampFit::min_amplitude(amplitude_seed));
+        let mut model = Gaussian2D::new(grid.radius as f64, stamp::min_amplitude(amplitude_seed));
         let result = fit.fit(&mut model, grid, initial_params)?;
 
         let [x0, y0, amplitude, a, b, c, _] = result.params;
@@ -197,13 +192,13 @@ impl GaussianFit {
                 .iter()
                 .all(|&k| k > *curvature.start() && k < *curvature.end())
             && b.abs() < b_max;
-        if !shape_free || !fit_is_plausible(result_pos, pos, grid.radius) {
+        if !shape_free || !centroid::fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
         let det = a * c - b * b;
         Some(Self {
             pos: result_pos,
-            position_sigma: position_sigma(&result, fit.stamp.z.len())?,
+            position_sigma: centroid::position_sigma(&result, fit.stamp.z.len())?,
             covariance: Cov2 {
                 xx: c / det,
                 yy: a / det,

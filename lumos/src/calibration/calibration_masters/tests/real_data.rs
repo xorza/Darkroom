@@ -1,7 +1,7 @@
 //! Real-data calibration-master checks over the bundled
 //! `test_data/lumos_data/{Bias,Darks,Flats}` Fuji X-Trans RAF set.
 //!
-//! These drive the master-build path `lens` calls — `stack_cfa_master` per role, then
+//! These drive the master-build path `lens` calls — `MasterStack::run` per role, then
 //! `CalibrationMasters::from_images` and its defect-map derivation — including the libraw RAW
 //! decode of every calibration frame.
 //!
@@ -16,24 +16,24 @@ use std::path::PathBuf;
 use common::CancelToken;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
-use crate::calibration::calibration_masters::stack_cfa_master;
 use crate::calibration::defect_map::DefectMap;
+use crate::calibration::master_stack::MasterStack;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::io::raw;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, MasterRole, StackConfig};
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
-    // `from_files` sizes its in-memory-vs-disk decision from `raw_cfa_frame_info` (a header peek,
+    // `from_files` sizes its in-memory-vs-disk decision from `raw::cfa_frame_info` (a header peek,
     // no decode). That peek must report exactly the dims a full decode produces, or the memory
     // budget would be wrong.
     let paths = real_data::calibration_frames();
     let path = &paths.darks[0];
-    let peeked = raw::raw_cfa_frame_info(path, &LoadContext::default()).expect("peek frame info");
-    let loaded = raw::load_raw_cfa(path, &LoadContext::default()).expect("full decode");
+    let peeked = raw::cfa_frame_info(path, &LoadContext::default()).expect("peek frame info");
+    let loaded = raw::load_cfa(path, &LoadContext::default()).expect("full decode");
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
         (loaded.data.width(), loaded.data.height()),
@@ -218,15 +218,14 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     let full_paths: Vec<_> = paths.darks.iter().collect();
 
     let detect = |dark_paths: &[&PathBuf]| {
-        let dark = stack_cfa_master(
-            dark_paths,
-            MasterRole::Dark,
-            StackConfig::bias_or_dark(),
-            &IngestConfig::default(),
-            None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        let dark = MasterStack {
+            paths: dark_paths,
+            role: MasterRole::Dark,
+            config: StackConfig::bias_or_dark(),
+            ingest: &IngestConfig::default(),
+            subtract: None,
+        }
+        .run(ProgressMonitor::unattended())
         .expect("master-dark stack failed")
         .expect("master dark");
         let size = Size2us::new(dark.data.width(), dark.data.height());

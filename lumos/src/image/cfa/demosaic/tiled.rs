@@ -146,156 +146,163 @@ pub(crate) const fn workspace_bytes(tile_bytes: usize, workers: usize) -> usize 
     workers.saturating_mul(tile_bytes)
 }
 
-/// Demosaic the `size` frame `data`, whose photosite at a point has the colour `color_at` gives,
-/// in tiles placed by `tiling`: each worker makes its tile with `new_tile` and runs `demosaic` on
-/// it at each place, which writes into the planes the part of the place `tiling.margin` or more
-/// inside its edges, and nothing else. The border comes from [`fill_border`].
-///
-/// # Errors
-///
-/// [`Cancelled`] when `cancel` is set, between tiles and before the border.
-pub(crate) fn demosaic<T>(
-    data: &[f32],
-    size: Size2us,
-    color_at: impl Fn(Vec2us) -> usize + Sync,
-    tiling: Tiling,
-    new_tile: impl Fn() -> T + Sync + Send,
-    demosaic: impl Fn(&mut T, TilePlace, OutputPlanes) + Sync,
-    cancel: &CancelToken,
-) -> Result<[Vec<f32>; 3], Cancelled> {
-    let pixels = size.pixel_count();
-    let mut planes = [
-        vec![0.0f32; pixels],
-        vec![0.0f32; pixels],
-        vec![0.0f32; pixels],
-    ];
-    let places = tiling.places(size);
-    let out = OutputPlanes {
-        planes: planes
-            .each_mut()
-            .map(|plane| UnsafeSendPtr::new(plane.as_mut_ptr())),
-    };
-    places
-        .par_iter()
-        .try_for_each_init(new_tile, |tile, &place| {
-            Cancelled::check(cancel)?;
-            demosaic(tile, place, out);
-            Ok(())
-        })?;
-    Cancelled::check(cancel)?;
-    let border = if places.is_empty() {
-        size.width.max(size.height)
-    } else {
-        tiling.border()
-    };
-    let [r, g, b] = &mut planes;
-    fill_border(data, size, color_at, [r, g, b], border);
-    Ok(planes)
+/// A frame's mosaic: its samples row by row, its size, and `color_at`, the colour of the photosite
+/// at a point.
+#[derive(Debug)]
+pub(crate) struct Mosaic<'a, C> {
+    pub(crate) data: &'a [f32],
+    pub(crate) size: Size2us,
+    pub(crate) color_at: C,
 }
 
-/// Fill the pixels within `border` of the frame's edge of `out`, row by row in parallel: the
-/// whole of each row in the band at the top and bottom, and the ends of each row between.
-fn fill_border(
-    data: &[f32],
-    size: Size2us,
-    color_at: impl Fn(Vec2us) -> usize + Sync,
-    [out_r, out_g, out_b]: [&mut [f32]; 3],
-    border: usize,
-) {
-    let Size2us { width, height } = size;
-    out_r
-        .par_chunks_mut(width)
-        .zip(out_g.par_chunks_mut(width))
-        .zip(out_b.par_chunks_mut(width))
-        .enumerate()
-        .for_each(|(y, ((row_r, row_g), row_b))| {
-            let mut fill_span = |span: Range<usize>| {
-                for x in span {
-                    let [r, g, b] = border_pixel(data, size, &color_at, x, y);
-                    row_r[x] = r;
-                    row_g[x] = g;
-                    row_b[x] = b;
-                }
-            };
-            if y < border || y + border >= height || 2 * border >= width {
-                fill_span(0..width);
-            } else {
-                fill_span(0..border);
-                fill_span(width - border..width);
-            }
-        });
+/// How a kernel runs over a frame's tiles: where they lie, how a worker makes the tile it works
+/// in, and `run`, which demosaics one place with it.
+#[derive(Debug)]
+pub(crate) struct TileKernel<N, R> {
+    pub(crate) tiling: Tiling,
+    pub(crate) new_tile: N,
+    pub(crate) run: R,
 }
 
-/// Each colour at `(x, y)` of the border: the pixel's own sample in its colour, and each other
-/// colour from its 3×3 neighbours of that colour, those beside it weighted twice the diagonal ones;
-/// where none of those is of the colour, the mean of its samples in the smallest square window
-/// around the pixel that holds any.
-///
-/// A mean of one colour's samples is the same whatever gain balances that colour, so the border
-/// reads the input as it is, and its native samples are the input's own.
-fn border_pixel(
-    data: &[f32],
-    size: Size2us,
-    color_at: &impl Fn(Vec2us) -> usize,
-    x: usize,
-    y: usize,
-) -> [f32; 3] {
-    let Size2us { width, height } = size;
-    let mut sums = [0.0f32; 3];
-    let mut weights = [0.0f32; 3];
-    for neighbor_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
-        for neighbor_x in x.saturating_sub(1)..=(x + 1).min(width - 1) {
-            let weight = match (neighbor_y.abs_diff(y), neighbor_x.abs_diff(x)) {
-                (0, 0) => 0.0,
-                (0, 1) | (1, 0) => 0.5,
-                (1, 1) => 0.25,
-                _ => unreachable!("a 3×3 neighbourhood"),
-            };
-            let color = color_at(Vec2us::new(neighbor_x, neighbor_y));
-            sums[color] += data[neighbor_y * width + neighbor_x] * weight;
-            weights[color] += weight;
-        }
-    }
-    let native = color_at(Vec2us::new(x, y));
-    let sample = data[y * width + x];
-    let channel = |color: usize| {
-        if color == native {
-            sample
-        } else if weights[color] > 0.0 {
-            sums[color] / weights[color]
+impl<C: Fn(Vec2us) -> usize + Sync> Mosaic<'_, C> {
+    /// Demosaic the frame in tiles placed by `kernel.tiling`: each worker makes its tile with
+    /// `kernel.new_tile` and runs `kernel.run` on it at each place, which writes into the planes
+    /// the part of the place `tiling.margin` or more inside its edges, and nothing else. The border
+    /// comes from [`Self::fill_border`].
+    ///
+    /// # Errors
+    ///
+    /// [`Cancelled`] when `cancel` is set, between tiles and before the border.
+    pub(crate) fn demosaic<T>(
+        &self,
+        kernel: TileKernel<
+            impl Fn() -> T + Sync + Send,
+            impl Fn(&mut T, TilePlace, OutputPlanes) + Sync,
+        >,
+        cancel: &CancelToken,
+    ) -> Result<[Vec<f32>; 3], Cancelled> {
+        let TileKernel {
+            tiling,
+            new_tile,
+            run,
+        } = kernel;
+        let pixels = self.size.pixel_count();
+        let mut planes = [
+            vec![0.0f32; pixels],
+            vec![0.0f32; pixels],
+            vec![0.0f32; pixels],
+        ];
+        let places = tiling.places(self.size);
+        let out = OutputPlanes {
+            planes: planes
+                .each_mut()
+                .map(|plane| UnsafeSendPtr::new(plane.as_mut_ptr())),
+        };
+        places
+            .par_iter()
+            .try_for_each_init(new_tile, |tile, &place| {
+                Cancelled::check(cancel)?;
+                run(tile, place, out);
+                Ok(())
+            })?;
+        Cancelled::check(cancel)?;
+        let border = if places.is_empty() {
+            self.size.width.max(self.size.height)
         } else {
-            nearest_mean(data, size, color_at, x, y, color).unwrap_or(sample)
-        }
-    };
-    [channel(0), channel(1), channel(2)]
-}
+            tiling.border()
+        };
+        let [r, g, b] = &mut planes;
+        self.fill_border([r, g, b], border);
+        Ok(planes)
+    }
 
-/// The mean of `color`'s samples in the smallest square window around `(x, y)` that holds any, for
-/// a border pixel whose 3×3 neighbourhood has none. `None` only when the whole frame has no sample
-/// of `color`, where there is nothing to interpolate from and the caller keeps the pixel's own
-/// sample.
-fn nearest_mean(
-    data: &[f32],
-    size: Size2us,
-    color_at: &impl Fn(Vec2us) -> usize,
-    x: usize,
-    y: usize,
-    color: usize,
-) -> Option<f32> {
-    let Size2us { width, height } = size;
-    (2..width.max(height)).find_map(|radius| {
-        let mut sum = 0.0f32;
-        let mut count = 0usize;
-        for neighbor_y in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-            for neighbor_x in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
-                if color_at(Vec2us::new(neighbor_x, neighbor_y)) == color {
-                    sum += data[neighbor_y * width + neighbor_x];
-                    count += 1;
+    /// Fill the pixels within `border` of the frame's edge of `out`, row by row in parallel: the
+    /// whole of each row in the band at the top and bottom, and the ends of each row between.
+    fn fill_border(&self, [out_r, out_g, out_b]: [&mut [f32]; 3], border: usize) {
+        let Size2us { width, height } = self.size;
+        out_r
+            .par_chunks_mut(width)
+            .zip(out_g.par_chunks_mut(width))
+            .zip(out_b.par_chunks_mut(width))
+            .enumerate()
+            .for_each(|(y, ((row_r, row_g), row_b))| {
+                let mut fill_span = |span: Range<usize>| {
+                    for x in span {
+                        let [r, g, b] = self.border_pixel(Vec2us::new(x, y));
+                        row_r[x] = r;
+                        row_g[x] = g;
+                        row_b[x] = b;
+                    }
+                };
+                if y < border || y + border >= height || 2 * border >= width {
+                    fill_span(0..width);
+                } else {
+                    fill_span(0..border);
+                    fill_span(width - border..width);
                 }
+            });
+    }
+
+    /// Each colour at `at` of the border: the pixel's own sample in its colour, and each other
+    /// colour from its 3×3 neighbours of that colour, those beside it weighted twice the diagonal
+    /// ones; where none of those is of the colour, the mean of its samples in the smallest square
+    /// window around the pixel that holds any.
+    ///
+    /// A mean of one colour's samples is the same whatever gain balances that colour, so the border
+    /// reads the input as it is, and its native samples are the input's own.
+    fn border_pixel(&self, at: Vec2us) -> [f32; 3] {
+        let Size2us { width, height } = self.size;
+        let Vec2us { x, y } = at;
+        let mut sums = [0.0f32; 3];
+        let mut weights = [0.0f32; 3];
+        for neighbor_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+            for neighbor_x in x.saturating_sub(1)..=(x + 1).min(width - 1) {
+                let weight = match (neighbor_y.abs_diff(y), neighbor_x.abs_diff(x)) {
+                    (0, 0) => 0.0,
+                    (0, 1) | (1, 0) => 0.5,
+                    (1, 1) => 0.25,
+                    _ => unreachable!("a 3×3 neighbourhood"),
+                };
+                let color = (self.color_at)(Vec2us::new(neighbor_x, neighbor_y));
+                sums[color] += self.data[neighbor_y * width + neighbor_x] * weight;
+                weights[color] += weight;
             }
         }
-        (count > 0).then(|| sum / count as f32)
-    })
+        let native = (self.color_at)(at);
+        let sample = self.data[y * width + x];
+        let channel = |color: usize| {
+            if color == native {
+                sample
+            } else if weights[color] > 0.0 {
+                sums[color] / weights[color]
+            } else {
+                self.nearest_mean(at, color).unwrap_or(sample)
+            }
+        };
+        [channel(0), channel(1), channel(2)]
+    }
+
+    /// The mean of `color`'s samples in the smallest square window around `at` that holds any, for
+    /// a border pixel whose 3×3 neighbourhood has none. `None` only when the whole frame has no
+    /// sample of `color`, where there is nothing to interpolate from and the caller keeps the
+    /// pixel's own sample.
+    fn nearest_mean(&self, at: Vec2us, color: usize) -> Option<f32> {
+        let Size2us { width, height } = self.size;
+        let Vec2us { x, y } = at;
+        (2..width.max(height)).find_map(|radius| {
+            let mut sum = 0.0f32;
+            let mut count = 0usize;
+            for neighbor_y in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+                for neighbor_x in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+                    if (self.color_at)(Vec2us::new(neighbor_x, neighbor_y)) == color {
+                        sum += self.data[neighbor_y * width + neighbor_x];
+                        count += 1;
+                    }
+                }
+            }
+            (count > 0).then(|| sum / count as f32)
+        })
+    }
 }
 
 #[cfg(test)]

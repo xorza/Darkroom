@@ -11,17 +11,16 @@ mod snapshot;
 
 use std::path::PathBuf;
 
-use crate::calibration::calibration_masters::{
-    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master,
-};
+use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::calibration::calibration_set::CalibrationSet;
-use crate::calibration::master_cache::MASTER_PIN;
+use crate::calibration::master_recipe::MASTER_PIN;
 use crate::calibration::master_role::MasterRole;
-use crate::calibration::master_subtraction::Subtractor;
-use crate::combine::stack::StackFrame;
+use crate::calibration::master_stack::MasterStack;
+use crate::calibration::subtractor::Subtractor;
+use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack_config::{Normalization, StackConfig, Weighting};
 use crate::frame::frame_stats::FrameStats;
-use crate::frame_store::decode_cache::cache_key::DECODE_PINS;
+use crate::frame_store::decode_cache::decode_pins::DECODE_PINS;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -32,9 +31,9 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::io::fits::cfa::save_cfa_fits;
+use crate::io::fits::cfa;
 use crate::io::load_context::LoadContext;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
 use crate::registration::transform::Transform;
@@ -146,7 +145,7 @@ fn decode_snapshot() {
         channels[0].channel(0).pixels().to_vec(),
         CfaType::Bayer(CfaPattern::Rggb),
     );
-    save_cfa_fits(&fits, &mosaic).unwrap();
+    cfa::save(&fits, &mosaic).unwrap();
     let cfa = CfaImage::from_file(&fits, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
     cfa_snapshot(&mut snapshot, &cfa);
@@ -244,7 +243,7 @@ fn master_snapshot() {
             .map(|i| level(i) + sigma * rng.next_gaussian_f32())
             .collect();
         let path = scratch.join(name);
-        save_cfa_fits(&path, &make_cfa(size, pixels, bayer)).unwrap();
+        cfa::save(&path, &make_cfa(size, pixels, bayer)).unwrap();
         path
     };
     let vignette = |i: usize| {
@@ -275,15 +274,14 @@ fn master_snapshot() {
         .collect();
     let ingest = IngestConfig::with_cache_dir(scratch.join("cache"));
     let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
-        stack_cfa_master(
+        MasterStack {
             paths,
             role,
-            role.stack_config(),
-            &ingest,
+            config: role.stack_config(),
+            ingest: &ingest,
             subtract,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        }
+        .run(ProgressMonitor::unattended())
         .unwrap()
         .unwrap()
     };
@@ -415,7 +413,7 @@ fn combine_snapshot() {
         normalization: Normalization::None,
         ..StackConfig::light()
     })
-    .stack_images(frames, ProgressCallback::default(), CancelToken::never())
+    .stack_images(frames, ProgressMonitor::unattended())
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
@@ -464,13 +462,13 @@ fn stretch_snapshot() {
 #[test]
 fn raw_decode_snapshot() {
     use crate::internals::real_data::raw_frames;
-    use crate::io::raw::load_raw_cfa;
+    use crate::io::raw;
 
     if !pinned_host() {
         return;
     }
     let path = &raw_frames("Lights")[0];
-    let cfa = load_raw_cfa(path, &LoadContext::default()).unwrap();
+    let cfa = raw::load_cfa(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
     cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("RAW decode", &snapshot, DECODE_PINS.raw_cfa);

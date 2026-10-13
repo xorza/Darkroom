@@ -16,12 +16,12 @@ use crate::bit_buffer2::BitBuffer2;
 /// half-width at that offset, `⌊√(radius² − dy²)⌋`, on packed 64-bit words. Rows run in parallel
 /// over contiguous memory.
 pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut BitBuffer2) {
-    assert_eq!(mask.size, scratch.size, "size mismatch");
+    debug_assert_eq!(mask.size, scratch.size, "size mismatch");
     if radius == 0 {
         return;
     }
     // The word kernel smears within a 64-bit word, so a single pass covers radius ≤ 63.
-    assert!(radius <= 63, "dilation radius must be <= 63, got {radius}");
+    debug_assert!(radius <= 63, "dilation radius must be <= 63, got {radius}");
 
     let width = mask.size.width;
     let height = mask.size.height;
@@ -58,19 +58,18 @@ pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut Bi
         });
 }
 
-/// Fast horizontal dilation using word-level bit operations (radius <= 63).
+/// Word `word_idx` of `row` smeared `radius` bits either way, its neighbours' bits included
+/// (radius <= 63).
 #[inline]
 fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
     let current = row[word_idx];
     let mut result = current;
 
-    // Dilate within current word using bit smearing
     for shift in 1..=radius {
         result |= current << shift;
         result |= current >> shift;
     }
 
-    // Left word contributes to our low bits
     if word_idx > 0 {
         let prev = row[word_idx - 1];
         if prev != 0 {
@@ -80,7 +79,6 @@ fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
         }
     }
 
-    // Right word contributes to our high bits
     if word_idx + 1 < row.len() {
         let next = row[word_idx + 1];
         if next != 0 {

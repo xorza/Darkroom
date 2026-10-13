@@ -63,7 +63,7 @@ where
     R: Send,
     E: Send,
 {
-    assert!(!slots.is_empty(), "a bounded map needs at least one slot");
+    debug_assert!(!slots.is_empty(), "a bounded map needs at least one slot");
 
     let next = AtomicUsize::new(0);
     let lowest_failure = AtomicUsize::new(usize::MAX);

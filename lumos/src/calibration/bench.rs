@@ -16,7 +16,7 @@ use crate::calibration::master_cache::NoMasterCache;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
@@ -66,8 +66,7 @@ pub(crate) fn integration(c: &mut Criterion) {
                 DEFAULT_SIGMA_THRESHOLD,
                 &ingest,
                 &NoMasterCache,
-                &ProgressCallback::default(),
-                &CancelToken::never(),
+                &ProgressMonitor::unattended(),
             )
             .unwrap()
         });

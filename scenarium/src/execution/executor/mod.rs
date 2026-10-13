@@ -39,7 +39,8 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::resource::error::StampError;
-use crate::execution::cache::runtime::{ReuseOutcome, RuntimeCache};
+use crate::execution::cache::runtime::{Restamp, ReuseOutcome, RuntimeCache};
+use crate::execution::cache::runtime_slot::OutputRead;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
 use crate::execution::schedule::{NodeState, RunSchedule};
@@ -91,9 +92,7 @@ pub(crate) struct Executor {
     outcomes: Column<NodeIdx, NodeOutcome>,
 }
 
-/// Everything one run borrows from the engine. A parameter struct rather than eight
-/// positional arguments, so the call site names each collaborator and a new one doesn't
-/// become another slot to count. `'r` is the reporter's own lifetime — see
+/// Everything one run borrows from the engine. `'r` is the reporter's own lifetime — see
 /// [`ExecutionFrame`].
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
@@ -108,6 +107,16 @@ pub(crate) struct RunRequest<'a, 'r> {
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
     pub(crate) cancel: CancelToken,
+}
+
+/// What [`Executor::collect_outcome`] reduces a run against: the program and
+/// schedule the loop walked, and the RAM each node was left holding once the
+/// engine released what the run left dead.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CollectRequest<'a> {
+    pub(crate) program: &'a CompiledGraph,
+    pub(crate) schedule: &'a RunSchedule,
+    pub(crate) node_ram: &'a Column<NodeIdx, RamUsage>,
 }
 
 #[derive(Default, Debug)]
@@ -219,11 +228,14 @@ impl Executor {
     /// one, and that is the only thing it has to report.
     pub(crate) fn collect_outcome(
         &self,
-        program: &CompiledGraph,
-        schedule: &RunSchedule,
-        node_ram: &Column<NodeIdx, RamUsage>,
+        request: CollectRequest<'_>,
         outcome: &mut ExecutionOutcome,
     ) {
+        let CollectRequest {
+            program,
+            schedule,
+            node_ram,
+        } = request;
         for (node_idx, node_outcome) in self.outcomes.iter_indexed() {
             let status = match node_outcome {
                 // A reuse hit, or a node the cut pruned that still holds a resident value, are
@@ -263,7 +275,7 @@ impl Executor {
                 // The planner may have stopped at this node for want of an input — the one
                 // verdict that isn't the run loop's to give, since a node it never reached
                 // holds no outcome of its own.
-                NodeOutcome::Pending => Self::missing_inputs(program, schedule, node_idx),
+                NodeOutcome::Pending => missing_inputs(program, schedule, node_idx),
             };
             let ram = node_ram[node_idx];
             if status.is_none() && ram.total() == 0 {
@@ -276,33 +288,33 @@ impl Executor {
             });
         }
     }
+}
 
-    /// The unsatisfied input ports of a node the planner verdicted `MissingInputs`, or
-    /// `None` for any other node.
-    ///
-    /// Which ports is recomputed from the schedule's own predicate (the one the planner
-    /// reached its verdict with) rather than stored: only the rare missing node pays for it,
-    /// so it isn't worth a column spanning the program.
-    fn missing_inputs(
-        program: &CompiledGraph,
-        schedule: &RunSchedule,
-        node_idx: NodeIdx,
-    ) -> Option<NodeExecutionStatus> {
-        if !schedule.states[node_idx].missing_required_inputs() {
-            return None;
-        }
-        let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
-            .iter()
-            .enumerate()
-            .filter(|(_, input)| schedule.input_missing(program, input))
-            .map(|(port_idx, _)| port_idx)
-            .collect();
-        debug_assert!(
-            !ports.is_empty(),
-            "a node verdicted `MissingInputs` has at least one unsatisfied port"
-        );
-        Some(NodeExecutionStatus::MissingInputs { ports })
+/// The unsatisfied input ports of a node the planner verdicted `MissingInputs`, or
+/// `None` for any other node.
+///
+/// Which ports is recomputed from the schedule's own predicate (the one the planner
+/// reached its verdict with) rather than stored: only the rare missing node pays for it,
+/// so it isn't worth a column spanning the program.
+fn missing_inputs(
+    program: &CompiledGraph,
+    schedule: &RunSchedule,
+    node_idx: NodeIdx,
+) -> Option<NodeExecutionStatus> {
+    if !schedule.states[node_idx].missing_required_inputs() {
+        return None;
     }
+    let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
+        .iter()
+        .enumerate()
+        .filter(|(_, input)| schedule.input_missing(program, input))
+        .map(|(port_idx, _)| port_idx)
+        .collect();
+    debug_assert!(
+        !ports.is_empty(),
+        "a node verdicted `MissingInputs` has at least one unsatisfied port"
+    );
+    Some(NodeExecutionStatus::MissingInputs { ports })
 }
 
 /// One run's live state: the read-only schedule, the cache and per-invoke scratch it
@@ -418,10 +430,15 @@ impl ExecutionFrame<'_, '_> {
             return true;
         }
         let program = self.program;
-        let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(program, &self.schedule.states, node_idx, demand, cancel)
+            .restamp_and_hydrate(Restamp {
+                program,
+                states: &self.schedule.states,
+                node_idx,
+                demand,
+                cancel: self.ctx.cancel.clone(),
+            })
             .await;
         match hydrated {
             // The run is being torn down, so there is nothing to start here:
@@ -634,11 +651,16 @@ impl ExecutionFrame<'_, '_> {
                 ExecutionBinding::Bind(addr) => {
                     let address = *addr;
                     let output_idx = self.program.output_idx(address);
-                    let take = self.remaining_reads.is_last(output_idx)
-                        && !self.program[address.node_idx].cache.caches_in_ram();
+                    let read = if self.remaining_reads.is_last(output_idx)
+                        && !self.program[address.node_idx].cache.caches_in_ram()
+                    {
+                        OutputRead::Take
+                    } else {
+                        OutputRead::Clone
+                    };
                     let value = self
                         .cache
-                        .read_output_port(self.program, address, take)
+                        .read_output_port(self.program, address, read)
                         .expect("a resolved producer output must be resident when consumed");
                     self.complete_planned_read(address);
                     value

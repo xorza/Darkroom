@@ -28,8 +28,14 @@ fn every_method_on_a_sub_pixel_grid() {
 
         let gaussian =
             SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::gaussian(2.5)).stamp(size, 0.1);
-        let fit = GaussianFit::new(&gaussian, seed, &StampGrid::new(8), 0.1, None)
-            .expect("the Gaussian fit lands");
+        let fit = GaussianFit::new(FitInputs {
+            pixels: &gaussian,
+            pos: seed,
+            grid: &StampGrid::new(8),
+            background: 0.1,
+            noise: None,
+        })
+        .expect("the Gaussian fit lands");
         assert!(
             (fit.pos - truth).length() <= 1e-6,
             "Gaussian at {truth}: {}",
@@ -46,8 +52,17 @@ fn every_method_on_a_sub_pixel_grid() {
         )
         .stamp(size, 0.1);
         let beta = 2.5;
-        let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, beta)
-            .expect("the Moffat fit lands");
+        let fit = MoffatFit::new(
+            FitInputs {
+                pixels: &moffat,
+                pos: seed,
+                grid: &StampGrid::new(8),
+                background: 0.1,
+                noise: None,
+            },
+            beta,
+        )
+        .expect("the Moffat fit lands");
         assert!(
             (fit.pos - truth).length() <= 1e-6,
             "Moffat at {truth}: {}",
@@ -100,7 +115,7 @@ fn moment_metrics_of_gaussian_stars() {
             angle: 0.0,
         };
         let pixels = SyntheticStar::new(at.as_vec2(), 0.8, profile).stamp(size, 0.1);
-        let radius = MeasureGrid::stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
+        let radius = measure_grid::stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
         let star = Measured::flat(&pixels, 0.1, 0.01)
             .compute(at, radius)
             .expect("a star");

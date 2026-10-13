@@ -1,6 +1,9 @@
-use super::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Serialize, serde::Deserialize)]
+use super::*;
+use crate::serde::serde_format::SerdeFormat;
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct TestValue {
     label: String,
     count: u32,
@@ -9,11 +12,11 @@ struct TestValue {
 #[test]
 fn backend_failures_keep_their_typed_variant() {
     assert!(matches!(
-        deserialize::<i64>(b"(", SerdeFormat::Ron).unwrap_err(),
+        SerdeFormat::Ron.deserialize::<i64>(b"(").unwrap_err(),
         DeserializeError::Ron(_)
     ));
     assert!(matches!(
-        deserialize::<i64>(&[], SerdeFormat::Bitcode).unwrap_err(),
+        SerdeFormat::Bitcode.deserialize::<i64>(&[]).unwrap_err(),
         DeserializeError::Bitcode(_)
     ));
 }
@@ -27,19 +30,19 @@ fn every_format_round_trips_and_appends() {
         count: 42,
     };
     for format in SerdeFormat::ALL {
-        let bytes = serialize(&value, format).unwrap();
-        let back: TestValue = deserialize(&bytes, format).unwrap();
+        let bytes = format.serialize(&value).unwrap();
+        let back: TestValue = format.deserialize(&bytes).unwrap();
         assert_eq!(back, value, "{format:?}");
 
         let mut out = b"prefix".to_vec();
-        serialize_into(&value, format, &mut out).unwrap();
+        format.serialize_into(&value, &mut out).unwrap();
         assert_eq!(&out[..6], b"prefix", "{format:?}");
         assert_eq!(&out[6..], bytes, "{format:?}");
 
         let mut trailing = bytes;
         trailing.push(b'x');
         assert!(
-            deserialize::<TestValue>(&trailing, format).is_err(),
+            format.deserialize::<TestValue>(&trailing).is_err(),
             "{format:?} accepted a trailing byte"
         );
     }
@@ -51,7 +54,7 @@ fn ron_is_the_pretty_text() {
         label: "a".to_string(),
         count: 1,
     };
-    let bytes = serialize(&value, SerdeFormat::Ron).unwrap();
+    let bytes = SerdeFormat::Ron.serialize(&value).unwrap();
     assert_eq!(
         String::from_utf8(bytes).unwrap(),
         "(\n    label: \"a\",\n    count: 1,\n)"

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::math::size2us::Size2us;
-use crate::registration::distortion::sip::SipPolynomial;
+use crate::registration::distortion::sip::SipModel;
 use crate::registration::point_normalization::centroid;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformModel;
@@ -96,8 +96,11 @@ fn register_two_lights() {
         .collect();
 
     let origin = centroid(&inlier_ref);
-    let sip =
-        SipPolynomial::fitted_under(&result.transform(), &inlier_ref, &inlier_target, 4, origin);
+    let sip = SipModel { order: 4, origin }.fitted_under(
+        &result.transform(),
+        &inlier_ref,
+        &inlier_target,
+    );
 
     let corrected_residuals =
         sip.corrected_residuals(&inlier_ref, &inlier_target, &result.transform());

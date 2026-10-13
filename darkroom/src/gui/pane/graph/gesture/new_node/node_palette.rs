@@ -10,10 +10,9 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::gesture::new_node;
 use crate::gui::pane::graph::gesture::new_node::palette_rows::{PaletteRow, PaletteRows};
-use crate::gui::pane::graph::gesture::new_node::{
-    SEARCH_ROW_GAP, Search, results_wid, search_field_wid,
-};
+use crate::gui::pane::graph::gesture::new_node::{SEARCH_ROW_GAP, Search};
 
 /// One row of a category's palette list: a library `Func` or a built-in
 /// special node. Collecting them into one type lets every source sort
@@ -79,7 +78,7 @@ impl<'a> NodePalette<'a> {
     fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
         self.graph_ctx
             .library()
-            .funcs()
+            .iter()
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))
     }
@@ -135,7 +134,7 @@ impl NodePalette<'_> {
     ) -> Option<GraphIntent> {
         let mut chosen: Option<GraphIntent> = None;
 
-        let search_id = search_field_wid();
+        let search_id = new_node::search_field_wid();
         TextEdit::new(&mut search.text)
             .id(search_id)
             // The field filters the palette rather than editing a value, so Esc
@@ -158,7 +157,7 @@ impl NodePalette<'_> {
         let library = self.graph_ctx.library();
 
         Scroll::vertical()
-            .id(results_wid())
+            .id(new_node::results_wid())
             .size((Sizing::HUG, Sizing::HUG))
             .max_size((f32::INFINITY, scroll_cap))
             .show(ui, |ui| {

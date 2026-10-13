@@ -72,9 +72,8 @@ impl StarDetector {
         };
         tracing::debug!("Detected {} star candidates", detect_result.regions.len());
 
-        let stars = stages::measure::measure(
+        let stars = frame.measure_stars(
             &detect_result.regions,
-            &frame,
             &self.config.measurement,
             fwhm.value(),
         );

@@ -1,8 +1,12 @@
+//! [`LinearPixels`]: the planes of a [`LinearImage`](crate::image::linear_image::LinearImage).
+
+use std::array;
+use std::slice;
+
+use arrayvec::ArrayVec;
 use imaginarium::{Buffer2, ChannelCount, Image};
 
 use crate::image::image_dimensions::ImageDimensions;
-use std::array;
-use std::slice;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -174,10 +178,10 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
+    pub(crate) fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3> {
         match self {
-            Self::L(plane) => arrayvec::ArrayVec::from_iter([plane]),
-            Self::Rgb(planes) => arrayvec::ArrayVec::from_iter(planes),
+            Self::L(plane) => ArrayVec::from_iter([plane]),
+            Self::Rgb(planes) => ArrayVec::from(planes),
         }
     }
 }

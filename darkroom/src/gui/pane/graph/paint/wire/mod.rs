@@ -19,12 +19,12 @@
 pub(crate) mod glyph_drag;
 
 use glam::Vec2;
-use palantir::widget::{LineCap, Shape};
+use palantir::widget::{CubicBezier, LineCap, Shape};
 use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
-use crate::gui::theme::color::toward;
+use crate::gui::theme::color;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
@@ -121,10 +121,12 @@ impl Wire {
     pub(crate) fn add(&self, ui: &mut Ui, width: f32, paint: impl Into<WirePaint>) {
         let WirePaint { color, ramp } = paint.into();
         let mut shape = Shape::cubic_bezier(
-            self.p0,
-            self.p1,
-            self.p2,
-            self.p3,
+            CubicBezier {
+                p0: self.p0,
+                p1: self.p1,
+                p2: self.p2,
+                p3: self.p3,
+            },
             Stroke::new(color, width),
         )
         .cap(LineCap::Round);
@@ -282,7 +284,7 @@ impl WireEmphasis {
         let hovered = !broken && self.hovered(endpoint_hover);
         WireStroke {
             hovered,
-            width: Self::width(base_width, hovered || broken),
+            width: width(base_width, hovered || broken),
         }
     }
 
@@ -316,18 +318,18 @@ impl WireEmphasis {
         } else if emphasized {
             c
         } else {
-            toward(c, self.canvas_bg, WIRE_REST_DIM)
+            color::toward(c, self.canvas_bg, WIRE_REST_DIM)
         }
     }
+}
 
-    /// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
-    /// too: full width against the faded rest of the set is the alarm.
-    fn width(base: f32, emphasized: bool) -> f32 {
-        if emphasized {
-            base * WIRE_HOVER_WIDTH
-        } else {
-            base
-        }
+/// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
+/// too: full width against the faded rest of the set is the alarm.
+fn width(base: f32, emphasized: bool) -> f32 {
+    if emphasized {
+        base * WIRE_HOVER_WIDTH
+    } else {
+        base
     }
 }
 

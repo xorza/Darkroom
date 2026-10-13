@@ -90,7 +90,7 @@ fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> Option<T>
             file.as_raw_handle(),
             class,
             (&raw mut info).cast::<c_void>(),
-            size_of::<T>() as u32,
+            u32::try_from(size_of::<T>()).expect("a file information struct's size fits u32"),
         )
     };
     (answered != 0).then_some(info)

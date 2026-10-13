@@ -16,10 +16,9 @@ use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
 use crate::gui::widgets::chip::Chip;
-use crate::gui::widgets::support::{
-    dot, filled_rect, frame, play_triangle, play_triangle_at, stroked_rect,
-};
-use crate::gui::widgets::toolbar::{BUTTON_GAP, TOOLBAR_MARGIN, pill};
+use crate::gui::widgets::pill;
+use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
+use crate::gui::widgets::support;
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 fn run_button_wid() -> WidgetId {
@@ -59,7 +58,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         .show(ui, |ui| {
             // Top row: run/cancel + event-loop toggles, side by side on their
             // own chrome pill. Both compile and run the whole document.
-            pill(
+            pill::show(
                 ui,
                 theme,
                 Panel::hstack().id_salt("graph_toolbar_run"),
@@ -112,7 +111,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
-            pill(ui, theme, framing, |ui| {
+            pill::show(ui, theme, framing, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
                     out.extend_graph(pan_zoom::framing_intent(
                         ui,
@@ -147,20 +146,18 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
 
 /// A right-pointing play triangle (run once), optically centered in the box.
 fn draw_play(ui: &mut Ui, s: f32, color: RgbaF32) {
-    play_triangle(ui, s, PLAY_FILL, color);
+    support::play_triangle(ui, s, PLAY_FILL, color);
 }
 
 /// `|>` — a vertical bar then a play triangle (start the event loop).
 fn draw_play_bar(ui: &mut Ui, s: f32, color: RgbaF32) {
-    // The bar.
-    filled_rect(
+    support::filled_rect(
         ui,
         Rect::new(s * 0.28, s * 0.30, s * 0.085, s * 0.40),
         1.0,
         color,
     );
-    // The play triangle, just to its right, as tall as the bar.
-    play_triangle_at(ui, s, Vec2::new(s * 0.58, s * 0.5), 0.40, color);
+    support::play_triangle_at(ui, s, Vec2::new(s * 0.58, s * 0.5), 0.40, color);
 }
 
 /// How much of a toolbar button the play mark spans. Smaller than the node
@@ -172,29 +169,29 @@ const PLAY_FILL: f32 = 0.4;
 fn draw_reset(ui: &mut Ui, s: f32, color: RgbaF32) {
     let d = s * 0.52;
     let o = (s - d) * 0.5;
-    stroked_rect(ui, Rect::new(o, o, d, d), d * 0.5, color, s * 0.06);
-    dot(ui, s * 0.5, s * 0.5, s * 0.075, color);
+    support::stroked_rect(ui, Rect::new(o, o, d, d), d * 0.5, color, s * 0.06);
+    support::dot(ui, s * 0.5, s * 0.5, s * 0.075, color);
 }
 
 /// Show all: a frame enclosing a 2×2 field of dots (fit every node).
 fn draw_show_all(ui: &mut Ui, s: f32, color: RgbaF32) {
-    frame(ui, s, color);
+    support::frame(ui, s, color);
     let r = s * 0.055;
     let near = s * 0.5 - s * 0.11;
     let far = s * 0.5 + s * 0.11;
     for &cy in &[near, far] {
         for &cx in &[near, far] {
-            dot(ui, cx, cy, r, color);
+            support::dot(ui, cx, cy, r, color);
         }
     }
 }
 
 /// Show selected: a frame enclosing one filled square (fit the selection).
 fn draw_show_selected(ui: &mut Ui, s: f32, color: RgbaF32) {
-    frame(ui, s, color);
+    support::frame(ui, s, color);
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
-    filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
+    support::filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
 }
 
 #[cfg(test)]

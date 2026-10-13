@@ -32,16 +32,17 @@ impl HomographyRefinement<'_> {
             .fit(self, start)
             .map(|fit| fit.params)
     }
+}
 
-    fn project(h: &[f64; 8], r: DVec2) -> Projection {
-        let w = h[6] * r.x + h[7] * r.y + 1.0;
-        Projection {
-            point: DVec2::new(
-                (h[0] * r.x + h[1] * r.y + h[2]) / w,
-                (h[3] * r.x + h[4] * r.y + h[5]) / w,
-            ),
-            w,
-        }
+/// `r` through the homography of entries `h`, its last held at 1.
+fn project(h: &[f64; 8], r: DVec2) -> Projection {
+    let w = h[6] * r.x + h[7] * r.y + 1.0;
+    Projection {
+        point: DVec2::new(
+            (h[0] * r.x + h[1] * r.y + h[2]) / w,
+            (h[3] * r.x + h[4] * r.y + h[5]) / w,
+        ),
+        w,
     }
 }
 
@@ -55,7 +56,7 @@ impl LmProblem<8> for HomographyRefinement<'_> {
             chi2: 0.0,
         };
         for ((&r, &t), &weight) in self.reference.iter().zip(self.target).zip(self.weights) {
-            let Projection { point, w } = Self::project(params, r);
+            let Projection { point, w } = project(params, r);
             let residual = t - point;
             let rows = [
                 [
@@ -98,9 +99,7 @@ impl LmProblem<8> for HomographyRefinement<'_> {
             .iter()
             .zip(self.target)
             .zip(self.weights)
-            .map(|((&r, &t), &weight)| {
-                weight * (t - Self::project(params, r).point).length_squared()
-            })
+            .map(|((&r, &t), &weight)| weight * (t - project(params, r).point).length_squared())
             .sum()
     }
 

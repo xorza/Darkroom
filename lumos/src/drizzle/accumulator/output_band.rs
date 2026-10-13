@@ -109,46 +109,29 @@ impl CornerLattice {
 #[derive(Debug)]
 pub(super) struct OutputBand<'a> {
     /// Absolute output rows this band owns.
-    rows: Range<usize>,
+    pub(super) rows: Range<usize>,
     /// Output pixels per row. Every band spans the full output width.
-    width: usize,
-    planes: PlaneSpan<'a>,
+    pub(super) width: usize,
+    pub(super) planes: PlaneSpan<'a>,
     /// Which band this is, and the input pixels every band scans for this frame — this one's, and
     /// the earlier ones', which decide whether a pixel that failed to invert is this band's to
     /// count.
-    index: usize,
-    scans: &'a [BandScan],
+    pub(super) index: usize,
+    pub(super) scans: &'a [BandScan],
+    /// The radial kernels' scratch, which the bands lease from as they run.
+    pub(super) radial: &'a ScratchPool<RadialScratch>,
+    /// The square kernel's corner lattices, which the bands lease from as they run.
+    pub(super) lattice: &'a ScratchPool<CornerLattice>,
 }
-impl<'a> OutputBand<'a> {
-    pub(super) const fn new(
-        rows: Range<usize>,
-        width: usize,
-        planes: PlaneSpan<'a>,
-        index: usize,
-        scans: &'a [BandScan],
-    ) -> Self {
-        Self {
-            rows,
-            width,
-            planes,
-            index,
-            scans,
-        }
-    }
 
+impl OutputBand<'_> {
     /// Scatter one frame into this band, returning how many of the input pixels it is the first to
     /// scan could not be inverted through the warp's SIP correction.
-    pub(super) fn distribute(
-        &mut self,
-        source: &FrameSource<'_>,
-        plan: KernelPlan,
-        radial: &ScratchPool<RadialScratch>,
-        lattice: &ScratchPool<CornerLattice>,
-    ) -> usize {
+    pub(super) fn distribute(&mut self, source: &FrameSource<'_>, plan: KernelPlan) -> usize {
         match plan {
             // Pixfrac 1: every drop's corners are lattice points its neighbours share.
             KernelPlan::Square { half_drop: 0.5 } => {
-                let mut lattice = lattice.acquire();
+                let mut lattice = self.lattice.acquire();
                 debug_assert!(lattice.has_shape(source.width()));
                 self.distribute_square(source, |pixel| {
                     let Vec2us { x, y } = pixel.position;
@@ -169,14 +152,12 @@ impl<'a> OutputBand<'a> {
             KernelPlan::Gaussian {
                 radius,
                 inv_2sigma_sq,
-            } => self.distribute_radial(source, radius, &mut radial.acquire(), |d| {
-                (-d * d * inv_2sigma_sq).exp()
-            }),
+            } => self.distribute_radial(source, radius, |d| (-d * d * inv_2sigma_sq).exp()),
             KernelPlan::Lanczos { radius } => {
                 // The warp's table, within 1.1e-7 of the kernel: two `sin`s and two divisions a
                 // tap, fourteen taps a drop, become two reads and a fused multiply-add.
                 let lut = LANCZOS_ORDER.lut();
-                self.distribute_radial(source, radius, &mut radial.acquire(), |d| {
+                self.distribute_radial(source, radius, |d| {
                     lut.at(d.abs() * LANCZOS_LUT_RESOLUTION as f32)
                 })
             }
@@ -356,9 +337,9 @@ impl<'a> OutputBand<'a> {
         &mut self,
         source: &FrameSource<'_>,
         radius: isize,
-        scratch: &mut RadialScratch,
         kernel: impl Fn(f32) -> f32,
     ) -> usize {
+        let mut scratch = self.radial.acquire();
         let reach = radius as f64;
         self.scan(
             source,
@@ -507,8 +488,9 @@ impl<'a> OutputBand<'a> {
 mod tests {
     use super::*;
     use crate::drizzle::deposit::Deposit;
+    use crate::drizzle::drizzle_frame::DrizzleFrame;
     use crate::internals::prelude::*;
-    use crate::registration::distortion::sip::SipPolynomial;
+    use crate::registration::distortion::sip::SipModel;
     use crate::registration::transform::Transform;
     use crate::registration::transform::warp_transform::WarpTransform;
 
@@ -532,7 +514,11 @@ mod tests {
         };
         let target: Vec<DVec2> = reference.iter().map(|&r| bend(r)).collect();
         let identity = Transform::identity();
-        let sip = SipPolynomial::fitted_under(&identity, &reference, &target, 3, centre);
+        let sip = SipModel {
+            order: 3,
+            origin: centre,
+        }
+        .fitted_under(&identity, &reference, &target);
         let warps = [
             (
                 "homography",
@@ -552,7 +538,8 @@ mod tests {
             _ => false,
         };
         for (name, warp) in warps {
-            let source = FrameSource::new(&image, Deposit::of(&image), &warp, 2.0, None);
+            let frame = DrizzleFrame::new(image.clone(), warp);
+            let source = FrameSource::new(&frame, Deposit::of(&image), 2.0);
             let pixel = |x: usize, y: usize| InputPixel {
                 position: Vec2us::new(x, y),
                 index: y * size.width + x,

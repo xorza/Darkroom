@@ -23,7 +23,7 @@ use crate::graph::node::Node;
 /// construction: [`new`](Self::new) checks and orders a record from outside,
 /// deserializing goes through it, and a graph builds one from its own tables.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "DetachedNodeFields")]
+#[serde(try_from = "DetachedNodeParts")]
 pub struct DetachedNode {
     pub(super) node_id: NodeId,
     pub(super) node: Node,
@@ -32,15 +32,16 @@ pub struct DetachedNode {
 }
 
 impl DetachedNode {
-    /// A record of `node` under `node_id` with the wiring that touches it,
-    /// put in the graph's order. Refused when the id is nil, or a binding or
-    /// subscription does not touch the node or appears twice.
-    pub fn new(
-        node_id: NodeId,
-        node: Node,
-        mut bindings: Vec<BindingEntry>,
-        mut subscriptions: Vec<Subscription>,
-    ) -> Result<Self, DetachedNodeError> {
+    /// A record of `parts.node` under `parts.node_id` with the wiring that
+    /// touches it, put in the graph's order. Refused when the id is nil, or a
+    /// binding or subscription does not touch the node or appears twice.
+    pub fn new(parts: DetachedNodeParts) -> Result<Self, DetachedNodeError> {
+        let DetachedNodeParts {
+            node_id,
+            node,
+            mut bindings,
+            mut subscriptions,
+        } = parts;
         if node_id.is_nil() {
             return Err(DetachedNodeError::NilNodeId);
         }
@@ -96,24 +97,21 @@ impl DetachedNode {
     }
 }
 
-/// A [`DetachedNode`] as serialized, before [`DetachedNode::new`] accepts it.
-#[derive(Debug, Deserialize)]
-struct DetachedNodeFields {
-    node_id: NodeId,
-    node: Node,
-    bindings: Vec<BindingEntry>,
-    subscriptions: Vec<Subscription>,
+/// The contents of a [`DetachedNode`] before [`DetachedNode::new`] checks and
+/// orders them — what a caller assembles a record from, and what one
+/// deserializes as.
+#[derive(Clone, Debug, Deserialize)]
+pub struct DetachedNodeParts {
+    pub node_id: NodeId,
+    pub node: Node,
+    pub bindings: Vec<BindingEntry>,
+    pub subscriptions: Vec<Subscription>,
 }
 
-impl TryFrom<DetachedNodeFields> for DetachedNode {
+impl TryFrom<DetachedNodeParts> for DetachedNode {
     type Error = DetachedNodeError;
 
-    fn try_from(fields: DetachedNodeFields) -> Result<Self, DetachedNodeError> {
-        Self::new(
-            fields.node_id,
-            fields.node,
-            fields.bindings,
-            fields.subscriptions,
-        )
+    fn try_from(parts: DetachedNodeParts) -> Result<Self, DetachedNodeError> {
+        Self::new(parts)
     }
 }

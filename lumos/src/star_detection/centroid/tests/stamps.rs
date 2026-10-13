@@ -18,13 +18,13 @@ fn sigma_seed_is_the_truncated_second_moment() {
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
         let pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(sigma))
             .stamp(Size2us::new(21, 21), SKY);
-        let fit = StampFit::prepare::<6>(
-            &pixels,
-            DVec2::splat(10.0),
-            &StampGrid::new(radius),
-            SKY,
-            None,
-        )
+        let fit = StampFit::prepare::<6>(FitInputs {
+            pixels: &pixels,
+            pos: DVec2::splat(10.0),
+            grid: &StampGrid::new(radius),
+            background: SKY,
+            noise: None,
+        })
         .expect("21x21 stamp at its centre");
 
         let gaussian = PixelGaussian {
@@ -51,7 +51,13 @@ fn sigma_seed_is_the_truncated_second_moment() {
 /// `StampFit::prepare` walks the stamp once and fills every field, so its extraction is pinned
 /// through the constructor.
 fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit> {
-    StampFit::prepare::<6>(pixels, pos, &StampGrid::new(radius), 0.0, None)
+    StampFit::prepare::<6>(FitInputs {
+        pixels,
+        pos,
+        grid: &StampGrid::new(radius),
+        background: 0.0,
+        noise: None,
+    })
 }
 
 #[test]
@@ -119,9 +125,27 @@ fn stamp_too_small_for_the_parameter_count_is_rejected() {
     let grid = StampGrid::new(1);
     // A least-squares fit needs strictly more samples than parameters: a radius-1 stamp holds 9 >
     // 6, a radius-0 stamp 1.
-    assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &grid, 0.0, None).is_some());
+    assert!(
+        StampFit::prepare::<6>(FitInputs {
+            pixels: &pixels,
+            pos: DVec2::splat(32.0),
+            grid: &grid,
+            background: 0.0,
+            noise: None
+        })
+        .is_some()
+    );
     let point = StampGrid::new(0);
-    assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &point, 0.0, None).is_none());
+    assert!(
+        StampFit::prepare::<6>(FitInputs {
+            pixels: &pixels,
+            pos: DVec2::splat(32.0),
+            grid: &point,
+            background: 0.0,
+            noise: None
+        })
+        .is_none()
+    );
 }
 
 /// A sky the map left in the residual — a flat pedestal Δ — stays in the flux under `GlobalMap` and
@@ -142,7 +166,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
     const PEDESTAL: f32 = 0.02;
     let sigma = 1.5f32;
     let fwhm = sigma_to_fwhm(sigma);
-    let radius = MeasureGrid::stamp_radius(fwhm);
+    let radius = measure_grid::stamp_radius(fwhm);
     assert_eq!(radius, 7);
     let pixels = SyntheticStar::new(
         Vec2::new(64.3, 63.6),

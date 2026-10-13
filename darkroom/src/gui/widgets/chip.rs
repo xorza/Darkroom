@@ -3,7 +3,7 @@
 use palantir::prelude::*;
 
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::tooltip_after;
+use crate::gui::widgets::support;
 
 /// Side of each square button, in px.
 const BUTTON_SIZE: f32 = 30.0;
@@ -91,7 +91,7 @@ impl Chip {
         // borrow ends before the tooltip records into `ui`.
         let snapshot = button.response.snapshot();
         let clicked = button.response.left.clicked();
-        tooltip_after(ui, &snapshot, Some(self.tip));
+        support::tooltip_after(ui, &snapshot, Some(self.tip));
         clicked
     }
 }

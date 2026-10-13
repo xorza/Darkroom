@@ -16,36 +16,16 @@ pub(super) struct SegmentRamp {
     pub(super) step: f32,
 }
 
-/// Natural cubic spline interpolation of one row segment, background and noise together, on the
-/// widest Isa this CPU has. `bg_out` and `noise_out` must have the same length.
-pub(super) fn interpolate_segment_cubic(
-    bg_out: &mut [f32],
-    noise_out: &mut [f32],
-    bg: SplineSegment,
-    noise: SplineSegment,
-    ramp: SegmentRamp,
-) {
-    // Release assert, O(1) per segment: the kernel walks both outputs in lockstep, and a shorter
-    // one would leave the other's tail unwritten.
-    assert_eq!(bg_out.len(), noise_out.len());
-    InterpolateSegment {
-        bg_out,
-        noise_out,
-        bg,
-        noise,
-        ramp,
-    }
-    .dispatch();
-}
-
-/// [`interpolate_segment_cubic`] as a kernel.
+/// Natural cubic spline interpolation of one row segment, background and noise together, as a
+/// kernel. `bg_out` and `noise_out` have the same length: the kernel walks them in lockstep, and a
+/// shorter one would leave the other's tail unwritten.
 #[derive(Debug)]
-struct InterpolateSegment<'a> {
-    bg_out: &'a mut [f32],
-    noise_out: &'a mut [f32],
-    bg: SplineSegment,
-    noise: SplineSegment,
-    ramp: SegmentRamp,
+pub(super) struct InterpolateSegment<'a> {
+    pub(super) bg_out: &'a mut [f32],
+    pub(super) noise_out: &'a mut [f32],
+    pub(super) bg: SplineSegment,
+    pub(super) noise: SplineSegment,
+    pub(super) ramp: SegmentRamp,
 }
 
 impl Kernel for InterpolateSegment<'_> {
@@ -53,6 +33,7 @@ impl Kernel for InterpolateSegment<'_> {
 
     #[inline(always)]
     fn run<S: Isa>(self, isa: S) {
+        debug_assert_eq!(self.bg_out.len(), self.noise_out.len());
         let bg = Coefficients::splat(isa, self.bg);
         let noise = Coefficients::splat(isa, self.noise);
         let one = isa.splat_f32(1.0);
@@ -112,8 +93,7 @@ impl<V: F32x8> Coefficients<V> {
 
 #[cfg(test)]
 mod internals {
-    use crate::background_mesh::spline::spline_segment::SplineSegment;
-    use crate::star_detection::background::simd::SegmentRamp;
+    use crate::star_detection::background::simd::{InterpolateSegment, SegmentRamp};
 
     impl SegmentRamp {
         /// The spline parameter at output pixel `i`: outside [0, 1] past the segment's knots,
@@ -123,18 +103,19 @@ mod internals {
         }
     }
 
-    /// The scalar reference: [`SplineSegment::eval`] at each pixel's parameter.
-    pub(super) fn interpolate_segment_cubic_scalar(
-        bg_out: &mut [f32],
-        noise_out: &mut [f32],
-        bg: SplineSegment,
-        noise: SplineSegment,
-        ramp: SegmentRamp,
-    ) {
-        for (i, (bg_px, noise_px)) in bg_out.iter_mut().zip(noise_out.iter_mut()).enumerate() {
-            let t = ramp.t_at(i);
-            *bg_px = bg.eval(t);
-            *noise_px = noise.eval(t);
+    impl InterpolateSegment<'_> {
+        /// The scalar reference: `SplineSegment::eval` at each pixel's parameter.
+        pub(super) fn run_scalar(self) {
+            for (i, (bg_px, noise_px)) in self
+                .bg_out
+                .iter_mut()
+                .zip(self.noise_out.iter_mut())
+                .enumerate()
+            {
+                let t = self.ramp.t_at(i);
+                *bg_px = self.bg.eval(t);
+                *noise_px = self.noise.eval(t);
+            }
         }
     }
 }

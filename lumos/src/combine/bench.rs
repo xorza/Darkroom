@@ -7,12 +7,13 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
-use common::{CancelToken, TempDir};
+use common::TempDir;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
+use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::rejection;
 use crate::combine::stack::stack_stored_frames;
 use crate::combine::stack_config::{Combine, CombineMethod, StackConfig};
@@ -25,7 +26,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::memory::run_memory::RunMemory;
 use crate::platform::MappedFile;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 
 /// The machine the spilled combine plans against.
@@ -151,12 +152,13 @@ impl Lights {
     fn combine(&self, frames: Vec<StoredFrame>, tier: Tier, config: &StackConfig) -> StackProduct {
         stack_stored_frames(
             frames,
-            tier,
-            ImageDimensions::new(FRAME, 1),
-            self.images[0].metadata.clone(),
+            CacheCore {
+                tier,
+                dimensions: ImageDimensions::new(FRAME, 1),
+                metadata: self.images[0].metadata.clone(),
+                monitor: ProgressMonitor::unattended(),
+            },
             config,
-            ProgressCallback::default(),
-            CancelToken::never(),
         )
         .unwrap()
     }

@@ -2,12 +2,13 @@ use std::path::Path;
 
 use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu};
 
-use crate::io::error::ImageError;
+use crate::io::error::{FitsRefusal, ImageError};
 
 use crate::io::fits::extension_claims::ExtensionClaims;
-use crate::io::fits::metadata::read_text;
-use crate::io::fits::options::{FitsChecksumPolicy, FitsHduSelector};
-use crate::io::fits::provenance::{FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance};
+use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::io::fits::fits_load_options::{FitsChecksumPolicy, FitsHduSelector};
+use crate::io::fits::fits_transfer_provenance::FitsHduProvenance;
+use crate::io::fits::metadata;
 
 pub(super) fn selected_hdu(
     path: &Path,
@@ -17,11 +18,14 @@ pub(super) fn selected_hdu(
     let hdu = hdus.get(index).ok_or_else(|| {
         ImageError::fits_unsupported(
             path,
-            format!("HDU index {index} is out of range for {} HDUs", hdus.len()),
+            FitsRefusal::HduOutOfRange {
+                index,
+                hdus: hdus.len(),
+            },
         )
     })?;
-    let extname =
-        read_text(&hdu.header, "EXTNAME").map_err(|source| ImageError::fits(path, source))?;
+    let extname = metadata::read_text(&hdu.header, "EXTNAME")
+        .map_err(|source| ImageError::fits(path, source))?;
     let extver = if extname.is_some() {
         Some(
             hdu.header
@@ -54,15 +58,14 @@ pub(super) fn select_image_hdu(
                 }
             }
             match images.as_slice() {
-                [] => return Err(ImageError::fits_unsupported(path, "no image HDU found")),
+                [] => return Err(ImageError::fits_unsupported(path, FitsRefusal::NoImageHdu)),
                 [index] => *index,
                 _ => {
                     return Err(ImageError::fits_unsupported(
                         path,
-                        format!(
-                            "FITS file contains {} image HDUs; select one explicitly by index or EXTNAME/EXTVER",
-                            images.len()
-                        ),
+                        FitsRefusal::SeveralImageHdus {
+                            images: images.len(),
+                        },
                     ));
                 }
             }
@@ -82,22 +85,22 @@ pub(super) fn select_image_hdu(
                 [] => {
                     return Err(ImageError::fits_unsupported(
                         path,
-                        format!("no HDU matches EXTNAME={extname:?}, EXTVER={extver:?}"),
+                        FitsRefusal::NoMatchingHdu {
+                            extname: extname.clone(),
+                            extver: *extver,
+                        },
                     ));
                 }
                 [index] => *index,
                 _ => {
-                    let reason = match extver {
-                        Some(version) => format!(
-                            "{} HDUs match EXTNAME={extname:?}, EXTVER={version}",
-                            matches.len()
-                        ),
-                        None => format!(
-                            "{} HDUs match EXTNAME={extname:?}; specify EXTVER",
-                            matches.len()
-                        ),
-                    };
-                    return Err(ImageError::fits_unsupported(path, reason));
+                    return Err(ImageError::fits_unsupported(
+                        path,
+                        FitsRefusal::SeveralMatchingHdus {
+                            extname: extname.clone(),
+                            extver: *extver,
+                            matches: matches.len(),
+                        },
+                    ));
                 }
             }
         }
@@ -106,7 +109,9 @@ pub(super) fn select_image_hdu(
     if !hdus[selected.index].is_image() {
         return Err(ImageError::fits_unsupported(
             path,
-            format!("selected HDU {} is not an image", selected.index),
+            FitsRefusal::NotAnImage {
+                hdu: selected.index,
+            },
         ));
     }
     Ok(selected)
@@ -146,10 +151,7 @@ pub(super) fn judge_checksum(
             {
                 return Err(ImageError::fits_unsupported(
                     path,
-                    format!(
-                        "HDU {index} has an invalid FITS checksum: DATASUM={:?}, CHECKSUM={:?}",
-                        report.datasum, report.checksum
-                    ),
+                    FitsRefusal::InvalidChecksum { hdu: index, report },
                 ));
             }
         }
@@ -157,10 +159,7 @@ pub(super) fn judge_checksum(
             if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
                 return Err(ImageError::fits_unsupported(
                     path,
-                    format!(
-                        "HDU {index} requires valid DATASUM and CHECKSUM: DATASUM={:?}, CHECKSUM={:?}",
-                        report.datasum, report.checksum
-                    ),
+                    FitsRefusal::ChecksumRequired { hdu: index, report },
                 ));
             }
         }

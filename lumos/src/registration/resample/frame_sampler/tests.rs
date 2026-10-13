@@ -2,7 +2,6 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::prelude::*;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
-use crate::registration::registration_config;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, WindowAxes,
@@ -13,6 +12,7 @@ use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::resample::warp_params::WarpParams;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;
@@ -725,7 +725,7 @@ fn coverage_and_confidence_vanish_together() {
     let positions = positions(size);
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            registration_config::internals::warp_params(method),
+            WarpParams::with_method(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );
@@ -764,7 +764,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
     let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
     let warped = halving.warp(
         &image,
-        registration_config::internals::warp_params(InterpolationMethod::Lanczos3),
+        WarpParams::with_method(InterpolationMethod::Lanczos3),
     );
 
     let lut = LanczosOrder::Three.lut();
@@ -888,7 +888,7 @@ fn filters_reproduce_their_polynomials() {
     let bound = 2.0 * 64.0 * epsilon * 8.0 * 2.5;
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            registration_config::internals::warp_params(method),
+            WarpParams::with_method(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );

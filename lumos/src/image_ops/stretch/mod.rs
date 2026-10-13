@@ -47,8 +47,10 @@ use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
+use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
+use crate::simd::Kernel;
 
 mod simd;
 
@@ -285,7 +287,7 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
             hp,
         } => Some(Curve {
             black: BlackPoint::new(black_point),
-            tone: Tone::Ghs(GhsCurve::new(d, b, sp, lp, hp)),
+            tone: Tone::Ghs(GhsCurve::new(GhsShape { d, b, sp, lp, hp })),
         }),
         StretchMethod::AutoStf { .. } | StretchMethod::AutoAsinh { .. } => None,
     }
@@ -341,6 +343,47 @@ impl BlackPoint {
     }
 }
 
+/// The background an automatic method measures: its median, and its spread in Gaussian units.
+#[derive(Debug, Clone, Copy)]
+struct Background {
+    median: f32,
+    sigma: f32,
+}
+
+impl Background {
+    /// The STF curve for this background: the black point `shadow_sigmas·sigma` below the median,
+    /// and the midtones that put the median on `target`.
+    fn stf_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
+        let unreachable = || OpError::UnreachableBackground {
+            method: "auto STF",
+            median: self.median,
+            target,
+        };
+        let background = AutoBackground::new(self, shadow_sigmas, unreachable)?;
+        let tone = MtfCurve::new(background.rescaled, target).ok_or_else(unreachable)?;
+        Ok(Curve {
+            black: background.black,
+            tone: Tone::Mtf(tone),
+        })
+    }
+
+    /// The auto-asinh curve for this background: the black point [`Self::stf_curve`] takes, and
+    /// the softening that puts the median on `target`.
+    fn auto_asinh_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
+        let unreachable = || OpError::UnreachableBackground {
+            method: "auto asinh",
+            median: self.median,
+            target,
+        };
+        let background = AutoBackground::new(self, shadow_sigmas, unreachable)?;
+        let beta = solve_asinh_beta(background.rescaled, target).ok_or_else(unreachable)?;
+        Ok(Curve {
+            black: background.black,
+            tone: Tone::Asinh(AsinhCurve::new(beta)),
+        })
+    }
+}
+
 /// An automatic method's black point, and the background median after it.
 #[derive(Debug, Clone, Copy)]
 struct AutoBackground {
@@ -349,15 +392,15 @@ struct AutoBackground {
 }
 
 impl AutoBackground {
-    /// The black point `shadow_sigmas` times `sigma` below `median`, held at 0 from below;
-    /// `unreachable` when it reaches white or leaves the median at or below it, or at white —
-    /// nothing for a curve to place.
+    /// The black point `shadow_sigmas` times the background's σ below its median, held at 0 from
+    /// below; `unreachable` when it reaches white or leaves the median at or below it, or at white
+    /// — nothing for a curve to place.
     fn new(
-        median: f32,
-        sigma: f32,
+        background: Background,
         shadow_sigmas: f32,
         unreachable: impl FnOnce() -> OpError,
     ) -> Result<Self, OpError> {
+        let Background { median, sigma } = background;
         let black = (median - shadow_sigmas * sigma).max(0.0);
         if black >= 1.0 {
             return Err(unreachable());
@@ -448,53 +491,70 @@ impl ToneCurve for AsinhCurve {
     }
 
     fn eval_block(&self, black: BlackPoint, block: &mut [f32]) {
-        simd::asinh_plane(block, black, *self);
+        AsinhPlane {
+            plane: block,
+            black,
+            curve: *self,
+        }
+        .dispatch();
     }
 }
 
-/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in every case,
-/// which is what makes the curve continuous at the symmetry point.
-///
-/// Written through `ln_1p`/`expm1` so it stays accurate as `b` nears its two limits: the textbook
-/// `1 − (1 + b·d·u)^(−1/b)` cancels as `b → 0` (in f32, 18.6% off at `b = 2e-6`, `d = 5`) and the
-/// `b < 0` form divides by `b + 1` as `b → −1`. Only the limits themselves, `b = 0` (exponential)
-/// and `b = −1` (logarithmic), take their own forms — the general ones are `0/0` there exactly.
-/// Each branch fixes its own scale, which the curve's normalization divides out.
-fn ghs_base_t(d: f32, b: f32, u: f32) -> f32 {
-    if b == 0.0 {
-        -(-d * u).exp_m1()
-    } else if b == -1.0 {
-        (d * u).ln_1p() / d
-    } else if b < 0.0 {
-        -(((b + 1.0) / b) * (-b * d * u).ln_1p()).exp_m1() / (d * (b + 1.0))
-    } else {
-        -(-(b * d * u).ln_1p() / b).exp_m1()
-    }
-}
-
-/// Derivative `T'(u)` of [`ghs_base_t`] — the slope of the linear shadow/highlight tails.
-fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
-    if b == 0.0 {
-        d * (-d * u).exp()
-    } else if b < 0.0 {
-        ((-b * d * u).ln_1p() / b).exp()
-    } else {
-        d * (-((1.0 + b) / b) * (b * d * u).ln_1p()).exp()
-    }
-}
-
-/// Generalized Hyperbolic Stretch: the base curve [`ghs_base_t`] mirrored about `sp`, with linear
-/// shadow (`< lp`) and highlight (`> hp`) protection, normalized to map `[0, 1] → [0, 1]`. C¹ and
-/// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
+/// The parameters of a Generalized Hyperbolic Stretch: the stretch strength `d`, the curve family
+/// `b`, the symmetry point `sp`, and the shadow and highlight protection points `lp` and `hp`.
 #[derive(Debug, Clone, Copy)]
-struct GhsCurve {
-    /// `d = 0`, or a range too small to normalize: the transform is the identity.
-    identity: bool,
+struct GhsShape {
     d: f32,
     b: f32,
     sp: f32,
     lp: f32,
     hp: f32,
+}
+
+impl GhsShape {
+    /// The base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in every case,
+    /// which is what makes the curve continuous at the symmetry point.
+    ///
+    /// Written through `ln_1p`/`expm1` so it stays accurate as `b` nears its two limits: the
+    /// textbook `1 − (1 + b·d·u)^(−1/b)` cancels as `b → 0` (in f32, 18.6% off at `b = 2e-6`,
+    /// `d = 5`) and the `b < 0` form divides by `b + 1` as `b → −1`. Only the limits themselves,
+    /// `b = 0` (exponential) and `b = −1` (logarithmic), take their own forms — the general ones
+    /// are `0/0` there exactly. Each branch fixes its own scale, which the curve's normalization
+    /// divides out.
+    fn base(self, u: f32) -> f32 {
+        let Self { d, b, .. } = self;
+        if b == 0.0 {
+            -(-d * u).exp_m1()
+        } else if b == -1.0 {
+            (d * u).ln_1p() / d
+        } else if b < 0.0 {
+            -(((b + 1.0) / b) * (-b * d * u).ln_1p()).exp_m1() / (d * (b + 1.0))
+        } else {
+            -(-(b * d * u).ln_1p() / b).exp_m1()
+        }
+    }
+
+    /// The derivative `T'(u)` of [`Self::base`] — the slope of the linear shadow/highlight tails.
+    fn base_slope(self, u: f32) -> f32 {
+        let Self { d, b, .. } = self;
+        if b == 0.0 {
+            d * (-d * u).exp()
+        } else if b < 0.0 {
+            ((-b * d * u).ln_1p() / b).exp()
+        } else {
+            d * (-((1.0 + b) / b) * (b * d * u).ln_1p()).exp()
+        }
+    }
+}
+
+/// Generalized Hyperbolic Stretch: the base curve [`GhsShape::base`] mirrored about `sp`, with
+/// linear shadow (`< lp`) and highlight (`> hp`) protection, normalized to map `[0, 1] → [0, 1]`.
+/// C¹ and monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
+#[derive(Debug, Clone, Copy)]
+struct GhsCurve {
+    /// `d = 0`, or a range too small to normalize: the transform is the identity.
+    identity: bool,
+    shape: GhsShape,
     /// `T(sp − lp)` / `T'(sp − lp)` — the shadow tail's intercept and slope.
     t_sp_lp: f32,
     tp_sp_lp: f32,
@@ -507,14 +567,11 @@ struct GhsCurve {
 }
 
 impl GhsCurve {
-    fn new(d: f32, b: f32, sp: f32, lp: f32, hp: f32) -> Self {
+    fn new(shape: GhsShape) -> Self {
+        let GhsShape { d, sp, lp, hp, .. } = shape;
         let zero = Self {
             identity: true,
-            d,
-            b,
-            sp,
-            lp,
-            hp,
+            shape,
             t_sp_lp: 0.0,
             tp_sp_lp: 0.0,
             t_hp_sp: 0.0,
@@ -522,10 +579,10 @@ impl GhsCurve {
             t0: 0.0,
             inv_range: 1.0,
         };
-        let t_sp_lp = ghs_base_t(d, b, sp - lp);
-        let tp_sp_lp = ghs_base_tp(d, b, sp - lp);
-        let t_hp_sp = ghs_base_t(d, b, hp - sp);
-        let tp_hp_sp = ghs_base_tp(d, b, hp - sp);
+        let t_sp_lp = shape.base(sp - lp);
+        let tp_sp_lp = shape.base_slope(sp - lp);
+        let t_hp_sp = shape.base(hp - sp);
+        let tp_hp_sp = shape.base_slope(hp - sp);
         let t0 = -lp * tp_sp_lp - t_sp_lp; // T1(0)
         let t1 = (1.0 - hp) * tp_hp_sp + t_hp_sp; // T4(1)
         // `d = 0` is the identity, and a `d` so small that the curve's range underflows is it too:
@@ -552,16 +609,17 @@ impl ToneCurve for GhsCurve {
         if self.identity {
             return unit(x);
         }
-        let raw = if x < self.lp {
+        let GhsShape { sp, lp, hp, .. } = self.shape;
+        let raw = if x < lp {
             // T1: linear, tangent to the mirrored base at lp.
-            self.tp_sp_lp * (x - self.lp) - self.t_sp_lp
-        } else if x < self.sp {
-            -ghs_base_t(self.d, self.b, self.sp - x) // T2: mirror below sp
-        } else if x < self.hp {
-            ghs_base_t(self.d, self.b, x - self.sp) // T3: base above sp
+            self.tp_sp_lp * (x - lp) - self.t_sp_lp
+        } else if x < sp {
+            -self.shape.base(sp - x) // T2: mirror below sp
+        } else if x < hp {
+            self.shape.base(x - sp) // T3: base above sp
         } else {
             // T4: linear, tangent to the base at hp.
-            self.tp_hp_sp * (x - self.hp) + self.t_hp_sp
+            self.tp_hp_sp * (x - hp) + self.t_hp_sp
         };
         unit((raw - self.t0) * self.inv_range)
     }
@@ -628,67 +686,24 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> Option<f32> {
 /// explicit methods are resolved by [`explicit_curve`] before any samples are materialized, so they
 /// never reach here.
 fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
-    let background = MedianMad::of_mut(samples);
+    let measured = MedianMad::of_mut(samples);
+    let background = Background {
+        median: measured.median,
+        sigma: measured.sigma(),
+    };
     match method {
         StretchMethod::AutoStf {
             shadow_sigmas,
             target_background,
-        } => stf_curve(
-            background.median,
-            background.sigma(),
-            shadow_sigmas,
-            target_background,
-        ),
+        } => background.stf_curve(shadow_sigmas, target_background),
         StretchMethod::AutoAsinh {
             shadow_sigmas,
             target_background,
-        } => auto_asinh_curve(
-            background.median,
-            background.sigma(),
-            shadow_sigmas,
-            target_background,
-        ),
+        } => background.auto_asinh_curve(shadow_sigmas, target_background),
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
             unreachable!("explicit methods are built by explicit_curve, not build_curve")
         }
     }
-}
-
-/// The STF curve for a background of `median` and spread `sigma`: the black point
-/// `shadow_sigmas·sigma` below the median, and the midtones that put the median on `target`.
-fn stf_curve(median: f32, sigma: f32, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
-    let unreachable = || OpError::UnreachableBackground {
-        method: "auto STF",
-        median,
-        target,
-    };
-    let background = AutoBackground::new(median, sigma, shadow_sigmas, unreachable)?;
-    let tone = MtfCurve::new(background.rescaled, target).ok_or_else(unreachable)?;
-    Ok(Curve {
-        black: background.black,
-        tone: Tone::Mtf(tone),
-    })
-}
-
-/// The auto-asinh curve for a background of `median` and spread `sigma`: the black point
-/// [`stf_curve`] takes, and the softening that puts the median on `target`.
-fn auto_asinh_curve(
-    median: f32,
-    sigma: f32,
-    shadow_sigmas: f32,
-    target: f32,
-) -> Result<Curve, OpError> {
-    let unreachable = || OpError::UnreachableBackground {
-        method: "auto asinh",
-        median,
-        target,
-    };
-    let background = AutoBackground::new(median, sigma, shadow_sigmas, unreachable)?;
-    let beta = solve_asinh_beta(background.rescaled, target).ok_or_else(unreachable)?;
-    Ok(Curve {
-        black: background.black,
-        tone: Tone::Asinh(AsinhCurve::new(beta)),
-    })
 }
 
 /// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
@@ -746,7 +761,16 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: A
     r.par_chunks_mut(SAMPLES_PER_BLOCK)
         .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
         .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
-        .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, black, c));
+        .for_each(|((red, green), blue)| {
+            AsinhColorPreserve {
+                red,
+                green,
+                blue,
+                black,
+                curve: c,
+            }
+            .dispatch();
+        });
 }
 
 #[cfg(test)]

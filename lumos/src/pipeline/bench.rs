@@ -20,10 +20,10 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
 use crate::pipeline::align_stack_config::AlignStackConfig;
-use crate::pipeline::calibrate::CalibrationNotes;
+use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::light_source::MosaicPreparation;
 use crate::platform::MappedFile;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
 use crate::registration::resample::WarpBuffers;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
@@ -170,8 +170,7 @@ fn end_to_end(c: &mut Criterion) {
                         &files.paths,
                         masters,
                         &ingest,
-                        ProgressCallback::default(),
-                        CancelToken::never(),
+                        ProgressMonitor::unattended(),
                     )
                     .unwrap()
             });

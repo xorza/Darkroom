@@ -1,13 +1,23 @@
+use std::slice;
+
+use common::TempDir;
+
 use crate::combine::frame_cache::FrameCache;
+use crate::combine::frame_cache::slots::Slots;
+use crate::combine::normalization::common_domain::{ChannelCoverage, CommonDomain};
+use crate::combine::normalization::photometric_gain::{PairSide, PairedGain, SamplePair};
+use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::combine::normalization::*;
-use crate::combine::stack::{StackFrame, run_stacking};
+use crate::combine::stack::run_stacking;
+use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack_config::{Combine, StackConfig, Weighting};
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_quality::{DropPlanes, FrameQuality};
-use crate::frame::frame_stats::FrameStats;
+use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -16,8 +26,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::math::statistics::mad_to_sigma;
-use crate::progress::progress_callback::ProgressCallback;
-use common::TempDir;
+use crate::progress::progress_monitor::ProgressMonitor;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
@@ -139,6 +148,18 @@ fn reference_selection_uses_lowest_channel_noise_in_one_domain() {
     assert_eq!(select(scaled, &[1.0, 1.0]), 1);
 }
 
+/// `samples`, of noise variance `noise_variance`, as one side of a pair.
+fn side(samples: &[f32], noise_variance: f64) -> PairSide<'_> {
+    PairSide::new(samples, noise_variance, &CancelToken::never()).unwrap()
+}
+
+/// The gain [`SamplePair::photometric_gain`] fits of `frame` onto `reference`.
+fn paired_gain(frame: PairSide<'_>, reference: PairSide<'_>) -> PairedGain {
+    SamplePair { frame, reference }
+        .photometric_gain(&CancelToken::never())
+        .unwrap()
+}
+
 /// A noiseless line `2x + 5` with one pair thrown far off it: the window drops that pair and the
 /// fit through the rest is the line's slope exactly.
 #[test]
@@ -146,11 +167,7 @@ fn paired_gain_recovers_scale_after_residual_clipping() {
     let frame: Vec<f32> = (0..101).map(|value| value as f32).collect();
     let mut reference: Vec<f32> = frame.iter().map(|value| value * 2.0 + 5.0).collect();
     reference[50] = 10_000.0;
-
-    let cancel = CancelToken::never();
-    let reference_stats = sample_stats(&reference, &cancel).unwrap();
-    let paired =
-        paired_photometric_gain(&frame, &reference, reference_stats, 1.0, 4.0, &cancel).unwrap();
+    let paired = paired_gain(side(&frame, 1.0), side(&reference, 4.0));
     assert_eq!(paired.gain, 2.0);
 }
 
@@ -166,19 +183,8 @@ fn paired_gain_recovers_scale_after_residual_clipping() {
 fn deming_gain_weighs_each_sides_noise() {
     let frame = [8.0, 9.0, 10.0, 11.0, 12.0];
     let reference = [5.0, 9.0, 10.0, 12.0, 15.0];
-    let cancel = CancelToken::never();
-    let reference_stats = sample_stats(&reference, &cancel).unwrap();
     let gain = |frame_noise, reference_noise| {
-        paired_photometric_gain(
-            &frame,
-            &reference,
-            reference_stats,
-            frame_noise,
-            reference_noise,
-            &cancel,
-        )
-        .unwrap()
-        .gain
+        paired_gain(side(&frame, frame_noise), side(&reference, reference_noise)).gain
     };
     assert_eq!(gain(1.0, 1.0), 2.369_802_2);
     assert_eq!(gain(1.0, 4.0), 2.347_452_9);
@@ -193,7 +199,6 @@ fn deming_gain_weighs_each_sides_noise() {
 /// a standard deviation over 400 draws is 1/√798 ≈ 3.5% of it, so 10% is about three of those.
 #[test]
 fn the_deming_error_is_the_scatter_of_the_gains() {
-    let cancel = CancelToken::never();
     let mut rng = TestRng::new(0xDE41);
     let draws = 400;
     let mut gains = Vec::with_capacity(draws);
@@ -210,16 +215,10 @@ fn the_deming_error_is_the_scatter_of_the_gains() {
             .iter()
             .map(|&x| 1.6 * x + 0.02 + 0.015 * rng.next_gaussian_f32())
             .collect();
-        let reference_stats = sample_stats(&reference, &cancel).unwrap();
-        let paired = paired_photometric_gain(
-            &frame,
-            &reference,
-            reference_stats,
-            0.01f64.powi(2),
-            0.015f64.powi(2),
-            &cancel,
-        )
-        .unwrap();
+        let paired = paired_gain(
+            side(&frame, 0.01f64.powi(2)),
+            side(&reference, 0.015f64.powi(2)),
+        );
         gains.push(f64::from(paired.gain));
         stated += paired.relative_error;
     }
@@ -247,10 +246,7 @@ fn the_deming_error_is_the_scatter_of_the_gains() {
 fn a_fit_without_positive_covariance_keeps_the_seed() {
     let frame = [8.0, 9.0, 10.0, 11.0, 12.0];
     let reference = [15.0, 12.0, 10.0, 9.0, 5.0];
-    let cancel = CancelToken::never();
-    let reference_stats = sample_stats(&reference, &cancel).unwrap();
-    let paired =
-        paired_photometric_gain(&frame, &reference, reference_stats, 1.0, 1.0, &cancel).unwrap();
+    let paired = paired_gain(side(&frame, 1.0), side(&reference, 1.0));
     assert_eq!(paired.gain, 2.0);
 }
 
@@ -268,11 +264,13 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
         Normalization::None,
     );
     let result = FrameNorm::measure(
-        &cache.frames,
-        cache.core.dimensions,
-        cache.slots,
+        SlotPlanes {
+            frames: &cache.frames,
+            dimensions: cache.core.dimensions,
+            slots: cache.slots,
+            cancel: &CancelToken::never(),
+        },
         Normalization::Multiplicative,
-        &CancelToken::never(),
     );
     assert!(matches!(
         result,
@@ -289,11 +287,13 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
 fn norms(images: Vec<LinearImage>, normalization: Normalization) -> Vec<(f32, f32)> {
     let cache = FrameCache::from_images(images, Normalization::None);
     FrameNorm::measure(
-        &cache.frames,
-        cache.core.dimensions,
-        cache.slots,
+        SlotPlanes {
+            frames: &cache.frames,
+            dimensions: cache.core.dimensions,
+            slots: cache.slots,
+            cancel: &CancelToken::never(),
+        },
         normalization,
-        &CancelToken::never(),
     )
     .unwrap()
     .unwrap()
@@ -414,8 +414,7 @@ fn stacked_frames_land_on_the_reference_level() {
         })
         .stack_images(
             frames.into_iter().map(StackFrame::from).collect(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap();
         for (channel, &level) in expected.iter().enumerate() {
@@ -448,9 +447,11 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     );
 
     let domain = CommonDomain::build(
-        &[&frame],
-        0,
-        dimensions.pixel_count(),
+        ChannelCoverage {
+            frames: &[&frame],
+            channel: 0,
+            pixel_count: dimensions.pixel_count(),
+        },
         &CancelToken::never(),
     )
     .expect("two pixels clear the floor");
@@ -498,8 +499,15 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     .into_iter()
     .enumerate()
     {
-        let domain =
-            CommonDomain::build(&[&warped, &drizzled], channel, 4, &CancelToken::never()).unwrap();
+        let domain = CommonDomain::build(
+            ChannelCoverage {
+                frames: &[&warped, &drizzled],
+                channel,
+                pixel_count: 4,
+            },
+            &CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(
             (0..4)
                 .map(|pixel| domain.valid.get(pixel))
@@ -535,11 +543,13 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     );
 
     let norms = FrameNorm::measure(
-        &frames,
-        dimensions,
-        Slots::of_frames(&frames, dimensions),
+        SlotPlanes {
+            frames: &frames,
+            dimensions,
+            slots: Slots::of_frames(&frames, dimensions),
+            cancel: &CancelToken::never(),
+        },
         Normalization::Global,
-        &CancelToken::never(),
     )
     .unwrap()
     .expect("global normalization returns parameters");
@@ -574,11 +584,13 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let frames = affine_rgb_frames([1.0; 3]);
     let norms = |normalization| {
         FrameNorm::measure(
-            &frames,
-            dimensions,
-            Slots::of_frames(&frames, dimensions),
+            SlotPlanes {
+                frames: &frames,
+                dimensions,
+                slots: Slots::of_frames(&frames, dimensions),
+                cancel: &CancelToken::never(),
+            },
             normalization,
-            &CancelToken::never(),
         )
         .unwrap()
         .unwrap()
@@ -617,11 +629,13 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let cancel = CancelToken::new();
     cancel.cancel();
     let error = FrameNorm::measure(
-        &frames,
-        dimensions,
-        Slots::of_frames(&frames, dimensions),
+        SlotPlanes {
+            frames: &frames,
+            dimensions,
+            slots: Slots::of_frames(&frames, dimensions),
+            cancel: &cancel,
+        },
         Normalization::Global,
-        &cancel,
     )
     .unwrap_err();
     assert!(matches!(error, StackError::Cancelled));
@@ -697,11 +711,13 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
     };
     let gains = |frames: &[StoredFrame]| -> Vec<f32> {
         FrameNorm::measure(
-            frames,
-            dimensions,
-            Slots::of_frames(frames, dimensions),
+            SlotPlanes {
+                frames,
+                dimensions,
+                slots: Slots::of_frames(frames, dimensions),
+                cancel: &CancelToken::never(),
+            },
             Normalization::Global,
-            &CancelToken::never(),
         )
         .unwrap()
         .unwrap()
@@ -784,10 +800,18 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
         FrameQuality::from_coverage(Buffer2::new(pixel_count, 1, even)),
         frame_stats(0.5, 0.1),
     );
-    let domain = CommonDomain::build(&[&frame], 0, pixel_count, &cancel).unwrap();
+    let domain = CommonDomain::build(
+        ChannelCoverage {
+            frames: &[&frame],
+            channel: 0,
+            pixel_count,
+        },
+        &cancel,
+    )
+    .unwrap();
     assert_eq!(domain.sample_count, 100_000);
     check(
-        stratified_indices(&domain, &cancel).unwrap(),
+        domain.stratified_indices(&cancel).unwrap(),
         [0, 2, 6, 8],
         199_996,
     );
@@ -833,11 +857,25 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     let indices = [0, 1, 2, 3];
     let mono = Slots::new(None, 1);
     assert_eq!(
-        source_noise_variance(&warped, mono, 0, &indices, 4, &cancel).unwrap(),
+        SlotPlanes {
+            frames: slice::from_ref(&warped),
+            dimensions: ImageDimensions::new((4, 1), mono.count()),
+            slots: mono,
+            cancel: &cancel
+        }
+        .noise_variance(0, 0, &indices)
+        .unwrap(),
         2.0 * sigma * sigma
     );
     assert_eq!(
-        source_noise_variance(&unwarped, mono, 0, &indices, 4, &cancel).unwrap(),
+        SlotPlanes {
+            frames: slice::from_ref(&unwarped),
+            dimensions: ImageDimensions::new((4, 1), mono.count()),
+            slots: mono,
+            cancel: &cancel
+        }
+        .noise_variance(0, 0, &indices)
+        .unwrap(),
         sigma * sigma
     );
 
@@ -866,7 +904,14 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     let colours = Slots::new(None, 3);
     for (slot, expected) in [(0, 2.0), (1, 2.0), (2, 1.0)] {
         assert_eq!(
-            source_noise_variance(&drizzled, colours, slot, &indices, 4, &cancel).unwrap(),
+            SlotPlanes {
+                frames: slice::from_ref(&drizzled),
+                dimensions: ImageDimensions::new((4, 1), colours.count()),
+                slots: colours,
+                cancel: &cancel
+            }
+            .noise_variance(0, slot, &indices)
+            .unwrap(),
             expected * sigma * sigma,
             "slot {slot}"
         );
@@ -961,17 +1006,19 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
             assert_eq!(samples.len(), slots.count());
             for (slot, stored) in samples.iter().enumerate() {
                 let expected = StratifiedSamples::new(dimensions.size(), mosaic, slot)
-                    .gather(frame.channels[slots.channel(slot)].chunk(0, size.pixel_count()));
-                assert_eq!(stored.chunk(0, stored.samples()), expected, "slot {slot}");
+                    .gather(frame.channels[slots.channel(slot)].chunk(0..size.pixel_count()));
+                assert_eq!(stored.chunk(0..stored.samples()), expected, "slot {slot}");
             }
         }
         let norms = |frames: &[StoredFrame]| {
             FrameNorm::measure(
-                frames,
-                dimensions,
-                slots,
+                SlotPlanes {
+                    frames,
+                    dimensions,
+                    slots,
+                    cancel: &CancelToken::never(),
+                },
                 Normalization::Global,
-                &CancelToken::never(),
             )
             .unwrap()
             .unwrap()
@@ -1116,11 +1163,13 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
     );
     let norms = |normalization| {
         FrameNorm::measure(
-            &frames,
-            dimensions,
-            Slots::of_frames(&frames, dimensions),
+            SlotPlanes {
+                frames: &frames,
+                dimensions,
+                slots: Slots::of_frames(&frames, dimensions),
+                cancel: &CancelToken::never(),
+            },
             normalization,
-            &CancelToken::never(),
         )
         .unwrap()
         .unwrap()
@@ -1223,11 +1272,13 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
     };
     let norms = |frames: &[StoredFrame], normalization| {
         FrameNorm::measure(
-            frames,
-            dimensions,
-            Slots::of_frames(frames, dimensions),
+            SlotPlanes {
+                frames,
+                dimensions,
+                slots: Slots::of_frames(frames, dimensions),
+                cancel: &CancelToken::never(),
+            },
             normalization,
-            &CancelToken::never(),
         )
         .unwrap()
         .unwrap()
@@ -1308,11 +1359,13 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
     };
     let norms = |frames: &[StoredFrame], normalization| {
         FrameNorm::measure(
-            frames,
-            dimensions,
-            Slots::of_frames(frames, dimensions),
+            SlotPlanes {
+                frames,
+                dimensions,
+                slots: Slots::of_frames(frames, dimensions),
+                cancel: &CancelToken::never(),
+            },
             normalization,
-            &CancelToken::never(),
         )
     };
     let frames = [
@@ -1380,7 +1433,15 @@ fn the_working_set_is_what_the_measurement_holds() {
     let dimensions = ImageDimensions::new((100, 100), 1);
     let mono = Slots::new(None, 1);
     let bytes = |slots, normalization, coverage, threads| {
-        FrameNorm::heap_bytes(3, dimensions, slots, normalization, coverage, threads)
+        PlannedNormalization {
+            frame_count: 3,
+            dimensions,
+            slots,
+            normalization,
+            coverage,
+            threads,
+        }
+        .heap_bytes()
     };
     for (normalization, coverage, threads, expected) in [
         (Normalization::Global, SetCoverage::Common, 2, 805_552),

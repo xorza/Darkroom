@@ -5,15 +5,13 @@ use std::sync::Arc;
 use palantir::prelude::*;
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph::gesture::group_drag;
-use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
-use crate::gui::pane::graph::node::memory_row::memory_row;
-use crate::gui::pane::graph::node::port_row::ports_row;
-use crate::gui::pane::graph::node::{NodeUI, preview_row, wid};
+use crate::gui::pane::graph::node::{NodeUI, header, memory_row, port_row, preview_row, wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -94,7 +92,7 @@ impl<'a> NodeWidget<'a> {
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
-        let shift_click = ui.modifiers().shift;
+        let click_mode = ClickMode::with_shift(ui.modifiers().shift);
         // Status glow when the node ran, else the ambient elevation shadow —
         // one slot, and live status outranks depth.
         let shadow = node_shadow(theme, node.exec_status());
@@ -103,7 +101,7 @@ impl<'a> NodeWidget<'a> {
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
         if node.sink() {
-            subscription_pin(ui, theme, node, dcx.geometry().subs.is_hovered(node.id));
+            header::subscription_pin(ui, theme, node, dcx.geometry().subs.is_hovered(node.id));
         }
 
         // Borrowed off `self` before the body closure so it can't conflict
@@ -127,15 +125,15 @@ impl<'a> NodeWidget<'a> {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                let inspect_toggled = header(ui, ncx, dcx, out);
-                status_row(ui, ncx, out);
-                ports_row(ui, ncx, dcx, row_tracks, out);
+                let inspect_toggled = header::show(ui, ncx, dcx, out);
+                header::status_row(ui, ncx, out);
+                port_row::show(ui, ncx, dcx, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
-                    preview_row::preview_row(ui, ncx, out);
+                    preview_row::show(ui, ncx, out);
                 } else {
-                    memory_row(ui, ncx);
+                    memory_row::show(ui, ncx);
                 }
                 inspect_toggled
             });
@@ -161,7 +159,7 @@ impl<'a> NodeWidget<'a> {
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
             out.extend_graph(GraphIntent::click(
-                shift_click,
+                click_mode,
                 ncx.graph_ctx.selected(),
                 node.id,
             ));
@@ -183,7 +181,11 @@ impl<'a> NodeWidget<'a> {
             let members = if selected {
                 group_drag::selected_group(dcx)
             } else {
-                out.extend_graph(GraphIntent::click(false, ncx.graph_ctx.selected(), node.id));
+                out.extend_graph(GraphIntent::click(
+                    ClickMode::Replace,
+                    ncx.graph_ctx.selected(),
+                    node.id,
+                ));
                 Arc::from([DragStart {
                     node: node.id,
                     pos: node.pos,

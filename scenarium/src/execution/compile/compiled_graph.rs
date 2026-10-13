@@ -15,23 +15,22 @@
 //! search of the id column it already carries rather than a lookup through a
 //! table beside it.
 
+use std::ops::Index;
 use std::sync::Arc;
 
-use crate::data::codec::Codecs;
-use crate::graph::identity::FuncId;
-
 use crate::containers::column::{Column, Span};
+use crate::data::codec::Codecs;
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
+use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
 use crate::{ConstValue, DataType};
-use std::ops::Index;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
@@ -43,14 +42,14 @@ pub(crate) enum ExecutionBinding {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ExecutionInput {
-    pub required: bool,
+    pub(crate) required: bool,
     /// Whether a bound value's filesystem referent contributes to this input's digest.
-    pub stamps_fs_path: bool,
-    pub binding: ExecutionBinding,
+    pub(crate) stamps_fs_path: bool,
+    pub(crate) binding: ExecutionBinding,
     /// The input of the same node declared to override this one
     /// ([`FuncInput::overrides`](crate::FuncInput::overrides)), resolved to its
     /// place in the input column.
-    pub overridden_by: Option<InputIdx>,
+    pub(crate) overridden_by: Option<InputIdx>,
 }
 
 impl ExecutionInput {
@@ -68,8 +67,8 @@ impl ExecutionInput {
 #[derive(Debug)]
 pub(crate) struct ExecutionEvent {
     /// This event's run in [`CompiledGraph::subscribers`].
-    pub subscribers: Span<SubscriberIdx>,
-    pub lambda: EventLambda,
+    pub(crate) subscribers: Span<SubscriberIdx>,
+    pub(crate) lambda: EventLambda,
 }
 
 /// Topology + code for one lowered node. Immutable across runs; mutable per-run
@@ -82,13 +81,13 @@ pub(crate) struct ExecutionEvent {
 /// library stays readable behind it — which is what `Clone` is for.
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionNode {
-    pub sink: bool,
+    pub(crate) sink: bool,
     /// The authoring node is disabled. Ambient planning excludes it; an
     /// explicit node seed overrides it for that run.
-    pub disabled: bool,
+    pub(crate) disabled: bool,
     /// Copied from the node's func at lowering. Only `Pure` is content-cacheable;
     /// the digest of an `Impure` node (or any node downstream of one) is `None`.
-    pub behavior: FuncBehavior,
+    pub(crate) behavior: FuncBehavior,
 
     /// The authoring node's cache mode, copied from
     /// [`CacheMode`] at lowering. Its two bits
@@ -97,22 +96,22 @@ pub(crate) struct ExecutionNode {
     /// and the disk load/store; disk is honored only when the node has a
     /// content digest (a reproducible cone) and a disk root is configured — see `digest.rs`
     /// and `disk_store.rs`.
-    pub cache: CacheMode,
+    pub(crate) cache: CacheMode,
 
     /// `Some` for a built-in [`SpecialNode`] (lowered from
     /// [`NodeKind::Special`](crate::graph::node::NodeKind::Special)). The planner
     /// recognizes the kind — a subscribed `RunSinks` promotes a fired event
     /// into a full sinks run — and it marks the node's interface as coming
     /// from the hardcoded spec rather than the library.
-    pub special: Option<SpecialNode>,
+    pub(crate) special: Option<SpecialNode>,
 
-    pub inputs: Span<InputIdx>,
-    pub outputs: Span<OutputIdx>,
-    pub events: Span<EventIdx>,
+    pub(crate) inputs: Span<InputIdx>,
+    pub(crate) outputs: Span<OutputIdx>,
+    pub(crate) events: Span<EventIdx>,
 
-    pub func_id: FuncId,
+    pub(crate) func_id: FuncId,
 
-    pub lambda: FuncLambda,
+    pub(crate) lambda: FuncLambda,
 }
 
 /// The compile artifact: the lowered, immutable program — lambdas, resolved

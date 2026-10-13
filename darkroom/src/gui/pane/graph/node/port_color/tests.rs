@@ -22,23 +22,23 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
     for (i, a) in types.iter().enumerate() {
         for b in &types[i + 1..] {
             assert_ne!(
-                port_color(&theme, a, PortKind::Input, false),
-                port_color(&theme, b, PortKind::Input, false),
+                data(&theme, a, PortKind::Input, false),
+                data(&theme, b, PortKind::Input, false),
                 "{a:?} and {b:?} share a color",
             );
         }
     }
 
     for ty in &types {
-        let rest = port_color(&theme, ty, PortKind::Input, false);
+        let rest = data(&theme, ty, PortKind::Input, false);
         assert_eq!(
             rest,
-            port_color(&theme, ty, PortKind::Output, false),
+            data(&theme, ty, PortKind::Output, false),
             "{ty:?} is the type's hue, not the column's",
         );
         assert_ne!(
             rest,
-            port_color(&theme, ty, PortKind::Input, true),
+            data(&theme, ty, PortKind::Input, true),
             "{ty:?} must visibly lift on hover",
         );
     }
@@ -50,20 +50,20 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
 fn null_falls_back_to_positional_port_color() {
     let t = Theme::default();
     assert_eq!(
-        port_color(&t, &DataType::Any, PortKind::Input, false),
+        data(&t, &DataType::Any, PortKind::Input, false),
         t.ports.input
     );
     assert_eq!(
-        port_color(&t, &DataType::Any, PortKind::Output, false),
+        data(&t, &DataType::Any, PortKind::Output, false),
         t.ports.output
     );
     assert_eq!(
-        port_color(&t, &DataType::Any, PortKind::Input, true),
-        hover_lift(t.ports.input)
+        data(&t, &DataType::Any, PortKind::Input, true),
+        color::hover_lift(t.ports.input)
     );
     assert_eq!(
-        port_color(&t, &DataType::Any, PortKind::Output, true),
-        hover_lift(t.ports.output)
+        data(&t, &DataType::Any, PortKind::Output, true),
+        color::hover_lift(t.ports.output)
     );
 }
 
@@ -73,15 +73,15 @@ fn custom_types_keyed_by_type_id() {
     // Ids in adjacent ramp slots → different colors (ramp entries
     // are distinct, len > 1).
     assert_ne!(
-        port_color(&t, &custom(0), PortKind::Input, false),
-        port_color(&t, &custom(1), PortKind::Input, false),
+        data(&t, &custom(0), PortKind::Input, false),
+        data(&t, &custom(1), PortKind::Input, false),
     );
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
     let image_ty = DataType::Custom(lens::IMAGE_TYPE_ID);
     assert_eq!(
-        port_color(&t, &image_ty, PortKind::Input, false),
+        data(&t, &image_ty, PortKind::Input, false),
         t.type_colors.image
     );
     assert!(!t.type_colors.ramp.contains(&t.type_colors.image));
@@ -92,9 +92,9 @@ fn event_color_is_neutral_and_lifts_on_hover() {
     // Events use the theme's event colour, distinct from any data hue, and
     // the hover variant differs from rest.
     let t = Theme::default();
-    let rest = event_color(&t, false);
-    let hov = event_color(&t, true);
+    let rest = event(&t, false);
+    let hov = event(&t, true);
     assert_eq!(rest, t.ports.event);
-    assert_eq!(hov, hover_lift(t.ports.event));
+    assert_eq!(hov, color::hover_lift(t.ports.event));
     assert_ne!(rest, hov, "hover must visibly differ from rest");
 }

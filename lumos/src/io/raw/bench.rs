@@ -7,8 +7,8 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{BIAS, FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack};
-use crate::io::raw::libraw_filter_color;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -83,12 +83,12 @@ impl RawSensor {
         let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
             .map(|index| {
                 let (x, y) = (index % layout.raw.width, index / layout.raw.width);
-                u16::try_from(BLACK + CHANNEL_BLACK[libraw_filter_color(RGGB, y, x)]).unwrap()
+                u16::try_from(BLACK + CHANNEL_BLACK[raw::filter_color(RGGB, y, x)]).unwrap()
             })
             .collect();
         for (index, &sample) in light.data.pixels().iter().enumerate() {
             let (x, y) = (index % active.width, index / active.width);
-            let level = black.of_channel(libraw_filter_color(RGGB, y, x))
+            let level = black.of_channel(raw::filter_color(RGGB, y, x))
                 + (f64::from(sample) - f64::from(BIAS)) * span;
             let (raw_x, raw_y) = (layout.margin.x + x, layout.margin.y + y);
             raw[raw_y * layout.raw.width + raw_x] = level.round().min(f64::from(WHITE)) as u16;
@@ -100,7 +100,7 @@ impl RawSensor {
         self.black.decode(
             &self.raw,
             self.layout,
-            |x, y| libraw_filter_color(RGGB, y, x),
+            |x, y| raw::filter_color(RGGB, y, x),
             2,
             FlagRule {
                 zero_is_bad: true,

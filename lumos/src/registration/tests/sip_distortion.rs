@@ -7,8 +7,8 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
-use crate::registration::RegistrationConfig;
 use crate::registration::distortion::sip::SipConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers;
 use crate::registration::transform::{Transform, TransformType};
 

@@ -14,7 +14,9 @@ use scenarium::{
 
 use palantir::DockOperation;
 
-use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
+use crate::core::document::Document;
+use crate::core::document::graph_view::{GraphView, ItemPlacement};
+use crate::core::document::tab_ref::TabRef;
 
 /// Lay every placement out along a row so no node lands off-viewport and gets
 /// culled — [`GraphView::new`] seeds every item at the origin.

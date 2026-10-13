@@ -3,6 +3,7 @@ use crate::combine::stack_config::{
 };
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
 use crate::internals::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -20,16 +21,18 @@ use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::io::fits::cfa::save_cfa_fits;
-use crate::pipeline::align::register_warp_and_stack;
+use crate::io::fits::cfa;
 use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
 use crate::pipeline::align_stack_result::AlignStackResult;
+use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registration::FrameRegistration;
+use crate::pipeline::light_source::DetectedLights;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::{StackingProgress, StackingStage};
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -42,7 +45,7 @@ use common::TempDir;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::write_fits;
-use crate::io::fits::options::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::load_context::LoadContext;
 use fits_well::image::Image as FitsImage;
 
@@ -85,8 +88,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            progress,
-            CancelToken::never(),
+            ProgressMonitor::new(progress, CancelToken::never()),
         )
         .expect("stack");
 
@@ -221,8 +223,7 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("stack");
 
@@ -258,8 +259,7 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("manual weights follow the survivors");
     assert_eq!(result.alignment.dropped(), vec![1, 3]);
@@ -300,8 +300,7 @@ fn stacked_master_inherits_reference_frame_metadata() {
         .align_stack_images(
             vec![f0, f1, f2],
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("stack");
 
@@ -326,8 +325,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
         .align_stack_images(
             vec![base, odd, odder],
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
 
@@ -373,8 +371,7 @@ fn an_invalid_registration_config_is_reported_as_one() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(
@@ -422,17 +419,19 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         })
         .collect();
 
-    let error = register_warp_and_stack(
-        detected,
-        &config,
-        StagePlan {
-            parking: FrameParking::new(Tier::Resident),
-            warp_width: 1,
-        },
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
+    let run = AlignStackRun {
+        config: &config,
+        ingest: IngestRun::new(&IngestConfig::default(), ProgressMonitor::unattended()),
+    };
+    let error = run
+        .register_warp_and_stack(DetectedLights {
+            frames: detected,
+            stage: StagePlan {
+                parking: FrameParking::new(Tier::Resident),
+                warp_width: 1,
+            },
+        })
+        .unwrap_err();
     let AlignStackError::RegistrationConfig(invalid) = error else {
         panic!("expected the config to be blamed, got {error:?}")
     };
@@ -468,8 +467,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(
@@ -500,8 +498,7 @@ fn all_non_reference_frames_dropped_errors() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(
@@ -523,8 +520,7 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("stack");
     assert_ne!(
@@ -569,8 +565,7 @@ fn a_combine_error_names_the_input_light() {
         .align_stack_images(
             frames,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(
@@ -588,8 +583,7 @@ fn public_input_errors() {
         .align_stack_images(
             Vec::new(),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(matches!(err, AlignStackError::NoFrames));
@@ -609,8 +603,7 @@ fn public_input_errors() {
         .align_stack_images(
             vec![image],
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     let AlignStackError::DetectionConfig(invalid) = error else {
@@ -627,8 +620,7 @@ fn public_input_errors() {
             .align_stack_images(
                 lights,
                 &IngestConfig::default(),
-                ProgressCallback::default(),
-                CancelToken::never(),
+                ProgressMonitor::unattended(),
             )
             .unwrap_err()
     };
@@ -688,7 +680,7 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
     );
     cfa.metadata.date_obs = Some(format!("2026-01-01T00:00:{index:02}"));
     cfa.metadata.exposure_time = Some(10.0);
-    save_cfa_fits(&path, &cfa).expect("write synthetic CFA FITS light");
+    cfa::save(&path, &cfa).expect("write synthetic CFA FITS light");
     path
 }
 
@@ -719,8 +711,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
                 paths,
                 &CalibrationMasters::default(),
                 &IngestConfig::default(),
-                ProgressCallback::default(),
-                CancelToken::never(),
+                ProgressMonitor::unattended(),
             )
             .unwrap_err()
     };
@@ -778,14 +769,13 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     let mut longer = make_cfa(Size2us::new(32, 32), vec![0.1; 32 * 32], CfaType::Mono);
     longer.metadata.exposure_time = Some(20.0);
     let longer_path = scratch.path().join("light_longer.fits");
-    save_cfa_fits(&longer_path, &longer).unwrap();
+    cfa::save(&longer_path, &longer).unwrap();
     let error = AlignStackConfig::default()
         .calibrate_align_stack_paths(
             &[paths[0].clone(), longer_path.clone()],
             &masters,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap_err();
     assert!(
@@ -813,7 +803,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         vec![0.1; 36 * 36],
         CfaType::XTrans(XTRANS_PATTERN),
     );
-    save_cfa_fits(&xtrans, &cfa).expect("write synthetic X-Trans light");
+    cfa::save(&xtrans, &cfa).expect("write synthetic X-Trans light");
     let cosmic = AlignStackConfig {
         cosmic_ray: Some(CosmicRayConfig::default()),
         ..AlignStackConfig::default()
@@ -905,12 +895,7 @@ fn kept_lights_are_read_back_by_the_next_run() {
     ingest.cache_dir = scratch.join("kept");
     let run = || {
         config
-            .align_stack_paths(
-                &paths,
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .align_stack_paths(&paths, &ingest, ProgressMonitor::unattended())
             .unwrap()
     };
     let first = run();
@@ -968,21 +953,11 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() 
         ..config
     };
     assert!(matches!(
-        cosmic.align_stack_paths(
-            &paths,
-            &ingest,
-            ProgressCallback::default(),
-            CancelToken::never()
-        ),
+        cosmic.align_stack_paths(&paths, &ingest, ProgressMonitor::unattended()),
         Err(AlignStackError::CosmicRayOnLinearLights)
     ));
     assert!(matches!(
-        cosmic.align_stack_images(
-            vec![base],
-            &ingest,
-            ProgressCallback::default(),
-            CancelToken::never()
-        ),
+        cosmic.align_stack_images(vec![base], &ingest, ProgressMonitor::unattended()),
         Err(AlignStackError::CosmicRayOnLinearLights)
     ));
 }
@@ -1017,12 +992,7 @@ fn assert_tiers_stack_as_held(
         .collect();
     assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
     let expected = config
-        .align_stack_images(
-            held,
-            ingest,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        .align_stack_images(held, ingest, ProgressMonitor::unattended())
         .unwrap();
     let registered = expected.alignment.registered();
     assert_eq!(registered, paths.len(), "every light registers");
@@ -1046,12 +1016,7 @@ fn assert_tiers_stack_as_held(
             ..ingest.clone()
         };
         let result = config
-            .align_stack_paths(
-                paths,
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .align_stack_paths(paths, &ingest, ProgressMonitor::unattended())
             .unwrap();
         let report = &result.product.report;
         assert_eq!(
@@ -1119,8 +1084,7 @@ fn both_front_ends_report_the_same_stages() {
             &paths,
             &CalibrationMasters::default(),
             &IngestConfig::default(),
-            raw_progress,
-            CancelToken::never(),
+            ProgressMonitor::new(raw_progress, CancelToken::never()),
         )
         .expect("raw-path stack");
 
@@ -1129,8 +1093,7 @@ fn both_front_ends_report_the_same_stages() {
         .align_stack_images(
             frames.to_vec(),
             &IngestConfig::default(),
-            decoded_progress,
-            CancelToken::never(),
+            ProgressMonitor::new(decoded_progress, CancelToken::never()),
         )
         .expect("decoded-path stack");
 
@@ -1209,13 +1172,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let masters = CalibrationMasters::default();
     let run = |config: &AlignStackConfig, ingest: &IngestConfig| {
         config
-            .calibrate_align_stack_paths(
-                &paths,
-                &masters,
-                ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .calibrate_align_stack_paths(&paths, &masters, ingest, ProgressMonitor::unattended())
             .expect("stack the lights")
     };
     let ram = run(&config, &ram_ingest);
@@ -1306,8 +1263,7 @@ fn two_default_runs_stack_bit_for_bit() {
             .align_stack_images(
                 frames(),
                 &IngestConfig::default(),
-                ProgressCallback::default(),
-                CancelToken::never(),
+                ProgressMonitor::unattended(),
             )
             .expect("stack")
     };
@@ -1397,8 +1353,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
             lights,
             &masters,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .expect("calibrate_align_stack_paths");
 

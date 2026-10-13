@@ -1,6 +1,6 @@
 //! Working memory the background estimator keeps between detections.
 
-use crate::background_mesh::workspace::MeshWorkspace;
+use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::scratch_pool::{Scratch, ScratchPool};
 
 #[derive(Debug, Default)]

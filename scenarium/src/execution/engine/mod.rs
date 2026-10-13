@@ -17,7 +17,7 @@ use crate::execution::cache::runtime::error::CacheNodeFailure;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::engine::error::InstallValidationError;
 use crate::execution::error::Result;
-use crate::execution::executor::{Executor, RunRequest};
+use crate::execution::executor::{CollectRequest, Executor, RunRequest};
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::RunReporter;
 use crate::execution::schedule::RunSchedule;
@@ -51,6 +51,19 @@ pub(crate) struct ExecutionEngine {
     /// dispositions, demand, and reader counts the cache-aware sweep refines it into.
     /// Recycled across runs to avoid reallocation.
     schedule: RunSchedule,
+}
+
+/// One run as a host asks for it: what to seed, where live feedback goes, and
+/// the token that cancels it.
+#[derive(Debug)]
+pub(crate) struct ExecuteRequest<'a, 'r> {
+    pub(crate) seeds: &'a RunSeeds,
+    /// Receives progress before and after each node's lambda, ahead of the
+    /// final outcome.
+    pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
+    /// Set mid-run, it stops scheduling after the in-flight node and marks the
+    /// outcome `cancelled`.
+    pub(crate) cancel: CancelToken,
 }
 
 impl ExecutionEngine {
@@ -104,17 +117,18 @@ impl ExecutionEngine {
         self.cache.evict(&self.compiled, node_ids).await
     }
 
-    /// `reporter` receives live feedback ahead of the final outcome: progress before and
-    /// after each node's lambda runs. When `cancel` is set mid-run, scheduling stops after
-    /// the in-flight node and the caller-owned outcome is marked `cancelled`. The outcome
+    /// Plan, resolve and run `request.seeds` into the caller-owned `outcome`. The outcome
     /// also owns triggers initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
-        seeds: &RunSeeds,
-        reporter: &mut dyn RunReporter,
-        cancel: CancelToken,
+        request: ExecuteRequest<'_, '_>,
         outcome: &mut ExecutionOutcome,
     ) -> Result<()> {
+        let ExecuteRequest {
+            seeds,
+            reporter,
+            cancel,
+        } = request;
         // Phase 2: schedule into the reusable buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
@@ -161,8 +175,14 @@ impl ExecutionEngine {
 
         // Phase 4: reduce the run to one status row per node. Last, because a node's row
         // carries the RAM it ended up holding — which the two steps above just settled.
-        self.executor
-            .collect_outcome(compiled, &self.schedule, self.cache.node_ram(), outcome);
+        self.executor.collect_outcome(
+            CollectRequest {
+                program: compiled,
+                schedule: &self.schedule,
+                node_ram: self.cache.node_ram(),
+            },
+            outcome,
+        );
 
         Ok(())
     }
@@ -229,22 +249,22 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::execution::index::NodeIdx;
     use std::result;
 
     use crate::DynamicValue;
     use crate::execution::cache::disk_store::DiskStore;
-    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
+    use crate::execution::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionInput};
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
+    use crate::execution::index::NodeIdx;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::Graph;
     use crate::graph::func::lambda::OutputDemand;
-    use crate::graph::identity::{EventPort, NodeId};
+    use crate::graph::identity::NodeId;
     use crate::library::Library;
 
     #[derive(Debug, Default)]
@@ -275,20 +295,9 @@ pub(crate) mod internals {
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-        pub(crate) async fn prepare_execution(
-            &mut self,
-            sinks: bool,
-            event_sources: bool,
-            events: &[EventPort],
-        ) -> Result<()> {
-            let seeds = RunSeeds {
-                sinks,
-                event_sources,
-                events: events.to_vec(),
-                node_ids: Vec::new(),
-            };
+        pub(crate) async fn prepare_execution(&mut self, seeds: &RunSeeds) -> Result<()> {
             let compiled: &CompiledGraph = &self.compiled;
-            self.planner.plan(compiled, &seeds, &mut self.schedule)?;
+            self.planner.plan(compiled, seeds, &mut self.schedule)?;
             self.schedule.resolve(compiled, &mut self.cache).await;
             Ok(())
         }

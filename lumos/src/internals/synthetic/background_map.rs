@@ -5,11 +5,9 @@
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::{BackgroundEstimate, noise_floor_for};
-use crate::star_detection::detection_plane::PlaneFilters;
+use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::background_config::{
-    BackgroundConfig, BackgroundRefinement,
-};
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use imaginarium::Buffer2;
 
 /// Create a uniform `BackgroundEstimate` with constant background and noise values.
@@ -41,22 +39,18 @@ pub(crate) fn estimate_in(
     config: &BackgroundConfig,
     pool: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    let estimate = BackgroundEstimate::estimate(pixels, None, config, pool);
-    let BackgroundRefinement::Iterative(refinement) = config.refinement else {
-        return estimate;
-    };
-    let refined = estimate.refine(
-        pixels,
-        refinement,
-        PlaneFilters {
-            median: false,
-            matched: None,
-            mask: None,
-        },
-        config,
-        pool,
-    );
-    refined.estimate
+    BackgroundEstimate::estimate(pixels, None, config, pool)
+        .refine(
+            pixels,
+            PlaneSpec {
+                prefilter: Prefilter::None,
+                matched: None,
+                mask: None,
+                background: config,
+            },
+            pool,
+        )
+        .estimate
 }
 
 #[cfg(test)]

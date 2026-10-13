@@ -33,8 +33,7 @@ impl PixelFlags {
             .par_iter_mut()
             .enumerate()
             .for_each(|(index, byte)| *byte = flags_at(index).byte());
-        let flags = Self::from_plane(bits);
-        flags.counts.any().then_some(flags)
+        Self::from_buffer(bits)
     }
 
     /// Flags from a plane of their bytes whose `counts` its producer tallied as it wrote them;
@@ -139,7 +138,7 @@ impl PixelFlags {
             .par_chunks_mut(width)
             .zip(source.par_chunks(width))
             .for_each_init(BlockOrs::default, |scratch, (out, row)| {
-                or_window(row, out, reach, scratch);
+                scratch.or_window(row, out, reach);
             });
         // The vertical pass runs the same window over whole rows at once: a row is one element of
         // the column-wise sequence, and OR is element-wise.
@@ -287,36 +286,38 @@ struct BlockOrs {
     suffix: Vec<u8>,
 }
 
-/// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row, with
-/// `scratch` for the block ORs.
-fn or_window(row: &[u8], out: &mut [u8], reach: Reach, scratch: &mut BlockOrs) {
-    let len = row.len();
-    let block = reach.len();
-    let BlockOrs { prefix, suffix } = scratch;
-    prefix.clear();
-    prefix.extend_from_slice(row);
-    suffix.clear();
-    suffix.extend_from_slice(row);
-    for i in 1..len {
-        if i % block != 0 {
-            prefix[i] |= prefix[i - 1];
+impl BlockOrs {
+    /// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row, through
+    /// these block ORs.
+    fn or_window(&mut self, row: &[u8], out: &mut [u8], reach: Reach) {
+        let len = row.len();
+        let block = reach.len();
+        let Self { prefix, suffix } = self;
+        prefix.clear();
+        prefix.extend_from_slice(row);
+        suffix.clear();
+        suffix.extend_from_slice(row);
+        for i in 1..len {
+            if i % block != 0 {
+                prefix[i] |= prefix[i - 1];
+            }
         }
-    }
-    for i in (0..len.saturating_sub(1)).rev() {
-        if (i + 1) % block != 0 {
-            suffix[i] |= suffix[i + 1];
+        for i in (0..len.saturating_sub(1)).rev() {
+            if (i + 1) % block != 0 {
+                suffix[i] |= suffix[i + 1];
+            }
         }
-    }
-    for (i, value) in out.iter_mut().enumerate() {
-        let parts = WindowParts::of(reach.window(i, len), block, len);
-        *value = match parts {
-            WindowParts::Both {
-                suffix: s,
-                prefix: p,
-            } => suffix[s] | prefix[p],
-            WindowParts::Prefix(at) => prefix[at],
-            WindowParts::Suffix(at) => suffix[at],
-        };
+        for (i, value) in out.iter_mut().enumerate() {
+            let parts = WindowParts::of(reach.window(i, len), block, len);
+            *value = match parts {
+                WindowParts::Both {
+                    suffix: s,
+                    prefix: p,
+                } => suffix[s] | prefix[p],
+                WindowParts::Prefix(at) => prefix[at],
+                WindowParts::Suffix(at) => suffix[at],
+            };
+        }
     }
 }
 

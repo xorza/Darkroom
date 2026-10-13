@@ -7,9 +7,11 @@
 //! imported:
 //!
 //! - [`CancelToken`] — cooperative cancellation, shared across worker threads.
-//! - [`serialize`] / [`deserialize`] over a [`SerdeFormat`] — the one
-//!   format-tagged codec every document and sidecar in the workspace is
-//!   written with; [`serialize_into`] appends to a buffer the caller keeps.
+//! - [`SerdeFormat`] and its [`serialize`](SerdeFormat::serialize) /
+//!   [`deserialize`](SerdeFormat::deserialize) — the one format-tagged codec
+//!   every document and sidecar in the workspace is written with;
+//!   [`serialize_into`](SerdeFormat::serialize_into) appends to a buffer the
+//!   caller keeps.
 //!   [`SerializeError`] and [`DeserializeError`] appear in those signatures;
 //!   nothing imports them to construct one.
 //! - [`Introspect`] / [`IntrospectEnum`] and the [`FieldDesc`] … [`FieldValue`]
@@ -51,14 +53,14 @@ pub use internals::temp_file::TempFile;
 #[cfg(all(unix, feature = "internals"))]
 pub use internals::unreadable::Unreadable;
 // The derives share their traits' names in the macro namespace, so one name exports both.
-#[cfg(any(test, feature = "introspect-derive"))]
+#[cfg(feature = "introspect-derive")]
 pub use common_derive::{Introspect, IntrospectEnum};
 pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
 pub use serde::serde_format::SerdeFormat;
-pub use serde::{DeserializeError, SerializeError, deserialize, serialize, serialize_into};
+pub use serde::{DeserializeError, SerializeError};
 
 /// Whether this build has debug assertions on — the one switch every
 /// debug-only self-check in the workspace is gated on, so those checks turn

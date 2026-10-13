@@ -1,13 +1,23 @@
-use crate::background_mesh::workspace::internals::compute_grid;
+use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::background_mesh::*;
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::statistics::mad_to_sigma;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
-/// Create a `BackgroundMesh` with default test parameters (no mask, default sigma clip iterations)
+/// Tiles of `tile_size`, the test clip passes, and the median filter.
+const fn params(tile_size: usize) -> MeshParams {
+    MeshParams {
+        tile_size,
+        sigma_clip_iterations: TEST_SIGMA_CLIP_ITERATIONS,
+        median_filter: MedianFilter::Apply,
+    }
+}
+
+/// The mesh of `pixels` in tiles of `tile_size`, unmasked.
 fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundMesh {
-    compute_grid(pixels, None, tile_size, TEST_SIGMA_CLIP_ITERATIONS, true)
+    BackgroundMesh::computed(pixels, None, params(tile_size))
 }
 
 /// Create a `BackgroundMesh` with mask
@@ -16,13 +26,7 @@ fn make_grid_with_mask(
     tile_size: usize,
     mask: &BitBuffer2,
 ) -> BackgroundMesh {
-    compute_grid(
-        pixels,
-        Some(mask),
-        tile_size,
-        TEST_SIGMA_CLIP_ITERATIONS,
-        true,
-    )
+    BackgroundMesh::computed(pixels, Some(mask), params(tile_size))
 }
 
 #[test]
@@ -182,7 +186,15 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
     let clipped = make_grid(&pixels, 32).stats[(0, 0)];
     assert_eq!((clipped.sky, clipped.sigma), (104.5, mad_to_sigma(2.5f32)));
 
-    let unclipped = compute_grid(&pixels, None, 32, 0, true).stats[(0, 0)];
+    let unclipped = BackgroundMesh::computed(
+        &pixels,
+        None,
+        MeshParams {
+            sigma_clip_iterations: 0,
+            ..params(32)
+        },
+    )
+    .stats[(0, 0)];
     assert_eq!(unclipped.sky, 105.0);
 }
 

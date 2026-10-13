@@ -8,24 +8,13 @@ use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use crate::simd::math::Math;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
 
-/// Apply the arcsinh plane curve after `black` in place to one band of a plane, on the widest Isa
-/// this CPU has.
-pub(super) fn asinh_plane(plane: &mut [f32], black: BlackPoint, curve: AsinhCurve) {
-    AsinhPlane {
-        plane,
-        black,
-        curve,
-    }
-    .dispatch();
-}
-
-/// [`asinh_plane`] as a kernel: `clamp(asinh(v′ / β) / norm, 0, 1)` of `v′` after the black point,
-/// a NaN sample to 0.
+/// The arcsinh plane curve after `black`, in place, over one band of a plane:
+/// `clamp(asinh(v′ / β) / norm, 0, 1)` of `v′` after the black point, a NaN sample to 0.
 #[derive(Debug)]
-struct AsinhPlane<'a> {
-    plane: &'a mut [f32],
-    black: BlackPoint,
-    curve: AsinhCurve,
+pub(super) struct AsinhPlane<'a> {
+    pub(super) plane: &'a mut [f32],
+    pub(super) black: BlackPoint,
+    pub(super) curve: AsinhCurve,
 }
 
 impl Kernel for AsinhPlane<'_> {
@@ -46,37 +35,19 @@ impl Kernel for AsinhPlane<'_> {
     }
 }
 
-/// Apply the color-preserving arcsinh curve after `black` in place to one band of three RGB-f32
-/// **planes**, on the widest Isa this CPU has.
+/// The color-preserving arcsinh curve after `black`, in place, over one band of three RGB-f32
+/// **planes**: `color_preserve_pixel` lane by lane — black point, intensity, curve, channel
+/// scale, highlight cap.
 ///
 /// The three slices must be the same length. Callers split the planes in lockstep and hand each
 /// task one band of every channel, so the Isa is chosen per band rather than per pixel.
-pub(super) fn asinh_color_preserve(
-    red: &mut [f32],
-    green: &mut [f32],
-    blue: &mut [f32],
-    black: BlackPoint,
-    curve: AsinhCurve,
-) {
-    AsinhColorPreserve {
-        red,
-        green,
-        blue,
-        black,
-        curve,
-    }
-    .dispatch();
-}
-
-/// [`asinh_color_preserve`] as a kernel: `color_preserve_pixel` lane by lane — black point,
-/// intensity, curve, channel scale, highlight cap.
 #[derive(Debug)]
-struct AsinhColorPreserve<'a> {
-    red: &'a mut [f32],
-    green: &'a mut [f32],
-    blue: &'a mut [f32],
-    black: BlackPoint,
-    curve: AsinhCurve,
+pub(super) struct AsinhColorPreserve<'a> {
+    pub(super) red: &'a mut [f32],
+    pub(super) green: &'a mut [f32],
+    pub(super) blue: &'a mut [f32],
+    pub(super) black: BlackPoint,
+    pub(super) curve: AsinhCurve,
 }
 
 impl Kernel for AsinhColorPreserve<'_> {
@@ -189,37 +160,41 @@ impl<V: F32x8> SplatCurve<V> {
 #[cfg(test)]
 mod internals {
     use crate::image_ops::rgb::Rgb;
-    use crate::image_ops::stretch::{AsinhCurve, BlackPoint, ToneCurve, color_preserve_pixel};
+    use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
+    use crate::image_ops::stretch::{ToneCurve, color_preserve_pixel};
 
-    /// The scalar plane curve the kernel is tested against: libm's `asinhf` through
-    /// [`AsinhCurve::eval`], after `black`.
-    pub(super) fn asinh_plane_scalar(plane: &mut [f32], black: BlackPoint, curve: AsinhCurve) {
-        for value in plane {
-            *value = curve.eval(black.rescale(*value));
+    impl AsinhPlane<'_> {
+        /// The scalar plane curve the kernel is tested against: libm's `asinhf` through
+        /// `AsinhCurve::eval`, after the black point.
+        pub(super) fn run_scalar(self) {
+            for value in self.plane {
+                *value = self.curve.eval(self.black.rescale(*value));
+            }
         }
     }
 
-    /// The scalar color-preserving curve the kernel is tested against: [`color_preserve_pixel`].
-    pub(super) fn asinh_color_preserve_scalar(
-        red: &mut [f32],
-        green: &mut [f32],
-        blue: &mut [f32],
-        black: BlackPoint,
-        curve: AsinhCurve,
-    ) {
-        for ((r, g), b) in red.iter_mut().zip(green.iter_mut()).zip(blue.iter_mut()) {
-            let out = color_preserve_pixel(
-                Rgb {
-                    r: *r,
-                    g: *g,
-                    b: *b,
-                },
-                black,
-                &curve,
-            );
-            *r = out.r;
-            *g = out.g;
-            *b = out.b;
+    impl AsinhColorPreserve<'_> {
+        /// The scalar color-preserving curve the kernel is tested against: `color_preserve_pixel`.
+        pub(super) fn run_scalar(self) {
+            let pixels = self
+                .red
+                .iter_mut()
+                .zip(self.green.iter_mut())
+                .zip(self.blue.iter_mut());
+            for ((r, g), b) in pixels {
+                let out = color_preserve_pixel(
+                    Rgb {
+                        r: *r,
+                        g: *g,
+                        b: *b,
+                    },
+                    self.black,
+                    &self.curve,
+                );
+                *r = out.r;
+                *g = out.g;
+                *b = out.b;
+            }
         }
     }
 }

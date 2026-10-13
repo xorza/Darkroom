@@ -10,42 +10,17 @@
 //!    tree-based algorithm that uses multiple threshold levels to separate
 //!    blended sources. More accurate for crowded fields but slower.
 
-use std::cmp::Ordering;
-
 use crate::math::vec2us::Vec2us;
+use crate::star_detection::deblend::pixel::Pixel;
 
+pub(super) mod assignment;
 pub(super) mod component;
 pub(super) mod component_pixels;
 pub(super) mod deblend_buffers;
 pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
+pub(super) mod pixel;
 pub(super) mod region;
-
-/// A pixel with its coordinates and value.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Pixel {
-    pub(crate) pos: Vec2us,
-    pub(crate) value: f32,
-}
-
-impl Pixel {
-    /// The brightest of `pixels`, the first in iteration order among equals; `None` when there
-    /// are none.
-    fn brightest(pixels: impl IntoIterator<Item = Self>) -> Option<Self> {
-        pixels
-            .into_iter()
-            .reduce(|best, p| if p.value > best.value { p } else { best })
-    }
-
-    /// Brightest first; equal values in raster order (row, then column), so a ranking does not
-    /// depend on the order its input arrived in.
-    fn brighter_first(a: &Self, b: &Self) -> Ordering {
-        b.value
-            .total_cmp(&a.value)
-            .then(a.pos.y.cmp(&b.pos.y))
-            .then(a.pos.x.cmp(&b.pos.x))
-    }
-}
 
 /// Squared Euclidean distance between two pixel positions — the one peak-separation
 /// metric shared by the Voronoi assignment and every min-separation check.

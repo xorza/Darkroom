@@ -10,55 +10,10 @@
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
+use crate::frame::frame_plane::FramePlane;
 use crate::frame::stackable_image::StackableImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
-/// Which of a frame's planes a validation failure is about.
-///
-/// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
-/// fraction of a pixel that had support, confidence an interpolation's noise factor with no upper
-/// bound.
-/// Carrying the kind rather than its label is what keeps that rule out of a string comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FramePlane {
-    /// One of the image's colour planes.
-    Channel,
-    /// Per-pixel warp support, in `[0, 1]`.
-    Coverage,
-    /// Per-pixel interpolation confidence, non-negative.
-    Confidence,
-    /// A drizzled frame's per-pixel drop weight `Σw`, non-negative.
-    DropWeight,
-}
-
-impl FramePlane {
-    /// Whether `value` is in range for this plane. Non-finite is out of range for all of them.
-    pub(crate) fn accepts(self, value: f32) -> bool {
-        value.is_finite()
-            && match self {
-                // Finiteness is the whole rule for image data, as in `validate_sample_channels`:
-                // dark subtraction takes a calibrated channel below zero legitimately.
-                Self::Channel => true,
-                Self::Coverage => (0.0..=1.0).contains(&value),
-                Self::Confidence | Self::DropWeight => value >= 0.0,
-            }
-    }
-}
-
-impl Display for FramePlane {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Channel => "a channel",
-            Self::Coverage => "coverage",
-            Self::Confidence => "confidence",
-            Self::DropWeight => "drop weight",
-        })
-    }
-}
 
 /// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
 /// interpolation that produced it was.
@@ -75,7 +30,7 @@ impl Display for FramePlane {
 /// takes zero for both, and every sample it takes has positive coverage and confidence — and
 /// [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans on
 /// it: a sample that clears the coverage floor is guaranteed a positive confidence to divide its
-/// noise by, and `source_noise_variance` a non-zero one too.
+/// noise by, and `SlotPlanes::noise_variance` a non-zero one too.
 ///
 /// [`FrameCheck::quality_pair`]: crate::ingest::frame_check::FrameCheck::quality_pair
 #[derive(Debug, Clone)]
@@ -159,14 +114,6 @@ impl FrameQuality<Buffer2<f32>> {
 }
 
 impl<P> FrameQuality<P> {
-    /// The frame's per-pixel warp support, or `None` for a frame that carries no such plane.
-    pub(crate) const fn coverage(&self) -> Option<&P> {
-        match self {
-            Self::None | Self::Mask { .. } | Self::Drizzled { .. } => None,
-            Self::Planes { coverage, .. } => Some(coverage),
-        }
-    }
-
     /// The factor the frame's noise is divided by at each pixel of `channel` — a warp's
     /// interpolation confidence, a drizzle's Kish size — or `None` for a frame that carries no such
     /// plane.
@@ -302,6 +249,16 @@ pub(crate) mod internals {
     use imaginarium::Buffer2;
 
     use crate::frame::frame_quality::FrameQuality;
+
+    impl<P> FrameQuality<P> {
+        /// The frame's per-pixel warp support, or `None` for a frame that carries no such plane.
+        pub(crate) const fn coverage(&self) -> Option<&P> {
+            match self {
+                Self::None | Self::Mask { .. } | Self::Drizzled { .. } => None,
+                Self::Planes { coverage, .. } => Some(coverage),
+            }
+        }
+    }
 
     impl FrameQuality<Buffer2<f32>> {
         /// A coverage plane with the confidence plane a warp would have produced beside it: unit

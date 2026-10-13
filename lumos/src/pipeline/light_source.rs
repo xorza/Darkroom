@@ -2,14 +2,11 @@
 
 use std::path::Path;
 
-use common::CancelToken;
-
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::calibration::cosmic_ray::reject_cosmic_rays;
 use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::{FrameNorm, SetCoverage};
+use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_stats::FrameStats;
@@ -17,6 +14,7 @@ use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::KeptDecodeError;
 use crate::frame_store::stored_layout::StoredLayout;
+use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -29,10 +27,10 @@ use crate::memory::DETECTION_WORKING_PLANES;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
-use crate::pipeline::align::register_warp_and_stack;
 use crate::pipeline::align_stack_config::{AlignStackConfig, Reference};
 use crate::pipeline::align_stack_result::AlignStackResult;
-use crate::pipeline::calibrate::CalibrationNotes;
+use crate::pipeline::align_stack_run::AlignStackRun;
+use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
@@ -40,7 +38,6 @@ use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet, ParkedFrame};
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detector::StarDetector;
@@ -104,7 +101,7 @@ impl MosaicPreparation<'_> {
                 })?;
         self.notes.record(outcome);
         if let Some(cosmic_ray) = self.cosmic_ray {
-            let removed = reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| {
+            let removed = cosmic_ray::reject(&mut cfa, cosmic_ray).map_err(|source| {
                 AlignStackError::CosmicRay {
                     path: path.to_path_buf(),
                     source,
@@ -125,10 +122,12 @@ pub(crate) struct DetectedLights {
     pub(crate) stage: StagePlan,
 }
 
-/// What a run of lights holds: each one's demosaiced dimensions, its way from its file or the
-/// caller to detected, and what the caller held of it before the run read the machine.
+/// What a run of lights holds: how many there are, each one's demosaiced dimensions, its way from
+/// its file or the caller to detected, and what the caller held of it before the run read the
+/// machine.
 #[derive(Debug)]
 struct LightShape {
+    count: usize,
     dimensions: ImageDimensions,
     prepared: Footprint,
     held: usize,
@@ -199,22 +198,18 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     /// The statistics are measured before the warp correlates neighbouring pixels, and while the
     /// frame is in hand: a spilled frame would otherwise be read back for them. A demosaiced
     /// light's noise is the one its demosaic measured on the mosaic.
-    pub(crate) fn detect(
-        self,
-        config: &AlignStackConfig,
-        run: &IngestRun,
-        progress: &ProgressCallback,
-    ) -> Result<DetectedLights, AlignStackError> {
+    pub(super) fn detect(self, run: &AlignStackRun<'_>) -> Result<DetectedLights, AlignStackError> {
+        let AlignStackRun { config, ingest } = run;
         let total = self.len();
         debug_assert!(total > 0, "each entry refuses an empty set");
-        let budget = run.budget;
-        let shape = self.shape(run)?;
+        let budget = ingest.budget;
+        let shape = self.shape(ingest)?;
         let plan = RunPlan::of(
             total,
-            &shape.found_reference(total, config, budget.workers()),
+            &shape.found_reference(config, budget.workers()),
             budget,
         );
-        let stage = StagePlan::new(&plan, LightShape::WARP, shape.spill_bytes(total), run)?;
+        let stage = shape.stage_plan(&plan, LightShape::WARP, ingest)?;
         tracing::info!(
             frames = total,
             budget_mb = budget.usable() / (1024 * 1024),
@@ -231,8 +226,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                 decode_slots: slots,
                 stage: StackingStage::Preparing,
             },
-            run,
-            progress,
+            ingest,
         );
         // Bounded by the plan, which charges each in-flight frame its decode and the detector's
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
@@ -270,9 +264,9 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
         match self {
             // They were in memory before the run read the machine: the plan charges them as held.
-            Self::Held(frames) => Ok(LightShape::linear(
+            Self::Held(frames) => Ok(LightShape::held(
                 FramePeek::of_decoded(&frames[0]),
-                true,
+                frames.len(),
                 run.budget.workers(),
             )),
             Self::Files(files) => files.shape(run),
@@ -288,14 +282,24 @@ impl LightShape {
     /// The stage of [`Self::named_reference`] that takes each light through all of it.
     const PASS: usize = 0;
 
-    /// Linear lights as `peek` reads them on `workers`, `held` by the caller or decoded one at a
-    /// time: a light's way is its decode and its statistics.
-    fn linear(peek: FramePeek, held: bool, workers: usize) -> Self {
-        let prepared = peek.footprint(workers);
+    /// [`Self::decoded`], but for lights the caller holds, which the plan charges only what the run
+    /// adds to them.
+    fn held(peek: FramePeek, count: usize, workers: usize) -> Self {
+        let decoded = Self::decoded(peek, count, workers);
         Self {
+            held: decoded.prepared.kept,
+            ..decoded
+        }
+    }
+
+    /// `count` linear lights decoded one at a time, as `peek` reads them on `workers`: a light's
+    /// way is its decode and its statistics.
+    fn decoded(peek: FramePeek, count: usize, workers: usize) -> Self {
+        Self {
+            count,
             dimensions: peek.dimensions,
-            prepared,
-            held: if held { prepared.kept } else { 0 },
+            prepared: peek.footprint(workers),
+            held: 0,
         }
     }
 
@@ -305,10 +309,25 @@ impl LightShape {
         StoredLayout::warped(self.dimensions).heap_bytes(self.dimensions)
     }
 
-    /// The most `frame_count` lights write to a spill: each as it is warped, which is no smaller
-    /// than as it was parked.
-    const fn spill_bytes(&self, frame_count: usize) -> u64 {
-        (self.warped() as u64).saturating_mul(frame_count as u64)
+    /// The most the lights write to a spill: each as it is warped, which is no smaller than as it
+    /// was parked.
+    const fn spill_bytes(&self) -> u64 {
+        (self.warped() as u64).saturating_mul(self.count as u64)
+    }
+
+    /// Where `plan` parks the lights, and the width of its stage `warp`, which warps them; a spill
+    /// checked for room for what the lights write to it.
+    fn stage_plan(
+        &self,
+        plan: &RunPlan,
+        warp: usize,
+        run: &IngestRun,
+    ) -> Result<StagePlan, AlignStackError> {
+        let tier = Tier::for_plan(plan, run.budget, self.spill_bytes(), &run.cache_dir)?;
+        Ok(StagePlan {
+            parking: FrameParking::new(tier),
+            warp_width: plan.width(warp),
+        })
     }
 
     /// What each worker's detector holds throughout: its pool of image-sized planes.
@@ -316,17 +335,12 @@ impl LightShape {
         DETECTION_WORKING_PLANES * self.dimensions.pixel_count() * size_of::<f32>()
     }
 
-    /// The stages of `frame_count` lights with the reference found, under `config` on `workers`:
-    /// each light prepared and detected; then warped, the light it warps from in hand; the
-    /// normalization; the combine.
-    fn found_reference(
-        &self,
-        frame_count: usize,
-        config: &AlignStackConfig,
-        workers: usize,
-    ) -> [Stage; 4] {
+    /// The stages of the lights with the reference found, under `config` on `workers`: each light
+    /// prepared and detected; then warped, the light it warps from in hand; the normalization; the
+    /// combine.
+    fn found_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 4] {
         let warped = self.warped() - self.held;
-        let [normalize, combine] = self.combined(warped, frame_count, config, workers);
+        let [normalize, combine] = self.combined(warped, config, workers);
         [
             Stage {
                 kept: self.prepared.kept - self.held,
@@ -345,18 +359,13 @@ impl LightShape {
         ]
     }
 
-    /// The stages of `frame_count` lights with the reference named, under `config` on `workers`:
-    /// each light taken through its preparation, its detection and its warp by one worker, which
-    /// keeps only the warped light; the normalization; the combine.
-    fn named_reference(
-        &self,
-        frame_count: usize,
-        config: &AlignStackConfig,
-        workers: usize,
-    ) -> [Stage; 3] {
+    /// The stages of the lights with the reference named, under `config` on `workers`: each light
+    /// taken through its preparation, its detection and its warp by one worker, which keeps only
+    /// the warped light; the normalization; the combine.
+    fn named_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 3] {
         debug_assert_eq!(self.held, 0, "a single pass decodes its own lights");
         let warped = self.warped();
-        let [normalize, combine] = self.combined(warped, frame_count, config, workers);
+        let [normalize, combine] = self.combined(warped, config, workers);
         [
             Stage {
                 kept: warped,
@@ -369,27 +378,26 @@ impl LightShape {
         ]
     }
 
-    /// The normalization and the combine of `frame_count` warped lights, each kept at `kept`: every
-    /// warped light covers only the pixels its warp reached.
-    fn combined(
-        &self,
-        kept: usize,
-        frame_count: usize,
-        config: &AlignStackConfig,
-        workers: usize,
-    ) -> [Stage; 2] {
-        let dimensions = self.dimensions;
+    /// The normalization and the combine of the warped lights, each kept at `kept`: every warped
+    /// light covers only the pixels its warp reached.
+    fn combined(&self, kept: usize, config: &AlignStackConfig, workers: usize) -> [Stage; 2] {
+        let Self {
+            count: frame_count,
+            dimensions,
+            ..
+        } = *self;
         [
             Stage {
                 kept,
-                held: FrameNorm::heap_bytes(
+                held: PlannedNormalization {
                     frame_count,
                     dimensions,
-                    Slots::new(None, dimensions.channels()),
-                    config.stack.normalization,
-                    SetCoverage::Common,
-                    workers,
-                ),
+                    slots: Slots::new(None, dimensions.channels()),
+                    normalization: config.stack.normalization,
+                    coverage: SetCoverage::Common,
+                    threads: workers,
+                }
+                .heap_bytes(),
                 in_flight: 0,
                 units: Units::Whole,
             },
@@ -431,18 +439,15 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     /// Stack the lights: with [`Reference::Index`] in one pass, each light prepared, detected,
     /// registered, warped and stored by one worker; with [`Reference::Auto`] every light prepared
     /// and detected first, since the reference is the sharpest, and parked until it registers.
-    pub(crate) fn stack(
+    pub(super) fn stack(
         self,
-        config: &AlignStackConfig,
-        run: &IngestRun,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        run: &AlignStackRun<'_>,
     ) -> Result<AlignStackResult, AlignStackError> {
-        match config.reference {
-            Reference::Index(reference) => self.stack_in_one_pass(reference, config, run, progress),
+        match run.config.reference {
+            Reference::Index(reference) => self.stack_in_one_pass(reference, run),
             Reference::Auto => {
-                let detected = LightSource::Files(self).detect(config, run, &progress)?;
-                register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
+                let detected = LightSource::Files(self).detect(run)?;
+                run.register_warp_and_stack(detected)
             }
         }
     }
@@ -463,7 +468,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                     }
                 };
                 self.ensure_kept_space::<LinearImage>(peek.resident_bytes(), &run.context)?;
-                return Ok(LightShape::linear(peek, false, workers));
+                return Ok(LightShape::decoded(peek, self.paths.len(), workers));
             }
         };
         let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| {
@@ -509,6 +514,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         })
         .beside(FrameStats::heap_bytes(dimensions, None, workers));
         Ok(LightShape {
+            count: self.paths.len(),
             dimensions,
             prepared,
             held: 0,
@@ -519,13 +525,15 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     /// prepared and detected first and alone, then each worker takes a light through its
     /// preparation, its detection, its registration, its warp and its store, so a light is
     /// written once and no prepared set is ever parked.
-    pub(crate) fn stack_in_one_pass(
+    fn stack_in_one_pass(
         &self,
         reference: usize,
-        config: &AlignStackConfig,
-        run: &IngestRun,
-        progress: ProgressCallback,
+        stack: &AlignStackRun<'_>,
     ) -> Result<AlignStackResult, AlignStackError> {
+        let AlignStackRun {
+            config,
+            ingest: run,
+        } = stack;
         let total = self.paths.len();
         if reference >= total {
             return Err(AlignStackError::ReferenceOutOfRange {
@@ -537,13 +545,13 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let shape = self.shape(run)?;
         let plan = RunPlan::of(
             total,
-            &shape.named_reference(total, config, budget.workers()),
+            &shape.named_reference(config, budget.workers()),
             budget,
         );
         let StagePlan {
             parking,
             warp_width: workers,
-        } = StagePlan::new(&plan, LightShape::PASS, shape.spill_bytes(total), run)?;
+        } = shape.stage_plan(&plan, LightShape::PASS, run)?;
         tracing::info!(
             frames = total,
             reference,
@@ -562,7 +570,6 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 stage: StackingStage::Preparing,
             },
             run,
-            &progress,
         );
         let mut detectors = DetectorPool::from_config(&config.detection, slots)
             .map_err(AlignStackError::DetectionConfig)?;
@@ -590,16 +597,14 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let dimensions = image.dimensions();
         let reference_diagnostics = result.diagnostics;
         let registrar = FrameRegistrar::new(
-            reference,
-            result.stars,
-            config,
+            stack,
             &parking,
             LightSet {
                 count: total,
                 dimensions,
+                reference,
+                reference_stars: result.stars,
             },
-            &progress,
-            cancel,
         );
         let reference_frame = registrar.park(
             reference,
@@ -652,8 +657,9 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             metadata,
             dimensions,
             detection,
+            parking,
         }
-        .combine(parking, config, progress, cancel.clone())
+        .combine(stack)
     }
 
     /// Load one light and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
@@ -772,10 +778,10 @@ mod tests {
                 stage(kept, 80, 168, Units::Rows(4)),
             ]
         };
-        let decoded = LightShape::linear(peek, false, 1);
+        let decoded = LightShape::decoded(peek, 3, 1);
         let [normalize, combine] = tail(224);
         assert_eq!(
-            decoded.found_reference(3, &config, 1),
+            decoded.found_reference(&config, 1),
             [
                 stage(80, 0, 1704, Units::Frames),
                 stage(224, 0, 80, Units::Frames),
@@ -784,12 +790,12 @@ mod tests {
             ]
         );
         assert_eq!(
-            decoded.named_reference(3, &config, 1),
+            decoded.named_reference(&config, 1),
             [stage(224, 0, 1784, Units::Frames), normalize, combine]
         );
         let [normalize, combine] = tail(144);
         assert_eq!(
-            LightShape::linear(peek, true, 1).found_reference(3, &config, 1),
+            LightShape::held(peek, 3, 1).found_reference(&config, 1),
             [
                 stage(0, 0, 1704, Units::Frames),
                 stage(144, 0, 80, Units::Frames),

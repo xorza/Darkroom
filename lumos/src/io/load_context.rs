@@ -6,7 +6,7 @@ use common::CancelToken;
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::error::ImageError;
-use crate::io::fits::options::FitsLoadOptions;
+use crate::io::fits::fits_load_options::FitsLoadOptions;
 use crate::memory;
 use crate::platform::SystemMemory;
 
@@ -60,7 +60,7 @@ impl LoadContext {
 /// The threads each of `slots` decodes running at once gets of `cores`: an equal share, one at
 /// least, so the decodes together use the cores and no more.
 const fn threads_per_decode(cores: usize, slots: usize) -> usize {
-    assert!(slots > 0, "a run decodes in one slot at least");
+    debug_assert!(slots > 0, "a run decodes in one slot at least");
     let share = cores / slots;
     if share == 0 { 1 } else { share }
 }
@@ -69,7 +69,7 @@ impl Default for LoadContext {
     fn default() -> Self {
         Self::new(
             CancelToken::never(),
-            memory::memory_budget(SystemMemory::available()),
+            memory::usable(SystemMemory::available()),
         )
     }
 }

@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use palantir::{MenuItem, MenuSeparator, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use scenarium::NodeId;
@@ -29,10 +30,7 @@ pub(crate) struct NodeMenuUi {
 #[derive(Copy, Clone, Debug)]
 enum MenuChoice {
     Run,
-    /// `incoming`: keep the clones' wires to producers outside the selection.
-    Duplicate {
-        incoming: bool,
-    },
+    Duplicate { incoming: IncomingWires },
     Remove,
 }
 
@@ -91,14 +89,18 @@ impl NodeMenuUi {
                 MenuSeparator::new().show(ui);
             }
             if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
-                chosen = Some(MenuChoice::Duplicate { incoming: false });
+                chosen = Some(MenuChoice::Duplicate {
+                    incoming: IncomingWires::Drop,
+                });
             }
             if MenuItem::new("Duplicate with incoming connections")
                 .show(ui, popup)
                 .left
                 .clicked()
             {
-                chosen = Some(MenuChoice::Duplicate { incoming: true });
+                chosen = Some(MenuChoice::Duplicate {
+                    incoming: IncomingWires::Keep,
+                });
             }
             MenuSeparator::new().show(ui);
             if MenuItem::new("Remove").show(ui, popup).left.clicked() {

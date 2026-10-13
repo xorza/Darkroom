@@ -3,9 +3,9 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::frame_store::decode_cache::cache_key::DecodeOptions;
+use crate::frame_store::decode_cache::decode_options::DecodeOptions;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::io::fits::options::FitsLoadOptions;
+use crate::io::fits::fits_load_options::FitsLoadOptions;
 use crate::platform::UserCache;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans

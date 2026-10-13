@@ -1,20 +1,23 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use common::TempDir;
+
 use crate::combine::frame_cache::slots::Slots;
-use crate::combine::stack_config::{Combine, Normalization, SmallN};
-use crate::frame::capture_conditions::CaptureConditions;
-use crate::frame::frame_facts::FrameFacts;
-use crate::frame::unverified_conditions::UnverifiedConditions;
-use crate::frame_store::tier::CombineBudget;
-use crate::ingest::error::AdmissionError;
-use crate::internals::prelude::*;
-use crate::memory::run_memory::RunMemory;
-
-use crate::frame::frame_quality::FramePlane;
-
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::trim_config::TrimConfig;
+use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack::*;
+use crate::combine::stack_config::{Combine, Normalization, SmallN};
 use crate::error::FrameDimensionMismatch;
+use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame::frame_facts::FrameFacts;
+use crate::frame::frame_plane::FramePlane;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame::frame_stats::FrameStats;
+use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -26,25 +29,29 @@ use crate::image::image_provenance::{
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::ingest::error::AdmissionError;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
 use crate::internals::assertions::bits;
+use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::math::noise::mosaic_noise::MosaicNoise;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::registration::registration_config;
+use crate::memory::run_memory::RunMemory;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::resample::warp_params::WarpParams;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::quality_map::QualityMap;
-use common::TempDir;
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::stack_product::quality_planes::QualityPlanes;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
-    config.stack_images(frames, ProgressCallback::default(), CancelToken::never())
+    config.stack_images(frames, ProgressMonitor::unattended())
 }
 
 /// `frame` measured to have white noise `sigma` in every slot, so each of its samples has variance
@@ -222,15 +229,16 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     .collect();
                 stack_stored_frames(
                     stored,
-                    Tier::Spilled {
-                        scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
-                        combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
+                    CacheCore {
+                        tier: Tier::Spilled {
+                            scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
+                            combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
+                        },
+                        dimensions: dims,
+                        metadata,
+                        monitor: ProgressMonitor::unattended(),
                     },
-                    dims,
-                    metadata,
                     &config,
-                    ProgressCallback::default(),
-                    CancelToken::never(),
                 )
                 .unwrap()
             };
@@ -301,8 +309,7 @@ fn stack_empty_paths() {
     .stack_paths(
         &paths,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), StackError::NoFrames));
 }
@@ -331,8 +338,7 @@ fn stack_nonexistent_file() {
     .stack_paths(
         &paths,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), StackError::ImageLoad(_)));
 }
@@ -352,8 +358,7 @@ fn stack_rejects_invalid_config_before_loading() {
     .stack_paths(
         &paths,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -373,8 +378,7 @@ fn stack_rejects_invalid_config_before_loading() {
     .stack_paths(
         &paths,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap_err();
     assert!(matches!(
@@ -1024,7 +1028,7 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
 
         let cancel = CancelToken::new();
         cancel.cancel();
-        cache.core.cancel = cancel;
+        cache.core.monitor.cancel = cancel;
         assert!(matches!(
             run_stacking(&cache, &config).unwrap_err(),
             StackError::Cancelled
@@ -1047,8 +1051,7 @@ fn cancelled_stack_returns_cancelled_error() {
     })
     .stack_images(
         vec![a.into(), b.into()],
-        ProgressCallback::default(),
-        cancel,
+        ProgressMonitor::new(ProgressCallback::default(), cancel),
     );
     assert!(matches!(result.unwrap_err(), StackError::Cancelled));
 }
@@ -1167,8 +1170,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         FrameCache::from_stack_frames(
             frames,
             Normalization::Multiplicative,
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
     };
@@ -1187,9 +1189,11 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         // σ, its gain, square, inverse, the sum and the quotient: 7 f32 roundings, 4ε relative.
         let weights = FrameWeights::resolve(
             &Weighting::Noise,
-            source_stats(cache),
-            Some(norms),
-            Slots::new(None, 1),
+            NormalizedStats {
+                stats: source_stats(cache),
+                norms: Some(norms),
+                slots: Slots::new(None, 1),
+            },
         )
         .unwrap()
         .unwrap();
@@ -1353,7 +1357,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     };
 
     for method in InterpolationMethod::ALL {
-        let warped = transform.warp(&source, registration_config::internals::warp_params(method));
+        let warped = transform.warp(&source, WarpParams::with_method(method));
         let frames = vec![
             StackFrame::from(source.clone()),
             StackFrame::registered(&source, warped),
@@ -1410,14 +1414,13 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let b = field(1.0, 0.8, 0.006, 2);
     let mads = [&a, &b]
         .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
-    let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
+    let params = WarpParams::with_method(InterpolationMethod::Bilinear);
     let warped_b =
         (WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0)))).warp(&b, params);
     let cache = FrameCache::from_stack_frames(
         vec![StackFrame::from(a), StackFrame::registered(&b, warped_b)],
         Normalization::Global,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .unwrap();
     let norms = cache.frame_norms.as_ref().unwrap();
@@ -1451,7 +1454,7 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .map(|_| rng.next_f32() - 0.5)
         .collect();
     let source = LinearImage::from_pixels(dims, pixels);
-    let params = registration_config::internals::warp_params(InterpolationMethod::Bilinear);
+    let params = WarpParams::with_method(InterpolationMethod::Bilinear);
     let frames = vec![
         StackFrame::registered(
             &source,
@@ -1462,18 +1465,16 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
             WarpTransform::new(Transform::translation(DVec2::splat(0.5))).warp(&source, params),
         ),
     ];
-    let cache = FrameCache::from_stack_frames(
-        frames,
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
+    let cache =
+        FrameCache::from_stack_frames(frames, Normalization::None, ProgressMonitor::unattended())
+            .unwrap();
     let weights = FrameWeights::resolve(
         &Weighting::Noise,
-        source_stats(&cache),
-        None,
-        Slots::new(None, 1),
+        NormalizedStats {
+            stats: source_stats(&cache),
+            norms: None,
+            slots: Slots::new(None, 1),
+        },
     )
     .unwrap()
     .unwrap();
@@ -1485,12 +1486,12 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .quality
         .confidence(0)
         .unwrap()
-        .chunk(pixel, pixel + 1)[0];
+        .chunk(pixel..pixel + 1)[0];
     let half_pixel_confidence = cache.frames[1]
         .quality
         .confidence(0)
         .unwrap()
-        .chunk(pixel, pixel + 1)[0];
+        .chunk(pixel..pixel + 1)[0];
     assert_eq!(identity_confidence, 1.0);
     assert_eq!(half_pixel_confidence, 4.0);
     let sigma_squared = source_stats(&cache)
@@ -2015,12 +2016,7 @@ fn disk_backed_stack_combines_via_mmap() {
         ..IngestConfig::with_cache_dir(temp_dir.join("cache"))
     };
     let result = config
-        .stack_paths(
-            &paths,
-            &ingest,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        .stack_paths(&paths, &ingest, ProgressMonitor::unattended())
         .unwrap()
         .image;
     assert_eq!(result.channel(0).pixels(), &[20.0; 16]);
@@ -2195,7 +2191,7 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
         });
         image
     };
-    let params = registration_config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let params = WarpParams::with_method(InterpolationMethod::Lanczos3);
     let reference = field(0);
     let shifted = field(1);
     let frames = vec![

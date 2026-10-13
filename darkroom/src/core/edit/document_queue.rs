@@ -2,7 +2,7 @@
 
 use palantir::DockOperation;
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;

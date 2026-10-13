@@ -8,45 +8,24 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
 use crate::image::linear_image::LinearImage;
-use crate::ingest::ingest_run::IngestRun;
-use crate::memory::run_plan::RunPlan;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;
 use crate::scratch_pool::Pooled;
 
-/// The memory decisions the register-warp stage reads, both taken from one [`RunPlan`]: where a
-/// frame parks, and how many frames are warped at once.
+/// The memory decisions the register-warp stage reads, both taken from one
+/// [`RunPlan`](crate::memory::run_plan::RunPlan): where a frame parks, and how many frames are
+/// warped at once.
 #[derive(Debug)]
 pub(crate) struct StagePlan {
     pub(crate) parking: FrameParking,
     pub(crate) warp_width: usize,
 }
 
-impl StagePlan {
-    /// Where `plan` parks the lights, and the width of its stage `warp`, which warps them; a spill
-    /// checked for room for the `spill_bytes` the run will write.
-    pub(crate) fn new(
-        plan: &RunPlan,
-        warp: usize,
-        spill_bytes: u64,
-        run: &IngestRun,
-    ) -> Result<Self, AlignStackError> {
-        Ok(Self {
-            parking: FrameParking::new(Tier::for_plan(
-                plan,
-                run.budget,
-                spill_bytes,
-                &run.cache_dir,
-            )?),
-            warp_width: plan.width(warp),
-        })
-    }
-}
-
-/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the [`RunPlan`] and
-/// threaded through the pipeline body, which is otherwise identical either way, and how many
-/// calibrated lights it parked on disk before their registration, for the run's report.
+/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the
+/// [`RunPlan`](crate::memory::run_plan::RunPlan) and threaded through the pipeline body, which is
+/// otherwise identical either way, and how many calibrated lights it parked on disk before their
+/// registration, for the run's report.
 #[derive(Debug)]
 pub(crate) struct FrameParking {
     tier: Tier,
@@ -202,7 +181,7 @@ mod tests {
                 let stored = tier
                     .store_reference(frame, FrameStats::measure(&image))
                     .unwrap();
-                let gate = FrameGate::of(&stored, 0, 0, 4);
+                let gate = FrameGate::of(&stored, 0, 0..4);
                 assert_eq!(
                     (0..4)
                         .map(|index| gate.sample(index).map(|sample| sample.confidence))
@@ -216,7 +195,7 @@ mod tests {
                     0
                 };
                 assert_eq!(
-                    stored.flags.as_ref().unwrap().chunk(0, 4),
+                    stored.flags.as_ref().unwrap().chunk(0..4),
                     [first, QualityFlags::COSMIC_RAY.byte(), 0, 0],
                     "{label} {saturated}"
                 );

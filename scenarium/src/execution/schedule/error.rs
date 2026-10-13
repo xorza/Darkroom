@@ -7,6 +7,10 @@
 //! [`validate_debug`](crate::execution::schedule::RunSchedule::validate_debug),
 //! as values a test can assert on.
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use thiserror::Error;
 
 use crate::execution::index::NodeIdx;
@@ -19,7 +23,7 @@ pub(crate) enum RunScheduleValidationError {
     OrderTooLong,
     #[error("schedule {set} spans {len} entries, not the program's {expected}")]
     SetLength {
-        set: &'static str,
+        set: ScheduleColumn,
         len: usize,
         expected: usize,
     },
@@ -33,4 +37,25 @@ pub(crate) enum RunScheduleValidationError {
     DuplicateNode { node_id: NodeId },
     #[error("unscheduled node {node_id:?} was decided {state:?}")]
     UnscheduledNodeDecided { node_id: NodeId, state: NodeState },
+}
+
+/// Which of the schedule's program-spanning columns a length fault names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScheduleColumn {
+    States,
+    RootFlags,
+    OutputDemand,
+    OutputReaders,
+}
+
+impl Display for ScheduleColumn {
+    /// Lowercase words, so it reads inside the sentence above.
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::States => "states",
+            Self::RootFlags => "root flags",
+            Self::OutputDemand => "output demand",
+            Self::OutputReaders => "output readers",
+        })
+    }
 }

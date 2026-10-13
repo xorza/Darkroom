@@ -34,11 +34,8 @@ impl FrameDimensionMismatch {
         }
     }
 
-    /// `Ok(())` when `actual` matches, else the rejection of frame `index`.
-    ///
-    /// The Result-returning counterpart to `assert_eq!` for frame geometry, in
-    /// [`InvalidConfigField::check`]'s shape — five call sites across loading, alignment, the
-    /// combine cache and drizzle each wrote the comparison and the payload out by hand.
+    /// `Ok(())` when `actual` matches, else the rejection of frame `index`: the Result-returning
+    /// counterpart to `assert_eq!` for frame geometry, in [`InvalidConfigField::check`]'s shape.
     pub(crate) fn check(
         index: usize,
         expected: ImageDimensions,
@@ -148,9 +145,9 @@ impl Cancelled {
     /// How many samples a cancellable walk covers between cancel polls.
     ///
     /// The frame checks and the normalization gather chunk their iteration to this rather than
-    /// test the token per sample — the divisor was a modulo on every sample of every plane of
-    /// every frame. The figure is not tuned to either: it is a granularity, small enough that a
-    /// cancelled run stops promptly and large enough that the poll is lost in the work.
+    /// test the token per sample. The figure is not tuned to either: it is a granularity, small
+    /// enough that a cancelled run stops promptly and large enough that the poll is lost in the
+    /// work.
     pub(crate) const POLL_CHUNK: usize = 16_384;
 
     /// `Err(Cancelled)` once `cancel` is set, so a long walk can `?` its way out between chunks.
@@ -199,10 +196,8 @@ mod tests {
         assert_eq!(plain.bound, None);
 
         // A count widens exactly, and prints without a fractional part.
-        let tile_size: usize = 300;
-        let counted =
-            InvalidConfigField::check(false, "tile_size", "between 16 and 256", tile_size as f64)
-                .unwrap_err();
+        let counted = InvalidConfigField::check(false, "tile_size", "between 16 and 256", 300u32)
+            .unwrap_err();
         assert_eq!(
             counted.to_string(),
             "tile_size must be between 16 and 256, got 300"

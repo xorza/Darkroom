@@ -1,129 +1,55 @@
-//! The body of the stacking entries: [`StackConfig::stack_paths`] from files and
-//! [`StackConfig::stack_images`] from frames in memory, and the one combine every stack goes
-//! through.
+//! The one combine every stack goes through: [`combine_cached`] validates and loads, and
+//! [`run_stacking`] reduces the frames to the stacked product.
 
 mod quantization;
-
-use std::path::Path;
-
-use crate::image::image_dimensions::ImageDimensions;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::linear_image::LinearImage;
-use common::CancelToken;
-use imaginarium::Buffer2;
+pub(crate) mod stack_frame;
 
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::frame_cache::frame_weights::FrameWeights;
-use crate::combine::frame_cache::sample::CombinedSample;
+use crate::combine::frame_cache::normalized_stats::NormalizedStats;
+use crate::combine::frame_cache::sample::{CombinedSample, SampleQuality};
 use crate::combine::frame_cache::sample_noise::SampleNoise;
-use crate::combine::frame_cache::{CombineOutput, CombineRequest, FrameCache};
+use crate::combine::frame_cache::{CombineRequest, FrameCache};
+use crate::combine::rejection::mean_combine::MeanCombine;
 use crate::combine::stack::quantization::SourceSigmas;
 use crate::combine::stack_config::{CombineMethod, StackConfig, Weighting};
-use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::frame_store::tier::Tier;
-use crate::ingest::ingest_config::IngestConfig;
-use crate::ingest::ingest_run::IngestRun;
 use crate::math;
-use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::resample::WarpResult;
 use crate::stack_product::StackProduct;
-use crate::stack_product::quality_planes::QualityPlanes;
 
-/// One input frame for [`StackConfig::stack_images`], with the per-pixel frame quality a registered
-/// frame carries.
-///
-/// Its coverage plane gates whether a warped sample has meaningful source support; its confidence
-/// plane is an independent inverse-variance multiplier. A frame with no frame quality has full
-/// support at unit confidence throughout. Plain `LinearImage`s convert with `.into()`; registered
-/// frames must use [`StackFrame::registered`] so source-domain noise is captured before
-/// interpolation.
-#[derive(Debug, Clone)]
-pub struct StackFrame {
-    pub(crate) image: LinearImage,
-    pub(crate) quality: FrameQuality<Buffer2<f32>>,
-    pub(crate) source_stats: FrameStats,
+/// Where the frames of a combine come from, for its log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameSource {
+    /// Files decoded into the run's tier.
+    Paths,
+    /// Mosaic calibration frames decoded into the run's tier.
+    CfaPaths,
+    /// Frames the caller held in memory.
+    Memory,
+    /// Frames the pipeline stored.
+    FrameStore,
 }
 
-impl StackFrame {
-    /// Build a registered stack frame while preserving statistics from before interpolation.
-    pub fn registered(source: &LinearImage, warped: WarpResult) -> Self {
-        Self {
-            source_stats: FrameStats::measure(source),
-            image: warped.image,
-            quality: FrameQuality::Planes {
-                coverage: warped.coverage,
-                confidence: warped.confidence,
-            },
-        }
-    }
+/// The frames a combine takes: where they come from, and how many there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameSet {
+    pub(crate) source: FrameSource,
+    pub(crate) count: usize,
 }
 
-impl From<LinearImage> for StackFrame {
-    fn from(image: LinearImage) -> Self {
-        let source_stats = FrameStats::measure(&image);
-        let quality = FrameQuality::for_unwarped(&image);
-        Self {
-            image,
-            quality,
-            source_stats,
-        }
-    }
-}
-
-/// The body of [`StackConfig::stack_paths`].
-pub(crate) fn stack_paths<P: AsRef<Path> + Sync>(
-    paths: &[P],
-    config: &StackConfig,
-    ingest: &IngestConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<StackProduct, StackError> {
-    // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
-    // `cancel` rides on the cache from construction, so the load loop polls it too.
-    combine_cached(config, paths.len(), "paths", || {
-        FrameCache::from_paths(paths, config, IngestRun::new(ingest, cancel), progress)
-    })
-}
-
-/// The body of [`StackConfig::stack_images`].
-pub(crate) fn stack_images(
-    frames: Vec<StackFrame>,
-    config: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
-) -> Result<StackProduct, StackError> {
-    let frame_count = frames.len();
-    combine_cached(config, frame_count, "memory", || {
-        FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
-    })
-}
-
-/// Combine frames produced by the shared frame store.
+/// Combine `frames`, which the shared frame store produced, over `core`.
 pub(crate) fn stack_stored_frames(
     frames: Vec<StoredFrame>,
-    tier: Tier,
-    dimensions: ImageDimensions,
-    metadata: ImageMetadata,
+    core: CacheCore,
     config: &StackConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
 ) -> Result<StackProduct, StackError> {
-    let frame_count = frames.len();
-    combine_cached(config, frame_count, "frame store", || {
-        FrameCache::from_stored_frames(
-            frames,
-            CacheCore {
-                tier,
-                dimensions,
-                metadata,
-                progress,
-                cancel,
-            },
-            config.normalization,
-        )
+    let set = FrameSet {
+        source: FrameSource::FrameStore,
+        count: frames.len(),
+    };
+    combine_cached(config, set, || {
+        FrameCache::from_stored_frames(frames, core, config.normalization)
     })
 }
 
@@ -131,7 +57,7 @@ pub(crate) fn stack_stored_frames(
 /// configuration against the frame count, build the cache, log what the run turned out to be,
 /// reduce, and decide whether the result is real.
 ///
-/// Every entry point routes here — including `stack_cfa_master`, which builds a CFA cache of its
+/// Every entry point routes here — including `MasterStack`, which builds a CFA cache of its
 /// own — so config validation happens in exactly one place rather than being a convention each
 /// entry point has to remember.
 ///
@@ -140,10 +66,13 @@ pub(crate) fn stack_stored_frames(
 /// the end of this scope on every path.
 pub(crate) fn combine_cached(
     config: &StackConfig,
-    frame_count: usize,
-    source: &'static str,
+    set: FrameSet,
     build: impl FnOnce() -> Result<FrameCache, StackError>,
 ) -> Result<StackProduct, StackError> {
+    let FrameSet {
+        source,
+        count: frame_count,
+    } = set;
     if frame_count == 0 {
         return Err(StackError::NoFrames);
     }
@@ -154,7 +83,7 @@ pub(crate) fn combine_cached(
     // Logged after the load so the tier and quality facts come from the cache itself rather than
     // being restated at each entry point.
     tracing::info!(
-        source,
+        ?source,
         frame_count,
         method = ?config.combine.method,
         weighting = ?config.weighting,
@@ -226,19 +155,24 @@ pub(crate) fn run_stacking(
         .small_n
         .resolve(config.combine.method, frame_count);
     warn_if_weights_ignored(method, &config.weighting);
-    let weighted_combine = matches!(method, CombineMethod::Mean(_));
     let norms = cache.frame_norms.as_deref();
     let slots = cache.slots;
-    let weights = if weighted_combine {
-        FrameWeights::resolve(&config.weighting, stats(), norms, slots)?
-    } else {
-        None
+    let weights = match method {
+        CombineMethod::Mean(_) => FrameWeights::resolve(
+            &config.weighting,
+            NormalizedStats {
+                stats: stats(),
+                norms,
+                slots,
+            },
+        )?,
+        CombineMethod::Median => None,
     };
 
     // A median is not a linear combination, so it has no variance to report whatever the caller
     // asked for. Resolving here means the reducer never allocates a plane it would drop.
-    let planes = config.quality.resolve(weighted_combine);
-    let measure_quality = planes.weight || planes.inverse_variance || planes.dispersion;
+    let planes = config.quality.resolve(method);
+    let quality = SampleQuality::of(planes);
 
     // A master states the step of its inputs: the largest any frame contributes once its
     // normalization scaled it, whatever each pixel's survivors were.
@@ -259,16 +193,20 @@ pub(crate) fn run_stacking(
                 // Reorders the values in place, away from their weights: only the weights' sum,
                 // which no order changes, is read after it.
                 let value = math::statistics::median_mut(samples.values);
-                if measure_quality {
-                    CombinedSample::median(value, samples.weights)
-                } else {
-                    CombinedSample::value_only(value)
+                match quality {
+                    SampleQuality::Measured => CombinedSample::median(value, samples.weights),
+                    SampleQuality::ValueOnly => CombinedSample::value_only(value),
                 }
             })
         }
         CombineMethod::Mean(rejection) => {
-            let noise = (rejection.measures_spread() || planes.inverse_variance)
-                .then(|| SampleNoise::new(stats(), norms, slots));
+            let noise = (rejection.measures_spread() || planes.inverse_variance).then(|| {
+                SampleNoise::new(NormalizedStats {
+                    stats: stats(),
+                    norms,
+                    slots,
+                })
+            });
             let request = CombineRequest {
                 weights: weights.as_ref(),
                 planes,
@@ -276,10 +214,14 @@ pub(crate) fn run_stacking(
                 noise: noise.as_ref(),
                 slots,
             };
+            let mean = MeanCombine {
+                rejection,
+                min_survivors,
+                quality,
+            };
             let dispersion_correction = rejection.dispersion_correction();
             cache.process_chunked(request, move |samples, scratch| {
-                let mut sample =
-                    rejection.combine_mean(samples, min_survivors, scratch, measure_quality);
+                let mut sample = mean.combine(&samples, scratch);
                 // Survivors of a band scatter as a Gaussian truncated to it; a pixel too small to
                 // reject from kept every sample, with nothing cut.
                 if scratch.survivors.is_some() {
@@ -290,18 +232,8 @@ pub(crate) fn run_stacking(
         }
     };
 
-    finish_unless_cancelled(cache, combined, planes, quantization_sigma)
-}
-
-/// Assemble the product, or report the run as cancelled — the single exit both of
-/// [`run_stacking`]'s paths take, so neither can hand back a partial stack as a whole one.
-fn finish_unless_cancelled(
-    cache: &FrameCache,
-    combined: CombineOutput,
-    planes: QualityPlanes,
-    quantization_sigma: Option<f32>,
-) -> Result<StackProduct, StackError> {
-    if cache.core.cancel.is_cancelled() {
+    // Both reductions leave here, so neither can hand back a partial stack as a whole one.
+    if cache.core.monitor.cancel.is_cancelled() {
         return Err(StackError::Cancelled);
     }
     Ok(cache.finish_product(combined, planes, quantization_sigma))

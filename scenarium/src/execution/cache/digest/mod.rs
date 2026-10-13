@@ -34,7 +34,7 @@
 //!   prepared by [`RuntimeCache::prepare`](crate::execution::cache::runtime::RuntimeCache::prepare), so a
 //!   folder-reading node can be `Pure` and still re-key when its contents change. A
 //!   same-size edit within mtime granularity can slip through; explicit runtime cache
-//!   eviction removes the affected node and downstream blobs. The same tier holds
+//!   eviction removes the affected node and downstream blobs.
 //! - **A reference is dereferenced only through an input declared with its resource
 //!   type.** Const and Bind-delivered references both fold the referent's identity, but
 //!   only where the consumer's input is declared `FsPath` — a lambda that reads a file

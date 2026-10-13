@@ -1,21 +1,29 @@
+use std::f64::consts::TAU;
+
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
+use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples, SampleQuality};
+use crate::combine::rejection::mean_combine::MeanCombine;
 use crate::combine::rejection::rejection_scale::RejectionScale;
+use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::*;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::internals::invariance::Affine;
 use crate::internals::prelude::*;
-use std::f64::consts::TAU;
 
-/// The gather positions `rejection` keeps of `values`, ascending.
-fn kept_with(
-    rejection: Rejection,
-    values: &[f32],
+/// A pixel's samples, each of background noise σ `background`.
+#[derive(Debug, Clone, Copy)]
+struct NoisySamples<'a> {
+    values: &'a [f32],
     background: f32,
-    min_survivors: usize,
-) -> Vec<usize> {
+}
+
+/// The gather positions `rejection` keeps of `samples`, ascending, keeping `min_survivors` at the
+/// least.
+fn kept_with(rejection: Rejection, samples: NoisySamples<'_>, min_survivors: usize) -> Vec<usize> {
+    let NoisySamples { values, background } = samples;
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(values);
     let variances = vec![background * background; values.len()];
@@ -25,12 +33,7 @@ fn kept_with(
         sky: &zeros,
         inverse_electrons: &zeros,
     };
-    let window = rejection.surviving_window(
-        &mut scratch.sorted,
-        Some(noise),
-        min_survivors,
-        &mut scratch.methods,
-    );
+    let window = rejection.surviving_window(&mut scratch, Some(noise), min_survivors);
     let mut kept: Vec<usize> = scratch.sorted.positions()[window]
         .iter()
         .map(|&position| position as usize)
@@ -41,7 +44,14 @@ fn kept_with(
 
 /// The positions kept with no measured background and the default survivor minimum.
 fn kept(rejection: Rejection, values: &[f32]) -> Vec<usize> {
-    kept_with(rejection, values, 0.0, DEFAULT_MIN_SURVIVORS)
+    kept_with(
+        rejection,
+        NoisySamples {
+            values,
+            background: 0.0,
+        },
+        DEFAULT_MIN_SURVIVORS,
+    )
 }
 
 /// Every position of `count` but those in `dropped`.
@@ -49,18 +59,21 @@ fn all_but(count: usize, dropped: &[usize]) -> Vec<usize> {
     (0..count).filter(|i| !dropped.contains(i)).collect()
 }
 
-/// `combine_mean` over `values` with `weights`, every sample its own frame, and no noise.
+/// [`MeanCombine::combine`] over `values` with `weights`, every sample its own frame, and no noise.
 fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSample {
     let mut values = values.to_vec();
-    rejection.combine_mean(
-        PixelSamples {
+    MeanCombine {
+        rejection,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        quality: SampleQuality::Measured,
+    }
+    .combine(
+        &PixelSamples {
             values: &mut values,
             weights,
             noise: None,
         },
-        DEFAULT_MIN_SURVIVORS,
         &mut ScratchBuffers::default(),
-        true,
     )
 }
 
@@ -301,8 +314,10 @@ fn the_background_floors_a_window_of_tied_integers() {
     assert_eq!(
         kept_with(
             Rejection::sigma_clip(2.5),
-            &values,
-            0.7 * scale,
+            NoisySamples {
+                values: &values,
+                background: 0.7 * scale
+            },
             DEFAULT_MIN_SURVIVORS
         ),
         all_but(20, &[13, 19])
@@ -335,8 +350,10 @@ fn every_method_decides_the_same_at_every_scale() {
             let kept_under = |case: Affine| {
                 kept_with(
                     rejection,
-                    &case.apply_all(&values),
-                    background * case.scale,
+                    NoisySamples {
+                        values: &case.apply_all(&values),
+                        background: background * case.scale,
+                    },
                     DEFAULT_MIN_SURVIVORS,
                 )
             };
@@ -496,10 +513,9 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
             }
             scratch.sorted.fill(&values);
             let window = Rejection::linear_fit(3.0).surviving_window(
-                &mut scratch.sorted,
+                &mut scratch,
                 None,
                 DEFAULT_MIN_SURVIVORS,
-                &mut scratch.methods,
             );
             rejected += count - window.len();
         }
@@ -671,12 +687,7 @@ fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
                 *value = standard_normal(&mut rng);
             }
             scratch.sorted.fill(&values);
-            let window = rejection.surviving_window(
-                &mut scratch.sorted,
-                noise,
-                DEFAULT_MIN_SURVIVORS,
-                &mut scratch.methods,
-            );
+            let window = rejection.surviving_window(&mut scratch, noise, DEFAULT_MIN_SURVIVORS);
             rejected += count - window.len();
         }
         let share = rejected as f64 / (count * trials) as f64;
@@ -900,12 +911,8 @@ fn gesd_matches_nist_reference_example() {
         min_survivors: DEFAULT_MIN_SURVIVORS,
         noise: None,
     });
-    let window = Rejection::Gesd(config).surviving_window(
-        &mut scratch.sorted,
-        None,
-        DEFAULT_MIN_SURVIVORS,
-        &mut scratch.methods,
-    );
+    let window =
+        Rejection::Gesd(config).surviving_window(&mut scratch, None, DEFAULT_MIN_SURVIVORS);
     assert_eq!(window, 0..51);
     let gesd = &mut scratch.methods.gesd;
     assert_eq!(statistics.len(), 10);
@@ -966,12 +973,7 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
                 *value = standard_normal(&mut rng);
             }
             scratch.sorted.fill(&values);
-            let window = rejection.surviving_window(
-                &mut scratch.sorted,
-                None,
-                DEFAULT_MIN_SURVIVORS,
-                &mut scratch.methods,
-            );
+            let window = rejection.surviving_window(&mut scratch, None, DEFAULT_MIN_SURVIVORS);
             if window.len() < count {
                 false_positives += 1;
             }
@@ -1000,15 +1002,34 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
     let mut tied = vec![1.0f32; 8];
     tied.extend([5.0, 6.0, 7.0]);
     assert_eq!(
-        kept_with(Rejection::sigma_clip(2.5), &tied, 0.0, 3),
+        kept_with(
+            Rejection::sigma_clip(2.5),
+            NoisySamples {
+                values: &tied,
+                background: 0.0
+            },
+            3
+        ),
         all_but(11, &[8, 9, 10])
     );
     assert_eq!(
-        kept_with(Rejection::sigma_clip(2.5), &tied, 0.0, 9),
+        kept_with(
+            Rejection::sigma_clip(2.5),
+            NoisySamples {
+                values: &tied,
+                background: 0.0
+            },
+            9
+        ),
         all_but(11, &[9, 10])
     );
-    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0], 0..4, 2.5, 3), 0..3);
-    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0, 10.0], 0..5, 3.0, 3), 1..4);
+    let nearest = |values: &[f32], centre, count| {
+        let mut sorted = SortedSamples::default();
+        sorted.fill(values);
+        sorted.nearest(0..values.len(), centre, count)
+    };
+    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0], 2.5, 3), 0..3);
+    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0, 10.0], 3.0, 3), 1..4);
 
     let mut rng = ChaCha8Rng::seed_from_u64(17);
     for minimum in 1..=6 {
@@ -1021,7 +1042,15 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
         ] {
             for _ in 0..20 {
                 let values: Vec<f32> = (0..10).map(|_| standard_normal(&mut rng)).collect();
-                let survivors = kept_with(rejection, &values, 0.0, minimum).len();
+                let survivors = kept_with(
+                    rejection,
+                    NoisySamples {
+                        values: &values,
+                        background: 0.0,
+                    },
+                    minimum,
+                )
+                .len();
                 assert!(
                     survivors >= minimum,
                     "{rejection:?} kept {survivors} of 10 under {minimum}"
@@ -1031,7 +1060,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
     }
 }
 
-/// `combine_mean` averages the survivors under their own weights. Each expected value is the
+/// [`MeanCombine::combine`] averages the survivors under their own weights. Each expected value is the
 /// weighted mean of survivors derived above, an exact quotient rounded once.
 ///
 /// - No rejection over 1 … 5: 15/5, and with frame 0 weighing 10: (10 + 14)/14.
@@ -1047,7 +1076,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
 ///   (8 + 5.25/8)/(8 + 4/8).
 /// - GESD drops the 100 of [1, 1.125, 0.875, 1, 1.25, 0.75, 1, 100]: (8 + 6/8)/(8 + 6/8) = 1.
 #[test]
-fn combine_mean_weighs_each_survivor_by_its_own_weight() {
+fn a_mean_weighs_each_survivor_by_its_own_weight() {
     let ramp = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let tenths: Vec<f32> = (1..=10).map(|i| i as f32).collect();
     let heavy_first = |n: usize, first: f32, rest: f32| {
@@ -1157,15 +1186,18 @@ fn the_survivors_are_named_after_the_combine() {
         inverse_electrons: &[0.25; 8],
     };
     let mut scratch = ScratchBuffers::default();
-    let sample = Rejection::sigma_clip(2.0).combine_mean(
-        PixelSamples {
+    let sample = MeanCombine {
+        rejection: Rejection::sigma_clip(2.0),
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        quality: SampleQuality::Measured,
+    }
+    .combine(
+        &PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             noise: Some(noise),
         },
-        DEFAULT_MIN_SURVIVORS,
         &mut scratch,
-        true,
     );
     assert_eq!(
         scratch.survivor_positions(),
@@ -1176,15 +1208,18 @@ fn the_survivors_are_named_after_the_combine() {
     assert_eq!(sample.inverse_variance, 28.0 / 3.0);
     assert_eq!(sample.dispersion, 1.0 / 6.0);
 
-    Rejection::None.combine_mean(
-        PixelSamples {
+    MeanCombine {
+        rejection: Rejection::None,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        quality: SampleQuality::Measured,
+    }
+    .combine(
+        &PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             noise: None,
         },
-        DEFAULT_MIN_SURVIVORS,
         &mut scratch,
-        true,
     );
     assert_eq!(scratch.survivor_positions(), None);
 }
@@ -1201,8 +1236,13 @@ fn the_gathered_noise_floors_the_spread() {
     let survivors = |background: Option<&[f32]>| {
         let mut values = values;
         let mut scratch = ScratchBuffers::default();
-        Rejection::sigma_clip(2.0).combine_mean(
-            PixelSamples {
+        MeanCombine {
+            rejection: Rejection::sigma_clip(2.0),
+            min_survivors: DEFAULT_MIN_SURVIVORS,
+            quality: SampleQuality::ValueOnly,
+        }
+        .combine(
+            &PixelSamples {
                 values: &mut values,
                 weights: &[1.0; 8],
                 noise: background.map(|background| NoiseColumns {
@@ -1211,9 +1251,7 @@ fn the_gathered_noise_floors_the_spread() {
                     inverse_electrons: &zeros,
                 }),
             },
-            DEFAULT_MIN_SURVIVORS,
             &mut scratch,
-            false,
         );
         scratch.survivor_positions().map_or(8, <[u32]>::len)
     };
@@ -1247,12 +1285,7 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
             SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
         );
         rejection
-            .surviving_window(
-                &mut scratch.sorted,
-                Some(noise),
-                DEFAULT_MIN_SURVIVORS,
-                &mut scratch.methods,
-            )
+            .surviving_window(&mut scratch, Some(noise), DEFAULT_MIN_SURVIVORS)
             .len()
     };
     assert_eq!(kept_under(RejectionScale::Robust), 6);
@@ -1281,12 +1314,7 @@ fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
         let window = Rejection::SigmaClip(
             SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
         )
-        .surviving_window(
-            &mut scratch.sorted,
-            Some(noise),
-            DEFAULT_MIN_SURVIVORS,
-            &mut scratch.methods,
-        );
+        .surviving_window(&mut scratch, Some(noise), DEFAULT_MIN_SURVIVORS);
         let kept = scratch.sorted.values()[window.clone()].to_vec();
         assert!(kept.is_sorted(), "{scale:?}: {kept:?}");
         for (&value, &position) in kept.iter().zip(&scratch.sorted.positions()[window]) {

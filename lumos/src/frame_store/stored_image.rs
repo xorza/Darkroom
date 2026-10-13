@@ -55,7 +55,7 @@ impl StoredImage {
         let samples = self.dimensions.pixel_count();
         self.channels
             .iter()
-            .map(move |plane| plane.chunk(0, samples))
+            .map(move |plane| plane.chunk(0..samples))
     }
 
     /// The image read back into RAM: its channels, flags and metadata, each plane copied out of
@@ -74,7 +74,7 @@ impl StoredImage {
         self.flags.as_ref().map(|plane| {
             PixelFlags::from_bytes(
                 self.dimensions.size(),
-                plane.chunk(0, self.dimensions.pixel_count()),
+                plane.chunk(0..self.dimensions.pixel_count()),
             )
         })
     }

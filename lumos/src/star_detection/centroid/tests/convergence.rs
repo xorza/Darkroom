@@ -34,16 +34,31 @@ fn the_windowed_centroid_converges_and_the_fits_ignore_the_seed() {
         }
         let windowed = measured.windowed(start, fwhm).unwrap().pos;
 
-        let grid = StampGrid::new(MeasureGrid::stamp_radius(fwhm));
+        let grid = StampGrid::new(measure_grid::stamp_radius(fwhm));
         let gaussian = |seed| {
-            GaussianFit::new(&measured.residual, seed, &grid, 0.0, None)
-                .expect("the Gaussian fit lands")
-                .pos
+            GaussianFit::new(FitInputs {
+                pixels: &measured.residual,
+                pos: seed,
+                grid: &grid,
+                background: 0.0,
+                noise: None,
+            })
+            .expect("the Gaussian fit lands")
+            .pos
         };
         let moffat = |seed| {
-            MoffatFit::new(&measured.residual, seed, &grid, 0.0, None, 2.5)
-                .expect("the Moffat fit lands")
-                .pos
+            MoffatFit::new(
+                FitInputs {
+                    pixels: &measured.residual,
+                    pos: seed,
+                    grid: &grid,
+                    background: 0.0,
+                    noise: None,
+                },
+                2.5,
+            )
+            .expect("the Moffat fit lands")
+            .pos
         };
         let fits: [(&str, &dyn Fn(DVec2) -> DVec2, _); 2] =
             [("Gaussian", &gaussian, 1e-5), ("Moffat", &moffat, 1e-3)];
@@ -88,7 +103,7 @@ fn the_windowed_centroid_converges_on_stars_wider_than_its_window() {
 }
 
 #[test]
-fn compute_stamp_radius_scales_and_clamps() {
+fn stamp_radius_scales_and_clamps() {
     let cases = [
         (1.0, 4),
         (2.0, 4),
@@ -102,7 +117,7 @@ fn compute_stamp_radius_scales_and_clamps() {
     ];
     for (fwhm, expected) in cases {
         assert_eq!(
-            MeasureGrid::stamp_radius(fwhm),
+            measure_grid::stamp_radius(fwhm),
             expected,
             "FWHM {fwhm} uses ceil(1.75 × FWHM), clamped to [4, 15]"
         );

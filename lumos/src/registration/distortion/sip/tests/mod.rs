@@ -24,7 +24,11 @@ fn rms(residuals: &[f64]) -> f64 {
 /// centre, every pair weighed alike.
 fn fit_field(field: &RadialField, grid: Grid, order: usize) -> SipPolynomial {
     let RadialPairs { reference, target } = field.pairs(grid);
-    SipPolynomial::fitted_under(&field.transform, &reference, &target, order, field.centre)
+    SipModel {
+        order,
+        origin: field.centre,
+    }
+    .fitted_under(&field.transform, &reference, &target)
 }
 
 mod basis;

@@ -34,7 +34,7 @@ impl FuncSignature {
         count(&mut hasher, func.inputs.len());
         for input in &func.inputs {
             name(&mut hasher, &input.name);
-            Self::write_type(&mut hasher, &input.data_type);
+            write_type(&mut hasher, &input.data_type);
         }
         count(&mut hasher, func.outputs.len());
         for output in &func.outputs {
@@ -42,7 +42,7 @@ impl FuncSignature {
             match &output.ty {
                 OutputType::Fixed(data_type) => {
                     hasher.update(&[0]);
-                    Self::write_type(&mut hasher, data_type);
+                    write_type(&mut hasher, data_type);
                 }
                 OutputType::Wildcard { mirrors } => {
                     hasher.update(&[1]);
@@ -56,25 +56,25 @@ impl FuncSignature {
         }
         Self(*hasher.finalize().as_bytes())
     }
+}
 
-    /// A type as its kind, plus the identity of a custom or enum type. A path's mode and
-    /// extensions are left out: they decide which values a picker offers, not where a binding
-    /// lands.
-    fn write_type(hasher: &mut blake3::Hasher, data_type: &DataType) {
-        let tag: u8 = match data_type {
-            DataType::Any => 0,
-            DataType::Float => 1,
-            DataType::Int => 2,
-            DataType::Bool => 3,
-            DataType::String => 4,
-            DataType::FsPath(_) => 5,
-            DataType::Custom(_) => 6,
-            DataType::Enum(_) => 7,
-        };
-        hasher.update(&[tag]);
-        if let DataType::Custom(type_id) | DataType::Enum(type_id) = data_type {
-            hasher.update(&type_id.as_u128().to_le_bytes());
-        }
+/// A type as its kind, plus the identity of a custom or enum type. A path's mode and
+/// extensions are left out: they decide which values a picker offers, not where a binding
+/// lands.
+fn write_type(hasher: &mut blake3::Hasher, data_type: &DataType) {
+    let tag: u8 = match data_type {
+        DataType::Any => 0,
+        DataType::Float => 1,
+        DataType::Int => 2,
+        DataType::Bool => 3,
+        DataType::String => 4,
+        DataType::FsPath(_) => 5,
+        DataType::Custom(_) => 6,
+        DataType::Enum(_) => 7,
+    };
+    hasher.update(&[tag]);
+    if let DataType::Custom(type_id) | DataType::Enum(type_id) = data_type {
+        hasher.update(&type_id.as_u128().to_le_bytes());
     }
 }
 

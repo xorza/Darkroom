@@ -1,9 +1,13 @@
 use rayon::prelude::*;
 
-use super::*;
+use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::generate_random_positions;
-use crate::internals::test_rng::TestRng;
+use crate::registration::final_fit::fit_catalogs::{CAUCHY_TUNING, FitCatalogs};
+use crate::registration::final_fit::weighted_pairs::WeightedPairs;
+use crate::registration::final_fit::{FinalFit, FitModel};
 use crate::registration::ransac::transforms::estimate_transform;
+use crate::registration::transform::{Transform, TransformType};
+use crate::star_detection::star::Star;
 
 /// A `angle_deg` rotation about (1000, 1000), then `offset`.
 fn rotation_about_centre(angle_deg: f64, offset: DVec2) -> Transform {
@@ -50,16 +54,16 @@ fn a_seed_that_misses_stars_reaches_them_all() {
     assert!(missed > 0, "the seed has to miss stars to test anything");
 
     let catalogs = FitCatalogs::new(&stars(&reference, 0.01), &stars(&target, 0.01)).unwrap();
-    let fit = FinalFit::run(
-        &catalogs,
-        seed,
-        FitModel {
-            transform: TransformType::Euclidean,
-            sip: None,
-        },
-        3.0,
-    )
-    .unwrap();
+    let fit = catalogs
+        .fit(
+            seed,
+            FitModel {
+                transform: TransformType::Euclidean,
+                sip: None,
+            },
+            3.0,
+        )
+        .unwrap();
     assert_eq!(indices(&fit), (0..50).map(|i| (i, i)).collect::<Vec<_>>());
     for p in [DVec2::ZERO, DVec2::new(2000.0, 0.0), DVec2::splat(2000.0)] {
         assert!(fit.warp.transform.apply(p).distance(truth.apply(p)) < 1e-9);
@@ -93,16 +97,16 @@ fn pairs_weigh_by_their_variance() {
         });
     }
     let catalogs = FitCatalogs::new(&reference, &target).unwrap();
-    let fit = FinalFit::run(
-        &catalogs,
-        Transform::translation(DVec2::new(5.0, 0.0)),
-        FitModel {
-            transform: TransformType::Translation,
-            sip: None,
-        },
-        3.0,
-    )
-    .unwrap();
+    let fit = catalogs
+        .fit(
+            Transform::translation(DVec2::new(5.0, 0.0)),
+            FitModel {
+                transform: TransformType::Translation,
+                sip: None,
+            },
+            3.0,
+        )
+        .unwrap();
     let found = fit.warp.transform.translation_components();
     assert!((found - DVec2::new(5.0, 0.0)).length() < 1e-12, "{found}");
     assert_eq!(fit.scale, 1.0);
@@ -123,16 +127,16 @@ fn saturated_stars_and_a_blend_take_no_part() {
     reference[3].saturated = true;
     target[7].saturated = true;
     let catalogs = FitCatalogs::new(&reference, &target).unwrap();
-    let fit = FinalFit::run(
-        &catalogs,
-        truth,
-        FitModel {
-            transform: TransformType::Euclidean,
-            sip: None,
-        },
-        3.0,
-    )
-    .unwrap();
+    let fit = catalogs
+        .fit(
+            truth,
+            FitModel {
+                transform: TransformType::Euclidean,
+                sip: None,
+            },
+            3.0,
+        )
+        .unwrap();
     let expected: Vec<(usize, usize)> = (0..51)
         .filter(|i| ![3, 7, 11].contains(i))
         .map(|i| (i, i))
@@ -230,16 +234,16 @@ fn the_fit_reaches_the_cramer_rao_bound() {
                 })
                 .collect();
             let catalogs = FitCatalogs::new(&reference, &target).unwrap();
-            let fit = FinalFit::run(
-                &catalogs,
-                truth,
-                FitModel {
-                    transform: TransformType::Similarity,
-                    sip: None,
-                },
-                3.0,
-            )
-            .unwrap();
+            let fit = catalogs
+                .fit(
+                    truth,
+                    FitModel {
+                        transform: TransformType::Similarity,
+                        sip: None,
+                    },
+                    3.0,
+                )
+                .unwrap();
             parameters(&fit.warp.transform)
         })
         .collect();

@@ -55,7 +55,7 @@ fn removes_cosmic_rays_preserves_stars() {
     let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.index_of(p)]).collect();
 
     let mut img = cfa_from_plane(data, CfaType::Mono);
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
+    let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
 
     // Every injected CR is removed (the spike drops back toward sky, ≪ 0.95).
@@ -87,7 +87,7 @@ fn removes_cosmic_rays_preserves_stars() {
 #[test]
 fn clean_field_few_false_positives() {
     let field = synthetic_field();
-    let count = reject_cosmic_rays(
+    let count = reject(
         &mut cfa_from_plane(field.pixels, CfaType::Mono),
         &CosmicRayConfig::default(),
     )
@@ -103,7 +103,7 @@ fn sigclip_controls_sensitivity() {
     } = synthetic_field();
     let size = Size2us::new(data.width(), data.height());
     data[size.index_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
-    let sensitive = reject_cosmic_rays(
+    let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig {
             sigclip: 3.0,
@@ -111,7 +111,7 @@ fn sigclip_controls_sensitivity() {
         },
     )
     .unwrap();
-    let strict = reject_cosmic_rays(
+    let strict = reject(
         &mut cfa_from_plane(data, CfaType::Mono),
         &CosmicRayConfig {
             sigclip: 60.0,
@@ -143,7 +143,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
         let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
         // A 12-bit ADC: one step is 1/4095 of a sample unit.
         img.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0);
-        let count = reject_cosmic_rays(
+        let count = reject(
             &mut img,
             &CosmicRayConfig {
                 noise,
@@ -185,7 +185,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
+    let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
     for &p in &crs {
         assert!(
@@ -248,7 +248,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
-    reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
+    reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
     // CR rejection still works — the injected CRs are removed.
     for &p in &crs {
@@ -432,7 +432,7 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
         ..Default::default()
     };
     assert_eq!(
-        reject_cosmic_rays(&mut image, &config),
+        reject(&mut image, &config),
         Err(CosmicRayError::UnknownAdcStep)
     );
 }
@@ -454,7 +454,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
     let whole_frame_sigma = MedianMad::of_mut(&mut pixels.clone()).sigma();
     assert!(whole_frame_sigma > 0.08, "premise: {whole_frame_sigma}");
     let mut image = cfa_from_plane(Buffer2::new(128, 128, pixels), CfaType::Mono);
-    reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
+    reject(&mut image, &CosmicRayConfig::default()).unwrap();
     assert!(
         image
             .flags
@@ -609,7 +609,7 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
                 }
             });
         }
-        reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
+        reject(&mut image, &CosmicRayConfig::default()).unwrap();
         image
     };
     let cosmic = |image: &CfaImage, index: usize| {
@@ -676,7 +676,7 @@ fn an_xtrans_mosaic_is_refused_untouched() {
             ..Default::default()
         };
         assert_eq!(
-            reject_cosmic_rays(&mut image, &config),
+            reject(&mut image, &config),
             Err(CosmicRayError::XTransUnsupported)
         );
         assert_eq!(bits(image.data.pixels()), bits(&data));
@@ -694,6 +694,7 @@ fn an_xtrans_mosaic_is_refused_untouched() {
 /// same pixels found.
 #[test]
 fn the_local_recompute_is_the_full_one() {
+    use crate::calibration::cosmic_ray::mono::Recompute;
     use crate::calibration::cosmic_ray::mono::internals::reject_recomputing;
 
     let size = Size2us::new(96, 96);
@@ -724,8 +725,8 @@ fn the_local_recompute_is_the_full_one() {
     let config = CosmicRayConfig::default();
     let mut local = data.pixels().to_vec();
     let mut full = data.pixels().to_vec();
-    let found_local = reject_recomputing(&mut local, size, &config, false);
-    let found_full = reject_recomputing(&mut full, size, &config, true);
+    let found_local = reject_recomputing(&mut local, size, &config, Recompute::ChangedRows);
+    let found_full = reject_recomputing(&mut full, size, &config, Recompute::EveryRow);
     assert!(
         hits.iter().all(|&hit| found_full.get_at(hit)),
         "every hit is found"

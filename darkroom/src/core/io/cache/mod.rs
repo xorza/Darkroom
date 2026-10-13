@@ -16,7 +16,7 @@ use crate::core::io::document::EXTENSION;
 /// Per-document-named so two projects in one folder keep separate stores.
 /// Save-As / moving the project does *not* carry the cache along — each
 /// location keeps its own store, which refills lazily as nodes recompute.
-pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
+pub(crate) fn root(doc_path: &Path) -> PathBuf {
     let stem = doc_path.file_stem().unwrap_or_default();
     let mut name = stem.to_os_string();
     name.push(".");
@@ -31,7 +31,7 @@ pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
 /// a document with no disk-backed node leaves its folder untouched. A failure
 /// just means no `.gitignore` yet — the cache still works, since blob writes
 /// recreate the dir.
-pub(crate) fn prepare_cache_root(root: &Path) {
+pub(crate) fn prepare(root: &Path) {
     if fs::create_dir_all(root).is_err() {
         return;
     }

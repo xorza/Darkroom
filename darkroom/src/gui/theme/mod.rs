@@ -26,9 +26,7 @@ use crate::gui::theme::card_theme::CardTheme;
 use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
-use crate::gui::theme::palantir_bridge::{
-    BridgeRoles, menu_button_for, palantir_for, palantir_palette_for,
-};
+use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
 use crate::gui::theme::status_colors::StatusColors;
@@ -183,10 +181,10 @@ impl Theme {
         // The palantir half is derived here rather than stored on `Palette`:
         // it is a projection of the same roles, and a second copy of them
         // could drift from the one the darkroom rosters read.
-        let pal = palantir_palette_for(p);
+        let pal = palantir_bridge::palette(p);
         let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
-        let palantir = palantir_for(
+        let palantir = palantir_bridge::theme(
             &pal,
             BridgeRoles {
                 chrome_fill: colors.chrome_fill,
@@ -197,7 +195,7 @@ impl Theme {
                 text: &text,
             },
         );
-        let menu_button = menu_button_for(&pal, &text);
+        let menu_button = palantir_bridge::menu_button(&pal, &text);
         let path_field_error = error_bordered(&palantir.text_edit, status.error);
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename

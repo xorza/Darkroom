@@ -14,7 +14,7 @@ use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_to_sigma, sigma
 use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
-use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::stamp::{FitInputs, StampGrid};
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::centroid::*;
@@ -29,7 +29,7 @@ use crate::star_detection::star_detector::stages::detect::internals::detect_star
 const TEST_EXPECTED_FWHM: f32 = 5.9;
 
 /// The stamp `measure_star` would use at [`TEST_EXPECTED_FWHM`]: ceil(1.75 · 5.9) = 11.
-const TEST_STAMP_RADIUS: usize = MeasureGrid::stamp_radius(TEST_EXPECTED_FWHM);
+const TEST_STAMP_RADIUS: usize = measure_grid::stamp_radius(TEST_EXPECTED_FWHM);
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
@@ -129,17 +129,13 @@ impl Measured {
         config: &MeasurementConfig,
         expected_fwhm: f32,
     ) -> Option<Star> {
-        measure_star(
-            MeasurePlanes {
-                residual: &self.residual,
-                sky: &self.sky,
-                saturation: &self.saturation,
-                no_data: None,
-            },
-            region,
-            config,
-            &MeasureGrid::new(expected_fwhm),
-        )
+        MeasurePlanes {
+            residual: &self.residual,
+            sky: &self.sky,
+            saturation: &self.saturation,
+            no_data: None,
+        }
+        .measure_star(region, config, &MeasureGrid::new(expected_fwhm))
     }
 
     /// The windowed centroid from `start` with the grid of `expected_fwhm`, the global sky, the
@@ -163,9 +159,11 @@ impl Measured {
     /// of [`TEST_EXPECTED_FWHM`].
     fn compute(&self, pos: DVec2, radius: usize) -> Option<Star> {
         compute_star(
-            &self.residual,
-            pos,
-            radius,
+            StampAt {
+                residual: &self.residual,
+                pos,
+                radius,
+            },
             MeasureGrid::new(TEST_EXPECTED_FWHM).window_sigma,
             global_background(&self.sky, pos),
         )

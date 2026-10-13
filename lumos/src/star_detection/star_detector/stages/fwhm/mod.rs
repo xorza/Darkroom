@@ -14,7 +14,6 @@ use crate::star_detection::star_detector::detection_result::FwhmSource;
 use crate::star_detection::star_detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::star_detection::star_detector::stages::detect::DetectResult;
 use crate::star_detection::star_detector::stages::filter::FilterRejection;
-use crate::star_detection::star_detector::stages::measure;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 
 /// Minimum plausible FWHM in pixels. Stars narrower than this are likely
@@ -73,16 +72,14 @@ fn from_bright_stars(
         regions.len()
     );
 
+    let estimator = Estimator {
+        fwhm: &config.fwhm,
+        filter: &config.filter,
+        fallback,
+    };
     let mut at = |seed: f32| {
-        let stars = measure::measure(&regions, frame, &config.measurement, Some(seed));
-        from_stars(
-            &stars,
-            &config.fwhm,
-            fallback,
-            &config.filter,
-            &mut pool.values,
-            &mut pool.deviations,
-        )
+        let stars = frame.measure_stars(&regions, &config.measurement, Some(seed));
+        estimator.estimate(&stars, &mut pool.values, &mut pool.deviations)
     };
     let first = at(fallback);
     let FwhmSource::Estimated { fwhm, .. } = first else {
@@ -94,80 +91,94 @@ fn from_bright_stars(
     }
 }
 
-/// Estimate FWHM from a set of detected stars.
-///
-/// Uses robust statistics (median + MAD) to handle outliers from
-/// cosmic rays, saturated stars, and edge artifacts.
-///
-/// # Algorithm
-/// 1. Keep the stars that pass the quality filter ([`FilterRejection::of`]) with a plausible FWHM
-/// 2. Compute median FWHM from filtered stars
-/// 3. Reject outliers using MAD-based threshold (keep within 3×MAD of median)
-/// 4. Recompute median from remaining stars
-///
-/// `fwhms` and `deviations` are scratch.
-fn from_stars(
-    stars: &[Star],
-    fwhm_config: &FwhmConfig,
+/// What an estimate from measured stars reads: the estimation settings, the quality filter a star
+/// passes to count, and the FWHM to fall back to.
+#[derive(Debug, Clone, Copy)]
+struct Estimator<'a> {
+    fwhm: &'a FwhmConfig,
+    filter: &'a FilterConfig,
     fallback: f32,
-    filter_config: &FilterConfig,
-    fwhms: &mut Vec<f32>,
-    deviations: &mut Vec<f32>,
-) -> FwhmSource {
-    let min_stars = fwhm_config.min_stars;
+}
 
-    fwhms.clear();
-    fwhms.extend(
-        stars
-            .iter()
-            .filter(|s| {
-                FilterRejection::of(s, filter_config).is_none()
-                    && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)
-            })
-            .map(|s| s.fwhm),
-    );
+impl Estimator<'_> {
+    /// Estimate FWHM from a set of detected stars.
+    ///
+    /// Uses robust statistics (median + MAD) to handle outliers from
+    /// cosmic rays, saturated stars, and edge artifacts.
+    ///
+    /// # Algorithm
+    /// 1. Keep the stars that pass the quality filter ([`FilterRejection::of`]) with a plausible
+    ///    FWHM
+    /// 2. Compute median FWHM from filtered stars
+    /// 3. Reject outliers using MAD-based threshold (keep within 3×MAD of median)
+    /// 4. Recompute median from remaining stars
+    ///
+    /// `fwhms` and `deviations` are scratch.
+    fn estimate(
+        self,
+        stars: &[Star],
+        fwhms: &mut Vec<f32>,
+        deviations: &mut Vec<f32>,
+    ) -> FwhmSource {
+        let Self {
+            fwhm: fwhm_config,
+            filter: filter_config,
+            fallback,
+        } = self;
+        let min_stars = fwhm_config.min_stars;
 
-    if fwhms.len() < min_stars {
-        tracing::debug!(
-            "Insufficient stars for FWHM estimation: {} < {}, using fallback {:.1}",
-            fwhms.len(),
-            min_stars,
-            fallback
+        fwhms.clear();
+        fwhms.extend(
+            stars
+                .iter()
+                .filter(|s| {
+                    FilterRejection::of(s, filter_config).is_none()
+                        && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)
+                })
+                .map(|s| s.fwhm),
         );
-        return FwhmSource::Configured(fallback);
-    }
 
-    let median = median_mut(fwhms);
-    let mad = mad_with_scratch(fwhms, median, deviations);
+        if fwhms.len() < min_stars {
+            tracing::debug!(
+                "Insufficient stars for FWHM estimation: {} < {}, using fallback {:.1}",
+                fwhms.len(),
+                min_stars,
+                fallback
+            );
+            return FwhmSource::Configured(fallback);
+        }
 
-    // Reject outliers: keep within 3×MAD of median (with floor for uniform distributions)
-    let threshold = FWHM_MAD_MULTIPLIER * mad_floored(mad, median, FWHM_MAD_FLOOR_FRACTION);
-    let count_before = fwhms.len();
-    fwhms.retain(|&f| (f - median).abs() <= threshold);
+        let median = median_mut(fwhms);
+        let mad = mad_with_scratch(fwhms, median, deviations);
 
-    // If too many rejected, use pre-rejection median
-    if fwhms.len() < min_stars {
-        tracing::debug!(
-            "Too many outliers rejected ({count_before} -> {}), using pre-rejection median {median:.2}",
-            fwhms.len(),
+        // The floor keeps a uniform set from a zero threshold.
+        let threshold = FWHM_MAD_MULTIPLIER * mad_floored(mad, median, FWHM_MAD_FLOOR_FRACTION);
+        let count_before = fwhms.len();
+        fwhms.retain(|&f| (f - median).abs() <= threshold);
+
+        if fwhms.len() < min_stars {
+            tracing::debug!(
+                "Too many outliers rejected ({count_before} -> {}), using pre-rejection median {median:.2}",
+                fwhms.len(),
+            );
+            // `median` was computed over the pre-rejection set (`count_before` stars), not the
+            // shrunken post-retain `fwhms` — report the count that actually produced the value.
+            return FwhmSource::Estimated {
+                fwhm: median,
+                stars_used: count_before,
+            };
+        }
+
+        let final_median = median_mut(fwhms);
+        tracing::info!(
+            "Estimated FWHM: {final_median:.2} pixels from {} stars",
+            fwhms.len()
         );
-        // `median` was computed over the pre-rejection set (`count_before` stars), not the
-        // shrunken post-retain `fwhms` — report the count that actually produced the value.
-        return FwhmSource::Estimated {
-            fwhm: median,
-            stars_used: count_before,
-        };
-    }
 
-    let final_median = median_mut(fwhms);
-    tracing::info!(
-        "Estimated FWHM: {final_median:.2} pixels from {} stars",
-        fwhms.len()
-    );
-
-    FwhmSource::Estimated {
-        fwhm: final_median,
-        stars_used: fwhms.len(),
+        FwhmSource::Estimated {
+            fwhm: final_median,
+            stars_used: fwhms.len(),
+        }
     }
 }
 

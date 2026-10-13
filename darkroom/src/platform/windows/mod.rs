@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::gui::HostHandle;
+use crate::gui::app::App;
 
 /// Nothing to arrange: a shell file association passes the path in argv,
 /// where the CLI already reads it.
-pub(super) fn route_opened_documents(_handle: HostHandle) {}
+pub(super) fn route_opened_documents(_handle: HostHandle, _open: fn(&mut App, PathBuf)) {}
 
 pub(super) fn url_opener() -> Command {
     let mut command = Command::new("cmd");

@@ -16,7 +16,6 @@ use crate::registration::transform::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
-use crate::star_detection::threshold_mask::ThresholdParams;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
@@ -137,7 +136,6 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::star_detection::star_detector::stages::detect::DetectResult;
     use crate::star_detection::star_detector::stages::fwhm;
     use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
-    use crate::star_detection::threshold_mask::create_residual_threshold_mask;
     use imaginarium::Buffer2;
 
     init_tracing();
@@ -179,15 +177,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 4. Threshold mask.
     let mut mask = pool.acquire_bit();
-    create_residual_threshold_mask(
-        &plane.values,
-        &plane.noise.noise,
-        ThresholdParams {
-            sigma: config.extraction.sigma_threshold,
-            min_noise: plane.noise.floor,
-        },
-        &mut mask,
-    );
+    plane.threshold(config.extraction.sigma_threshold, &mut mask);
     if let Some(no_data) = &frame.no_data {
         mask.and_not(no_data);
     }

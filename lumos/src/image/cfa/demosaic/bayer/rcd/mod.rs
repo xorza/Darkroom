@@ -17,7 +17,7 @@ use crate::error::Cancelled;
 use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
 use crate::image::cfa::demosaic::tiled;
-use crate::image::cfa::demosaic::tiled::Tiling;
+use crate::image::cfa::demosaic::tiled::{Mosaic, TileKernel, Tiling};
 use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
 use crate::simd::{F32x8, Isa, Mask8};
@@ -142,20 +142,21 @@ pub(crate) fn demosaic(
     bayer: &BayerImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let tiling = Tiling {
-        tile: TILE,
-        inset: 0,
-        margin: INTERPOLATED_BORDER,
+    let mosaic = Mosaic {
+        data: bayer.data,
+        size: bayer.size,
+        color_at: |position| bayer.pattern.color_at(position).index(),
     };
-    tiled::demosaic(
-        bayer.data,
-        bayer.size,
-        |position| bayer.pattern.color_at(position).index(),
-        tiling,
-        || Tile::new(bayer.pattern),
-        |tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
-        cancel,
-    )
+    let kernel = TileKernel {
+        tiling: Tiling {
+            tile: TILE,
+            inset: 0,
+            margin: INTERPOLATED_BORDER,
+        },
+        new_tile: || Tile::new(bayer.pattern),
+        run: |tile: &mut Tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
+    };
+    mosaic.demosaic(kernel, cancel)
 }
 
 #[cfg(test)]

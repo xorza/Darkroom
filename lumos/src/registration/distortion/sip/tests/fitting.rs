@@ -64,8 +64,28 @@ fn coincident_points_fit_nothing() {
         target: &coincident,
         weights: &weights,
     };
-    assert!(SipPolynomial::fit_under(&Transform::identity(), pairs, 2, DVec2::ZERO).is_none());
-    assert!(SipPolynomial::fit_with(TransformType::Affine, pairs, 2, DVec2::ZERO).is_none());
+    assert!(
+        SipPolynomial::fit_under(
+            &Transform::identity(),
+            pairs,
+            SipModel {
+                order: 2,
+                origin: DVec2::ZERO
+            }
+        )
+        .is_none()
+    );
+    assert!(
+        SipPolynomial::fit_with(
+            TransformType::Affine,
+            pairs,
+            SipModel {
+                order: 2,
+                origin: DVec2::ZERO
+            }
+        )
+        .is_none()
+    );
 }
 
 /// The largest correction over a grid on the frame, corners included: the barrel field's farthest
@@ -75,17 +95,10 @@ fn coincident_points_fit_nothing() {
 #[test]
 fn max_correction_is_the_corner_correction() {
     let size = Size2us::new(1000, 1000);
-    let barrel = fit_field(&barrel(), Grid::DEFAULT, 3);
+    let distorted = fit_field(&barrel(), Grid::DEFAULT, 3);
     let corner = 25.0 * 2f64.sqrt();
-    assert!((barrel.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
-    let flat = fit_field(
-        &RadialField {
-            k: 0.0,
-            ..super::barrel()
-        },
-        Grid::DEFAULT,
-        2,
-    );
+    assert!((distorted.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
+    let flat = fit_field(&RadialField { k: 0.0, ..barrel() }, Grid::DEFAULT, 2);
     assert_eq!(flat.max_grid_correction(size, 50.0), 0.0);
     assert!(
         flat.coeffs_u
@@ -177,8 +190,15 @@ fn each_linear_part_and_its_correction_fit_together() {
             target: &target,
             weights: &weights,
         };
-        let SipFit { transform, sip } =
-            SipPolynomial::fit_with(model, pairs, 3, field.centre).unwrap();
+        let SipFit { transform, sip } = SipPolynomial::fit_with(
+            model,
+            pairs,
+            SipModel {
+                order: 3,
+                origin: field.centre,
+            },
+        )
+        .unwrap();
         for p in [DVec2::new(700.0, 300.0), DVec2::ZERO, DVec2::splat(1000.0)] {
             assert!(
                 transform.apply(p).distance(truth.apply(p)) <= 1e-9,

@@ -10,10 +10,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
-use crate::combine::frame_cache::sample::PixelSamples;
+use crate::combine::frame_cache::sample::{PixelSamples, SampleQuality};
 use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+use crate::combine::rejection::mean_combine::MeanCombine;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
@@ -62,12 +63,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
                             weights: &block.weights,
                             noise: Some(block.noise()),
                         };
-                        black_box(rejection.combine_mean(
-                            samples,
-                            DEFAULT_MIN_SURVIVORS,
-                            &mut scratch,
-                            true,
-                        ));
+                        black_box(
+                            MeanCombine {
+                                rejection,
+                                min_survivors: DEFAULT_MIN_SURVIVORS,
+                                quality: SampleQuality::Measured,
+                            }
+                            .combine(&samples, &mut scratch),
+                        );
                     }
                 });
             });

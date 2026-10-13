@@ -4,10 +4,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME};
-use crate::calibration::calibration_masters::subtract_master;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::prepared_flat::PreparedFlat;
+use crate::calibration::subtractor::Subtractor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 
@@ -19,7 +19,12 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("prepare/rggb", "masters"), |b| {
         let CalibrationSet { bias, flat, .. } = scene::masters(FRAME, cfa_type);
         let (bias, mut flat) = (bias.unwrap(), flat.unwrap());
-        subtract_master(&mut flat, &bias, MasterRole::Bias, None).unwrap();
+        Subtractor {
+            role: MasterRole::Bias,
+            master: &bias,
+        }
+        .subtract_from(&mut flat, None)
+        .unwrap();
         b.iter_batched(
             || flat.clone(),
             |flat| PreparedFlat::new(flat).unwrap(),

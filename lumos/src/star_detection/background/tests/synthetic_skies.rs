@@ -28,6 +28,7 @@ use crate::star_detection::tests::Scenario;
 /// wings: pinned at its measured size on each sky.
 #[test]
 fn rendered_skies_are_recovered() {
+    #[derive(Debug)]
     struct Case {
         name: &'static str,
         sky: BackgroundField,

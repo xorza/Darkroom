@@ -1,7 +1,7 @@
 //! Shared record-time scraps used across the GUI tree: text styles
 //! derived from the theme base, small filled/stroked glyph primitives,
 //! and layout spacers. Chrome-level composition (pills, chips) lives in
-//! [`toolbar`](crate::gui::widgets::toolbar).
+//! [`pill`](crate::gui::widgets::pill).
 
 use std::fmt::Display;
 

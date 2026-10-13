@@ -54,7 +54,7 @@ enum CacheRootChange {
     /// A different root, or none at all — a document opened, closed, or saved
     /// somewhere else. The worker takes the new store and writes nothing into
     /// it: each location keeps its own store and refills lazily, per
-    /// [`document_cache_root`](cache::document_cache_root).
+    /// [`cache::root`].
     Repointed,
     /// A document that had nowhere to persist gained a root — the first save of
     /// an unsaved document. **The one transition that owes a flush**: its
@@ -151,7 +151,7 @@ impl RuntimeHost {
             return;
         }
         if let Some(root) = &self.disk_root {
-            cache::prepare_cache_root(root);
+            cache::prepare(root);
             self.root_prepared = true;
         }
     }
@@ -164,10 +164,7 @@ impl RuntimeHost {
     /// What the worker is told is [`CacheRootChange`]'s to decide — see there
     /// for why only one of the transitions owes a flush.
     pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
-        let previous = mem::replace(
-            &mut self.disk_root,
-            doc_path.map(cache::document_cache_root),
-        );
+        let previous = mem::replace(&mut self.disk_root, doc_path.map(cache::root));
         let change = CacheRootChange::of(previous.as_deref(), self.disk_root.as_deref());
         if change != CacheRootChange::Unchanged {
             self.root_prepared = false;
@@ -234,7 +231,7 @@ impl RuntimeHost {
         }
         self.dispatch(|worker| {
             worker.install(compiled)?;
-            worker.run_nodes(vec![node_id])
+            worker.run_nodes([node_id])
         });
         true
     }

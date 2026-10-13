@@ -2,16 +2,13 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common::CancelToken;
-
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::image_dimensions::ImageDimensions;
-use crate::pipeline::align_stack_config::AlignStackConfig;
+use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registration::FrameRegistration;
-use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 use crate::registration::error::RegistrationError;
@@ -26,9 +23,8 @@ use crate::star_detection::star::Star;
 pub(crate) struct FrameRegistrar<'a> {
     reference: usize,
     reference_stars: Vec<Star>,
-    config: &'a AlignStackConfig,
+    run: &'a AlignStackRun<'a>,
     parking: &'a FrameParking,
-    cancel: &'a CancelToken,
     /// The frames registered to the reference: every frame but the reference.
     others: usize,
     attempted: AtomicUsize,
@@ -41,11 +37,14 @@ pub(crate) struct FrameRegistrar<'a> {
     rows: ScratchPool<RowScratch>,
 }
 
-/// The lights a registrar parks: how many, and the dimensions every one of them has.
-#[derive(Debug, Clone, Copy)]
+/// The lights a registrar parks: how many, the dimensions every one of them has, and the reference
+/// among them with the stars the others register to.
+#[derive(Debug)]
 pub(crate) struct LightSet {
     pub(crate) count: usize,
     pub(crate) dimensions: ImageDimensions,
+    pub(crate) reference: usize,
+    pub(crate) reference_stars: Vec<Star>,
 }
 
 /// One parked light: its stored frame when it registered, and how it registered.
@@ -56,16 +55,19 @@ pub(crate) struct ParkedFrame {
 }
 
 impl<'a> FrameRegistrar<'a> {
-    pub(crate) fn new(
-        reference: usize,
-        reference_stars: Vec<Star>,
-        config: &'a AlignStackConfig,
+    /// Park `lights` in `parking`, registered and warped as `run` asks.
+    pub(super) fn new(
+        run: &'a AlignStackRun<'a>,
         parking: &'a FrameParking,
         lights: LightSet,
-        progress: &'a ProgressCallback,
-        cancel: &'a CancelToken,
     ) -> Self {
-        let others = lights.count - 1;
+        let LightSet {
+            count,
+            dimensions,
+            reference,
+            reference_stars,
+        } = lights;
+        let others = count - 1;
         tracing::info!(
             reference,
             ref_stars = reference_stars.len(),
@@ -75,13 +77,12 @@ impl<'a> FrameRegistrar<'a> {
         Self {
             reference,
             reference_stars,
-            config,
+            run,
             parking,
-            cancel,
             others,
             attempted: AtomicUsize::new(0),
-            resolved: StageCounter::new(progress, StackingStage::Registering, others),
-            warps: ScratchPool::new(lights.dimensions),
+            resolved: StageCounter::new(&run.ingest.progress, StackingStage::Registering, others),
+            warps: ScratchPool::new(dimensions),
             rows: ScratchPool::default(),
         }
     }
@@ -94,7 +95,7 @@ impl<'a> FrameRegistrar<'a> {
         index: usize,
         frame: DetectedFrame,
     ) -> Result<Option<ParkedFrame>, AlignStackError> {
-        if self.cancel.is_cancelled() {
+        if self.run.cancel().is_cancelled() {
             return Ok(None);
         }
         let DetectedFrame {
@@ -115,6 +116,7 @@ impl<'a> FrameRegistrar<'a> {
 
         let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
         let registration = match self
+            .run
             .config
             .registration
             .register(&self.reference_stars, &stars)
@@ -150,7 +152,7 @@ impl<'a> FrameRegistrar<'a> {
         warped.warp_into(
             &SourceImage::of(&image),
             &warp,
-            self.config.registration.warp,
+            self.run.config.registration.warp,
             &self.rows,
         );
         drop(image);

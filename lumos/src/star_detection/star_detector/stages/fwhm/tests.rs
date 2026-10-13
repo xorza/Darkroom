@@ -40,14 +40,14 @@ fn nine_and(spoiled: Star) -> Vec<Star> {
     stars
 }
 
-/// Every outcome of `from_stars`, as the whole `FwhmSource` it returns.
+/// Every outcome of `Estimator::estimate`, as the whole `FwhmSource` it returns.
 ///
 /// The quality cases spoil a star whose FWHM is the same 3.0 as the rest, so only the quality
 /// filter can remove it: the outcome is `Estimated { 3.0, 9 }` with the filter and would be
 /// `{ 3.0, 10 }` without. Medians of ten take the mean of the middle two; the MAD floor is
 /// `0.1 · median`, so a 3.0 cluster with MAD 0 keeps `|f − 3| ≤ 3 · 0.3 = 0.9`.
 #[test]
-fn from_stars_over_every_case() {
+fn estimate_over_every_case() {
     let base = Star::at(DVec2::ZERO);
     let cases: Vec<(&str, Vec<Star>, usize, FwhmSource)> = vec![
         // 4 < min_stars: the fallback, which no star produced.
@@ -203,14 +203,12 @@ fn from_stars_over_every_case() {
     let (mut fwhms, mut deviations) = (Vec::new(), Vec::new());
     for (name, stars, min_stars, expected) in cases {
         assert_eq!(
-            from_stars(
-                &stars,
-                &fwhm_config(min_stars),
-                FALLBACK,
-                &filter_config(),
-                &mut fwhms,
-                &mut deviations,
-            ),
+            Estimator {
+                fwhm: &fwhm_config(min_stars),
+                filter: &filter_config(),
+                fallback: FALLBACK,
+            }
+            .estimate(&stars, &mut fwhms, &mut deviations),
             expected,
             "{name}"
         );

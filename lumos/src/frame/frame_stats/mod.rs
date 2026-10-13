@@ -35,7 +35,7 @@ pub(crate) struct FrameStats {
     pub(crate) sky: ArrayVec<f32, 3>,
     /// Each slot's robust spread over the same pixels as its median: noise and signal together.
     /// Measured only where a normalization scales frames one by one, which a drizzle of mosaics
-    /// does ([`Self::measure_with_spread`]); `None` elsewhere.
+    /// does ([`Spreads::Measured`]); `None` elsewhere.
     pub(crate) spread: Option<ArrayVec<SlotSpread, 3>>,
     pub(crate) quantization_sigma: Option<f32>,
     /// From [`ImageMetadata::electrons_per_unit`], when the source states its gain.
@@ -61,13 +61,7 @@ impl FrameStats {
     /// by construction is; and normalization already re-measures over the pixels every frame shares
     /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
-        Self::measured(image, false)
-    }
-
-    /// [`Self::measure`], and each slot's [`spread`](Self::spread) from the samples its median
-    /// already took.
-    pub(crate) fn measure_with_spread(image: &impl StackableImage) -> Self {
-        Self::measured(image, true)
+        Self::measure_as(image, Spreads::Skipped)
     }
 
     /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
@@ -86,7 +80,9 @@ impl FrameStats {
         }
     }
 
-    fn measured(image: &impl StackableImage, with_spread: bool) -> Self {
+    /// [`Self::measure`], and with [`Spreads::Measured`] each slot's [`spread`](Self::spread) from
+    /// the samples its median already took.
+    pub(crate) fn measure_as(image: &impl StackableImage, spreads: Spreads) -> Self {
         let dimensions = image.dimensions();
         let metadata = image.metadata();
         let facts = FrameFacts::of(image);
@@ -155,7 +151,7 @@ impl FrameStats {
             Some(cfa_type) => (0..cfa_type.num_colors())
                 .into_par_iter()
                 .map(|colour| {
-                    SlotLevel::of(image.channel(0), width, with_spread, |index, position| {
+                    SlotLevel::of(image.channel(0), width, spreads, |index, position| {
                         measured(index) && cfa_type.color_at(position) == colour
                     })
                 })
@@ -164,14 +160,14 @@ impl FrameStats {
             // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
                 .map(|channel| {
-                    SlotLevel::of(image.channel(channel), width, with_spread, |index, _| {
+                    SlotLevel::of(image.channel(channel), width, spreads, |index, _| {
                         measured(index)
                     })
                 })
                 .collect(),
         };
         let medians: ArrayVec<f32, 3> = levels.iter().map(|level| level.median).collect();
-        let spread = with_spread.then(|| {
+        let spread = (spreads == Spreads::Measured).then(|| {
             levels
                 .iter()
                 .map(|level| level.spread.expect("measured with its spread"))
@@ -225,6 +221,13 @@ impl FrameStats {
     }
 }
 
+/// Whether a measurement takes each slot's [`SlotSpread`] beside its median.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Spreads {
+    Skipped,
+    Measured,
+}
+
 /// One slot's robust spread: `1.4826·MAD`, and how many samples it was taken over, which its
 /// standard error goes as.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -242,13 +245,13 @@ struct SlotLevel {
 
 impl SlotLevel {
     /// The median of the samples of `plane`, rows `width` long, whose index and position `keep`
-    /// names, and with `with_spread` their `1.4826·MAD`. Both 0 when `keep` names none: a frame
-    /// with nothing measured there contributes at none of them, so the figures are never read —
-    /// but the median of nothing would panic.
+    /// names, and with [`Spreads::Measured`] their `1.4826·MAD`. Both 0 when `keep` names none: a
+    /// frame with nothing measured there contributes at none of them, so the figures are never
+    /// read — but the median of nothing would panic.
     fn of(
         plane: &[f32],
         width: usize,
-        with_spread: bool,
+        spreads: Spreads,
         keep: impl Fn(usize, Vec2us) -> bool,
     ) -> Self {
         let kept = |y: usize, x: usize| keep(y * width + x, Vec2us::new(x, y));
@@ -269,13 +272,13 @@ impl SlotLevel {
         if samples.is_empty() {
             return Self {
                 median: 0.0,
-                spread: with_spread.then_some(SlotSpread {
+                spread: (spreads == Spreads::Measured).then_some(SlotSpread {
                     sigma: 0.0,
                     samples: 0,
                 }),
             };
         }
-        if with_spread {
+        if spreads == Spreads::Measured {
             let samples_taken = samples.len();
             let stats = MedianMad::of_mut(&mut samples);
             Self {

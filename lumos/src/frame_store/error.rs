@@ -3,7 +3,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use crate::frame::capture_conditions::CaptureCondition;
+use crate::frame::capture_condition::CaptureCondition;
 use crate::io::error::ImageError;
 
 /// Failure while creating or accessing disk-backed frame storage.

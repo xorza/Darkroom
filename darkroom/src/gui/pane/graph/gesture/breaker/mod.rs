@@ -5,7 +5,7 @@ use palantir::widget::{LineCap, LineJoin, Shape};
 use palantir::{PointerButton, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph::gesture::breaker::scribble::Scribble;
@@ -56,7 +56,7 @@ impl BreakerUI {
     /// once by the canvas — drops the scribble without emitting.
     pub(crate) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
-        let resp = ui.response_for(outer_canvas_widget_id());
+        let resp = ui.response_for(canvas::outer_wid());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
         if let Some(CanvasGesture::Breaker(button)) = cx.gesture()

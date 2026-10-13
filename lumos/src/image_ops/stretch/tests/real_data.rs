@@ -2,11 +2,13 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
+use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::scnr::Scnr;
+use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::math::statistics::median_mut;
-use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
+use crate::math::statistics;
 
 #[derive(Debug)]
 struct Stats {
@@ -22,7 +24,7 @@ fn stats(pixels: &[f32]) -> Stats {
     Stats {
         min,
         max,
-        median: median_mut(&mut scratch),
+        median: statistics::median_mut(&mut scratch),
     }
 }
 

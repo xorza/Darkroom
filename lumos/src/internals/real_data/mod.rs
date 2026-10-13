@@ -18,7 +18,7 @@ use common::CancelToken;
 
 use crate::image::linear_image::LinearImage;
 use crate::io::load_context::LoadContext;
-use crate::io::raw::load_raw_cfa;
+use crate::io::raw;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::io::raw::raw_files;
@@ -64,7 +64,7 @@ pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
 /// A RAW light, demosaiced without calibration: registration and detection need its stars, not
 /// its noise floor.
 pub(crate) fn raw_light(path: &Path) -> LinearImage {
-    load_raw_cfa(path, &LoadContext::default())
+    raw::load_cfa(path, &LoadContext::default())
         .expect("load a RAW light")
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .expect("demosaic a RAW light")

@@ -26,9 +26,10 @@ use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
 use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::error::ImageError;
-use crate::io::fits::cfa::{CFA_FITS_FORMAT, validate_cfa_image_header};
+use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
+use crate::io::fits::cfa;
 use crate::io::fits::decode::hdu_sections::HduSections;
+use crate::io::fits::decode::pixels::HduDecode;
 use crate::io::fits::decode::plan::FitsHduDescription;
 use crate::io::fits::decode::selected_fits::SelectedFits;
 
@@ -37,11 +38,10 @@ use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
+use crate::io::fits::fits_checksum_provenance::FitsChecksumProvenance;
+use crate::io::fits::fits_load_options::FitsCubeInterpretation;
 use crate::io::fits::flags_extension::FlagsExtension;
-use crate::io::fits::gain_extension::GAIN_EXTNAME;
-use crate::io::fits::metadata::read_cfa_from_headers;
-use crate::io::fits::options::FitsCubeInterpretation;
-use crate::io::fits::provenance::FitsChecksumProvenance;
+use crate::io::fits::metadata;
 use crate::io::load_context::LoadContext;
 
 mod hdu_sections;
@@ -72,7 +72,7 @@ impl DecodedFitsImage {
         {
             return Err(ImageError::scientific_rejection(
                 path,
-                "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+                ScientificRefusal::MosaicFits,
             ));
         }
 
@@ -85,16 +85,19 @@ impl DecodedFitsImage {
     }
 
     fn into_cfa(self, path: &Path) -> Result<CfaImage, ImageError> {
-        if !self.pixels.dimensions().is_grayscale() {
+        let dimensions = self.pixels.dimensions();
+        if !dimensions.is_grayscale() {
             return Err(ImageError::fits_unsupported(
                 path,
-                "scientific CFA input must have exactly one image plane",
+                FitsRefusal::CfaPlanes {
+                    planes: dimensions.channels(),
+                },
             ));
         }
         let Some(cfa_type) = self.cfa_type else {
             return Err(ImageError::fits_unsupported(
                 path,
-                "scientific CFA FITS input is missing validated CFA pattern metadata",
+                FitsRefusal::MissingCfaPattern,
             ));
         };
 
@@ -127,27 +130,21 @@ fn check_gain_channels(
     match metadata.flat_gain.as_deref() {
         Some(gain) if gain.channels() != channels => Err(ImageError::fits_unsupported(
             path,
-            format!(
-                "{GAIN_EXTNAME} holds {} grids for an image of {channels} colours or channels",
-                gain.channels()
-            ),
+            FitsRefusal::GainChannels {
+                grids: gain.channels(),
+                channels,
+            },
         )),
         _ => Ok(()),
     }
 }
 
 /// Load an already-linear astronomical image from a FITS file.
-pub(crate) fn load_linear_fits(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<LinearImage, ImageError> {
+pub(crate) fn load_linear(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
     read_selected_image(path, context)?.into_linear(path)
 }
 
-pub(crate) fn load_preview_fits(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<LinearImage, ImageError> {
+pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
     let decoded = read_selected_image(path, context)?;
     if decoded.cfa_type.is_some() {
         Ok(decoded
@@ -163,7 +160,7 @@ fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFits
     SelectedFits::open(path, context)?.read(path, context)
 }
 
-pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
+pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
     SelectedFits::open(path, context)?
         .read(path, context)?
         .into_cfa(path)
@@ -182,15 +179,15 @@ pub(crate) fn read_cfa_hdu(
 ) -> Result<CfaImage, ImageError> {
     context.check_cancelled(path)?;
     let hdu = &reader.hdus()[index];
-    if !validate_cfa_image_header(path, &hdu.header)? {
+    if !cfa::validate_image_header(path, &hdu.header)? {
         return Err(ImageError::fits_unsupported(
             path,
-            format!("HDU {index} is not a Lumos {CFA_FITS_FORMAT} image"),
+            FitsRefusal::NotLumosCfa { hdu: index },
         ));
     }
-    let plan = plan::preflight_fits_image(
+    let plan = plan::preflight(
         path,
-        FitsHduDescription::from_hdu(path, hdu)?,
+        FitsHduDescription::from_hdu(path, hdu, index)?,
         FitsCubeInterpretation::Reject,
         context.fits.float_scale,
         context.memory_limit_bytes,
@@ -202,15 +199,14 @@ pub(crate) fn read_cfa_hdu(
     }
     let header = reader.hdus()[index].header.clone();
     let selected = selection::selected_hdu(path, reader.hdus(), index)?;
-    let mut decoded = pixels::read_decoded_hdu(
-        &header,
-        &plan,
-        selected,
+    let mut decoded = HduDecode {
+        hdu: selected,
+        header: &header,
+        plan: &plan,
         path,
         context,
-        &mut HduSections::new(reader, index),
-        |_| Ok(checksum),
-    )?;
+    }
+    .read(&mut HduSections::new(reader, index), |_| Ok(checksum))?;
     if let Some(flags_hdu) = flags_hdu {
         context.check_cancelled(path)?;
         let stored = reader
@@ -222,7 +218,7 @@ pub(crate) fn read_cfa_hdu(
     decoded.into_cfa(path)
 }
 
-pub(crate) fn fits_cfa_frame_info(
+pub(crate) fn cfa_frame_info(
     path: &Path,
     context: &LoadContext,
 ) -> Result<CfaFrameInfo, ImageError> {
@@ -231,21 +227,18 @@ pub(crate) fn fits_cfa_frame_info(
     if !dimensions.is_grayscale() {
         return Err(ImageError::fits_unsupported(
             path,
-            "scientific CFA input must have exactly one image plane",
+            FitsRefusal::CfaPlanes {
+                planes: dimensions.channels(),
+            },
         ));
     }
-    let cfa_type = read_cfa_from_headers(
+    let cfa_type = metadata::read_cfa(
         selected.header(),
         dimensions.height(),
         context.fits.unstated_bayer_pattern,
     )
     .map_err(|source| ImageError::fits(path, source))?
-    .ok_or_else(|| {
-        ImageError::fits_unsupported(
-            path,
-            "scientific CFA FITS input is missing validated CFA pattern metadata",
-        )
-    })?;
+    .ok_or_else(|| ImageError::fits_unsupported(path, FitsRefusal::MissingCfaPattern))?;
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,
@@ -256,15 +249,12 @@ pub(crate) fn fits_cfa_frame_info(
 
 /// What a linear FITS image of `path` is worth to a memory estimate, from its header alone: the
 /// dimensions it decodes to and what its decode holds beside them, by the same selection, cube
-/// reading and limits [`load_linear_fits`] applies, without reading a sample. A header that
+/// reading and limits [`load_linear`] applies, without reading a sample. A header that
 /// declares a mosaic is refused, as the load refuses it.
-pub(crate) fn fits_linear_peek(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<FramePeek, ImageError> {
+pub(crate) fn linear_peek(path: &Path, context: &LoadContext) -> Result<FramePeek, ImageError> {
     let selected = SelectedFits::open(path, context)?;
     let dimensions = selected.plan.dimensions;
-    let cfa_type = read_cfa_from_headers(
+    let cfa_type = metadata::read_cfa(
         selected.header(),
         dimensions.height(),
         context.fits.unstated_bayer_pattern,
@@ -273,7 +263,7 @@ pub(crate) fn fits_linear_peek(
     if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
         return Err(ImageError::scientific_rejection(
             path,
-            "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
+            ScientificRefusal::MosaicFits,
         ));
     }
     Ok(FramePeek {

@@ -1,6 +1,8 @@
 //! [`FrameGate`]: where the combine gathers one frame's samples over a chunk, and at what
 //! confidence.
 
+use std::ops::Range;
+
 use crate::combine::frame_cache::frame_chunk::FrameChunk;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame::frame_quality::FrameQuality;
@@ -43,9 +45,9 @@ pub(crate) struct GateSample {
 }
 
 impl<'a> FrameGate<'a> {
-    /// `frame`'s gate over the pixels `start..end` of `channel`, read in place from its planes.
-    pub(crate) fn of(frame: &'a StoredFrame, channel: usize, start: usize, end: usize) -> Self {
-        Self::of_chunk(&FrameChunk::borrowed(frame, start..end), channel)
+    /// `frame`'s gate over the pixels `range` of `channel`, read in place from its planes.
+    pub(crate) fn of(frame: &'a StoredFrame, channel: usize, range: Range<usize>) -> Self {
+        Self::of_chunk(&FrameChunk::borrowed(frame, range), channel)
     }
 
     /// A frame's gate over `chunk`, in `channel`.

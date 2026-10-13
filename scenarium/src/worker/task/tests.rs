@@ -9,7 +9,9 @@ use crate::execution::report::{RunPhase, RunReporter};
 use crate::graph::identity::NodeId;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::task::{EventLoopTransition, PendingRun, WorkerRunReporter, WorkerTask};
+use crate::worker::task::{
+    EventLoopTransition, PendingRun, WorkerLinks, WorkerRunReporter, WorkerTask,
+};
 
 #[tokio::test]
 async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
@@ -21,12 +23,12 @@ async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
     })
     .unwrap();
     let shutdown = CancellationToken::new();
-    let mut task = WorkerTask::new(
-        rx,
-        |_: WorkerReport| {},
-        CancelToken::new(),
-        shutdown.clone(),
-    );
+    let mut task = WorkerTask::new(WorkerLinks {
+        message_rx: rx,
+        callback: |_: WorkerReport| {},
+        run_cancel: CancelToken::new(),
+        shutdown: shutdown.clone(),
+    });
 
     {
         let intent = task.next_intent().await.unwrap();

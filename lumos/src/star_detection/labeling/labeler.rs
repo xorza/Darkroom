@@ -8,9 +8,8 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::component_data::ComponentData;
-use crate::star_detection::labeling::run::{
-    Run, extract_runs_from_row, merge_runs_with_prev, runs_connected,
-};
+use crate::star_detection::labeling::run;
+use crate::star_detection::labeling::run::{Run, RunJoin};
 use crate::star_detection::labeling::union_find::UnionFind;
 use crate::star_detection::labeling::{LabelMap, LabelRun};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
@@ -91,7 +90,6 @@ impl Labeler {
             (1..=height).contains(&num_strips),
             "between one strip and one per row"
         );
-        let words_per_row = mask.words_per_row();
         let rows_per_strip = height / num_strips;
         let strip_rows = |strip_idx: usize| {
             let end = if strip_idx == num_strips - 1 {
@@ -109,28 +107,20 @@ impl Labeler {
             strips.resize_with(num_strips, Strip::default);
         }
         let strips = &mut strips[..num_strips];
+        let join = RunJoin {
+            union_find,
+            connectivity,
+        };
 
         strips
             .par_iter_mut()
             .enumerate()
             .for_each(|(strip_idx, strip)| {
-                strip.label_rows(
-                    &mask.words,
-                    width,
-                    words_per_row,
-                    strip_rows(strip_idx),
-                    union_find,
-                    connectivity,
-                );
+                strip.label_rows(mask, strip_rows(strip_idx), join);
             });
 
         for pair in strips.windows(2) {
-            stitch_boundary(
-                &pair[0].last_row_runs,
-                &pair[1].first_row_runs,
-                union_find,
-                connectivity,
-            );
+            join.stitch(&pair[0].last_row_runs, &pair[1].first_row_runs);
         }
 
         let count = union_find.build_label_map(
@@ -197,16 +187,9 @@ impl Labeler {
 }
 
 impl Strip {
-    /// Find the runs of `rows`, joining each to the runs of the row above it.
-    fn label_rows(
-        &mut self,
-        mask_words: &[u64],
-        width: usize,
-        words_per_row: usize,
-        rows: Range<usize>,
-        union_find: &UnionFind,
-        connectivity: Connectivity,
-    ) {
+    /// Find the runs of `rows` of `mask`, joining each to the runs of the row above it.
+    fn label_rows(&mut self, mask: &BitBuffer2, rows: Range<usize>, join: RunJoin<'_>) {
+        let words_per_row = mask.words_per_row();
         let Self {
             runs,
             first_row_runs,
@@ -223,11 +206,9 @@ impl Strip {
         let last = rows.end - 1;
         for y in rows {
             curr_runs.clear();
-            extract_runs_from_row(
-                mask_words,
-                y * words_per_row,
-                words_per_row,
-                width,
+            run::extract_runs_from_row(
+                &mask.words[y * words_per_row..(y + 1) * words_per_row],
+                mask.size.width,
                 curr_runs,
             );
 
@@ -236,7 +217,7 @@ impl Strip {
                 continue;
             }
 
-            merge_runs_with_prev(curr_runs, prev_runs, connectivity, union_find);
+            join.merge_with_prev(curr_runs, prev_runs);
             runs.extend(curr_runs.iter().map(|&run| (y as u32, run)));
 
             if y == first {
@@ -248,45 +229,6 @@ impl Strip {
 
             mem::swap(prev_runs, curr_runs);
         }
-    }
-}
-
-/// Merge labels across a strip boundary by sweeping the two sorted run lists.
-fn stitch_boundary(
-    above_runs: &[Run],
-    below_runs: &[Run],
-    union_find: &UnionFind,
-    connectivity: Connectivity,
-) {
-    let mut above_idx = 0;
-    let mut below_idx = 0;
-
-    while above_idx < above_runs.len() && below_idx < below_runs.len() {
-        let above = &above_runs[above_idx];
-        let below = &below_runs[below_idx];
-
-        let above_window = above.search_window(connectivity);
-        let below_window = below.search_window(connectivity);
-
-        if above_window.end <= below_window.start {
-            above_idx += 1;
-            continue;
-        }
-        if below_window.end <= above_window.start {
-            below_idx += 1;
-            continue;
-        }
-
-        for a in above_runs[above_idx..]
-            .iter()
-            .take_while(|a| a.start < below_window.end)
-        {
-            if runs_connected(a, below, connectivity) && a.label != below.label {
-                union_find.union(a.label, below.label);
-            }
-        }
-
-        below_idx += 1;
     }
 }
 

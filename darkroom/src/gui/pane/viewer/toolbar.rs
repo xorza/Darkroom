@@ -2,7 +2,7 @@
 //! roster the control panel loops over, and the one toggle with a state of its
 //! own.
 //!
-//! The panel's *layout* stays on [`ImageViewer`](super::ImageViewer) — it
+//! The panel's *layout* stays on [`ImageViewer`](crate::gui::pane::viewer::ImageViewer) — it
 //! reads and writes the viewer's framing — but everything it stamps out is
 //! here, so adding a control means adding a row to [`BACKDROPS`] or a function
 //! beside [`filter_toggle`] rather than growing the record pass.
@@ -15,8 +15,8 @@ use crate::core::io::preferences::ViewerBackground;
 use crate::gui::pane::viewer::glyph;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
-use crate::gui::widgets::support::muted_text;
-use crate::gui::widgets::toolbar::pill_background;
+use crate::gui::widgets::pill;
+use crate::gui::widgets::support;
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
 /// table behind the controls loop and the swatch ids.
@@ -50,9 +50,9 @@ pub(super) fn readout_pill<'a>(
     panel
         .size((Sizing::HUG, Sizing::HUG))
         .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-        .background(pill_background(theme))
+        .background(pill::background(theme))
         .show(ui, |ui| {
-            let style = muted_text(ui, theme, theme.text.body);
+            let style = support::muted_text(ui, theme, theme.text.body);
             Text::new(text).style(&style).show(ui);
         });
 }

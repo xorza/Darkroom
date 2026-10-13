@@ -49,17 +49,12 @@ impl WorkerBridge {
         let runtime = BackgroundRuntime::new().expect("build worker runtime");
         let (tx, rx) = channel::<WorkerReport>();
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
-        let worker = runtime.enter(|| Worker::new(move |report| Self::deliver(&tx, &wake, report)));
+        let worker = runtime.enter(|| Worker::new(move |report| deliver(&tx, &wake, report)));
         Self {
             worker,
             rx,
             runtime,
         }
-    }
-
-    fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
-        tx.send(report).ok();
-        (wake)();
     }
 
     /// Install a compiled program. The worker acknowledges it with
@@ -121,9 +116,13 @@ impl WorkerBridge {
     /// Execute these exact nodes in the installed program and deliver their
     /// outputs. Plural because a run is seeded with a set — a "run to this
     /// node" contributes one.
-    pub(crate) fn run_nodes(&self, node_ids: Vec<NodeId>) -> Result<(), WorkerExited> {
-        self.worker
-            .send(WorkerMessage::RunNodes { nodes: node_ids })
+    pub(crate) fn run_nodes(
+        &self,
+        node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::RunNodes {
+            nodes: node_ids.into_iter().collect(),
+        })
     }
 
     /// Point the engine's output cache at another store root — e.g. the
@@ -172,6 +171,11 @@ impl Drop for WorkerBridge {
             tracing::error!(%error, "worker task failed during shutdown");
         }
     }
+}
+
+fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
+    tx.send(report).ok();
+    (wake)();
 }
 
 #[cfg(test)]

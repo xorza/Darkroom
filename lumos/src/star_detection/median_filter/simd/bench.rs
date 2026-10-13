@@ -9,10 +9,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
+use crate::simd::Kernel;
 use crate::simd::tier::Tier;
 use crate::star_detection::bench::Stages;
-use crate::star_detection::median_filter::simd::internals::median_filter_row_scalar;
-use crate::star_detection::median_filter::simd::{MedianRow, median_filter_row};
+use crate::star_detection::median_filter::simd::MedianRow;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
@@ -32,7 +32,15 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
         let [above, curr, below] = rows();
-        b.iter(|| median_filter_row_scalar(black_box(above), curr, below, &mut output));
+        b.iter(|| {
+            MedianRow {
+                above: black_box(above),
+                curr,
+                below,
+                output: &mut output,
+            }
+            .run_scalar();
+        });
     });
     for &tier in &tiers {
         group.bench_function(
@@ -52,6 +60,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     }
     group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
         let [above, curr, below] = rows();
-        b.iter(|| median_filter_row(black_box(above), curr, below, &mut output));
+        b.iter(|| {
+            MedianRow {
+                above: black_box(above),
+                curr,
+                below,
+                output: &mut output,
+            }
+            .dispatch();
+        });
     });
 }

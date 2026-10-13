@@ -9,7 +9,7 @@ use crate::containers::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::RunError;
-use crate::execution::executor::{Executor, RunRequest};
+use crate::execution::executor::{CollectRequest, Executor, RunRequest};
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
@@ -156,7 +156,14 @@ impl<'a> Runs<'a> {
         // release sweep, which is not part of the run loop under test.
         let mut node_ram = Column::default();
         node_ram.reset(program.e_nodes.len(), RamUsage::default());
-        executor.collect_outcome(program, schedule, &node_ram, outcome);
+        executor.collect_outcome(
+            CollectRequest {
+                program,
+                schedule,
+                node_ram: &node_ram,
+            },
+            outcome,
+        );
     }
 
     pub(crate) fn program(&self) -> &CompiledGraph {
@@ -219,10 +226,10 @@ impl<'a> Runs<'a> {
                     OutputDemand::Produce
                 }
             })
-            .collect::<Vec<_>>();
+            .collect();
         self.schedule.outputs = ResolvedOutputs {
-            demand: Column::from(demand),
-            readers: Column::from(readers),
+            demand,
+            readers: readers.into_iter().collect(),
         };
     }
 }

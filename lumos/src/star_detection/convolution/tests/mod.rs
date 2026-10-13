@@ -12,9 +12,11 @@ use crate::internals::synthetic::patterns;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::fwhm::sigma_to_fwhm;
+use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
+use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
 use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
+use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// `pixels` less `background`: the residual the matched filter takes.
 fn less(pixels: &Buffer2<f32>, background: &Buffer2<f32>) -> Buffer2<f32> {
@@ -455,7 +457,7 @@ fn separable_matches_outer_product_2d() {
             .iter()
             .flat_map(|&ky| kernel.iter().map(move |&kx| ky * kx))
             .collect();
-        convolve_2d(&pixels, &weights, size, &mut result_2d);
+        convolve_2d(&pixels, simd::Kernel2d::new(&weights, size), &mut result_2d);
 
         let tolerance = (size * size) as f32 * f32::EPSILON;
         for (i, (&a, &b)) in result_sep.iter().zip(result_2d.iter()).enumerate() {
@@ -492,15 +494,17 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
     ] {
         let mut separable = pixels.clone();
         let mut temp = Buffer2::new_default(side, side);
-        let separable_norm = separable_convolve(
-            &mut separable,
-            sigmas,
-            radius,
-            &mut temp,
-            &mut FilterKernels::default(),
-        );
+        let separable_norm = FilterKernels::default().separable(&mut separable, sigmas, &mut temp);
         let mut full = Buffer2::new_default(side, side);
-        let full_norm = elliptical_gaussian_convolve(&pixels, sigma, axis_ratio, angle, &mut full);
+        let full_norm = elliptical_gaussian_convolve(
+            &pixels,
+            EllipticalGaussian {
+                sigma,
+                axis_ratio,
+                angle,
+            },
+            &mut full,
+        );
         assert!(
             (separable_norm - full_norm).abs() <= tolerance * full_norm,
             "angle {angle}: sqrt(ΣK²) {separable_norm} vs {full_norm}"
@@ -513,12 +517,10 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
         }
         if angle == FRAC_PI_2 {
             let mut swapped = pixels.clone();
-            separable_convolve(
+            FilterKernels::default().separable(
                 &mut swapped,
                 [sigma, sigma * axis_ratio],
-                radius,
                 &mut temp,
-                &mut FilterKernels::default(),
             );
             let largest = swapped
                 .iter()
@@ -558,7 +560,11 @@ fn elliptical_kernel_normalization() {
     for sigma in [1.0, 2.0, 3.0] {
         for axis_ratio in [0.3, 0.5, 0.7, 1.0] {
             for angle in [0.0, 0.5, 1.0, 1.57] {
-                let kernel = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+                let kernel = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+                    sigma,
+                    axis_ratio,
+                    angle,
+                });
                 let sum: f32 = kernel.weights.iter().sum();
                 assert!(
                     (sum - 1.0).abs() <= kernel.weights.len() as f32 * f32::EPSILON,
@@ -573,7 +579,11 @@ fn elliptical_kernel_normalization() {
 fn elliptical_kernel_symmetry_at_zero_angle() {
     // At angle 0 the rotation is x·1 + y·0 and −x·0 + y·1, exactly x and y, and the weight reads
     // only their squares: the four quadrants agree bit for bit.
-    let kernel = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
+    let kernel = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.5,
+        angle: 0.0,
+    });
     let center = kernel.size / 2;
     let at = |x: usize, y: usize| kernel.weights[y * kernel.size + x];
     for dy in 0..=center {
@@ -589,7 +599,11 @@ fn elliptical_kernel_symmetry_at_zero_angle() {
 #[test]
 fn elliptical_kernel_elongation() {
     // With axis_ratio < 1, kernel should be elongated along major axis
-    let kernel = elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
+    let kernel = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.3,
+        angle: 0.0,
+    });
     let center = kernel.size / 2;
 
     // At angle=0, major axis is horizontal (x), minor axis is vertical (y)
@@ -612,9 +626,23 @@ fn elliptical_convolve_uniform_image() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result);
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio: 0.5,
+            angle: 0.5,
+        },
+        &mut result,
+    );
 
-    let n2 = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.5).weights.len() as f32;
+    let n2 = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.5,
+        angle: 0.5,
+    })
+    .weights
+    .len() as f32;
     for v in &result {
         assert!((v - 0.5).abs() <= 0.5 * n2 * f32::EPSILON, "{v}");
     }
@@ -629,9 +657,23 @@ fn elliptical_convolve_preserves_flux() {
     pixels[(32, 32)] = 1.0;
 
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result);
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio: 0.5,
+            angle: 0.3,
+        },
+        &mut result,
+    );
 
-    let n2 = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.3).weights.len() as f32;
+    let n2 = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.5,
+        angle: 0.3,
+    })
+    .weights
+    .len() as f32;
     let output_sum: f32 = result.iter().sum();
     assert!(
         (output_sum - 1.0).abs() <= 2.0 * n2 * f32::EPSILON,
@@ -649,9 +691,21 @@ fn elliptical_convolve_spreads_point_source() {
     pixels[(16, 16)] = 1.0;
 
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result);
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio: 0.5,
+            angle: 0.0,
+        },
+        &mut result,
+    );
 
-    let kernel = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
+    let kernel = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.5,
+        angle: 0.0,
+    });
     let r = kernel.size / 2;
     for dy in 0..=r {
         for dx in 0..=r {
@@ -684,11 +738,25 @@ fn elliptical_convolve_axis_ratio_1_matches_circular() {
             .copy_from_slice(pixels.pixels());
         gaussian_convolve(&mut result_circular, sigma, &mut temp)
     };
-    elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical);
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma,
+            axis_ratio: 1.0,
+            angle: 0.0,
+        },
+        &mut result_elliptical,
+    );
 
     // The same kernel, once as a product of normalized rows and once normalized whole: equal
     // algebraically, apart by the n² weights' rounding, n²·ε on values ≤ 1.
-    let n2 = elliptical_gaussian_kernel_2d(sigma, 1.0, 0.0).weights.len() as f32;
+    let n2 = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma,
+        axis_ratio: 1.0,
+        angle: 0.0,
+    })
+    .weights
+    .len() as f32;
     for (i, (&a, &b)) in result_circular
         .iter()
         .zip(result_elliptical.iter())
@@ -713,14 +781,36 @@ fn elliptical_convolve_rotation_invariance() {
     let mut result_0 = Buffer2::new_default(width, height);
     let mut result_90 = Buffer2::new_default(width, height);
 
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, FRAC_PI_2, &mut result_90);
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio: 0.5,
+            angle: 0.0,
+        },
+        &mut result_0,
+    );
+    elliptical_gaussian_convolve(
+        &pixels,
+        EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio: 0.5,
+            angle: FRAC_PI_2,
+        },
+        &mut result_90,
+    );
 
     let sum_0: f32 = result_0.iter().sum();
     let sum_90: f32 = result_90.iter().sum();
 
     // Both sum their kernels, 1 within 2·n²·ε each.
-    let n2 = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0).weights.len() as f32;
+    let n2 = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+        sigma: 2.0,
+        axis_ratio: 0.5,
+        angle: 0.0,
+    })
+    .weights
+    .len() as f32;
     assert!(
         (sum_0 - sum_90).abs() <= 4.0 * n2 * f32::EPSILON,
         "Total flux should be same at different angles: {sum_0} vs {sum_90}"
@@ -756,11 +846,23 @@ fn elliptical_convolve_various_axis_ratios() {
     let mut peaks = Vec::new();
     for axis_ratio in [1.0, 0.8, 0.6, 0.4, 0.2] {
         let mut result = Buffer2::new_default(width, height);
-        elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result);
+        elliptical_gaussian_convolve(
+            &pixels,
+            EllipticalGaussian {
+                sigma: 2.0,
+                axis_ratio,
+                angle: 0.0,
+            },
+            &mut result,
+        );
 
-        let n2 = elliptical_gaussian_kernel_2d(2.0, axis_ratio, 0.0)
-            .weights
-            .len() as f32;
+        let n2 = elliptical_gaussian_kernel_2d(EllipticalGaussian {
+            sigma: 2.0,
+            axis_ratio,
+            angle: 0.0,
+        })
+        .weights
+        .len() as f32;
         let sum: f32 = result.iter().sum();
         assert!(
             (sum - 1.0).abs() <= 2.0 * n2 * f32::EPSILON,

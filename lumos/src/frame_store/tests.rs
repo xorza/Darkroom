@@ -1,3 +1,11 @@
+use std::fs;
+use std::panic::catch_unwind;
+use std::path::Path;
+use std::sync::Arc;
+
+use common::{FileIdentity, TempDir};
+use imaginarium::Buffer2;
+
 use crate::combine::frame_cache::frame_gate::FrameGate;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
@@ -17,14 +25,8 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::panic_message;
-use crate::io::fits::options::{FitsHduSelector, FitsLoadOptions};
+use crate::io::fits::fits_load_options::{FitsHduSelector, FitsLoadOptions};
 use crate::io::load_context::LoadContext;
-use common::{FileIdentity, TempDir};
-use imaginarium::Buffer2;
-use std::fs;
-use std::panic::catch_unwind;
-use std::path::Path;
-use std::sync::Arc;
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
 /// back with none. Its files have no name while it lives, on Unix, and none outlive it anywhere.
@@ -87,7 +89,7 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
         })
         .collect();
     for (i, plane) in planes.iter().enumerate() {
-        assert_eq!(plane.chunk(0, 6), &[i as f32; 6]);
+        assert_eq!(plane.chunk(0..6), &[i as f32; 6]);
     }
     if cfg!(unix) {
         assert_eq!(root.entry_count(), 1, "a scratch file is visible by name");
@@ -121,13 +123,13 @@ fn light_frame_keeps_quality_with_its_planes() {
         },
         source_stats,
     );
-    assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(frame.channels[0].chunk(0..4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
-        frame.quality.coverage().unwrap().chunk(0, 4),
+        frame.quality.coverage().unwrap().chunk(0..4),
         &[1.0, 0.5, 0.25, 0.0]
     );
     assert_eq!(
-        frame.quality.confidence(0).unwrap().chunk(0, 4),
+        frame.quality.confidence(0).unwrap().chunk(0..4),
         &[4.0, 3.0, 2.0, 0.0]
     );
     assert_eq!(frame.source_stats.medians[0], 2.5);
@@ -149,7 +151,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     let quality = FrameQuality::for_unwarped(&image);
     assert_eq!(quality.mask(), Some(QualityFlags::NO_DATA));
     let frame = StoredFrame::from_memory(image.clone(), quality, FrameStats::measure(&image));
-    let gate = FrameGate::of(&frame, 0, 0, 4);
+    let gate = FrameGate::of(&frame, 0, 0..4);
     assert_eq!(
         (0..4)
             .map(|index| gate.sample(index).map(|sample| sample.confidence))
@@ -179,19 +181,18 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let cache = |name, image: &LinearImage| {
-        let spill = FrameSpill::named(directory.path(), name);
-        let quality = FrameQuality::for_unwarped(image);
-        drop(StoredFrame::cache(&spill, key, image, &quality, FrameStats::measure(image)).unwrap());
+        let spill = FrameSpill::named(directory.path(), name, key);
+        drop(StoredFrame::cache(&spill, image, FrameStats::measure(image)).unwrap());
         spill
     };
 
     let spill = cache("masked", &image);
-    let reused = StoredFrame::reuse(&spill, key).unwrap().unwrap();
+    let reused = StoredFrame::reuse(&spill).unwrap().unwrap();
     assert_eq!(reused.dimensions, dimensions);
-    assert_eq!(reused.frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(reused.frame.channels[0].chunk(0..4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(reused.frame.quality.mask(), Some(QualityFlags::NO_DATA));
     assert_eq!(
-        reused.frame.flags.as_ref().unwrap().chunk(0, 4),
+        reused.frame.flags.as_ref().unwrap().chunk(0..4),
         &[0, 0, QualityFlags::NO_DATA.byte(), 0]
     );
     // Read back whole, the frame is the image it was decoded to, flags and metadata with it.
@@ -231,18 +232,19 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         .into_iter()
         .chain(other_options)
     {
-        assert!(StoredFrame::reuse(&spill, other).unwrap().is_none());
+        let other = FrameSpill::named(directory.path(), "masked", other);
+        assert!(StoredFrame::reuse(&other).unwrap().is_none());
     }
 
     fs::remove_file(spill.flags_path()).unwrap();
     assert!(
-        StoredFrame::reuse(&spill, key).unwrap().is_none(),
+        StoredFrame::reuse(&spill).unwrap().is_none(),
         "a mask without its flags"
     );
 
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let spill = cache("plain", &plain);
-    let reused = StoredFrame::reuse(&spill, key).unwrap().unwrap();
+    let reused = StoredFrame::reuse(&spill).unwrap().unwrap();
     assert!(reused.frame.quality.is_none());
     assert!(reused.frame.flat_gain.is_none());
     drop(reused);
@@ -256,7 +258,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     ));
     let mut flattened = plain.clone();
     flattened.metadata.flat_gain = Some(Arc::clone(&gain));
-    let reused = StoredFrame::reuse(&cache("flattened", &flattened), key)
+    let reused = StoredFrame::reuse(&cache("flattened", &flattened))
         .unwrap()
         .unwrap();
     assert!(
@@ -276,12 +278,12 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let channel = fs::read(spill.channel_path(0)).unwrap();
     fs::write(spill.channel_path(0), &channel[..12]).unwrap();
     assert!(
-        StoredFrame::reuse(&spill, key).unwrap().is_none(),
+        StoredFrame::reuse(&spill).unwrap().is_none(),
         "a plane shorter than the shape it was committed with"
     );
     fs::write(spill.channel_path(0), &channel).unwrap();
     fs::remove_file(spill.channel_path(0)).unwrap();
-    assert!(StoredFrame::reuse(&spill, key).unwrap().is_none());
+    assert!(StoredFrame::reuse(&spill).unwrap().is_none());
 }
 
 #[test]
@@ -292,18 +294,33 @@ fn plane_persistence_roundtrips_pixels() {
     StoredPlane::write(&path, &pixels).unwrap();
 
     let mapped = StoredPlane::<f32>::map(&path).unwrap();
-    assert_eq!(mapped.chunk(0, pixels.len()), pixels);
+    assert_eq!(mapped.chunk(0..pixels.len()), pixels);
 
     drop(mapped);
 }
 
 /// A cached frame's files are named by its source and decoder: the same pair always finds the same
-/// files, and another path or decoder never does. Every file of one frame hangs off one stem.
+/// files, and another path or decoder never does, while the rest of the key — the decode version,
+/// the options — leaves the name alone, for the commit to tell apart. Every file of one frame hangs
+/// off one stem.
 #[test]
 fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
     let path = Path::new("/test/deterministic.fits");
     let cache_dir = Path::new("/cache");
-    let hashed = FrameSpill::cached(cache_dir, path, DecoderKind::Linear);
+    let key = |decoder| {
+        CacheKey::new(
+            FileIdentity {
+                len: 16,
+                mtime_ns: 1,
+                file_id: None,
+                changed_ns: None,
+            },
+            decoder,
+            &LoadContext::default(),
+        )
+    };
+    let linear = key(DecoderKind::Linear);
+    let hashed = FrameSpill::cached(cache_dir, path, linear);
     let channel = hashed.channel_path(0);
     let stem = channel
         .file_name()
@@ -318,17 +335,22 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         stem.bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     );
-    assert_eq!(
-        FrameSpill::cached(cache_dir, path, DecoderKind::Linear).channel_path(0),
-        channel
-    );
+    for same in [
+        linear,
+        CacheKey {
+            decode_version: linear.decode_version ^ 1,
+            options: linear.options ^ 1,
+            ..linear
+        },
+    ] {
+        assert_eq!(
+            FrameSpill::cached(cache_dir, path, same).channel_path(0),
+            channel
+        );
+    }
     for other in [
-        FrameSpill::cached(
-            cache_dir,
-            Path::new("/test/other.fits"),
-            DecoderKind::Linear,
-        ),
-        FrameSpill::cached(cache_dir, path, DecoderKind::Cfa),
+        FrameSpill::cached(cache_dir, Path::new("/test/other.fits"), linear),
+        FrameSpill::cached(cache_dir, path, key(DecoderKind::Cfa)),
     ] {
         assert_ne!(other.channel_path(0), channel);
     }
@@ -337,7 +359,7 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         cache_dir.join(format!("{stem}_flags.bin"))
     );
 
-    let plain = FrameSpill::named(cache_dir, "frame");
+    let plain = FrameSpill::named(cache_dir, "frame", linear);
     assert_eq!(plain.channel_path(2), cache_dir.join("frame_c2.bin"));
     assert_eq!(plain.flags_path(), cache_dir.join("frame_flags.bin"));
 }
@@ -346,7 +368,17 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
 fn channels_on_disk_requires_every_plane_at_the_expected_size() {
     let directory = TempDir::new("frame_store_reuse");
     let dimensions = ImageDimensions::new((4, 3), 3);
-    let spill = FrameSpill::named(directory.path(), "reuse");
+    let key = CacheKey::new(
+        FileIdentity {
+            len: 0,
+            mtime_ns: 0,
+            file_id: None,
+            changed_ns: None,
+        },
+        DecoderKind::Linear,
+        &LoadContext::default(),
+    );
+    let spill = FrameSpill::named(directory.path(), "reuse", key);
 
     // 4×3 f32 = 48 bytes per plane, three planes. Nothing on disk yet.
     assert!(!spill.channels_on_disk(dimensions));

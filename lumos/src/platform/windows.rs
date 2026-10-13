@@ -124,7 +124,7 @@ fn job_committed() -> Option<u64> {
         )
     };
     let mut buffer = vec![0usize; 2];
-    let _ = query(&mut buffer);
+    query(&mut buffer).ok();
     let header = buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
     let assigned = unsafe { (*header).NumberOfAssignedProcesses } as usize;
     buffer = vec![0usize; 1 + assigned.max(1)];
@@ -137,7 +137,7 @@ fn job_committed() -> Option<u64> {
             let process =
                 unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, id as u32) }.ok()?;
             let committed = committed_by(process);
-            let _ = unsafe { CloseHandle(process) };
+            unsafe { CloseHandle(process) }.ok();
             committed
         })
         .sum()

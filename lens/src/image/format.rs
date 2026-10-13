@@ -1,6 +1,6 @@
-use imaginarium::{ALL_FORMATS, ColorFormat};
 use std::str::FromStr;
 
+use imaginarium::{ALL_FORMATS, ColorFormat};
 use scenarium::{DataType, EnumVariants, TypeId};
 
 /// The `Format` variant that keeps the image's color format.
@@ -36,11 +36,16 @@ impl ConversionFormat {
     }
 }
 
+/// A name that is neither [`AS_IS`] nor a color format's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("neither \"As Is\" nor a color format's name")]
+pub(super) struct UnknownConversionFormat;
+
 impl FromStr for ConversionFormat {
-    type Err = ();
+    type Err = UnknownConversionFormat;
 
     /// One of the port's variant names: [`AS_IS`], or a color format's name.
-    fn from_str(name: &str) -> Result<Self, ()> {
+    fn from_str(name: &str) -> Result<Self, UnknownConversionFormat> {
         if name == AS_IS {
             return Ok(Self::AsIs);
         }
@@ -48,7 +53,7 @@ impl FromStr for ConversionFormat {
             .into_iter()
             .find(|format| format.name() == name)
             .map(Self::To)
-            .ok_or(())
+            .ok_or(UnknownConversionFormat)
     }
 }
 
@@ -68,7 +73,7 @@ mod tests {
     use imaginarium::{ALL_FORMATS, ColorFormat};
     use scenarium::EnumVariants;
 
-    use crate::image::format::{AS_IS, ConversionFormat};
+    use crate::image::format::{AS_IS, ConversionFormat, UnknownConversionFormat};
 
     /// "As Is" leads the dropdown, every color format follows by name, and every variant parses
     /// back to what it names.
@@ -83,7 +88,10 @@ mod tests {
             assert_eq!(name, &format.to_string());
             assert_eq!(name.parse(), Ok(ConversionFormat::To(format)));
         }
-        assert_eq!("RGB u9".parse::<ConversionFormat>(), Err(()));
+        assert_eq!(
+            "RGB u9".parse::<ConversionFormat>(),
+            Err(UnknownConversionFormat)
+        );
     }
 
     #[test]

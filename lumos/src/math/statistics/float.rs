@@ -7,7 +7,7 @@ use std::ops::{Add, Mul, Sub};
 /// One bound rather than a `_f32`/`_f64` pair per operation. Every body in
 /// this module is the same algorithm at two precisions, and monomorphization
 /// gives each width exactly the code the hand-written pair compiled to. Both
-/// widths are needed: the polynomial surface fit in `background_extraction`
+/// widths are needed: the polynomial surface fit in `extract_background`
 /// works in `f64` throughout, so downcasting its residuals to run a
 /// single-precision path would lose precision inside a fitting loop.
 pub(crate) trait Float:

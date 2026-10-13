@@ -235,8 +235,7 @@ impl Transform {
     /// division would cost more precision than [`MIN_HOMOGENEOUS_SCALE`] allows, or an entry is
     /// not finite.
     ///
-    /// # Panics
-    /// When a model below [`TransformType::Homography`] carries a perspective row: every one of them
+    /// A model below [`TransformType::Homography`] carries no perspective row: every one of them
     /// is built with `m[6] = m[7] = 0`, and products and inverses of them keep those exact zeros.
     fn from_matrix(matrix: DMat3, transform_type: TransformType) -> Option<Self> {
         let entries = matrix.as_array();
@@ -251,7 +250,7 @@ impl Transform {
             return None;
         }
         let matrix = DMat3::from_array(entries.map(|value| value / scale));
-        assert!(
+        debug_assert!(
             transform_type == TransformType::Homography || (matrix[6] == 0.0 && matrix[7] == 0.0),
             "a {transform_type:?} transform has no perspective row, got [{}, {}]",
             matrix[6],

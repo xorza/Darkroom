@@ -4,11 +4,11 @@ use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::internals::cfa::XTRANS_PATTERN;
+use crate::memory;
 use crate::memory::budget::Budget;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
-use crate::memory::stage::{MIN_CHUNK_ROWS, Stage, Units, Width};
-use crate::memory::*;
+use crate::memory::stage::{MIN_CHUNK_ROWS, Placement, Stage, Units, Width};
 use crate::platform::SystemMemory;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -41,16 +41,16 @@ fn available_memory_reports_a_plausible_figure_on_every_call() {
         "consecutive samples disagree wildly: {first} then {second}"
     );
     // A budget derived from it stays inside the machine, which a garbage reading would not.
-    assert!(memory_budget(first) < first);
+    assert!(memory::usable(first) < first);
 }
 
 #[test]
-fn memory_budget_keeps_one_quarter_as_headroom_without_overflow() {
+fn usable_keeps_one_quarter_as_headroom_without_overflow() {
     assert_eq!(
-        memory_budget(8 * 1024 * 1024 * 1024),
+        memory::usable(8 * 1024 * 1024 * 1024),
         6 * 1024 * 1024 * 1024
     );
-    assert_eq!(memory_budget(u64::MAX), 13_835_058_055_282_163_711);
+    assert_eq!(memory::usable(u64::MAX), 13_835_058_055_282_163_711);
 }
 
 /// Each stage's width by hand. `FRAME_96MB` is 99.02 MiB, so a transient of two is 198.05 MiB.
@@ -74,46 +74,43 @@ fn a_stage_runs_as_wide_as_its_budget_leaves() {
         in_flight,
         units: Units::Frames,
     };
-    for (stage, set, usable, workers, spilled, expected) in [
+    let resident = |kept_set| Placement::Resident { kept_set };
+    for (stage, placement, usable, workers, expected) in [
         (
             frames(FRAME_96MB, 2 * FRAME_96MB),
-            20 * FRAME_96MB as u64,
+            resident(20 * FRAME_96MB as u64),
             20_736 * MIB,
             16,
-            false,
             (16, 0),
         ),
         (
             frames(FRAME_96MB, 2 * FRAME_96MB),
-            200 * FRAME_96MB as u64,
+            resident(200 * FRAME_96MB as u64),
             19_200 * MIB,
             16,
-            false,
             (1, 841_728_000),
         ),
-        (frames(gib, gib), 0, 3 * GB, 64, false, (3, 0)),
-        (frames(gib, 2 * gib), 0, 3 * GB, 64, false, (1, 0)),
+        (frames(gib, gib), resident(0), 3 * GB, 64, (3, 0)),
+        (frames(gib, 2 * gib), resident(0), 3 * GB, 64, (1, 0)),
         (
             frames(FRAME_96MB, 2 * FRAME_96MB),
-            0,
+            resident(0),
             3 * GB,
             8,
-            false,
             (8, 0),
         ),
-        (frames(gib, gib), 0, 3 * GB / 2, 16, false, (1, 0)),
-        (frames(gib, gib), 0, 6 * GB, 16, false, (6, 0)),
-        (frames(gib, gib), 0, 6 * GB, 16, true, (3, 0)),
-        (frames(gib, gib), 0, 0, 16, false, (1, GB)),
+        (frames(gib, gib), resident(0), 3 * GB / 2, 16, (1, 0)),
+        (frames(gib, gib), resident(0), 6 * GB, 16, (6, 0)),
+        (frames(gib, gib), Placement::Spilled, 6 * GB, 16, (3, 0)),
+        (frames(gib, gib), resident(0), 0, 16, (1, GB)),
         (
             Stage {
                 units: Units::Serial,
                 ..frames(gib, gib)
             },
-            0,
+            resident(0),
             6 * GB,
             16,
-            false,
             (1, 0),
         ),
         (
@@ -122,18 +119,17 @@ fn a_stage_runs_as_wide_as_its_budget_leaves() {
                 units: Units::Whole,
                 ..frames(gib, gib)
             },
-            0,
+            Placement::Spilled,
             GB,
             16,
-            true,
             (1, GB),
         ),
     ] {
-        let width = stage.width(Budget::new(usable, workers), 1000, set, spilled);
+        let width = stage.width(Budget::new(usable, workers), 1000, placement);
         assert_eq!(
             (width.units, width.overcommit_bytes),
             expected,
-            "{stage:?} beside {set} B, {usable} B, {workers} workers, spilled {spilled}"
+            "{stage:?} {placement:?}, {usable} B, {workers} workers"
         );
     }
 }
@@ -177,7 +173,7 @@ fn a_decoded_stack_charges_its_frames_scratch_and_output() {
         !RunPlan::of(
             2,
             &stack(usize::MAX, 1, 0, 0),
-            Budget::new(memory_budget(u64::MAX), 8)
+            Budget::new(memory::usable(u64::MAX), 8)
         )
         .resident
     );
@@ -347,7 +343,7 @@ fn combine_rows_match_budget_arithmetic() {
         (rows(60, 3, 0, 0, 0, 100), 6 * GB, fits(100)),
     ] {
         assert_eq!(
-            stage.width(Budget::new(usable, 1), 1, 0, true),
+            stage.width(Budget::new(usable, 1), 1, Placement::Spilled),
             expected,
             "{stage:?} at {usable} B"
         );
@@ -396,7 +392,7 @@ fn a_set_whose_warped_frames_fit_stays_resident_and_narrows_its_warp() {
     let plan = RunPlan::of(
         10,
         &found_reference(plane_bytes, three_channel(plane_bytes, 22), 0),
-        Budget::new(memory_budget(8 * GB), 8),
+        Budget::new(memory::usable(8 * GB), 8),
     );
     assert!(plan.resident);
     assert_eq!((plan.width(PREPARE), plan.width(WARP)), (1, 2));
@@ -420,7 +416,7 @@ fn widths_follow_each_demosaics_peak() {
         let plan = RunPlan::of(
             10,
             &found_reference(plane_bytes, decode, 0),
-            Budget::new(memory_budget(8 * GB), 8),
+            Budget::new(memory::usable(8 * GB), 8),
         );
         assert!(plan.resident, "{decode:?}");
         assert_eq!(
@@ -439,7 +435,7 @@ fn small_set_uses_all_workers_in_ram() {
     let plan = RunPlan::of(
         5,
         &found_reference(plane_bytes, three_channel(plane_bytes, 22), 0),
-        Budget::new(memory_budget(8 * GB), 8),
+        Budget::new(memory::usable(8 * GB), 8),
     );
     assert!(plan.resident);
     assert_eq!((plan.width(PREPARE), plan.width(WARP)), (5, 5));
@@ -515,7 +511,7 @@ fn a_plan_never_overshoots_its_budget() {
             for stages in &runs {
                 for &workers in &[1usize, 8, 32] {
                     for &budget_gib in &[1u64, 2, 4, 8, 16] {
-                        let budget = Budget::new(memory_budget(budget_gib * GB), workers);
+                        let budget = Budget::new(memory::usable(budget_gib * GB), workers);
                         let plan = RunPlan::of(frames, stages, budget);
                         let mut before = 0;
                         for (index, stage) in stages.iter().enumerate() {
@@ -562,8 +558,8 @@ fn budget_flips_the_tier_and_scales_the_widths() {
     let plane_bytes = plane(100);
     let stages = found_reference(plane_bytes, three_channel(plane_bytes, 22), 0);
     for (usable, resident, widths, overcommit) in [
-        (memory_budget(2 * GB), false, (1, 1), 1364 * MIB),
-        (memory_budget(16 * GB), true, (2, 5), 0),
+        (memory::usable(2 * GB), false, (1, 1), 1364 * MIB),
+        (memory::usable(16 * GB), true, (2, 5), 0),
         (1 << 50, true, (16, 16), 0),
     ] {
         let plan = RunPlan::of(20, &stages, Budget::new(usable, 16));

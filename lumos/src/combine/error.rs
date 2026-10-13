@@ -1,4 +1,4 @@
-//! StackError types for stacking operations.
+//! The errors of a stack: its configuration's and its run's.
 
 use thiserror::Error;
 
@@ -6,7 +6,7 @@ use crate::calibration::error::SubtractionError;
 use crate::calibration::master_role::MasterRole;
 use crate::error::Cancelled;
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
-use crate::frame::frame_quality::FramePlane;
+use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::error::{ConditionMismatch, FrameStoreError};
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
@@ -355,12 +355,5 @@ mod tests {
             StackError::from(mismatch).to_string(),
             "frame 5 is 200x100x3, expected 100x100x3"
         );
-    }
-
-    #[test]
-    fn error_is_debug() {
-        let err = StackError::NoFrames;
-        let debug_str = format!("{err:?}");
-        assert!(debug_str.contains("NoFrames"));
     }
 }

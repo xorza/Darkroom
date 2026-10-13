@@ -58,26 +58,6 @@ pub struct WarpResult {
     pub confidence: Buffer2<f32>,
 }
 
-/// The body of [`WarpTransform::warp`].
-pub(crate) fn warp(
-    image: &LinearImage,
-    warp_transform: &WarpTransform,
-    config: WarpParams,
-) -> WarpResult {
-    let mut buffers = WarpBuffers::build(image.dimensions());
-    buffers.warp_into(
-        &SourceImage::of(image),
-        warp_transform,
-        config,
-        &ScratchPool::default(),
-    );
-    WarpResult {
-        image: buffers.image,
-        coverage: buffers.coverage,
-        confidence: buffers.confidence,
-    }
-}
-
 /// What a warp fills: the aligned image — its pixels, the flags it carries and its warped metadata
 /// — and the two quality maps.
 ///
@@ -187,7 +167,7 @@ impl WarpBuffers {
                         channel_rows: &mut [&mut [f32]],
                         coverage_row: &mut [f32],
                         confidence_row: &mut [f32]| {
-            scratch.positions.fill(y, width, warp_transform, size);
+            scratch.positions.fill(y, warp_transform, size);
             let positions = scratch.positions.positions();
             let flags = flag_rows
                 .map(|rows| unsafe { slice::from_raw_parts_mut(rows.get().add(y * width), width) });
@@ -251,34 +231,6 @@ impl WarpBuffers {
             _ => unreachable!("an image has one channel or three"),
         }
         warped.flags = flag_plane.and_then(PixelFlags::from_buffer);
-    }
-}
-
-#[cfg(test)]
-pub(super) mod internals {
-    use imaginarium::Buffer2;
-
-    use crate::image::image_dimensions::ImageDimensions;
-    use crate::image::linear_image::LinearImage;
-
-    use crate::registration::resample::warp_params::WarpParams;
-    use crate::registration::transform::warp_transform::WarpTransform;
-
-    /// One plane warped on its own — the shape the kernel tests and the plane benches compare.
-    pub(crate) fn warp_plane(
-        input: &Buffer2<f32>,
-        output: &mut Buffer2<f32>,
-        transform: &WarpTransform,
-        params: WarpParams,
-    ) {
-        let image = LinearImage::from_pixels(
-            ImageDimensions::new((input.width(), input.height()), 1),
-            input.pixels().to_vec(),
-        );
-        let warped = transform.warp(&image, params);
-        output
-            .pixels_mut()
-            .copy_from_slice(warped.image.channel(0).pixels());
     }
 }
 

@@ -10,11 +10,12 @@
 //!    is significant and split nowhere below becomes a star, and a split marks every ancestor as
 //!    split. A component that split nowhere is one star.
 
+use crate::star_detection::deblend;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
-use crate::star_detection::deblend::{Pixel, peaks_too_close};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// A pixel that belongs to no object of the current level: below it, or in a region too small to
@@ -70,12 +71,19 @@ impl MultiThresholdParams {
         }
 
         pixels.fill(component);
-        let ladder = ThresholdLadder {
-            low: floor,
-            high: peak.value,
-            n_thresholds: params.n_thresholds,
-        };
-        tree.build(pixels, peak, ladder, params);
+        tree.build(
+            pixels,
+            TreeCut {
+                root: peak,
+                ladder: ThresholdLadder {
+                    low: floor,
+                    high: peak.value,
+                    n_thresholds: params.n_thresholds,
+                },
+                min_area: params.min_area,
+                connectivity: params.connectivity,
+            },
+        );
         let root_flux: f64 = pixels.pixels.iter().map(|p| f64::from(p.value)).sum();
         tree.find_stars((f64::from(params.min_contrast) * root_flux) as f32);
 
@@ -90,10 +98,9 @@ impl MultiThresholdParams {
             let min_sep_sq = params.min_separation * params.min_separation;
             for &star in stars.iter() {
                 let candidate = objects[star as usize].peak;
-                if !peaks
-                    .iter()
-                    .any(|kept: &Pixel| peaks_too_close(candidate.pos, kept.pos, min_sep_sq))
-                {
+                if !peaks.iter().any(|kept: &Pixel| {
+                    deblend::peaks_too_close(candidate.pos, kept.pos, min_sep_sq)
+                }) {
                     peaks.push(candidate);
                 }
             }
@@ -146,6 +153,25 @@ struct ThresholdLadder {
     n_thresholds: usize,
 }
 
+/// What a tree is cut by: its root, the whole component with its brightest pixel; the ladder of
+/// levels; the fewest pixels an object holds; and how pixels join into one.
+#[derive(Debug, Clone, Copy)]
+struct TreeCut {
+    root: Pixel,
+    ladder: ThresholdLadder,
+    min_area: usize,
+    connectivity: Connectivity,
+}
+
+/// One level of a tree: the threshold its objects stand above, the stamp its visits are marked
+/// with, and how pixels join.
+#[derive(Debug, Clone, Copy)]
+struct LevelCut {
+    threshold: f32,
+    stamp: u32,
+    connectivity: Connectivity,
+}
+
 impl ThresholdLadder {
     /// Level `i` of `0..n_thresholds`: `low` itself at 0.
     fn level(self, i: usize) -> f32 {
@@ -154,17 +180,17 @@ impl ThresholdLadder {
 }
 
 impl TreeBuffers {
-    /// Build the tree of `pixels`, whose brightest is `peak`: the root is the whole component,
-    /// and levels `1..n_thresholds` cut every object of the level below into its regions above
-    /// the level holding at least `min_area` pixels. Exponential spacing puts the levels densest at
-    /// the faint end, where neighbours first separate.
-    fn build(
-        &mut self,
-        pixels: &ComponentPixels,
-        peak: Pixel,
-        ladder: ThresholdLadder,
-        params: MultiThresholdParams,
-    ) {
+    /// Build the tree of `pixels`, whose brightest is `cut.root`: the root is the whole
+    /// component, and levels `1..n_thresholds` cut every object of the level below into its
+    /// regions above the level holding at least `min_area` pixels. Exponential spacing puts the
+    /// levels densest at the faint end, where neighbours first separate.
+    fn build(&mut self, pixels: &ComponentPixels, cut: TreeCut) {
+        let TreeCut {
+            root: peak,
+            ladder,
+            min_area,
+            connectivity,
+        } = cut;
         let count = pixels.pixels.len();
         self.object_of.clear();
         self.object_of.resize(count, 0);
@@ -195,13 +221,21 @@ impl TreeBuffers {
                 if self.visited[seed] == stamp {
                     continue;
                 }
-                self.grow(pixels, seed, threshold, stamp, params.connectivity);
+                self.grow(
+                    pixels,
+                    seed,
+                    LevelCut {
+                        threshold,
+                        stamp,
+                        connectivity,
+                    },
+                );
                 let sum: f64 = self
                     .members
                     .iter()
                     .map(|&member| f64::from(pixels.pixels[member as usize].value))
                     .sum();
-                let object = if self.members.len() < params.min_area {
+                let object = if self.members.len() < min_area {
                     NO_OBJECT
                 } else {
                     let peak = Pixel::brightest(
@@ -227,17 +261,15 @@ impl TreeBuffers {
         }
     }
 
-    /// Into `members`, the connected pixels at or above `threshold` reached from `seed`, each
-    /// marked visited at `stamp`. The pixels above a level nest inside the regions of the level
-    /// below, so all of them lie in the seed's object.
-    fn grow(
-        &mut self,
-        pixels: &ComponentPixels,
-        seed: usize,
-        threshold: f32,
-        stamp: u32,
-        connectivity: Connectivity,
-    ) {
+    /// Into `members`, the connected pixels at or above `level.threshold` reached from `seed`, each
+    /// marked visited at `level.stamp`. The pixels above a level nest inside the regions of the
+    /// level below, so all of them lie in the seed's object.
+    fn grow(&mut self, pixels: &ComponentPixels, seed: usize, level: LevelCut) {
+        let LevelCut {
+            threshold,
+            stamp,
+            connectivity,
+        } = level;
         let Self {
             visited,
             members,

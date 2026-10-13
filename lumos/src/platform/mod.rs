@@ -60,15 +60,27 @@ impl ScratchFile {
     }
 
     /// The file mapped back, with what keeps it alive for the map's life; its handle kept open
-    /// for [`MappedFile::evict`] too when `evictable`.
-    pub(crate) fn map(self, evictable: bool) -> io::Result<MappedFile> {
+    /// for `MappedFile::evict` too when `eviction` allows it.
+    pub(crate) fn map(self, eviction: Eviction) -> io::Result<MappedFile> {
         let map = unsafe { Mmap::map(&self.file) }?;
-        Ok(MappedFile::new(
-            map,
-            self.file,
-            files::SCRATCH_MAP_NEEDS_HANDLE || evictable,
-        ))
+        let keep_handle = match eviction {
+            Eviction::Never => files::SCRATCH_MAP_NEEDS_HANDLE,
+            #[cfg(feature = "internals")]
+            Eviction::Allowed => true,
+        };
+        Ok(MappedFile::new(map, keep_handle.then_some(self.file)))
     }
+}
+
+/// Whether a scratch map may have its pages dropped from the page cache on demand, which keeps its
+/// file's handle open for as long as it lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Eviction {
+    /// A run's scratch: no handle held per plane where the map does not need one.
+    Never,
+    /// A bench of cold reads' scratch, which `MappedFile::evict` drops between passes.
+    #[cfg(feature = "internals")]
+    Allowed,
 }
 
 /// A file mapped into memory for reading, read front to back.
@@ -92,15 +104,15 @@ impl MappedFile {
     pub(crate) unsafe fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
         let map = unsafe { Mmap::map(&file) }?;
-        Ok(Self::new(map, file, false))
+        Ok(Self::new(map, None))
     }
 
-    /// `file` mapped as `map`, its handle kept while the map lives when `keep_handle`.
-    fn new(map: Mmap, file: File, keep_handle: bool) -> Self {
+    /// `map`, with the handle of its file kept while it lives when one is given.
+    fn new(map: Mmap, handle: Option<File>) -> Self {
         files::advise_sequential(&map);
         Self {
             map,
-            _handle: keep_handle.then_some(file),
+            _handle: handle,
         }
     }
 

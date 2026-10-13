@@ -11,7 +11,8 @@ use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput};
 use crate::internals;
 use crate::internals::func_invoker::FuncInvoker;
-use crate::library::{Library, TypeEntry};
+use crate::library::Library;
+use crate::library::type_entry::TypeEntry;
 use crate::{
     CodecError, ConstValue, CustomValue, CustomValueCodec, DataType, DynamicValue, TypeId,
     async_lambda,
@@ -173,11 +174,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
         func_after.is_err(),
         "a func declaring a registered custom type as an enum must be refused",
     );
-    assert_eq!(
-        library.funcs().len(),
-        0,
-        "the refused func is not installed"
-    );
+    assert_eq!(library.iter().len(), 0, "the refused func is not installed");
 
     // …and the reverse order, which is the one deferred registration
     // makes reachable in real hosts.
@@ -212,6 +209,17 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
             .output(FuncOutput::new("mode", DataType::Enum(type_id))),
     );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
+}
+
+#[test]
+fn a_library_iterates_exactly_its_funcs() {
+    let ids = [FuncId::unique(), FuncId::unique()];
+    let mut library = Library::default();
+    library.add(internals::stub_func(ids[0], "first"));
+    library.add(internals::stub_func(ids[1], "second"));
+    assert_eq!(library.iter().len(), 2);
+    assert!((&library).into_iter().all(|func| ids.contains(&func.id)));
+    assert!(ids.iter().all(|&id| library.by_id(id).is_some()));
 }
 
 /// A func whose `mode` input defaults to the enum variant `default`.

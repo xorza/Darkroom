@@ -22,8 +22,10 @@ use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, TypeId};
-use scenarium::{Func, FuncId, FuncInput, FuncOutput};
+use scenarium::{Func, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
+
+use crate::node_spec::NodeSpec;
 
 /// A config type's wire type id, parsed once at compile time from its `TYPE_ID`.
 pub(crate) const fn wire_type_id<T: Introspect>() -> TypeId {
@@ -75,18 +77,12 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
     /// and a single `Config` output of [`config_data_type::<T>`]. Registers
     /// `T`'s output type and its fields' enum types on `library`, so the editor
     /// can render them. The caller adds the node, under its own category.
-    pub(crate) fn builder(
-        library: &mut Library,
-        node_id: FuncId,
-        node_name: &str,
-        description: &str,
-    ) -> Func {
+    pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> Func {
         let fields = T::fields();
         library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
         for field in &fields {
             register_field_enum(library, &field.kind);
         }
-        // The lambda needs each field's kind to read its input value back.
         let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
         let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
             kinds = Arc::clone(&kinds),
@@ -100,9 +96,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
             outputs[0] = DynamicValue::from_custom(Self(config));
             Ok(())
         });
-        let mut func = Func::new(node_id, node_name, lambda)
-            .description(description)
-            .pure();
+        let mut func = spec.func(lambda).pure();
         for field in &fields {
             let data_type = data_type(&field.kind);
             let input = if field.required {
@@ -214,7 +208,6 @@ mod tests {
         };
         assert_eq!(data_type(&renamed), DataType::Enum(expected_id));
 
-        // Registration records the enum's name + variants under that id.
         let mut library = Library::default();
         register_field_enum(&mut library, &kind);
         register_field_enum(&mut library, &kind);

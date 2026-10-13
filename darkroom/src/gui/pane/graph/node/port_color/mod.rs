@@ -17,15 +17,15 @@
 use palantir::RgbaF32;
 use scenarium::DataType;
 
-use crate::core::document::PortKind;
+use crate::core::document::port_ref::PortKind;
 use crate::gui::theme::Theme;
-use crate::gui::theme::color::hover_lift;
+use crate::gui::theme::color;
 use crate::gui::theme::type_colors::TypeColors;
 
 /// `RgbaF32` for a port of type `ty` on the given side. Untyped (`Any`) ports
 /// defer to the theme's positional port colors; `hovered` lifts either one
-/// through [`hover_lift`].
-pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> RgbaF32 {
+/// through [`color::hover_lift`].
+pub(crate) fn data(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> RgbaF32 {
     let base = if matches!(ty, DataType::Any) {
         fallback(theme, kind)
     } else {
@@ -37,7 +37,7 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
 /// `RgbaF32` for an event emitter glyph, subscription pin, or event wire.
 /// Events carry no data type, so they use the theme's event colour rather
 /// than a type hue; `hovered` lifts it like every other port.
-pub(crate) fn event_color(theme: &Theme, hovered: bool) -> RgbaF32 {
+pub(crate) fn event(theme: &Theme, hovered: bool) -> RgbaF32 {
     lit(theme.ports.event, hovered)
 }
 
@@ -49,7 +49,7 @@ const fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
 }
 
 fn lit(c: RgbaF32, hovered: bool) -> RgbaF32 {
-    if hovered { hover_lift(c) } else { c }
+    if hovered { color::hover_lift(c) } else { c }
 }
 
 /// The base hue for a non-`Any` type under the theme's roster.

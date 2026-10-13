@@ -8,9 +8,7 @@ use crate::{ConstValue, DynamicValue};
 /// A shared count of how often the body it wraps was invoked.
 ///
 /// "Did this node recompute, or was it served from a cache" is the question the
-/// cache tests are about, and each of them grew its own counter: an
-/// `Arc<AtomicUsize>` threaded into a `compute` closure, a `tokio::Mutex<i64>`,
-/// a struct of three. Here it is one value, cloned into as many bodies as a
+/// cache tests ask. The answer is one value, cloned into as many bodies as a
 /// fixture wants and read back with [`count`](Self::count).
 ///
 /// Cheap to clone — the count is shared, not copied — so a fixture hands the

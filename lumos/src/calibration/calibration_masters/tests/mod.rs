@@ -5,20 +5,20 @@ mod real_data;
 mod synthetic;
 
 use crate::calibration::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
-use crate::calibration::calibration_masters::stack_cfa_master;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
 use crate::calibration::defect_map::{DefectMap, HotPixels};
 use crate::calibration::error::{CalibrationError, DarkMismatch, MasterBuildError};
 use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs};
-use crate::calibration::master_subtraction::Subtractor;
+use crate::calibration::master_stack::MasterStack;
 use crate::calibration::prepared_flat::PreparedFlat;
+use crate::calibration::subtractor::Subtractor;
 use crate::calibration::temperature_difference::TemperatureDifference;
 use crate::calibration::temperature_source::TemperatureSource;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
 use crate::combine::stack_config::{Combine, CombineMethod, SmallN, StackConfig, Weighting};
-use crate::frame::capture_conditions::CaptureCondition;
+use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::error::ConditionMismatch;
 use crate::image::calibration_state::CalibrationState;
@@ -40,9 +40,10 @@ use crate::internals::fits::rewrite_fits;
 use crate::internals::prelude::*;
 use crate::io::load_context::LoadContext;
 use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{
     BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColourDefects,
-    DefectSummary, DefectTableError, ImageError, ImageMetadata, MasterRole,
+    DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata, MasterRole,
 };
 use common::TempDir;
 use fits_well::FitsReader;
@@ -560,15 +561,14 @@ fn every_component_round_trips_through_its_extname() {
 fn empty_roles_yield_no_masters() {
     let empty: Vec<PathBuf> = Vec::new();
     for role in MasterRole::ALL {
-        let master = stack_cfa_master(
-            &empty,
+        let master = MasterStack {
+            paths: &empty,
             role,
-            role.stack_config(),
-            &IngestConfig::default(),
-            None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+            config: role.stack_config(),
+            ingest: &IngestConfig::default(),
+            subtract: None,
+        }
+        .run(ProgressMonitor::unattended())
         .unwrap();
         assert!(master.is_none(), "{role}");
     }
@@ -1108,8 +1108,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let refused = |result: Result<(), ImageError>| {
         matches!(
             result,
-            Err(ImageError::FitsUnsupported { reason, .. })
-                if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
+            Err(ImageError::FitsUnsupported {
+                reason: FitsRefusal::NotStandaloneCfa { format },
+                ..
+            }) if format == "CALMASTR"
         )
     };
     let context = LoadContext::default();
@@ -1414,8 +1416,8 @@ fn ram_bytes_sums_present_frames_and_defects() {
 }
 
 #[test]
-fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
-    // `stack_cfa_master` builds its own CFA cache, so it is the entry point most likely to drift
+fn a_master_stack_rejects_an_invalid_config_before_reading_anything() {
+    // `MasterStack` builds its own CFA cache, so it is the entry point most likely to drift
     // out of the shared `combine_cached` gate and reach the reducer unvalidated. A NaN sigma
     // rejects every sample at every pixel and yields a silently black master; a negative one
     // inverts the clip band and faults on the survivor range. Both are configuration errors and
@@ -1432,15 +1434,14 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
             },
             ..StackConfig::bias_or_dark()
         };
-        let error = stack_cfa_master(
-            &missing,
-            MasterRole::Dark,
+        let error = MasterStack {
+            paths: &missing,
+            role: MasterRole::Dark,
             config,
-            &IngestConfig::default(),
-            None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+            ingest: &IngestConfig::default(),
+            subtract: None,
+        }
+        .run(ProgressMonitor::unattended())
         .unwrap_err();
         assert!(
             matches!(
@@ -1453,18 +1454,17 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
 
     // The frame-count half of the gate, which only reaches this entry point because it routes
     // through `combine_cached`: a manual weight per frame, against one path.
-    let error = stack_cfa_master(
-        &missing,
-        MasterRole::Dark,
-        StackConfig {
+    let error = MasterStack {
+        paths: &missing,
+        role: MasterRole::Dark,
+        config: StackConfig {
             weighting: Weighting::Manual(vec![1.0, 1.0]),
             ..StackConfig::bias_or_dark()
         },
-        &IngestConfig::default(),
-        None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
+        ingest: &IngestConfig::default(),
+        subtract: None,
+    }
+    .run(ProgressMonitor::unattended())
     .unwrap_err();
     assert!(
         matches!(
@@ -1479,15 +1479,14 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
 
     // Reported from the config alone: the paths are never opened, so a valid config on the same
     // missing files fails differently.
-    let error = stack_cfa_master(
-        &missing,
-        MasterRole::Dark,
-        StackConfig::bias_or_dark(),
-        &IngestConfig::default(),
-        None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
+    let error = MasterStack {
+        paths: &missing,
+        role: MasterRole::Dark,
+        config: StackConfig::bias_or_dark(),
+        ingest: &IngestConfig::default(),
+        subtract: None,
+    }
+    .run(ProgressMonitor::unattended())
     .unwrap_err();
     assert!(
         !matches!(error, StackError::Config(_)),
@@ -2023,32 +2022,30 @@ fn flats_are_calibrated_before_they_are_combined() {
             cache_dir: directory.join("cache"),
             ..IngestConfig::default()
         };
-        let calibrated = stack_cfa_master(
-            &paths,
-            MasterRole::Flat,
-            config.clone(),
-            &ingest,
-            Some(Subtractor {
+        let calibrated = MasterStack {
+            paths: &paths,
+            role: MasterRole::Flat,
+            config: config.clone(),
+            ingest: &ingest,
+            subtract: Some(Subtractor {
                 role: MasterRole::Bias,
                 master: &bias,
             }),
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        }
+        .run(ProgressMonitor::unattended())
         .unwrap()
         .unwrap();
         assert_eq!(calibrated.metadata.calibration, CalibrationState::BIAS);
         assert_eq!(corner_over_centre(&calibrated), 0.5, "{memory_override:?}");
 
-        let mut late = stack_cfa_master(
-            &paths,
-            MasterRole::Flat,
+        let mut late = MasterStack {
+            paths: &paths,
+            role: MasterRole::Flat,
             config,
-            &ingest,
-            None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+            ingest: &ingest,
+            subtract: None,
+        }
+        .run(ProgressMonitor::unattended())
         .unwrap()
         .unwrap();
         late.subtract(&bias, DomainMap::IDENTITY);
@@ -2157,8 +2154,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
         DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::with_cache_dir(directory.join("cache")),
         &cache,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        &ProgressMonitor::unattended(),
     )
     .unwrap();
     let flat = masters.flat.as_ref().unwrap().divisor();
@@ -2223,8 +2219,7 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
         DEFAULT_SIGMA_THRESHOLD,
         &IngestConfig::with_cache_dir(directory.join("cache")),
         &Cancelling(cancel.clone()),
-        &ProgressCallback::default(),
-        &cancel,
+        &ProgressMonitor::new(ProgressCallback::default(), cancel),
     )
     .unwrap_err();
     assert!(matches!(error, MasterBuildError::Cancelled), "{error:?}");
@@ -2258,15 +2253,14 @@ fn dark_frames_share_one_exposure() {
             .collect()
     };
     let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
-        stack_cfa_master(
+        MasterStack {
             paths,
             role,
-            role.stack_config(),
-            &IngestConfig::default(),
+            config: role.stack_config(),
+            ingest: &IngestConfig::default(),
             subtract,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
+        }
+        .run(ProgressMonitor::unattended())
     };
 
     let mixed = write(

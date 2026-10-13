@@ -58,7 +58,7 @@ impl PreviewSink {
 /// refresh without the editor naming it as a seed. It stays `Impure` (the
 /// default) because `Func::validate` refuses an outputless func that claims to
 /// be pure.
-pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
+pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
     Func::new(
         PREVIEW_FUNC_ID,
         "Preview",
@@ -93,7 +93,7 @@ pub(crate) fn registered(library: &Library) -> Option<&Func> {
 
 /// Whether `func_id` is the preview func — what the scene projection asks to
 /// decide a node draws a value card instead of the usual body.
-pub(crate) fn is_preview(func_id: FuncId) -> bool {
+pub(crate) fn is_func(func_id: FuncId) -> bool {
     func_id == PREVIEW_FUNC_ID
 }
 

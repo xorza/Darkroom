@@ -23,16 +23,15 @@ use hashbrown::HashMap;
 
 use crate::containers::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
+use crate::execution::cache::disk_store::blob_target::BlobTarget;
 use crate::execution::cache::disk_store::error::StoreResult;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
-use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
+use crate::execution::cache::disk_store::{DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
-use crate::execution::cache::runtime::error::{
-    CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
-};
-use crate::execution::cache::slot::RuntimeSlot;
+use crate::execution::cache::runtime::error::{CacheFlushUnsupported, CacheNodeFailure};
+use crate::execution::cache::runtime_slot::{OutputRead, RuntimeSlot};
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{NodeIdx, OutputAddr};
@@ -147,6 +146,19 @@ pub(crate) enum ReuseOutcome {
     Missed,
 }
 
+/// One node reached by the run loop with no digest yet — what
+/// [`restamp_and_hydrate`](RuntimeCache::restamp_and_hydrate) re-keys and,
+/// on a hit, serves.
+#[derive(Debug)]
+pub(crate) struct Restamp<'a> {
+    pub(crate) program: &'a CompiledGraph,
+    /// The run's settled states, which decide which producers fold as unbound.
+    pub(crate) states: &'a Column<NodeIdx, NodeState>,
+    pub(crate) node_idx: NodeIdx,
+    pub(crate) demand: &'a [OutputDemand],
+    pub(crate) cancel: CancelToken,
+}
+
 impl Index<NodeIdx> for RuntimeCache {
     type Output = RuntimeSlot;
 
@@ -207,7 +219,7 @@ impl RuntimeCache {
                 .filter_map(|node_id| program.node(node_id)),
         );
         let mut failures = Vec::new();
-        for node_idx in downstream.iter() {
+        for node_idx in downstream {
             let node_id = program.node_ids[node_idx];
             match self.disk_store.remove_node(node_id).await {
                 // Dropping the value drops the belief that a blob backed it,
@@ -215,7 +227,7 @@ impl RuntimeCache {
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheNodeFailure {
                     node_id,
-                    cause: CacheNodeError::Removal(error),
+                    cause: error.into(),
                 }),
             }
         }
@@ -320,7 +332,7 @@ impl RuntimeCache {
         &mut self,
         program: &CompiledGraph,
         address: OutputAddr,
-        take: bool,
+        read: OutputRead,
     ) -> Option<DynamicValue> {
         let arity = program[address.node_idx].outputs.len as usize;
         let slot = &mut self.slots[address.node_idx];
@@ -329,7 +341,7 @@ impl RuntimeCache {
                 .is_none_or(|values| values.len() == arity),
             "cached output values must match the node's compiled arity"
         );
-        slot.read_output(address.port_idx, take)
+        slot.read_output(address.port_idx, read)
     }
 
     /// Producer-first digest pass over the whole schedule, so a consumer
@@ -632,12 +644,15 @@ impl RuntimeCache {
     /// than a run-wide abort blaming nobody.
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
-        program: &CompiledGraph,
-        states: &Column<NodeIdx, NodeState>,
-        node_idx: NodeIdx,
-        demand: &[OutputDemand],
-        cancel: CancelToken,
+        restamp: Restamp<'_>,
     ) -> Result<ReuseOutcome, StampError> {
+        let Restamp {
+            program,
+            states,
+            node_idx,
+            demand,
+            cancel,
+        } = restamp;
         self.identify(program, iter::once(node_idx), cancel).await?;
         self.stamp_digest(program, states, node_idx);
         Ok(self.hydrate_reuse(program, node_idx, demand).await)
@@ -675,11 +690,7 @@ impl RuntimeCache {
         match self.reuse_source(program, node_idx, demand) {
             None => false,
             Some(ReuseSource::Resident) => true,
-            Some(ReuseSource::Blob(target)) => {
-                self.disk_store
-                    .covers_demand(&target, &program.codecs, demand)
-                    .await
-            }
+            Some(ReuseSource::Blob(target)) => target.covers_demand(&program.codecs, demand).await,
         }
     }
 
@@ -721,7 +732,7 @@ impl RuntimeCache {
             }
             Some(ReuseSource::Blob(target)) => target,
         };
-        let Some(snapshot) = self.disk_store.read(&target, &program.codecs, demand).await else {
+        let Some(snapshot) = target.read(&program.codecs, demand).await else {
             return ReuseOutcome::Missed;
         };
         self.slots[node_idx].load_from_blob(snapshot, target.digest);
@@ -784,10 +795,7 @@ impl RuntimeCache {
     ) -> Option<StoreResult> {
         let target = self.blob_target(program, node_idx)?;
         let snapshot = self.slots[node_idx].current_snapshot()?;
-        let outcome = self
-            .disk_store
-            .store(&target, &program.codecs, snapshot, policy)
-            .await;
+        let outcome = target.store(&program.codecs, snapshot, policy).await;
         self.slots[node_idx].note_store(&outcome);
         Some(outcome)
     }
@@ -863,7 +871,7 @@ impl RuntimeCache {
                     .push(CacheFlushUnsupported { node_id, type_id }),
                 Err(error) => report.failures.push(CacheNodeFailure {
                     node_id,
-                    cause: CacheNodeError::Store(error),
+                    cause: error.into(),
                 }),
             }
         }
@@ -921,7 +929,7 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::FsPathId;
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
-    use crate::execution::cache::slot::OutputSnapshot;
+    use crate::execution::cache::runtime_slot::OutputSnapshot;
     use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::index::NodeIdx;
 

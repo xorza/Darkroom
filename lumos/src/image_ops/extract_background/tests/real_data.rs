@@ -4,12 +4,13 @@
 //! before/after. Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
+use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::extract_background::ExtractBackground;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
-use crate::{ExtractBackground, NeutralizeBackground};
+use crate::math::statistics;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
@@ -27,7 +28,7 @@ fn corner_background_spread(image: &LinearImage) -> f32 {
             let row = y * size.width + x0;
             vals.extend_from_slice(&px[row..row + patch]);
         }
-        median_mut(&mut vals)
+        statistics::median_mut(&mut vals)
     };
 
     let corners = [

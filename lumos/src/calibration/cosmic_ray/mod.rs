@@ -34,7 +34,7 @@ pub(crate) mod mono;
 pub(crate) mod noise_model;
 
 use crate::background_mesh::colour_mesh::ColourMesh;
-use crate::background_mesh::workspace::MeshWorkspace;
+use crate::background_mesh::mesh_workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_image::CfaImage;
@@ -88,7 +88,7 @@ impl Layout {
 /// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number
 /// of CR pixels corrected, or an error, with the frame untouched, for an X-Trans mosaic or when the
 /// parametric noise model needs an ADC step the frame does not record.
-pub(crate) fn reject_cosmic_rays(
+pub(crate) fn reject(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
 ) -> Result<usize, CosmicRayError> {

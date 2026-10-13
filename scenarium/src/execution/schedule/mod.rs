@@ -37,19 +37,20 @@
 //! the planner keeps its scratch across runs, so a repeated plan on an unchanged graph
 //! allocates nothing.
 
+use std::result;
+
 use common::is_debug;
 
 use crate::containers::column::{Column, Idx};
-use crate::containers::set::IdxSet;
+use crate::containers::idx_set::IdxSet;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
 use crate::execution::index::{NodeIdx, OutputIdx};
-use crate::execution::schedule::error::RunScheduleValidationError;
+use crate::execution::schedule::error::{RunScheduleValidationError, ScheduleColumn};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
-use std::result;
 
 pub(crate) mod error;
 pub(crate) mod planner;
@@ -63,8 +64,7 @@ pub(crate) mod planner;
 /// reads to `Run` or `Reuse` and leaving the rest where the
 /// planner put them. That is why "the planner cleared it" and "the cut pruned
 /// it" are one state rather than two: a node that could run and that nothing
-/// this run reads *is* a cut node, and holding the two apart meant a column
-/// each, kept in step by hand.
+/// this run reads *is* a cut node.
 ///
 /// Authoritative once resolved: a `Reuse` is never re-derived after the cut may
 /// have pruned its producers. The safe direction is allowed once — the run loop
@@ -118,8 +118,8 @@ impl NodeState {
         !matches!(self, Self::Unvisited | Self::Disabled | Self::MissingInputs)
     }
 
-    pub(crate) fn missing_required_inputs(self) -> bool {
-        self == Self::MissingInputs
+    pub(crate) const fn missing_required_inputs(self) -> bool {
+        matches!(self, Self::MissingInputs)
     }
 
     /// Clear this node to run, reporting whether it was this call that did it.
@@ -173,7 +173,7 @@ impl ResolvedOutputs {
 ///
 /// One buffer rather than a plan and a resolution held apart, because the two passes
 /// that write it produce one answer: the sweep already refines the planner's `states`
-/// in place, and `outputs` is the same verdict counted per port. Holding them apart
+/// in place, and `outputs` is the same verdict counted per port. Held apart, they would
 /// let a freshly planned schedule carry the previous run's demand, or an executor read
 /// counts resolved against a different one — states the single
 /// [`reset_for_program`](Self::reset_for_program) rules out.
@@ -423,15 +423,23 @@ impl RunSchedule {
         // it finds, never fault on it. The output columns span the flat output
         // pool rather than the node vector, hence the per-entry expectation.
         for (set, len, expected) in [
-            ("states", self.states.len(), program.e_nodes.len()),
-            ("root flags", self.root_flags.len(), program.e_nodes.len()),
             (
-                "output demand",
+                ScheduleColumn::States,
+                self.states.len(),
+                program.e_nodes.len(),
+            ),
+            (
+                ScheduleColumn::RootFlags,
+                self.root_flags.len(),
+                program.e_nodes.len(),
+            ),
+            (
+                ScheduleColumn::OutputDemand,
                 self.outputs.demand.len(),
                 program.outputs.len(),
             ),
             (
-                "output readers",
+                ScheduleColumn::OutputReaders,
                 self.outputs.readers.len(),
                 program.outputs.len(),
             ),

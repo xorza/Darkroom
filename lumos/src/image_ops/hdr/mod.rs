@@ -7,8 +7,8 @@
 //! domain the result is a smooth factor on each pixel, so a pixel stays positive and keeps its
 //! ratio to its neighbours: a linear base compressed by subtraction instead takes a faint halo
 //! below black and turns near-black noise into colour speckle. A **display-domain** (post-stretch)
-//! operation, streaming [`crate::math::wavelet::atrous_smooth`] — see [`hdr_map`] for why the
-//! layer pyramid is never materialized.
+//! operation, streaming [`crate::math::wavelet::atrous_smooth`] — see [`Hdr::compress`] for why
+//! the layer pyramid is never materialized.
 
 use common::Introspect;
 use rayon::prelude::*;
@@ -19,7 +19,7 @@ use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
 use crate::math::sum;
-use crate::math::wavelet::{atrous_smooth, max_scales};
+use crate::math::wavelet;
 use imaginarium::Buffer2;
 use std::mem;
 
@@ -62,8 +62,55 @@ impl Hdr {
         if self.amount == 0.0 {
             return Ok(());
         }
-        image.remap_intensity(|intensity| hdr_map(intensity, self));
+        image.remap_intensity(|intensity| self.compress(intensity));
         Ok(())
+    }
+
+    /// The starlet residual-flattening on the log of the combined intensity plane; [`Self::apply`]
+    /// computes the intensity, runs this, then remaps the image's channels to it.
+    ///
+    /// With `L = ln max(I, LOG_FLOOR)`, the detail layers are untouched by this op, so with the
+    /// exact starlet identity `L == residual + Σ layers` the reconstruction collapses
+    /// algebraically: `L′ = L − amount·(residual − mean)`, so
+    /// `I′ = I·exp(−amount·(residual − mean))`: the pixel times `(G/B)^amount`, with
+    /// `B = exp(residual)` its local geometric mean and `G` the image's. The starlet's kernel is
+    /// positive, so the residual lies within the range of `L`, and the factor within `65536^amount`
+    /// either way; an intensity at or below zero stays there. Only the smoothed residual is ever
+    /// computed — a streaming à trous over two reused planes — never the layer pyramid (`scales`
+    /// full planes at ~100 MB each on a real master).
+    fn compress(&self, intensity: &Buffer2<f32>) -> Buffer2<f32> {
+        let size = Size2us::new(intensity.width(), intensity.height());
+        let scales = self.scales.min(wavelet::max_scales(size));
+
+        let mut c_curr = Buffer2::new(
+            size.width,
+            size.height,
+            intensity
+                .pixels()
+                .par_iter()
+                .map(|&i| i.max(LOG_FLOOR).ln())
+                .collect(),
+        );
+        let mut c_next = Buffer2::new_default(size.width, size.height);
+        for j in 0..scales {
+            wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
+            mem::swap(&mut c_curr, &mut c_next);
+        }
+        let mut residual = c_curr;
+
+        // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
+        let mean = sum::mean_f32(residual.pixels());
+        let amount = self.amount;
+        residual
+            .pixels_mut()
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(intensity.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(residual, intensity)| {
+                for (r, &i) in residual.iter_mut().zip(intensity) {
+                    *r = i * (-amount * (*r - mean)).exp();
+                }
+            });
+        residual
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
@@ -77,52 +124,6 @@ impl Hdr {
             (0.0..=1.0).contains(&value)
         })
     }
-}
-
-/// The starlet residual-flattening on the log of the combined intensity plane; [`Hdr::apply`]
-/// computes the intensity, runs this, then remaps the image's channels to it.
-///
-/// With `L = ln max(I, LOG_FLOOR)`, the detail layers are untouched by this op, so with the exact
-/// starlet identity `L == residual + Σ layers` the reconstruction collapses algebraically:
-/// `L′ = L − amount·(residual − mean)`, so `I′ = I·exp(−amount·(residual − mean))`: the pixel times
-/// `(G/B)^amount`, with `B = exp(residual)` its local geometric mean and `G` the image's. The
-/// starlet's kernel is positive, so the residual lies within the range of `L`, and the factor
-/// within `65536^amount` either way; an intensity at or below zero stays there. Only the smoothed
-/// residual is ever computed — a streaming à trous over two reused planes — never the layer
-/// pyramid (`scales` full planes at ~100 MB each on a real master).
-fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
-    let size = Size2us::new(intensity.width(), intensity.height());
-    let scales = config.scales.min(max_scales(size));
-
-    let mut c_curr = Buffer2::new(
-        size.width,
-        size.height,
-        intensity
-            .pixels()
-            .par_iter()
-            .map(|&i| i.max(LOG_FLOOR).ln())
-            .collect(),
-    );
-    let mut c_next = Buffer2::new_default(size.width, size.height);
-    for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, 1 << j);
-        mem::swap(&mut c_curr, &mut c_next);
-    }
-    let mut residual = c_curr;
-
-    // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
-    let mean = sum::mean_f32(residual.pixels());
-    let amount = config.amount;
-    residual
-        .pixels_mut()
-        .par_chunks_mut(SAMPLES_PER_BLOCK)
-        .zip(intensity.pixels().par_chunks(SAMPLES_PER_BLOCK))
-        .for_each(|(residual, intensity)| {
-            for (r, &i) in residual.iter_mut().zip(intensity) {
-                *r = i * (-amount * (*r - mean)).exp();
-            }
-        });
-    residual
 }
 
 #[cfg(test)]

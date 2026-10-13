@@ -1,6 +1,6 @@
 //! [`PlaneStore`]: where a spilled frame's planes are written.
 
-use crate::frame::frame_quality::FramePlane;
+use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::stored_plane::StoredPlane;
 

@@ -133,7 +133,7 @@ fn quantize(samples: &[f32]) -> Vec<u16> {
 mod tests {
     use super::*;
     use crate::image::cfa::cfa_pattern::CfaPattern;
-    use crate::io::fits::decode::{load_cfa_fits, load_linear_fits};
+    use crate::io::fits::decode;
     use crate::io::load_context::LoadContext;
     use crate::math::size2us::Size2us;
 
@@ -155,26 +155,26 @@ mod tests {
         let mono = field.light(size, CfaType::Mono);
         let path = dir.join("mono.fits");
         write_mosaic_u16(&path, &mono);
-        let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+        let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
         within_half_step(loaded.channel(0).pixels(), mono.data.pixels());
 
         let render = field.render(size).image;
         let path = dir.join("render.fits");
         write_mono_f32(&path, &render);
-        let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+        let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
         assert_eq!(loaded.channel(0).pixels(), render.channel(0).pixels());
 
         let mosaic = field.light(size, CfaType::Bayer(CfaPattern::Rggb));
         let path = dir.join("mosaic.fits");
         write_mosaic_u16(&path, &mosaic);
-        let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
+        let loaded = decode::load_cfa(&path, &LoadContext::default()).unwrap();
         assert_eq!(loaded.cfa_type, mosaic.cfa_type);
         within_half_step(loaded.data.pixels(), mosaic.data.pixels());
 
         let calibrated = field.mosaic_exposure(size, CfaType::Bayer(CfaPattern::Rggb), 1);
         let path = dir.join("calibrated.fits");
         calibrated.save_fits(&path).unwrap();
-        let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
+        let loaded = decode::load_cfa(&path, &LoadContext::default()).unwrap();
         assert_eq!(loaded.cfa_type, calibrated.cfa_type);
         assert_eq!(loaded.data.pixels(), calibrated.data.pixels());
     }

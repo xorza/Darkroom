@@ -22,7 +22,7 @@ use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview;
 use crate::gui::app::commands::AppCommand;
@@ -32,14 +32,16 @@ use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
-use crate::gui::pane::graph::node::port_color::{event_color, port_color};
+use crate::gui::pane::graph::node::port_color;
 use crate::gui::pane::graph::node::value_editor;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
-use crate::gui::widgets::support::{ROW_GAP, tooltip_after};
+use crate::gui::widgets::support;
+use crate::gui::widgets::support::ROW_GAP;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -66,7 +68,7 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
 /// `row_tracks` is [`NodeUI`](crate::gui::pane::graph::node::NodeUI)'s retained staging
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
-pub(super) fn ports_row(
+pub(super) fn show(
     ui: &mut Ui,
     ncx: NodeCtx<'_>,
     dcx: DrawCtx<'_>,
@@ -121,10 +123,10 @@ pub(super) fn ports_row(
 /// that sets this one aside, if one does. `description` is the resolved
 /// [`InputCtx::description`] text (empty = none).
 ///
-/// Built only for the node under the pointer — see [`ports_row`] — and
+/// Built only for the node under the pointer — see [`show`] — and
 /// interned straight into this pass's text arena, so a hovered node's ports
 /// author their tips with no `String` between them and the widget. `None`
-/// off that node, which [`tooltip_after`] and [`port_label`] both take as
+/// off that node, which [`support::tooltip_after`] and [`port_label`] both take as
 /// "no tooltip".
 fn tip_for(
     ui: &mut Ui,
@@ -168,7 +170,7 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>, 
         .sense(Sense::HOVER)
         .show(ui)
         .snapshot();
-    tooltip_after(ui, &snapshot, tip);
+    support::tooltip_after(ui, &snapshot, tip);
 }
 
 fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
@@ -189,6 +191,11 @@ fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Reque
     for (i, event) in node.events().iter().enumerate() {
         event_cell(ui, ncx, dcx, i, output_count + i, event);
     }
+}
+
+/// The grid row of port or event row `index`.
+fn grid_row(index: usize) -> u16 {
+    u16::try_from(index).expect("a node's rows fit the grid's u16 index")
 }
 
 pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
@@ -275,7 +282,7 @@ fn input_label_cell(
     let fill = if missing {
         theme.status.warning
     } else {
-        port_color(
+        port_color::data(
             theme,
             input.ty(),
             PortKind::Input,
@@ -287,7 +294,11 @@ fn input_label_cell(
     // same visual weight on either side. An optional input instead gets a
     // muted outline, so "not required" reads at a glance without needing
     // the bigger required-input footprint.
-    let diameter = PortGlyph::enlarged_diameter(theme.ports.size, input.required());
+    let diameter = if input.required() {
+        port_glyph::enlarged_diameter(theme.ports.size)
+    } else {
+        theme.ports.size
+    };
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
     let outline = (!input.required()).then_some(theme.card.fill);
@@ -299,7 +310,7 @@ fn input_label_cell(
     // circle has its own `port_circle_wid`); also the context-menu anchor.
     let cell = Panel::hstack()
         .id(input_cell_wid(port))
-        .grid_cell((port.port_idx as u16, COL_INPUT))
+        .grid_cell((grid_row(port.port_idx), COL_INPUT))
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
@@ -415,7 +426,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
     // not take edits until the override is gone.
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
-        .grid_cell((port.port_idx as u16, COL_VALUE))
+        .grid_cell((grid_row(port.port_idx), COL_VALUE))
         .size((Sizing::FILL, Sizing::FILL))
         .disabled(input.overridden_by().is_some())
         .child_align(Align::v(VAlign::Center))
@@ -449,7 +460,7 @@ fn output_cell(
     let theme = ncx.theme();
     let port = output.port_ref();
     let ty = output.ty();
-    let fill = port_color(
+    let fill = port_color::data(
         theme,
         ty,
         PortKind::Output,
@@ -460,7 +471,7 @@ fn output_cell(
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
         .id_salt(("out", port.port_idx))
-        .grid_cell((port.port_idx as u16, COL_OUTPUT))
+        .grid_cell((grid_row(port.port_idx), COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
@@ -573,11 +584,11 @@ fn event_cell(
     let overhang = theme.port_overhang();
     let ev = EventRef { node_id, event_idx };
     let wid = event_glyph_wid(ev);
-    let fill = event_color(theme, dcx.geometry().events.is_hovered(ev));
+    let fill = port_color::event(theme, dcx.geometry().events.is_hovered(ev));
     let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
     Panel::hstack()
         .id_salt(("event", event_idx))
-        .grid_cell((row as u16, COL_OUTPUT))
+        .grid_cell((grid_row(row), COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .gap(ROW_GAP)
@@ -646,8 +657,6 @@ mod tests {
     use super::*;
     use scenarium::{NodeKind, OutputPort};
 
-    use crate::core::preview::preview_func;
-
     /// The type line of a port tooltip. A path spells out its picker mode and
     /// the extensions it accepts; everything else defers to the library's own
     /// name for the type, so a tooltip and a palette entry can't disagree.
@@ -694,7 +703,7 @@ mod tests {
     /// the node and its wire.
     #[test]
     fn add_preview_spawns_a_node_already_wired_to_the_port() {
-        let func = preview_func(Arc::default());
+        let func = preview::func(Arc::default());
         let producer = NodeId::unique();
         let port = PortRef::output(producer, 2);
         let center = Vec2::new(100.0, 40.0);

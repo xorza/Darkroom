@@ -5,7 +5,7 @@ use palantir::TextInput;
 use palantir::prelude::*;
 use palantir::widget::Shape;
 
-use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
+use crate::gui::widgets::support;
 
 /// Hover / grab box scaled past the painted glyph so ports, event triangles,
 /// and subscription pins are easier to hit and snap to, while the visible
@@ -21,7 +21,7 @@ const TRIANGLE_RADIUS: f32 = 2.0;
 
 /// Stroke width of the muted ring drawn around a circle with an
 /// [`outline`](PortGlyph::outline). Also the amount
-/// [`PortGlyph::enlarged_diameter`] grows a circle by (on each side), so a
+/// [`enlarged_diameter`] grows a circle by (on each side), so a
 /// plain enlarged circle's footprint matches a ringed one — "important port"
 /// reads as one consistent size regardless of which visual carries it.
 const OUTLINE_WIDTH: f32 = 2.5;
@@ -109,17 +109,6 @@ impl<'a> PortGlyph<'a> {
         }
     }
 
-    /// A circle's diameter grown by [`OUTLINE_WIDTH`] on each side, so a plain
-    /// circle's footprint matches an [`outline`](Self::outline)d one. `false`
-    /// returns `base` unchanged.
-    pub(crate) fn enlarged_diameter(base: f32, enlarged: bool) -> f32 {
-        if enlarged {
-            base + 2.0 * OUTLINE_WIDTH
-        } else {
-            base
-        }
-    }
-
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
     pub(crate) const fn outline(mut self, color: RgbaF32) -> Self {
@@ -195,9 +184,15 @@ impl<'a> PortGlyph<'a> {
             double_clicked: glyph.response.left.double_clicked(),
             secondary_clicked: glyph.response.right.clicked(),
         };
-        tooltip_after(ui, &snapshot, tip);
+        support::tooltip_after(ui, &snapshot, tip);
         response
     }
+}
+
+/// A circle's diameter grown by [`OUTLINE_WIDTH`] on each side, so a plain
+/// circle's footprint matches an [`outline`](PortGlyph::outline)d one.
+pub(crate) const fn enlarged_diameter(base: f32) -> f32 {
+    base + 2.0 * OUTLINE_WIDTH
 }
 
 impl GlyphShape {
@@ -213,7 +208,7 @@ impl GlyphShape {
                 // drawing it on `rect` would eat into the fill; inflating first
                 // lands the ring's inner edge exactly on the fill's outer edge.
                 if let Some(color) = outline {
-                    stroked_rect(
+                    support::stroked_rect(
                         ui,
                         rect.inflated(OUTLINE_WIDTH),
                         radius + OUTLINE_WIDTH,
@@ -221,7 +216,7 @@ impl GlyphShape {
                         OUTLINE_WIDTH,
                     );
                 }
-                filled_rect(ui, rect, radius, fill);
+                support::filled_rect(ui, rect, radius, fill);
             }
             Self::Arrow { turn } => {
                 // Vertices are inset by the corner radius — the SDF rounds by
@@ -255,15 +250,10 @@ mod tests {
 
     #[test]
     fn enlarged_diameter_grows_by_the_outline_width_on_each_side() {
-        let base = 10.0;
+        // 10 + 2 * 2.5: the ring's width on both sides.
         assert_eq!(
-            PortGlyph::enlarged_diameter(base, false),
-            base,
-            "plain port is unchanged"
-        );
-        assert_eq!(
-            PortGlyph::enlarged_diameter(base, true),
-            base + 2.0 * OUTLINE_WIDTH,
+            enlarged_diameter(10.0),
+            15.0,
             "enlarged port matches an outlined circle's footprint"
         );
     }

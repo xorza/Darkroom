@@ -11,20 +11,17 @@
 //! dialogs), so the methods it calls belong to `App` rather than any one
 //! owner; only the dispatch splits by concern.
 
-use crate::core::edit::relayout::Relayout;
-use crate::gui::app::App;
-
 pub(crate) mod edit;
 pub(crate) mod file;
 pub(crate) mod prefs;
 pub(crate) mod run;
 
-use edit::EditCommand;
-use file::FileCommand;
-use prefs::PrefsCommand;
-use run::RunCommand;
-
-use crate::gui::app::PendingTransition;
+use crate::core::edit::relayout::Relayout;
+use crate::gui::app::commands::edit::EditCommand;
+use crate::gui::app::commands::file::FileCommand;
+use crate::gui::app::commands::prefs::PrefsCommand;
+use crate::gui::app::commands::run::RunCommand;
+use crate::gui::app::{App, PendingTransition};
 
 /// A command a UI surface (the menu bar, the graph toolbar, the Preferences
 /// tab, a node's G-badge, an inline path-picker) hands to [`App`]. The producing

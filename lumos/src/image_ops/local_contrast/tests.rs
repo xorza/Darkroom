@@ -1,6 +1,4 @@
-use crate::image_ops::local_contrast::{
-    LocalContrast, N_BINS, TileAxis, build_tile_luts, clip_histogram,
-};
+use crate::image_ops::local_contrast::{LocalContrast, N_BINS, TileAxis, TileGrid, clip_histogram};
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
 use crate::internals::synthetic::metrics::pixel_stats;
@@ -92,8 +90,11 @@ fn clahe_tile_mappings_are_monotonic() {
         .map(|i| f32::midpoint((i % 80) as f32 / 79.0, (i / 80) as f32 / 79.0))
         .collect();
     let intensity = Buffer2::new(80, 80, px);
-    let axis = TileAxis::new(80, 4);
-    let luts = build_tile_luts(&intensity, &axis, &axis, 2.0);
+    let grid = TileGrid {
+        columns: TileAxis::new(80, 4),
+        rows: TileAxis::new(80, 4),
+    };
+    let luts = grid.luts(&intensity, 2.0);
     for lut in &luts {
         for w in lut.windows(2) {
             assert!(

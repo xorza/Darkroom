@@ -6,11 +6,11 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
-use crate::data::codec::error::CodecFormatError;
+use crate::data::codec::error::{CodecFormatError, FrameError};
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::format::{
-    BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, PAYLOAD_LEN_OFFSET, covers_outputs,
-    header_len, read, write,
+    BODY_LEN_OFFSET, BlobReader, BlobWriter, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION,
+    PAYLOAD_LEN_OFFSET, header_len,
 };
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::blob::{Blob, BlobCodec};
@@ -103,9 +103,14 @@ fn library(version: u32, under_read: bool, decodes: Calls) -> Library {
 
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
-    write(&mut writer, digest, outputs, library.codecs())
-        .await
-        .unwrap();
+    BlobWriter {
+        writer: &mut writer,
+        digest,
+        codecs: library.codecs(),
+    }
+    .write(outputs)
+    .await
+    .unwrap();
     writer.0.into_inner()
 }
 
@@ -189,26 +194,26 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
 
     let mut header_only = Cursor::new(&bytes[..header_len]);
     assert!(
-        covers_outputs(
-            &mut header_only,
-            bytes.len() as u64,
+        BlobReader {
+            reader: &mut header_only,
+            file_len: bytes.len() as u64,
             digest,
-            &outputs,
-            library.codecs(),
-        )
+            codecs: library.codecs()
+        }
+        .covers_outputs(&outputs)
         .await
         .unwrap()
     );
     assert_eq!(header_only.position() as usize, header_len);
 
     assert!(
-        read(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            library.codecs(),
-            &demand(outputs.len(), &[0]),
-        )
+            codecs: library.codecs()
+        }
+        .read(&demand(outputs.len(), &[0]))
         .await
         .unwrap()
         .is_none()
@@ -216,13 +221,13 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     assert_eq!(calls.count(), 0);
 
     let mut reader = ChunkedIo::<_, 2>(Cursor::new(&bytes));
-    let restored = read(
-        &mut reader,
-        bytes.len() as u64,
+    let restored = BlobReader {
+        reader: &mut reader,
+        file_len: bytes.len() as u64,
         digest,
-        library.codecs(),
-        &demand(outputs.len(), &[]),
-    )
+        codecs: library.codecs(),
+    }
+    .read(&demand(outputs.len(), &[]))
     .await
     .unwrap()
     .unwrap();
@@ -258,13 +263,13 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     let calls = Calls::default();
     let complete_library = library(1, false, calls.clone());
     let bytes = encoded(digest, &outputs, &complete_library).await;
-    let restored = read(
-        &mut Cursor::new(&bytes),
-        bytes.len() as u64,
+    let restored = BlobReader {
+        reader: &mut Cursor::new(&bytes),
+        file_len: bytes.len() as u64,
         digest,
-        complete_library.codecs(),
-        &demand(outputs.len(), &[]),
-    )
+        codecs: complete_library.codecs(),
+    }
+    .read(&demand(outputs.len(), &[]))
     .await
     .unwrap()
     .unwrap();
@@ -276,16 +281,19 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
 
     let underread_calls = Calls::default();
     let underread_library = library(1, true, underread_calls.clone());
-    let error = read(
-        &mut Cursor::new(&bytes),
-        bytes.len() as u64,
+    let error = BlobReader {
+        reader: &mut Cursor::new(&bytes),
+        file_len: bytes.len() as u64,
         digest,
-        underread_library.codecs(),
-        &demand(outputs.len(), &[]),
-    )
+        codecs: underread_library.codecs(),
+    }
+    .read(&demand(outputs.len(), &[]))
     .await
     .unwrap_err();
-    assert!(matches!(error, CodecFormatError::Frame(_)));
+    assert!(matches!(
+        error,
+        CodecFormatError::Frame(FrameError::PayloadNotConsumed)
+    ));
     assert_eq!(underread_calls.count(), 1);
 }
 
@@ -301,13 +309,13 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     let bytes = encoded(digest, &outputs, &registered).await;
 
     assert!(
-        covers_outputs(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            &outputs,
-            registered.codecs(),
-        )
+            codecs: registered.codecs()
+        }
+        .covers_outputs(&outputs)
         .await
         .unwrap()
     );
@@ -316,13 +324,13 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         DynamicValue::Unbound,
     ];
     assert!(
-        covers_outputs(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            &partial,
-            registered.codecs(),
-        )
+            codecs: registered.codecs()
+        }
+        .covers_outputs(&partial)
         .await
         .unwrap()
     );
@@ -331,13 +339,13 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         DynamicValue::from_custom(Blob(vec![2])),
     ];
     assert!(
-        !covers_outputs(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        !BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            &wrong_kind,
-            registered.codecs(),
-        )
+            codecs: registered.codecs()
+        }
+        .covers_outputs(&wrong_kind)
         .await
         .unwrap()
     );
@@ -345,13 +353,13 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     let changed_calls = Calls::default();
     let changed = library(3, false, changed_calls.clone());
     assert!(
-        !covers_outputs(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        !BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            &outputs,
-            changed.codecs(),
-        )
+            codecs: changed.codecs()
+        }
+        .covers_outputs(&outputs)
         .await
         .unwrap()
     );
@@ -372,64 +380,58 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     };
     let length_offset = FIXED_LEN + PAYLOAD_LEN_OFFSET as usize;
     let body_offset = BODY_LEN_OFFSET as usize;
-    let cases: [(&str, Vec<u8>); 7] = [
+    let cases: [(FrameError, Vec<u8>); 7] = [
+        (FrameError::WrongMagic, corrupt(&|b| b[0] ^= 0xff)),
         (
-            "cache header has the wrong magic",
-            corrupt(&|b| b[0] ^= 0xff),
-        ),
-        (
-            "cache header has an unsupported version",
+            FrameError::UnsupportedVersion,
             corrupt(&|b| b[8..12].copy_from_slice(&FORMAT_VERSION.wrapping_add(1).to_le_bytes())),
         ),
         (
-            "cache descriptor reserved bytes are not zero",
+            FrameError::ReservedBytes,
             corrupt(&|b| b[FIXED_LEN + 1] = 1),
         ),
+        (FrameError::UnknownValueTag, corrupt(&|b| b[FIXED_LEN] = 9)),
         (
-            "cache descriptor has an unknown value tag",
-            corrupt(&|b| b[FIXED_LEN] = 9),
-        ),
-        (
-            "cache descriptor lengths do not equal the declared body length",
+            FrameError::BodyLengthMismatch,
             corrupt(&|b| b[length_offset..length_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
         ),
         (
-            "cache header and body lengths do not equal the file length",
+            FrameError::FileLengthMismatch,
             corrupt(&|b| b[body_offset..body_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
         ),
-        (
-            "cache header and body lengths do not equal the file length",
-            corrupt(&|b| b.push(0)),
-        ),
+        (FrameError::FileLengthMismatch, corrupt(&|b| b.push(0))),
     ];
     for (refusal, bytes) in cases {
-        let error = covers_outputs(
-            &mut Cursor::new(&bytes),
-            bytes.len() as u64,
+        let error = BlobReader {
+            reader: &mut Cursor::new(&bytes),
+            file_len: bytes.len() as u64,
             digest,
-            &outputs,
-            library.codecs(),
-        )
+            codecs: library.codecs(),
+        }
+        .covers_outputs(&outputs)
         .await
         .unwrap_err();
         assert!(
-            matches!(&error, CodecFormatError::Frame(message) if message == refusal),
+            matches!(&error, CodecFormatError::Frame(frame) if *frame == refusal),
             "{refusal}: {error}"
         );
     }
 
     let mut invalid_bool = original.clone();
     invalid_bool[header_len(1) + 1] = 2;
-    let error = read(
-        &mut Cursor::new(&invalid_bool),
-        invalid_bool.len() as u64,
+    let error = BlobReader {
+        reader: &mut Cursor::new(&invalid_bool),
+        file_len: invalid_bool.len() as u64,
         digest,
-        library.codecs(),
-        &demand(outputs.len(), &[]),
-    )
+        codecs: library.codecs(),
+    }
+    .read(&demand(outputs.len(), &[]))
     .await
     .unwrap_err();
-    assert!(matches!(error, CodecFormatError::Frame(_)));
+    assert!(matches!(
+        error,
+        CodecFormatError::Frame(FrameError::InvalidBool)
+    ));
 
     assert_eq!(DESCRIPTOR_LEN, 32);
 }

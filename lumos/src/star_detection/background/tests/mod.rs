@@ -8,10 +8,10 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::math::statistics::mad_to_sigma;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::star_detection::detection_plane::PlaneFilters;
+use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::{
-    BackgroundConfig, IterativeRefinement,
+    BackgroundConfig, BackgroundRefinement, IterativeRefinement,
 };
 
 /// The background and noise maps of `pixels` at `tile_size`.
@@ -207,7 +207,8 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
     assert!(background.background.pixels().iter().all(|&v| v == 0.2));
 }
 
-/// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest. On
+/// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest, and
+/// without a refinement configured returns the estimate untouched. On
 /// the unfiltered residual the detection plane's σ is the sky's, so the mask stands where the sky's
 /// own threshold does.
 ///
@@ -248,20 +249,23 @@ fn refine_masks_the_stars_and_their_halos_out() {
     };
     let refined = |iterations, mask_dilation| {
         let mut resources = DetectionResources::new(size);
+        let config = BackgroundConfig {
+            refinement: BackgroundRefinement::Iterative(IterativeRefinement {
+                iterations: NonZeroUsize::new(iterations).unwrap(),
+                mask_dilation,
+                mask_sigma: 4.0,
+            }),
+            ..config.clone()
+        };
         BackgroundEstimate::estimate(&pixels, None, &config, &mut resources)
             .refine(
                 &pixels,
-                IterativeRefinement {
-                    iterations: NonZeroUsize::new(iterations).unwrap(),
-                    mask_dilation,
-                    mask_sigma: 4.0,
-                },
-                PlaneFilters {
-                    median: false,
+                PlaneSpec {
+                    prefilter: Prefilter::None,
                     matched: None,
                     mask: None,
+                    background: &config,
                 },
-                &config,
                 &mut resources,
             )
             .estimate
@@ -274,6 +278,23 @@ fn refine_masks_the_stars_and_their_halos_out() {
             .pixels()
             .iter()
             .all(|&v| v == SKY + SPREAD)
+    );
+    // A configuration that refines nothing hands the estimate back as it came, with no sources.
+    let mut resources = DetectionResources::new(size);
+    let untouched = BackgroundEstimate::estimate(&pixels, None, &config, &mut resources).refine(
+        &pixels,
+        PlaneSpec {
+            prefilter: Prefilter::None,
+            matched: None,
+            mask: None,
+            background: &config,
+        },
+        &mut resources,
+    );
+    assert!(untouched.sources.is_none());
+    assert_eq!(
+        untouched.estimate.background.pixels(),
+        unrefined.background.pixels()
     );
     for mask_dilation in [0, 2] {
         let haloed = refined(1, mask_dilation);

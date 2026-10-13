@@ -2,6 +2,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::error::InvalidConfigField;
 
 /// Strategy for refining background estimation.
@@ -90,6 +91,16 @@ impl Default for BackgroundConfig {
 }
 
 impl BackgroundConfig {
+    /// The mesh the detector's sky and noise are measured on: these tiles and clip passes, each
+    /// tile the median of its neighbourhood.
+    pub(crate) const fn mesh_params(&self) -> MeshParams {
+        MeshParams {
+            tile_size: self.tile_size,
+            sigma_clip_iterations: self.sigma_clip_iterations,
+            median_filter: MedianFilter::Apply,
+        }
+    }
+
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::check(
             (16..=256).contains(&self.tile_size),

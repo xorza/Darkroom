@@ -82,7 +82,7 @@ impl Subtree {
 /// This layout eliminates per-node child pointers, improves cache locality,
 /// and enables iterative construction.
 #[derive(Debug)]
-pub(super) struct KdTree {
+pub(crate) struct KdTree {
     /// Permuted point indices forming the implicit tree structure.
     /// For a range [start, end), the node is at index `mid = (start + end) / 2`.
     /// Left subtree is [start, mid), right subtree is [mid+1, end).
@@ -103,7 +103,6 @@ impl KdTree {
 
         let mut indices: Vec<usize> = (0..points.len()).collect();
 
-        // Iterative construction using an explicit work stack.
         let mut stack: Vec<Subtree> = vec![Subtree::root(indices.len())];
 
         while let Some(subtree) = stack.pop() {
@@ -112,7 +111,6 @@ impl KdTree {
             }
 
             let split_dim = subtree.split_dim();
-            // Partition around the median — O(n) per level instead of O(n log n) sort.
             indices[subtree.start..subtree.end].select_nth_unstable_by(
                 subtree.len() / 2,
                 |&a, &b| {
@@ -220,12 +218,10 @@ impl KdTree {
         }
     }
 
-    /// Get the number of points in the tree.
     pub(super) const fn len(&self) -> usize {
         self.points.len()
     }
 
-    /// Get a point by index.
     pub(super) fn get_point(&self, idx: usize) -> DVec2 {
         self.points[idx]
     }
@@ -317,11 +313,10 @@ impl BoundedMaxHeap<'_> {
     fn push(&mut self, neighbor: Neighbor) {
         if self.items.len() < self.capacity {
             self.items.push(neighbor);
-            let last = self.items.len() - 1;
-            Self::sift_up_slice(self.items, last);
+            self.sift_up(self.items.len() - 1);
         } else if neighbor.dist_sq < self.items[0].dist_sq {
             self.items[0] = neighbor;
-            Self::sift_down_slice(self.items, 0);
+            self.sift_down(0);
         }
     }
 
@@ -335,7 +330,8 @@ impl BoundedMaxHeap<'_> {
             .map_or(f64::INFINITY, |neighbor| neighbor.dist_sq)
     }
 
-    fn sift_up_slice(items: &mut [Neighbor], mut idx: usize) {
+    fn sift_up(&mut self, mut idx: usize) {
+        let items = &mut *self.items;
         while idx > 0 {
             let parent = (idx - 1) / 2;
             if items[idx].dist_sq > items[parent].dist_sq {
@@ -347,7 +343,8 @@ impl BoundedMaxHeap<'_> {
         }
     }
 
-    fn sift_down_slice(items: &mut [Neighbor], mut idx: usize) {
+    fn sift_down(&mut self, mut idx: usize) {
+        let items = &mut *self.items;
         let len = items.len();
         loop {
             let left = 2 * idx + 1;
@@ -370,14 +367,12 @@ impl BoundedMaxHeap<'_> {
     }
 }
 
-/// Test-only ergonomic wrapper: k-nearest as an owned, distance-sorted `Vec`. Production uses
-/// the buffer-reusing [`KdTree::k_nearest_into`]; this allocating form exists only for test
-/// readability, so it's gated out of the library build.
 #[cfg(test)]
 mod internals {
     use super::*;
 
     impl KdTree {
+        /// [`KdTree::k_nearest_into`] into a new `Vec`.
         pub(super) fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
             let mut out = Vec::new();
             self.k_nearest_into(query, k, &mut out);

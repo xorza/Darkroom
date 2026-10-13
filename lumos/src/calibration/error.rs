@@ -300,7 +300,7 @@ pub enum BundleError {
     },
     /// The defect map's table is not what a bundle writes.
     #[error("the bundle's defect map: {0}")]
-    DefectTable(DefectTableError),
+    DefectTable(#[from] DefectTableError),
     /// The masters read do not make a set.
     #[error(transparent)]
     Calibration(#[from] CalibrationError),

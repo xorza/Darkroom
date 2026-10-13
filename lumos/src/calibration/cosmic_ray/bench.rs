@@ -5,8 +5,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
+use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::calibration::cosmic_ray::reject_cosmic_rays;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 
@@ -23,7 +23,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let config = CosmicRayConfig::default();
             b.iter_batched_ref(
                 || mosaic.clone(),
-                |mosaic| reject_cosmic_rays(mosaic, &config).unwrap(),
+                |mosaic| cosmic_ray::reject(mosaic, &config).unwrap(),
                 fixture::fresh_copies(size_of_val(mosaic.data.pixels())),
             );
         });

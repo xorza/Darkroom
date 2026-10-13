@@ -1,0 +1,146 @@
+//! [`SlotPlanes`]: the frames a normalization measures, read by slot, and where a plane of them is
+//! measured.
+
+use arrayvec::ArrayVec;
+use common::CancelToken;
+use rayon::prelude::*;
+
+use crate::combine::error::StackError;
+use crate::combine::frame_cache::slots::Slots;
+use crate::combine::normalization::common_domain::CommonDomain;
+use crate::combine::normalization::slot_pixels::SlotPixels;
+use crate::error::Cancelled;
+use crate::frame_store::stored_frame::StoredFrame;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::math::statistics::radix_median::RadixMedian;
+
+/// The frames a normalization measures, read by slot: every one of `dimensions`, under the run's
+/// `cancel`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SlotPlanes<'a> {
+    pub(crate) frames: &'a [StoredFrame],
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) slots: Slots,
+    pub(crate) cancel: &'a CancelToken,
+}
+
+impl<'a> SlotPlanes<'a> {
+    /// Every value of `slot`'s plane in frame `frame`.
+    pub(super) fn values(&self, frame: usize, slot: usize) -> &'a [f32] {
+        self.frames[frame].channels[self.slots.channel(slot)]
+            .chunk(0..self.dimensions.pixel_count())
+    }
+
+    /// Every frame's slot medians over the pixels the frames share, one pass per slot.
+    pub(super) fn slot_medians(
+        &self,
+        pixels: &[SlotPixels<'_>],
+    ) -> Result<Vec<ArrayVec<f32, 3>>, StackError> {
+        let slot_count = pixels.len();
+        let medians = (0..self.frames.len() * slot_count)
+            .into_par_iter()
+            .map_init(RadixMedian::default, |median, pair_index| {
+                let slot = pair_index % slot_count;
+                let sampling = PlaneSampling {
+                    domain: pixels[slot].shared(),
+                    indices: &[],
+                };
+                let measured = sampling.measure(
+                    self.values(pair_index / slot_count, slot),
+                    median,
+                    self.cancel,
+                )?;
+                Ok(measured.median.expect("the frames share only some pixels"))
+            })
+            .collect::<Result<Vec<_>, StackError>>()?;
+        Ok(medians
+            .chunks(slot_count)
+            .map(|slots| slots.iter().copied().collect())
+            .collect())
+    }
+
+    /// The noise variance of slot `slot` of frame `frame` at the sampled pixels `indices`: the
+    /// source's white noise σ², scaled by the mean inverse confidence there, since interpolation
+    /// that averaged several source pixels left less noise than the source had.
+    pub(super) fn noise_variance(
+        &self,
+        frame: usize,
+        slot: usize,
+        indices: &[usize],
+    ) -> Result<f64, StackError> {
+        let frame = &self.frames[frame];
+        let sigma = f64::from(frame.source_stats.slot_noise(slot));
+        let Some(confidence) = frame.quality.confidence(self.slots.channel(slot)) else {
+            return Ok(sigma * sigma);
+        };
+        let values = confidence.chunk(0..self.dimensions.pixel_count());
+        let mut inverse_confidence = 0.0;
+        for chunk in indices.chunks(Cancelled::POLL_CHUNK) {
+            Cancelled::check(self.cancel)?;
+            for &index in chunk {
+                let value = f64::from(values[index]);
+                // `indices` are common-domain pixels, which clear the coverage floor, and a
+                // frame-quality pair has confidence wherever it has support — so this is never a
+                // division by zero.
+                debug_assert!(
+                    value > 0.0,
+                    "zero confidence at common-domain pixel {index}"
+                );
+                inverse_confidence += 1.0 / value;
+            }
+        }
+        Ok(sigma * sigma * inverse_confidence / indices.len() as f64)
+    }
+}
+
+/// Where a plane is measured: its median over `domain`, when the frames do not all cover every
+/// pixel, and its values at the ascending `indices`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PlaneSampling<'a> {
+    pub(super) domain: Option<&'a CommonDomain>,
+    pub(super) indices: &'a [usize],
+}
+
+/// What [`PlaneSampling::measure`] measures of a plane.
+#[derive(Debug)]
+pub(super) struct PlaneMeasurement {
+    pub(super) median: Option<f32>,
+    pub(super) samples: Vec<f32>,
+}
+
+impl PlaneSampling<'_> {
+    /// `values`' median over the domain when there is one, and its values at the indices.
+    ///
+    /// The median is exact and holds no copy of the plane: `median`'s histogram, which the caller
+    /// reuses across planes, ranks the domain's values in two walks over it. A copy for every plane
+    /// measured at once would be a plane per worker, which no memory plan charges.
+    pub(super) fn measure(
+        &self,
+        values: &[f32],
+        median: &mut RadixMedian,
+        cancel: &CancelToken,
+    ) -> Result<PlaneMeasurement, StackError> {
+        debug_assert!(self.indices.is_sorted(), "the sample indices ascend");
+        let mut samples = Vec::with_capacity(self.indices.len());
+        for chunk in self.indices.chunks(Cancelled::POLL_CHUNK) {
+            Cancelled::check(cancel)?;
+            samples.extend(chunk.iter().map(|&index| values[index]));
+        }
+        let median = match self.domain {
+            Some(domain) => {
+                let mut high = median.high_pass();
+                domain.for_each_in(values, cancel, |run| high.add_all(run))?;
+                debug_assert_eq!(
+                    high.len(),
+                    domain.sample_count,
+                    "the walk visits the domain"
+                );
+                let mut low = high.finish();
+                domain.for_each_in(values, cancel, |run| low.add_all(run))?;
+                Some(low.median())
+            }
+            None => None,
+        };
+        Ok(PlaneMeasurement { median, samples })
+    }
+}

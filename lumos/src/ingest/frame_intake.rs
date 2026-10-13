@@ -13,7 +13,6 @@ use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::load_context::LoadContext;
-use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 
@@ -43,15 +42,11 @@ pub(crate) struct IntakePlan {
 
 impl<'a> FrameIntake<'a> {
     /// The intake of `plan`'s frames under `run`.
-    pub(crate) fn new(
-        plan: IntakePlan,
-        run: &'a IngestRun,
-        progress: &'a ProgressCallback,
-    ) -> Self {
+    pub(crate) fn new(plan: IntakePlan, run: &'a IngestRun) -> Self {
         Self {
             admission: FrameAdmission::new(plan.dimensions, &run.context.cancel),
             context: run.context.for_decode_slots(plan.decode_slots.max(1)),
-            done: StageCounter::new(progress, plan.stage, plan.frame_count),
+            done: StageCounter::new(&run.progress, plan.stage, plan.frame_count),
         }
     }
 

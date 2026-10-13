@@ -43,28 +43,16 @@ impl BackgroundSplit {
     /// split changes no variance the frame holds — so a tie goes to the sky-limited `S·g`, the
     /// exposure most deep-sky frames are taken at. No bin at all reads 0.
     pub(crate) fn fit(bins: &[GainBin]) -> Self {
-        let measured = || bins.iter().filter(|bin| bin.samples > 0);
-        if measured().next().is_none() {
+        if !bins.iter().any(|bin| bin.samples > 0) {
             return Self::unflattened(0.0);
         }
-        let sum = |term: &dyn Fn(f64, f64) -> f64| {
-            measured()
-                .map(|bin| {
-                    let weight = if bin.variance > 0.0 {
-                        bin.samples as f64 / (bin.variance * bin.variance)
-                    } else {
-                        bin.samples as f64
-                    };
-                    weight * term(bin.gain, bin.variance)
-                })
-                .sum::<f64>()
-        };
-        let g4 = sum(&|g, _| g.powi(4));
-        let g3 = sum(&|g, _| g.powi(3));
-        let g2 = sum(&|g, _| g * g);
-        let vg2 = sum(&|g, v| v * g * g);
-        let vg = sum(&|g, v| v * g);
-        let residual = |read: f64, sky: f64| sum(&|g, v| (v - read * g * g - sky * g).powi(2));
+        let g4 = weighted_sum(bins, |g, _| g.powi(4));
+        let g3 = weighted_sum(bins, |g, _| g.powi(3));
+        let g2 = weighted_sum(bins, |g, _| g * g);
+        let vg2 = weighted_sum(bins, |g, v| v * g * g);
+        let vg = weighted_sum(bins, |g, v| v * g);
+        let residual =
+            |read: f64, sky: f64| weighted_sum(bins, |g, v| (v - read * g * g - sky * g).powi(2));
         let sky_only = (0.0, vg / g2);
         let read_only = (vg2 / g4, 0.0);
         let one_term = if residual(read_only.0, read_only.1) < residual(sky_only.0, sky_only.1) {
@@ -96,6 +84,22 @@ impl BackgroundSplit {
             },
         }
     }
+}
+
+/// `Σ w·term(g, v)` over the bins that hold samples, at each bin's gain `g` and variance `v`: `w`
+/// its samples over `v²`, or its samples alone where `v` is 0.
+fn weighted_sum(bins: &[GainBin], term: impl Fn(f64, f64) -> f64) -> f64 {
+    bins.iter()
+        .filter(|bin| bin.samples > 0)
+        .map(|bin| {
+            let weight = if bin.variance > 0.0 {
+                bin.samples as f64 / (bin.variance * bin.variance)
+            } else {
+                bin.samples as f64
+            };
+            weight * term(bin.gain, bin.variance)
+        })
+        .sum::<f64>()
 }
 
 #[cfg(test)]

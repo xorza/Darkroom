@@ -104,7 +104,7 @@ pub struct Compiler {
     placed: Vec<PendingNode>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
-    /// at a time cost a walk per edge.
+    /// at a time would cost a walk per edge.
     output_types: OutputTypes,
 }
 
@@ -127,9 +127,7 @@ impl Compiler {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the walk below resolve every reference
         // infallibly.
-        if let Err(source) = graph.validate_with(library) {
-            return Err(CompileError { source });
-        }
+        graph.validate_with(library)?;
 
         let compiled = self.walk(graph, library);
         validate::validate_debug(&compiled, library);
@@ -301,7 +299,8 @@ impl Compiler {
             totals.events += func.events.len();
             placed.push(PendingNode {
                 node_id: node.id,
-                outputs: func.outputs.len() as u32,
+                outputs: u32::try_from(func.outputs.len())
+                    .expect("a func's output count must fit in u32"),
                 disabled: node.disabled,
             });
         }
@@ -324,7 +323,7 @@ impl Compiler {
             .placed
             .binary_search_by_key(&node_id, |placed| placed.node_id)
             .expect("the placement covers every node the graph holds");
-        NodeIdx(position as u32)
+        NodeIdx::from_idx(position)
     }
 
     fn placement(&self, node_id: NodeId) -> &PendingNode {

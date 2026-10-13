@@ -7,6 +7,6 @@ pub(crate) mod chip;
 pub(crate) mod edit_buffer;
 pub(crate) mod format;
 pub(crate) mod inline_rename;
+pub(crate) mod pill;
 pub(crate) mod port_glyph;
 pub(crate) mod support;
-pub(crate) mod toolbar;

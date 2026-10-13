@@ -55,9 +55,9 @@ struct PairedMoments {
 }
 
 impl PairedMoments {
-    fn from_inliers(
-        frame: &[f32],
-        reference: &[f32],
+    /// The moments of the pairs of `pair` that `window` admits.
+    fn of_inliers(
+        pair: &SamplePair<'_>,
         window: ResidualWindow,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
@@ -69,10 +69,7 @@ impl PairedMoments {
             reference_variance: 0.0,
             covariance: 0.0,
         };
-        for (frame_chunk, reference_chunk) in frame
-            .chunks(Cancelled::POLL_CHUNK)
-            .zip(reference.chunks(Cancelled::POLL_CHUNK))
-        {
+        for (frame_chunk, reference_chunk) in pair.chunks() {
             Cancelled::check(cancel)?;
             for (&frame_value, &reference_value) in frame_chunk.iter().zip(reference_chunk) {
                 if !window.admits(frame_value, reference_value) {
@@ -171,63 +168,6 @@ struct Seed {
     relative_error: f64,
 }
 
-impl Seed {
-    /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, or the ratio of
-    /// the sky spreads when there are too few of them.
-    fn of(
-        frame: &[f32],
-        reference: &[f32],
-        frame_stats: MedianMad,
-        reference_stats: MedianMad,
-        cancel: &CancelToken,
-    ) -> Result<Self, StackError> {
-        let frame_floor = LEVER_SIGMAS * mad_to_sigma(frame_stats.mad);
-        let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
-        // Every pair at most, so the ratios never grow past the room they took.
-        let mut ratios = Vec::with_capacity(frame.len());
-        for (frame_chunk, reference_chunk) in frame
-            .chunks(Cancelled::POLL_CHUNK)
-            .zip(reference.chunks(Cancelled::POLL_CHUNK))
-        {
-            Cancelled::check(cancel)?;
-            ratios.extend(frame_chunk.iter().zip(reference_chunk).filter_map(
-                |(&frame_value, &reference_value)| {
-                    let x = frame_value - frame_stats.median;
-                    let y = reference_value - reference_stats.median;
-                    (x > frame_floor && y > reference_floor && x > 0.0).then(|| y / x)
-                },
-            ));
-        }
-        if ratios.len() >= MIN_LEVER_PAIRS {
-            let count = ratios.len() as f64;
-            let ratio_stats = MedianMad::of_mut(&mut ratios);
-            let scatter = mad_to_sigma(ratio_stats.mad);
-            return Ok(Self {
-                gain: ratio_stats.median,
-                scatter,
-                relative_error: MEDIAN_ERROR * f64::from(scatter)
-                    / count.sqrt()
-                    / f64::from(ratio_stats.median),
-            });
-        }
-        // A frame whose samples tie to its own precision has no spread to compare: unit gain, which
-        // the fit then moves if the pairs say otherwise, of no known error.
-        if frame_stats.mad > Spread::resolution(frame_stats.median) {
-            Ok(Self {
-                gain: reference_stats.mad / frame_stats.mad,
-                scatter: 0.0,
-                relative_error: (2.0 * MAD_SIGMA_VARIANCE / frame.len() as f64).sqrt(),
-            })
-        } else {
-            Ok(Self {
-                gain: 1.0,
-                scatter: 0.0,
-                relative_error: f64::INFINITY,
-            })
-        }
-    }
-}
-
 /// Which pairs a fit admits: those whose residual from the line through the two medians at `gain`
 /// lies within [`WINDOW_SIGMAS`] of its expected spread, `√(σ²_sky + (scatter · (x − m_x))²)`,
 /// about the median residual.
@@ -254,23 +194,155 @@ enum Residuals {
 }
 
 impl ResidualWindow {
-    /// The window at `gain`; [`Residuals::Exact`] or [`Residuals::Degenerate`] when the residuals'
-    /// MAD is under their resolution and no lever-arm scatter widens the window.
-    fn at(
+    fn admits(self, frame_value: f32, reference_value: f32) -> bool {
+        let residual = f64::from(reference_value - (frame_value * self.gain + self.offset));
+        let lever = self.scatter * f64::from(frame_value - self.frame_median);
+        let spread = (self.sky_variance + lever * lever).sqrt();
+        (residual - f64::from(self.center)).abs() <= WINDOW_SIGMAS * spread
+    }
+}
+
+/// One side of a [`SamplePair`]: its samples at the paired pixels, their median and MAD, and its
+/// noise variance there.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PairSide<'a> {
+    pub(super) samples: &'a [f32],
+    pub(super) stats: MedianMad,
+    pub(super) noise_variance: f64,
+}
+
+impl<'a> PairSide<'a> {
+    /// `samples`, measured for their median and MAD, of noise variance `noise_variance`.
+    pub(super) fn new(
+        samples: &'a [f32],
+        noise_variance: f64,
+        cancel: &CancelToken,
+    ) -> Result<Self, StackError> {
+        Cancelled::check(cancel)?;
+        Ok(Self {
+            samples,
+            stats: MedianMad::of_mut(&mut samples.to_vec()),
+            noise_variance,
+        })
+    }
+}
+
+/// A frame's samples and the reference's at the same pixels, each side with its statistics and its
+/// noise variance.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SamplePair<'a> {
+    pub(super) frame: PairSide<'a>,
+    pub(super) reference: PairSide<'a>,
+}
+
+impl SamplePair<'_> {
+    /// The gain that carries the frame onto the reference: seeded on the lever-arm pairs, then the
+    /// Deming fit over the pairs its window admits, re-windowed on the fitted gain.
+    pub(super) fn photometric_gain(&self, cancel: &CancelToken) -> Result<PairedGain, StackError> {
+        let (frame_noise, reference_noise) =
+            (self.frame.noise_variance, self.reference.noise_variance);
+        let seed = self.seed(cancel)?;
+        let mut paired = PairedGain {
+            gain: seed.gain,
+            relative_error: seed.relative_error,
+        };
+        for _ in 0..FITS {
+            let window = match self.residuals(paired.gain, seed, cancel)? {
+                Residuals::Window(window) => window,
+                Residuals::Exact => {
+                    return Ok(PairedGain {
+                        gain: paired.gain,
+                        relative_error: 0.0,
+                    });
+                }
+                Residuals::Degenerate => break,
+            };
+            // Inliers with no positive covariance cannot move the gain from where the window
+            // started.
+            let moments = PairedMoments::of_inliers(self, window, cancel)?;
+            let Some(fitted) = moments.deming_gain(frame_noise, reference_noise) else {
+                break;
+            };
+            let unchanged = fitted == paired.gain;
+            paired = PairedGain {
+                gain: fitted,
+                relative_error: moments.deming_error(fitted, frame_noise, reference_noise),
+            };
+            if unchanged {
+                break;
+            }
+        }
+        Ok(paired)
+    }
+
+    /// The pairs in runs of [`Cancelled::POLL_CHUNK`], the frame's beside the reference's.
+    fn chunks(&self) -> impl Iterator<Item = (&[f32], &[f32])> {
+        self.frame
+            .samples
+            .chunks(Cancelled::POLL_CHUNK)
+            .zip(self.reference.samples.chunks(Cancelled::POLL_CHUNK))
+    }
+
+    /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, or the ratio of
+    /// the sky spreads when there are too few of them.
+    fn seed(&self, cancel: &CancelToken) -> Result<Seed, StackError> {
+        let (frame_stats, reference_stats) = (self.frame.stats, self.reference.stats);
+        let frame_floor = LEVER_SIGMAS * mad_to_sigma(frame_stats.mad);
+        let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
+        // Every pair at most, so the ratios never grow past the room they took.
+        let mut ratios = Vec::with_capacity(self.frame.samples.len());
+        for (frame_chunk, reference_chunk) in self.chunks() {
+            Cancelled::check(cancel)?;
+            ratios.extend(frame_chunk.iter().zip(reference_chunk).filter_map(
+                |(&frame_value, &reference_value)| {
+                    let x = frame_value - frame_stats.median;
+                    let y = reference_value - reference_stats.median;
+                    (x > frame_floor && y > reference_floor && x > 0.0).then(|| y / x)
+                },
+            ));
+        }
+        if ratios.len() >= MIN_LEVER_PAIRS {
+            let count = ratios.len() as f64;
+            let ratio_stats = MedianMad::of_mut(&mut ratios);
+            let scatter = mad_to_sigma(ratio_stats.mad);
+            return Ok(Seed {
+                gain: ratio_stats.median,
+                scatter,
+                relative_error: MEDIAN_ERROR * f64::from(scatter)
+                    / count.sqrt()
+                    / f64::from(ratio_stats.median),
+            });
+        }
+        // A frame whose samples tie to its own precision has no spread to compare: unit gain, which
+        // the fit then moves if the pairs say otherwise, of no known error.
+        if frame_stats.mad > Spread::resolution(frame_stats.median) {
+            Ok(Seed {
+                gain: reference_stats.mad / frame_stats.mad,
+                scatter: 0.0,
+                relative_error: (2.0 * MAD_SIGMA_VARIANCE / self.frame.samples.len() as f64).sqrt(),
+            })
+        } else {
+            Ok(Seed {
+                gain: 1.0,
+                scatter: 0.0,
+                relative_error: f64::INFINITY,
+            })
+        }
+    }
+
+    /// The window at `gain`, widened by `seed`'s scatter; [`Residuals::Exact`] or
+    /// [`Residuals::Degenerate`] when the residuals' MAD is under their resolution and no lever-arm
+    /// scatter widens the window.
+    fn residuals(
+        &self,
         gain: f32,
         seed: Seed,
-        frame: &[f32],
-        reference: &[f32],
-        frame_stats: MedianMad,
-        reference_stats: MedianMad,
         cancel: &CancelToken,
     ) -> Result<Residuals, StackError> {
+        let (frame_stats, reference_stats) = (self.frame.stats, self.reference.stats);
         let offset = reference_stats.median - frame_stats.median * gain;
-        let mut residuals = Vec::with_capacity(frame.len());
-        for (frame_chunk, reference_chunk) in frame
-            .chunks(Cancelled::POLL_CHUNK)
-            .zip(reference.chunks(Cancelled::POLL_CHUNK))
-        {
+        let mut residuals = Vec::with_capacity(self.frame.samples.len());
+        for (frame_chunk, reference_chunk) in self.chunks() {
             Cancelled::check(cancel)?;
             residuals.extend(frame_chunk.iter().zip(reference_chunk).map(
                 |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
@@ -289,7 +361,7 @@ impl ResidualWindow {
             });
         }
         let sky_sigma = f64::from(mad_to_sigma(residual_stats.mad));
-        Ok(Residuals::Window(Self {
+        Ok(Residuals::Window(ResidualWindow {
             gain,
             offset,
             frame_median: frame_stats.median,
@@ -298,75 +370,4 @@ impl ResidualWindow {
             scatter: f64::from(seed.scatter),
         }))
     }
-
-    fn admits(self, frame_value: f32, reference_value: f32) -> bool {
-        let residual = f64::from(reference_value - (frame_value * self.gain + self.offset));
-        let lever = self.scatter * f64::from(frame_value - self.frame_median);
-        let spread = (self.sky_variance + lever * lever).sqrt();
-        (residual - f64::from(self.center)).abs() <= WINDOW_SIGMAS * spread
-    }
-}
-
-/// The gain that carries `frame` onto `reference`, from their paired samples and each side's
-/// noise variance: seeded on the lever-arm pairs, then the Deming fit over the pairs its window
-/// admits, re-windowed on the fitted gain.
-pub(super) fn paired_photometric_gain(
-    frame: &[f32],
-    reference: &[f32],
-    reference_stats: MedianMad,
-    frame_noise_variance: f64,
-    reference_noise_variance: f64,
-    cancel: &CancelToken,
-) -> Result<PairedGain, StackError> {
-    let frame_stats = sample_stats(frame, cancel)?;
-    let seed = Seed::of(frame, reference, frame_stats, reference_stats, cancel)?;
-    let mut paired = PairedGain {
-        gain: seed.gain,
-        relative_error: seed.relative_error,
-    };
-    for _ in 0..FITS {
-        let window = match ResidualWindow::at(
-            paired.gain,
-            seed,
-            frame,
-            reference,
-            frame_stats,
-            reference_stats,
-            cancel,
-        )? {
-            Residuals::Window(window) => window,
-            Residuals::Exact => {
-                return Ok(PairedGain {
-                    gain: paired.gain,
-                    relative_error: 0.0,
-                });
-            }
-            Residuals::Degenerate => break,
-        };
-        // Inliers with no positive covariance cannot move the gain from where the window started.
-        let moments = PairedMoments::from_inliers(frame, reference, window, cancel)?;
-        let Some(fitted) = moments.deming_gain(frame_noise_variance, reference_noise_variance)
-        else {
-            break;
-        };
-        let unchanged = fitted == paired.gain;
-        paired = PairedGain {
-            gain: fitted,
-            relative_error: moments.deming_error(
-                fitted,
-                frame_noise_variance,
-                reference_noise_variance,
-            ),
-        };
-        if unchanged {
-            break;
-        }
-    }
-    Ok(paired)
-}
-
-/// The median and MAD of a sample set, leaving the samples as they were.
-pub(super) fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<MedianMad, StackError> {
-    Cancelled::check(cancel)?;
-    Ok(MedianMad::of_mut(&mut samples.to_vec()))
 }

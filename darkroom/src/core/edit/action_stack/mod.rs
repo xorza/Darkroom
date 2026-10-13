@@ -120,7 +120,7 @@ impl ActionStack {
         // The entry stays in the buffer — it just moved into the redoable
         // region.
         let range = &self.entries[self.cursor];
-        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, range));
+        let steps = deserialize_steps(slice_bytes(&self.actions, range));
         for step in steps.iter().rev() {
             step.revert(doc);
             on_step(step);
@@ -134,7 +134,7 @@ impl ActionStack {
             return false;
         }
         let range = &self.entries[self.cursor];
-        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, range));
+        let steps = deserialize_steps(slice_bytes(&self.actions, range));
         for step in &steps {
             step.apply(doc);
             on_step(step);
@@ -210,36 +210,37 @@ impl ActionStack {
 
     /// Append `steps` as the newest applied entry, then trim to the budget.
     fn pack(&mut self, steps: &[UndoStep]) {
-        let range = Self::append_steps(&mut self.actions, steps);
+        let range = append_steps(&mut self.actions, steps);
         self.entries.push_back(range);
         self.cursor = self.entries.len();
         self.trim_to_limit();
     }
+}
 
-    fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
-        assert!(
-            !steps.is_empty(),
-            "undo stack should not store empty step batches"
-        );
-        let start = buffer.len();
-        common::serialize_into(steps, SerdeFormat::Bitcode, buffer)
-            .expect("bitcode serialize of in-memory undo steps is infallible");
-        let end = buffer.len();
-        start..end
-    }
+fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {
+    debug_assert!(range.start <= range.end, "undo stack range start > end");
+    debug_assert!(
+        range.end <= buffer.len(),
+        "undo stack range exceeds buffer length"
+    );
+    &buffer[range.clone()]
+}
 
-    fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
-        common::deserialize(bytes, SerdeFormat::Bitcode).unwrap()
-    }
+fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
+    SerdeFormat::Bitcode.deserialize(bytes).unwrap()
+}
 
-    fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {
-        assert!(range.start <= range.end, "undo stack range start > end");
-        assert!(
-            range.end <= buffer.len(),
-            "undo stack range exceeds buffer length"
-        );
-        &buffer[range.clone()]
-    }
+fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
+    debug_assert!(
+        !steps.is_empty(),
+        "undo stack should not store empty step batches"
+    );
+    let start = buffer.len();
+    SerdeFormat::Bitcode
+        .serialize_into(steps, buffer)
+        .expect("bitcode serialize of in-memory undo steps is infallible");
+    let end = buffer.len();
+    start..end
 }
 
 #[cfg(test)]

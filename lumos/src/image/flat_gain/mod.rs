@@ -40,7 +40,7 @@ pub struct FlatGain {
 /// A [`FlatGain`] as a kept frame's record holds it: the image it covers, each channel's node grid
 /// row-major, and each channel's bins, which a warp carries over from the sensor rather than
 /// measuring again.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FlatGainRecord {
     width: usize,
     height: usize,
@@ -105,6 +105,11 @@ impl FlatGain {
         let size = Size2us::new(divisor.width(), divisor.height());
         let columns = nodes_along(size.width);
         let rows = nodes_along(size.height);
+        let flat = NormalizedFlat {
+            divisor,
+            cfa_type,
+            excluded,
+        };
         let nodes = (0..cfa_type.num_colors())
             .map(|colour| {
                 let mut plane = Buffer2::new_default(columns, rows);
@@ -114,13 +119,7 @@ impl FlatGain {
                     .enumerate()
                     .for_each(|(j, row)| {
                         for (i, node) in row.iter_mut().enumerate() {
-                            *node = node_gain(
-                                divisor,
-                                cfa_type,
-                                &excluded,
-                                colour,
-                                Vec2us::new(STEP * i, STEP * j),
-                            );
+                            *node = flat.node_gain(colour, Vec2us::new(STEP * i, STEP * j));
                         }
                     });
                 plane
@@ -201,7 +200,7 @@ impl FlatGain {
     }
 
     /// The gain of `channel` at `point`, located on this grid once for every channel.
-    pub(crate) fn at_point(&self, channel: usize, point: GainPoint) -> f32 {
+    fn at_point(&self, channel: usize, point: GainPoint) -> f32 {
         GainRows::new(GainGrid::of(self.size), 0, self.planes().collect()).at(channel, point)
     }
 
@@ -320,46 +319,51 @@ const fn nodes_along(extent: usize) -> usize {
     (extent - 1).div_ceil(STEP) + 1
 }
 
-/// The mean of `1/f` over the photosites of `colour` within half a step of `node`, those `excluded`
-/// names left out where any other remains; 1, no gain known, for a colour the sensor has no
-/// photosite of.
-fn node_gain(
-    divisor: &Buffer2<f32>,
-    cfa_type: &CfaType,
-    excluded: &impl Fn(usize) -> bool,
-    colour: usize,
-    node: Vec2us,
-) -> f32 {
-    let size = Size2us::new(divisor.width(), divisor.height());
-    let mut half = STEP / 2;
-    loop {
-        let window = |extent: usize, centre: usize| {
-            centre.saturating_sub(half).min(extent - 1)..=(centre + half).min(extent - 1)
-        };
-        let mut measured = (0.0f64, 0usize);
-        let mut all = (0.0f64, 0usize);
-        for y in window(size.height, node.y) {
-            for x in window(size.width, node.x) {
-                let position = Vec2us::new(x, y);
-                if cfa_type.color_at(position) != colour {
-                    continue;
-                }
-                let index = y * size.width + x;
-                let gain = 1.0 / f64::from(divisor.pixels()[index]);
-                all = (all.0 + gain, all.1 + 1);
-                if !excluded(index) {
-                    measured = (measured.0 + gain, measured.1 + 1);
+/// A normalized flat over its own sensor, the photosites `excluded` names left out of its nodes
+/// where any other remains.
+#[derive(Debug)]
+struct NormalizedFlat<'a, E> {
+    divisor: &'a Buffer2<f32>,
+    cfa_type: &'a CfaType,
+    excluded: E,
+}
+
+impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
+    /// The mean of `1/f` over the photosites of `colour` within half a step of `node`; 1, no gain
+    /// known, for a colour the sensor has no photosite of.
+    fn node_gain(&self, colour: usize, node: Vec2us) -> f32 {
+        let divisor = self.divisor;
+        let size = Size2us::new(divisor.width(), divisor.height());
+        let mut half = STEP / 2;
+        loop {
+            let window = |extent: usize, centre: usize| {
+                centre.saturating_sub(half).min(extent - 1)..=(centre + half).min(extent - 1)
+            };
+            let mut measured = (0.0f64, 0usize);
+            let mut all = (0.0f64, 0usize);
+            for y in window(size.height, node.y) {
+                for x in window(size.width, node.x) {
+                    let position = Vec2us::new(x, y);
+                    if self.cfa_type.color_at(position) != colour {
+                        continue;
+                    }
+                    let index = y * size.width + x;
+                    let gain = 1.0 / f64::from(divisor.pixels()[index]);
+                    all = (all.0 + gain, all.1 + 1);
+                    if !(self.excluded)(index) {
+                        measured = (measured.0 + gain, measured.1 + 1);
+                    }
                 }
             }
+            let (sum, count) = if measured.1 > 0 { measured } else { all };
+            if count > 0 {
+                return (sum / count as f64) as f32;
+            }
+            if half >= size.width.max(size.height) {
+                return 1.0;
+            }
+            half += STEP;
         }
-        let (sum, count) = if measured.1 > 0 { measured } else { all };
-        if count > 0 {
-            return (sum / count as f64) as f32;
-        }
-        if half >= size.width.max(size.height) {
-            return 1.0;
-        }
-        half += STEP;
     }
 }
 

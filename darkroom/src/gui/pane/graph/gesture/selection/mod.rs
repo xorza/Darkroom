@@ -6,7 +6,7 @@ use palantir::widget::Shape;
 use palantir::{Rect, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -101,7 +101,7 @@ impl SelectionUI {
     /// resolved once by the canvas — drops the band without emitting.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
-        let resp = ui.response_for(outer_canvas_widget_id());
+        let resp = ui.response_for(canvas::outer_wid());
         if self.band.is_idle()
             && cx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local

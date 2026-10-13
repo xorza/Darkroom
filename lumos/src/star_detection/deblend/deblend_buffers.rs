@@ -1,10 +1,10 @@
 //! [`DeblendBuffers`]: the scratch one deblending job reuses from component to component.
 
 use crate::scratch_pool::Shapeless;
-use crate::star_detection::deblend::Pixel;
-use crate::star_detection::deblend::component::Assignment;
+use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::multi_threshold::TreeBuffers;
+use crate::star_detection::deblend::pixel::Pixel;
 
 /// The scratch one deblending job reuses across the components it handles, leased from the
 /// detector's pool so a frame after the first allocates nothing here.

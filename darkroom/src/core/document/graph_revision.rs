@@ -12,8 +12,10 @@ pub(crate) struct GraphRevision(u64);
 impl GraphRevision {
     /// A revision no graph has had before.
     pub(crate) fn fresh() -> Self {
+        // Process-wide rather than per document: the window's caches keep a
+        // revision and compare it alone, so a revision must not recur in
+        // another document. Relaxed: the counter orders nothing else.
         static LAST: AtomicU64 = AtomicU64::new(0);
-        // Relaxed: the counter orders nothing else, it only has to be unique.
         Self(LAST.fetch_add(1, Ordering::Relaxed) + 1)
     }
 }

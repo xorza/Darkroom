@@ -4,7 +4,7 @@ use scenarium::{AnyState, ConstValue, ContextManager, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
-    let func = preview_func(Arc::default());
+    let func = func(Arc::default());
     assert!(func.sink, "an ambient sinks run must reach it");
     assert!(func.outputs.is_empty());
     assert!(func.events.is_empty());
@@ -19,7 +19,7 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
     );
     assert_eq!(func.inputs[0].data_type, DataType::Any);
     func.validate().unwrap();
-    assert!(is_preview(func.id));
+    assert!(is_func(func.id));
 }
 
 /// The lambda publishes under the node it was invoked as, and a second run
@@ -28,7 +28,7 @@ fn the_declaration_is_a_sink_that_produces_nothing() {
 #[tokio::test]
 async fn invoking_publishes_the_latest_value_per_node() {
     let sink = Arc::new(PreviewSink::default());
-    let func = preview_func(Arc::clone(&sink));
+    let func = func(Arc::clone(&sink));
     let first = NodeId::default();
 
     // Built by hand rather than through `FuncInvoker`: the test reads the
@@ -72,7 +72,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
 #[tokio::test]
 #[should_panic(expected = "only readable inside a lambda invoke")]
 async fn an_unattributed_invoke_is_a_bug_not_a_silent_no_op() {
-    let func = preview_func(Arc::default());
+    let func = func(Arc::default());
     FuncInvoker::default()
         .call(&func, [DynamicValue::Static(ConstValue::Int(1))])
         .await

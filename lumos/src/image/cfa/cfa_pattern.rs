@@ -48,7 +48,7 @@ impl CfaPattern {
     }
 
     /// Parse from LibRaw's `filters` field, which holds the colour of each position of an 8 × 2
-    /// block (see [`raw::libraw_filter_color`]). Colour indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
+    /// block (see [`raw::filter_color`]). Colour indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
     ///
     /// Returns `None` when the word is not a 2×2 Bayer phase repeated down all eight rows —
     /// X-Trans, monochrome, and other exotic sensors all land here.
@@ -57,7 +57,7 @@ impl CfaPattern {
         if filters != (filters & 0xff) * 0x0101_0101 {
             return None;
         }
-        let color_at = |row: usize, col: usize| raw::libraw_filter_color(filters, row, col);
+        let color_at = |row: usize, col: usize| raw::filter_color(filters, row, col);
 
         let c00 = color_at(0, 0);
         let c01 = color_at(0, 1);

@@ -20,6 +20,22 @@ const ANNULUS_ENCLOSED_FLUX: f64 = 0.99;
 /// assumes.
 const ANNULUS_MOFFAT_BETA: f64 = 2.5;
 
+/// The stamp radius for `expected_fwhm`, held to `[MIN_STAMP_RADIUS, MAX_STAMP_RADIUS]`.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "a non-positive FWHM saturates to 0 and takes the minimum radius"
+)]
+pub(super) const fn stamp_radius(expected_fwhm: f32) -> usize {
+    let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
+    if radius < MIN_STAMP_RADIUS {
+        MIN_STAMP_RADIUS
+    } else if radius > MAX_STAMP_RADIUS {
+        MAX_STAMP_RADIUS
+    } else {
+        radius
+    }
+}
+
 /// What one detection's stars are measured with, all from the FWHM it expects.
 #[derive(Debug)]
 pub(crate) struct MeasureGrid {
@@ -41,28 +57,12 @@ pub(super) struct AnnulusRadii {
 
 impl MeasureGrid {
     pub(crate) fn new(expected_fwhm: f32) -> Self {
-        let radius = Self::stamp_radius(expected_fwhm);
+        let radius = stamp_radius(expected_fwhm);
         let window_sigma = f64::from(fwhm_to_sigma(expected_fwhm)).clamp(1.0, radius as f64 / 2.0);
         Self {
             stamp: StampGrid::new(radius),
             window_sigma,
             annulus: AnnulusRadii::enclosing(f64::from(expected_fwhm), radius),
-        }
-    }
-
-    /// The stamp radius for `expected_fwhm`, held to `[MIN_STAMP_RADIUS, MAX_STAMP_RADIUS]`.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "a non-positive FWHM saturates to 0 and takes the minimum radius"
-    )]
-    pub(super) const fn stamp_radius(expected_fwhm: f32) -> usize {
-        let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
-        if radius < MIN_STAMP_RADIUS {
-            MIN_STAMP_RADIUS
-        } else if radius > MAX_STAMP_RADIUS {
-            MAX_STAMP_RADIUS
-        } else {
-            radius
         }
     }
 }

@@ -6,7 +6,7 @@ use common::CancelToken;
 
 use crate::worker::error::WorkerExited;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::task::WorkerTask;
+use crate::worker::task::{WorkerLinks, WorkerTask};
 
 pub(crate) mod activity;
 pub(crate) mod batch;
@@ -33,7 +33,12 @@ impl Worker {
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let run_cancel = CancelToken::new();
         let shutdown = CancellationToken::new();
-        let worker_task = WorkerTask::new(rx, callback, run_cancel.clone(), shutdown.clone());
+        let worker_task = WorkerTask::new(WorkerLinks {
+            message_rx: rx,
+            callback,
+            run_cancel: run_cancel.clone(),
+            shutdown: shutdown.clone(),
+        });
         let task = tokio::spawn(worker_task.run());
 
         Self {

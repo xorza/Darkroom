@@ -14,7 +14,7 @@ use crate::gui::theme::type_scale::TypeScale;
 ///   the graph canvas, so a chip dissolves into the pane below it.
 /// - `element` and `node_fill` are one colour by design: nodes and
 ///   palantir's own surfaces sit on the same tier.
-pub(super) const fn palantir_palette_for(p: &Palette) -> palantir::Palette {
+pub(super) const fn palette(p: &Palette) -> palantir::Palette {
     palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,
@@ -58,7 +58,7 @@ pub(super) struct BridgeRoles<'a> {
 /// Takes the type scale rather than reaching for a private menu-font
 /// const: menu rows are ordinary UI text, so they read
 /// [`TypeScale::body`] like every other surface at that tier.
-pub(super) fn palantir_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
+pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
     let BridgeRoles {
         chrome_fill, text, ..
     } = r;
@@ -147,7 +147,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 ///
 /// Pins colour and size only; every other axis inherits the ambient style
 /// an unstyled label would have.
-pub(super) fn menu_button_for(p: &palantir::Palette, text: &TypeScale) -> ButtonTheme {
+pub(super) fn menu_button(p: &palantir::Palette, text: &TypeScale) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         look.text = look.text.with_color(color).with_font_size(text.body);

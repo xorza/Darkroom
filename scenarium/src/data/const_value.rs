@@ -51,7 +51,7 @@ impl ConstValue {
         match self {
             Self::Float(value) => Some(*value),
             Self::Int(value) => Some(*value as f64),
-            Self::Bool(value) => Some(i64::from(*value) as f64),
+            Self::Bool(value) => Some(f64::from(u8::from(*value))),
             _ => None,
         }
     }
@@ -146,7 +146,6 @@ impl Display for ValueText<'_> {
                 f.write_str(value)
             }
             ConstValue::FsPaths(paths) => {
-                // The `join("\n")` this replaces, without its intermediate.
                 if let Some((first, rest)) = paths.split_first() {
                     f.write_str(first)?;
                     for path in rest {

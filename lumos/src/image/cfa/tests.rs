@@ -25,15 +25,17 @@ use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
-use crate::internals::fits::rewrite_fits;
+use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::internals::test_rng::TestRng;
-use crate::io::error::ImageError;
+use crate::io::error::FitsRefusal;
+use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::load_context::LoadContext;
 use crate::io::raw;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use common::TempDir;
 use fits_well::header::Header;
+use fits_well::io::{ChecksumReport, ChecksumStatus};
 use std::fs;
 use std::sync::Arc;
 
@@ -196,25 +198,33 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     assert!(reloaded.planes().eq(gain.planes()));
     assert!(loaded.flat_gain().is_some());
 
-    let cases: [(&str, Edit, &str); 5] = [
+    let extension = LumosExtension::Gain;
+    let cases: [(&str, Edit, FitsRefusal); 5] = [
         (
             "no gain",
             |_, data| data[..4].copy_from_slice(&(-1.0f32).to_be_bytes()),
-            "node 0 holds -1, not a gain",
+            FitsRefusal::NotAGain {
+                node: 0,
+                value: -1.0,
+            },
         ),
         (
             "another step",
             |header, _| {
                 header.set("LUMGSTEP", 8).unwrap();
             },
-            "a node every Some(8) pixels",
+            FitsRefusal::GainStep { step: Some(8) },
         ),
         (
             "another version",
             |header, _| {
                 header.set("LUMOSVER", 2).unwrap();
             },
-            "expected FLATGAIN version 1",
+            FitsRefusal::ExtensionFormat {
+                extension,
+                format: Some("FLATGAIN".to_owned()),
+                version: Some(2),
+            },
         ),
         (
             "another grid",
@@ -222,14 +232,22 @@ fn a_flat_gain_survives_the_fits_round_trip() {
                 header.set("NAXIS1", 3).unwrap();
                 header.set("NAXIS2", 4).unwrap();
             },
-            "shape [3, 4, 3] is not one or three 4x3 grids",
+            FitsRefusal::ExtensionShape {
+                extension,
+                shape: vec![3, 4, 3],
+                image: size,
+            },
         ),
         (
             "no image named",
             |header, _| {
                 header.set("LUMFOR", "SCI").unwrap();
             },
-            "is for \"SCI\", which is no image of the file",
+            FitsRefusal::ClaimsMissingImage {
+                extension,
+                hdu: 1,
+                image: "SCI".to_owned(),
+            },
         ),
     ];
     for (name, edit, expected) in cases {
@@ -241,10 +259,37 @@ fn a_flat_gain_survives_the_fits_round_trip() {
             true
         });
         let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
-        assert!(
-            matches!(&error, ImageError::FitsUnsupported { reason, .. } if reason.contains(expected)),
-            "{name}: {error:?}"
-        );
+        assert_eq!(fits_refusal(error), expected, "{name}");
+    }
+    assert_eq!(
+        FitsRefusal::ExtensionShape {
+            extension,
+            shape: vec![3, 4, 3],
+            image: size,
+        }
+        .to_string(),
+        "LUMGAIN: shape [3, 4, 3] is not one or three 4x3 grids over the image's 12x6"
+    );
+    // A keyword the header states reads as its value, one it leaves out as no value at all.
+    for (refusal, text) in [
+        (
+            FitsRefusal::GainStep { step: Some(8) },
+            "LUMGAIN: a node every 8 pixels; this reader takes 4",
+        ),
+        (
+            FitsRefusal::GainStep { step: None },
+            "LUMGAIN: no node spacing stated; this reader takes 4",
+        ),
+        (
+            FitsRefusal::ExtensionFormat {
+                extension,
+                format: None,
+                version: Some(1),
+            },
+            "LUMGAIN: format none version 1; expected FLATGAIN version 1",
+        ),
+    ] {
+        assert_eq!(refusal.to_string(), text);
     }
 
     // A mono frame's one plane under three colours' grids, through either loader.
@@ -253,10 +298,12 @@ fn a_flat_gain_survives_the_fits_round_trip() {
         CfaImage::from_file(&path, &LoadContext::default()).unwrap_err(),
         LinearImage::from_file(&path, &LoadContext::default()).unwrap_err(),
     ] {
-        assert!(
-            matches!(&error, ImageError::FitsUnsupported { reason, .. }
-                if reason.contains("holds 3 grids for an image of 1 colours or channels")),
-            "{error:?}"
+        assert_eq!(
+            fits_refusal(error),
+            FitsRefusal::GainChannels {
+                grids: 3,
+                channels: 1
+            }
         );
     }
 }
@@ -283,21 +330,29 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
         .save_fits(&path)
         .unwrap();
     };
-    let cases: [(&str, Edit, &str); 6] = [
+    let extension = LumosExtension::Flags;
+    let cases: [(&str, Edit, FitsRefusal); 6] = [
         (
             "unknown bit",
             |_, data| data[5] |= 0x40,
-            "(2, 1): byte 0x60 holds a bit no flag has",
+            FitsRefusal::UnknownFlagBits {
+                pixel: Vec2us::new(2, 1),
+                byte: 0x60,
+            },
         ),
         (
             "NO_DATA lost",
             |_, data| data[1] = 0,
-            "(1, 0): NO_DATA disagrees",
+            FitsRefusal::NoDataDisagrees {
+                pixel: Vec2us::new(1, 0),
+            },
         ),
         (
             "NO_DATA added",
             |_, data| data[3] = 1,
-            "(0, 1): NO_DATA disagrees",
+            FitsRefusal::NoDataDisagrees {
+                pixel: Vec2us::new(0, 1),
+            },
         ),
         (
             "another geometry",
@@ -305,21 +360,33 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
                 header.set("NAXIS1", 2).unwrap();
                 header.set("NAXIS2", 3).unwrap();
             },
-            "shape [2, 3] is not the image's 3x2",
+            FitsRefusal::ExtensionShape {
+                extension,
+                shape: vec![2, 3],
+                image: size,
+            },
         ),
         (
             "another version",
             |header, _| {
                 header.set("LUMOSVER", 2).unwrap();
             },
-            "expected PIXFLAGS version 1",
+            FitsRefusal::ExtensionFormat {
+                extension,
+                format: Some("PIXFLAGS".to_owned()),
+                version: Some(2),
+            },
         ),
         (
             "no image named",
             |header, _| {
                 header.set("LUMFOR", "SCI").unwrap();
             },
-            "is for \"SCI\", which is no image of the file",
+            FitsRefusal::ClaimsMissingImage {
+                extension,
+                hdu: 1,
+                image: "SCI".to_owned(),
+            },
         ),
     ];
     for (name, edit, expected) in cases {
@@ -331,11 +398,17 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             true
         });
         let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
-        assert!(
-            matches!(&error, ImageError::FitsUnsupported { reason, .. } if reason.contains(expected)),
-            "{name}: {error:?}"
-        );
+        assert_eq!(fits_refusal(error), expected, "{name}");
     }
+    assert_eq!(
+        FitsRefusal::ExtensionFormat {
+            extension,
+            format: Some("PIXFLAGS".to_owned()),
+            version: Some(2),
+        }
+        .to_string(),
+        "LUMFLAGS: format PIXFLAGS version 2; expected PIXFLAGS version 1"
+    );
 
     // The flags are the last HDU, and their 6 bytes open its one 2880-byte data block.
     write();
@@ -344,10 +417,15 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
     file[flags_start + 1] = 0;
     fs::write(&path, &file).unwrap();
     let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
-    assert!(
-        matches!(&error, ImageError::FitsUnsupported { reason, .. }
-            if reason.contains("HDU 1 requires valid DATASUM and CHECKSUM")),
-        "{error:?}"
+    assert_eq!(
+        fits_refusal(error),
+        FitsRefusal::ChecksumRequired {
+            hdu: 1,
+            report: ChecksumReport {
+                datasum: ChecksumStatus::Invalid,
+                checksum: ChecksumStatus::Invalid,
+            },
+        }
     );
 }
 
@@ -510,10 +588,11 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         .unwrap();
     invalid_version[version_card + version_digit] = b'0';
     fs::write(&path, invalid_version).unwrap();
-    assert!(matches!(
-        CfaImage::from_file(&path, &LoadContext::default()),
-        Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("version")
-    ));
+    let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+    assert_eq!(
+        fits_refusal(error),
+        FitsRefusal::CfaVersion { version: Some(0) }
+    );
 
     let mut corrupted = original;
     let sample = 0.1f32.to_be_bytes();
@@ -524,13 +603,15 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     corrupted[offset] ^= 0x01;
     fs::write(&path, corrupted).unwrap();
     let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
-    assert!(
-        matches!(
-            &error,
-            ImageError::FitsUnsupported { reason, .. }
-                if reason.contains("requires valid DATASUM and CHECKSUM")
-        ),
-        "{error:?}"
+    assert_eq!(
+        fits_refusal(error),
+        FitsRefusal::ChecksumRequired {
+            hdu: 0,
+            report: ChecksumReport {
+                datasum: ChecksumStatus::Invalid,
+                checksum: ChecksumStatus::Invalid,
+            },
+        }
     );
 }
 
@@ -744,7 +825,7 @@ fn every_pattern_names_the_colour_at_each_position() {
                     "{pattern:?} {pos:?}"
                 );
                 assert_eq!(CfaType::Bayer(pattern).color_at(pos), expected);
-                assert_eq!(raw::libraw_filter_color(filters, y, x), expected);
+                assert_eq!(raw::filter_color(filters, y, x), expected);
             }
         }
     }

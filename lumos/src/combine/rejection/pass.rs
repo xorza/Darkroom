@@ -38,7 +38,27 @@ pub(crate) struct Proposal {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Narrowing {
     Window(Proposal),
-    PerSample { centre: f32, bounds: SigmaBounds },
+    PerSample(SampleBand),
+}
+
+/// A band about `centre` in units of each sample's own noise model σ there.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SampleBand {
+    pub(crate) centre: f32,
+    pub(crate) bounds: SigmaBounds,
+}
+
+impl SampleBand {
+    /// Whether `value`, the sample at gather `position`, lies within the band, in units of its own
+    /// model σ under `noise` at the centre, raised to the resolution there.
+    pub(crate) fn keeps(self, noise: &NoiseColumns<'_>, position: usize, value: f32) -> bool {
+        let sigma = noise
+            .variance_at(position, self.centre)
+            .sqrt()
+            .max(Spread::resolution(self.centre));
+        let deviation = value - self.centre;
+        -self.bounds.low * sigma <= deviation && deviation <= self.bounds.high * sigma
+    }
 }
 
 impl Pass<'_> {
@@ -145,9 +165,9 @@ impl Pass<'_> {
             self.noise.is_some(),
             "a spread-measuring combine gathers the noise models"
         );
-        Narrowing::PerSample {
+        Narrowing::PerSample(SampleBand {
             centre: Spread::median_of_sorted(self.samples()),
             bounds,
-        }
+        })
     }
 }

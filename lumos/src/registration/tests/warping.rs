@@ -4,8 +4,6 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
-use crate::registration::registration_config;
-use crate::registration::resample::internals;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::registration::transform::{Transform, TransformType};
@@ -18,18 +16,11 @@ fn do_warp(
     transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
-    warp_with(
-        input,
-        transform,
-        registration_config::internals::warp_params(method),
-    )
+    warp_with(input, transform, WarpParams::with_method(method))
 }
 
 fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpParams) -> Buffer2<f32> {
-    let inverse = transform.inverse();
-    let mut output = Buffer2::new_default(input.width(), input.height());
-    internals::warp_plane(input, &mut output, &WarpTransform::new(inverse), params);
-    output
+    WarpTransform::new(transform.inverse()).warp_plane(input, params)
 }
 
 /// Peak signal-to-noise ratio between two images of peak `max_val`, in dB; infinite for equal ones.
@@ -219,7 +210,7 @@ fn interpolation_quality_ordering() {
     let psnr = |method| {
         let params = WarpParams {
             clamping_threshold: None,
-            ..registration_config::internals::warp_params(method)
+            ..WarpParams::with_method(method)
         };
         let restored = warp_with(&warp_with(&ref_buf, &forward, params), &inverse, params);
         let central = extract_central_region(ref_buf.pixels(), restored.pixels(), size, 50);
@@ -308,7 +299,7 @@ fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) ->
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
     use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
-    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::registration::distortion::sip::SipModel;
 
     let size = Size2us::new(128, 128);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
@@ -324,17 +315,11 @@ fn the_public_warp_samples_through_the_sip_correction() {
         step: 11,
         extent: 109,
     });
-    let sip_config = SipConfig {
+    let sip = SipModel {
         order: 3,
-        reference_point: Some(field.centre),
-    };
-    let sip = SipPolynomial::fitted_under(
-        &transform,
-        &ref_points,
-        &target_points,
-        sip_config.order,
-        sip_config.reference_point.unwrap(),
-    );
+        origin: field.centre,
+    }
+    .fitted_under(&transform, &ref_points, &target_points);
     assert!(sip.max_grid_correction(size, 10.0) > 0.1);
     let warp_transform = WarpTransform::with_sip(transform, sip);
 
@@ -344,10 +329,9 @@ fn the_public_warp_samples_through_the_sip_correction() {
         pixels.pixels().to_vec(),
     );
     for method in InterpolationMethod::ALL {
-        let params = registration_config::internals::warp_params(method);
+        let params = WarpParams::with_method(method);
         let warped = warp_transform.warp(&image, params).image;
-        let mut plane = Buffer2::new_default(size.width, size.height);
-        internals::warp_plane(&pixels, &mut plane, &warp_transform, params);
+        let plane = warp_transform.warp_plane(&pixels, params);
         for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
             assert_eq!(
                 a.to_bits(),

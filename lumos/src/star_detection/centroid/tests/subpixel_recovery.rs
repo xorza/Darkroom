@@ -113,7 +113,14 @@ fn the_position_sigma_matches_the_scatter() {
                 },
             )
             .unwrap();
-            let fit = GaussianFit::new(&residual, windowed.pos, &grid.stamp, 0.0, None).unwrap();
+            let fit = GaussianFit::new(FitInputs {
+                pixels: &residual,
+                pos: windowed.pos,
+                grid: &grid.stamp,
+                background: 0.0,
+                noise: None,
+            })
+            .unwrap();
             Draw {
                 windowed_scatter: (windowed.pos - truth).length_squared() / 2.0,
                 windowed_reported: windowed.sigma * windowed.sigma,

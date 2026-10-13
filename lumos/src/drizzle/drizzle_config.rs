@@ -2,19 +2,18 @@
 
 use std::path::Path;
 
-use common::CancelToken;
-
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_result::DrizzleResult;
+use crate::drizzle::drizzle_run::DrizzleRun;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::drizzle::stack;
 use crate::error::InvalidConfigField;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
 use crate::math::size2us::Size2us;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -191,18 +190,14 @@ impl DrizzleConfig {
     /// Returns an error for an invalid configuration, missing frames, image loading failures,
     /// inconsistent image dimensions, a non-finite sample, invalid pixel weights, a failed combine,
     /// or cancellation.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "every stacking entry takes its progress and cancel token the same way, by value"
-    )]
     pub fn drizzle_paths<P: AsRef<Path>>(
         &self,
         frames: Vec<DrizzleFrame<P>>,
         ingest: &IngestConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<DrizzleResult, DrizzleError> {
-        stack::from_files::<LinearImage, P>(frames, self, ingest, &progress, cancel)
+        self.begin(ingest, monitor)
+            .drizzle_files::<LinearImage, P>(frames)
     }
 
     /// Drizzle frames already held in memory, and combine them under [`Self::stack`].
@@ -213,18 +208,13 @@ impl DrizzleConfig {
     /// # Errors
     ///
     /// As [`Self::drizzle_paths`], but for the loads.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "every stacking entry takes its progress and cancel token the same way, by value"
-    )]
     pub fn drizzle_images(
         &self,
         frames: Vec<DrizzleFrame<LinearImage>>,
         ingest: &IngestConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<DrizzleResult, DrizzleError> {
-        stack::from_memory(frames, self, ingest, &progress, cancel)
+        self.begin(ingest, monitor).drizzle_held(frames)
     }
 
     /// Drizzle calibrated, un-demosaiced sensor frames from disk — mosaic FITS or camera RAW — and
@@ -251,18 +241,14 @@ impl DrizzleConfig {
     ///
     /// As [`Self::drizzle_paths`], and for a frame whose mosaic pattern differs from the first
     /// frame's.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "every stacking entry takes its progress and cancel token the same way, by value"
-    )]
     pub fn drizzle_cfa_paths<P: AsRef<Path>>(
         &self,
         frames: Vec<DrizzleFrame<P>>,
         ingest: &IngestConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<DrizzleResult, DrizzleError> {
-        stack::from_files::<CfaImage, P>(frames, self, ingest, &progress, cancel)
+        self.begin(ingest, monitor)
+            .drizzle_files::<CfaImage, P>(frames)
     }
 
     /// Drizzle calibrated mosaics already held in memory, and combine them under [`Self::stack`]:
@@ -271,17 +257,21 @@ impl DrizzleConfig {
     /// # Errors
     ///
     /// As [`Self::drizzle_cfa_paths`], but for the loads.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "every stacking entry takes its progress and cancel token the same way, by value"
-    )]
     pub fn drizzle_cfa_images(
         &self,
         frames: Vec<DrizzleFrame<CfaImage>>,
         ingest: &IngestConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<DrizzleResult, DrizzleError> {
-        stack::from_memory(frames, self, ingest, &progress, cancel)
+        self.begin(ingest, monitor).drizzle_held(frames)
+    }
+
+    /// A drizzle under this configuration, taking its memory reading and decode policy from
+    /// `ingest`, and its progress and cancel token from `monitor`, now.
+    fn begin(&self, ingest: &IngestConfig, monitor: ProgressMonitor) -> DrizzleRun<'_> {
+        DrizzleRun {
+            config: self,
+            ingest: IngestRun::new(ingest, monitor),
+        }
     }
 }

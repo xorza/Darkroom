@@ -9,7 +9,6 @@
 //! [`load_to_disk`]: crate::combine::frame_cache
 //! [`load_in_memory`]: crate::combine::frame_cache
 
-use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
@@ -18,7 +17,7 @@ use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use common::TempDir;
 use std::fs;
 use std::path::Path;
@@ -74,12 +73,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
             ..IngestConfig::default()
         };
         config
-            .stack_paths(
-                &paths,
-                &ingest,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
+            .stack_paths(&paths, &ingest, ProgressMonitor::unattended())
             .expect("stack")
             .image
     };

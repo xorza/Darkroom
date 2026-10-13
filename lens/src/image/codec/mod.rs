@@ -27,6 +27,33 @@ const PLANE_CHUNK: usize = 16 * 1024;
 #[derive(Debug)]
 struct ImageCodec;
 
+/// Why a cached image payload does not read back.
+#[derive(Debug, thiserror::Error)]
+enum DecodeError {
+    #[error("image cache payload is only {byte_len} bytes")]
+    Short { byte_len: u64 },
+    #[error("image cache payload names an unknown color format")]
+    UnknownFormat,
+    #[error("image cache width does not fit in memory")]
+    WidthOverflow,
+    #[error("image cache height does not fit in memory")]
+    HeightOverflow,
+    #[error("image cache dimensions overflow memory")]
+    DimensionsOverflow,
+    #[error("image byte count does not fit in the cache format")]
+    ByteCountOverflow,
+    #[error("image cache payload length overflow")]
+    LengthOverflow,
+    #[error("image cache payload has length {byte_len}, expected {expected}")]
+    LengthMismatch { byte_len: u64, expected: u64 },
+    #[error("invalid cached image: {0}")]
+    InvalidImage(#[from] imaginarium::Error),
+    #[error("planar image cache payload has format {0}")]
+    PlanarFormat(ColorFormat),
+    #[error("image cache payload names layout {0}")]
+    UnknownLayout(u8),
+}
+
 #[async_trait]
 impl CustomValueCodec for ImageCodec {
     fn version(&self) -> u32 {
@@ -67,31 +94,29 @@ impl CustomValueCodec for ImageCodec {
         byte_len: u64,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         if byte_len < HEADER_LEN {
-            return Err(format!("image cache payload is only {byte_len} bytes").into());
+            return Err(DecodeError::Short { byte_len }.into());
         }
         let mut header = [0; HEADER_LEN as usize];
         reader.read_exact(&mut header).await?;
         let layout = header[0];
-        let color_format = format_from_bytes([header[1], header[2]])
-            .ok_or("image cache payload names an unknown color format")?;
+        let color_format =
+            format_from_bytes([header[1], header[2]]).ok_or(DecodeError::UnknownFormat)?;
         let width = usize::try_from(u64::from_le_bytes(header[3..11].try_into().unwrap()))
-            .map_err(|_| "image cache width does not fit in memory")?;
+            .map_err(|_| DecodeError::WidthOverflow)?;
         let height = usize::try_from(u64::from_le_bytes(header[11..19].try_into().unwrap()))
-            .map_err(|_| "image cache height does not fit in memory")?;
+            .map_err(|_| DecodeError::HeightOverflow)?;
         let pixel_len = width
             .checked_mul(height)
             .and_then(|pixel_count| pixel_count.checked_mul(color_format.byte_count()))
-            .ok_or("image cache dimensions overflow memory")?;
+            .ok_or(DecodeError::DimensionsOverflow)?;
         let expected_len = HEADER_LEN
-            .checked_add(
-                u64::try_from(pixel_len)
-                    .map_err(|_| "image byte count does not fit in the cache format")?,
-            )
-            .ok_or("image cache payload length overflow")?;
+            .checked_add(u64::try_from(pixel_len).map_err(|_| DecodeError::ByteCountOverflow)?)
+            .ok_or(DecodeError::LengthOverflow)?;
         if byte_len != expected_len {
-            return Err(format!(
-                "image cache payload has length {byte_len}, expected {expected_len}"
-            )
+            return Err(DecodeError::LengthMismatch {
+                byte_len,
+                expected: expected_len,
+            }
             .into());
         }
         let image = match layout {
@@ -106,20 +131,14 @@ impl CustomValueCodec for ImageCodec {
                 }
                 let desc = ImageDesc::new(width, height, color_format);
                 Image::from(
-                    imaginarium::Image::new_with_data(desc, bytes)
-                        .map_err(|error| format!("invalid cached image: {error:?}"))?,
+                    imaginarium::Image::new_with_data(desc, bytes).map_err(DecodeError::from)?,
                 )
             }
             PLANAR => {
                 let channels = match color_format {
                     ColorFormat::L_F32 => 1,
                     ColorFormat::RGB_F32 => 3,
-                    _ => {
-                        return Err(format!(
-                            "planar image cache payload has format {color_format}"
-                        )
-                        .into());
-                    }
+                    _ => return Err(DecodeError::PlanarFormat(color_format).into()),
                 };
                 let mut chunk = vec![0_u8; PLANE_CHUNK];
                 let mut planes = Vec::with_capacity(channels);
@@ -131,7 +150,7 @@ impl CustomValueCodec for ImageCodec {
                     planes,
                 ))
             }
-            _ => return Err(format!("image cache payload names layout {layout}").into()),
+            _ => return Err(DecodeError::UnknownLayout(layout).into()),
         };
         Ok(Arc::new(image))
     }
@@ -142,9 +161,13 @@ fn header(layout: u8, desc: ImageDesc) -> [u8; HEADER_LEN as usize] {
     let mut header = [0; HEADER_LEN as usize];
     header[0] = layout;
     header[1..3].copy_from_slice(&format_bytes(desc.color_format));
-    header[3..11].copy_from_slice(&(desc.width as u64).to_le_bytes());
-    header[11..19].copy_from_slice(&(desc.height as u64).to_le_bytes());
+    header[3..11].copy_from_slice(&extent(desc.width).to_le_bytes());
+    header[11..19].copy_from_slice(&extent(desc.height).to_le_bytes());
     header
+}
+
+fn extent(pixels: usize) -> u64 {
+    u64::try_from(pixels).expect("an image extent fits u64")
 }
 
 /// One plane as little-endian `f32`s, a `chunk` at a time.

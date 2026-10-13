@@ -73,7 +73,7 @@ fn camera_white_balance(
 /// LibRaw's `FC` macro: the colour index at (row, col) of a `filters` word, which holds two bits
 /// for each of the 8 × 2 positions of its repeating block.
 #[inline(always)]
-pub(crate) const fn libraw_filter_color(filters: u32, row: usize, col: usize) -> usize {
+pub(crate) const fn filter_color(filters: u32, row: usize, col: usize) -> usize {
     ((filters >> ((((row << 1) & 0xE) | (col & 1)) << 1)) & 3) as usize
 }
 
@@ -120,11 +120,11 @@ fn open_raw(path: &Path, context: &LoadContext) -> Result<UnpackedRaw, ImageErro
 
 /// Load a raw file as a linear image within `[0, 1]`: the light-frame preview.
 ///
-/// A sensor lumos demosaics goes the science path — [`load_raw_cfa`]'s frame, its demosaic over
+/// A sensor lumos demosaics goes the science path — [`load_cfa`]'s frame, its demosaic over
 /// the visible area alone, then a clamp — so the preview and a calibrated frame cannot disagree
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
 /// three-colour CFA — is LibRaw's own processing.
-pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+pub(crate) fn load(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
     let raw = open_raw(path, context)?;
     context.check_cancelled(path)?;
     raw.into_linear_image(context)
@@ -132,7 +132,7 @@ pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage
 
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`: the file is
 /// read whole, as every load reads it, but its sensor data is not decoded.
-pub(crate) fn raw_cfa_frame_info(
+pub(crate) fn cfa_frame_info(
     path: &Path,
     context: &LoadContext,
 ) -> Result<CfaFrameInfo, ImageError> {
@@ -178,7 +178,7 @@ fn frame_info(libraw: &Libraw) -> Result<CfaFrameInfo, RawError> {
 /// Load a raw file as its CFA frame, un-demosaiced and unclamped: the calibration and science
 /// path, where defects are repaired before any demosaic and a master's noise below its pedestal
 /// stays in.
-pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
+pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
     let raw = open_raw(path, context)?;
     context.check_cancelled(path)?;
     raw.into_cfa_image()

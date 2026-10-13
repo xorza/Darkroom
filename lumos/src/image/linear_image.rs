@@ -18,11 +18,11 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode as fits_decode;
 use crate::io::input_format::InputFormat;
 use crate::io::load_context::LoadContext;
-use crate::io::standard::{f32_target_format, read_standard_image};
+use crate::io::standard;
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -44,15 +44,18 @@ impl LinearImage {
     ///
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
     /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
-    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
-        let path = path.as_ref();
+    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
+        Self::load_path(path.as_ref(), context)
+    }
+
+    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         context.check_cancelled(path)?;
         let format = match InputFormat::of(path)? {
-            InputFormat::Fits => return fits_decode::load_linear_fits(path, context),
+            InputFormat::Fits => return fits_decode::load_linear(path, context),
             InputFormat::CameraRaw => {
                 return Err(ImageError::scientific_rejection(
                     path,
-                    "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+                    ScientificRefusal::CameraRaw,
                 ));
             }
             InputFormat::Raster(format) => format,
@@ -60,34 +63,32 @@ impl LinearImage {
         if format != FileFormat::Tiff {
             return Err(ImageError::scientific_rejection(
                 path,
-                "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
+                ScientificRefusal::PreviewOnlyRaster { format },
             ));
         }
 
-        let decoded = read_standard_image(path)?;
+        let decoded = standard::read(path)?;
         context.check_cancelled(path)?;
         let desc = decoded.desc();
         if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
             return Err(ImageError::scientific_rejection(
                 path,
-                format!(
-                    "{}x{} has a side past {} px",
-                    desc.width,
-                    desc.height,
-                    ImageDimensions::MAX_SIDE
-                ),
+                ScientificRefusal::RasterSideTooLong {
+                    width: desc.width,
+                    height: desc.height,
+                },
             ));
         }
         if !decoded.desc().color_format.sample_type.is_float() {
             return Err(ImageError::scientific_rejection(
                 path,
-                "scientific raster input must be a floating-point TIFF",
+                ScientificRefusal::IntegerRaster,
             ));
         }
         if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
             return Err(ImageError::scientific_rejection(
                 path,
-                "scientific raster input must not contain an alpha channel",
+                ScientificRefusal::AlphaChannel,
             ));
         }
 
@@ -223,7 +224,7 @@ impl LinearImage {
     /// # Panics
     /// If `image` is not one of those two formats. Callers check the format themselves — the
     /// ops live on `LinearImage`, so there is no shared gate to name.
-    pub(crate) fn from_f32_image(image: &Image) -> Self {
+    fn from_f32_image(image: &Image) -> Self {
         Self {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
@@ -354,14 +355,14 @@ impl StackableImage for LinearImage {
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::from_file(path, context)
+        Self::load_path(path, context)
     }
 
     /// A FITS header answers without a decode, the reader's chunk buffers with it. A float TIFF
     /// has no header this reads apart from its pixels.
     fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
         match InputFormat::of(path).ok()? {
-            InputFormat::Fits => fits_decode::fits_linear_peek(path, context).ok(),
+            InputFormat::Fits => fits_decode::linear_peek(path, context).ok(),
             InputFormat::CameraRaw | InputFormat::Raster(_) => None,
         }
     }
@@ -419,7 +420,7 @@ impl From<&Image> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
     /// source is not already in one, rather than asking the caller to arrive with one.
     fn from(image: &Image) -> Self {
-        let target = f32_target_format(image);
+        let target = standard::f32_target_format(image);
         if image.desc().color_format == target {
             Self::from_f32_image(image)
         } else {
@@ -459,17 +460,21 @@ mod tests {
         assert_eq!(gray.channel(0).pixels(), &[0.25, 0.5, 0.75]);
     }
 
+    /// The channel mean as f32 rounds it, the sum times the f32 `1/3`: (0.3, 0, 0) gives
+    /// `0.3·⅓`, which rounds one ulp above `0.1f32`, to `0x3dcc_ccce`; (0.6, 0.6, 0.6) sums to
+    /// `1.8000001` and its third rounds back onto `0.6f32`. Mono is its own intensity.
     #[test]
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
-        // RGB: (0.3,0,0) → 0.1, (0.6,0.6,0.6) → 0.6 (mean; approx for the /3 rounding).
         let rgb = rgb_image(
             Size2us::new(2, 1),
             vec![0.3, 0.6],
             vec![0.0, 0.6],
             vec![0.0, 0.6],
         );
-        let i = rgb.intensity_plane();
-        assert!((i.pixels()[0] - 0.1).abs() < 1e-6 && (i.pixels()[1] - 0.6).abs() < 1e-6);
+        assert_eq!(
+            rgb.intensity_plane().pixels(),
+            &[f32::from_bits(0x3dcc_ccce), 0.6]
+        );
 
         let l = gray_image(Size2us::new(2, 1), vec![0.2, 0.7]);
         assert_eq!(l.intensity_plane().pixels(), &[0.2, 0.7]);

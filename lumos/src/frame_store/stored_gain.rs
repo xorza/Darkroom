@@ -60,7 +60,7 @@ impl StoredGain {
             nodes.start,
             self.planes
                 .iter()
-                .map(|plane| plane.chunk(nodes.start * columns, nodes.end * columns))
+                .map(|plane| plane.chunk(nodes.start * columns..nodes.end * columns))
                 .collect(),
         )
     }

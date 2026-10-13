@@ -35,7 +35,7 @@ const SUM_F32_CROSSOVER: usize = 16;
 /// splits its input — `par_chunks` over an image plane, say — must be able to combine the partial
 /// sums without dropping to f32 between them, or the wide accumulator buys nothing at exactly the
 /// length it matters most.
-pub(crate) fn sum_f32(values: &[f32]) -> f64 {
+fn sum_f32(values: &[f32]) -> f64 {
     if values.len() >= SUM_F32_CROSSOVER {
         SumF32(values).dispatch()
     } else {

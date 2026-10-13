@@ -4,7 +4,7 @@
 //! is kept across runs, so a repeated plan on an unchanged graph allocates
 //! nothing.
 
-use crate::containers::set::IdxSet;
+use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::index::NodeIdx;

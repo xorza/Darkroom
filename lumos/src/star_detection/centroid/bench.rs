@@ -19,6 +19,7 @@ use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
+use crate::star_detection::centroid::stamp::FitInputs;
 use crate::star_detection::centroid::stamp_background::StampBackground;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
@@ -53,13 +54,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
             let at = measured.centre();
             let fit = || {
-                GaussianFit::new(
-                    black_box(&measured.residual),
-                    at,
-                    &measured.grid.stamp,
-                    0.0,
-                    None,
-                )
+                GaussianFit::new(FitInputs {
+                    pixels: black_box(&measured.residual),
+                    pos: at,
+                    grid: &measured.grid.stamp,
+                    background: 0.0,
+                    noise: None,
+                })
             };
             assert!(fit().is_some(), "the fit converges on a bright star");
             b.iter(fit);
@@ -73,11 +74,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let at = measured.centre();
             let fit = || {
                 MoffatFit::new(
-                    black_box(&measured.residual),
-                    at,
-                    &measured.grid.stamp,
-                    0.0,
-                    None,
+                    FitInputs {
+                        pixels: black_box(&measured.residual),
+                        pos: at,
+                        grid: &measured.grid.stamp,
+                        background: 0.0,
+                        noise: None,
+                    },
                     BETA,
                 )
             };

@@ -79,10 +79,8 @@ mod tests {
 
     use crate::astro::masters::Masters;
 
-    fn bundle(defects: bool) -> CalibrationMasters {
-        if !defects {
-            return CalibrationMasters::default();
-        }
+    /// A bundle of one dark master and the defect map built from it.
+    fn dark_bundle() -> CalibrationMasters {
         CalibrationMasters::from_images(
             CalibrationSet {
                 dark: Some(CfaImage::from_plane(
@@ -100,13 +98,16 @@ mod tests {
 
     #[test]
     fn display_empty_bundle() {
-        assert_eq!(Masters::from(bundle(false)).to_string(), "no masters");
+        assert_eq!(
+            Masters::from(CalibrationMasters::default()).to_string(),
+            "no masters"
+        );
     }
 
     #[test]
     fn display_lists_present_masters() {
         assert_eq!(
-            Masters::from(bundle(true)).to_string(),
+            Masters::from(dark_bundle()).to_string(),
             "masters: dark, defects; 0 defective pixels, 0.000%"
         );
     }

@@ -96,7 +96,7 @@ impl KernelPlan {
 
 /// How far a drop reaches from its pixel's centre, in the two grids — see [`KernelPlan::reach`].
 #[derive(Debug, Clone, Copy)]
-pub(super) struct DropReach {
-    pub(super) output: f64,
-    pub(super) input: f64,
+pub(crate) struct DropReach {
+    pub(crate) output: f64,
+    pub(crate) input: f64,
 }

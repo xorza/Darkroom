@@ -14,8 +14,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 /// A body's own arithmetic — what `Add` computes, what `Concat` joins — needs no
 /// graph, no schedule and no cache, only an invoke. But an invoke takes a
 /// context, the node's persistent state, its shared event state, the run's
-/// per-output demand, and a buffer to write into, so every library test that
-/// wanted one stood all five up by hand.
+/// per-output demand, and a buffer to write into.
 ///
 /// **State persists across calls**, because a node's does: two calls on one
 /// invoker see the same [`AnyState`] and the same [`SharedAnyState`], the way

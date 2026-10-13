@@ -5,8 +5,6 @@
 
 use crate::internals::prelude::*;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
-use crate::registration::registration_config;
-use crate::registration::resample::internals::warp_plane;
 use crate::registration::resample::kernel::warp_kernel::Filter;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
@@ -40,7 +38,7 @@ fn integer_shifts_copy_the_source() {
             f64::from(shift.1),
         )));
         for method in InterpolationMethod::ALL {
-            let params = registration_config::internals::warp_params(method);
+            let params = WarpParams::with_method(method);
             let tolerance = match Filter::of(method) {
                 Some(Filter::Lanczos(order)) => {
                     let lut = order.lut();
@@ -53,8 +51,7 @@ fn integer_shifts_copy_the_source() {
                 }
                 _ => 0.0,
             };
-            let mut output = Buffer2::new_filled(size.width, size.height, f32::NAN);
-            warp_plane(&input, &mut output, &transform, params);
+            let output = transform.warp_plane(&input, params);
             for y in 0..size.height {
                 for x in 0..size.width {
                     let source_x = x as i32 + shift.0;
@@ -161,13 +158,7 @@ fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
     ] {
-        let mut output = Buffer2::new_default(size.width, size.height);
-        warp_plane(
-            &input,
-            &mut output,
-            &wt,
-            registration_config::internals::warp_params(method),
-        );
+        let output = wt.warp_plane(&input, WarpParams::with_method(method));
         assert!(
             output
                 .pixels()

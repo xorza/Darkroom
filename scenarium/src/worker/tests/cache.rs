@@ -224,7 +224,7 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     use crate::internals::blob::{BLOB_TYPE, Blob};
-    use crate::library::TypeEntry;
+    use crate::library::type_entry::TypeEntry;
 
     let dir = TempDir::new("flush-unsupported");
     let mut graph = TestGraph::new();
@@ -291,7 +291,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
     use crate::internals::blob::{BLOB_TYPE, Blob};
-    use crate::library::TypeEntry;
+    use crate::library::type_entry::TypeEntry;
 
     // A blob weighs its length.
     const HEAVY_CPU: usize = 4096;

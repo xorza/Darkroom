@@ -86,23 +86,26 @@ fn tile_samples_centre_on_the_tile() {
             .collect(),
     );
     let tile = URect::new(Vec2us::new(10, 20), Vec2us::new(74, 84));
-    let (mut values, mut offsets) = (Vec::new(), Vec::new());
-    collect_tile_pixels(&pixels, tile, &mut values, &mut offsets);
+    let mut samples = TileSamples::default();
+    samples.collect_tile(&pixels, tile);
+    let TileSamples { values, offsets } = &samples;
     assert_eq!(values.len(), MAX_TILE_SAMPLES);
     let mean = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
     assert_eq!(mean, 41.5 + 1000.0 * 51.5);
-    for (&v, &[ox, oy]) in values.iter().zip(&offsets) {
+    for (&v, &[ox, oy]) in values.iter().zip(offsets) {
         assert_eq!(2 * v as i32, 83 + ox + 1000 * (103 + oy), "{v}");
     }
 
     let small = URect::new(Vec2us::new(3, 4), Vec2us::new(13, 9));
-    values.clear();
-    offsets.clear();
-    collect_tile_pixels(&pixels, small, &mut values, &mut offsets);
+    let mut samples = TileSamples::default();
+    samples.collect_tile(&pixels, small);
     let every: Vec<f32> = (4..9)
         .flat_map(|y| (3..13).map(move |x| (x + 1000 * y) as f32))
         .collect();
-    assert_eq!(values, every, "a tile within the budget reads every pixel");
+    assert_eq!(
+        samples.values, every,
+        "a tile within the budget reads every pixel"
+    );
 }
 
 /// The unmasked pixels of a tile, read in raster order and sampled by [`sample_ordinal`] past the
@@ -182,8 +185,12 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
             .map(|k| expected[sample_ordinal(k, count, expected.len())])
             .collect();
 
-        let (mut actual, mut offsets) = (Vec::new(), Vec::new());
-        collect_unmasked_pixels(&pixels, &mask, case.tile, &mut actual, &mut offsets);
+        let mut samples = TileSamples::default();
+        samples.collect_unmasked(&pixels, &mask, case.tile);
+        let TileSamples {
+            values: actual,
+            offsets,
+        } = samples;
 
         assert_eq!(actual, expected, "case: {case:?}");
         let named: Vec<[i32; 2]> = actual
@@ -211,8 +218,6 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
 /// the slope's spread counts in it.
 #[test]
 fn a_tile_reads_its_sky_about_its_own_plane() {
-    use crate::background_mesh::workspace::TileScratch;
-
     let size = Size2us::new(40, 40);
     // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
     let tile = URect::new(Vec2us::new(4, 6), Vec2us::new(36, 38));
@@ -238,7 +243,13 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
     let mut scratch = TileScratch::default();
     for mask in [None, Some(&star)] {
         let mut stats = |pixels: &Buffer2<f32>| {
-            TileStats::compute(pixels, mask, None, tile, 3, &mut scratch).unwrap()
+            let input = TileInput {
+                pixels,
+                mask,
+                eligible: None,
+                sigma_clip_iterations: 3,
+            };
+            TileStats::compute(&input, tile, &mut scratch).unwrap()
         };
         let masked = mask.is_some();
         assert_eq!(

@@ -21,15 +21,12 @@
 use glam::Vec2;
 use scenarium::{Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, NodeKind};
 
-use crate::core::edit::error::MalformedIntent;
+use crate::core::edit::error::{MalformedIntent, Role};
 
 /// An id the intent must actually name. A nil id is nothing a widget could
 /// have read out of the document, so it is malformed rather than stale — and
 /// it comes first, because the lookup would read it as merely absent.
-pub(super) const fn non_nil_node(
-    node_id: NodeId,
-    role: &'static str,
-) -> Result<(), MalformedIntent> {
+pub(super) const fn non_nil_node(node_id: NodeId, role: Role) -> Result<(), MalformedIntent> {
     if node_id.is_nil() {
         return Err(MalformedIntent::NilNodeId { role });
     }
@@ -40,11 +37,11 @@ pub(super) const fn non_nil_node(
 ///
 /// `Ok(None)` means the node is simply gone — the ordinary outcome of input
 /// that spans frames, which the caller turns into "no step".
-pub(super) fn live_node<'a>(
-    graph: &'a Graph,
+pub(super) fn live_node(
+    graph: &Graph,
     node_id: NodeId,
-    role: &'static str,
-) -> Result<Option<&'a Node>, MalformedIntent> {
+    role: Role,
+) -> Result<Option<&Node>, MalformedIntent> {
     non_nil_node(node_id, role)?;
     Ok(graph.find(node_id))
 }
@@ -57,7 +54,7 @@ pub(super) fn live_node<'a>(
 /// batch that repeats an id fails here on its second intent, against a graph
 /// the first has already been applied to.
 pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), MalformedIntent> {
-    non_nil_node(node_id, "new")?;
+    non_nil_node(node_id, Role::New)?;
     if graph.find(node_id).is_some() {
         return Err(MalformedIntent::NodeAlreadyExists { node_id });
     }
@@ -79,6 +76,15 @@ pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> 
     Ok(())
 }
 
+/// One node an insertion introduces, as the checks below read it: the id it
+/// lands under, the node itself, and the bindings seeded with it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Insertion<'a> {
+    pub(super) node_id: NodeId,
+    pub(super) node: &'a Node,
+    pub(super) bindings: &'a [BindingEntry],
+}
+
 /// The bindings riding along with an insertion: each one an input of the new
 /// node, read from a node the graph holds, never from the new node itself.
 ///
@@ -88,10 +94,13 @@ pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> 
 pub(super) fn seed_bindings(
     graph: &Graph,
     library: &Library,
-    node_id: NodeId,
-    node: &Node,
-    bindings: &[BindingEntry],
+    insertion: Insertion<'_>,
 ) -> Result<(), MalformedIntent> {
+    let Insertion {
+        node_id,
+        node,
+        bindings,
+    } = insertion;
     for BindingEntry { port, binding } in bindings {
         let port = *port;
         if port.node_id != node_id {
@@ -108,7 +117,7 @@ pub(super) fn seed_bindings(
             }
             // And the producer has to be there, or the graph keeps a dangling
             // edge.
-            present_node(graph, source.node_id, "binding producer")?;
+            present_node(graph, source.node_id, Role::BindingProducer)?;
         }
     }
     Ok(())
@@ -143,7 +152,7 @@ fn declares_const_only(node: &Node, library: &Library, port_idx: usize) -> bool 
 /// A node an insertion's wiring points at. Unlike [`live_node`] a miss is
 /// malformed, not stale — an insertion's wiring is authored in the same breath
 /// as its node.
-fn present_node(graph: &Graph, node_id: NodeId, role: &'static str) -> Result<(), MalformedIntent> {
+fn present_node(graph: &Graph, node_id: NodeId, role: Role) -> Result<(), MalformedIntent> {
     non_nil_node(node_id, role)?;
     if graph.find(node_id).is_some() {
         return Ok(());
@@ -154,7 +163,7 @@ fn present_node(graph: &Graph, node_id: NodeId, role: &'static str) -> Result<()
 /// Positions reach the view verbatim, and a non-finite one fails
 /// `GraphView::validate` — which only runs on save and load, so an unchecked
 /// NaN surfaces as a document that won't reopen.
-pub(super) fn finite_position(pos: Vec2, role: &'static str) -> Result<(), MalformedIntent> {
+pub(super) fn finite_position(pos: Vec2, role: Role) -> Result<(), MalformedIntent> {
     if !pos.is_finite() {
         return Err(MalformedIntent::NonFinitePosition { role, pos });
     }

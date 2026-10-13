@@ -1,12 +1,13 @@
 //! Why a registration found no transform.
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
 use crate::registration::transform::TransformType;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 
 /// Input catalog supplied to image registration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,39 @@ impl Display for RegistrationCatalog {
             Self::Reference => f.write_str("reference"),
             Self::Target => f.write_str("target"),
         }
+    }
+}
+
+/// A star measurement registration requires to be finite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StarField {
+    Fwhm,
+    Flux,
+    Snr,
+    Peak,
+    Sharpness,
+    Eccentricity,
+    /// The GROUND roundness.
+    Ground,
+    /// The SROUND roundness.
+    Sround,
+    /// The position's measurement σ.
+    PositionSigma,
+}
+
+impl Display for StarField {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Fwhm => "FWHM",
+            Self::Flux => "flux",
+            Self::Snr => "SNR",
+            Self::Peak => "peak",
+            Self::Sharpness => "sharpness",
+            Self::Eccentricity => "eccentricity",
+            Self::Ground => "GROUND",
+            Self::Sround => "SROUND",
+            Self::PositionSigma => "position σ",
+        })
     }
 }
 
@@ -72,11 +106,7 @@ fn joined(failures: &[FailedModel]) -> String {
         .join("; ")
 }
 
-/// Registration error types.
-///
-/// `position` and `catalog` reach the messages below through [`RegistrationCatalog`]'s and
-/// [`DVec2`]'s own formatting, which is why those two keep hand-written `Display` impls rather
-/// than deriving one they would only use here.
+/// Why a registration found no transform.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RegistrationError {
     /// Not enough stars detected.
@@ -95,7 +125,7 @@ pub enum RegistrationError {
     InvalidStarField {
         catalog: RegistrationCatalog,
         index: usize,
-        field: &'static str,
+        field: StarField,
         value: f64,
     },
     /// No matching star patterns found.

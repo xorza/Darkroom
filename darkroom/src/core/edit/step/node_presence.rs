@@ -3,7 +3,8 @@
 use scenarium::{DetachedNode, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::{Document, ItemPlacement};
+use crate::core::document::Document;
+use crate::core::document::graph_view::ItemPlacement;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 

@@ -19,6 +19,7 @@ fn fits_report_their_own_widths() {
     /// [`EXACT_FIT_PX2`]'s relative counterpart on a width, scaled by `(A + B) / A` = 1.125 for the
     /// sky under these stars, as the fit modules' own exact rows are.
     const EXACT_FIT: f64 = 1e-6 * 1.125;
+    #[derive(Debug)]
     struct Case {
         name: &'static str,
         profile: StarProfile,
@@ -147,8 +148,16 @@ fn windowed_covariance_deconvolves_to_the_source() {
         let measured = Measured::flat(&pixels, 0.0, 1.0);
         let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
         for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {
-            let cov = Cov2::windowed(&measured.residual, 0.0, pos, radius, seed)
-                .expect("a clean Gaussian converges");
+            let cov = Cov2::windowed(
+                StampAt {
+                    residual: &measured.residual,
+                    pos,
+                    radius,
+                },
+                0.0,
+                seed,
+            )
+            .expect("a clean Gaussian converges");
             let name = format!("σ ({sigma_x}, {sigma_y}) from seed {seed}");
             assert!((cov.xx / xx - 1.0).abs() <= 1e-7, "{name}: xx {}", cov.xx);
             assert!((cov.yy / yy - 1.0).abs() <= 1e-7, "{name}: yy {}", cov.yy);
@@ -189,8 +198,16 @@ fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
     }
     let scatter = 2.0 * f64::from(NOISE) * spread.sqrt() / (sigma_sq * weighted_signal);
 
-    let cov = Cov2::windowed(&measured.residual, 0.0, pos, radius, sigma_sq)
-        .expect("a noisy Gaussian converges");
+    let cov = Cov2::windowed(
+        StampAt {
+            residual: &measured.residual,
+            pos,
+            radius,
+        },
+        0.0,
+        sigma_sq,
+    )
+    .expect("a noisy Gaussian converges");
     let ratio = (cov.yy / cov.xx).sqrt();
     assert!(
         (ratio - 1.0).abs() <= 4.0 * scatter,
@@ -220,13 +237,13 @@ fn inverse_variance_weights_downweight_bright_pixels() {
     // path to them — a flat stamp 0.5 above the sky (dyadic, so exact) must weigh every pixel as
     // the signal 0.5 above.
     let pixels = Buffer2::new_filled(32, 32, 0.625f32);
-    let fit = StampFit::prepare::<6>(
-        &pixels,
-        DVec2::splat(16.0),
-        &StampGrid::new(3),
-        bg as f32,
-        Some(noise),
-    )
+    let fit = StampFit::prepare::<6>(FitInputs {
+        pixels: &pixels,
+        pos: DVec2::splat(16.0),
+        grid: &StampGrid::new(3),
+        background: bg as f32,
+        noise: Some(noise),
+    })
     .expect("stamp at centre");
     let weights = fit.weights.expect("a noise model means a weighted fit");
     assert_eq!(weights.len(), 7 * 7);

@@ -15,8 +15,8 @@ use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
 use crate::io::load_context::LoadContext;
+use crate::io::raw;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
-use crate::io::raw::load_raw;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -33,7 +33,7 @@ fn markesteijn_quality_vs_libraw() {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Quality comparison on: {}\n", path.display());
 
-    let ours = load_raw(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load(&path, &LoadContext::default()).unwrap();
     let one_pass = load_raw_libraw_demosaic(&path, 1).unwrap();
     let three_pass = load_raw_libraw_demosaic(&path, 3).unwrap();
     assert_eq!(ours.dimensions(), one_pass.dimensions());
@@ -83,7 +83,7 @@ fn bayer_rcd_quality_vs_libraw() {
         .expect("No Bayer test file found in test_data/raw_samples/");
     println!("Bayer quality comparison on: {}\n", path.display());
 
-    let ours = load_raw(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load(&path, &LoadContext::default()).unwrap();
     let size = Size2us::new(ours.width(), ours.height());
     for (qual, label) in [(3, "AHD"), (2, "PPG"), (11, "DHT")] {
         let reference = load_raw_libraw_demosaic(&path, qual).unwrap();
@@ -218,7 +218,6 @@ fn compare_channels(
         (1.0, 0.0)
     };
 
-    // Compute residuals after regression
     let mut sum_abs_err = 0.0f64;
     let mut sum_sq_err = 0.0f64;
     let mut max_abs = 0.0_f64;
@@ -245,7 +244,6 @@ fn compare_channels(
         f64::INFINITY
     };
 
-    // Pearson correlation
     let correlation = (nf * sum_ab - sum_a * sum_b)
         / ((nf * sum_a2 - sum_a * sum_a).sqrt() * (nf * sum_b2 - sum_b * sum_b).sqrt());
 

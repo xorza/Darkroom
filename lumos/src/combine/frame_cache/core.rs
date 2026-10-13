@@ -7,10 +7,7 @@
 //! chunk before it is reduced.
 
 use std::mem;
-use std::ops::Range;
 use std::thread;
-
-use common::CancelToken;
 
 use crate::combine::frame_cache::frame_chunk::{ChunkCopy, FrameChunk};
 use crate::frame_store::stored_frame::StoredFrame;
@@ -18,12 +15,13 @@ use crate::frame_store::tier::Tier;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_pixels::LinearPixels;
-use crate::memory::stage::{Stage, Width};
-use crate::progress::progress_callback::ProgressCallback;
+use crate::memory::stage::{Placement, Stage, Width};
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
-/// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier.
+/// Owned by composition inside
+/// [`FrameCache`](crate::combine::frame_cache::FrameCache); all frames share one tier.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
     pub(crate) tier: Tier,
@@ -31,11 +29,9 @@ pub(crate) struct CacheCore {
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
     pub(crate) metadata: ImageMetadata,
-    /// Progress callback.
-    pub(crate) progress: ProgressCallback,
-    /// Cooperative cancel flag, present during validation and normalization and polled by
-    /// [`Self::process_chunks`] during the combine.
-    pub(crate) cancel: CancelToken,
+    /// Where the combine reports, and the cancel token polled during validation and normalization
+    /// and by [`Self::process_chunks`] during the combine.
+    pub(crate) monitor: ProgressMonitor,
 }
 
 /// Per-chunk context handed to the [`CacheCore::process_chunks`] closure: each frame's samples of
@@ -75,7 +71,7 @@ impl CacheCore {
             in_flight: 2 * stage.in_flight,
             ..stage
         };
-        let width = double_buffered.width(combine.budget, 1, 0, true);
+        let width = double_buffered.width(combine.budget, 1, Placement::Spilled);
         if width.overcommit_bytes > 0 {
             tracing::warn!(
                 rows = width.units,
@@ -90,8 +86,7 @@ impl CacheCore {
     }
 
     /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),
-    /// and every channel within a chunk, and hand `(output_slice, ChunkContext)` to `process`. The
-    /// frames live in the owning cache, so they're passed in. Returns the combined `LinearPixels`.
+    /// and every channel within a chunk, and hand `(output_slice, ChunkContext)` to `process`.
     ///
     /// Chunk-outer, so a frame's quality planes and flags, which every channel reads, are taken
     /// once per chunk rather than once per channel. On the disk tier a chunk is copied out of the
@@ -116,20 +111,44 @@ impl CacheCore {
             let end_row = (start_row + chunk_rows).min(height);
             start_row * width..end_row * width
         };
+        let channel_count = output.channel_count();
+        // Hand chunk `chunk`, read as `views`, to `process` channel by channel, reporting each;
+        // `false` once the run is cancelled, the in-flight channel completed and the partial output
+        // left for the caller to discard.
+        let mut reduce = |views: &[FrameChunk<'_>], chunk: usize| {
+            let pixels = range(chunk);
+            let mut samples: Vec<&[f32]> = Vec::with_capacity(views.len());
+            for channel in 0..channel_count {
+                samples.clear();
+                samples.extend(views.iter().map(|view| view.channels[channel]));
+                process(
+                    &mut output.channel_mut(channel).pixels_mut()[pixels.clone()],
+                    ChunkContext {
+                        frames: &samples,
+                        chunks: views,
+                        width,
+                        channel,
+                        pixel_offset: pixels.start,
+                    },
+                );
+                self.monitor.progress.report(
+                    chunk * channel_count + channel + 1,
+                    num_chunks * channel_count,
+                    StackingStage::Combining,
+                );
+                if self.monitor.cancel.is_cancelled() {
+                    return false;
+                }
+            }
+            true
+        };
         if !self.tier.spills() {
             for chunk in 0..num_chunks {
                 let views: Vec<FrameChunk<'_>> = frames
                     .iter()
                     .map(|frame| FrameChunk::borrowed(frame, range(chunk)))
                     .collect();
-                if !self.reduce_chunk(
-                    &mut output,
-                    &views,
-                    range(chunk),
-                    chunk,
-                    num_chunks,
-                    &mut process,
-                ) {
+                if !reduce(&views, chunk) {
                     break;
                 }
             }
@@ -143,15 +162,7 @@ impl CacheCore {
             let completed = thread::scope(|scope| {
                 let reading = (chunk + 1 < num_chunks)
                     .then(|| scope.spawn(|| next.fill(frames, range(chunk + 1))));
-                let views = current.views(frames);
-                let completed = self.reduce_chunk(
-                    &mut output,
-                    &views,
-                    range(chunk),
-                    chunk,
-                    num_chunks,
-                    &mut process,
-                );
+                let completed = reduce(&current.views(frames), chunk);
                 if let Some(reading) = reading {
                     reading.join().expect("the chunk reader does not panic");
                 }
@@ -164,59 +175,15 @@ impl CacheCore {
         }
         output
     }
-
-    /// Hand chunk `chunk` of `chunks`, over `pixels`, to `process` channel by channel, reporting
-    /// each; `false` once the run is cancelled, the in-flight channel completed and the partial
-    /// output left for the caller to discard.
-    fn reduce_chunk<Process>(
-        &self,
-        output: &mut LinearPixels,
-        views: &[FrameChunk<'_>],
-        pixels: Range<usize>,
-        chunk: usize,
-        chunks: usize,
-        process: &mut Process,
-    ) -> bool
-    where
-        Process: FnMut(&mut [f32], ChunkContext<'_>),
-    {
-        let channel_count = output.channel_count();
-        let mut samples: Vec<&[f32]> = Vec::with_capacity(views.len());
-        for channel in 0..channel_count {
-            samples.clear();
-            samples.extend(views.iter().map(|view| view.channels[channel]));
-            process(
-                &mut output.channel_mut(channel).pixels_mut()[pixels.clone()],
-                ChunkContext {
-                    frames: &samples,
-                    chunks: views,
-                    width: self.dimensions.width(),
-                    channel,
-                    pixel_offset: pixels.start,
-                },
-            );
-            self.progress.report(
-                chunk * channel_count + channel + 1,
-                chunks * channel_count,
-                StackingStage::Combining,
-            );
-            if self.cancel.is_cancelled() {
-                return false;
-            }
-        }
-        true
-    }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::CancelToken;
-
     use crate::combine::frame_cache::core::CacheCore;
     use crate::frame_store::tier::Tier;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::image_metadata::ImageMetadata;
-    use crate::progress::progress_callback::ProgressCallback;
+    use crate::progress::progress_monitor::ProgressMonitor;
 
     impl CacheCore {
         /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
@@ -226,8 +193,7 @@ pub(crate) mod internals {
                 tier,
                 dimensions,
                 metadata: ImageMetadata::default(),
-                progress: ProgressCallback::default(),
-                cancel: CancelToken::never(),
+                monitor: ProgressMonitor::unattended(),
             }
         }
     }

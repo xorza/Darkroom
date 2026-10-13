@@ -2,7 +2,7 @@
 
 use scenarium::{GraphValidationError, NodeId};
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GraphViewValidationError {

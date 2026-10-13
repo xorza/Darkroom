@@ -1,6 +1,6 @@
 //! Downstream cones over a program's data edges.
 
-use crate::containers::set::IdxSet;
+use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::index::NodeIdx;
 
@@ -71,7 +71,7 @@ impl ConsumerCone {
         let node_count = program.e_nodes.len();
         starts.clear();
         starts.resize(node_count + 1, 0);
-        for e_node in program.e_nodes.iter() {
+        for e_node in &program.e_nodes {
             for input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
                     starts[address.node_idx.0 as usize + 1] += 1;
