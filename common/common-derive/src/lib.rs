@@ -18,13 +18,16 @@
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
 
+mod kind;
+mod type_identity;
+
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{
-    Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident, LitStr, PathArguments,
-    Type, parse_macro_input,
-};
+use syn::{Attribute, Data, DeriveInput, Field, Fields, Ident, LitStr, parse_macro_input};
+
+use crate::kind::Kind;
+use crate::type_identity::{Derive, TypeIdentity};
 
 #[proc_macro_derive(Introspect, attributes(config))]
 pub fn derive_introspect(input: TokenStream) -> TokenStream {
@@ -34,7 +37,7 @@ pub fn derive_introspect(input: TokenStream) -> TokenStream {
 
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let identity = type_identity(input, "Introspect")?;
+    let identity = TypeIdentity::parse(input, Derive::Introspect)?;
     let type_id = identity.type_id;
     let display_name = identity
         .name
@@ -57,7 +60,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     for (index, field) in named.named.iter().enumerate() {
         let fname = field.ident.as_ref().expect("named field");
         let label = field_label(field)?;
-        let kind = classify(&field.ty)?;
+        let kind = Kind::of(&field.ty)?;
         descriptors.push(descriptor(fname, &label, &kind));
         builders.push(builder(index, fname, &kind));
     }
@@ -102,7 +105,7 @@ pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
 
 fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let identity = type_identity(input, "IntrospectEnum")?;
+    let identity = TypeIdentity::parse(input, Derive::IntrospectEnum)?;
     if let Some(name) = identity.name {
         return Err(syn::Error::new_spanned(
             name,
@@ -198,65 +201,14 @@ fn snake_case(ident: &str) -> String {
     out
 }
 
-/// Reflected field kind. `Int`/`Float` carry the concrete numeric type,
-/// `Enum` its type, `Option` its inner kind + inner type.
-enum Kind {
-    Int(Type),
-    Float(Type),
-    Bool,
-    Str,
-    Enum(Type),
-    Option(Box<Self>, Type),
-}
-
-fn classify(ty: &Type) -> syn::Result<Kind> {
-    let Type::Path(path) = ty else {
-        return Err(syn::Error::new_spanned(
-            ty,
-            "unsupported introspect field type",
-        ));
-    };
-    let segment = path
-        .path
-        .segments
-        .last()
-        .ok_or_else(|| syn::Error::new_spanned(ty, "empty type path"))?;
-    match segment.ident.to_string().as_str() {
-        "usize" | "u8" | "u16" | "u32" | "u64" | "u128" | "isize" | "i8" | "i16" | "i32"
-        | "i64" | "i128" => Ok(Kind::Int(ty.clone())),
-        "f32" | "f64" => Ok(Kind::Float(ty.clone())),
-        "bool" => Ok(Kind::Bool),
-        "String" => Ok(Kind::Str),
-        "Option" => {
-            let inner = match &segment.arguments {
-                PathArguments::AngleBracketed(args) => args.args.iter().find_map(|a| match a {
-                    GenericArgument::Type(t) => Some(t),
-                    _ => None,
-                }),
-                _ => None,
-            }
-            .ok_or_else(|| syn::Error::new_spanned(ty, "Option needs a type argument"))?;
-            let inner_kind = classify(inner)?;
-            if matches!(inner_kind, Kind::Option(..)) {
-                return Err(syn::Error::new_spanned(
-                    ty,
-                    "nested Option<Option<_>> is not supported",
-                ));
-            }
-            Ok(Kind::Option(Box::new(inner_kind), inner.clone()))
-        }
-        _ => Ok(Kind::Enum(ty.clone())),
-    }
-}
-
 /// A `FieldDesc { name, label, kind, default, required }`. `d` (the `Default`
 /// instance) is in scope at the call site.
 fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     let name = LitStr::new(&fname.to_string(), Span::call_site());
     let label = LitStr::new(label, Span::call_site());
-    let required = !matches!(kind, Kind::Option(..));
-    let field_kind = kind_tokens(kind);
-    let default = default_tokens(fname, kind);
+    let required = kind.is_required();
+    let field_kind = kind.tokens();
+    let default = kind.default_value(fname);
     quote! {
         ::common::FieldDesc {
             name: #name,
@@ -268,231 +220,16 @@ fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     }
 }
 
-fn kind_tokens(kind: &Kind) -> TokenStream2 {
-    match kind {
-        Kind::Int(ty) => {
-            quote!(::common::FieldKind::Int(<#ty as ::common::IntrospectInteger>::KIND))
-        }
-        Kind::Float(ty) => {
-            quote!(::common::FieldKind::Float(<#ty as ::common::IntrospectFloat>::KIND))
-        }
-        Kind::Bool => quote!(::common::FieldKind::Bool),
-        Kind::Str => quote!(::common::FieldKind::Str),
-        Kind::Option(inner, _) => {
-            let inner = kind_tokens(inner);
-            quote!(::common::FieldKind::Option({
-                const INNER: ::common::FieldKind = #inner;
-                &INNER
-            }))
-        }
-        Kind::Enum(ty) => {
-            quote! {
-                ::common::FieldKind::Enum {
-                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID,
-                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME,
-                    variants: <#ty as ::common::IntrospectEnum>::VARIANTS,
-                }
-            }
-        }
-    }
-}
-
-/// The default `FieldValue` for `place` (e.g. `d.field`, or `(*v)` for an
-/// `Option`'s payload).
-fn default_scalar(kind: &Kind, place: &TokenStream2) -> TokenStream2 {
-    match kind {
-        Kind::Int(ty) => quote! {
-            ::common::FieldValue::Int(
-                <#ty as ::core::convert::Into<::common::IntegerValue>>::into(#place)
-            )
-        },
-        Kind::Float(ty) => quote! {
-            ::common::FieldValue::Float(
-                <#ty as ::common::IntrospectFloat>::into_field_value(#place)
-            )
-        },
-        Kind::Bool => quote!(::common::FieldValue::Bool(#place)),
-        Kind::Str => quote!(::common::FieldValue::Str(#place.clone())),
-        Kind::Enum(_) => {
-            quote!(::common::FieldValue::Enum(::std::string::ToString::to_string(
-                ::common::IntrospectEnum::to_variant(&#place)
-            )))
-        }
-        Kind::Option(..) => quote!(::common::FieldValue::Null),
-    }
-}
-
-fn default_tokens(fname: &Ident, kind: &Kind) -> TokenStream2 {
-    let Kind::Option(inner, _) = kind else {
-        return default_scalar(kind, &quote!(d.#fname));
-    };
-    let some = default_scalar(inner, &quote!((*v)));
-    quote! {
-        match &d.#fname {
-            ::core::option::Option::None => ::common::FieldValue::Null,
-            ::core::option::Option::Some(v) => #some,
-        }
-    }
-}
-
 /// `#field: <read values[index]>` for the typed rebuild.
 fn builder(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
-    let read = read_tokens(index, fname, kind);
+    let read = kind.read(index, fname);
     quote!(#fname: #read)
-}
-
-fn read_tokens(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
-    let get = quote!(values.get(#index));
-    match kind {
-        Kind::Int(ty) => quote! {
-            match #get {
-                ::core::option::Option::Some(::common::FieldValue::Int(n)) => {
-                    <#ty as ::common::IntrospectInteger>::from_field_value(
-                        ::core::stringify!(#fname),
-                        *n,
-                    )?
-                }
-                _ => d.#fname,
-            }
-        },
-        Kind::Float(ty) => quote! {
-            match #get {
-                ::core::option::Option::Some(::common::FieldValue::Float(f)) => {
-                    <#ty as ::common::IntrospectFloat>::from_field_value(
-                        ::core::stringify!(#fname),
-                        *f,
-                    )?
-                }
-                _ => d.#fname,
-            }
-        },
-        Kind::Bool => quote! {
-            match #get {
-                ::core::option::Option::Some(::common::FieldValue::Bool(b)) => *b,
-                _ => d.#fname,
-            }
-        },
-        Kind::Str => quote! {
-            match #get {
-                ::core::option::Option::Some(::common::FieldValue::Str(s)) => s.clone(),
-                _ => d.#fname,
-            }
-        },
-        Kind::Enum(ty) => quote! {
-            match #get {
-                ::core::option::Option::Some(::common::FieldValue::Enum(s)) => {
-                    <#ty as ::common::IntrospectEnum>::from_variant(s).unwrap_or(d.#fname)
-                }
-                _ => d.#fname,
-            }
-        },
-        Kind::Option(inner, inner_ty) => option_read(&get, fname, inner, inner_ty),
-    }
-}
-
-/// Read null as `None`, a bound value as `Some(value)`, and otherwise keep the default.
-fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type) -> TokenStream2 {
-    let some = match inner {
-        Kind::Int(_) => quote! {
-            ::core::option::Option::Some(::common::FieldValue::Int(n)) =>
-                ::core::option::Option::Some(
-                    <#inner_ty as ::common::IntrospectInteger>::from_field_value(
-                        ::core::stringify!(#fname),
-                        *n,
-                    )?
-                ),
-        },
-        Kind::Float(_) => quote! {
-            ::core::option::Option::Some(::common::FieldValue::Float(f)) =>
-                ::core::option::Option::Some(
-                    <#inner_ty as ::common::IntrospectFloat>::from_field_value(
-                        ::core::stringify!(#fname),
-                        *f,
-                    )?
-                ),
-        },
-        Kind::Bool => quote! {
-            ::core::option::Option::Some(::common::FieldValue::Bool(b)) =>
-                ::core::option::Option::Some(*b),
-        },
-        Kind::Str => quote! {
-            ::core::option::Option::Some(::common::FieldValue::Str(s)) =>
-                ::core::option::Option::Some(s.clone()),
-        },
-        Kind::Enum(ty) => quote! {
-            ::core::option::Option::Some(::common::FieldValue::Enum(s)) =>
-                <#ty as ::common::IntrospectEnum>::from_variant(s).map(::core::option::Option::Some).unwrap_or(d.#fname),
-        },
-        // `classify` rejects `Option<Option<_>>`, so an Option never nests another.
-        Kind::Option(..) => unreachable!("nested Option is rejected in classify"),
-    };
-    quote! {
-        match #get {
-            ::core::option::Option::Some(::common::FieldValue::Null) =>
-                ::core::option::Option::None,
-            #some
-            _ => d.#fname,
-        }
-    }
 }
 
 /// `#[config(label = "...")]` on a field, else its name title-cased.
 fn field_label(field: &Field) -> syn::Result<String> {
     Ok(config_label(&field.attrs)?
         .unwrap_or_else(|| prettify(&field.ident.as_ref().expect("named field").to_string())))
-}
-
-/// A type's `#[config(type_id = "…", name = "…")]`.
-struct TypeIdentity {
-    type_id: LitStr,
-    name: Option<LitStr>,
-}
-
-/// The type-level `#[config]`: a required canonical lowercase UUID `type_id`, and an
-/// optional display `name`.
-fn type_identity(input: &DeriveInput, derive: &str) -> syn::Result<TypeIdentity> {
-    let mut type_id = None;
-    let mut name = None;
-    for attr in &input.attrs {
-        if !attr.path().is_ident("config") {
-            continue;
-        }
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("name") {
-                if name.is_some() {
-                    return Err(meta.error("duplicate `name`"));
-                }
-                name = Some(meta.value()?.parse::<LitStr>()?);
-                return Ok(());
-            }
-            if !meta.path.is_ident("type_id") {
-                return Err(meta.error("expected `type_id` or `name`"));
-            }
-            if type_id.is_some() {
-                return Err(meta.error("duplicate `type_id`"));
-            }
-            let value = meta.value()?.parse::<LitStr>()?;
-            let raw = value.value();
-            let Ok(parsed) = uuid::Uuid::parse_str(&raw) else {
-                return Err(syn::Error::new_spanned(&value, "`type_id` must be a UUID"));
-            };
-            if parsed.hyphenated().to_string() != raw {
-                return Err(syn::Error::new_spanned(
-                    &value,
-                    "`type_id` must be a canonical lowercase UUID",
-                ));
-            }
-            type_id = Some(value);
-            Ok(())
-        })?;
-    }
-    let type_id = type_id.ok_or_else(|| {
-        syn::Error::new_spanned(
-            &input.ident,
-            format!("{derive} requires `#[config(type_id = \"…\")]`"),
-        )
-    })?;
-    Ok(TypeIdentity { type_id, name })
 }
 
 /// `snake_case` → "Title Case".
@@ -512,69 +249,7 @@ fn prettify(name: &str) -> String {
 mod tests {
     use syn::{DeriveInput, parse_quote};
 
-    use crate::{config_label, prettify, type_identity};
-
-    /// Each malformed type-level `#[config]` is refused with the message for
-    /// its rule; a well-formed one yields its id and name.
-    #[test]
-    fn type_identity_refuses_each_malformed_attribute() {
-        let refusals: [(DeriveInput, &str); 6] = [
-            (
-                parse_quote! { enum Mode { A } },
-                "IntrospectEnum requires `#[config(type_id = \"…\")]`",
-            ),
-            (
-                parse_quote! { #[config(type_id = "not-a-uuid")] enum Mode { A } },
-                "`type_id` must be a UUID",
-            ),
-            (
-                parse_quote! {
-                    #[config(type_id = "3EFFBD19-D4A8-4A9B-A931-78FD0E4F8ADB")]
-                    enum Mode { A }
-                },
-                "`type_id` must be a canonical lowercase UUID",
-            ),
-            (
-                parse_quote! {
-                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
-                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
-                    enum Mode { A }
-                },
-                "duplicate `type_id`",
-            ),
-            (
-                parse_quote! {
-                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "A", name = "B")]
-                    enum Mode { A }
-                },
-                "duplicate `name`",
-            ),
-            (
-                parse_quote! { #[config(label = "x")] enum Mode { A } },
-                "expected `type_id` or `name`",
-            ),
-        ];
-        for (input, message) in refusals {
-            let error = type_identity(&input, "IntrospectEnum")
-                .err()
-                .expect("the attribute is refused");
-            assert_eq!(error.to_string(), message);
-        }
-
-        let input: DeriveInput = parse_quote! {
-            #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "Speed")]
-            enum Mode { A }
-        };
-        let identity = type_identity(&input, "IntrospectEnum").unwrap();
-        assert_eq!(
-            identity.type_id.value(),
-            "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb"
-        );
-        assert_eq!(
-            identity.name.map(|name| name.value()).as_deref(),
-            Some("Speed")
-        );
-    }
+    use crate::{config_label, prettify};
 
     /// A variant names its label once, with `label` and nothing else.
     #[test]

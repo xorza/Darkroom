@@ -1,7 +1,7 @@
 //! [`DrizzleShape`]: what a drizzle run holds, and the tier its drizzled frames live in.
 
 use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::{FrameNorm, SetCoverage};
+use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
@@ -115,17 +115,18 @@ impl DrizzleShape {
                 // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each
                 // channel by its colour's own.
                 held: depth
-                    + FrameNorm::heap_bytes(
+                    + PlannedNormalization {
                         frame_count,
-                        output,
-                        Slots::new(None, output.channels()),
-                        stack.normalization,
-                        match deposit {
+                        dimensions: output,
+                        slots: Slots::new(None, output.channels()),
+                        normalization: stack.normalization,
+                        coverage: match deposit {
                             Deposit::Mosaic(_) => SetCoverage::PerChannel,
                             Deposit::Channels(_) => SetCoverage::Common,
                         },
-                        workers,
-                    ),
+                        threads: workers,
+                    }
+                    .heap_bytes(),
                 in_flight: 0,
                 units: Units::Whole,
             },

@@ -136,7 +136,7 @@ impl Session {
         //    read just ahead of it: unlike undo/redo they only queue an
         //    `AppCommand`, so they need no drain of their own and simply have
         //    to land before `App` takes the tier.
-        Self::menu_shortcut(ui, requests);
+        menu_shortcut(ui, requests);
         self.main_window
             .frame(ui, WindowCtx::new(ctx, &self.open), preferences, requests);
         // Graph edits the record surfaced (node select, cache toggle, const
@@ -177,42 +177,6 @@ impl Session {
         }
     }
 
-    /// Queue the [`AppCommand`] for whichever of Ctrl+N / Ctrl+O / Ctrl+S /
-    /// Ctrl+Shift+S / Ctrl+R / Ctrl+Q fired.
-    ///
-    /// Document file ops are **global** — they fire regardless of
-    /// focus, so Ctrl+S still saves while a node's value editor is
-    /// focused (`TextEdit` doesn't bind S/O/N, so nothing is stolen).
-    /// Every chord is sampled with `key_pressed` each frame so all
-    /// stay subscribed for palantir's wake-gate (sampling them all up
-    /// front, not short-circuited, so one chord firing doesn't drop
-    /// the others' subscription that frame). Palantir matches modifiers
-    /// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
-    fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
-        let new = ui.key_pressed(NEW_SHORTCUT);
-        let open = ui.key_pressed(OPEN_SHORTCUT);
-        let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
-        let save = ui.key_pressed(SAVE_SHORTCUT);
-        let run = ui.key_pressed(RUN_SHORTCUT);
-        let quit = ui.key_pressed(QUIT_SHORTCUT);
-        let command = if new {
-            AppCommand::File(FileCommand::New)
-        } else if open {
-            AppCommand::File(FileCommand::Open)
-        } else if save_as {
-            AppCommand::File(FileCommand::SaveAs)
-        } else if save {
-            AppCommand::File(FileCommand::Save)
-        } else if run {
-            AppCommand::Run(RunCommand::Once)
-        } else if quit {
-            AppCommand::Quit
-        } else {
-            return;
-        };
-        requests.push_app(command);
-    }
-
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
     /// stopped holding. Driven by `App::update` once a
     /// frame — [`Self::frame`] runs per *record pass*, so a sweep here would
@@ -220,6 +184,42 @@ impl Session {
     pub(super) fn reconcile_caches(&mut self) {
         self.main_window.reconcile(&self.open);
     }
+}
+
+/// Queue the [`AppCommand`] for whichever of Ctrl+N / Ctrl+O / Ctrl+S /
+/// Ctrl+Shift+S / Ctrl+R / Ctrl+Q fired.
+///
+/// Document file ops are **global** — they fire regardless of
+/// focus, so Ctrl+S still saves while a node's value editor is
+/// focused (`TextEdit` doesn't bind S/O/N, so nothing is stolen).
+/// Every chord is sampled with `key_pressed` each frame so all
+/// stay subscribed for palantir's wake-gate (sampling them all up
+/// front, not short-circuited, so one chord firing doesn't drop
+/// the others' subscription that frame). Palantir matches modifiers
+/// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
+fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
+    let new = ui.key_pressed(NEW_SHORTCUT);
+    let open = ui.key_pressed(OPEN_SHORTCUT);
+    let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
+    let save = ui.key_pressed(SAVE_SHORTCUT);
+    let run = ui.key_pressed(RUN_SHORTCUT);
+    let quit = ui.key_pressed(QUIT_SHORTCUT);
+    let command = if new {
+        AppCommand::File(FileCommand::New)
+    } else if open {
+        AppCommand::File(FileCommand::Open)
+    } else if save_as {
+        AppCommand::File(FileCommand::SaveAs)
+    } else if save {
+        AppCommand::File(FileCommand::Save)
+    } else if run {
+        AppCommand::Run(RunCommand::Once)
+    } else if quit {
+        AppCommand::Quit
+    } else {
+        return;
+    };
+    requests.push_app(command);
 }
 
 #[cfg(feature = "internals")]

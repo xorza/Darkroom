@@ -4,22 +4,20 @@
 //! shows no strip at all, matching the window status bar.
 
 use palantir::prelude::*;
-
-use crate::gui::widgets::support::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value,
-};
 use scenarium::RamUsage;
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::format::fmt_bytes;
+use crate::gui::widgets::format::bytes::Bytes;
+use crate::gui::widgets::support;
+use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y};
 
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
 
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram()`
 /// is mirrored from the run cache; each pool shows only when non-zero.
-pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
+pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>) {
     let node = ncx;
     let ram = node.ram();
     if ram.total() == 0 {
@@ -38,7 +36,7 @@ pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.
-        .background(footer_background(theme, r))
+        .background(support::footer_background(theme, r))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")
@@ -77,7 +75,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: RgbaF32, label: &'static str, bytes: u
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             dot_cell(ui, hue);
-            labeled_value(ui, theme, label, fmt_bytes(bytes as u64));
+            support::labeled_value(ui, theme, label, Bytes::new(bytes as u64));
         });
 }
 

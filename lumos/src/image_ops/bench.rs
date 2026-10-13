@@ -10,10 +10,13 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::linear_image::LinearImage;
-use crate::{
-    ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
-    StretchMethod,
-};
+use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::scnr::Scnr;
+use crate::image_ops::denoise::Denoise;
+use crate::image_ops::extract_background::ExtractBackground;
+use crate::image_ops::hdr::Hdr;
+use crate::image_ops::local_contrast::LocalContrast;
+use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 
 pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;

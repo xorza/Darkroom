@@ -32,6 +32,15 @@ pub(crate) enum Units {
     Rows(usize),
 }
 
+/// Where a run keeps its frames while a stage works over them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// In memory, `kept_set` bytes of them beside the stage.
+    Resident { kept_set: u64 },
+    /// On disk, only the frames in work in memory.
+    Spilled,
+}
+
 /// How wide a stage runs: its units at once, and the bytes its narrowest step holds past the
 /// budget anyway, so the run makes progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,15 +50,12 @@ pub(crate) struct Width {
 }
 
 impl Stage {
-    /// The width under `budget` of this stage over `frames` frames, beside `kept_set` bytes of them
-    /// kept, on the spill tier or not.
-    pub(crate) fn width(
-        &self,
-        budget: Budget,
-        frames: usize,
-        kept_set: u64,
-        spilled: bool,
-    ) -> Width {
+    /// The width under `budget` of this stage over `frames` frames, kept as `placement` says.
+    pub(crate) fn width(&self, budget: Budget, frames: usize, placement: Placement) -> Width {
+        let (kept_set, spilled) = match placement {
+            Placement::Resident { kept_set } => (kept_set, false),
+            Placement::Spilled => (0, true),
+        };
         let per_unit = match (self.units, spilled) {
             (Units::Whole, _) | (Units::Rows(_), false) => 0,
             (Units::Frames | Units::Serial, true) => self.in_flight.saturating_add(self.kept),

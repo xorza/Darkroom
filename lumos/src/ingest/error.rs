@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::error::Cancelled;
 use crate::error::FrameDimensionMismatch;
-use crate::frame::frame_quality::FramePlane;
+use crate::frame::frame_plane::FramePlane;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_provenance::RowOrder;
 use crate::image::sample_domain::SampleDomain;

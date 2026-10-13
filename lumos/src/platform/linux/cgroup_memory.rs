@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::platform::linux::mount_table::{Mount, MountTable};
 
 /// The memory limits of this process's control group and every group above it, against their
-/// use; Linux only.
+/// use.
 ///
 /// `MemAvailable` is the host's figure. In a container, a systemd unit with `MemoryMax`, or a CI
 /// runner, the kernel enforces the group's limit instead, and a process planned against the host
@@ -41,7 +41,7 @@ enum CgroupVersion {
 }
 
 impl CgroupMemory {
-    /// This process's groups; `None` off Linux, or where its memory hierarchy cannot be found.
+    /// This process's groups; `None` where its memory hierarchy cannot be found.
     pub(crate) fn of_process(mounts: &MountTable) -> Option<Self> {
         let membership = fs::read_to_string("/proc/self/cgroup").ok()?;
         Self::locate(&membership, mounts, Path::new("/"))

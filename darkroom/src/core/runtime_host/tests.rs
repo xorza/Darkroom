@@ -6,7 +6,7 @@ use common::TempDir;
 use lens::MlModelPaths;
 use scenarium::{Binding, CacheMode, ConstValue, Graph, InputPort, NodeId};
 
-use crate::core::io::cache::document_cache_root;
+use crate::core::io::cache;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 
@@ -107,10 +107,7 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     let dir = TempDir::new("darkroom-runtime-host");
     let first_path = dir.join("first.darkroom");
     let second_path = dir.join("second.darkroom");
-    let (first_root, second_root) = (
-        document_cache_root(&first_path),
-        document_cache_root(&second_path),
-    );
+    let (first_root, second_root) = (cache::root(&first_path), cache::root(&second_path));
     assert_eq!(host.disk_root, None);
     host.set_document_cache(Some(&first_path));
     assert_eq!(host.disk_root.as_deref(), Some(first_root.as_path()));

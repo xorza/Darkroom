@@ -8,7 +8,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::internals::calls::Calls;
-use crate::library::{Library, TypeEntry};
+use crate::library::Library;
+use crate::library::type_entry::TypeEntry;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, RamUsage, TypeId};
 
 pub(crate) const BLOB_TYPE: TypeId = TypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");

@@ -4,10 +4,10 @@ mod synthetic;
 
 use crate::internals::prelude::*;
 use common::TempDir;
-use imaginarium::{ColorFormat, Image, ImageDesc};
+use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
 use crate::io::PREVIEW_IMAGE_EXTENSIONS;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, ScientificRefusal};
 use fits_well::image::SampleType;
 
 use crate::frame::stackable_image::StackableImage;
@@ -231,16 +231,31 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         vec![0, 64, 128, 255],
     )
     .unwrap();
-    for path in [&integer_tiff, &png, &jpeg] {
+    for (path, refusal) in [
+        (&integer_tiff, ScientificRefusal::IntegerRaster),
+        (
+            &png,
+            ScientificRefusal::PreviewOnlyRaster {
+                format: FileFormat::Png,
+            },
+        ),
+        (
+            &jpeg,
+            ScientificRefusal::PreviewOnlyRaster {
+                format: FileFormat::Jpeg,
+            },
+        ),
+    ] {
         integer_image.save_file(path).unwrap();
-        assert!(matches!(
-            LinearImage::from_file(path, &LoadContext::default()),
-            Err(ImageError::ScientificInputRejected { .. })
-        ));
-        assert!(matches!(
-            <LinearImage as StackableImage>::load(path, &LoadContext::default()),
-            Err(ImageError::ScientificInputRejected { .. })
-        ));
+        for error in [
+            LinearImage::from_file(path, &LoadContext::default()).unwrap_err(),
+            <LinearImage as StackableImage>::load(path, &LoadContext::default()).unwrap_err(),
+        ] {
+            assert!(
+                matches!(&error, ImageError::ScientificInputRejected { reason, .. } if *reason == refusal),
+                "{path:?}: {error:?}"
+            );
+        }
         PreviewImage::from_file(path, &LoadContext::default()).unwrap();
     }
 
@@ -255,7 +270,10 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .unwrap();
     assert!(matches!(
         LinearImage::from_file(&alpha_path, &LoadContext::default()),
-        Err(ImageError::ScientificInputRejected { .. })
+        Err(ImageError::ScientificInputRejected {
+            reason: ScientificRefusal::AlphaChannel,
+            ..
+        })
     ));
     let alpha_preview = PreviewImage::from_file(&alpha_path, &LoadContext::default()).unwrap();
     assert!(matches!(
@@ -271,7 +289,10 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(
         LinearImage::from_file(&nonexistent_raw, &LoadContext::default()),
-        Err(ImageError::ScientificInputRejected { .. })
+        Err(ImageError::ScientificInputRejected {
+            reason: ScientificRefusal::CameraRaw,
+            ..
+        })
     ));
 }
 

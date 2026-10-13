@@ -1,8 +1,8 @@
 //! [`ComponentPixels`]: one component's pixels, found by position in memory proportional to them.
 
 use crate::math::vec2us::Vec2us;
-use crate::star_detection::deblend::Pixel;
 use crate::star_detection::deblend::component::Component;
+use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// One component's pixels in raster order, with where each row of its box starts.
@@ -91,27 +91,32 @@ impl ComponentPixels {
         }
     }
 
-    /// The pixels of row `y` and the index of the first, empty outside the box.
-    fn row(&self, y: usize) -> (usize, &[Pixel]) {
+    /// The pixels of row `y`, empty outside the box.
+    fn row(&self, y: usize) -> Row<'_> {
+        let empty = Row {
+            start: 0,
+            pixels: &[],
+        };
         let Some(row) = y.checked_sub(self.top) else {
-            return (0, &[]);
+            return empty;
         };
         if row + 1 >= self.row_starts.len() {
-            return (0, &[]);
+            return empty;
         }
         let start = self.row_starts[row] as usize;
-        (
+        Row {
             start,
-            &self.pixels[start..self.row_starts[row + 1] as usize],
-        )
+            pixels: &self.pixels[start..self.row_starts[row + 1] as usize],
+        }
     }
 
     /// The index of the pixel at `pos`, when the component holds it.
     pub(crate) fn index_of(&self, pos: Vec2us) -> Option<usize> {
-        let (start, row) = self.row(pos.y);
-        row.binary_search_by_key(&pos.x, |pixel| pixel.pos.x)
+        let row = self.row(pos.y);
+        row.pixels
+            .binary_search_by_key(&pos.x, |pixel| pixel.pos.x)
             .ok()
-            .map(|offset| start + offset)
+            .map(|offset| row.start + offset)
     }
 
     /// Call `visit` with the index of each neighbour of pixel `index` that the component holds,
@@ -156,6 +161,13 @@ impl ComponentPixels {
             );
         }
     }
+}
+
+/// The pixels of one row of a component, and the index of the first among all of its pixels.
+#[derive(Debug)]
+struct Row<'a> {
+    start: usize,
+    pixels: &'a [Pixel],
 }
 
 #[cfg(test)]

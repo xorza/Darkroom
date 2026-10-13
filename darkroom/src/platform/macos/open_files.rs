@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::ptr;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyClass, AnyObject, Sel};
+use objc2::runtime::{AnyObject, Sel};
 use objc2::{ffi, sel};
 use objc2_app_kit::NSApplication;
 use objc2_foundation::{MainThreadMarker, NSArray, NSURL};
@@ -54,14 +54,14 @@ thread_local! {
 /// not starting. All three conditions are code changes rather than bad data,
 /// caught the first time a developer launches after touching winit, and this
 /// is a cold startup path.
-pub(crate) fn install(deliver: impl Fn(PathBuf) + 'static) {
+pub(super) fn install(deliver: impl Fn(PathBuf) + 'static) {
     let mtm = MainThreadMarker::new().expect("install runs on the event loop's thread");
     let delegate = NSApplication::sharedApplication(mtm)
         .delegate()
         .expect("winit registered its application delegate in EventLoop::new");
 
     let object: &AnyObject = unsafe { &*Retained::as_ptr(&delegate).cast::<AnyObject>() };
-    let class: &AnyClass = object.class();
+    let class = object.class();
 
     let added = unsafe {
         ffi::class_addMethod(

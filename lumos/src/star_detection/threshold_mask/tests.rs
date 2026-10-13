@@ -2,20 +2,14 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
-use crate::star_detection::threshold_mask::create_residual_threshold_mask;
-use crate::star_detection::threshold_mask::internals::test_params;
+use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
-/// Helper to create filtered threshold mask for tests
-fn create_residual_threshold_mask_test(
-    filtered: &[f32],
-    noise: &[f32],
-    sigma: f32,
-    size: Size2us,
-) -> BitBuffer2 {
+/// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.
+fn threshold_mask(filtered: &[f32], noise: &[f32], sigma: f32, size: Size2us) -> BitBuffer2 {
     let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_residual_threshold_mask(&filtered, &noise, test_params(sigma), &mut mask);
+    ThresholdParams::test(sigma).fill_mask(&filtered, &noise, &mut mask);
     mask
 }
 
@@ -150,8 +144,7 @@ fn threshold_mask_truth_table() {
     ];
 
     for case in cases {
-        let mask =
-            create_residual_threshold_mask_test(case.pixels, case.noise, case.sigma, case.size);
+        let mask = threshold_mask(case.pixels, case.noise, case.sigma, case.size);
         let actual: Vec<bool> = mask.iter().collect();
 
         assert_eq!(actual.as_slice(), case.expected, "{}: {case:?}", case.name);
@@ -190,7 +183,7 @@ fn row_layout_over_sizes_and_patterns() {
                 .map(|&on| if on { 1.0 } else { -0.5 })
                 .collect();
             let noise = vec![0.1f32; size.pixel_count()];
-            let mask = create_residual_threshold_mask_test(&residual, &noise, 3.0, size);
+            let mask = threshold_mask(&residual, &noise, 3.0, size);
             let actual: Vec<bool> = mask.iter().collect();
             assert_eq!(actual, expected, "{name} at {size:?}");
         }

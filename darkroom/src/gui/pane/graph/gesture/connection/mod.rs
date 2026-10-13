@@ -3,16 +3,16 @@ use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
 use scenarium::{Binding, InputPort};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
-use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
+use crate::gui::pane::graph::gesture::canvas_gesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::graph::node::port_color::port_color;
+use crate::gui::pane::graph::node::port_color;
 use crate::gui::pane::graph::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph::paint::wire::{Wire, WirePass, WireTint};
 use crate::gui::requests::Requests;
@@ -44,8 +44,8 @@ pub(crate) struct ConnectionUI {
 /// discriminant rather than distinct payloads.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct InFlight {
-    pub(crate) drag: GlyphDrag<PortRef, PortRef>,
-    pub(crate) mode: DragMode,
+    pub(super) drag: GlyphDrag<PortRef, PortRef>,
+    pub(super) mode: DragMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -114,7 +114,7 @@ impl ConnectionUI {
         // The output column drops out while the preview-spawn chord is
         // held: that chord is the preview drag's, so the two controllers
         // never both latch one press.
-        let preview_chord = preview_drag_modifier(ui);
+        let preview_chord = canvas_gesture::preview_drag_modifier(ui);
         if self.state.is_idle()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, |port| {
                 !preview_chord || port.kind == PortKind::Input
@@ -277,7 +277,7 @@ impl ConnectionUI {
         // preview already reads as the type being connected.
         let theme = graph_ctx.theme();
         let drag_ty = graph_ctx.port_type(start_port).unwrap_or(&DataType::Any);
-        let color = port_color(theme, drag_ty, start_port.kind, false);
+        let color = port_color::data(theme, drag_ty, start_port.kind, false);
         Wire::data(p0, p3).add(ui, theme.stroke_width, color);
     }
 }
@@ -320,8 +320,8 @@ fn data_tint(theme: &Theme, graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef)
         return WireTint::flat(theme.status.warning);
     }
     WireTint::new(
-        port_color(theme, src_ty, PortKind::Output, false),
-        port_color(theme, tgt_ty, PortKind::Input, false),
+        port_color::data(theme, src_ty, PortKind::Output, false),
+        port_color::data(theme, tgt_ty, PortKind::Input, false),
     )
 }
 
@@ -430,7 +430,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
         return false;
     };
     let over_canvas = ui
-        .response_for(outer_canvas_widget_id())
+        .response_for(canvas::outer_wid())
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas && !geometry.over_any_node(pointer)

@@ -148,7 +148,7 @@ fn warp_transform_new() {
 #[test]
 fn warp_transform_with_sip() {
     use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
-    use crate::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::registration::distortion::sip::SipModel;
 
     let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
     let field = RadialField {
@@ -160,17 +160,11 @@ fn warp_transform_with_sip() {
         step: 10,
         extent: 95,
     });
-    let sip_config = SipConfig {
+    let sip = SipModel {
         order: 3,
-        reference_point: Some(field.centre),
-    };
-    let sip = SipPolynomial::fitted_under(
-        &transform,
-        &reference,
-        &target,
-        sip_config.order,
-        sip_config.reference_point.unwrap(),
-    );
+        origin: field.centre,
+    }
+    .fitted_under(&transform, &reference, &target);
 
     let wt = WarpTransform::with_sip(transform, sip.clone());
     assert!(wt.has_sip());

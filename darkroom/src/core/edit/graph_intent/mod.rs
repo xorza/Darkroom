@@ -18,7 +18,9 @@
 //! layout around it. Neither can be mistaken for the other, so no code path
 //! has to carry state it will not read.
 
+pub(crate) mod click_mode;
 pub(crate) mod drag_start;
+pub(crate) mod incoming_wires;
 
 use std::collections::{BTreeSet, HashMap};
 use std::iter;
@@ -26,14 +28,19 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, InputPort, Library, Node, NodeId, Subscription,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, InputPort, Library, Node, NodeId,
+    Subscription,
 };
 
-use crate::core::document::PortRef;
-use crate::core::document::{Document, ItemPlacement, Viewport};
-use crate::core::edit::error::MalformedIntent;
+use crate::core::document::Document;
+use crate::core::document::graph_view::ItemPlacement;
+use crate::core::document::port_ref::PortRef;
+use crate::core::document::viewport::Viewport;
+use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
 use crate::core::edit::step::node_presence::{NodePresence, NodeState};
@@ -46,6 +53,7 @@ use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_viewport::SetViewport;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::validate;
+use crate::core::edit::validate::Insertion;
 
 /// World-space offset applied to duplicated nodes so the copies don't land
 /// exactly on top of their originals.
@@ -139,7 +147,7 @@ pub(crate) enum GraphIntent {
 impl GraphIntent {
     /// The intents a click on `key` produces: the selection change, plus a
     /// lift to the top of the paint stack so a clicked node comes to the
-    /// front. The raise is skipped only when a Shift-click *removes* `key`
+    /// front. The raise is skipped only when a toggling click *removes* `key`
     /// from the selection — a node you just deselected shouldn't jump
     /// forward. Shared by the node body, its header title and its port
     /// labels, so clicking any of them behaves like clicking the body.
@@ -148,25 +156,24 @@ impl GraphIntent {
     /// only thing either rule reads, and it keeps the click policy beside the
     /// intents it builds instead of in the widget that raises them.
     pub(crate) fn click(
-        shift: bool,
+        mode: ClickMode,
         selected: &BTreeSet<NodeId>,
         key: NodeId,
     ) -> impl Iterator<Item = Self> {
-        let deselecting = shift && selected.contains(&key);
-        iter::once(Self::select_click(shift, selected, key))
+        let deselecting = mode == ClickMode::Toggle && selected.contains(&key);
+        iter::once(Self::select_click(mode, selected, key))
             .chain((!deselecting).then_some(Self::Raise { key }))
     }
 
-    /// The [`Self::SetSelection`] a click on `key` produces: a plain click
-    /// selects only it, a Shift-click toggles its membership. A click that
+    /// The [`Self::SetSelection`] a click on `key` produces: a replacing click
+    /// selects only it, a toggling one flips its membership. A click that
     /// changes nothing is dropped at commit as a no-op.
-    fn select_click(shift: bool, selected: &BTreeSet<NodeId>, key: NodeId) -> Self {
-        let mut to = if shift {
-            selected.clone()
-        } else {
-            BTreeSet::new()
+    fn select_click(mode: ClickMode, selected: &BTreeSet<NodeId>, key: NodeId) -> Self {
+        let mut to = match mode {
+            ClickMode::Replace => BTreeSet::new(),
+            ClickMode::Toggle => selected.clone(),
         };
-        if shift && selected.contains(&key) {
+        if mode == ClickMode::Toggle && selected.contains(&key) {
             to.remove(&key);
         } else {
             to.insert(key);
@@ -197,9 +204,9 @@ impl GraphIntent {
     /// offset position, const-value bindings copy verbatim, the data and
     /// event connections *among* the selected nodes are recreated against the
     /// clones, and the copies end up selected. A `Bind` whose source is
-    /// *outside* the selection is dropped unless `include_incoming` is set, in
-    /// which case the clone keeps the wire pointing at the original external
-    /// producer. Empty when nothing is selected.
+    /// *outside* the selection goes as `incoming` says: dropped, or kept
+    /// pointing at the original external producer. Empty when nothing is
+    /// selected.
     ///
     /// A list rather than an intent of its own: duplicating is an editor
     /// command built out of the vocabulary, not a graph primitive. The whole
@@ -213,7 +220,7 @@ impl GraphIntent {
     /// The selection is the only source of a duplicate set: Ctrl+D and the
     /// node context menu's two Duplicate picks all act on it, the latter
     /// because a right-click selects the node it landed on first.
-    pub(crate) fn duplicate(doc: &Document, include_incoming: bool) -> Vec<Self> {
+    pub(crate) fn duplicate(doc: &Document, incoming: IncomingWires) -> Vec<Self> {
         let (graph, view) = (&doc.graph, &doc.main_view);
         // Resolve the whole set first, in selection order: an edge is only
         // recognisable as internal once both of its endpoints have a fresh id,
@@ -251,7 +258,7 @@ impl GraphIntent {
                             input,
                             to: Some(Binding::bind(new_source, source.port_idx)),
                         }),
-                        None if include_incoming => bindings.push(BindingEntry {
+                        None if incoming == IncomingWires::Keep => bindings.push(BindingEntry {
                             port: input,
                             binding: Binding::Bind(*source),
                         }),
@@ -323,9 +330,17 @@ impl GraphIntent {
                 bindings,
             } => {
                 validate::fresh_node_id(graph, node_id)?;
-                validate::finite_position(pos, "AddNode")?;
+                validate::finite_position(pos, Role::AddNode)?;
                 validate::insertable_kind(&node)?;
-                validate::seed_bindings(graph, library, node_id, &node, &bindings)?;
+                validate::seed_bindings(
+                    graph,
+                    library,
+                    Insertion {
+                        node_id,
+                        node: &node,
+                        bindings: &bindings,
+                    },
+                )?;
                 // The depth is fixed here rather than at write time, so a redo
                 // puts the node back at the depth the original add gave it
                 // instead of jumping it in front of whatever arrived since.
@@ -333,11 +348,16 @@ impl GraphIntent {
                     pos,
                     z: view.front_z(),
                 };
-                let detached = DetachedNode::new(node_id, node, bindings, Vec::new())?;
+                let detached = DetachedNode::new(DetachedNodeParts {
+                    node_id,
+                    node,
+                    bindings,
+                    subscriptions: Vec::new(),
+                })?;
                 UndoStep::NodePresence(Box::new(NodePresence::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
-                validate::non_nil_node(node_id, "RemoveNode")?;
+                validate::non_nil_node(node_id, Role::RemoveNode)?;
                 let Some(state) = NodeState::capture(doc, node_id) else {
                     return Ok(None);
                 };
@@ -349,7 +369,7 @@ impl GraphIntent {
                 let mut moves = Vec::with_capacity(members.len());
                 for member in members.iter() {
                     let to = member.pos + offset;
-                    validate::finite_position(to, "MoveSelection")?;
+                    validate::finite_position(to, Role::MoveSelection)?;
                     // Drag-sourced (spans frames): a member whose item
                     // vanished mid-gesture (node removed) drops quietly.
                     let Some(placement) = view.item_placements.get(&member.node) else {
@@ -366,7 +386,7 @@ impl GraphIntent {
                 UndoStep::MoveSelection(MoveSelection { moves })
             }
             Self::RenameNode { node_id, to } => {
-                let Some(node) = validate::live_node(graph, node_id, "RenameNode")? else {
+                let Some(node) = validate::live_node(graph, node_id, Role::RenameNode)? else {
                     return Ok(None);
                 };
                 UndoStep::RenameNode(RenameNode {
@@ -378,14 +398,15 @@ impl GraphIntent {
                 })
             }
             Self::SetInput { input, to } => {
-                if validate::live_node(graph, input.node_id, "SetInput destination")?.is_none() {
+                if validate::live_node(graph, input.node_id, Role::SetInputDestination)?.is_none() {
                     return Ok(None);
                 }
                 if let Some(Binding::Bind(source)) = &to {
                     validate::wirable(graph, library, input)?;
                     // A wire held across frames can outlive its producer, and
                     // the bind would leave the graph with a dangling edge.
-                    if validate::live_node(graph, source.node_id, "SetInput producer")?.is_none() {
+                    if validate::live_node(graph, source.node_id, Role::SetInputProducer)?.is_none()
+                    {
                         return Ok(None);
                     }
                     // Reject a bind that would close a data cycle: the planner
@@ -434,7 +455,7 @@ impl GraphIntent {
                 })
             }
             Self::SetNodeProperty { node_id, to } => {
-                let Some(node) = validate::live_node(graph, node_id, "SetNodeProperty")? else {
+                let Some(node) = validate::live_node(graph, node_id, Role::SetNodeProperty)? else {
                     return Ok(None);
                 };
                 // Capture the *same* property's current value as `from`, so a
@@ -468,8 +489,8 @@ impl GraphIntent {
                     event_idx,
                     subscriber,
                 } = subscription;
-                validate::non_nil_node(emitter, "SetSubscription emitter")?;
-                validate::non_nil_node(subscriber, "SetSubscription subscriber")?;
+                validate::non_nil_node(emitter, Role::SetSubscriptionEmitter)?;
+                validate::non_nil_node(subscriber, Role::SetSubscriptionSubscriber)?;
                 // A subscribe needs both endpoints present; a stale drag onto a
                 // vanished node drops rather than recording a dangling
                 // subscription. An unsubscribe of a vanished node no-ops

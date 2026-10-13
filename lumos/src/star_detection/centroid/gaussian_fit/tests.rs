@@ -10,6 +10,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
     assert_jacobian_matches_differences,
 };
+use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
@@ -397,13 +398,13 @@ fn gaussian_fit_recovers_known_parameters() {
             .stamp(Size2us::new(case.stamp, case.stamp), case.background);
         case.perturbation.apply(&mut pixels);
 
-        let result = GaussianFit::new(
-            &pixels,
-            case.guess,
-            &StampGrid::new(case.fit_radius),
-            case.fit_background.unwrap_or(case.background),
-            None,
-        )
+        let result = GaussianFit::new(FitInputs {
+            pixels: &pixels,
+            pos: case.guess,
+            grid: &StampGrid::new(case.fit_radius),
+            background: case.fit_background.unwrap_or(case.background),
+            noise: None,
+        })
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
 
         let position_error = (result.pos - case.center).length();
@@ -554,7 +555,13 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
                 .stamp(size, 0.1),
             None => Buffer2::new_filled(case.side, case.side, 0.1),
         };
-        let fit = GaussianFit::new(&pixels, case.seed, &StampGrid::new(case.radius), 0.1, None);
+        let fit = GaussianFit::new(FitInputs {
+            pixels: &pixels,
+            pos: case.seed,
+            grid: &StampGrid::new(case.radius),
+            background: 0.1,
+            noise: None,
+        });
         assert_eq!(fit.is_some(), case.lands, "{}", case.name);
         if let (Some(fit), Some(sigma)) = (fit, case.sigma) {
             assert!(
@@ -583,8 +590,14 @@ fn gaussian_fit_rms_residual() {
         let mut pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::gaussian(2.5))
             .stamp(Size2us::new(21, 21), 0.1);
         patterns::add_gaussian_noise(&mut pixels, noise, 11111);
-        let fit =
-            GaussianFit::new(&pixels, DVec2::splat(10.0), &StampGrid::new(8), 0.1, None).unwrap();
+        let fit = GaussianFit::new(FitInputs {
+            pixels: &pixels,
+            pos: DVec2::splat(10.0),
+            grid: &StampGrid::new(8),
+            background: 0.1,
+            noise: None,
+        })
+        .unwrap();
         let rms = f64::from(fit.debug.rms_residual);
         if noise == 0.0 {
             assert!(rms < 1e-7, "clean stamp: {rms}");
@@ -681,13 +694,13 @@ fn gaussian_fit_converges_as_fast_on_a_round_star() {
             },
         )
         .stamp(size, 0.1);
-        let fit = GaussianFit::new(
-            &pixels,
-            DVec2::new(15.3, 14.8),
-            &StampGrid::new(8),
-            0.1,
-            None,
-        )
+        let fit = GaussianFit::new(FitInputs {
+            pixels: &pixels,
+            pos: DVec2::new(15.3, 14.8),
+            grid: &StampGrid::new(8),
+            background: 0.1,
+            noise: None,
+        })
         .expect("the fit lands");
         fit.debug.iterations
     };

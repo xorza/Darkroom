@@ -4,13 +4,13 @@ mod real_data;
 use crate::image_ops::stretch::*;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use std::f32::consts::LN_10;
 use std::iter;
 
 fn median_of(v: &[f32]) -> f32 {
     let mut c = v.to_vec();
-    median_mut(&mut c)
+    statistics::median_mut(&mut c)
 }
 
 /// How far f32 `MTF(m, x) = (m − 1)x / ((2m − 1)x − m)` can sit from its exact value `v`: two
@@ -178,14 +178,14 @@ fn auto_stretches_report_an_unreachable_background() {
         (1e-5, 1.0, false),
         (0.999_99, 1.0, true),
     ] {
-        let asinh = auto_asinh_curve(median, sigma, 1.5, 0.2);
+        let asinh = Background { median, sigma }.auto_asinh_curve(1.5, 0.2);
         assert_eq!(
             asinh.is_err(),
             asinh_fails,
             "asinh: median {median}, sigma {sigma}"
         );
         for (name, curve) in [
-            ("STF", stf_curve(median, sigma, 1.5, 0.2)),
+            ("STF", Background { median, sigma }.stf_curve(1.5, 0.2)),
             ("asinh", asinh),
         ]
         .into_iter()
@@ -220,7 +220,12 @@ fn stf_params_hand_computed() {
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
     //
     // Each value takes a few f32 roundings along the way; 16ε of it holds them.
-    let c = stf_curve(0.1, 0.02, 1.0, 0.25).unwrap();
+    let c = Background {
+        median: 0.1,
+        sigma: 0.02,
+    }
+    .stf_curve(1.0, 0.25)
+    .unwrap();
     let near = |got: f32, expected: f32| (got - expected).abs() <= 16.0 * f32::EPSILON * expected;
     assert_eq!(c.black.black, 0.1 - 0.02, "black");
     assert_eq!(c.black.inv_range, 1.0 / (1.0 - c.black.black), "inv_range");
@@ -242,10 +247,13 @@ fn stf_params_hand_computed() {
 fn the_auto_black_point_is_autostfs() {
     assert_eq!(StretchMethod::AUTO_SHADOW_SIGMAS, 2.8);
     assert_eq!(StretchMethod::AUTO_TARGET_BACKGROUND, 0.25);
-    let preset = |curve: fn(f32, f32, f32, f32) -> Result<Curve, OpError>, shadow_sigmas: f32| {
+    let background = Background {
+        median: 0.1,
+        sigma: 0.02,
+    };
+    let preset = |curve: fn(Background, f32, f32) -> Result<Curve, OpError>, shadow_sigmas: f32| {
         curve(
-            0.1,
-            0.02,
+            background,
             shadow_sigmas,
             StretchMethod::AUTO_TARGET_BACKGROUND,
         )
@@ -253,7 +261,7 @@ fn the_auto_black_point_is_autostfs() {
         .black
         .black
     };
-    for curve in [stf_curve, auto_asinh_curve] {
+    for curve in [Background::stf_curve, Background::auto_asinh_curve] {
         assert_eq!(
             preset(curve, StretchMethod::AUTO_SHADOW_SIGMAS),
             0.1 - 2.8 * 0.02
@@ -268,7 +276,13 @@ fn ghs_endpoints_and_monotonic_across_b_family() {
     // Every b case (b=-1 log, b=0 exp, b>0 hyperbolic, general b<0) must map 0->0, 1->1, monotone.
     for &b in &[-2.0f32, -1.4, -1.0, -0.3, 0.0, 0.5, 1.0, 3.0] {
         for &d in &[0.5f32, 2.0, 6.0] {
-            let c = GhsCurve::new(d, b, 0.3, 0.0, 1.0);
+            let c = GhsCurve::new(GhsShape {
+                d,
+                b,
+                sp: 0.3,
+                lp: 0.0,
+                hp: 1.0,
+            });
             assert_eq!(c.eval(0.0), 0.0, "f(0)=0 (b={b}, d={d})");
             assert!(
                 (c.eval(1.0) - 1.0).abs() <= GHS_EVAL_BOUND,
@@ -354,7 +368,7 @@ fn ghs_matches_an_f64_reference_through_both_limits() {
     ] {
         for d in [0.5f32, 5.0, 12.0] {
             for (sp, lp, hp) in [(0.3f32, 0.0f32, 1.0f32), (0.4, 0.15, 0.85)] {
-                let curve = GhsCurve::new(d, b, sp, lp, hp);
+                let curve = GhsCurve::new(GhsShape { d, b, sp, lp, hp });
                 for i in 0..=400 {
                     let x = i as f32 / 400.0;
                     let expected = ghs_reference(
@@ -409,8 +423,15 @@ fn ghs_slope_is_the_derivative_of_the_base() {
                 let u32 = u as f32;
                 let t = ghs_reference_t(d64, b64, f64::from(u32)) * scale;
                 let tp = ghs_reference_tp(d64, b64, f64::from(u32)) * scale;
-                assert!(near(ghs_base_t(d, b, u32), t), "b {b}, d {d}, u {u}: T");
-                assert!(near(ghs_base_tp(d, b, u32), tp), "b {b}, d {d}, u {u}: T′");
+                let shape = GhsShape {
+                    d,
+                    b,
+                    sp: 0.0,
+                    lp: 0.0,
+                    hp: 1.0,
+                };
+                assert!(near(shape.base(u32), t), "b {b}, d {d}, u {u}: T");
+                assert!(near(shape.base_slope(u32), tp), "b {b}, d {d}, u {u}: T′");
             }
         }
     }
@@ -418,7 +439,13 @@ fn ghs_slope_is_the_derivative_of_the_base() {
 
 #[test]
 fn ghs_identity_when_d_zero() {
-    let c = GhsCurve::new(0.0, 1.0, 0.3, 0.1, 0.9);
+    let c = GhsCurve::new(GhsShape {
+        d: 0.0,
+        b: 1.0,
+        sp: 0.3,
+        lp: 0.1,
+        hp: 0.9,
+    });
     for &x in &[0.0f32, 0.05, 0.3, 0.5, 0.9, 1.0] {
         assert_eq!(c.eval(x), x, "d=0 is the identity at {x}");
     }
@@ -433,7 +460,13 @@ const GHS_EVAL_BOUND: f32 = 8.0 * f32::EPSILON;
 /// reference is that closed form, and the curve meets it to [`GHS_EVAL_BOUND`].
 #[test]
 fn ghs_exponential_b0_hand_computed() {
-    let c = GhsCurve::new(2.0, 0.0, 0.0, 0.0, 1.0);
+    let c = GhsCurve::new(GhsShape {
+        d: 2.0,
+        b: 0.0,
+        sp: 0.0,
+        lp: 0.0,
+        hp: 1.0,
+    });
     for (x, hand) in [(0.5f32, 0.731_059), (0.25, 0.455_054)] {
         let closed = (1.0 - (-2.0 * f64::from(x)).exp()) / (1.0 - (-2.0f64).exp());
         assert!((closed - hand).abs() < 1e-6, "{closed} vs {hand}");
@@ -454,7 +487,13 @@ fn ghs_exponential_b0_hand_computed() {
 /// `f(0.9) = (f(0.8) + 1)/2` — two evaluations' [`GHS_EVAL_BOUND`] apart at most.
 #[test]
 fn ghs_protection_tails_are_linear() {
-    let c = GhsCurve::new(3.0, 1.0, 0.5, 0.2, 0.8);
+    let c = GhsCurve::new(GhsShape {
+        d: 3.0,
+        b: 1.0,
+        sp: 0.5,
+        lp: 0.2,
+        hp: 0.8,
+    });
     assert_eq!(c.eval(0.0), 0.0);
     assert_eq!(c.eval(1.0), 1.0);
     assert!(
@@ -474,10 +513,10 @@ fn ghs_protection_tails_are_linear() {
 #[test]
 fn ghs_continuous_at_breakpoints() {
     let (d, b, sp, lp, hp) = (2.5, -1.4, 0.4, 0.15, 0.85);
-    let c = GhsCurve::new(d, b, sp, lp, hp);
+    let c = GhsCurve::new(GhsShape { d, b, sp, lp, hp });
     for bp in [lp, sp, hp] {
         let below = bp.next_down();
-        let slope = ghs_base_tp(d, b, (bp - sp).abs()) * c.inv_range;
+        let slope = c.shape.base_slope((bp - sp).abs()) * c.inv_range;
         let bound = slope * (bp - below) + 2.0 * GHS_EVAL_BOUND;
         let jump = (c.eval(bp) - c.eval(below)).abs();
         assert!(jump <= bound, "at {bp}: {jump:e} > {bound:e}");
@@ -486,7 +525,13 @@ fn ghs_continuous_at_breakpoints() {
 
 #[test]
 fn ghs_clamps_out_of_range_input() {
-    let c = GhsCurve::new(2.0, 1.0, 0.3, 0.0, 0.9);
+    let c = GhsCurve::new(GhsShape {
+        d: 2.0,
+        b: 1.0,
+        sp: 0.3,
+        lp: 0.0,
+        hp: 0.9,
+    });
     assert_eq!(
         c.eval(5.0),
         1.0,
@@ -499,8 +544,22 @@ fn ghs_clamps_out_of_range_input() {
 fn ghs_d_controls_strength() {
     // With the symmetry point at the faint-signal level, stronger d lifts signal above sp higher
     // (below sp the antisymmetric curve instead compresses toward black).
-    let weak = GhsCurve::new(1.0, 0.0, 0.1, 0.0, 1.0).eval(0.2);
-    let strong = GhsCurve::new(6.0, 0.0, 0.1, 0.0, 1.0).eval(0.2);
+    let weak = GhsCurve::new(GhsShape {
+        d: 1.0,
+        b: 0.0,
+        sp: 0.1,
+        lp: 0.0,
+        hp: 1.0,
+    })
+    .eval(0.2);
+    let strong = GhsCurve::new(GhsShape {
+        d: 6.0,
+        b: 0.0,
+        sp: 0.1,
+        lp: 0.0,
+        hp: 1.0,
+    })
+    .eval(0.2);
     assert!(
         strong > weak,
         "stronger d lifts signal above sp more ({strong} > {weak})"
@@ -726,8 +785,28 @@ fn the_auto_black_point_keeps_a_faint_colour() {
 fn a_nan_sample_is_black_on_every_curve() {
     assert_eq!(MtfCurve { midtones: 0.2 }.eval(f32::NAN), 0.0);
     assert_eq!(AsinhCurve::new(0.05).eval(f32::NAN), 0.0);
-    assert_eq!(GhsCurve::new(3.0, 1.0, 0.5, 0.2, 0.8).eval(f32::NAN), 0.0);
-    assert_eq!(GhsCurve::new(0.0, 1.0, 0.5, 0.2, 0.8).eval(f32::NAN), 0.0);
+    assert_eq!(
+        GhsCurve::new(GhsShape {
+            d: 3.0,
+            b: 1.0,
+            sp: 0.5,
+            lp: 0.2,
+            hp: 0.8
+        })
+        .eval(f32::NAN),
+        0.0
+    );
+    assert_eq!(
+        GhsCurve::new(GhsShape {
+            d: 0.0,
+            b: 1.0,
+            sp: 0.5,
+            lp: 0.2,
+            hp: 0.8
+        })
+        .eval(f32::NAN),
+        0.0
+    );
     let mut image = rgb(Size2us::new(1, 1), vec![f32::NAN], vec![0.2], vec![0.2]);
     Stretch {
         method: StretchMethod::Ghs {

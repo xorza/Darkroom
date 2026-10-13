@@ -1,10 +1,10 @@
 use crate::image::cfa::cfa_colour::CfaColour;
-use crate::image::cfa::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::image::cfa::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
 use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::error::XTransPatternError;
 use crate::internals::assertions::assert_close;
+use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -12,7 +12,7 @@ use common::CancelToken;
 
 #[test]
 fn xtrans_pattern_color_at() {
-    let pattern = test_pattern();
+    let pattern = XTRANS_PATTERN;
     // Check corners
     assert_eq!(pattern.color_at(Vec2us::new(0, 0)), CfaColour::Green);
     assert_eq!(pattern.color_at(Vec2us::new(2, 0)), CfaColour::Red);
@@ -53,7 +53,7 @@ fn xtrans_pattern_invalid_metadata() {
         }
     );
 
-    let mut pattern = test_pattern_array();
+    let mut pattern = *XTRANS_PATTERN.rows();
     pattern[0][2] = 1;
     assert_eq!(
         XTransPattern::new(pattern).unwrap_err(),
@@ -110,13 +110,17 @@ fn xtrans_pattern_invalid_metadata() {
     );
 
     // Deserializing checks the layout too, so a stored pattern cannot come back invalid.
-    let stored = common::serialize(&test_pattern(), common::SerdeFormat::Ron).unwrap();
-    let restored: XTransPattern = common::deserialize(&stored, common::SerdeFormat::Ron).unwrap();
-    assert_eq!(restored, test_pattern());
+    let stored = common::SerdeFormat::Ron.serialize(&XTRANS_PATTERN).unwrap();
+    let restored: XTransPattern = common::SerdeFormat::Ron.deserialize(&stored).unwrap();
+    assert_eq!(restored, XTRANS_PATTERN);
     let mut corrupted = invalid_value_pattern;
     corrupted[1][2] = 3;
-    let stored = common::serialize(&corrupted, common::SerdeFormat::Ron).unwrap();
-    assert!(common::deserialize::<XTransPattern>(&stored, common::SerdeFormat::Ron).is_err());
+    let stored = common::SerdeFormat::Ron.serialize(&corrupted).unwrap();
+    assert!(
+        common::SerdeFormat::Ron
+            .deserialize::<XTransPattern>(&stored)
+            .is_err()
+    );
 }
 
 /// The hexagons of the Fujifilm layout are dcraw's `allhex` for it, entry for entry, as
@@ -142,7 +146,7 @@ fn the_hexagons_are_dcraws() {
             [(0, -1), (0, 2), (1, 0), (-2, 0), (-1, -1), (1, 1), (1, -1), (-2, 2)],
         ],
     ];
-    let hexagons = test_pattern().hexagons();
+    let hexagons = XTRANS_PATTERN.hexagons();
     for (row, cells) in expected.iter().enumerate() {
         for (column, cell) in cells.iter().enumerate() {
             let actual: Vec<(i8, i8)> = hexagons
@@ -159,13 +163,13 @@ fn the_hexagons_are_dcraws() {
 /// A frame must hold one sample per pixel of a size that is not empty.
 #[test]
 fn an_xtrans_image_holds_its_size_in_samples() {
-    let image = XTransImage::new(&[0.5; 36], Size2us::new(6, 6), test_pattern());
+    let image = XTransImage::new(&[0.5; 36], Size2us::new(6, 6), XTRANS_PATTERN);
     assert_eq!(image.size, Size2us::new(6, 6));
     assert_eq!(image.read(1, 2), 0.5);
     for (samples, size) in [(24, Size2us::new(0, 4)), (30, Size2us::new(6, 6))] {
         let data = vec![0.5f32; samples];
         let refused = std::panic::catch_unwind(|| {
-            XTransImage::new(&data, size, test_pattern());
+            XTransImage::new(&data, size, XTRANS_PATTERN);
         });
         assert!(refused.is_err(), "{samples} samples for {size:?}");
     }
@@ -180,7 +184,7 @@ fn a_uniform_frame_demosaics_to_itself() {
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2, 0.5] {
             let rgb = markesteijn::demosaic(
-                &XTransImage::new(&vec![level; size.pixel_count()], size, test_pattern()),
+                &XTransImage::new(&vec![level; size.pixel_count()], size, XTRANS_PATTERN),
                 passes,
                 &CancelToken::never(),
             )
@@ -218,7 +222,7 @@ fn markesteijn_is_odd() {
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         let demosaic = |data: &[f32]| {
             markesteijn::demosaic(
-                &XTransImage::new(data, size, test_pattern()),
+                &XTransImage::new(data, size, XTRANS_PATTERN),
                 passes,
                 &CancelToken::never(),
             )
@@ -241,7 +245,7 @@ fn markesteijn_is_odd() {
 #[test]
 fn f32_demosaic_preserves_signed_native_samples() {
     let size = Size2us::new(18, 18);
-    let pattern = test_pattern();
+    let pattern = XTRANS_PATTERN;
     let data: Vec<f32> = (0..size.pixel_count())
         .map(|index| (index % 17) as f32 * 0.25 - 2.0)
         .collect();
@@ -279,7 +283,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let shifted: Vec<f32> = base.iter().map(|value| value + pedestal).collect();
     let run = |data: &[f32]| {
         markesteijn::demosaic(
-            &XTransImage::new(data, size, test_pattern()),
+            &XTransImage::new(data, size, XTRANS_PATTERN),
             MarkesteijnPasses::One,
             &CancelToken::never(),
         )
@@ -312,7 +316,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
         })
         .collect();
     let rgb = markesteijn::demosaic(
-        &XTransImage::new(&blocks, contrast, test_pattern()),
+        &XTransImage::new(&blocks, contrast, XTRANS_PATTERN),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )

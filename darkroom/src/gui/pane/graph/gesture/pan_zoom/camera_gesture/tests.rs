@@ -14,7 +14,7 @@ fn a_pan_drag_measures_from_its_latch_and_releases_once() {
     let mut out = Requests::default();
     let mut camera = CameraGesture::default();
 
-    // Before any latch, a delta drives nothing — `emit_pan_zoom` calls in
+    // Before any latch, a delta drives nothing — `emit` calls in
     // every frame, most of them with no gesture in flight.
     let mut unlatched = Vec2::ZERO;
     assert_eq!(

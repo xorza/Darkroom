@@ -14,7 +14,7 @@ fn zero_is_bad_follows_the_open_flags() {
             let opened = sys::libraw_open_bayer(
                 raw,
                 bytes.as_mut_ptr(),
-                bytes.len() as u32,
+                u32::try_from(bytes.len()).unwrap(),
                 SIDE,
                 SIDE,
                 0,

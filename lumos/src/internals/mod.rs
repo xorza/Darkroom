@@ -8,9 +8,6 @@
 )]
 
 #[cfg(test)]
-use std::any::Any;
-
-#[cfg(test)]
 pub(crate) mod assertions;
 pub(crate) mod cfa;
 #[cfg(test)]
@@ -31,7 +28,7 @@ pub(crate) mod visual;
 
 /// The text a caught panic carried: its `&str` or `String` payload, the two `panic!` produces.
 #[cfg(test)]
-pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|message| (*message).to_string())
@@ -39,9 +36,8 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
         .expect("panic! carries a &str or a String")
 }
 
-/// Initialize tracing subscriber for tests.
-/// Safe to call multiple times - will only initialize once.
-/// Respects `RUST_LOG` env var, defaults to "info".
+/// Route the tests' tracing to the test writer, at `RUST_LOG`'s filter or `info`; a second call
+/// leaves the first subscriber in place.
 #[cfg(test)]
 pub(crate) fn init_tracing() {
     use tracing_subscriber::EnvFilter;

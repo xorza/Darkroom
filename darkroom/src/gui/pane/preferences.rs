@@ -21,7 +21,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
+use crate::gui::widgets::support;
 use crate::platform;
 
 /// Cap on the settings column, so the form reads as a column on a wide
@@ -112,7 +112,7 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
         .show(ui, |ui| {
             let style = TextStyle {
                 weight: FontWeight::BOLD,
-                ..muted_text(ui, theme, theme.text.body)
+                ..support::muted_text(ui, theme, theme.text.body)
             };
             Text::new(title).style(&style).show(ui);
             body(ui);
@@ -239,7 +239,7 @@ fn model_row(
                             .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
                             .show(ui, |ui| {
                                 Text::new(label)
-                                    .style(&sized_text(ui, theme.text.body))
+                                    .style(&support::sized_text(ui, theme.text.body))
                                     .show(ui);
                             });
 
@@ -291,7 +291,11 @@ fn model_row(
                 if let Some(problem) = problem {
                     indented_line(ui, "problem", |ui| {
                         Text::new(problem)
-                            .style(&colored_text(ui, theme.status.error, theme.text.body))
+                            .style(&support::colored_text(
+                                ui,
+                                theme.status.error,
+                                theme.text.body,
+                            ))
                             .show(ui);
                     });
                 }
@@ -339,7 +343,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 Text::new(link_label)
-                    .style(&colored_text(ui, link_color, theme.text.body))
+                    .style(&support::colored_text(ui, link_color, theme.text.body))
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
@@ -350,7 +354,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         // link goes before clicking — the URL isn't otherwise visible.
         Tooltip::on(&snapshot, url).show(ui);
         Text::new(DOWNLOAD_HINT)
-            .style(&muted_text(ui, theme, theme.text.body))
+            .style(&support::muted_text(ui, theme, theme.text.body))
             .show(ui);
     });
 }

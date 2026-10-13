@@ -26,7 +26,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::DomainMap;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::input_format::InputFormat;
 use crate::io::load_context::LoadContext;
@@ -52,11 +52,11 @@ pub(crate) struct CfaFrameInfo {
 impl CfaFrameInfo {
     pub(crate) fn from_file(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::fits_cfa_frame_info(path, context),
-            InputFormat::CameraRaw => raw::raw_cfa_frame_info(path, context),
+            InputFormat::Fits => fits_decode::cfa_frame_info(path, context),
+            InputFormat::CameraRaw => raw::cfa_frame_info(path, context),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
-                "scientific CFA input must be camera RAW or FITS",
+                ScientificRefusal::RasterCfa,
             )),
         }
     }
@@ -80,7 +80,7 @@ impl StackableImage for CfaImage {
     const DECODER: DecoderKind = DecoderKind::Cfa;
 
     fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new((self.data.width(), self.data.height()), 1)
+        ImageDimensions::new(self.size(), 1)
     }
 
     fn flags(&self) -> Option<&PixelFlags> {
@@ -101,7 +101,7 @@ impl StackableImage for CfaImage {
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::from_file(path, context)
+        Self::load_path(path, context)
     }
 
     fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
@@ -153,15 +153,18 @@ impl CfaImage {
     }
 
     /// Load an un-demosaiced sensor image from camera RAW or mosaic FITS.
-    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
-        let path = path.as_ref();
+    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
+        Self::load_path(path.as_ref(), context)
+    }
+
+    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         context.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_cfa_fits(path, context),
-            InputFormat::CameraRaw => raw::load_raw_cfa(path, context),
+            InputFormat::Fits => fits_decode::load_cfa(path, context),
+            InputFormat::CameraRaw => raw::load_cfa(path, context),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
-                "generic raster decoders do not establish a scientific CFA contract",
+                ScientificRefusal::RasterCfa,
             )),
         }
     }
@@ -180,7 +183,7 @@ impl CfaImage {
     /// Save this sensor-domain image as a checksummed floating-point FITS file, with its flags
     /// in a `LUMFLAGS` extension when they hold more than the NaN of a sample with no data.
     pub fn save_fits(&self, path: &Path) -> io::Result<()> {
-        fits_cfa::save_cfa_fits(path, self)
+        fits_cfa::save(path, self)
     }
 
     /// Replace every null with the median of its same-colour neighbours.
@@ -208,7 +211,7 @@ impl CfaImage {
             return;
         };
         let lattice = CfaLattice::new(&self.cfa_type);
-        let size = Size2us::new(self.data.width(), self.data.height());
+        let size = self.size();
         let mut nulls = flags.mask_of(QualityFlags::NO_DATA);
         nulls.and_not(&flags.mask_of(QualityFlags::REPAIRED));
         let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
@@ -234,8 +237,7 @@ impl CfaImage {
         // frame no calibration touched, or one read back from a file, which holds the decoder's
         // fill under each null.
         self.repair_nulls();
-        let width = self.data.width();
-        let height = self.data.height();
+        let size = self.size();
         // Through the checked accessor, then shared: the grid is the flat's, not this frame's.
         let flat_gain = self
             .flat_gain()
@@ -253,7 +255,7 @@ impl CfaImage {
             let flags = self.flags.as_ref();
             metadata.mosaic_noise = Some(MosaicNoise::measure(
                 self.data.pixels(),
-                Size2us::new(width, height),
+                size,
                 &cfa_type,
                 |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
                 metadata.quantization_sigma,
@@ -279,37 +281,22 @@ impl CfaImage {
             flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
         }
 
-        Ok(match cfa_type {
-            CfaType::Mono => {
-                // No demosaicing needed - convert 1-channel to 1-channel LinearImage
-                let dims = ImageDimensions::new((width, height), 1);
-                let mut image = LinearImage::from_pixels(dims, pixels);
-                image.metadata = metadata;
-                image.flags = flags;
-                image
-            }
+        let mut image = match cfa_type {
+            CfaType::Mono => LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels),
             CfaType::Bayer(cfa_pattern) => {
-                let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern)
-                    .with_gains(gains);
+                let bayer = BayerImage::new(&pixels, size, cfa_pattern).with_gains(gains);
                 let planes = rcd::demosaic(&bayer, cancel)?;
-                let dims = ImageDimensions::new((width, height), 3);
-                let mut image = LinearImage::from_planar_channels(dims, planes);
-                image.metadata = metadata;
-                image.flags = flags;
-                image
+                LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
             }
             CfaType::XTrans(pattern) => {
-                let xtrans = XTransImage::new(&pixels, Size2us::new(width, height), pattern)
-                    .with_gains(gains);
+                let xtrans = XTransImage::new(&pixels, size, pattern).with_gains(gains);
                 let planes = markesteijn::demosaic(&xtrans, passes, cancel)?;
-
-                let dims = ImageDimensions::new((width, height), 3);
-                let mut image = LinearImage::from_planar_channels(dims, planes);
-                image.metadata = metadata;
-                image.flags = flags;
-                image
+                LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
             }
-        })
+        };
+        image.metadata = metadata;
+        image.flags = flags;
+        Ok(image)
     }
 
     /// A plane to register this mosaic on, as Siril registers CFA frames for its CFA drizzle
@@ -432,12 +419,10 @@ impl CfaImage {
     /// signal.
     pub(crate) fn subtract_scaled(&mut self, dark: &Self, map: DomainMap, scale: f64) {
         assert!(
-            self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
-            "CfaImage dimensions mismatch: {}x{} vs {}x{}",
-            self.data.width(),
-            self.data.height(),
-            dark.data.width(),
-            dark.data.height()
+            self.size() == dark.size(),
+            "CfaImage dimensions mismatch: {} vs {}",
+            self.size(),
+            dark.size()
         );
         // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the map
         // from the two domains and refuses a pair with none. Only checked when both declare a
@@ -464,7 +449,7 @@ impl CfaImage {
 
     /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
     /// measurement — a fill, or a saturated bound: the calibrated value there is not one either.
-    pub(crate) fn take_master_flags(&mut self, master: &Self) {
+    fn take_master_flags(&mut self, master: &Self) {
         let Some(flags) = master.flags.as_ref().filter(|flags| {
             flags.contains(QualityFlags::NO_DATA) || flags.contains(QualityFlags::SATURATED)
         }) else {

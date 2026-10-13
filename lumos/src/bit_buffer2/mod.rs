@@ -25,35 +25,38 @@ const BITS_PER_WORD: usize = 64;
 /// Row alignment in bits (128 bits = 16 bytes = 2 words).
 const ROW_ALIGNMENT_BITS: usize = 128;
 
+/// A buffer's row stride in bits, and the words its rows take.
 #[derive(Debug)]
 struct BitLayout {
     stride: usize,
     num_words: usize,
 }
 
-fn bit_layout(size: Size2us) -> BitLayout {
-    if size.width == 0 || size.height == 0 {
-        return BitLayout {
-            stride: 0,
-            num_words: 0,
-        };
-    }
+impl BitLayout {
+    fn of(size: Size2us) -> Self {
+        if size.width == 0 || size.height == 0 {
+            return Self {
+                stride: 0,
+                num_words: 0,
+            };
+        }
 
-    let stride = size
-        .width
-        .div_ceil(ROW_ALIGNMENT_BITS)
-        .checked_mul(ROW_ALIGNMENT_BITS)
-        .expect("BitBuffer2 row stride overflow");
-    size.width
-        .checked_mul(size.height)
-        .expect("BitBuffer2 dimensions overflow");
-    let total_bits = stride
-        .checked_mul(size.height)
-        .expect("BitBuffer2 storage size overflow");
-    debug_assert_eq!(total_bits % BITS_PER_WORD, 0);
-    BitLayout {
-        stride,
-        num_words: total_bits / BITS_PER_WORD,
+        let stride = size
+            .width
+            .div_ceil(ROW_ALIGNMENT_BITS)
+            .checked_mul(ROW_ALIGNMENT_BITS)
+            .expect("BitBuffer2 row stride overflow");
+        size.width
+            .checked_mul(size.height)
+            .expect("BitBuffer2 dimensions overflow");
+        let total_bits = stride
+            .checked_mul(size.height)
+            .expect("BitBuffer2 storage size overflow");
+        debug_assert_eq!(total_bits % BITS_PER_WORD, 0);
+        Self {
+            stride,
+            num_words: total_bits / BITS_PER_WORD,
+        }
     }
 }
 
@@ -93,10 +96,9 @@ impl Scratch for BitBuffer2 {
 }
 
 impl BitBuffer2 {
-    /// Create a new bit buffer filled with the given value.
     #[inline]
     pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
-        let layout = bit_layout(size);
+        let layout = BitLayout::of(size);
         let fill = if value { !0u64 } else { 0u64 };
         let words = vec![fill; layout.num_words];
         Self {
@@ -108,16 +110,14 @@ impl BitBuffer2 {
 
     /// The bytes a buffer of `size` allocates, rows padded and all.
     pub(crate) fn heap_bytes(size: Size2us) -> usize {
-        bit_layout(size).num_words * size_of::<u64>()
+        BitLayout::of(size).num_words * size_of::<u64>()
     }
 
-    /// Create a new bit buffer with all bits set to false.
     #[inline]
     pub(crate) fn new_default(size: Size2us) -> Self {
         Self::new_filled(size, false)
     }
 
-    /// Get the number of words per row.
     #[inline]
     pub(crate) const fn words_per_row(&self) -> usize {
         self.stride / BITS_PER_WORD
@@ -159,18 +159,17 @@ impl BitBuffer2 {
         }
     }
 
-    /// Fill all bits with the given value.
+    /// Every bit, padding included, set to `value`.
     #[inline]
     pub(crate) fn fill(&mut self, value: bool) {
         let fill = if value { !0u64 } else { 0u64 };
         self.words.fill(fill);
     }
 
-    /// Copy contents from another `BitBuffer2`.
     #[inline]
     pub(crate) fn copy_from(&mut self, other: &Self) {
-        assert_eq!(self.size, other.size, "size mismatch");
-        assert_eq!(self.stride, other.stride, "stride mismatch");
+        debug_assert_eq!(self.size, other.size, "size mismatch");
+        debug_assert_eq!(self.stride, other.stride, "stride mismatch");
         self.words.copy_from_slice(&other.words);
     }
 
@@ -183,7 +182,6 @@ impl BitBuffer2 {
 
         let words_per_row = self.words_per_row();
         let bits_in_last_word = self.size.width % BITS_PER_WORD;
-        // Number of fully-used words (all 64 bits valid)
         let full_words_per_row = self.size.width / BITS_PER_WORD;
 
         let mut count = 0usize;
@@ -191,17 +189,12 @@ impl BitBuffer2 {
         for y in 0..self.size.height {
             let row_start = y * words_per_row;
 
-            // Count full words (all 64 bits valid)
             for w in 0..full_words_per_row {
                 count += self.words[row_start + w].count_ones() as usize;
             }
 
-            // Handle partial last word if width is not a multiple of 64.
-            // The empty-buffer early-return guarantees width > 0 here, so a
-            // nonzero `bits_in_last_word` already implies a valid last word.
             if bits_in_last_word != 0 {
                 let last_word = self.words[row_start + full_words_per_row];
-                // Mask off padding bits
                 let mask = (1u64 << bits_in_last_word) - 1;
                 count += (last_word & mask).count_ones() as usize;
             }
@@ -360,8 +353,7 @@ impl BitBuffer2 {
     /// A disk rather than a square, as photutils dilates its source masks: a square reaches √2
     /// times further along the diagonals and masks sky that no source touches.
     ///
-    /// # Panics
-    /// If `scratch` is another size, or `radius` exceeds 63.
+    /// `scratch` is this buffer's size, and `radius` at most 63.
     pub(crate) fn dilate(&mut self, radius: usize, scratch: &mut Self) {
         dilation::dilate_mask(self, radius, scratch);
     }
@@ -373,8 +365,7 @@ impl Index<usize> for BitBuffer2 {
 
     #[inline]
     fn index(&self, idx: usize) -> &Self::Output {
-        // We can't return a reference to a bit, so we use a static bool
-        // This is a limitation of bit-packed storage
+        // A packed bit has no address to lend; the two promoted constants do.
         if self.get(idx) { &true } else { &false }
     }
 }

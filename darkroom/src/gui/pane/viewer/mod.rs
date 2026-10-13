@@ -18,7 +18,7 @@
 //! nothing else — the state one viewer tab keeps across frames, and the record
 //! pass that drives it.
 //!
-//! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
+//! [`TabRef::ImageViewer`]: crate::core::document::tab_ref::TabRef::ImageViewer
 
 mod camera;
 mod glyph;
@@ -33,21 +33,21 @@ use palantir::prelude::*;
 use palantir::widget::Shape;
 use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
 
-use crate::core::document::{Document, Viewport};
+use crate::core::document::Document;
+use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::pane::graph::gesture::pan_zoom;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::viewer::camera::{
-    VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM, draw_rect, fit_viewport, zoom_about_pane_center,
-};
-use crate::gui::pane::viewer::toolbar::{BACKDROPS, control_wid, filter_toggle, readout_pill};
+use crate::gui::pane::viewer::camera::{VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM};
+use crate::gui::pane::viewer::toolbar::BACKDROPS;
 use crate::gui::state::preview_store::error::PreviewImageError;
 use crate::gui::state::preview_store::{
     DrawableImage, PreviewMessage, PreviewStore, StoredContent,
 };
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
-use crate::gui::widgets::toolbar::{BUTTON_GAP, TOOLBAR_MARGIN, pill, pill_rule};
+use crate::gui::widgets::pill;
+use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
@@ -167,7 +167,7 @@ impl ImageViewer {
     ///
     /// `None` therefore means only "no framing yet": no explicit viewport and
     /// no pane to fit into. [`ImageFit::Contain`] is the right picture there —
-    /// [`fit_viewport`] is defined to match it — so nothing is owed a later
+    /// [`camera::fit_viewport`] is defined to match it — so nothing is owed a later
     /// pass.
     ///
     /// Converts the texture to logical px itself rather than taking the
@@ -181,7 +181,7 @@ impl ImageViewer {
         pane: Option<Vec2>,
     ) -> Option<Viewport> {
         self.view
-            .or_else(|| Some(fit_viewport(logical_size(image, ui), pane?)))
+            .or_else(|| Some(camera::fit_viewport(logical_size(image, ui), pane?)))
     }
 
     fn sync_source(&mut self, source_size: Option<UVec2>) {
@@ -238,7 +238,7 @@ impl ImageViewer {
                         .downsample(ImageDownsample::Mean);
                     ui.add_shape(match self.effective_view(ui, shown, pane) {
                         Some(v) => image
-                            .at(draw_rect(logical_size(shown, ui), v))
+                            .at(camera::draw_rect(logical_size(shown, ui), v))
                             .fit(ImageFit::Fill),
                         // No framing yet — no zoom of its own and no pane to
                         // fit into. Palantir's own contain draws exactly what
@@ -254,7 +254,7 @@ impl ImageViewer {
                 // legible over the checker/white backdrops too.
                 if let Some(hint) = source.hint() {
                     let text = fmt!(ui, "{hint}");
-                    readout_pill(
+                    toolbar::readout_pill(
                         ui,
                         theme,
                         Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
@@ -304,7 +304,7 @@ impl ImageViewer {
             zoom: self.effective_view(ui, shown, pane).map(|v| v.zoom),
         };
         let text = fmt!(ui, "{readout}");
-        readout_pill(
+        toolbar::readout_pill(
             ui,
             theme,
             Panel::hstack()
@@ -334,46 +334,51 @@ impl ImageViewer {
         let node_id = self.node_id;
         let mut changed = false;
         Panel::vstack()
-            .id(control_wid(node_id, "panel"))
+            .id(toolbar::control_wid(node_id, "panel"))
             .size((Sizing::HUG, Sizing::HUG))
             .align(Align::new(HAlign::Right, VAlign::Top))
             .child_align(Align::new(HAlign::Right, VAlign::Top))
             .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
             .gap(BUTTON_GAP)
             .show(ui, |ui| {
-                let framing = Panel::hstack().id(control_wid(node_id, "pill_framing"));
-                pill(ui, theme, framing, |ui| {
-                    if Chip::new(control_wid(node_id, "fit"), "Fit to view").show(
+                let framing = Panel::hstack().id(toolbar::control_wid(node_id, "pill_framing"));
+                pill::show(ui, theme, framing, |ui| {
+                    if Chip::new(toolbar::control_wid(node_id, "fit"), "Fit to view").show(
                         ui,
                         theme,
                         glyph::draw_fit,
                     ) {
                         self.reset_framing();
                     }
-                    if Chip::new(control_wid(node_id, "100"), "Zoom to 100%").show(
+                    if Chip::new(toolbar::control_wid(node_id, "100"), "Zoom to 100%").show(
                         ui,
                         theme,
                         glyph::draw_100,
                     ) && let Some(pane) = pane
                         && let Some(v) = self.effective_view(ui, shown, Some(pane))
                     {
-                        self.view = Some(zoom_about_pane_center(v, 1.0, pane));
+                        self.view = Some(camera::zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
-                let appearance = Panel::vstack().id(control_wid(node_id, "pill_appearance"));
-                pill(ui, theme, appearance, |ui| {
+                let appearance =
+                    Panel::vstack().id(toolbar::control_wid(node_id, "pill_appearance"));
+                pill::show(ui, theme, appearance, |ui| {
                     for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
-                        if Chip::new(control_wid(node_id, key), tip).show(ui, theme, |ui, s, _| {
-                            glyph::draw_swatch(ui, s, theme, mode, selected);
-                        }) && !selected
+                        if Chip::new(toolbar::control_wid(node_id, key), tip).show(
+                            ui,
+                            theme,
+                            |ui, s, _| {
+                                glyph::draw_swatch(ui, s, theme, mode, selected);
+                            },
+                        ) && !selected
                         {
                             prefs.background = mode;
                             changed = true;
                         }
                     }
-                    pill_rule(ui, theme);
-                    changed |= filter_toggle(ui, theme, node_id, &mut prefs.mag_filter);
+                    pill::rule(ui, theme);
+                    changed |= toolbar::filter_toggle(ui, theme, node_id, &mut prefs.mag_filter);
                 });
             });
         changed

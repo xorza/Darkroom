@@ -14,9 +14,9 @@ assert_not_impl_any!(InlineRenameTheme: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring, in
-/// `palantir_for`, or in `menu_button_for` fails loudly. Against
-/// the loaded palette rather than hex literals: the values are the
-/// palette's to choose, but landing `header_fill` in `canvas.bg` is
+/// `palantir_bridge::theme`, or in `palantir_bridge::menu_button` fails
+/// loudly. Against the loaded palette rather than hex literals: the values
+/// are the palette's to choose, but landing `header_fill` in `canvas.bg` is
 /// still a bug.
 #[test]
 fn default_wiring_and_menu_tweak() {

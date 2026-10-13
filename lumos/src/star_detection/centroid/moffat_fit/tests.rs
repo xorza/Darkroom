@@ -10,6 +10,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
     assert_jacobian_matches_differences,
 };
+use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
 
 /// One Moffat recovery case, as `gaussian_fit`'s `RecoveryCase` with one more axis: `fixed_beta`,
@@ -194,11 +195,13 @@ fn moffat_fit_recovers_known_parameters() {
 
         let beta = case.fixed_beta;
         let result = MoffatFit::new(
-            &pixels,
-            case.guess,
-            &StampGrid::new(case.fit_radius),
-            case.fit_background.unwrap_or(case.background),
-            None,
+            FitInputs {
+                pixels: &pixels,
+                pos: case.guess,
+                grid: &StampGrid::new(case.fit_radius),
+                background: case.fit_background.unwrap_or(case.background),
+                noise: None,
+            },
             beta,
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
@@ -272,7 +275,16 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
             false,
         ),
     ] {
-        let fit = MoffatFit::new(pixels, seed, &StampGrid::new(8), sky, None, 2.5);
+        let fit = MoffatFit::new(
+            FitInputs {
+                pixels,
+                pos: seed,
+                grid: &StampGrid::new(8),
+                background: sky,
+                noise: None,
+            },
+            2.5,
+        );
         assert_eq!(fit.is_some(), lands, "{name}");
     }
 }

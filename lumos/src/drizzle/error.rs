@@ -36,7 +36,7 @@ pub enum DrizzleError {
     /// for why the decoder's own error travels rather than a wrapper. A cancelled decode arrives as
     /// [`Self::Cancelled`], never here.
     #[error(transparent)]
-    ImageLoad(#[from] ImageError),
+    ImageLoad(ImageError),
 
     /// A frame failed the checks every frame of a set passes: among them a frame of another
     /// shape, a frame of another mosaic pattern, whose photosites would reach other channels at
@@ -70,6 +70,17 @@ pub enum DrizzleError {
     },
 }
 
+/// Cancellation is the run stopping, not a file failing, so a cancelled decode leaves the load
+/// error behind and reports as the drizzle's own.
+impl From<ImageError> for DrizzleError {
+    fn from(error: ImageError) -> Self {
+        match error {
+            ImageError::Cancelled { .. } => Self::Cancelled,
+            error => Self::ImageLoad(error),
+        }
+    }
+}
+
 impl From<AdmissionError> for DrizzleError {
     fn from(error: AdmissionError) -> Self {
         match error {
@@ -81,6 +92,9 @@ impl From<AdmissionError> for DrizzleError {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::path::{Path, PathBuf};
+
     use crate::drizzle::error::*;
     use crate::error::FrameDimensionMismatch;
     use crate::image::image_dimensions::ImageDimensions;
@@ -105,5 +119,23 @@ mod tests {
             DrizzleError::from(AdmissionError::from(mismatch)).to_string(),
             "frame 2 is 200x100x3, expected 100x100x3"
         );
+    }
+
+    /// A decode the run's cancel stopped is the drizzle's own cancellation, not a file that failed
+    /// to load; any other decode failure is the file's, its error kept whole.
+    #[test]
+    fn a_cancelled_decode_is_the_drizzles_cancellation() {
+        assert!(matches!(
+            DrizzleError::from(ImageError::cancelled(Path::new("light.fits"))),
+            DrizzleError::Cancelled
+        ));
+        let missing = ImageError::Io {
+            path: PathBuf::from("light.fits"),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        };
+        assert!(matches!(
+            DrizzleError::from(missing),
+            DrizzleError::ImageLoad(ImageError::Io { path, .. }) if path == Path::new("light.fits")
+        ));
     }
 }

@@ -8,8 +8,10 @@ use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
-use crate::drizzle::accumulator::input_map::InputMap;
+use crate::drizzle::accumulator::input_map::{InputMap, OutputRect};
+use crate::drizzle::accumulator::kernel_plan::DropReach;
 use crate::drizzle::deposit::Deposit;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::pixel_flags::PixelFlags;
@@ -17,7 +19,6 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.
@@ -197,15 +198,14 @@ pub(super) struct FrameSource<'a> {
 }
 
 impl<'a> FrameSource<'a> {
-    /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
-    /// `scale` times finer, its samples reaching the output as `deposit` says.
+    /// `frame`'s image under its warp — reference to input, as registration produces it — onto an
+    /// output grid `scale` times finer, its samples reaching the output as `deposit` says.
     pub(super) fn new(
-        image: &'a impl StackableImage,
+        frame: &'a DrizzleFrame<impl StackableImage>,
         deposit: Deposit,
-        warp: &WarpTransform,
         scale: f64,
-        pixel_weights: Option<&'a Buffer2<f32>>,
     ) -> Self {
+        let image = &frame.source;
         let dimensions = image.dimensions();
         Self {
             planes: (0..dimensions.channels())
@@ -213,8 +213,8 @@ impl<'a> FrameSource<'a> {
                 .collect(),
             mosaic: deposit.mosaic(),
             size: dimensions.size(),
-            map: InputMap::new(warp, output_grid(scale)),
-            pixel_weights: pixel_weights.map(Buffer2::pixels),
+            map: InputMap::new(&frame.warp, output_grid(scale)),
+            pixel_weights: frame.pixel_weight_map.as_ref().map(Buffer2::pixels),
             flags: image.flags(),
         }
     }
@@ -300,14 +300,14 @@ impl<'a> FrameSource<'a> {
         })
     }
 
-    /// The input pixels whose drops can reach output `rows`: a drop reaching `output_margin`
-    /// output rows, or `input_margin` input rows, from its pixel's centre.
+    /// The input pixels whose drops can reach output `rows` of a grid `output_width` wide: a drop
+    /// reaching `reach.output` output rows, or `reach.input` input rows, from its pixel's centre.
     ///
-    /// The output rows widened by `output_margin` — and the columns too, since a rotated drop
+    /// The output rows widened by `reach.output` — and the columns too, since a rotated drop
     /// reaches the band from beside the grid as well as from above and below it — taken back to the
-    /// input, and the pixels within `input_margin` of that. Exact rather than estimated: a drop that
-    /// reaches the band has a point inside it, and that point lies within `input_margin` of its
-    /// pixel's centre, or its output position within `output_margin` of the band. Deliberately
+    /// input, and the pixels within `reach.input` of that. Exact rather than estimated: a drop that
+    /// reaches the band has a point inside it, and that point lies within `reach.input` of its
+    /// pixel's centre, or its output position within `reach.output` of the band. Deliberately
     /// generous by a row and a column, since over-scanning costs one transform and a rejected test
     /// per pixel while under-scanning would drop flux.
     ///
@@ -325,16 +325,18 @@ impl<'a> FrameSource<'a> {
         &self,
         rows: &Range<usize>,
         output_width: usize,
-        output_margin: f64,
-        input_margin: f64,
+        reach: DropReach,
     ) -> BandScan {
-        let low = rows.start as f64 - output_margin;
-        let high = rows.end as f64 - 1.0 + output_margin;
-        let left = -output_margin;
-        let right = output_width as f64 - 1.0 + output_margin;
+        let band = OutputRect {
+            min: DVec2::new(-reach.output, rows.start as f64 - reach.output),
+            max: DVec2::new(
+                output_width as f64 - 1.0 + reach.output,
+                rows.end as f64 - 1.0 + reach.output,
+            ),
+        };
         let width = self.size.width;
         let height = self.size.height;
-        let Some(outline) = self.map.outline(low, high, left, right, input_margin) else {
+        let Some(outline) = self.map.outline(band, reach.input) else {
             return BandScan {
                 rows: 0..height,
                 outline: None,
@@ -357,8 +359,8 @@ impl<'a> FrameSource<'a> {
     /// The pixel weight at `pixel`, or `None` when it is zero or the pixel's flags exclude it.
     ///
     /// Zero is the one value worth testing for: it deposits nothing anywhere, and letting it
-    /// through would have the frame counted as covering every pixel it reached. An excluded pixel is
-    /// the same case: the decoder's fill under a null would otherwise pull every output pixel it
+    /// through would have the frame counted as covering every pixel it reached. An excluded pixel
+    /// is the same case: the decoder's fill under a null would otherwise pull every output pixel it
     /// reaches toward the frame's median.
     #[inline]
     fn deposit_weight(&self, pixel: InputPixel) -> Option<f64> {
@@ -393,26 +395,23 @@ pub(crate) mod internals {
     use std::ops::Range;
 
     use crate::drizzle::accumulator::frame_source::FrameSource;
+    use crate::drizzle::accumulator::kernel_plan::DropReach;
     use crate::drizzle::deposit::Deposit;
+    use crate::drizzle::drizzle_frame::DrizzleFrame;
     use crate::image::linear_image::LinearImage;
-    use crate::registration::transform::warp_transform::WarpTransform;
 
-    /// The input rows a band covering `rows` would scan, each with its columns, without running a
-    /// drizzle to find out.
+    /// The input rows the band of output rows 0 to 3, on a grid `output_width` wide at `frame`'s
+    /// own scale, would scan for drops that `reach` so far, each with its columns, without running
+    /// a drizzle to find out.
     pub(crate) fn band_scan(
-        image: &LinearImage,
-        warp: &WarpTransform,
-        scale: f64,
-        rows: Range<usize>,
+        frame: &DrizzleFrame<LinearImage>,
         output_width: usize,
-        output_margin: f64,
-        input_margin: f64,
+        reach: DropReach,
     ) -> impl Iterator<Item = (usize, Range<usize>)> {
-        let scan = FrameSource::new(image, Deposit::of(image), warp, scale, None).band_scan(
-            &rows,
+        let scan = FrameSource::new(frame, Deposit::of(&frame.source), 1.0).band_scan(
+            &(0..4),
             output_width,
-            output_margin,
-            input_margin,
+            reach,
         );
         scan.rows().map(move |row| (row, scan.columns(row)))
     }

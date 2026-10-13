@@ -4,12 +4,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use common::{SerdeFormat, deserialize, file_utils, serialize};
+use common::{SerdeFormat, file_utils};
 use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;
 
-use crate::core::io::preferences::error::PreferencesLoadError;
+use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::platform;
 
 /// Preferences file name, resolved inside the platform's configuration
@@ -112,32 +112,12 @@ impl Default for Preferences {
 }
 
 impl Preferences {
-    /// The preferences file, in the OS's own configuration directory (see
-    /// [`crate::platform::config_dir`]) — so the same user reads back the same
-    /// settings however the editor was launched and wherever it is installed.
-    ///
-    /// Resolving beside the executable instead would tie the file to the
-    /// install location, and every packaged install puts that somewhere the
-    /// user cannot write: the flatpak's `/app/bin` is a read-only mount, a
-    /// `PREFIX=/usr` install needs root, and writing inside a macOS `.app`
-    /// invalidates its code signature.
-    ///
-    /// A platform that can name no home leaves the file name bare, which
-    /// resolves against the working directory. Degrading beats panicking:
-    /// everything else here already falls back rather than block a launch
-    /// over settings.
-    fn path() -> PathBuf {
-        platform::config_dir()
-            .unwrap_or_default()
-            .join(PREFERENCES_FILE)
-    }
-
     /// Read the preferences from the configuration directory. A missing file
     /// is a first run, and reads as the defaults; a file that cannot be read
     /// or parsed is an error, so the caller can report it and leave the file
     /// as the user has it.
     pub(crate) fn load() -> Result<Self, PreferencesLoadError> {
-        Self::load_from(&Self::path())
+        Self::load_from(&path())
     }
 
     fn load_from(path: &Path) -> Result<Self, PreferencesLoadError> {
@@ -151,19 +131,23 @@ impl Preferences {
                 });
             }
         };
-        deserialize(&bytes, SerdeFormat::Ron).map_err(|source| PreferencesLoadError::Parse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
+        SerdeFormat::Ron
+            .deserialize(&bytes)
+            .map_err(|source| PreferencesLoadError::Parse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })
     }
 
-    /// Write the preferences to the configuration directory. `Err` carries the
-    /// display-ready reason — the caller surfaces it (status bar); a
-    /// failed persist shouldn't interrupt the user's session.
-    pub(crate) fn save(&self) -> Result<(), String> {
-        let bytes = serialize(self, SerdeFormat::Ron)
-            .map_err(|err| format!("preferences save failed: {err}"))?;
-        let path = Self::path();
+    /// Write the preferences to the configuration directory. A failed
+    /// persist is the caller's to surface: it shouldn't interrupt the user's
+    /// session.
+    pub(crate) fn save(&self) -> Result<(), PreferencesSaveError> {
+        self.save_to(&path())
+    }
+
+    fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
+        let bytes = SerdeFormat::Ron.serialize(self)?;
         // Nothing has created the configuration directory on a first run, and
         // publication needs it to exist to place its temporary file beside the
         // target. Skipped for the bare-name fallback, whose parent is empty.
@@ -171,11 +155,38 @@ impl Preferences {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            fs::create_dir_all(parent).map_err(|err| format!("preferences save failed: {err}"))?;
+            fs::create_dir_all(parent).map_err(|source| PreferencesSaveError::CreateDir {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
-        file_utils::publish_bytes(&path, &bytes, file_utils::PublicationMode::Durable)
-            .map_err(|err| format!("preferences save failed: {err}"))
+        file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable).map_err(
+            |source| PreferencesSaveError::Write {
+                path: path.to_path_buf(),
+                source,
+            },
+        )
     }
+}
+
+/// The preferences file, in the OS's own configuration directory (see
+/// [`crate::platform::config_dir`]) — so the same user reads back the same
+/// settings however the editor was launched and wherever it is installed.
+///
+/// Resolving beside the executable instead would tie the file to the
+/// install location, and every packaged install puts that somewhere the
+/// user cannot write: the flatpak's `/app/bin` is a read-only mount, a
+/// `PREFIX=/usr` install needs root, and writing inside a macOS `.app`
+/// invalidates its code signature.
+///
+/// A platform that can name no home leaves the file name bare, which
+/// resolves against the working directory. Degrading beats panicking:
+/// everything else here already falls back rather than block a launch
+/// over settings.
+fn path() -> PathBuf {
+    platform::config_dir()
+        .unwrap_or_default()
+        .join(PREFERENCES_FILE)
 }
 
 #[cfg(test)]

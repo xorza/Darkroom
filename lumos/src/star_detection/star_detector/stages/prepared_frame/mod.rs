@@ -12,10 +12,19 @@ use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::detection_plane::{DetectionPlane, PlaneFilters};
+use crate::star_detection::centroid::MeasurePlanes;
+use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::deblend::region::Region;
+use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec, Prefilter};
 use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
-use crate::star_detection::star_detection_config::background_config::BackgroundRefinement;
+use crate::star_detection::star_detection_config::measurement_config::MeasurementConfig;
+
+/// The width a measurement assumes when no FWHM is known: zero, which `measure_grid::stamp_radius`
+/// and the moments window clamp up to their smallest stamp and narrowest window — the choice that
+/// assumes nothing about the star beyond its being at least that wide.
+const UNKNOWN_FWHM: f32 = 0.0;
 
 /// A frame reduced to one plane and its sky: what detection and measurement read of it.
 ///
@@ -33,8 +42,8 @@ pub(crate) struct PreparedFrame {
     /// The sources the refined sky was measured around, and the pixels with no data; `None`
     /// without a refinement.
     sources: Option<Pooled<BitBuffer2>>,
-    /// Whether the frame was demosaiced, so its detection plane takes the 3×3 median first.
-    demosaiced: bool,
+    /// The 3×3 median for a demosaiced frame, whose detection plane takes it first.
+    prefilter: Prefilter,
 }
 
 impl PreparedFrame {
@@ -47,7 +56,11 @@ impl PreparedFrame {
     ) -> Self {
         let mut plane = resources.acquire_f32();
         combine_channels(image, &mut plane);
-        let demosaiced = image.metadata.is_demosaiced();
+        let prefilter = if image.metadata.is_demosaiced() {
+            Prefilter::Median3x3
+        } else {
+            Prefilter::None
+        };
         let no_data = image
             .flags
             .as_ref()
@@ -58,42 +71,34 @@ impl PreparedFrame {
                 mask
             });
 
-        let mut background =
-            BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources);
-        let sources =
-            if let BackgroundRefinement::Iterative(refinement) = config.background.refinement {
-                // The sources are found at the FWHM the configuration starts from.
-                let refined = background.refine(
+        // The sources are found at the FWHM the configuration starts from.
+        let refined =
+            BackgroundEstimate::estimate(&plane, no_data.as_deref(), &config.background, resources)
+                .refine(
                     &plane,
-                    refinement,
-                    PlaneFilters {
-                        median: demosaiced,
+                    PlaneSpec {
+                        prefilter,
                         matched: config
                             .fwhm
                             .mode
                             .map(|mode| config.fwhm.filter_at(mode.seed())),
                         mask: no_data.as_deref(),
+                        background: &config.background,
                     },
-                    &config.background,
                     resources,
                 );
-                background = refined.estimate;
-                Some(refined.sources)
-            } else {
-                None
-            };
 
         // Saturation is a property of the recorded values, read before anything combines them.
         let mut saturation = resources.acquire_bit();
         mark_saturated(image, &mut saturation);
-        let sky = background.subtract_from(&mut plane);
+        let sky = refined.estimate.subtract_from(&mut plane);
         Self {
             measure: plane,
             sky,
             saturation,
             no_data,
-            sources,
-            demosaiced,
+            sources: refined.sources,
+            prefilter,
         }
     }
 
@@ -108,14 +113,38 @@ impl PreparedFrame {
         residual.pixels_mut().copy_from_slice(self.measure.pixels());
         DetectionPlane::from_residual(
             residual,
-            PlaneFilters {
-                median: self.demosaiced,
+            PlaneSpec {
+                prefilter: self.prefilter,
                 matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
                 mask: self.sources.as_deref().or(self.no_data.as_deref()),
+                background: &config.background,
             },
-            &config.background,
             resources,
         )
+    }
+
+    /// Measure the stars of `regions` on the measurement plane, in parallel: sub-pixel positions,
+    /// flux, FWHM and quality metrics, flagging those whose peak pixel is saturated.
+    /// `expected_fwhm` sizes every stamp; `None` measures at [`UNKNOWN_FWHM`].
+    pub(crate) fn measure_stars(
+        &self,
+        regions: &[Region],
+        config: &MeasurementConfig,
+        expected_fwhm: Option<f32>,
+    ) -> Vec<Star> {
+        // One grid for the whole detection: `expected_fwhm` fixes the stamp, the window and the
+        // annulus, so every candidate is measured over the same ones.
+        let grid = MeasureGrid::new(expected_fwhm.unwrap_or(UNKNOWN_FWHM));
+        let planes = MeasurePlanes {
+            residual: &self.measure,
+            sky: &self.sky,
+            saturation: &self.saturation,
+            no_data: self.no_data.as_deref(),
+        };
+        regions
+            .par_iter()
+            .filter_map(|region| planes.measure_star(region, config, &grid))
+            .collect()
     }
 
     /// Return the source mask once no detection plane is built any more: only their noise reads it.

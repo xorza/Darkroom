@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use common::CancelToken;
 
 use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
-use crate::execution::engine::ExecutionEngine;
+use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
 use crate::execution::error::Error;
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::{RunPhase, RunReporter};
@@ -58,6 +58,15 @@ enum FlushReporting {
     Sweep,
 }
 
+/// Whether stopping the event loop tells the host the worker went `Idle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleReport {
+    Report,
+    /// For a stop made while applying an intent: a rebuild's `execute` reports
+    /// `Executing` directly, without a transient `Idle` flashing between.
+    Quiet,
+}
+
 #[derive(Debug)]
 struct PendingRun {
     seeds: RunSeeds,
@@ -92,6 +101,17 @@ enum WorkerWake {
     EventLoopPanicked(LambdaPanic),
 }
 
+/// What ties a [`WorkerTask`] to the [`Worker`](crate::Worker) handle that
+/// spawned it: the message stream, where reports go, and the two tokens the
+/// handle trips.
+#[derive(Debug)]
+pub(crate) struct WorkerLinks<ExecutionCallback> {
+    pub(crate) message_rx: UnboundedReceiver<WorkerMessage>,
+    pub(crate) callback: ExecutionCallback,
+    pub(crate) run_cancel: CancelToken,
+    pub(crate) shutdown: CancellationToken,
+}
+
 #[derive(Debug)]
 pub(crate) struct WorkerTask<ExecutionCallback> {
     message_rx: UnboundedReceiver<WorkerMessage>,
@@ -112,12 +132,13 @@ impl<ExecutionCallback> WorkerTask<ExecutionCallback>
 where
     ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
 {
-    pub(crate) fn new(
-        message_rx: UnboundedReceiver<WorkerMessage>,
-        callback: ExecutionCallback,
-        run_cancel: CancelToken,
-        shutdown: CancellationToken,
-    ) -> Self {
+    pub(crate) fn new(links: WorkerLinks<ExecutionCallback>) -> Self {
+        let WorkerLinks {
+            message_rx,
+            callback,
+            run_cancel,
+            shutdown,
+        } = links;
         Self {
             message_rx,
             callback,
@@ -184,7 +205,7 @@ where
         let stopped_loop =
             !matches!(transition, EventLoopTransition::Preserve) && self.event_loop.is_some();
         if stopped_loop {
-            self.finish_event_loop(None, false).await;
+            self.finish_event_loop(None, IdleReport::Quiet).await;
         }
 
         // The graph op leads: it establishes the program every stage below is
@@ -320,9 +341,11 @@ where
         let result = self
             .engine
             .execute(
-                &run.seeds,
-                &mut reporter,
-                self.run_cancel.clone(),
+                ExecuteRequest {
+                    seeds: &run.seeds,
+                    reporter: &mut reporter,
+                    cancel: self.run_cancel.clone(),
+                },
                 &mut self.outcome,
             )
             .await;
@@ -354,18 +377,18 @@ where
     }
 
     /// Stop the loop and report `Idle` — the terminal form (worker
-    /// shutdown). Intent application stops quietly instead
-    /// (`finish_event_loop(None, false)`): a rebuild's `execute` reports
-    /// `Executing` directly, without a transient `Idle` flashing between.
+    /// shutdown). Intent application stops [quietly](IdleReport::Quiet)
+    /// instead.
     async fn stop_event_loop(&mut self) {
-        self.finish_event_loop(None, true).await;
+        self.finish_event_loop(None, IdleReport::Report).await;
     }
 
     async fn fail_event_loop(&mut self, panic: LambdaPanic) {
-        self.finish_event_loop(Some(panic), true).await;
+        self.finish_event_loop(Some(panic), IdleReport::Report)
+            .await;
     }
 
-    async fn finish_event_loop(&mut self, leading_panic: Option<LambdaPanic>, report_idle: bool) {
+    async fn finish_event_loop(&mut self, leading_panic: Option<LambdaPanic>, idle: IdleReport) {
         let Some(mut active) = self.event_loop.take() else {
             assert!(
                 leading_panic.is_none(),
@@ -379,7 +402,7 @@ where
             panics.insert(0, panic);
         }
         tracing::info!("Event loop stopped");
-        if report_idle {
+        if idle == IdleReport::Report {
             (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
         for panic in panics {

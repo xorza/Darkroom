@@ -31,6 +31,7 @@ use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ};
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::{MAX_STAMP_RADIUS, MeasureGrid};
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
+use crate::star_detection::centroid::stamp::FitInputs;
 use crate::star_detection::centroid::stamp_background::StampBackground;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
@@ -74,7 +75,8 @@ pub(super) fn stamp_centre(pos: DVec2, size: Size2us, stamp_radius: usize) -> Op
 /// *ignores* NaN and returns the other lane, so a NaN x-coordinate would silently compare as the
 /// (finite) y-offset.
 ///
-/// A rejected fit is not an error — [`measure_star`] falls back to the moment-based centroid.
+/// A rejected fit is not an error — [`MeasurePlanes::measure_star`] falls back to the moment-based
+/// centroid.
 fn fit_is_plausible(result_pos: DVec2, input_pos: DVec2, stamp_radius: usize) -> bool {
     result_pos.is_finite() && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
 }
@@ -90,156 +92,6 @@ fn position_sigma<const N: usize>(fit: &LmFit<N>, samples: usize) -> Option<f64>
     Some(((inverse[0] + inverse[1]) * scale / 2.0).sqrt())
 }
 
-/// Measure a star candidate: compute sub-pixel position and quality metrics.
-///
-/// This is the main entry point for the measurement stage. It takes a detected region and:
-/// 1. measures the local sky the residual still carries, from the annulus in `LocalAnnulus` mode;
-/// 2. finds the converged windowed centroid above it ([`WindowedCentroid`]);
-/// 3. with a profile fit configured, fits from there, stamped again once at the fit's centre when
-///    it moved more than half the stamp radius; a fit that fails leaves the windowed centroid;
-/// 4. computes flux, FWHM, eccentricity, SNR, sharpness and roundness at the centre.
-///
-/// Every star leaves with a position σ: the fit's, from `(JᵀWJ)⁻¹·χ²/(n − p)`, or the windowed
-/// centroid's, from the pixel noise.
-///
-/// Returns `None` if the candidate fails quality checks during measurement.
-pub(super) fn measure_star(
-    planes: MeasurePlanes<'_>,
-    region: &Region,
-    config: &MeasurementConfig,
-    grid: &MeasureGrid,
-) -> Option<Star> {
-    let MeasurePlanes {
-        residual,
-        sky,
-        saturation,
-        no_data,
-    } = planes;
-    let stamp_radius = grid.stamp.radius;
-    let start = DVec2::new(region.peak.x as f64, region.peak.y as f64);
-    // A stamp over a pixel with no measurement reads its fill as one, so such a star is not
-    // measured: at its peak, and again at the centre it moves to.
-    let size = Size2us::new(residual.width(), residual.height());
-    let holds_no_data = |at: DVec2| {
-        no_data.is_some_and(|no_data| {
-            stamp_centre(at, size, stamp_radius)
-                .is_some_and(|centre| no_data.any_in_square(centre, stamp_radius))
-        })
-    };
-    if holds_no_data(start) {
-        return None;
-    }
-
-    // None in GlobalMap mode, or when fewer than 10 annulus pixels lie in the frame. A missing
-    // annulus leaves the map's noise at the star, held to the frame's floor, for the centroid and
-    // the fit, but must NOT become a metrics override: the map's noise at one pixel stands in for
-    // the stamp only where nothing better was measured.
-    let annulus_at = |at: DVec2| match config.local_background {
-        LocalBackgroundMethod::GlobalMap => None,
-        LocalBackgroundMethod::LocalAnnulus => {
-            StampBackground::measure(residual, no_data, at, grid.annulus)
-        }
-    };
-    let start_annulus = annulus_at(start);
-    let (local_offset, local_noise) = start_annulus
-        .map_or((0.0, sky.noise[(region.peak.x, region.peak.y)]), |local| {
-            (local.offset, local.noise)
-        });
-    let noise = StarNoise {
-        background_sigma: f64::from(local_noise.max(sky.floor)),
-        electrons_per_unit: config.electrons_per_unit.map(f64::from),
-    };
-
-    let windowed = WindowedCentroid::measure(
-        residual,
-        start,
-        grid,
-        WindowedInputs {
-            offset: local_offset,
-            noise,
-        },
-    )?;
-    let mut pos = windowed.pos;
-    let mut position_sigma = windowed.sigma;
-
-    // A converged fit's widths replace the moment-based FWHM and eccentricity.
-    let mut fit_fwhm: Option<f32> = None;
-    let mut fit_eccentricity: Option<f32> = None;
-    // Weighted by the CCD equation only when the star's own photons are known; with the
-    // background's noise alone every pixel weighs the same.
-    let fit_noise = noise.electrons_per_unit.is_some().then_some(noise);
-    match config.centroid_method {
-        CentroidMethod::GaussianFit => {
-            let fit = restamped(
-                |at| GaussianFit::new(residual, at, &grid.stamp, local_offset, fit_noise),
-                |fit| fit.pos,
-                windowed.pos,
-                stamp_radius,
-            );
-            if let Some(fit) = fit {
-                pos = fit.pos;
-                position_sigma = fit.position_sigma;
-                fit_fwhm = Some(fit.covariance.fwhm());
-                fit_eccentricity = Some(fit.covariance.eccentricity());
-            }
-        }
-        CentroidMethod::MoffatFit { beta } => {
-            let fit = restamped(
-                |at| MoffatFit::new(residual, at, &grid.stamp, local_offset, fit_noise, beta),
-                |fit| fit.pos,
-                windowed.pos,
-                stamp_radius,
-            );
-            if let Some(fit) = fit {
-                pos = fit.pos;
-                position_sigma = fit.position_sigma;
-                fit_fwhm = Some(fit.fwhm);
-                // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based
-            }
-        }
-        CentroidMethod::WeightedMoments => {}
-    }
-
-    if holds_no_data(pos) {
-        return None;
-    }
-    // `StampBackground::measure` samples by rounded centre, so the annulus measured at the start
-    // stands unless the centre moved to another pixel.
-    let annulus_background = if pos.round() == start.round() {
-        start_annulus
-    } else {
-        annulus_at(pos)
-    };
-
-    // Flux, SNR, sharpness and roundness come from the stamp whatever the method; where the
-    // annulus measured the sky, against its offset, its noise and its sample count.
-    let mut star = compute_star(
-        residual,
-        pos,
-        stamp_radius,
-        grid.window_sigma,
-        StarBackground {
-            offset: annulus_background.map_or(0.0, |local| local.offset),
-            noise: annulus_background.map_or(noise, |local| StarNoise {
-                background_sigma: f64::from(local.noise.max(sky.floor)),
-                ..noise
-            }),
-            sky_samples: annulus_background.map(|local| local.samples),
-        },
-    )?;
-    star.saturated = saturation.get_at(region.peak);
-    star.position_sigma = position_sigma;
-
-    if let Some(fwhm) = fit_fwhm {
-        star.fwhm = fwhm;
-    }
-    if let Some(ecc) = fit_eccentricity {
-        star.eccentricity = ecc;
-    }
-
-    Some(star)
-}
-
 /// The frame planes a star is measured on: the residual, its sky noise, and which pixels are
 /// saturated and which hold no measurement.
 #[derive(Debug, Clone, Copy)]
@@ -248,6 +100,189 @@ pub(super) struct MeasurePlanes<'a> {
     pub(super) sky: &'a SkyNoise,
     pub(super) saturation: &'a BitBuffer2,
     pub(super) no_data: Option<&'a BitBuffer2>,
+}
+
+/// The square of the residual of `radius` about `pos`.
+#[derive(Debug, Clone, Copy)]
+struct StampAt<'a> {
+    residual: &'a Buffer2<f32>,
+    pos: DVec2,
+    radius: usize,
+}
+
+impl MeasurePlanes<'_> {
+    /// Measure a star candidate: compute sub-pixel position and quality metrics.
+    ///
+    /// This is the main entry point for the measurement stage. It takes a detected region and:
+    /// 1. measures the local sky the residual still carries, from the annulus in `LocalAnnulus`
+    ///    mode;
+    /// 2. finds the converged windowed centroid above it ([`WindowedCentroid`]);
+    /// 3. with a profile fit configured, fits from there, stamped again once at the fit's centre
+    ///    when it moved more than half the stamp radius; a fit that fails leaves the windowed
+    ///    centroid;
+    /// 4. computes flux, FWHM, eccentricity, SNR, sharpness and roundness at the centre.
+    ///
+    /// Every star leaves with a position σ: the fit's, from `(JᵀWJ)⁻¹·χ²/(n − p)`, or the windowed
+    /// centroid's, from the pixel noise.
+    ///
+    /// Returns `None` if the candidate fails quality checks during measurement.
+    pub(super) fn measure_star(
+        self,
+        region: &Region,
+        config: &MeasurementConfig,
+        grid: &MeasureGrid,
+    ) -> Option<Star> {
+        let MeasurePlanes {
+            residual,
+            sky,
+            saturation,
+            no_data,
+        } = self;
+        let stamp_radius = grid.stamp.radius;
+        let start = DVec2::new(region.peak.x as f64, region.peak.y as f64);
+        // A stamp over a pixel with no measurement reads its fill as one, so such a star is not
+        // measured: at its peak, and again at the centre it moves to.
+        let size = Size2us::new(residual.width(), residual.height());
+        let holds_no_data = |at: DVec2| {
+            no_data.is_some_and(|no_data| {
+                stamp_centre(at, size, stamp_radius)
+                    .is_some_and(|centre| no_data.any_in_square(centre, stamp_radius))
+            })
+        };
+        if holds_no_data(start) {
+            return None;
+        }
+
+        // None in GlobalMap mode, or when fewer than 10 annulus pixels lie in the frame. A missing
+        // annulus leaves the map's noise at the star, held to the frame's floor, for the centroid
+        // and the fit, but must NOT become a metrics override: the map's noise at one pixel stands
+        // in for the stamp only where nothing better was measured.
+        let annulus_at = |at: DVec2| match config.local_background {
+            LocalBackgroundMethod::GlobalMap => None,
+            LocalBackgroundMethod::LocalAnnulus => {
+                StampBackground::measure(residual, no_data, at, grid.annulus)
+            }
+        };
+        let start_annulus = annulus_at(start);
+        let (local_offset, local_noise) = start_annulus
+            .map_or((0.0, sky.noise[(region.peak.x, region.peak.y)]), |local| {
+                (local.offset, local.noise)
+            });
+        let noise = StarNoise {
+            background_sigma: f64::from(local_noise.max(sky.floor)),
+            electrons_per_unit: config.electrons_per_unit.map(f64::from),
+        };
+
+        let windowed = WindowedCentroid::measure(
+            residual,
+            start,
+            grid,
+            WindowedInputs {
+                offset: local_offset,
+                noise,
+            },
+        )?;
+        let mut pos = windowed.pos;
+        let mut position_sigma = windowed.sigma;
+
+        // A converged fit's widths replace the moment-based FWHM and eccentricity.
+        let mut fit_fwhm: Option<f32> = None;
+        let mut fit_eccentricity: Option<f32> = None;
+        // Weighted by the CCD equation only when the star's own photons are known; with the
+        // background's noise alone every pixel weighs the same.
+        let fit_noise = noise.electrons_per_unit.is_some().then_some(noise);
+        match config.centroid_method {
+            CentroidMethod::GaussianFit => {
+                let fit = restamped(
+                    |at| {
+                        GaussianFit::new(FitInputs {
+                            pixels: residual,
+                            pos: at,
+                            grid: &grid.stamp,
+                            background: local_offset,
+                            noise: fit_noise,
+                        })
+                    },
+                    |fit| fit.pos,
+                    windowed.pos,
+                    stamp_radius,
+                );
+                if let Some(fit) = fit {
+                    pos = fit.pos;
+                    position_sigma = fit.position_sigma;
+                    fit_fwhm = Some(fit.covariance.fwhm());
+                    fit_eccentricity = Some(fit.covariance.eccentricity());
+                }
+            }
+            CentroidMethod::MoffatFit { beta } => {
+                let fit = restamped(
+                    |at| {
+                        MoffatFit::new(
+                            FitInputs {
+                                pixels: residual,
+                                pos: at,
+                                grid: &grid.stamp,
+                                background: local_offset,
+                                noise: fit_noise,
+                            },
+                            beta,
+                        )
+                    },
+                    |fit| fit.pos,
+                    windowed.pos,
+                    stamp_radius,
+                );
+                if let Some(fit) = fit {
+                    pos = fit.pos;
+                    position_sigma = fit.position_sigma;
+                    fit_fwhm = Some(fit.fwhm);
+                    // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based
+                }
+            }
+            CentroidMethod::WeightedMoments => {}
+        }
+
+        if holds_no_data(pos) {
+            return None;
+        }
+        // `StampBackground::measure` samples by rounded centre, so the annulus measured at the
+        // start stands unless the centre moved to another pixel.
+        let annulus_background = if pos.round() == start.round() {
+            start_annulus
+        } else {
+            annulus_at(pos)
+        };
+
+        // Flux, SNR, sharpness and roundness come from the stamp whatever the method; where the
+        // annulus measured the sky, against its offset, its noise and its sample count.
+        let mut star = compute_star(
+            StampAt {
+                residual,
+                pos,
+                radius: stamp_radius,
+            },
+            grid.window_sigma,
+            StarBackground {
+                offset: annulus_background.map_or(0.0, |local| local.offset),
+                noise: annulus_background.map_or(noise, |local| StarNoise {
+                    background_sigma: f64::from(local.noise.max(sky.floor)),
+                    ..noise
+                }),
+                sky_samples: annulus_background.map(|local| local.samples),
+            },
+        )?;
+        star.saturated = saturation.get_at(region.peak);
+        star.position_sigma = position_sigma;
+
+        if let Some(fwhm) = fit_fwhm {
+            star.fwhm = fwhm;
+        }
+        if let Some(ecc) = fit_eccentricity {
+            star.eccentricity = ecc;
+        }
+
+        Some(star)
+    }
 }
 
 /// A profile fit from `start`, fitted again once from its own centre when it moved more than half
@@ -287,19 +322,18 @@ struct StarBackground {
     sky_samples: Option<usize>,
 }
 
-/// Construct a star and compute its quality metrics at the given position, against `background`,
-/// over a stamp of `stamp_radius`: flux, the star's own peak above the sky, FWHM and eccentricity
-/// from the windowed covariance, the SNR by the CCD equation, the sharpness of its own peak, and
-/// the DAOFIND roundness against a PSF of `psf_sigma`. `None` when the stamp leaves the frame or
+/// Construct a star and compute its quality metrics over `stamp`, against `background`: flux, the
+/// star's own peak above the sky, FWHM and eccentricity from the windowed covariance, the SNR by
+/// the CCD equation, the sharpness of its own peak, and the DAOFIND roundness against a PSF of
+/// `psf_sigma`. `None` when the stamp leaves the frame or
 /// holds no star — no net or no positive light, a non-finite flux or SNR, or a marginal with no
 /// height — and the position σ is the caller's to set.
-fn compute_star(
-    residual: &Buffer2<f32>,
-    pos: DVec2,
-    stamp_radius: usize,
-    psf_sigma: f64,
-    background: StarBackground,
-) -> Option<Star> {
+fn compute_star(stamp: StampAt<'_>, psf_sigma: f64, background: StarBackground) -> Option<Star> {
+    let StampAt {
+        residual,
+        pos,
+        radius: stamp_radius,
+    } = stamp;
     let offset = background.offset;
     let centre = stamp_centre(
         pos,
@@ -318,14 +352,14 @@ fn compute_star(
     let mut sum_y2 = 0.0f64;
     let mut sum_xy = 0.0f64;
     let stamp_size = 2 * stamp_radius + 1;
-    let mut stamp = [0.0f64; MAX_STAMP_PIXELS];
+    let mut values = [0.0f64; MAX_STAMP_PIXELS];
 
     for (my, y) in (centre.y - stamp_radius..=centre.y + stamp_radius).enumerate() {
         let px_row = residual.row(y);
         let ady = my.abs_diff(stamp_radius);
         for (mx, x) in (centre.x - stamp_radius..=centre.x + stamp_radius).enumerate() {
             let signal = f64::from(px_row[x] - offset);
-            stamp[my * stamp_size + mx] = signal;
+            values[my * stamp_size + mx] = signal;
             let value = signal.max(0.0);
             flux += signal;
             weight_sum += value;
@@ -350,7 +384,7 @@ fn compute_star(
     // window from the plain moment; fall back to the plain moments if it can't converge to a
     // valid (positive-definite) covariance.
     let seed_sigma_sq = ((sum_x2 + sum_y2) / weight_sum / 2.0).max(MIN_SIGMA_SQ);
-    let cov = Cov2::windowed(residual, offset, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
+    let cov = Cov2::windowed(stamp, offset, seed_sigma_sq).unwrap_or(Cov2 {
         xx: sum_x2 / weight_sum,
         yy: sum_y2 / weight_sum,
         xy: sum_xy / weight_sum,
@@ -366,14 +400,14 @@ fn compute_star(
     }
     // The star's own peak, at its centre pixel: the brightest pixel of the stamp may be a
     // companion's, and its sharpness then reads 1.
-    let peak = stamp[stamp_radius * stamp_size + stamp_radius];
+    let peak = values[stamp_radius * stamp_size + stamp_radius];
     let sharpness = if core_flux > 0.0 {
         (peak / core_flux).clamp(0.0, 1.0) as f32
     } else {
         1.0
     };
     let roundness = Roundness::measure(RoundnessStamp {
-        values: &stamp[..npix],
+        values: &values[..npix],
         radius: stamp_radius,
         psf_sigma,
     })?;

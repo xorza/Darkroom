@@ -7,9 +7,10 @@
 //! call that queued it. [`WorkerExited`] is the other direction: the send-side
 //! failure every handle method returns once the task is gone.
 
+use std::fmt::Display;
+
 use crate::execution::cache::runtime::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::execution::error::Error;
-use std::fmt::Display;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -25,10 +26,7 @@ pub enum WorkerError {
     /// What a flush did not leave on disk, kept apart because the two mean
     /// different things to whoever asked: a failure may pass on the next write,
     /// while an unsupported type never will. Both empty sends no error.
-    ///
-    /// A host is free to present them the same way — `Display` does — but no
-    /// longer has to, and the choice is now the host's rather than baked into a
-    /// string the worker had already flattened.
+    /// `Display` presents them together; a host may tell them apart.
     #[error(
         "cache flush wrote nothing for {} node(s): {}{}{}",
         failures.len() + unsupported.len(),

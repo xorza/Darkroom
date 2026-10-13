@@ -5,10 +5,13 @@
 
 pub(super) mod simd;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::simd::Kernel;
+use crate::star_detection::median_filter::simd::MedianRow;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
 ///
@@ -20,7 +23,7 @@ use rayon::prelude::*;
 /// separate filter instead of calling this at `r == 1`: L.A.Cosmic differences two window sizes
 /// against each other and so needs one border convention across all of them, and it picked
 /// replication.
-pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
+pub(crate) fn apply_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     let size = Size2us::new(pixels.width(), pixels.height());
     debug_assert_eq!(size.width, output.width());
     debug_assert_eq!(size.height, output.height());
@@ -36,9 +39,9 @@ pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>
         .enumerate()
         .for_each(|(y, row)| {
             if y == 0 || y == size.height - 1 {
-                filter_edge_row(pixels, size, y, row);
+                filter_edge_row(pixels, y, row);
             } else {
-                filter_interior_row(pixels, size.width, y, row);
+                filter_interior_row(pixels, y, row);
             }
         });
 }
@@ -46,21 +49,25 @@ pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>
 /// Filter an interior row (y is not 0 or height-1): the vector kernel for every pixel with a full
 /// 9-element neighborhood.
 #[inline]
-fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut [f32]) {
+fn filter_interior_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) {
+    let width = pixels.width();
     output_row[0] = median_at_left_edge(pixels, width, y);
 
-    let row_above = &pixels[(y - 1) * width..y * width];
-    let row_curr = &pixels[y * width..(y + 1) * width];
-    let row_below = &pixels[(y + 1) * width..(y + 2) * width];
-
-    simd::median_filter_row(row_above, row_curr, row_below, output_row);
+    MedianRow {
+        above: pixels.row(y - 1),
+        curr: pixels.row(y),
+        below: pixels.row(y + 1),
+        output: output_row,
+    }
+    .dispatch();
 
     output_row[width - 1] = median_at_right_edge(pixels, width, y);
 }
 
 /// Filter an edge row (y=0 or y=height-1).
 #[inline]
-fn filter_edge_row(pixels: &[f32], size: Size2us, y: usize, output_row: &mut [f32]) {
+fn filter_edge_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) {
+    let size = Size2us::new(pixels.width(), pixels.height());
     for (x, out) in output_row.iter_mut().enumerate() {
         *out = median_at_edge(pixels, size, Vec2us::new(x, y));
     }

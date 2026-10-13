@@ -7,13 +7,13 @@
 
 use thiserror::Error;
 
-/// Every graph validation returns this.
-pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
-
 use crate::graph::Subscription;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
+
+/// Every graph validation returns this.
+pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
 /// Why a [`DetachedNode`](crate::DetachedNode) record was refused.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]

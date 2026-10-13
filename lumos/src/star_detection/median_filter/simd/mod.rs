@@ -8,25 +8,13 @@
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// The interior of one row, pixels `1..width − 1` of `output`, from the rows above, at and below
-/// it, on the widest Isa this CPU has. The edges carry no full window and are left alone.
-#[inline]
-pub(super) fn median_filter_row(above: &[f32], curr: &[f32], below: &[f32], output: &mut [f32]) {
-    MedianRow {
-        above,
-        curr,
-        below,
-        output,
-    }
-    .dispatch();
-}
-
-/// [`median_filter_row`] as a kernel.
+/// it. The edges carry no full window and are left alone.
 #[derive(Debug)]
-struct MedianRow<'a> {
-    above: &'a [f32],
-    curr: &'a [f32],
-    below: &'a [f32],
-    output: &'a mut [f32],
+pub(super) struct MedianRow<'a> {
+    pub(super) above: &'a [f32],
+    pub(super) curr: &'a [f32],
+    pub(super) below: &'a [f32],
+    pub(super) output: &'a mut [f32],
 }
 
 impl Kernel for MedianRow<'_> {
@@ -134,25 +122,30 @@ fn compare_swap<V: F32x8>(a: &mut V, b: &mut V) {
 
 #[cfg(feature = "internals")]
 mod internals {
-    /// The scalar reference the kernel is tested and benched against: the interior of one row.
-    pub(super) fn median_filter_row_scalar(
-        row_above: &[f32],
-        row_curr: &[f32],
-        row_below: &[f32],
-        output_row: &mut [f32],
-    ) {
-        for x in 1..output_row.len().saturating_sub(1) {
-            output_row[x] = median9_scalar([
-                row_above[x - 1],
-                row_above[x],
-                row_above[x + 1],
-                row_curr[x - 1],
-                row_curr[x],
-                row_curr[x + 1],
-                row_below[x - 1],
-                row_below[x],
-                row_below[x + 1],
-            ]);
+    use crate::star_detection::median_filter::simd::MedianRow;
+
+    impl MedianRow<'_> {
+        /// The scalar reference the kernel is tested and benched against: the interior of one row.
+        pub(super) fn run_scalar(self) {
+            let Self {
+                above,
+                curr,
+                below,
+                output,
+            } = self;
+            for x in 1..output.len().saturating_sub(1) {
+                output[x] = median9_scalar([
+                    above[x - 1],
+                    above[x],
+                    above[x + 1],
+                    curr[x - 1],
+                    curr[x],
+                    curr[x + 1],
+                    below[x - 1],
+                    below[x],
+                    below[x + 1],
+                ]);
+            }
         }
     }
 

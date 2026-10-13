@@ -12,15 +12,17 @@ use palantir::internals::ui_harness::UiHarness;
 use palantir::prelude::*;
 use scenarium::NodeId;
 
+use crate::core::document::Document;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::{Document, PortRef, TabRef};
+use crate::core::document::port_ref::PortRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
-use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::pane::graph::node::port_row;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use std::iter;
@@ -105,7 +107,7 @@ impl CanvasHarness {
             commands,
             view_ops,
         } = self;
-        let mut out = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
+        let mut out = ui.frame_value(|recorder: &mut Ui| record(graph_ui, ctx, recorder));
         view_ops.clear();
         let intents: Vec<GraphIntent> = out
             .document()
@@ -147,24 +149,10 @@ impl CanvasHarness {
             ui, graph_ui, ctx, ..
         } = self;
         ui.frame_passes(|recorder: &mut Ui| {
-            let _ = Self::record(graph_ui, ctx, recorder);
+            let _ = record(graph_ui, ctx, recorder);
         })
         .into_a()
         .is_some()
-    }
-
-    /// The record body both frame drivers run.
-    fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
-        let mut out = Requests::default();
-        let graph_ctx = ctx.graph_ctx();
-        graph_ui.prepass(recorder, graph_ctx, &mut out);
-        Panel::vstack()
-            .id_salt("pane")
-            .size((Sizing::FILL, Sizing::FILL))
-            .show(recorder, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut out);
-            });
-        out
     }
 
     pub(crate) fn doc(&self) -> &Document {
@@ -198,7 +186,7 @@ impl CanvasHarness {
     /// The point a wire drag leaves `port` from, or lands on — the snap scan
     /// tests the post-transform rect, so this is the one to aim at.
     pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
-        self.ui.center_of(port_circle_wid(port))
+        self.ui.center_of(port_row::port_circle_wid(port))
     }
 
     /// The cached world rect wires anchor to and the cull reads, or `None`
@@ -212,4 +200,18 @@ impl CanvasHarness {
             .expect("the document still holds that node");
         graph_ui.geometry().node_world_rect(node)
     }
+}
+
+/// The record body both frame drivers run.
+fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
+    let mut out = Requests::default();
+    let graph_ctx = ctx.graph_ctx();
+    graph_ui.prepass(recorder, graph_ctx, &mut out);
+    Panel::vstack()
+        .id_salt("pane")
+        .size((Sizing::FILL, Sizing::FILL))
+        .show(recorder, |ui| {
+            graph_ui.draw(ui, graph_ctx, &mut out);
+        });
+    out
 }

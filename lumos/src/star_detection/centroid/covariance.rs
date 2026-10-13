@@ -4,12 +4,10 @@
 //! with a fixed window biases wide stars and clips narrow ones, so the window iterates toward the
 //! star's own width, and the 2×2 matrix that results is small enough to invert in closed form.
 
-use glam::DVec2;
-use imaginarium::Buffer2;
-
 use crate::math::fwhm::equal_area_fwhm;
 use crate::math::size2us::Size2us;
-use crate::star_detection::centroid::{MAX_STAMP_SIZE, stamp_centre};
+use crate::star_detection::centroid;
+use crate::star_detection::centroid::{MAX_STAMP_SIZE, StampAt};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Cov2 {
@@ -86,28 +84,27 @@ impl Cov2 {
     /// Returns the source covariance, or `None` if it never reaches a valid
     /// positive-definite estimate (caller falls back to the plain moments).
     ///
-    /// `offset` is the stamp's local sky left in the residual, exactly as in
-    /// [`compute_star`](super::compute_star) — both must subtract the same one or FWHM/eccentricity and
-    /// flux/SNR would come from different sky conventions.
+    /// `offset` is the stamp's local sky left in the residual, exactly as in `compute_star` — both
+    /// must subtract the same one or FWHM/eccentricity and flux/SNR would come from different sky
+    /// conventions.
     ///
-    /// The whole stamp must lie inside the frame: a position nearer the edge than `stamp_radius` is the
+    /// The whole stamp must lie inside the frame: a position nearer the edge than its radius is the
     /// caller's bug, and panics.
-    pub(super) fn windowed(
-        residual: &Buffer2<f32>,
-        offset: f32,
-        pos: DVec2,
-        stamp_radius: usize,
-        seed_sigma_sq: f64,
-    ) -> Option<Self> {
+    pub(super) fn windowed(stamp: StampAt<'_>, offset: f32, seed_sigma_sq: f64) -> Option<Self> {
         const MAX_ITERS: usize = 4;
 
+        let StampAt {
+            residual,
+            pos,
+            radius: stamp_radius,
+        } = stamp;
         // Caller's contract, not data validation: `compute_star` has already rejected edge positions.
-        let centre = stamp_centre(
+        let centre = centroid::stamp_centre(
             pos,
             Size2us::new(residual.width(), residual.height()),
             stamp_radius,
         )
-        .expect("windowed_covariance needs the whole stamp in frame");
+        .expect("Cov2::windowed needs the whole stamp in frame");
         let (x0, y0) = (centre.x - stamp_radius, centre.y - stamp_radius);
         let pos_x = pos.x;
         let pos_y = pos.y;
@@ -130,8 +127,8 @@ impl Cov2 {
             let mut myy = 0.0f64;
             let mut mxy = 0.0f64;
 
-            // The window is circular, so `exp(-(fx² + fy²)·k)` factors per axis exactly as in
-            // `refine_centroid` — `2(2r+1)` exponentials per iteration instead of `(2r+1)²`.
+            // The window is circular, so `exp(-(fx² + fy²)·k)` factors per axis — `2(2r+1)`
+            // exponentials per iteration instead of `(2r+1)²`.
             let mut column_weights = [0.0f64; MAX_STAMP_SIZE];
             for (weight, &fx) in column_weights[..stamp_size]
                 .iter_mut()

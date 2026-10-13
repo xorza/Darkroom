@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
@@ -12,7 +11,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::stack_config::StackConfig;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 
 pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
@@ -26,12 +25,7 @@ pub(crate) fn integration(c: &mut Criterion) {
         let ingest = IngestConfig::with_cache_dir(files.dir().join("cache"));
         b.iter(|| {
             StackConfig::light()
-                .stack_paths(
-                    &files.paths,
-                    &ingest,
-                    ProgressCallback::default(),
-                    CancelToken::never(),
-                )
+                .stack_paths(&files.paths, &ingest, ProgressMonitor::unattended())
                 .unwrap()
         });
     });

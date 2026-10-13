@@ -64,7 +64,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     }
 
     let mut reads = RemainingOutputReads {
-        counts: Column::from(vec![0]),
+        counts: Column::from([0]),
     };
     assert!(
         catch_unwind(AssertUnwindSafe(|| reads.consume(OutputIdx(0)))).is_err(),

@@ -15,7 +15,7 @@ use palantir::{
 };
 use scenarium::{NodeId, OutputTypes};
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
@@ -145,8 +145,8 @@ impl DockTabs for DockPanes<'_> {
 mod tests {
     use palantir::{DockView, TabStrip};
 
-    use crate::core::document::TabRef;
     use crate::core::document::internals::DocFixture;
+    use crate::core::document::tab_ref::TabRef;
     use crate::gui::app::session::internals::SessionHarness;
 
     /// Which tab kinds reserve the unsaved-changes dot is darkroom's own

@@ -1,41 +1,30 @@
 //! Tests for RANSAC module.
 
 use crate::internals::prelude::*;
+use crate::registration::ransac::ransac_config::ScaleRange;
 use crate::registration::ransac::*;
-use crate::registration::triangle::voting::MatchIndices;
 use std::f64::consts::PI;
-
-use rand::rngs::SmallRng;
 
 /// An estimator for `max_sigma` under `config`.
 fn estimator(max_sigma: f64, config: RansacConfig) -> RansacEstimator {
     RansacEstimator::new(config, max_sigma)
 }
 
-/// `PointMatch`es pairing index `i` with index `i`, at the given confidences.
-fn matches_with_confidence(confidences: &[f64]) -> Vec<PointMatch> {
-    confidences
-        .iter()
-        .enumerate()
-        .map(|(i, &confidence)| PointMatch {
-            indices: MatchIndices {
-                reference: i,
-                target: i,
-            },
-            confidence,
-        })
-        .collect()
+/// `reference` and `target` paired by index.
+fn pairs(reference: &[DVec2], target: &[DVec2]) -> PointPairs {
+    PointPairs {
+        reference: reference.to_vec(),
+        target: target.to_vec(),
+    }
 }
 
 /// [`RansacEstimator::estimate`] with every pair at confidence 1.
 fn estimate_uniform(
     estimator: &RansacEstimator,
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
+    pairs: &PointPairs,
     transform_type: TransformType,
 ) -> Result<RansacResult, RansacFailure> {
-    let matches = matches_with_confidence(&vec![1.0; ref_points.len()]);
-    estimator.estimate(&matches, ref_points, target_points, transform_type)
+    estimator.estimate(pairs, &vec![1.0; pairs.reference.len()], transform_type)
 }
 
 /// A `cols × rows` grid at `spacing`, row by row from the origin.
@@ -67,6 +56,5 @@ fn exact_fit_tolerance(points: &[DVec2]) -> f64 {
 mod estimator;
 mod math;
 mod plausibility;
-mod sampling;
 mod scoring;
 mod transforms;

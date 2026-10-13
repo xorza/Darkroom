@@ -13,25 +13,4 @@ pub(crate) mod markesteijn;
 pub(crate) mod xtrans_image;
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
-    use crate::image::cfa::xtrans_pattern::XTransPattern;
-    use crate::internals::cfa::XTRANS_PATTERN;
-    use crate::math::size2us::Size2us;
-
-    /// `data` as a frame of `size` under the test pattern.
-    pub(crate) fn make_xtrans(data: &[f32], size: Size2us) -> XTransImage<'_> {
-        XTransImage::new(data, size, XTRANS_PATTERN)
-    }
-
-    pub(crate) fn test_pattern_array() -> [[u8; 6]; 6] {
-        *XTRANS_PATTERN.rows()
-    }
-
-    pub(crate) fn test_pattern() -> XTransPattern {
-        XTRANS_PATTERN
-    }
-}
-
-#[cfg(test)]
 mod tests;

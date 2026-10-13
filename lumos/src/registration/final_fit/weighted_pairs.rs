@@ -7,8 +7,8 @@ use nalgebra::DMatrix;
 use crate::math::dmat3::DMat3;
 use crate::math::lstsq::Lstsq;
 use crate::registration::distortion::sip::{SipFit, SipPairs, SipPolynomial};
+use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::homography_refinement::HomographyRefinement;
-use crate::registration::final_fit::{FitModel, SipModel};
 use crate::registration::point_normalization::PointNormalization;
 use crate::registration::ransac::transforms::{dlt_rows, solve_homogeneous_svd_dynamic};
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -32,6 +32,13 @@ struct Moments {
     cross: [f64; 4],
     /// `Σ wᵢ·|r̃ᵢ|²`.
     reference_spread: f64,
+}
+
+/// Whether a Procrustes fit holds the scale at 1 or fits it.
+#[derive(Debug, Clone, Copy)]
+enum Scale {
+    Unit,
+    Fitted,
 }
 
 impl WeightedPairs {
@@ -59,7 +66,7 @@ impl WeightedPairs {
     /// and its SIP correction at their joint optimum ([`SipPolynomial::fit_with`]). `None` when the
     /// pairs do not determine it.
     pub(super) fn fit_warp(&self, model: FitModel) -> Option<WarpTransform> {
-        let Some(SipModel { order, origin }) = model.sip else {
+        let Some(sip) = model.sip else {
             return self.fit(model.transform).map(WarpTransform::new);
         };
         let pairs = SipPairs {
@@ -67,8 +74,7 @@ impl WeightedPairs {
             target: &self.target,
             weights: &self.weights,
         };
-        let SipFit { transform, sip } =
-            SipPolynomial::fit_with(model.transform, pairs, order, origin)?;
+        let SipFit { transform, sip } = SipPolynomial::fit_with(model.transform, pairs, sip)?;
         Some(WarpTransform::with_sip(transform, sip))
     }
 
@@ -81,8 +87,8 @@ impl WeightedPairs {
         }
         match model {
             TransformType::Translation => Some(self.translation()),
-            TransformType::Euclidean => self.procrustes(false),
-            TransformType::Similarity => self.procrustes(true),
+            TransformType::Euclidean => self.procrustes(Scale::Unit),
+            TransformType::Similarity => self.procrustes(Scale::Fitted),
             TransformType::Affine => self.affine(),
             TransformType::Homography => self.homography(),
         }
@@ -131,7 +137,7 @@ impl WeightedPairs {
     /// Weighted Procrustes: the rotation from the weighted cross-covariance, the scale (when
     /// fitted) from it over the weighted reference spread, and the translation that carries the
     /// weighted centroids onto each other. Exact for isotropic per-pair weights.
-    fn procrustes(&self, with_scale: bool) -> Option<Transform> {
+    fn procrustes(&self, scale: Scale) -> Option<Transform> {
         let Moments {
             reference_centroid,
             target_centroid,
@@ -140,27 +146,27 @@ impl WeightedPairs {
         } = self.moments();
         let angle = (xy - yx).atan2(xx + yy);
         let (sin, cos) = angle.sin_cos();
-        let scale = if with_scale {
-            if reference_spread <= 0.0 {
-                return None;
+        let factor = match scale {
+            Scale::Unit => 1.0,
+            Scale::Fitted => {
+                if reference_spread <= 0.0 {
+                    return None;
+                }
+                let factor = ((xx + yy) * cos + (xy - yx) * sin) / reference_spread;
+                if factor <= 0.0 {
+                    return None;
+                }
+                factor
             }
-            let scale = ((xx + yy) * cos + (xy - yx) * sin) / reference_spread;
-            if scale <= 0.0 {
-                return None;
-            }
-            scale
-        } else {
-            1.0
         };
         let rotated = DVec2::new(
             cos * reference_centroid.x - sin * reference_centroid.y,
             sin * reference_centroid.x + cos * reference_centroid.y,
         );
-        let translation = target_centroid - scale * rotated;
-        Some(if with_scale {
-            Transform::similarity(translation, angle, scale)
-        } else {
-            Transform::euclidean(translation, angle)
+        let translation = target_centroid - factor * rotated;
+        Some(match scale {
+            Scale::Unit => Transform::euclidean(translation, angle),
+            Scale::Fitted => Transform::similarity(translation, angle, factor),
         })
     }
 

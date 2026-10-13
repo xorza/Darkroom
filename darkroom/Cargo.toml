@@ -45,7 +45,7 @@ tracing-subscriber = { workspace = true }
 criterion = { workspace = true, optional = true }
 
 [dev-dependencies]
-darkroom = { path = ".", features = ["internals"] }
+darkroom = { workspace = true, features = ["internals"] }
 palantir = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }

@@ -249,7 +249,7 @@ mod tests {
         let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
         let op = ContrastBrightness::new(1.5, 0.1);
         let pattern: Vec<u8> = (0..desc.size_in_bytes())
-            .map(|index| (index % 251) as u8)
+            .map(|index| u8::try_from(index % 251).unwrap())
             .collect();
         let patterned_image = || {
             let mut image = imaginarium::Image::new_black(desc).unwrap();

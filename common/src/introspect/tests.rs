@@ -1,8 +1,10 @@
+use common_derive::{Introspect, IntrospectEnum};
+
 use crate::introspect::{
     FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect, IntrospectEnum,
-    IntrospectFloat, IntrospectInteger,
+    IntrospectError, IntrospectFloat, IntrospectInteger,
 };
-use common_derive::{Introspect, IntrospectEnum};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 enum Mode {
     #[default]
@@ -238,8 +240,8 @@ fn lossless_defaults_round_trip_at_wide_boundaries() {
         [
             FieldValue::Int(IntegerValue::Signed(i128::MIN)),
             FieldValue::Int(IntegerValue::Unsigned(u128::MAX)),
-            FieldValue::Int(IntegerValue::Signed(isize::MIN as i128)),
-            FieldValue::Int(IntegerValue::Unsigned(usize::MAX as u128)),
+            FieldValue::Int(IntegerValue::Signed(i128::try_from(isize::MIN).unwrap())),
+            FieldValue::Int(IntegerValue::Unsigned(u128::try_from(usize::MAX).unwrap())),
             FieldValue::Float(f64::from(f32::MAX)),
         ]
     );
@@ -270,7 +272,7 @@ macro_rules! assert_signed_boundaries {
             assert_eq!(
                 <$ty as IntrospectInteger>::from_field_value(
                     "value",
-                    IntegerValue::Unsigned(<$ty>::MAX as u128),
+                    IntegerValue::Unsigned(u128::try_from(<$ty>::MAX).unwrap()),
                 ),
                 Ok(<$ty>::MAX),
             );
@@ -334,12 +336,20 @@ fn integer_conversions_reject_values_outside_the_target_domain() {
             .unwrap_err(),
         <i128 as IntrospectInteger>::from_field_value(
             "value",
-            IntegerValue::Unsigned(i128::MAX as u128 + 1),
+            IntegerValue::Unsigned(u128::try_from(i128::MAX).unwrap() + 1),
         )
         .unwrap_err(),
     ] {
         assert!(error.to_string().starts_with("field `value` value "));
     }
+    assert_eq!(
+        <u8 as IntrospectInteger>::from_field_value("value", IntegerValue::Signed(-1)),
+        Err(IntrospectError::Integer {
+            field: "value",
+            value: IntegerValue::Signed(-1),
+            target: IntegerKind::U8,
+        })
+    );
 }
 
 #[test]
@@ -359,7 +369,14 @@ fn float_conversions_check_f32_finite_range_and_preserve_f64() {
         f64::from(f32::MIN) * 2.0,
         f64::from(f32::MAX) * 2.0,
     ] {
-        assert!(<f32 as IntrospectFloat>::from_field_value("value", value).is_err());
+        assert!(matches!(
+            <f32 as IntrospectFloat>::from_field_value("value", value),
+            Err(IntrospectError::Float {
+                field: "value",
+                value: refused,
+                target: FloatKind::F32,
+            }) if refused.to_bits() == value.to_bits()
+        ));
     }
     assert_eq!(
         <f64 as IntrospectFloat>::from_field_value("value", f64::MIN),

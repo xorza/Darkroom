@@ -115,11 +115,8 @@ fn a_linear_ramp_reads_back_at_each_preimage() {
         let preimage = transform.inverse();
         for &kernel in kernels {
             let product = drizzle_one(
-                size,
                 kernel_config(kernel, 1.0, 1.0),
-                image.clone(),
-                &transform,
-                None,
+                &DrizzleFrame::new(image.clone(), warp_of(transform)),
             );
             for y in interior.clone() {
                 for x in interior.clone() {

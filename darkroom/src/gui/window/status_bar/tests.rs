@@ -58,12 +58,12 @@ fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     let mut h = SessionHarness::new(DocFixture::default());
     h.prime(2);
     let without =
-        h.ui.rect(status_bar_id())
+        h.ui.rect(id())
             .expect("status bar records with no reading and an empty cache");
 
     h.process_memory = 3 * 1024 * 1024;
     h.prime(2);
-    let with = h.ui.rect(status_bar_id()).expect("status bar records");
+    let with = h.ui.rect(id()).expect("status bar records");
 
     // The strip is a real row either way — a collapsed one would
     // arrange to zero height and read as "no bar".

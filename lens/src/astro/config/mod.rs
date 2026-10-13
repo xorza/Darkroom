@@ -15,6 +15,7 @@ use scenarium::Library;
 use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
 use crate::config_node::ConfigValue;
+use crate::node_spec::NodeSpec;
 
 const BUILD_BACKGROUND_CONFIG_FUNC_ID: FuncId =
     FuncId::literal("9cda0462-1b8e-4c50-83d6-4db470df22d9");
@@ -36,66 +37,82 @@ const BUILD_SCNR_CONFIG_FUNC_ID: FuncId = FuncId::literal("d07742d1-4469-4739-b2
 pub(crate) fn register_builders(library: &mut Library) {
     add_builder::<ExtractBackground>(
         library,
-        BUILD_BACKGROUND_CONFIG_FUNC_ID,
-        "Build Background Config",
-        "Builds a detailed background-extraction config",
+        NodeSpec {
+            id: BUILD_BACKGROUND_CONFIG_FUNC_ID,
+            name: "Build Background Config",
+            description: "Builds a detailed background-extraction config",
+        },
     );
     add_builder::<DetectionKnobs>(
         library,
-        BUILD_DETECTION_CONFIG_FUNC_ID,
-        "Build Detection Config",
-        "Builds a detailed star-detection config",
+        NodeSpec {
+            id: BUILD_DETECTION_CONFIG_FUNC_ID,
+            name: "Build Detection Config",
+            description: "Builds a detailed star-detection config",
+        },
     );
     add_builder::<RegistrationKnobs>(
         library,
-        BUILD_REGISTRATION_CONFIG_FUNC_ID,
-        "Build Registration Config",
-        "Builds a detailed registration config",
+        NodeSpec {
+            id: BUILD_REGISTRATION_CONFIG_FUNC_ID,
+            name: "Build Registration Config",
+            description: "Builds a detailed registration config",
+        },
     );
     add_builder::<CombineKnobs>(
         library,
-        BUILD_COMBINE_CONFIG_FUNC_ID,
-        "Build Combine Config",
-        "Builds a detailed frame-combination config",
+        NodeSpec {
+            id: BUILD_COMBINE_CONFIG_FUNC_ID,
+            name: "Build Combine Config",
+            description: "Builds a detailed frame-combination config",
+        },
     );
     add_builder::<Denoise>(
         library,
-        BUILD_DENOISE_CONFIG_FUNC_ID,
-        "Build Denoise Config",
-        "Builds a detailed wavelet-denoise config",
+        NodeSpec {
+            id: BUILD_DENOISE_CONFIG_FUNC_ID,
+            name: "Build Denoise Config",
+            description: "Builds a detailed wavelet-denoise config",
+        },
     );
     add_builder::<Hdr>(
         library,
-        BUILD_HDR_CONFIG_FUNC_ID,
-        "Build HDR Config",
-        "Builds a detailed HDR dynamic-range-compression config",
+        NodeSpec {
+            id: BUILD_HDR_CONFIG_FUNC_ID,
+            name: "Build HDR Config",
+            description: "Builds a detailed HDR dynamic-range-compression config",
+        },
     );
     add_builder::<LocalContrast>(
         library,
-        BUILD_LOCAL_CONTRAST_CONFIG_FUNC_ID,
-        "Build Local Contrast Config",
-        "Builds a detailed local-contrast config",
+        NodeSpec {
+            id: BUILD_LOCAL_CONTRAST_CONFIG_FUNC_ID,
+            name: "Build Local Contrast Config",
+            description: "Builds a detailed local-contrast config",
+        },
     );
     add_builder::<StretchKnobs>(
         library,
-        BUILD_STRETCH_CONFIG_FUNC_ID,
-        "Build Stretch Config",
-        "Builds a detailed display-stretch config",
+        NodeSpec {
+            id: BUILD_STRETCH_CONFIG_FUNC_ID,
+            name: "Build Stretch Config",
+            description: "Builds a detailed display-stretch config",
+        },
     );
     add_builder::<ScnrKnobs>(
         library,
-        BUILD_SCNR_CONFIG_FUNC_ID,
-        "Build SCNR Config",
-        "Builds a detailed SCNR (green-removal) config",
+        NodeSpec {
+            id: BUILD_SCNR_CONFIG_FUNC_ID,
+            name: "Build SCNR Config",
+            description: "Builds a detailed SCNR (green-removal) config",
+        },
     );
 }
 
 fn add_builder<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static>(
     library: &mut Library,
-    id: FuncId,
-    name: &str,
-    description: &str,
+    spec: NodeSpec,
 ) {
-    let func = ConfigValue::<T>::builder(library, id, name, description).category("Astro");
+    let func = ConfigValue::<T>::builder(library, spec).category("Astro");
     library.add(func);
 }

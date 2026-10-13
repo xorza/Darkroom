@@ -2,8 +2,12 @@
 
 use imaginarium::Buffer2;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Pooled;
+use crate::star_detection::background::background_estimate::{self, Planes};
+use crate::star_detection::resources::DetectionResources;
+use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 
 /// The sky's noise per pixel and its floor: all the stages after the sky's removal need of it.
 ///
@@ -20,6 +24,29 @@ pub(crate) struct SkyNoise {
 }
 
 impl SkyNoise {
+    /// The noise of `pixels` alone, by the background estimate's mesh, leaving out the pixels
+    /// `mask` sets: for a plane whose sky is already out, whose σ is all a threshold needs.
+    pub(crate) fn measure(
+        pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
+        config: &BackgroundConfig,
+        resources: &mut DetectionResources,
+    ) -> Self {
+        let mut noise = resources.acquire_f32();
+        let workspace = &mut resources.background;
+        let tile_grid = workspace.mesh.compute(pixels, mask, config.mesh_params());
+        let floor = background_estimate::noise_floor_from(tile_grid, &mut resources.values);
+        background_estimate::interpolate_from_grid(
+            tile_grid,
+            Planes {
+                background: None,
+                noise: &mut noise,
+            },
+            &mut workspace.interpolation,
+        );
+        Self { noise, floor }
+    }
+
     /// The residual level `sigma` noise σ above the sky at `pos`, with σ held to the floor — the
     /// same test the threshold mask applies to every pixel.
     pub(crate) fn threshold_at(&self, pos: Vec2us, sigma: f32) -> f32 {

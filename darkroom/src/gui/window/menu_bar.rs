@@ -1,7 +1,7 @@
 use palantir::prelude::*;
 use palantir::{CloseHandle, DockOperation, MenuSeparator};
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::requests::Requests;

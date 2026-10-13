@@ -3,7 +3,7 @@
 use arrayvec::ArrayVec;
 
 use crate::memory::budget::Budget;
-use crate::memory::stage::{Stage, Width};
+use crate::memory::stage::{Placement, Stage, Width};
 
 /// The most stages a run has: preparing, warping, normalizing and combining.
 const MAX_STAGES: usize = 4;
@@ -21,11 +21,11 @@ impl RunPlan {
     ///
     /// The run stays resident when every stage's narrowest step fits beside the whole set as that
     /// stage keeps it: each frame at the larger of what the stage before kept of it and what this
-    /// one keeps, since frames not yet through are still as they came. Otherwise every frame lies on
-    /// disk between its stages, and only the frames in work are in memory. Each stage then runs as
-    /// wide as what is left allows.
+    /// one keeps, since frames not yet through are still as they came. Otherwise every frame lies
+    /// on disk between its stages, and only the frames in work are in memory. Each stage then runs
+    /// as wide as what is left allows.
     pub(crate) fn of(frame_count: usize, stages: &[Stage], budget: Budget) -> Self {
-        assert!(frame_count > 0, "a run plans one frame at least");
+        debug_assert!(frame_count > 0, "a run plans one frame at least");
         let kept_sets: ArrayVec<u64, MAX_STAGES> = stages
             .iter()
             .scan(0, |before, stage| {
@@ -34,22 +34,22 @@ impl RunPlan {
                 Some(set)
             })
             .collect();
-        let resident = stages.iter().zip(&kept_sets).all(|(stage, &set)| {
+        let resident = stages.iter().zip(&kept_sets).all(|(stage, &kept_set)| {
             stage
-                .width(budget, frame_count, set, false)
+                .width(budget, frame_count, Placement::Resident { kept_set })
                 .overcommit_bytes
                 == 0
         });
         let widths = stages
             .iter()
             .zip(&kept_sets)
-            .map(|(stage, &set)| {
-                stage.width(
-                    budget,
-                    frame_count,
-                    if resident { set } else { 0 },
-                    !resident,
-                )
+            .map(|(stage, &kept_set)| {
+                let placement = if resident {
+                    Placement::Resident { kept_set }
+                } else {
+                    Placement::Spilled
+                };
+                stage.width(budget, frame_count, placement)
             })
             .collect();
         Self { resident, widths }

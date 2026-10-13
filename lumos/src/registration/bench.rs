@@ -8,20 +8,21 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::test_rng::TestRng;
-use crate::registration::distortion::sip::SipConfig;
-use crate::registration::final_fit::{FinalFit, FitCatalogs, FitModel, SipModel};
+use crate::registration::distortion::sip::{SipConfig, SipModel};
+use crate::registration::final_fit::fit_catalogs::FitCatalogs;
+use crate::registration::final_fit::{FinalFit, FitModel};
 use crate::registration::kd_tree::KdTree;
+use crate::registration::model_search::ModelSearch;
+use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::RansacEstimator;
-use crate::registration::registration_config::RegistrationConfig;
+use crate::registration::registration_config::{
+    RegistrationConfig, bounding_box_centre, median_fwhm,
+};
 use crate::registration::resample::row_positions;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::triangle::matching;
 use crate::registration::triangle::voting::PointMatch;
-use crate::registration::{
-    bounding_box_centre, estimate_and_refine, final_fit, kd_tree, median_fwhm, ransac, triangle,
-    tuning,
-};
+use crate::registration::{final_fit, kd_tree, ransac, triangle, tuning};
 use crate::star_detection::star::Star;
 
 /// Two star catalogues registered, as `register` takes every light's against the reference's:
@@ -116,12 +117,10 @@ impl Pair {
 
     /// The triangle matches between the brightest stars `config` takes.
     pub(super) fn matches(&self, trees: &Trees, config: &RegistrationConfig) -> Vec<PointMatch> {
-        matching::match_triangles(
-            &trees.reference,
-            &trees.target,
-            &config.matching.triangle,
-            self.max_sigma(),
-        )
+        config
+            .matching
+            .triangle
+            .match_trees(&trees.reference, &trees.target, self.max_sigma())
     }
 
     /// RANSAC's `transform` on the matches of the default configuration's brightest stars: the
@@ -129,38 +128,39 @@ impl Pair {
     pub(super) fn hypothesis(&self, transform: TransformType) -> Transform {
         let config = RegistrationConfig::default();
         let trees = self.trees(config.matching.max_stars);
-        RansacEstimator::new(config.ransac.clone(), self.max_sigma())
-            .estimate(
-                &self.matches(&trees, &config),
-                trees.reference.points(),
-                trees.target.points(),
-                transform,
-            )
+        let matches = self.matches(&trees, &config);
+        RansacEstimator::new(config.ransac, self.max_sigma())
+            .estimate(&trees.pairs(&matches), &confidences(&matches), transform)
             .expect("the pair registers")
             .transform
     }
 
-    /// `transform`, with the SIP correction the precise presets add when `sip` is set, about the
-    /// reference catalogue's centre as `register` places it.
-    pub(super) fn model(&self, transform: TransformType, sip: bool) -> FitModel {
+    /// `transform` under `correction`: the SIP correction the precise presets add is taken about
+    /// the reference catalogue's centre, as `register` places it.
+    pub(super) fn model(&self, transform: TransformType, correction: Correction) -> FitModel {
         FitModel {
             transform,
-            sip: sip.then(|| SipModel {
-                order: SipConfig::default().order,
-                origin: bounding_box_centre(&self.reference),
-            }),
+            sip: match correction {
+                Correction::Linear => None,
+                Correction::Sip => Some(SipModel {
+                    order: SipConfig::default().order,
+                    origin: bounding_box_centre(&self.reference),
+                }),
+            },
         }
     }
 
     /// The similarity `register` fits to the pair: the dither, with the lens left in its residuals.
     pub(crate) fn similarity_warp(&self) -> WarpTransform {
-        self.fit(self.model(TransformType::Similarity, false)).warp
+        self.fit(self.model(TransformType::Similarity, Correction::Linear))
+            .warp
     }
 
     /// The warp `register` fits to the pair with the SIP correction the precise presets add: the
     /// dither and the lens together.
     pub(crate) fn sip_warp(&self) -> WarpTransform {
-        self.fit(self.model(TransformType::Similarity, true)).warp
+        self.fit(self.model(TransformType::Similarity, Correction::Sip))
+            .warp
     }
 
     /// `model` fitted as `register` fits it under the default configuration: RANSAC on the
@@ -169,17 +169,25 @@ impl Pair {
         let config = RegistrationConfig::default();
         let trees = self.trees(config.matching.max_stars);
         let catalogs = FitCatalogs::new(&self.reference, &self.target).expect("a catalogue");
-        estimate_and_refine(
-            trees.reference.points(),
-            &trees.target,
-            &self.matches(&trees, &config),
-            &catalogs,
-            model,
-            self.max_sigma(),
-            &config,
-        )
-        .expect("the pair registers")
+        let matches = self.matches(&trees, &config);
+        let search = ModelSearch {
+            pairs: trees.pairs(&matches),
+            confidences: confidences(&matches),
+            catalogs: &catalogs,
+            max_sigma: self.max_sigma(),
+            config: &config,
+        };
+        search
+            .estimate_and_refine(model)
+            .expect("the pair registers")
     }
+}
+
+/// Whether a benched fit carries the SIP correction the precise presets add.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Correction {
+    Linear,
+    Sip,
 }
 
 /// Each catalogue's brightest stars as a tree.
@@ -187,4 +195,16 @@ impl Pair {
 pub(super) struct Trees {
     pub(super) reference: KdTree,
     pub(super) target: KdTree,
+}
+
+impl Trees {
+    /// The positions of `matches` among these stars.
+    pub(super) fn pairs(&self, matches: &[PointMatch]) -> PointPairs {
+        PointPairs::from_matches(matches, self.reference.points(), self.target.points())
+    }
+}
+
+/// Each match's confidence, by index.
+pub(super) fn confidences(matches: &[PointMatch]) -> Vec<f64> {
+    matches.iter().map(|m| m.confidence).collect()
 }

@@ -33,15 +33,15 @@ use scenarium::LogLevel;
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::node::NodeDrawOutcome;
 use crate::gui::pane::graph::node::wid;
-use crate::gui::pane::graph::node::widget::exec_color;
+use crate::gui::pane::graph::node::widget;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::format::fmt_elapsed;
-use crate::gui::widgets::support::{colored_text, sized_text};
+use crate::gui::widgets::format::elapsed::Elapsed;
+use crate::gui::widgets::support;
 use scenarium::Binding;
 
 /// Open state of a single node's inspector. Absence from
@@ -161,117 +161,117 @@ impl Inspectors {
                 .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             let ncx = node.with_hover(wid::hovered(ui, node.id));
-            Self::draw_one(ui, ncx, mode, pos);
+            draw_one(ui, ncx, mode, pos);
         }
     }
+}
 
-    fn draw_one(ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
-        let (theme, node) = (ncx.theme(), ncx);
-        let logs = ncx.graph_ctx.run_state().logs(node.id);
-        let error = ncx.graph_ctx.run_state().error(node.id);
-        // The outline is the *pinned* signal, in the same accent the header's
-        // `i` chip uses for its open/pinned states — one color means
-        // "inspector held open" on both ends. A transient panel rides on its
-        // shadow alone. Width stays constant so pin-cycling never reflows.
-        let border = match mode {
-            InspectMode::Pinned => theme.colors.badge_graph,
-            InspectMode::Open => RgbaF32::TRANSPARENT,
-        };
-        let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-            .with_border(Stroke::new(border, theme.card.border_width))
-            // Same elevation swatch as the node bodies, so every floating
-            // surface casts one kind of shadow (bigger blur — the panel sits higher).
-            .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
-        Panel::vstack()
-            .id(inspect_panel_wid(node.id))
-            .position(pos)
-            .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
-            .sense(Sense::CLICK)
-            .padding(Spacing::all(8.0))
-            .gap(3.0)
-            .background(chrome)
-            .show(ui, |ui| {
-                let title = if node.name().is_empty() {
-                    "(unnamed)"
-                } else {
-                    node.name()
-                };
-                let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
-                line(ui, title, title_style(theme, ui));
-                // The kind line earns its row only when it says something the
-                // title doesn't — an unrenamed node repeats its func name.
-                if !repeated_kind {
-                    line(ui, node.kind_label(), muted_style(theme, ui));
-                }
+fn draw_one(ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
+    let (theme, node) = (ncx.theme(), ncx);
+    let logs = ncx.graph_ctx.run_state().logs(node.id);
+    let error = ncx.graph_ctx.run_state().error(node.id);
+    // The outline is the *pinned* signal, in the same accent the header's
+    // `i` chip uses for its open/pinned states — one color means
+    // "inspector held open" on both ends. A transient panel rides on its
+    // shadow alone. Width stays constant so pin-cycling never reflows.
+    let border = match mode {
+        InspectMode::Pinned => theme.colors.badge_graph,
+        InspectMode::Open => RgbaF32::TRANSPARENT,
+    };
+    let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+        .with_border(Stroke::new(border, theme.card.border_width))
+        // Same elevation swatch as the node bodies, so every floating
+        // surface casts one kind of shadow (bigger blur — the panel sits higher).
+        .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
+    Panel::vstack()
+        .id(inspect_panel_wid(node.id))
+        .position(pos)
+        .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
+        .sense(Sense::CLICK)
+        .padding(Spacing::all(8.0))
+        .gap(3.0)
+        .background(chrome)
+        .show(ui, |ui| {
+            let title = if node.name().is_empty() {
+                "(unnamed)"
+            } else {
+                node.name()
+            };
+            let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
+            line(ui, title, title_style(theme, ui));
+            // The kind line earns its row only when it says something the
+            // title doesn't — an unrenamed node repeats its func name.
+            if !repeated_kind {
+                line(ui, node.kind_label(), muted_style(theme, ui));
+            }
 
-                // Status right under the title — the most-glanceable fact.
-                // The colored line is self-labeling; no section header.
-                let status_color =
-                    exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
-                let status = status_text(ui, node.exec_status());
+            // Status right under the title — the most-glanceable fact.
+            // The colored line is self-labeling; no section header.
+            let status_color =
+                widget::exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
+            let status = status_text(ui, node.exec_status());
+            line(
+                ui,
+                status,
+                TextStyle {
+                    color: status_color,
+                    ..body_style(theme, ui)
+                },
+            );
+            // The actual failure cause beneath the bare "errored" line, in
+            // the error color — this is what turns a generic status into
+            // an actionable message (e.g. "no light frames provided").
+            if let Some(message) = error {
                 line(
                     ui,
-                    status,
+                    message,
                     TextStyle {
-                        color: status_color,
+                        color: theme.status.error,
                         ..body_style(theme, ui)
                     },
                 );
-                // The actual failure cause beneath the bare "errored" line, in
-                // the error color — this is what turns a generic status into
-                // an actionable message (e.g. "no light frames provided").
-                if let Some(message) = error {
+            }
+            if node.sink() {
+                line(ui, "sink", muted_style(theme, ui));
+            }
+            if !node.description().is_empty() {
+                line(ui, node.description(), muted_style(theme, ui));
+            }
+
+            let library = ncx.graph_ctx.library();
+            if node.inputs().len() > 0 {
+                section(ui, theme, "Inputs");
+                for input in node.inputs() {
+                    let val = value_str(ui, input.binding());
+                    port_row(ui, theme, library, input.name(), input.ty(), Some(val));
+                }
+            }
+
+            if node.outputs().len() > 0 {
+                section(ui, theme, "Outputs");
+                for output in node.outputs() {
+                    port_row(ui, theme, library, output.name(), output.ty(), None);
+                }
+            }
+
+            // Log: this node's lines from the last run, level-colored.
+            // Capped to the most recent few so the panel can't grow
+            // unbounded.
+            if !logs.is_empty() {
+                section(ui, theme, "Log");
+                let start = logs.len().saturating_sub(LOG_LINE_CAP);
+                for entry in &logs[start..] {
                     line(
                         ui,
-                        message,
+                        &entry.message,
                         TextStyle {
-                            color: theme.status.error,
+                            color: log_color(theme, ui, entry.level),
                             ..body_style(theme, ui)
                         },
                     );
                 }
-                if node.sink() {
-                    line(ui, "sink", muted_style(theme, ui));
-                }
-                if !node.description().is_empty() {
-                    line(ui, node.description(), muted_style(theme, ui));
-                }
-
-                let library = ncx.graph_ctx.library();
-                if node.inputs().len() > 0 {
-                    section(ui, theme, "Inputs");
-                    for input in node.inputs() {
-                        let val = value_str(ui, input.binding());
-                        port_row(ui, theme, library, input.name(), input.ty(), Some(val));
-                    }
-                }
-
-                if node.outputs().len() > 0 {
-                    section(ui, theme, "Outputs");
-                    for output in node.outputs() {
-                        port_row(ui, theme, library, output.name(), output.ty(), None);
-                    }
-                }
-
-                // Log: this node's lines from the last run, level-colored.
-                // Capped to the most recent few so the panel can't grow
-                // unbounded.
-                if !logs.is_empty() {
-                    section(ui, theme, "Log");
-                    let start = logs.len().saturating_sub(LOG_LINE_CAP);
-                    for entry in &logs[start..] {
-                        line(
-                            ui,
-                            &entry.message,
-                            TextStyle {
-                                color: log_color(theme, ui, entry.level),
-                                ..body_style(theme, ui)
-                            },
-                        );
-                    }
-                }
-            });
-    }
+            }
+        });
 }
 
 /// `RgbaF32` for a log line by level: info reads as muted body text, warn
@@ -289,7 +289,7 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
 fn outside_action(ui: &Ui, body_acted: bool) -> bool {
-    let oc = ui.response_for(outer_canvas_widget_id());
+    let oc = ui.response_for(canvas::outer_wid());
     // Any-button drag: left rubber-bands, middle pans, right scribbles
     // the breaker — all of them count as "acted on the canvas".
     let dragged = oc.left.drag.is_live() || oc.middle.drag.is_live() || oc.right.drag.is_live();
@@ -376,18 +376,18 @@ impl Display for PortLabel<'_> {
 }
 
 fn title_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    sized_text(ui, theme.text.title)
+    support::sized_text(ui, theme.text.title)
 }
 
 /// The panel's de-emphasized ink. `port_label`, not `text_muted`: the panel
 /// surface is the node fill, exactly the combination the light palette's
 /// `text_muted` is too faint for (see the `port_label` slot).
 fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    colored_text(ui, theme.ports.label, theme.text.label)
+    support::colored_text(ui, theme.ports.label, theme.text.label)
 }
 
 fn body_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    sized_text(ui, theme.text.body)
+    support::sized_text(ui, theme.text.body)
 }
 
 /// The value tier of an input row.
@@ -410,11 +410,13 @@ fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
     match status {
         ExecStatus::None => TextInput::Borrowed("not run"),
         ExecStatus::Cached => TextInput::Borrowed("cached"),
-        ExecStatus::Executed(secs) => TextInput::Interned(fmt!(ui, "ran in {}", fmt_elapsed(secs))),
+        ExecStatus::Executed(secs) => {
+            TextInput::Interned(fmt!(ui, "ran in {}", Elapsed::new(secs)))
+        }
         ExecStatus::Running(at) => TextInput::Interned(fmt!(
             ui,
             "running… {}",
-            fmt_elapsed(at.elapsed().as_secs_f64())
+            Elapsed::new(at.elapsed().as_secs_f64())
         )),
         ExecStatus::MissingInputs => TextInput::Borrowed("missing inputs"),
         ExecStatus::Errored => TextInput::Borrowed("errored"),

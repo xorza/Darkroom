@@ -48,12 +48,7 @@ impl Case {
             self.confidences.clone()
         };
         let result = estimator(self.max_sigma, config)
-            .estimate(
-                &matches_with_confidence(&confidences),
-                &self.points,
-                &targets,
-                self.model,
-            )
+            .estimate(&pairs(&self.points, &targets), &confidences, self.model)
             .unwrap_or_else(|failure| panic!("{}: no estimate, {failure:?}", self.name));
         let expected: Vec<usize> = (0..self.points.len())
             .filter(|i| !self.outliers.contains(i))
@@ -260,13 +255,13 @@ fn too_few_matches_give_no_estimate() {
     });
     assert_eq!(
         estimator
-            .estimate(&[], &[], &[], TransformType::Translation)
+            .estimate(&PointPairs::default(), &[], TransformType::Translation)
             .map(|result| result.inliers),
         never_ran
     );
     let one = [DVec2::ZERO];
     assert_eq!(
-        estimate_uniform(&estimator, &one, &one, TransformType::Similarity)
+        estimate_uniform(&estimator, &pairs(&one, &one), TransformType::Similarity)
             .map(|result| result.inliers),
         never_ran
     );
@@ -290,8 +285,7 @@ fn a_seed_repeats_the_run() {
                     ..Default::default()
                 },
             ),
-            &ref_points,
-            &target_points,
+            &pairs(&ref_points, &target_points),
             TransformType::Similarity,
         )
         .unwrap()
@@ -326,19 +320,17 @@ fn ransac_stops_at_the_adaptive_bound_without_a_later_improvement() {
         },
     );
     let mut samples = 0;
-    let result = estimator
-        .ransac_loop(
-            &ref_points,
-            &target_points,
-            TransformType::Translation,
-            0,
-            |_, sample| {
-                samples += 1;
-                sample.clear();
-                sample.push(0);
-            },
-        )
-        .unwrap();
+    let result = Search::new(
+        &estimator,
+        &pairs(&ref_points, &target_points),
+        TransformType::Translation,
+    )
+    .run(0, |_, sample| {
+        samples += 1;
+        sample.clear();
+        sample.push(0);
+    })
+    .unwrap();
     assert_eq!(samples, 10);
     assert_eq!(result.inliers, (0..25).collect::<Vec<_>>());
     assert_eq!(
@@ -361,25 +353,6 @@ fn final_refit_does_not_degrade_robust_score() {
         point.x += 3.0;
     }
 
-    let scorer = WelschScorer::new(1.0);
-    let mut inliers = Vec::new();
-    let mut score = |transform| {
-        score_hypothesis(
-            &ref_points,
-            &target_points,
-            &transform,
-            &scorer,
-            &mut inliers,
-            f64::NEG_INFINITY,
-        )
-    };
-    let robust_score = score(Transform::identity());
-    let refit_score = score(Transform::translation(DVec2::new(0.6, 0.0)));
-    assert!(
-        robust_score > refit_score,
-        "{robust_score} against {refit_score}"
-    );
-
     let estimator = estimator(
         1.0,
         RansacConfig {
@@ -388,17 +361,22 @@ fn final_refit_does_not_degrade_robust_score() {
             ..Default::default()
         },
     );
-    let result = estimator
-        .ransac_loop(
-            &ref_points,
-            &target_points,
-            TransformType::Translation,
-            0,
-            |_, sample| {
-                sample.clear();
-                sample.push(0);
-            },
-        )
+    let points = pairs(&ref_points, &target_points);
+    let search = Search::new(&estimator, &points, TransformType::Translation);
+    let mut inliers = Vec::new();
+    let mut score = |transform| search.score(&transform, &mut inliers, f64::NEG_INFINITY);
+    let robust_score = score(Transform::identity());
+    let refit_score = score(Transform::translation(DVec2::new(0.6, 0.0)));
+    assert!(
+        robust_score > refit_score,
+        "{robust_score} against {refit_score}"
+    );
+
+    let result = search
+        .run(0, |_, sample| {
+            sample.clear();
+            sample.push(0);
+        })
         .unwrap();
     assert_eq!(result.inliers, (0..10).collect::<Vec<_>>());
     assert_eq!(result.transform.translation_components(), DVec2::ZERO);
@@ -433,18 +411,16 @@ fn local_optimization_grows_the_consensus() {
                 ..Default::default()
             },
         );
-        let result = estimator
-            .ransac_loop(
-                &ref_points,
-                &target_points,
-                TransformType::Translation,
-                0,
-                |_, sample| {
-                    sample.clear();
-                    sample.push(0);
-                },
-            )
-            .unwrap();
+        let result = Search::new(
+            &estimator,
+            &pairs(&ref_points, &target_points),
+            TransformType::Translation,
+        )
+        .run(0, |_, sample| {
+            sample.clear();
+            sample.push(0);
+        })
+        .unwrap();
         assert_eq!(
             result.inliers,
             (0..inliers).collect::<Vec<_>>(),
@@ -489,18 +465,16 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
     let weighted = [vec![0.01; 80], vec![1.0; 20]].concat();
     let result = estimator(1.0, config.clone())
         .estimate(
-            &matches_with_confidence(&weighted),
-            &ref_points,
-            &target_points,
+            &pairs(&ref_points, &target_points),
+            &weighted,
             TransformType::Similarity,
         )
         .unwrap();
     assert_eq!(result.inliers, trusted);
 
     let uniform = estimator(1.0, config).estimate(
-        &matches_with_confidence(&[1.0; 100]),
-        &ref_points,
-        &target_points,
+        &pairs(&ref_points, &target_points),
+        &[1.0; 100],
         TransformType::Similarity,
     );
     assert_ne!(uniform.map(|result| result.inliers), Ok(trusted));

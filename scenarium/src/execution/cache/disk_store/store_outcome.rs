@@ -12,7 +12,7 @@ use crate::data::type_system::TypeId;
 pub(crate) enum StoreOutcome {
     /// A fresh blob is on disk.
     Published,
-    /// [`StorePolicy::PreserveCovering`](super::StorePolicy::PreserveCovering)
+    /// [`StorePolicy::PreserveCovering`](crate::execution::cache::disk_store::StorePolicy::PreserveCovering)
     /// found a blob already covering the snapshot and left it untouched.
     AlreadyCovered,
     /// A value's custom type has no codec registered in the current library, so

@@ -21,18 +21,17 @@ pub(crate) struct FrameChunk<'a> {
 impl<'a> FrameChunk<'a> {
     /// `frame`'s pixels `range`, read in place from its planes.
     pub(crate) fn borrowed(frame: &'a StoredFrame, range: Range<usize>) -> Self {
-        let Range { start, end } = range;
         Self {
             channels: frame
                 .channels
                 .iter()
-                .map(|plane| plane.chunk(start, end))
+                .map(|plane| plane.chunk(range.clone()))
                 .collect(),
             quality: frame
                 .quality
-                .try_map(|_, plane| Ok::<_, Infallible>(plane.chunk(start, end)))
+                .try_map(|_, plane| Ok::<_, Infallible>(plane.chunk(range.clone())))
                 .unwrap_or_else(|never| match never {}),
-            flags: frame.flags.as_ref().map(|plane| plane.chunk(start, end)),
+            flags: frame.flags.as_ref().map(|plane| plane.chunk(range.clone())),
         }
     }
 }
@@ -101,19 +100,18 @@ impl ChunkCopy {
     }
 
     fn fill_frames(frames: &[StoredFrame], buffers: &mut [FrameBuffers], range: Range<usize>) {
-        let Range { start, end } = range;
         for (frame, buffers) in frames.iter().zip(buffers) {
             for (plane, buffer) in frame.channels.iter().zip(&mut buffers.channels) {
                 buffer.clear();
-                buffer.extend_from_slice(plane.chunk(start, end));
+                buffer.extend_from_slice(plane.chunk(range.clone()));
             }
             for ((_, plane), buffer) in frame.quality.present().zip(&mut buffers.quality) {
                 buffer.clear();
-                buffer.extend_from_slice(plane.chunk(start, end));
+                buffer.extend_from_slice(plane.chunk(range.clone()));
             }
             if let (Some(plane), Some(buffer)) = (&frame.flags, &mut buffers.flags) {
                 buffer.clear();
-                buffer.extend_from_slice(plane.chunk(start, end));
+                buffer.extend_from_slice(plane.chunk(range.clone()));
             }
         }
     }

@@ -6,7 +6,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::star_detection::bench::Stages;
+use crate::star_detection::bench;
 use crate::star_detection::resources::DetectionResources;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -15,7 +15,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for field in [Field::Typical, Field::Dense] {
         group.bench_function(BenchmarkId::new("mesh", field.name()), |b| {
             let pixels = field.render(FRAME).image.channel(0).clone();
-            let config = Stages::config(field).background;
+            let config = bench::config(field).background;
             let mut resources = DetectionResources::new(FRAME);
             b.iter(|| BackgroundEstimate::estimate(&pixels, None, &config, &mut resources));
         });

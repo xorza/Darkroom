@@ -110,7 +110,6 @@ macro_rules! id_type {
 )]
 mod tests {
     use crate::serde::serde_format::SerdeFormat;
-    use crate::serde::{deserialize, serialize};
 
     crate::id_type!(SampleId);
 
@@ -129,9 +128,9 @@ mod tests {
         assert_eq!(SampleId::default(), SampleId::nil());
         assert!(!SampleId::unique().is_nil());
         for format in SerdeFormat::ALL {
-            let bytes = serialize(&id, format).unwrap();
+            let bytes = format.serialize(&id).unwrap();
             assert_eq!(
-                deserialize::<SampleId>(&bytes, format).unwrap(),
+                format.deserialize::<SampleId>(&bytes).unwrap(),
                 id,
                 "{format:?}"
             );

@@ -2,7 +2,7 @@ use crate::image_ops::hdr::Hdr;
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
-use crate::math::wavelet::{atrous_smooth, max_scales};
+use crate::math::wavelet;
 use std::mem;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
@@ -113,12 +113,12 @@ fn hdr_preserves_fine_detail() {
     );
 }
 
-/// The starlet residual of `plane` over `scales`, as `hdr_map` smooths it.
+/// The starlet residual of `plane` over `scales`, as `Hdr::compress` smooths it.
 fn residual(plane: &[f32], size: Size2us, scales: usize) -> Vec<f32> {
     let mut c_curr = Buffer2::new(size.width, size.height, plane.to_vec());
     let mut c_next = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, 1 << j);
+        wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
         mem::swap(&mut c_curr, &mut c_next);
     }
     c_curr.pixels().to_vec()
@@ -136,14 +136,14 @@ fn linear_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32>
 }
 
 /// The literal reference: materialize every detail layer of the log intensity, flatten the
-/// residual toward its mean, re-sum and exponentiate — the computation `hdr_map` collapses
+/// residual toward its mean, re-sum and exponentiate — the computation `Hdr::compress` collapses
 /// algebraically. Every input here is above the log floor.
 fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f32> {
     let mut c_curr = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
     let mut c_next = Buffer2::new_default(size.width, size.height);
     let mut layers: Vec<Vec<f32>> = Vec::new();
     for j in 0..scales {
-        atrous_smooth(&c_curr, &mut c_next, 1 << j);
+        wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
         layers.push(
             c_curr
                 .pixels()
@@ -241,7 +241,7 @@ fn scales_change_the_output_up_to_the_frame_limit() {
         .unwrap();
         img.channel(0).pixels().to_vec()
     };
-    assert_eq!(max_scales(size), 5);
+    assert_eq!(wavelet::max_scales(size), 5);
     assert_ne!(run(2), run(4));
     assert_eq!(run(20), run(5));
 }

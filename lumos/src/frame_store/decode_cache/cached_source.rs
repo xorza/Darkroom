@@ -1,32 +1,69 @@
-//! [`CachedSource`]: a source file as the decode cache names it.
+//! [`CachedSource`]: a source file as the decode cache names and keys it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::FileIdentity;
 
+use crate::frame_store::decode_cache::cache_key::{CacheKey, DecoderKind};
 use crate::frame_store::error::FrameStoreError;
+use crate::io::load_context::LoadContext;
 
-/// A source file as the decode cache names it: its canonical path, and its identity when it was
-/// read.
+/// A source file as the decode cache names and keys it: the path it was read by, its canonical
+/// path, and the key of its decode as the file was then.
 #[derive(Debug)]
 pub(crate) struct CachedSource {
+    pub(crate) path: PathBuf,
     pub(crate) canonical: PathBuf,
-    pub(crate) identity: FileIdentity,
+    pub(crate) key: CacheKey,
 }
 
 impl CachedSource {
-    /// `path` as it is now.
-    pub(crate) fn of(path: &Path) -> Result<Self, FrameStoreError> {
-        let metadata_error = |source| FrameStoreError::ReadMetadata {
-            path: path.to_path_buf(),
-            source,
-        };
-        let canonical = fs::canonicalize(path).map_err(metadata_error)?;
-        let identity = FileIdentity::of(&canonical).map_err(metadata_error)?;
+    /// `path` as it is now, decoded by `decoder` under `context`.
+    pub(crate) fn of(
+        path: &Path,
+        decoder: DecoderKind,
+        context: &LoadContext,
+    ) -> Result<Self, FrameStoreError> {
+        let canonical = canonicalize(path)?;
+        let identity = identity(path, &canonical)?;
         Ok(Self {
+            path: path.to_path_buf(),
             canonical,
-            identity,
+            key: CacheKey::new(identity, decoder, context),
         })
     }
+
+    /// The source read again by its path, refused when it changed since [`Self::of`] read it: its
+    /// decode would otherwise be kept under the identity it had before.
+    ///
+    /// # Errors
+    ///
+    /// [`FrameStoreError::SourceChanged`], or the source cannot be read.
+    pub(crate) fn ensure_unchanged(&self) -> Result<(), FrameStoreError> {
+        let now = identity(&self.path, &canonicalize(&self.path)?)?;
+        if now == self.key.source {
+            Ok(())
+        } else {
+            Err(FrameStoreError::SourceChanged {
+                path: self.path.clone(),
+            })
+        }
+    }
+}
+
+/// `path` canonicalized, a failure named by `path`.
+fn canonicalize(path: &Path) -> Result<PathBuf, FrameStoreError> {
+    fs::canonicalize(path).map_err(|source| FrameStoreError::ReadMetadata {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// The identity of `canonical`, the canonical form of `path`, a failure named by `path`.
+fn identity(path: &Path, canonical: &Path) -> Result<FileIdentity, FrameStoreError> {
+    FileIdentity::of(canonical).map_err(|source| FrameStoreError::ReadMetadata {
+        path: path.to_path_buf(),
+        source,
+    })
 }

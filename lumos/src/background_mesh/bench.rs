@@ -3,8 +3,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::background_mesh::tile_stats::TileStats;
-use crate::background_mesh::workspace::TileScratch;
+use crate::background_mesh::tile_stats::{TileInput, TileScratch, TileStats};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::Field;
 use crate::math::urect::URect;
@@ -21,17 +20,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
         |b| {
             let pixels = Field::Typical.tile(side);
             let tile = URect::new(Vec2us::new(0, 0), Vec2us::new(side, side));
+            let input = TileInput {
+                pixels: &pixels,
+                mask: None,
+                eligible: None,
+                sigma_clip_iterations: config.sigma_clip_iterations,
+            };
             let mut scratch = TileScratch::default();
-            b.iter(|| {
-                TileStats::compute(
-                    &pixels,
-                    None,
-                    None,
-                    tile,
-                    config.sigma_clip_iterations,
-                    &mut scratch,
-                )
-            });
+            b.iter(|| TileStats::compute(&input, tile, &mut scratch));
         },
     );
 }

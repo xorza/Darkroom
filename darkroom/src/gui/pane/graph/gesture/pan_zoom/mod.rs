@@ -10,10 +10,10 @@ use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
 
-use crate::core::document::Viewport;
+use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
@@ -134,7 +134,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 ///   `-y` (wheel up) → zoom in.
 /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
 ///   `Response::pointer_local` pivot.
-pub(crate) fn emit_pan_zoom(
+pub(crate) fn emit(
     camera: &mut CameraGesture,
     ui: &Ui,
     graph_ctx: GraphCtx<'_>,
@@ -142,7 +142,7 @@ pub(crate) fn emit_pan_zoom(
     out: &mut Requests,
 ) {
     let viewport = graph_ctx.viewport();
-    let resp = ui.response_for(outer_canvas_widget_id());
+    let resp = ui.response_for(canvas::outer_wid());
     let mut v = viewport;
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
@@ -236,16 +236,16 @@ pub(crate) fn framing_intent(
     graph_ctx: GraphCtx<'_>,
     framing: Framing,
 ) -> Option<GraphIntent> {
-    let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
+    let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
     let pane = Vec2::new(vp.w, vp.h);
     let to = match framing {
         Framing::Reset => reset_target(geometry, graph_ctx, pane),
-        Framing::ShowAll => fit_target(node_bounds(geometry, graph_ctx, false)?, pane),
+        Framing::ShowAll => fit_target(node_bounds(geometry, graph_ctx, Bounded::All)?, pane),
         Framing::ShowSelected => {
             if graph_ctx.selected().is_empty() {
                 return None;
             }
-            fit_target(node_bounds(geometry, graph_ctx, true)?, pane)
+            fit_target(node_bounds(geometry, graph_ctx, Bounded::Selected)?, pane)
         }
     };
     Some(GraphIntent::SetViewport { to, gesture: None })
@@ -253,11 +253,18 @@ pub(crate) fn framing_intent(
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
 fn reset_target(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>, pane: Vec2) -> Viewport {
-    let pan = match node_bounds(geometry, graph_ctx, false) {
+    let pan = match node_bounds(geometry, graph_ctx, Bounded::All) {
         Some(b) => pane * 0.5 - b.center(),
         None => Vec2::ZERO,
     };
     Viewport { pan, zoom: 1.0 }
+}
+
+/// Which nodes a framing bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Bounded {
+    All,
+    Selected,
 }
 
 /// World-space (inner-canvas pre-transform) bounding box of the framed
@@ -272,11 +279,11 @@ fn reset_target(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>, pane: Vec2) 
 fn node_bounds(
     geometry: &CanvasGeometry,
     graph_ctx: GraphCtx<'_>,
-    selected_only: bool,
+    bounded: Bounded,
 ) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in graph_ctx.nodes() {
-        if selected_only && !graph_ctx.is_selected(n.id) {
+        if bounded == Bounded::Selected && !graph_ctx.is_selected(n.id) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {

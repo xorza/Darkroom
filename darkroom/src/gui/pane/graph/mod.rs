@@ -31,13 +31,12 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
-use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::draw_ctx::{DrawCtx, Selection};
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::breaker::BreakerUI;
-use crate::gui::pane::graph::gesture::canvas_gesture::{CanvasGesture, classify_canvas_gesture};
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::connection::ConnectionUI;
 use crate::gui::pane::graph::gesture::new_node::NewNodeUi;
 use crate::gui::pane::graph::gesture::node_menu::NodeMenuUi;
@@ -69,14 +68,14 @@ use crate::gui::requests::Requests;
 /// into intents before the record, and [`Self::draw`] records the pane from
 /// the dock's content closure.
 ///
-/// **Bare-canvas gesture arbitration.** [`classify_canvas_gesture`] reads the
-/// outer canvas's response ([`outer_canvas_widget_id`]) + modifiers and
+/// **Bare-canvas gesture arbitration.** [`CanvasGesture::classify`] reads the
+/// outer canvas's response ([`canvas::outer_wid`]) + modifiers and
 /// resolves which gesture latches this frame into a single [`CanvasGesture`].
 /// `prepass` resolves it once per frame and parks it in [`Self::gesture`];
 /// each sub-controller is handed that classification and consumes only its
 /// own variant, so there's no hand-kept disjointness across files — the
 /// precedence lives in one match. Wheel/pinch zoom isn't a latch gesture (it
-/// coexists), so it stays inside `emit_pan_zoom` regardless of the
+/// coexists), so it stays inside `pan_zoom::emit` regardless of the
 /// classification.
 ///
 /// Node panels and port circles live in the *inner* canvas and hit-test
@@ -121,7 +120,7 @@ pub(crate) struct GraphUI {
     /// Whether this frame cancels whatever gesture is in flight (Esc).
     ///
     /// Resolved once in [`Self::prepass`], beside the classification —
-    /// the counterpart to [`classify_canvas_gesture`], which says which
+    /// the counterpart to [`CanvasGesture::classify`], which says which
     /// gesture *starts*. Read there rather than per controller because
     /// the escape is one fact about the frame, and four controllers
     /// polling it separately is how they grew three different guards
@@ -300,9 +299,9 @@ impl GraphUI {
         self.cancelled = ui.key_pressed(Shortcut::key(Key::Escape));
         // Esc cancels what is in flight, and deselects only when nothing was.
         let deselect = self.cancelled && !self.in_flight();
-        let gesture = classify_canvas_gesture(ui);
+        let gesture = CanvasGesture::classify(ui);
         self.gesture = gesture;
-        pan_zoom::emit_pan_zoom(&mut self.camera, ui, graph_ctx, gesture, out);
+        pan_zoom::emit(&mut self.camera, ui, graph_ctx, gesture, out);
         self.node_ui.prepass(ui, graph_ctx, self.cancelled, out);
         // One walk, filling the geometry caches off the per-node and per-port
         // responses.
@@ -428,7 +427,6 @@ impl GraphUI {
         let cx = CanvasCtx::new(graph_ctx, &self.geometry, self.gesture, self.cancelled);
         let theme = cx.theme();
         let viewport = graph_ctx.viewport();
-        let (pan_val, zoom_val) = (viewport.pan, viewport.zoom);
         // Effective selection to paint: the live rubber-band preview while
         // a band is in flight, else the committed set.
         // The preview is kept out of the document, so a band in flight
@@ -463,7 +461,7 @@ impl GraphUI {
         // damage threshold sees ratio ≫ 1 and trips `Damage::Full`
         // every pan/zoom tick.
         Panel::canvas()
-            .id(outer_canvas_widget_id())
+            .id(canvas::outer_wid())
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
@@ -471,11 +469,11 @@ impl GraphUI {
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
-                self.background.draw(ui, theme, pan_val, zoom_val);
+                self.background.draw(ui, theme, viewport);
                 Panel::canvas()
-                    .id(inner_canvas_widget_id())
+                    .id(canvas::inner_wid())
                     .size((Sizing::FILL, Sizing::FILL))
-                    .transform(TranslateScale::new(pan_val, zoom_val))
+                    .transform(TranslateScale::new(viewport.pan, viewport.zoom))
                     .show(ui, |ui| {
                         // Inner canvas's pre-transform origin. Shapes
                         // and child node panels recorded inside this
@@ -485,11 +483,11 @@ impl GraphUI {
                         // shapes), so port `layout_rect`s and bezier
                         // endpoints stay aligned at every zoom.
                         let canvas_origin = ui
-                            .response_for(inner_canvas_widget_id())
+                            .response_for(canvas::inner_wid())
                             .layout_rect
                             .map_or(Vec2::ZERO, |r| r.min);
                         let cull = CullRegion::from_canvas(
-                            ui.response_for(outer_canvas_widget_id()).layout_rect,
+                            ui.response_for(canvas::outer_wid()).layout_rect,
                             canvas_origin,
                             &viewport,
                         );
@@ -561,30 +559,31 @@ mod tests {
 
     use super::*;
     use crate::core::document::internals::DocFixture;
-    use crate::core::document::{PortRef, TabRef};
-    use crate::core::preview::preview_func;
+    use crate::core::document::port_ref::PortRef;
+    use crate::core::document::tab_ref::TabRef;
+    use crate::core::preview;
     use crate::gui::pane::graph::internals::CanvasHarness;
-    use crate::gui::pane::graph::node::port_row::port_circle_wid;
-    use crate::gui::pane::graph::node::preview_row::preview_image_wid;
-    use crate::gui::state::preview_store::internals::opaque_image_value;
+    use crate::gui::pane::graph::node::{port_row, preview_row};
+    use crate::gui::state::preview_store;
 
     /// Clicking a preview card's image asks the dock for that node's viewer
     /// tab — the canvas's one view-tier request.
     #[test]
     fn clicking_a_preview_card_asks_for_its_viewer_tab() {
         let mut fixture = DocFixture::default();
-        let node = fixture.add(&preview_func(Arc::default()));
+        let node = fixture.add(&preview::func(Arc::default()));
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
         // without a value the card records `Sense::NONE` and swallows the click.
-        h.ctx
-            .run_state
-            .previews
-            .ingest_preview(h.ui.ui(), node, opaque_image_value());
+        h.ctx.run_state.previews.ingest_preview(
+            h.ui.ui(),
+            node,
+            preview_store::internals::opaque_image_value(),
+        );
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
 
-        h.ui.click_on(preview_image_wid(node));
+        h.ui.click_on(preview_row::preview_image_wid(node));
         let intents = h.frame();
 
         assert!(
@@ -627,7 +626,9 @@ mod tests {
         // *outside* the body and on the canvas beneath. Still well inside the
         // glyph — its box is 23.4 px across — and both clicks land on the same
         // point, so the double-click still registers.
-        let at = h.ui.center_of(port_circle_wid(PortRef::input(consumer, 0))) + Vec2::new(4.0, 0.0);
+        let at =
+            h.ui.center_of(port_row::port_circle_wid(PortRef::input(consumer, 0)))
+                + Vec2::new(4.0, 0.0);
 
         h.ui.click_at(at);
         let first = h.frame();

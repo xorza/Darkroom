@@ -87,12 +87,12 @@ impl<I> Span<I> {
         }
     }
 
-    /// The run's bounds in the column's flat space, for a caller slicing
-    /// something else aligned to that space.
     pub(crate) const fn is_empty(self) -> bool {
         self.len == 0
     }
 
+    /// The run's bounds in the column's flat space, for a caller slicing
+    /// something else aligned to that space.
     pub(crate) const fn range(self) -> Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize
@@ -162,12 +162,33 @@ impl<I, T> Default for Column<I, T> {
     }
 }
 
-impl<I, T> From<Vec<T>> for Column<I, T> {
-    fn from(values: Vec<T>) -> Self {
+impl<I, T> FromIterator<T> for Column<I, T> {
+    fn from_iter<V: IntoIterator<Item = T>>(values: V) -> Self {
         Self {
-            values,
+            values: values.into_iter().collect(),
             space: PhantomData,
         }
+    }
+}
+
+impl<I, T, const N: usize> From<[T; N]> for Column<I, T> {
+    fn from(values: [T; N]) -> Self {
+        values.into_iter().collect()
+    }
+}
+
+impl<I, T> Extend<T> for Column<I, T> {
+    fn extend<V: IntoIterator<Item = T>>(&mut self, values: V) {
+        self.values.extend(values);
+    }
+}
+
+impl<'a, I, T> IntoIterator for &'a Column<I, T> {
+    type Item = &'a T;
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Iter<'a, T> {
+        self.values.iter()
     }
 }
 

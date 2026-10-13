@@ -3,12 +3,10 @@
 use crate::internals::prelude::*;
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::star_detection::convolution::simd::internals::{
-    convolve_2d_row_scalar, convolve_cols_row_scalar, convolve_row_scalar,
-};
+use crate::simd::Kernel;
+use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
-    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, convolve_2d_row, convolve_cols_direct,
-    convolve_row, mirror_index,
+    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, mirror_index,
 };
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
@@ -29,7 +27,12 @@ fn convolve_row_scalar_identity() {
     let kernel = vec![0.0, 1.0, 0.0];
     let mut output = vec![0.0; 5];
 
-    convolve_row_scalar(&input, &mut output, &kernel);
+    ConvolveRow {
+        input: &input,
+        output: &mut output,
+        kernel: &kernel,
+    }
+    .run_scalar();
 
     // 0·a + 1·b + 0·c is b exactly.
     assert_eq!(output, input);
@@ -41,7 +44,12 @@ fn convolve_row_scalar_average() {
     let kernel = vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0];
     let mut output = vec![0.0; 5];
 
-    convolve_row_scalar(&input, &mut output, &kernel);
+    ConvolveRow {
+        input: &input,
+        output: &mut output,
+        kernel: &kernel,
+    }
+    .run_scalar();
 
     // One nonzero term each: 3 · fl(1/3) rounds back to exactly 1.
     assert_eq!(output, [0.0, 1.0, 1.0, 1.0, 0.0]);
@@ -67,7 +75,12 @@ fn convolve_row_matches_scalar() {
             let input = shape.row(width, 0);
             let mut scalar = vec![0.0f32; width];
             let mut simd = vec![0.0f32; width];
-            convolve_row_scalar(&input, &mut scalar, &kernel);
+            ConvolveRow {
+                input: &input,
+                output: &mut scalar,
+                kernel: &kernel,
+            }
+            .run_scalar();
             tier.run(ConvolveRow {
                 input: &input,
                 output: &mut simd,
@@ -80,7 +93,7 @@ fn convolve_row_matches_scalar() {
 
 /// The impulse response is the kernel *reversed*, which is what pins the tap order.
 ///
-/// `convolve_row` correlates rather than convolves — `convolve_pixel_scalar` sums
+/// `ConvolveRow` correlates rather than convolves — `convolve_pixel_scalar` sums
 /// `input[x + k - radius] · kernel[k]`, so an impulse at `p` puts `kernel[2r - t]` at column
 /// `p - r + t`. That is the usual image-processing convention and production only ever passes
 /// symmetric Gaussians, so it makes no difference there. It is why the kernel here is asymmetric:
@@ -96,12 +109,22 @@ fn convolve_row_impulse_response_is_the_reversed_kernel() {
     input[centre] = 1.0;
 
     // Both implementations, because an interior impulse takes the vector path — checking only
-    // `convolve_row` would leave the scalar reference's own tap order unpinned, and the parity
+    // `ConvolveRow` would leave the scalar reference's own tap order unpinned, and the parity
     // sweep cannot tell which of the two is right.
     let mut simd = vec![0.0f32; width];
     let mut scalar = vec![0.0f32; width];
-    convolve_row(&input, &mut simd, &kernel);
-    convolve_row_scalar(&input, &mut scalar, &kernel);
+    ConvolveRow {
+        input: &input,
+        output: &mut simd,
+        kernel: &kernel,
+    }
+    .dispatch();
+    ConvolveRow {
+        input: &input,
+        output: &mut scalar,
+        kernel: &kernel,
+    }
+    .run_scalar();
 
     for (label, output) in [("simd", &simd), ("scalar", &scalar)] {
         for tap in 0..kernel.len() {
@@ -168,13 +191,13 @@ fn convolve_cols_uniform_input() {
     // 10ε relative.
     let width = 32;
     let height = 32;
-    let input = vec![42.0f32; width * height];
+    let input = Buffer2::new_filled(width, height, 42.0f32);
     let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
 
-    let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(&input, &mut output, Size2us::new(width, height), &kernel);
+    let mut output = Buffer2::new_default(width, height);
+    convolution::convolve_cols(&input, &mut output, &kernel);
 
-    for (i, &v) in output.iter().enumerate() {
+    for (i, &v) in output.pixels().iter().enumerate() {
         assert!(
             (v - 42.0).abs() <= 42.0 * 10.0 * f32::EPSILON,
             "Uniform input should stay uniform at {i}: {v}"
@@ -188,13 +211,13 @@ fn convolve_cols_impulse_response() {
     // column, exactly, and nothing anywhere else. The kernel is asymmetric so the tap order shows.
     let width = 8;
     let height = 16;
-    let mut input = vec![0.0f32; width * height];
-    input[8 * width + 4] = 1.0;
+    let mut input = Buffer2::new_filled(width, height, 0.0f32);
+    input[(4, 8)] = 1.0;
     let kernel = [0.1f32, 0.2, 0.4, 0.3, 0.05];
     let radius = kernel.len() / 2;
 
-    let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(&input, &mut output, Size2us::new(width, height), &kernel);
+    let mut output = Buffer2::new_default(width, height);
+    convolution::convolve_cols(&input, &mut output, &kernel);
 
     for y in 0..height {
         for x in 0..width {
@@ -203,7 +226,7 @@ fn convolve_cols_impulse_response() {
             } else {
                 0.0
             };
-            assert_eq!(output[y * width + x], expected, "({x}, {y})");
+            assert_eq!(output[(x, y)], expected, "({x}, {y})");
         }
     }
 }
@@ -223,7 +246,14 @@ fn convolve_cols_matches_scalar() {
             let mut simd = vec![0.0f32; width * height];
             for y in 0..height {
                 let row = y * width..(y + 1) * width;
-                convolve_cols_row_scalar(&input, &mut scalar[row.clone()], size, y, &kernel);
+                ConvolveColsRow {
+                    input: &input,
+                    out_row: &mut scalar[row.clone()],
+                    size,
+                    y,
+                    kernel: &kernel,
+                }
+                .run_scalar();
                 tier.run(ConvolveColsRow {
                     input: &input,
                     out_row: &mut simd[row],
@@ -259,7 +289,14 @@ fn convolve_2d_row_matches_scalar() {
             for y in [0, 1, height / 2, height - 2, height - 1] {
                 let mut scalar_row = vec![0.0f32; width];
                 let mut simd_row = vec![0.0f32; width];
-                convolve_2d_row_scalar(&input, &mut scalar_row, size, y, kernel);
+                Convolve2dRow {
+                    input: &input,
+                    output_row: &mut scalar_row,
+                    size,
+                    y,
+                    kernel,
+                }
+                .run_scalar();
                 tier.run(Convolve2dRow {
                     input: &input,
                     output_row: &mut simd_row,
@@ -286,7 +323,14 @@ fn convolve_2d_row_uniform() {
 
     for y in 0..height {
         let mut output = vec![0.0f32; width];
-        convolve_2d_row(&input, &mut output, Size2us::new(width, height), y, kernel);
+        Convolve2dRow {
+            input: &input,
+            output_row: &mut output,
+            size: Size2us::new(width, height),
+            y,
+            kernel,
+        }
+        .dispatch();
         for (x, &v) in output.iter().enumerate() {
             assert!(
                 (v - 42.0).abs() <= 42.0 * 50.0 * f32::EPSILON,
@@ -299,7 +343,7 @@ fn convolve_2d_row_uniform() {
 #[test]
 fn convolve_2d_row_impulse_response() {
     // An impulse at (8, 8) through a 3×3 kernel of distinct weights: row `8 + dy` carries the
-    // kernel's row `1 − dy` reversed, exactly — both axes correlate, as `convolve_row` does.
+    // kernel's row `1 − dy` reversed, exactly — both axes correlate, as `ConvolveRow` does.
     let width = 16;
     let height = 16;
     let mut input = vec![0.0f32; width * height];
@@ -309,7 +353,14 @@ fn convolve_2d_row_impulse_response() {
 
     for y in 0..height {
         let mut output = vec![0.0f32; width];
-        convolve_2d_row(&input, &mut output, Size2us::new(width, height), y, kernel);
+        Convolve2dRow {
+            input: &input,
+            output_row: &mut output,
+            size: Size2us::new(width, height),
+            y,
+            kernel,
+        }
+        .dispatch();
         for (x, &value) in output.iter().enumerate() {
             let expected = if (7..=9).contains(&y) && (7..=9).contains(&x) {
                 kernel.at(9 - y, 9 - x)

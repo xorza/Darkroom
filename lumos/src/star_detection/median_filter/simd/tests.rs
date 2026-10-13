@@ -1,8 +1,6 @@
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 use crate::star_detection::median_filter::simd::MedianRow;
-use crate::star_detection::median_filter::simd::internals::{
-    median_filter_row_scalar, median9_scalar,
-};
+use crate::star_detection::median_filter::simd::internals::median9_scalar;
 
 /// Every tier, over every shape and width, against the scalar reference. Min/max networks compute
 /// no new values, so they agree exactly. The borders carry no 3x3 window, so only the interior is
@@ -16,7 +14,13 @@ fn median_filter_row_matches_scalar() {
         let below = shape.row(width, 2);
         let mut scalar = vec![0.0f32; width];
         let mut simd = vec![0.0f32; width];
-        median_filter_row_scalar(&above, &curr, &below, &mut scalar);
+        MedianRow {
+            above: &above,
+            curr: &curr,
+            below: &below,
+            output: &mut scalar,
+        }
+        .run_scalar();
         tier.run(MedianRow {
             above: &above,
             curr: &curr,
@@ -36,7 +40,13 @@ fn scalar_row_matches_a_hand_taken_neighbourhood_median() {
     let row_below: Vec<f32> = (0..width).map(|i| ((i + 7) % 10) as f32 * 0.1).collect();
     let mut output = vec![0.0f32; width];
 
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output);
+    MedianRow {
+        above: &row_above,
+        curr: &row_curr,
+        below: &row_below,
+        output: &mut output,
+    }
+    .run_scalar();
 
     let x = 5;
     let mut values = [

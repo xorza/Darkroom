@@ -8,7 +8,6 @@
 //! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM.
 //! ~60 s for a full 24 MP frame on a 10-core machine.
 
-use std::array;
 use std::path::PathBuf;
 
 use ort::session::Session;
@@ -17,6 +16,7 @@ use ort::value::TensorRef;
 use imaginarium::Buffer2;
 
 use crate::error::InvalidConfigField;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
 use crate::math::size2us::Size2us;
@@ -64,14 +64,6 @@ impl TiledOnnxConfig {
     }
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "taken by value so `map_err(model_err)` reads as it does"
-)]
-fn model_err(e: ort::Error) -> MlError {
-    MlError::Model(e.to_string())
-}
-
 impl TiledOnnxConfig {
     /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
     /// overlaps. Returns a new image with the same channel count as the input (grayscale is
@@ -87,14 +79,9 @@ impl TiledOnnxConfig {
         if size.width < WINDOW || size.height < WINDOW {
             return Err(MlError::TooSmall(size));
         }
-        let mut session = Session::builder()
-            .map_err(model_err)?
-            .commit_from_file(&self.weights)
-            .map_err(model_err)?;
+        let mut session = Session::builder()?.commit_from_file(&self.weights)?;
 
-        let pixels = size.pixel_count();
-        let mut acc = [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]];
-        let mut weight = vec![0.0f32; pixels];
+        let mut blend = FeatherBlend::new(image.dimensions());
         // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
         // duration of `session.run` instead of taking ownership, so one allocation serves the
         // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
@@ -106,21 +93,16 @@ impl TiledOnnxConfig {
             for &tx in &xs {
                 fill_tile_input(image, Vec2us::new(tx, ty), &mut input);
                 let tensor =
-                    TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
-                        .map_err(model_err)?;
-                let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
-                let (_shape, tile) = outputs[0].try_extract_tensor::<f32>().map_err(model_err)?;
-                let expected = WINDOW * WINDOW * 3;
-                if tile.len() != expected {
-                    return Err(MlError::Model(format!(
-                        "model output has {} values, expected {expected} (NHWC [1,{WINDOW},{WINDOW},3])",
-                        tile.len()
-                    )));
+                    TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))?;
+                let outputs = session.run(ort::inputs![tensor])?;
+                let (_shape, tile) = outputs[0].try_extract_tensor::<f32>()?;
+                if tile.len() != WINDOW * WINDOW * 3 {
+                    return Err(MlError::OutputLength { len: tile.len() });
                 }
-                accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
+                blend.add(tile, Vec2us::new(tx, ty));
             }
         }
-        Ok(build_output(image.is_rgb(), &acc, &weight, size))
+        Ok(blend.into_image())
     }
 }
 
@@ -169,9 +151,8 @@ fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
 }
 
 /// Per-axis feather weight in `[FEATHER_MIN, 1]` for each of the `WINDOW` tile positions,
-/// precomputed once at compile time — it only depends on distance from the tile edge, not on
-/// which tile, so recomputing the ramp/clamp per pixel of every tile (as `accumulate` does,
-/// once per axis) was pure waste.
+/// precomputed at compile time: it depends only on the distance from the tile edge, not on the
+/// tile, so [`FeatherBlend::add`] reads it per axis rather than ramping and clamping per pixel.
 const FEATHER_LUT: [f32; WINDOW] = {
     let mut lut = [0.0f32; WINDOW];
     let mut i = 0;
@@ -192,39 +173,71 @@ const fn feather(i: usize) -> f32 {
     FEATHER_LUT[i]
 }
 
-fn accumulate(out: &[f32], tile: Vec2us, w: usize, acc: &mut [Vec<f32>; 3], weight: &mut [f32]) {
-    for hh in 0..WINDOW {
-        let fy = feather(hh);
-        let row = (tile.y + hh) * w + tile.x;
-        for ww in 0..WINDOW {
-            let fw = feather(ww) * fy;
-            let idx = row + ww;
-            let s = (hh * WINDOW + ww) * 3;
-            for c in 0..3 {
-                acc[c][idx] += out[s + c] * fw;
-            }
-            weight[idx] += fw;
-        }
-    }
+/// The model's tiles over a frame, each feathered by its weight: the weighted sum of each output
+/// channel and the sum of the weights, normalized into an image once every tile is in.
+#[derive(Debug)]
+struct FeatherBlend {
+    dimensions: ImageDimensions,
+    channels: [Vec<f32>; 3],
+    weight: Vec<f32>,
 }
 
-/// Normalize the feather-weighted accumulation into an image matching the input's channels.
-fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> LinearImage {
-    if rgb {
-        LinearImage::from(array::from_fn::<_, 3, _>(|c| {
-            let px = acc[c]
-                .iter()
-                .zip(weight)
-                .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
+impl FeatherBlend {
+    /// Nothing yet over a frame of `dimensions`, whose channel count the image it makes takes.
+    fn new(dimensions: ImageDimensions) -> Self {
+        let pixels = dimensions.pixel_count();
+        Self {
+            dimensions,
+            channels: [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]],
+            weight: vec![0.0f32; pixels],
+        }
+    }
+
+    /// Add `out`, the model's NHWC output for the tile at `tile`.
+    fn add(&mut self, out: &[f32], tile: Vec2us) {
+        let width = self.dimensions.width();
+        for hh in 0..WINDOW {
+            let fy = feather(hh);
+            let row = (tile.y + hh) * width + tile.x;
+            for ww in 0..WINDOW {
+                let fw = feather(ww) * fy;
+                let idx = row + ww;
+                let s = (hh * WINDOW + ww) * 3;
+                for c in 0..3 {
+                    self.channels[c][idx] += out[s + c] * fw;
+                }
+                self.weight[idx] += fw;
+            }
+        }
+    }
+
+    /// The normalized blend, with the frame's channel count: a grayscale frame takes the mean of
+    /// the model's three channels.
+    fn into_image(self) -> LinearImage {
+        let Self {
+            dimensions,
+            channels,
+            weight,
+        } = self;
+        let size = dimensions.size();
+        if dimensions.is_rgb() {
+            LinearImage::from(channels.map(|channel| {
+                let px = channel
+                    .iter()
+                    .zip(&weight)
+                    .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
+                    .collect();
+                Buffer2::new(size.width, size.height, px)
+            }))
+        } else {
+            let gray: Vec<f32> = (0..size.pixel_count())
+                .map(|i| {
+                    ((channels[0][i] + channels[1][i] + channels[2][i]) / (3.0 * weight[i]))
+                        .clamp(0.0, 1.0)
+                })
                 .collect();
-            Buffer2::new(size.width, size.height, px)
-        }))
-    } else {
-        // Average the three model output channels back to grayscale.
-        let gray: Vec<f32> = (0..size.pixel_count())
-            .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
-            .collect();
-        LinearImage::from(Buffer2::new(size.width, size.height, gray))
+            LinearImage::from(Buffer2::new(size.width, size.height, gray))
+        }
     }
 }
 

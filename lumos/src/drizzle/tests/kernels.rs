@@ -85,8 +85,10 @@ fn a_constant_reads_back_wherever_weight_landed() {
                     min_weight_fraction: GATE,
                     ..usual_config(kernel)
                 };
-                let product =
-                    drizzle_one(size, config, constant_image(size, value), transform, None);
+                let product = drizzle_one(
+                    config,
+                    &DrizzleFrame::new(constant_image(size, value), warp_of(*transform)),
+                );
                 assert_constant_or_fill(&product, value, FILL, GATE, &format!("{kernel:?} {name}"));
             }
         }
@@ -114,8 +116,7 @@ fn two_frames_combine_to_their_weighted_mean() {
                 &[Transform::identity(); 2],
             ),
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
         .unwrap()
         .product;
@@ -156,7 +157,10 @@ fn one_bright_pixel_fills_its_own_block() {
                 fill_value: -9.0,
                 ..kernel_config(kernel, 2.0, 0.8)
             };
-            let product = drizzle_one(size, config, image.clone(), &transform, None);
+            let product = drizzle_one(
+                config,
+                &DrizzleFrame::new(image.clone(), warp_of(transform)),
+            );
             let weight = weight_plane(&product);
             let block = 2 + shift as usize..4 + shift as usize;
             for y in 0..12 {
@@ -199,11 +203,11 @@ fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
             (0.3, 4, &[1.0 / 6.0, 5.0 / 6.0][..]),
         ] {
             let product = drizzle_one(
-                size,
                 kernel_config(kernel, 2.0, pixfrac),
-                constant_image(size, 1.0),
-                &transform,
-                Some(&only(size, pixel)),
+                &DrizzleFrame {
+                    pixel_weight_map: Some(only(size, pixel)),
+                    ..DrizzleFrame::new(constant_image(size, 1.0), warp_of(transform))
+                },
             );
             let weight = weight_plane(&product);
             let reached = weight.pixels().iter().filter(|&&w| w != 0.0).count();
@@ -279,11 +283,11 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
 fn lanczos_keeps_its_negative_lobes() {
     let size = Size2us::new(20, 20);
     let product = drizzle_one(
-        size,
         kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
-        one_pixel_image(size, 0.0, Vec2us::new(10, 10), 100.0),
-        &Transform::translation(DVec2::new(0.5, 0.0)),
-        None,
+        &DrizzleFrame::new(
+            one_pixel_image(size, 0.0, Vec2us::new(10, 10), 100.0),
+            warp_of(Transform::translation(DVec2::new(0.5, 0.0))),
+        ),
     );
     let actual = f64::from(product.image.channel(0)[(12, 10)]);
     let expected: f64 = -10000.0 / 736.0;
@@ -349,11 +353,11 @@ fn unit_sampling_copies_the_input() {
         DrizzleKernel::Point,
     ] {
         let product = drizzle_one(
-            size,
             kernel_config(kernel, 1.0, 1.0),
-            gray_image(size, pixels.clone()),
-            &Transform::identity(),
-            None,
+            &DrizzleFrame::new(
+                gray_image(size, pixels.clone()),
+                warp_of(Transform::identity()),
+            ),
         );
         assert_eq!(product.image.channel(0).pixels(), &*pixels, "{kernel:?}");
         assert!(
@@ -422,11 +426,11 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
             ..usual_config(kernel)
         };
         let product = drizzle_one(
-            size,
             config.clone(),
-            one_pixel_image(size, 4.0, pixel, 100.0),
-            &transform,
-            Some(&excluded),
+            &DrizzleFrame {
+                pixel_weight_map: Some(excluded.clone()),
+                ..DrizzleFrame::new(one_pixel_image(size, 4.0, pixel, 100.0), warp_of(transform))
+            },
         );
         assert_constant_or_fill(&product, 4.0, -1.0, GATE, &format!("{kernel:?}"));
 
@@ -509,11 +513,8 @@ fn radial_drops_lose_the_flux_that_misses_the_grid() {
     let size = Size2us::new(SIDE as usize, SIDE as usize);
     let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 1.0);
     let product = drizzle_one(
-        size,
         config,
-        constant_image(size, 1.0),
-        &Transform::identity(),
-        None,
+        &DrizzleFrame::new(constant_image(size, 1.0), warp_of(Transform::identity())),
     );
 
     // At scale 1 / pixfrac 1 the drop size is 1 output pixel, so σ = 1/2.3548 and the kernel is

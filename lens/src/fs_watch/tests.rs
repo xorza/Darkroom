@@ -1,13 +1,15 @@
-use common::TempDir;
-
-use crate::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
-use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{ConstValue, DynamicValue, Func, FuncBehavior, InvokeError, SharedAnyState};
 use std::fs;
 use std::sync::Arc;
+
+use common::TempDir;
+use notify::RecursiveMode;
+use scenarium::internals::func_invoker::FuncInvoker;
+use scenarium::{ConstValue, DynamicValue, Func, FuncBehavior, InvokeError, SharedAnyState};
 use tokio::sync::Notify;
 use tokio::task;
 use tokio::time::{Duration, Instant, sleep, timeout};
+
+use crate::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
 
 /// One Watch Directory node, called again and again the way a node runs across
 /// graph runs: its state persists between calls.
@@ -125,8 +127,8 @@ async fn passes_directory_through_and_seeds_watcher() {
 
     let guard = event_state.lock().await;
     let ws = guard.get::<WatchState>().expect("watcher seeded");
-    assert_eq!(ws.path, dir_str);
-    assert!(ws.recursive);
+    assert_eq!(ws.path, dir.path());
+    assert_eq!(ws.mode, RecursiveMode::Recursive);
 }
 
 #[tokio::test]
@@ -156,7 +158,10 @@ async fn reuses_watcher_until_params_change() {
     );
 
     let guard = event_state.lock().await;
-    assert!(!guard.get::<WatchState>().unwrap().recursive);
+    assert_eq!(
+        guard.get::<WatchState>().unwrap().mode,
+        RecursiveMode::NonRecursive
+    );
     drop(guard);
 }
 
@@ -263,7 +268,7 @@ async fn invalid_replacement_drops_previous_watcher() {
 #[tokio::test]
 async fn watcher_signals_on_content_change() {
     let dir = TempDir::new("lens-watch");
-    let ws = WatchState::new(dir.path().to_str().unwrap(), false, Duration::ZERO).unwrap();
+    let ws = WatchState::new(dir.path(), RecursiveMode::NonRecursive, Duration::ZERO).unwrap();
     let signal = Arc::clone(&ws.signal);
 
     // Absorb any spurious event from creating the directory itself, so the
@@ -291,8 +296,8 @@ async fn debounce_collapses_burst_into_one_fire() {
     // `changed` event lambda against a hand-pulsed signal (a "burst").
     let event_state = SharedAnyState::default();
     let ws = WatchState::new(
-        dir.path().to_str().unwrap(),
-        false,
+        dir.path(),
+        RecursiveMode::NonRecursive,
         Duration::from_millis(200),
     )
     .unwrap();

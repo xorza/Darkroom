@@ -25,25 +25,29 @@ struct CfaSamplePhase {
     sample_count: usize,
 }
 
-pub(super) fn collect_color_residual_samples(
+/// The residuals over the colour mesh of `target_color`'s stratified sample of `data`.
+pub(super) fn color_residual_samples(
     data: &Buffer2<f32>,
     cfa_type: CfaType,
     target_color: usize,
     background: &ColourMesh,
 ) -> Vec<f32> {
     let size = Size2us::new(data.width(), data.height());
-    collect_color_sample_indices(size, cfa_type, target_color)
+    color_sample_indices(size, cfa_type, target_color)
         .into_iter()
         .map(|index| data[index] - background.at(target_color, size.point_of(index)).sky)
         .collect()
 }
 
-pub(super) fn collect_color_sample_indices(
+/// The sorted flat indices of `target_color`'s stratified sample of a `size` frame: every
+/// photosite of the colour, or [`MAX_MEDIAN_SAMPLES`] of them spread across its phases, rows and
+/// columns.
+pub(super) fn color_sample_indices(
     size: Size2us,
     cfa_type: CfaType,
     target_color: usize,
 ) -> Vec<usize> {
-    assert!(
+    debug_assert!(
         size.width > 0 && size.height > 0,
         "color sampling needs non-zero dimensions"
     );
@@ -140,17 +144,17 @@ const fn stratified_center(part: usize, part_count: usize, length: usize) -> usi
 pub(crate) mod internals {
     use imaginarium::Buffer2;
 
-    use crate::calibration::defect_map::sampling::collect_color_sample_indices;
+    use crate::calibration::defect_map::sampling;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::math::size2us::Size2us;
 
-    /// The values of [`collect_color_sample_indices`]' stratified sample of one colour.
-    pub(crate) fn collect_color_samples(
+    /// The values of [`sampling::color_sample_indices`]' stratified sample of one colour.
+    pub(crate) fn color_samples(
         data: &Buffer2<f32>,
         cfa_type: CfaType,
         target_color: usize,
     ) -> Vec<f32> {
-        collect_color_sample_indices(
+        sampling::color_sample_indices(
             Size2us::new(data.width(), data.height()),
             cfa_type,
             target_color,

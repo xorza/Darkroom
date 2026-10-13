@@ -9,9 +9,9 @@ use palantir::prelude::*;
 use palantir::{DockOperation, DockView, KeyFilter, TabOverflow};
 use scenarium::NodeId;
 
-use crate::core::document::TabRef;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::gui::graph_ctx::GraphCtx;

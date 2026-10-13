@@ -186,7 +186,7 @@ impl PreviewImage {
     pub(crate) fn full(&self, ui: &Ui) -> Result<DrawableImage, PreviewImageError> {
         let mut full = self.full.borrow_mut();
         if let FullImage::Pending(value) = &*full {
-            *full = match Self::upload(ui, value) {
+            *full = match upload(ui, value) {
                 Ok(handle) => FullImage::Resident(handle),
                 Err(error) => FullImage::Failed(error),
             };
@@ -202,16 +202,16 @@ impl PreviewImage {
             FullImage::Pending(_) => unreachable!("the pending source was just uploaded"),
         }
     }
+}
 
-    fn upload(ui: &Ui, value: &DynamicValue) -> Result<ImageHandle, PreviewImageError> {
-        // Not a fallible step here, unlike in `prepare_content`: a
-        // `PreviewImage` is only ever built over a value that already
-        // downcast, and `Pending` holds that same value.
-        let image = value
-            .as_custom::<LensImage>()
-            .expect("a stored preview image is only built over an image value");
-        Ok(prepare_drawable(ui, image, None)?.handle)
-    }
+fn upload(ui: &Ui, value: &DynamicValue) -> Result<ImageHandle, PreviewImageError> {
+    // Not a fallible step here, unlike in `prepare_content`: a
+    // `PreviewImage` is only ever built over a value that already
+    // downcast, and `Pending` holds that same value.
+    let image = value
+        .as_custom::<LensImage>()
+        .expect("a stored preview image is only built over an image value");
+    Ok(prepare_drawable(ui, image, None)?.handle)
 }
 
 fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
@@ -269,9 +269,9 @@ fn prepare_drawable(
 fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
     let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(cpu);
     let desc = rgba.desc();
-    assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
-    assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
+    debug_assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
     Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
 }
 

@@ -7,9 +7,9 @@ use crate::internals::synthetic::transforms::{add_star_noise, generate_random_st
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::error::RegistrationError;
 use crate::registration::ransac::ransac_config::RansacConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars};
-use crate::registration::transform::{Transform, TransformModel};
-use crate::registration::{RegistrationConfig, TransformType};
+use crate::registration::transform::{Transform, TransformModel, TransformType};
 use crate::star_detection::star::Star;
 
 /// `s·R(θ)` about (1000, 1000), then `offset`.

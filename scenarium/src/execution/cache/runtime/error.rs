@@ -32,9 +32,9 @@ impl fmt::Display for CacheNodeFailure {
 #[derive(Debug, thiserror::Error)]
 pub enum CacheNodeError {
     #[error(transparent)]
-    Removal(RemovalError),
+    Removal(#[from] RemovalError),
     #[error(transparent)]
-    Store(StoreError),
+    Store(#[from] StoreError),
 }
 
 /// One node holding a value whose custom type has no registered codec, so the

@@ -1,5 +1,6 @@
 //! Which ancillary planes a combine is asked to produce.
 
+use crate::combine::stack_config::CombineMethod;
 use crate::image::image_dimensions::ImageDimensions;
 
 /// Which ancillary per-pixel planes a combine should produce.
@@ -50,7 +51,7 @@ impl QualityPlanes {
     /// Image-sized planes a combine keeps resident per output channel: the combined pixels, plus
     /// whichever of weight, inverse variance and dispersion were asked for and so are allocated up
     /// front.
-    pub(crate) const fn resident_planes_per_channel(self) -> usize {
+    const fn resident_planes_per_channel(self) -> usize {
         1 + self.weight as usize + self.inverse_variance as usize + self.dispersion as usize
     }
 
@@ -75,9 +76,10 @@ impl QualityPlanes {
             * dimensions.pixel_count()
     }
 
-    /// Drop the planes this combine method cannot produce, so the request reaching the reducer
-    /// is exactly what it will write: inverse variance and dispersion belong to a weighted mean.
-    pub(crate) const fn resolve(self, weighted_mean: bool) -> Self {
+    /// Drop the planes `method` cannot produce, so the request reaching the reducer is exactly
+    /// what it will write: inverse variance and dispersion belong to a weighted mean.
+    pub(crate) const fn resolve(self, method: CombineMethod) -> Self {
+        let weighted_mean = matches!(method, CombineMethod::Mean(_));
         Self {
             inverse_variance: self.inverse_variance && weighted_mean,
             dispersion: self.dispersion && weighted_mean,

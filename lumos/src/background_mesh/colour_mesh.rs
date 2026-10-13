@@ -3,8 +3,8 @@
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
+use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::background_mesh::tile_stats::TileStats;
-use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::vec2us::Vec2us;
@@ -51,12 +51,17 @@ impl ColourMesh {
         excluded: Option<&BitBuffer2>,
         workspace: &mut MeshWorkspace,
     ) -> Self {
+        let params = MeshParams {
+            tile_size,
+            sigma_clip_iterations: SIGMA_CLIP_ITERATIONS,
+            median_filter: MedianFilter::Apply,
+        };
         let mut colours = ArrayVec::new();
         let mut x = Vec::new();
         let mut y = Vec::new();
         for colour in 0..cfa.num_colors() {
             let grid = if *cfa == CfaType::Mono {
-                workspace.tile_stats(pixels, excluded, tile_size, SIGMA_CLIP_ITERATIONS, true)
+                workspace.tile_stats(pixels, excluded, params)
             } else {
                 workspace.tile_stats_where(
                     pixels,
@@ -64,9 +69,7 @@ impl ColourMesh {
                         cfa.color_at(position) == colour
                             && excluded.is_none_or(|excluded| !excluded.get_at(position))
                     },
-                    tile_size,
-                    SIGMA_CLIP_ITERATIONS,
-                    true,
+                    params,
                 )
             };
             colours.push(grid.stats.clone());

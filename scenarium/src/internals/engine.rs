@@ -22,7 +22,7 @@ use common::CancelToken;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime::error::CacheNodeFailure;
 use crate::execution::compile::error::CompileError;
-use crate::execution::engine::ExecutionEngine;
+use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
 use crate::execution::error::{Result, RunError};
 use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
@@ -270,7 +270,16 @@ impl TestEngine {
             outcome,
             ..
         } = self;
-        engine.execute(&seeds, reporter, cancel, outcome).await?;
+        engine
+            .execute(
+                ExecuteRequest {
+                    seeds: &seeds,
+                    reporter,
+                    cancel,
+                },
+                outcome,
+            )
+            .await?;
         Ok(RunOutcome::snapshot(graph, engine, outcome))
     }
 
@@ -287,9 +296,7 @@ impl TestEngine {
     /// [`plan`](Self::plan), surfacing the refusal a cycle or a bad seed
     /// raises.
     pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> Result<PlanOutcome> {
-        self.engine
-            .prepare_execution(seeds.sinks, seeds.event_sources, &seeds.events)
-            .await?;
+        self.engine.prepare_execution(&seeds).await?;
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))
     }
 

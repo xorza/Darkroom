@@ -1,6 +1,6 @@
 use crate::DataType;
 use crate::async_lambda;
-use crate::graph::func::lambda::Invocation;
+use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
 use crate::library::Library;
@@ -32,301 +32,311 @@ struct FloatOutputSpec {
     description: &'static str,
 }
 
-fn declared_input(spec: FloatInputSpec) -> FuncInput {
-    FuncInput::required(spec.name, DataType::Float)
-        .description(spec.description)
-        .default(spec.default)
+impl FloatInputSpec {
+    fn declare(self) -> FuncInput {
+        FuncInput::required(self.name, DataType::Float)
+            .description(self.description)
+            .default(self.default)
+    }
 }
 
-fn declared_output(spec: FloatOutputSpec) -> FuncOutput {
-    FuncOutput::new(spec.name, DataType::Float).description(spec.description)
+impl FloatOutputSpec {
+    fn declare(self) -> FuncOutput {
+        FuncOutput::new(self.name, DataType::Float).description(self.description)
+    }
 }
 
-fn unary_float_func(
+/// A pure `Math` func over `N` float inputs and one float output: everything
+/// but the operation, which [`unary`](FloatFunc::unary) and
+/// [`binary`](FloatFunc::binary) take by arity.
+#[derive(Debug, Clone, Copy)]
+struct FloatFunc<const N: usize> {
     id: FuncId,
     name: &'static str,
     description: &'static str,
-    input: FloatInputSpec,
+    inputs: [FloatInputSpec; N],
     output: FloatOutputSpec,
-    operation: fn(f64) -> f64,
-) -> Func {
-    Func::new(
-        id,
-        name,
-        async_lambda!(move |Invocation {
-                                inputs, outputs, ..
-                            }| {
+}
+
+impl<const N: usize> FloatFunc<N> {
+    fn declare(self, lambda: FuncLambda) -> Func {
+        Func::new(self.id, self.name, lambda)
+            .description(self.description)
+            .category("Math")
+            .pure()
+            .inputs(self.inputs.map(FloatInputSpec::declare))
+            .output(self.output.declare())
+    }
+}
+
+impl FloatFunc<1> {
+    fn unary(self, operation: fn(f64) -> f64) -> Func {
+        self.declare(async_lambda!(move |Invocation {
+                                             inputs, outputs, ..
+                                         }| {
             assert_eq!(inputs.len(), 1);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(inputs[0].required_f64()).into();
             Ok(())
-        }),
-    )
-    .description(description)
-    .category("Math")
-    .pure()
-    .input(declared_input(input))
-    .output(declared_output(output))
+        }))
+    }
 }
 
-fn binary_float_func(
-    id: FuncId,
-    name: &'static str,
-    description: &'static str,
-    inputs: [FloatInputSpec; 2],
-    output: FloatOutputSpec,
-    operation: fn(f64, f64) -> f64,
-) -> Func {
-    Func::new(
-        id,
-        name,
-        async_lambda!(move |Invocation {
-                                inputs, outputs, ..
-                            }| {
+impl FloatFunc<2> {
+    fn binary(self, operation: fn(f64, f64) -> f64) -> Func {
+        self.declare(async_lambda!(move |Invocation {
+                                             inputs, outputs, ..
+                                         }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(inputs[0].required_f64(), inputs[1].required_f64()).into();
             Ok(())
-        }),
-    )
-    .description(description)
-    .category("Math")
-    .pure()
-    .input(declared_input(inputs[0]))
-    .input(declared_input(inputs[1]))
-    .output(declared_output(output))
+        }))
+    }
 }
 
 pub fn math_library() -> Library {
     let mut library = Library::default();
 
-    library.add(binary_float_func(
-        ADD_FUNC_ID,
-        "Add",
-        "Adds two float values (A + B).",
-        [
-            FloatInputSpec {
-                name: "A",
-                description: "First addend.",
-                default: 0.0,
+    library.add(
+        FloatFunc {
+            id: ADD_FUNC_ID,
+            name: "Add",
+            description: "Adds two float values (A + B).",
+            inputs: [
+                FloatInputSpec {
+                    name: "A",
+                    description: "First addend.",
+                    default: 0.0,
+                },
+                FloatInputSpec {
+                    name: "B",
+                    description: "Second addend.",
+                    default: 1.0,
+                },
+            ],
+            output: FloatOutputSpec {
+                name: "Sum",
+                description: "A + B.",
             },
-            FloatInputSpec {
-                name: "B",
-                description: "Second addend.",
-                default: 1.0,
+        }
+        .binary(|a, b| a + b),
+    );
+    library.add(
+        FloatFunc {
+            id: SUBTRACT_FUNC_ID,
+            name: "Subtract",
+            description: "Subtracts the second value from the first (A − B).",
+            inputs: [
+                FloatInputSpec {
+                    name: "A",
+                    description: "Minuend.",
+                    default: 0.0,
+                },
+                FloatInputSpec {
+                    name: "B",
+                    description: "Subtrahend.",
+                    default: 1.0,
+                },
+            ],
+            output: FloatOutputSpec {
+                name: "Difference",
+                description: "A − B.",
             },
-        ],
-        FloatOutputSpec {
-            name: "Sum",
-            description: "A + B.",
-        },
-        |a, b| a + b,
-    ));
-    library.add(binary_float_func(
-        SUBTRACT_FUNC_ID,
-        "Subtract",
-        "Subtracts the second value from the first (A − B).",
-        [
-            FloatInputSpec {
-                name: "A",
-                description: "Minuend.",
-                default: 0.0,
+        }
+        .binary(|a, b| a - b),
+    );
+    library.add(
+        FloatFunc {
+            id: MULTIPLY_FUNC_ID,
+            name: "Multiply",
+            description: "Multiplies two float values (A × B).",
+            inputs: [
+                FloatInputSpec {
+                    name: "A",
+                    description: "First factor.",
+                    default: 0.0,
+                },
+                FloatInputSpec {
+                    name: "B",
+                    description: "Second factor.",
+                    default: 1.0,
+                },
+            ],
+            output: FloatOutputSpec {
+                name: "Product",
+                description: "A × B.",
             },
-            FloatInputSpec {
-                name: "B",
-                description: "Subtrahend.",
-                default: 1.0,
-            },
-        ],
-        FloatOutputSpec {
-            name: "Difference",
-            description: "A − B.",
-        },
-        |a, b| a - b,
-    ));
-    library.add(binary_float_func(
-        MULTIPLY_FUNC_ID,
-        "Multiply",
-        "Multiplies two float values (A × B).",
-        [
-            FloatInputSpec {
-                name: "A",
-                description: "First factor.",
-                default: 0.0,
-            },
-            FloatInputSpec {
-                name: "B",
-                description: "Second factor.",
-                default: 1.0,
-            },
-        ],
-        FloatOutputSpec {
-            name: "Product",
-            description: "A × B.",
-        },
-        |a, b| a * b,
-    ));
+        }
+        .binary(|a, b| a * b),
+    );
     library.add(divide_func());
-    library.add(binary_float_func(
-        POWER_FUNC_ID,
-        "Power",
-        "Raises the first value to the power of the second (Base^Exponent).",
-        [
-            FloatInputSpec {
-                name: "Base",
-                description: "The base.",
+    library.add(
+        FloatFunc {
+            id: POWER_FUNC_ID,
+            name: "Power",
+            description: "Raises the first value to the power of the second (Base^Exponent).",
+            inputs: [
+                FloatInputSpec {
+                    name: "Base",
+                    description: "The base.",
+                    default: 0.0,
+                },
+                FloatInputSpec {
+                    name: "Exponent",
+                    description: "The exponent.",
+                    default: 1.0,
+                },
+            ],
+            output: FloatOutputSpec {
+                name: "Result",
+                description: "Base raised to Exponent.",
+            },
+        }
+        .binary(f64::powf),
+    );
+    library.add(
+        FloatFunc {
+            id: SQUARE_ROOT_FUNC_ID,
+            name: "Square Root",
+            description: "Calculates the square root of a value.",
+            inputs: [FloatInputSpec {
+                name: "Value",
+                description: "Number to take the square root of.",
                 default: 0.0,
+            }],
+            output: FloatOutputSpec {
+                name: "Root",
+                description: "√Value.",
             },
-            FloatInputSpec {
-                name: "Exponent",
-                description: "The exponent.",
-                default: 1.0,
-            },
-        ],
-        FloatOutputSpec {
-            name: "Result",
-            description: "Base raised to Exponent.",
-        },
-        f64::powf,
-    ));
-    library.add(unary_float_func(
-        SQUARE_ROOT_FUNC_ID,
-        "Square Root",
-        "Calculates the square root of a value.",
-        FloatInputSpec {
-            name: "Value",
-            description: "Number to take the square root of.",
-            default: 0.0,
-        },
-        FloatOutputSpec {
-            name: "Root",
-            description: "√Value.",
-        },
-        f64::sqrt,
-    ));
+        }
+        .unary(f64::sqrt),
+    );
 
     for function in trigonometry_funcs() {
         library.add(function);
     }
 
-    library.add(binary_float_func(
-        LOGARITHM_FUNC_ID,
-        "Logarithm",
-        "Calculates the logarithm of a value with the given base.",
-        [
-            FloatInputSpec {
-                name: "Value",
-                description: "Number to take the logarithm of.",
-                default: 1.0,
+    library.add(
+        FloatFunc {
+            id: LOGARITHM_FUNC_ID,
+            name: "Logarithm",
+            description: "Calculates the logarithm of a value with the given base.",
+            inputs: [
+                FloatInputSpec {
+                    name: "Value",
+                    description: "Number to take the logarithm of.",
+                    default: 1.0,
+                },
+                FloatInputSpec {
+                    name: "Base",
+                    description: "Logarithm base.",
+                    default: 10.0,
+                },
+            ],
+            output: FloatOutputSpec {
+                name: "Result",
+                description: "log_Base(Value).",
             },
-            FloatInputSpec {
-                name: "Base",
-                description: "Logarithm base.",
-                default: 10.0,
-            },
-        ],
-        FloatOutputSpec {
-            name: "Result",
-            description: "log_Base(Value).",
-        },
-        f64::log,
-    ));
+        }
+        .binary(f64::log),
+    );
 
     library
 }
 
 fn trigonometry_funcs() -> [Func; 6] {
     [
-        unary_float_func(
-            SINE_FUNC_ID,
-            "Sine",
-            "Calculates the sine of an angle in radians.",
-            FloatInputSpec {
+        FloatFunc {
+            id: SINE_FUNC_ID,
+            name: "Sine",
+            description: "Calculates the sine of an angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
                 default: 0.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Sine",
                 description: "sin(Angle).",
             },
-            f64::sin,
-        ),
-        unary_float_func(
-            COSINE_FUNC_ID,
-            "Cosine",
-            "Calculates the cosine of an angle in radians.",
-            FloatInputSpec {
+        }
+        .unary(f64::sin),
+        FloatFunc {
+            id: COSINE_FUNC_ID,
+            name: "Cosine",
+            description: "Calculates the cosine of an angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
                 default: 0.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Cosine",
                 description: "cos(Angle).",
             },
-            f64::cos,
-        ),
-        unary_float_func(
-            TANGENT_FUNC_ID,
-            "Tangent",
-            "Calculates the tangent of an angle in radians.",
-            FloatInputSpec {
+        }
+        .unary(f64::cos),
+        FloatFunc {
+            id: TANGENT_FUNC_ID,
+            name: "Tangent",
+            description: "Calculates the tangent of an angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
                 default: 0.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Tangent",
                 description: "tan(Angle).",
             },
-            f64::tan,
-        ),
-        unary_float_func(
-            ARCSINE_FUNC_ID,
-            "Arcsine",
-            "Calculates the arc sine (inverse sine), returns angle in radians.",
-            FloatInputSpec {
+        }
+        .unary(f64::tan),
+        FloatFunc {
+            id: ARCSINE_FUNC_ID,
+            name: "Arcsine",
+            description: "Calculates the arc sine (inverse sine), returns angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Sine",
                 description: "Sine value in [−1, 1].",
                 default: 0.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
             },
-            f64::asin,
-        ),
-        unary_float_func(
-            ARCCOSINE_FUNC_ID,
-            "Arccosine",
-            "Calculates the arc cosine (inverse cosine), returns angle in radians.",
-            FloatInputSpec {
+        }
+        .unary(f64::asin),
+        FloatFunc {
+            id: ARCCOSINE_FUNC_ID,
+            name: "Arccosine",
+            description: "Calculates the arc cosine (inverse cosine), returns angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Cosine",
                 description: "Cosine value in [−1, 1].",
                 default: 1.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
             },
-            f64::acos,
-        ),
-        unary_float_func(
-            ARCTANGENT_FUNC_ID,
-            "Arctangent",
-            "Calculates the arc tangent (inverse tangent), returns angle in radians.",
-            FloatInputSpec {
+        }
+        .unary(f64::acos),
+        FloatFunc {
+            id: ARCTANGENT_FUNC_ID,
+            name: "Arctangent",
+            description: "Calculates the arc tangent (inverse tangent), returns angle in radians.",
+            inputs: [FloatInputSpec {
                 name: "Tangent",
                 description: "Tangent value.",
                 default: 0.0,
-            },
-            FloatOutputSpec {
+            }],
+            output: FloatOutputSpec {
                 name: "Angle",
                 description: "Angle in radians.",
             },
-            f64::atan,
-        ),
+        }
+        .unary(f64::atan),
     ]
 }
 
@@ -349,24 +359,36 @@ fn divide_func() -> Func {
     .description("Divides the first value by the second, outputs both quotient and remainder.")
     .category("Math")
     .pure()
-    .input(declared_input(FloatInputSpec {
-        name: "A",
-        description: "Dividend.",
-        default: 0.0,
-    }))
-    .input(declared_input(FloatInputSpec {
-        name: "B",
-        description: "Divisor.",
-        default: 1.0,
-    }))
-    .output(declared_output(FloatOutputSpec {
-        name: "Quotient",
-        description: "A ÷ B.",
-    }))
-    .output(declared_output(FloatOutputSpec {
-        name: "Remainder",
-        description: "A mod B.",
-    }))
+    .input(
+        FloatInputSpec {
+            name: "A",
+            description: "Dividend.",
+            default: 0.0,
+        }
+        .declare(),
+    )
+    .input(
+        FloatInputSpec {
+            name: "B",
+            description: "Divisor.",
+            default: 1.0,
+        }
+        .declare(),
+    )
+    .output(
+        FloatOutputSpec {
+            name: "Quotient",
+            description: "A ÷ B.",
+        }
+        .declare(),
+    )
+    .output(
+        FloatOutputSpec {
+            name: "Remainder",
+            description: "A mod B.",
+        }
+        .declare(),
+    )
 }
 
 #[cfg(test)]

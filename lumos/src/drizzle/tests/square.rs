@@ -16,11 +16,11 @@ fn square_kernel_mixes_two_pixels_by_their_overlap() {
     pixels[0] = 10.0;
     pixels[1] = 20.0;
     let product = drizzle_one(
-        Size2us::new(4, 4),
         kernel_config(DrizzleKernel::Square, 2.0, 1.0),
-        gray_image(Size2us::new(4, 4), pixels),
-        &Transform::translation(DVec2::new(0.25, 0.0)),
-        None,
+        &DrizzleFrame::new(
+            gray_image(Size2us::new(4, 4), pixels),
+            warp_of(Transform::translation(DVec2::new(0.25, 0.0))),
+        ),
     );
     // The overlaps are halves and wholes of quads whose area is a power of two, so every weight,
     // product and sum is exact and so is the mean.
@@ -63,11 +63,8 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
             let case = format!("{transform_name} at scale {scale}, pixfrac {pixfrac}");
             let render = |kernel| {
                 drizzle_one(
-                    size,
                     kernel_config(kernel, scale, pixfrac),
-                    gray_image(size, gradient.clone()),
-                    &transform,
-                    None,
+                    &DrizzleFrame::new(gray_image(size, gradient.clone()), warp_of(transform)),
                 )
             };
             let turbo = render(DrizzleKernel::Turbo);

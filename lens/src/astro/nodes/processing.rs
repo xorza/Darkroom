@@ -21,6 +21,7 @@ use crate::astro::config::processing::{ScnrMethodChoice, StretchMethodChoice};
 use crate::astro::nodes::runtime;
 use crate::config_node::ConfigValue;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use crate::node_spec::NodeSpec;
 
 const AUTO_STRETCH_FUNC_ID: FuncId = FuncId::literal("c15248e0-006a-4a4a-9aae-b1fc7886dea1");
 const EXTRACT_BACKGROUND_FUNC_ID: FuncId = FuncId::literal("e27c2a02-ec2a-4c6d-afea-60d1276ff8e1");
@@ -36,27 +37,35 @@ pub(crate) fn register(library: &mut Library) {
     BackgroundMode::register(library);
     ScnrMethodChoice::register(library);
     library.add(preset_func::<StretchMethodChoice>(
-        AUTO_STRETCH_FUNC_ID,
-        "Auto Stretch",
-        "Auto-stretches a linear frame to a viewable image (display tone curve).",
+        NodeSpec {
+            id: AUTO_STRETCH_FUNC_ID,
+            name: "Auto Stretch",
+            description: "Auto-stretches a linear frame to a viewable image (display tone curve).",
+        },
         "Method",
     ));
     library.add(preset_func::<BackgroundMode>(
-        EXTRACT_BACKGROUND_FUNC_ID,
-        "Extract Background",
-        "Fits and removes a smooth sky-background gradient.",
+        NodeSpec {
+            id: EXTRACT_BACKGROUND_FUNC_ID,
+            name: "Extract Background",
+            description: "Fits and removes a smooth sky-background gradient.",
+        },
         "Mode",
     ));
     library.add(preset_func::<ScnrMethodChoice>(
-        SCNR_FUNC_ID,
-        "SCNR",
-        "Removes the residual green cast (SCNR).",
+        NodeSpec {
+            id: SCNR_FUNC_ID,
+            name: "SCNR",
+            description: "Removes the residual green cast (SCNR).",
+        },
         "Method",
     ));
     library.add(strength_func(
-        DENOISE_FUNC_ID,
-        "Denoise",
-        "Wavelet denoise (starlet coefficient thresholding).",
+        NodeSpec {
+            id: DENOISE_FUNC_ID,
+            name: "Denoise",
+            description: "Wavelet denoise (starlet coefficient thresholding).",
+        },
         Knob {
             name: "Strength",
             description: "Denoise strength in [0, 1].",
@@ -68,9 +77,11 @@ pub(crate) fn register(library: &mut Library) {
         },
     ));
     library.add(strength_func(
-        HDR_COMPRESSION_FUNC_ID,
-        "HDR Compression",
-        "Compresses large-scale dynamic range (multiscale HDR).",
+        NodeSpec {
+            id: HDR_COMPRESSION_FUNC_ID,
+            name: "HDR Compression",
+            description: "Compresses large-scale dynamic range (multiscale HDR).",
+        },
         Knob {
             name: "Amount",
             description: "Compression amount in [0, 1].",
@@ -82,9 +93,11 @@ pub(crate) fn register(library: &mut Library) {
         },
     ));
     library.add(strength_func(
-        LOCAL_CONTRAST_FUNC_ID,
-        "Local Contrast",
-        "Local contrast enhancement (CLAHE).",
+        NodeSpec {
+            id: LOCAL_CONTRAST_FUNC_ID,
+            name: "Local Contrast",
+            description: "Local contrast enhancement (CLAHE).",
+        },
         Knob {
             name: "Strength",
             description: "Local-contrast strength in [0, 1].",
@@ -96,9 +109,11 @@ pub(crate) fn register(library: &mut Library) {
         },
     ));
     library.add(processing_func(
-        NEUTRALIZE_BACKGROUND_FUNC_ID,
-        "Neutralize Background",
-        "Shifts each channel so the background reads neutral gray.",
+        NodeSpec {
+            id: NEUTRALIZE_BACKGROUND_FUNC_ID,
+            name: "Neutralize Background",
+            description: "Shifts each channel so the background reads neutral gray.",
+        },
         vec![Image::input("Image")],
         async_lambda!(move |Invocation {
                                 inputs, outputs, ..
@@ -154,15 +169,13 @@ impl FrameOp for LocalContrast {
 
 /// A node over `P`'s configs: the image, `P`'s picker named `pick`, and the
 /// config overriding it.
-fn preset_func<P>(id: FuncId, name: &str, description: &str, pick: &str) -> Func
+fn preset_func<P>(spec: NodeSpec, pick: &str) -> Func
 where
     P: Preset,
     P::Config: FrameOp,
 {
     processing_func(
-        id,
-        name,
-        description,
+        spec,
         vec![
             Image::input("Image"),
             P::picker(pick),
@@ -190,20 +203,12 @@ struct Knob {
 
 /// A node over a config tuned by one strength: the image, the strength, and
 /// the config overriding it; `with` builds the config a strength stands for.
-fn strength_func<T>(
-    id: FuncId,
-    name: &str,
-    description: &str,
-    knob: Knob,
-    with: fn(f32) -> T,
-) -> Func
+fn strength_func<T>(spec: NodeSpec, knob: Knob, with: fn(f32) -> T) -> Func
 where
     T: FrameOp + Introspect + Clone + fmt::Debug + Sync,
 {
     processing_func(
-        id,
-        name,
-        description,
+        spec,
         vec![
             Image::input("Image"),
             FuncInput::required(knob.name, DataType::Float)
@@ -226,16 +231,9 @@ where
     )
 }
 
-fn processing_func(
-    id: FuncId,
-    name: &str,
-    description: &str,
-    inputs: Vec<FuncInput>,
-    lambda: FuncLambda,
-) -> Func {
-    Func::new(id, name, lambda)
+fn processing_func(spec: NodeSpec, inputs: Vec<FuncInput>, lambda: FuncLambda) -> Func {
+    spec.func(lambda)
         .category("Astro")
-        .description(description)
         .pure()
         .inputs(inputs)
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))

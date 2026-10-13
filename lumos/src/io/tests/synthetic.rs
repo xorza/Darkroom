@@ -1,7 +1,7 @@
 //! Load/decode round-trip tests on synthetic frames.
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
-//! real `load_linear_fits` path — exercising sample-type selection, the unsigned-via-BZERO
+//! real `decode::load_linear` path — exercising sample-type selection, the unsigned-via-BZERO
 //! convention, the division of integer samples into the `[0, 1]` domain (and the float path's
 //! exemption from it), and both halves of the null convention. The demosaic path is exercised by
 //! building mosaics from known colours and demosaicing them back.
@@ -24,20 +24,20 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::sample_domain::{DomainMap, ScaleOrigin};
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::error::ImageError;
-use crate::io::fits::decode::{load_cfa_fits, load_linear_fits};
-use crate::io::fits::options::{
+use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
+use crate::io::fits::decode;
+use crate::io::fits::fits_load_options::{
     FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::load_context::LoadContext;
 use crate::memory::run_memory::RunMemory;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 
 use crate::frame::stackable_image::StackableImage;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::fits::write_fits;
+use crate::internals::fits::{fits_refusal, write_fits};
 use crate::{
     CalibrationMasters, CalibrationSet, CfaImage, CfaType, ColorProvenance, PreviewImage,
     PreviewPixels,
@@ -48,12 +48,12 @@ use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
 
-/// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_linear_fits`.
+/// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = dir.join(format!("{name}.fits"));
     write_fits(&path, image, None);
-    load_linear_fits(&path, &LoadContext::default())
+    decode::load_linear(&path, &LoadContext::default())
 }
 
 /// Write `image` with `header`'s cards to `dir/name.fits`.
@@ -69,7 +69,7 @@ fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, Ima
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
-    load_linear_fits(&path, &LoadContext::default())
+    decode::load_linear(&path, &LoadContext::default())
 }
 
 fn one_pixel_header() -> Header {
@@ -217,15 +217,15 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
 
     // No DATAMAX, so `Auto` takes the samples as normalized, and they reach 65535: refused, which is
     // the case the declaration exists for.
-    assert!(matches!(
-        load_linear_fits(&path, &with_scale(FitsFloatScale::Auto)),
-        Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("nothing declares their scale")
-    ));
+    assert_eq!(
+        fits_refusal(decode::load_linear(&path, &with_scale(FitsFloatScale::Auto)).unwrap_err()),
+        FitsRefusal::UndeclaredFloatScale { maximum: 65_535.0 }
+    );
 
     // Declared: divided, and the span recorded so a later stage can compare it against another
     // frame's.
     let declared =
-        load_linear_fits(&path, &with_scale(FitsFloatScale::FullScale(65_535.0))).unwrap();
+        decode::load_linear(&path, &with_scale(FitsFloatScale::FullScale(65_535.0))).unwrap();
     assert_eq!(
         declared.channel(0).pixels(),
         &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
@@ -238,15 +238,17 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     declaring.set("DATAMAX", 65_535.0).unwrap();
     let declaring_path = write_with_header(&dir, "float32_datamax_overridden", &image, &declaring);
     let forced =
-        load_linear_fits(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
+        decode::load_linear(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
     assert_eq!(forced.channel(0).pixels(), &*pixels);
 
     // A scale that would invert or erase the samples is rejected rather than applied.
     for bad in [0.0, -1.0, f32::NAN] {
-        let error = load_linear_fits(&path, &with_scale(FitsFloatScale::FullScale(bad)));
+        let reason = fits_refusal(
+            decode::load_linear(&path, &with_scale(FitsFloatScale::FullScale(bad))).unwrap_err(),
+        );
         assert!(
-            matches!(error, Err(ImageError::FitsUnsupported { .. })),
-            "full scale {bad} should be rejected, got {error:?}"
+            matches!(reason, FitsRefusal::DeclaredFullScale { scale } if scale.to_bits() == bad.to_bits()),
+            "full scale {bad}: {reason:?}"
         );
     }
 }
@@ -263,7 +265,7 @@ fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
     let sigma_of = |name: &str, raw: &[u16]| {
         let image = Image::from_u16(vec![raw.len(), 1], raw).unwrap();
         let path = write_with_header(&dir, name, &image, &header);
-        load_cfa_fits(&path, &LoadContext::default())
+        decode::load_cfa(&path, &LoadContext::default())
             .unwrap()
             .metadata
             .quantization_sigma
@@ -294,10 +296,10 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // No DATAMAX: taken as already normalized, which these samples are not. The decode scans them,
     // and a maximum of 65535 past Siril's threshold of 10 is refused rather than loaded with its
     // saturation level at 0.95 ADU. The caller can still say they are normalized.
-    assert!(matches!(
-        write_and_load("float32_no_datamax", &image),
-        Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("nothing declares their scale")
-    ));
+    assert_eq!(
+        fits_refusal(write_and_load("float32_no_datamax", &image).unwrap_err()),
+        FitsRefusal::UndeclaredFloatScale { maximum: 65_535.0 }
+    );
     let dir = TempDir::new("lumos-fits-roundtrip");
     let bare_path = write_with_header(&dir, "float32_bare", &image, &Header::new());
     let normalized_options = LoadContext {
@@ -307,7 +309,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         },
         ..LoadContext::default()
     };
-    let bare = load_linear_fits(&bare_path, &normalized_options).unwrap();
+    let bare = decode::load_linear(&bare_path, &normalized_options).unwrap();
     assert_eq!(bare.channel(0).pixels(), &*pixels);
 
     // DATAMAX ≈ 1: a normalized frame saying so. Left alone — and refused when its samples
@@ -315,12 +317,12 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let mut normalized_header = Header::new();
     normalized_header.set("DATAMAX", 1.0).unwrap();
     let contradicted = write_with_header(&dir, "float32_datamax_1_adu", &image, &normalized_header);
-    assert!(load_linear_fits(&contradicted, &LoadContext::default()).is_err());
+    assert!(decode::load_linear(&contradicted, &LoadContext::default()).is_err());
     let unit_pixels = vec![-0.25f32, 0.0, 0.5, 1.0];
     let unit_image = Image::new(vec![4, 1], unit_pixels.clone()).unwrap();
     let normalized_path =
         write_with_header(&dir, "float32_datamax_1", &unit_image, &normalized_header);
-    let normalized = load_linear_fits(&normalized_path, &LoadContext::default()).unwrap();
+    let normalized = decode::load_linear(&normalized_path, &LoadContext::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
     assert_eq!(normalized.metadata.data_max, Some(1.0));
 
@@ -329,7 +331,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let mut adu_header = Header::new();
     adu_header.set("DATAMAX", 65_535.0).unwrap();
     let adu_path = write_with_header(&dir, "float32_datamax_adu", &image, &adu_header);
-    let adu = load_linear_fits(&adu_path, &LoadContext::default()).unwrap();
+    let adu = decode::load_linear(&adu_path, &LoadContext::default()).unwrap();
     let decoded = adu.channel(0).pixels();
     assert_close!(decoded[0], -7.629_511e-5, 1e-9, "{decoded:?}");
     assert_eq!(decoded[1], 0.0);
@@ -360,8 +362,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         .stack_paths(
             paths,
             &IngestConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            ProgressMonitor::unattended(),
         )
     };
     assert!(matches!(
@@ -387,7 +388,6 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::combine::frame_cache::FrameCache;
     use crate::combine::stack_config::Normalization;
     use crate::ingest::ingest_config::IngestConfig;
-    use crate::progress::progress_callback::ProgressCallback;
 
     let dir = TempDir::new("lumos-frame-set");
     let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0]).unwrap();
@@ -431,7 +431,6 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                     &[reference.as_path(), second, never_decoded.as_path()],
                     &config,
                     IngestRun::planned(memory, &ingest),
-                    ProgressCallback::default(),
                 )
             })
         };
@@ -470,7 +469,6 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 &config,
                 IngestRun::planned(memory, &ingest),
                 None,
-                ProgressCallback::default(),
             )
         });
         assert!(
@@ -510,7 +508,7 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
         let mut header = Header::new();
         header.set("BUNIT", bunit).unwrap();
         let path = write_with_header(&dir, name, &image, &header);
-        load_linear_fits(&path, &LoadContext::default())
+        decode::load_linear(&path, &LoadContext::default())
             .unwrap()
             .metadata
             .domain
@@ -563,7 +561,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         },
         ..LoadContext::default()
     };
-    let float = load_linear_fits(&float_path, &float_context).unwrap();
+    let float = decode::load_linear(&float_path, &float_context).unwrap();
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
     // stored value to NaN, which is the same thing the float file handed over.
@@ -578,7 +576,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     )
     .unwrap();
     let integer_path = write_with_header(&dir, "int16_blank", &integer_image, &Header::new());
-    let integer = load_linear_fits(&integer_path, &LoadContext::default()).unwrap();
+    let integer = decode::load_linear(&integer_path, &LoadContext::default()).unwrap();
 
     for (name, image) in [("float", &float), ("integer", &integer)] {
         let nulls = image
@@ -619,12 +617,16 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         },
         ..LoadContext::default()
     };
-    let error = load_linear_fits(&float_path, &strict).unwrap_err();
-    let ImageError::FitsUnsupported { reason, .. } = &error else {
-        panic!("expected an unsupported-FITS rejection, got {error:?}");
-    };
+    let reason = fits_refusal(decode::load_linear(&float_path, &strict).unwrap_err());
     assert_eq!(
         reason,
+        FitsRefusal::NullSamples {
+            count: 1,
+            first_index: 2
+        }
+    );
+    assert_eq!(
+        reason.to_string(),
         "image contains 1 null/non-finite samples; first at linear index 2"
     );
 
@@ -643,20 +645,20 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let stacked = config.stack_paths(
         &paths,
         &ingest(&float_context.fits),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(stacked.is_ok(), "{stacked:?}");
-    let refused = config.stack_paths(
-        &paths,
-        &ingest(&strict.fits),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    );
+    let refused = config.stack_paths(&paths, &ingest(&strict.fits), ProgressMonitor::unattended());
     assert!(
         matches!(
             refused,
-            Err(StackError::ImageLoad(ImageError::FitsUnsupported { .. }))
+            Err(StackError::ImageLoad(ImageError::FitsUnsupported {
+                reason: FitsRefusal::NullSamples {
+                    count: 1,
+                    first_index: 2
+                },
+                ..
+            }))
         ),
         "{refused:?}"
     );
@@ -666,13 +668,18 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             WarpTransform::new(Transform::identity()),
         )],
         &ingest(&strict.fits),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     );
     assert!(
         matches!(
             refused,
-            Err(DrizzleError::ImageLoad(ImageError::FitsUnsupported { .. }))
+            Err(DrizzleError::ImageLoad(ImageError::FitsUnsupported {
+                reason: FitsRefusal::NullSamples {
+                    count: 1,
+                    first_index: 2
+                },
+                ..
+            }))
         ),
         "{refused:?}"
     );
@@ -685,7 +692,7 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(&dir, "float32_all_null", &image, &Header::new());
-    let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
     let nulls = loaded.flags.as_ref().unwrap();
@@ -707,8 +714,8 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     let low_path = write_with_header(&dir, "datamax_100", &image, &low_header);
     let high_path = write_with_header(&dir, "datamax_65535", &image, &high_header);
 
-    let low = load_linear_fits(&low_path, &LoadContext::default()).unwrap();
-    let high = load_linear_fits(&high_path, &LoadContext::default()).unwrap();
+    let low = decode::load_linear(&low_path, &LoadContext::default()).unwrap();
+    let high = decode::load_linear(&high_path, &LoadContext::default()).unwrap();
 
     // BITPIX = 16, BSCALE = 1 → divisor 65535, and the samples are identical either way.
     let pixels = low.channel(0).pixels();
@@ -782,7 +789,10 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 
     assert!(matches!(
         LinearImage::from_file(&path, &LoadContext::default()),
-        Err(ImageError::ScientificInputRejected { .. })
+        Err(ImageError::ScientificInputRejected {
+            reason: ScientificRefusal::MosaicFits,
+            ..
+        })
     ));
     let mut loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.data.pixels(), pixels);
@@ -904,7 +914,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(&dir, "nan_inf", &image, &Header::new());
 
-    let masked = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    let masked = decode::load_linear(&path, &LoadContext::default()).unwrap();
     let nulls = masked.flags.as_ref().unwrap();
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 3);
     for index in 0..size.pixel_count() {
@@ -1014,7 +1024,7 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     let mut header = Header::new();
     header.set("DATAMAX", 4000.0).unwrap();
     let path = write_with_header(&dir, "uint16_datamax", &image, &header);
-    let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
     assert!(loaded.metadata.saturation_flagged);
     let flags = loaded.flags.as_ref().unwrap();
     let saturated: Vec<bool> = (0..4)
@@ -1023,7 +1033,7 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     assert_eq!(saturated, [false, false, true, true]);
 
     let path = write_with_header(&dir, "uint16_bare", &image, &Header::new());
-    let bare = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    let bare = decode::load_linear(&path, &LoadContext::default()).unwrap();
     assert!(!bare.metadata.saturation_flagged);
     assert!(bare.flags.is_none());
 }

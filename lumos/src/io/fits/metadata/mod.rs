@@ -145,7 +145,7 @@ impl MetadataField {
 /// The observation keywords a FITS header gives, each one `None` when it is absent or given with
 /// a type or value it cannot have: none of them changes a sample, so a writer's odd choice for
 /// one never costs the frame.
-pub(super) fn read_metadata(header: &Header, sample_type: SampleType) -> ImageMetadata {
+pub(super) fn read(header: &Header, sample_type: SampleType) -> ImageMetadata {
     let text = |field: MetadataField| field.read(header, read_text);
     ImageMetadata {
         object: text(MetadataField::Object),
@@ -231,7 +231,7 @@ fn optional<T>(keyword: &str, value: fits_well::Result<Option<T>>) -> Option<T> 
     })
 }
 
-pub(super) fn write_image_metadata(
+pub(super) fn write_image(
     header: &mut Header,
     metadata: &ImageMetadata,
     image_type: Option<&str>,
@@ -319,16 +319,11 @@ pub(super) fn write_image_metadata(
             header.set(keyword, true)?;
         }
     }
-    domain_keywords::write(
-        header,
-        metadata.domain.as_ref(),
-        metadata.quantization_sigma,
-        metadata.saturation_flagged,
-    )?;
+    domain_keywords::write(header, metadata)?;
     Ok(())
 }
 
-pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
+pub(super) fn write_cfa(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
     // Two keywords, because they answer two questions that a bottom-up source pulls apart.
     //
     // `ROWORDER` says which rows the `BAYERPAT` below is expressed against, and that is always
@@ -409,7 +404,7 @@ fn set_optional_integer(
 
 /// The mosaic pattern a header declares, or `None` for an image that is no mosaic.
 /// `unstated_bayer_pattern` stands in for a `BAYERPAT` of `'TRUE'`.
-pub(super) fn read_cfa_from_headers(
+pub(super) fn read_cfa(
     header: &Header,
     height: usize,
     unstated_bayer_pattern: Option<CfaPattern>,
@@ -417,7 +412,7 @@ pub(super) fn read_cfa_from_headers(
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
-            return read_bayer_cfa(header, height, true, unstated_bayer_pattern);
+            return read_bayer_cfa(header, height, Bayerpat::Required, unstated_bayer_pattern);
         }
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
             return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
@@ -430,7 +425,7 @@ pub(super) fn read_cfa_from_headers(
         }
         None => {}
     }
-    read_bayer_cfa(header, height, false, unstated_bayer_pattern)
+    read_bayer_cfa(header, height, Bayerpat::Optional, unstated_bayer_pattern)
 }
 
 /// Where a Lumos-written file records the row order its *source* had.
@@ -477,6 +472,14 @@ fn row_order_of(value: &str) -> RowOrder {
     }
 }
 
+/// Whether a header has to state `BAYERPAT`: one whose `CFATYPE` names a Bayer mosaic does, and
+/// any other states none for an image that is no mosaic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bayerpat {
+    Required,
+    Optional,
+}
+
 /// The Bayer type `header` declares for an image of `height` decoded rows.
 ///
 /// The height is the decoded image's, not `NAXIS2`: a tile-compressed HDU is a binary table whose
@@ -484,14 +487,14 @@ fn row_order_of(value: &str) -> RowOrder {
 fn read_bayer_cfa(
     header: &Header,
     height: usize,
-    required: bool,
+    keyword: Bayerpat,
     unstated_bayer_pattern: Option<CfaPattern>,
 ) -> fits_well::Result<Option<CfaType>> {
     let Some(bayerpat) = header.get_text("BAYERPAT")? else {
-        if required {
-            return Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" });
-        }
-        return Ok(None);
+        return match keyword {
+            Bayerpat::Required => Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" }),
+            Bayerpat::Optional => Ok(None),
+        };
     };
     let stated = CfaPattern::from_bayerpat(bayerpat);
     let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");

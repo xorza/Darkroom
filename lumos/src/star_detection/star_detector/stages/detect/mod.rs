@@ -19,8 +19,6 @@ use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 
-use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
-
 /// Result of detection stage with diagnostic statistics.
 #[derive(Debug)]
 pub(crate) struct DetectResult {
@@ -52,15 +50,7 @@ impl DetectResult {
         pool: &mut DetectionResources,
     ) -> Self {
         let mut mask = pool.acquire_bit();
-        create_residual_threshold_mask(
-            &plane.values,
-            &plane.noise.noise,
-            ThresholdParams {
-                sigma: config.sigma_threshold,
-                min_noise: plane.noise.floor,
-            },
-            &mut mask,
-        );
+        plane.threshold(config.sigma_threshold, &mut mask);
         // A pixel with no data holds a fill, not a measurement, and must not join a component.
         if let Some(no_data) = no_data {
             mask.and_not(no_data);

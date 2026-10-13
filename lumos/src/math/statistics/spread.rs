@@ -54,7 +54,7 @@ impl Spread {
     /// The small-sample factor `b_n` for `n ≥ 2` samples. Above the table, Croux & Rousseeuw's
     /// `n / (n − 0.8)`, which the same simulation puts within 0.1% of the measured factor from
     /// n = 20 on.
-    pub(crate) fn consistency(n: usize) -> f32 {
+    fn consistency(n: usize) -> f32 {
         debug_assert!(n >= 2);
         if let Some(&factor) = MAD_CONSISTENCY.get(n - 2) {
             factor
@@ -94,17 +94,46 @@ impl Spread {
 fn mad_of_sorted(sorted: &[f32], centre: f32) -> f32 {
     let n = sorted.len();
     let split = sorted.partition_point(|&v| v < centre);
-    let middle = Ranked::of(
-        |i| centre - sorted[split - 1 - i],
-        split,
-        |j| sorted[split + j] - centre,
-        n - split,
-        (n - 1) / 2,
-    );
+    let below = Run {
+        at: |i: usize| centre - sorted[split - 1 - i],
+        len: split,
+    };
+    let above = Run {
+        at: |j: usize| sorted[split + j] - centre,
+        len: n - split,
+    };
+    let middle = Ranked::of(&below, &above, (n - 1) / 2);
     if n.is_multiple_of(2) {
         f32::midpoint(middle.value, middle.next)
     } else {
         middle.value
+    }
+}
+
+/// An ascending run of `len` values, the `i`-th read by `at(i)`.
+#[derive(Debug)]
+struct Run<F> {
+    at: F,
+    len: usize,
+}
+
+impl<F: Fn(usize) -> f32> Run<F> {
+    /// The last of the run's first `count` values; `−∞` when it gives none.
+    fn last_taken(&self, count: usize) -> f32 {
+        if count > 0 {
+            (self.at)(count - 1)
+        } else {
+            f32::NEG_INFINITY
+        }
+    }
+
+    /// The run's value after its first `count`; `+∞` when none is left.
+    fn first_left(&self, count: usize) -> f32 {
+        if count < self.len {
+            (self.at)(count)
+        } else {
+            f32::INFINITY
+        }
     }
 }
 
@@ -117,22 +146,16 @@ struct Ranked {
 }
 
 impl Ranked {
-    /// Rank `rank` of the union of `a`, `a_len` values ascending, and `b`, `b_len` values
-    /// ascending: the `rank + 1` smallest take some `i` from `a` and the rest from `b`, and the
-    /// split is the first `i` whose next `a` is not below the last `b` it leaves out.
-    fn of(
-        a: impl Fn(usize) -> f32,
-        a_len: usize,
-        b: impl Fn(usize) -> f32,
-        b_len: usize,
-        rank: usize,
-    ) -> Self {
-        debug_assert!(rank < a_len + b_len);
+    /// Rank `rank` of the union of `a` and `b`: the `rank + 1` smallest take some `i` from `a` and
+    /// the rest from `b`, and the split is the first `i` whose next `a` is not below the last `b`
+    /// it leaves out.
+    fn of(a: &Run<impl Fn(usize) -> f32>, b: &Run<impl Fn(usize) -> f32>, rank: usize) -> Self {
+        debug_assert!(rank < a.len + b.len);
         let taken = rank + 1;
-        let (mut low, mut high) = (taken.saturating_sub(b_len), taken.min(a_len));
+        let (mut low, mut high) = (taken.saturating_sub(b.len), taken.min(a.len));
         while low < high {
             let i = usize::midpoint(low, high);
-            if a(i) < b(taken - i - 1) {
+            if (a.at)(i) < (b.at)(taken - i - 1) {
                 low = i + 1;
             } else {
                 high = i;
@@ -140,26 +163,8 @@ impl Ranked {
         }
         let (i, j) = (low, taken - low);
         Self {
-            value: Self::last_taken(&a, i).max(Self::last_taken(&b, j)),
-            next: Self::first_left(&a, i, a_len).min(Self::first_left(&b, j, b_len)),
-        }
-    }
-
-    /// The last of the first `count` values of `run`; `−∞` when it gives none.
-    fn last_taken(run: &impl Fn(usize) -> f32, count: usize) -> f32 {
-        if count > 0 {
-            run(count - 1)
-        } else {
-            f32::NEG_INFINITY
-        }
-    }
-
-    /// The value of `run`, `len` long, after its first `count`; `+∞` when none is left.
-    fn first_left(run: &impl Fn(usize) -> f32, count: usize, len: usize) -> f32 {
-        if count < len {
-            run(count)
-        } else {
-            f32::INFINITY
+            value: a.last_taken(i).max(b.last_taken(j)),
+            next: a.first_left(i).min(b.first_left(j)),
         }
     }
 }

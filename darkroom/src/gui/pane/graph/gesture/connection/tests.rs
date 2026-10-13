@@ -7,7 +7,7 @@ use super::*;
 use crate::core::document::internals::DocFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph::internals::CanvasHarness;
-use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::pane::graph::node::port_row;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -131,7 +131,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // and `CanvasGeometry` measured centers to hit-test against.
     h.prime(2);
 
-    let source = port_circle_wid(PortRef::output(producer, 0));
+    let source = port_row::port_circle_wid(PortRef::output(producer, 0));
     let drop_at = h.port_center(PortRef::input(consumer, 0));
 
     h.ui.press_on(source);
@@ -165,7 +165,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     h.doc_mut()
         .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let back_source = port_circle_wid(PortRef::output(consumer, 0));
+    let back_source = port_row::port_circle_wid(PortRef::output(consumer, 0));
     let back_drop_at = h.port_center(PortRef::input(producer, 0));
     h.advance_past_double_click();
     h.ui.press_on(back_source);

@@ -10,6 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::scratch_pool::ScratchPool;
+use crate::star_detection::bench;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
@@ -18,7 +19,7 @@ use crate::star_detection::star_detector::stages::detect::extract_candidates;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Dense;
-    let crowded = Stages::config(field).extraction;
+    let crowded = bench::config(field).extraction;
     let labelled = OnceCell::new();
     let mut group = Kind::Atomic.group(c, "detection/deblend/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));

@@ -4,12 +4,11 @@ use crate::internals::prelude::*;
 use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::geometry::{Orientation, Triangle};
 use crate::registration::triangle::matching::{
-    form_triangles_from_neighbors, form_triangles_kdtree, match_triangles,
+    form_triangles_from_neighbors, form_triangles_kdtree,
 };
+use crate::registration::triangle::reference_triangles::ReferenceTriangles;
 use crate::registration::triangle::triangle_config::TriangleConfig;
-use crate::registration::triangle::voting::{
-    PointMatch, VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
-};
+use crate::registration::triangle::voting::{PointMatch, VoteMatrix};
 
 /// The 3-4-5 right triangle: sides 3, 4 and 5, so ratios (0.6, 0.8), all exact.
 const THREE_FOUR_FIVE: [DVec2; 3] = [
@@ -47,13 +46,13 @@ fn tree(points: &[DVec2]) -> KdTree {
     KdTree::build(points.to_vec()).expect("a fixture has points")
 }
 
-/// [`match_triangles`] over two point sets, building their trees; nothing for an empty set, which
-/// has no tree to build.
+/// [`TriangleConfig::match_trees`] over two point sets, building their trees; nothing for an empty
+/// set, which has no tree to build.
 fn match_points(reference: &[DVec2], target: &[DVec2], config: &TriangleConfig) -> Vec<PointMatch> {
     if reference.is_empty() || target.is_empty() {
         return Vec::new();
     }
-    match_triangles(&tree(reference), &tree(target), config, NOISE_SCALE)
+    config.match_trees(&tree(reference), &tree(target), NOISE_SCALE)
 }
 
 /// [`form_triangles_kdtree`] over a point set; no triangles for an empty one.
@@ -62,6 +61,17 @@ fn triangles_of(points: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
         return Vec::new();
     }
     form_triangles_kdtree(&tree(points), k_neighbors, NOISE_SCALE)
+}
+
+/// The votes `target`'s triangles cast against `reference`'s, under `config`.
+fn cast_votes(
+    target: &[Triangle],
+    reference: Vec<Triangle>,
+    config: &TriangleConfig,
+) -> VoteMatrix {
+    ReferenceTriangles::new(reference)
+        .expect("a fixture has triangles")
+        .vote(target, config)
 }
 
 /// Build a `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.

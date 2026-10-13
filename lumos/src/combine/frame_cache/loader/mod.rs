@@ -23,7 +23,7 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::error::ImageError;
 use crate::io::load_context::LoadContext;
 use crate::memory::run_plan::RunPlan;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
 
 /// [`load_tiered`] output: the loaded frames plus the assembled [`CacheCore`].
@@ -41,15 +41,14 @@ const DECODE: usize = 0;
 /// A prepared frame is not what its source decodes to, so on the disk tier it is spilled for this
 /// run alone, never committed to the kept cache nor read back from it: a later run with another
 /// step, or none, would otherwise reuse it.
-pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
-    paths: &[P],
+pub(super) fn load_tiered<I: StackableImage>(
+    paths: &[&Path],
     config: &StackConfig,
     run: IngestRun,
     step: Option<&dyn FrameStep<I, Error = SubtractionError>>,
-    progress: ProgressCallback,
 ) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
-    let first_path = paths[0].as_ref();
+    let first_path = paths[0];
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it, so the in-memory path can decode every frame in parallel rather than
@@ -57,7 +56,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let (peek, early) = if let Some(peek) = I::peek(first_path, &run.context) {
         (peek, None)
     } else {
-        let source = CachedSource::of(first_path);
+        let source = CachedSource::of(first_path, I::DECODER, &run.context);
         let mut image = load_image::<I>(first_path, &run.context)?;
         if let Some(step) = step {
             step.apply(0, &mut image)?;
@@ -113,7 +112,6 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             stage: StackingStage::Loading,
         },
         &run,
-        &progress,
     );
     let load = FrameLoad {
         paths,
@@ -149,8 +147,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             tier,
             dimensions,
             metadata: metadata.expect("frame 0 provides metadata"),
-            progress,
-            cancel: run.context.cancel,
+            monitor: ProgressMonitor::new(run.progress, run.context.cancel),
         },
     })
 }
@@ -182,8 +179,8 @@ struct LoadedFrame {
 
 /// One frame set's load into its tier: where each frame goes, and how it is taken in.
 #[derive(Debug)]
-struct FrameLoad<'a, I, P> {
-    paths: &'a [P],
+struct FrameLoad<'a, I> {
+    paths: &'a [&'a Path],
     tier: &'a Tier,
     /// The decode cache, when `keep_cache` asked for one.
     kept: Option<&'a DecodeCache>,
@@ -191,12 +188,12 @@ struct FrameLoad<'a, I, P> {
     step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
 }
 
-impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
+impl<I: StackableImage> FrameLoad<'_, I> {
     /// Frame `index` decoded, through the step when there is one, with its source as it was
     /// before the decode.
     fn decode(&self, index: usize) -> Result<Decoded<I>, StackError> {
-        let path = self.paths[index].as_ref();
-        let source = CachedSource::of(path);
+        let path = self.paths[index];
+        let source = CachedSource::of(path, I::DECODER, self.intake.context());
         let mut image = load_image::<I>(path, self.intake.context())?;
         if let Some(step) = self.step {
             step.apply(index, &mut image)?;
@@ -212,9 +209,8 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
     /// lookup would save is already spent. A frame through `step` is not what its source decodes
     /// to, so it goes to the tier whatever the cache.
     fn frame(&self, index: usize, decoded: Option<Decoded<I>>) -> Result<LoadedFrame, StackError> {
-        let path = self.paths[index].as_ref();
         if let Some(kept) = self.kept {
-            return self.kept_frame(kept, path, index, decoded);
+            return self.kept_frame(kept, index, decoded);
         }
         let image = match decoded {
             Some(decoded) => decoded.image,
@@ -235,19 +231,19 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
     fn kept_frame(
         &self,
         kept: &DecodeCache,
-        path: &Path,
         index: usize,
         decoded: Option<Decoded<I>>,
     ) -> Result<LoadedFrame, StackError> {
+        let path = self.paths[index];
         let dimensions = self.intake.dimensions();
         let context = self.intake.context();
         let (source, decoded_image) = match decoded {
             Some(Decoded { image, source }) => (source?, Some(image)),
-            None => (CachedSource::of(path)?, None),
+            None => (CachedSource::of(path, I::DECODER, context)?, None),
         };
 
         if decoded_image.is_none()
-            && let Some(reused) = kept.reuse::<I>(&source, context)?
+            && let Some(reused) = kept.reuse(&source)?
         {
             tracing::debug!(source = %path.display(), "Reusing existing cache files");
             FrameDimensionMismatch::check(index, dimensions, reused.dimensions)?;
@@ -273,8 +269,7 @@ impl<I: StackableImage, P: AsRef<Path> + Sync> FrameLoad<'_, I, P> {
         };
         let stats = self.intake.admit(index, &image)?;
         let metadata = (index == 0).then(|| image.metadata().clone());
-        let quality = FrameQuality::for_unwarped(&image);
-        let frame = kept.keep(path, &source, &image, &quality, stats, context)?;
+        let frame = kept.keep(&source, &image, stats)?;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }

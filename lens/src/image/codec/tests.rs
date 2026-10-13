@@ -1,10 +1,15 @@
+use std::io::Cursor;
+
 use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
 use lumos::{ImageDimensions, LinearImage};
 use scenarium::{CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
 use crate::image::{IMAGE_TYPE_ID, Image, Pixels};
-use std::io::Cursor;
+
+fn header_len() -> usize {
+    usize::try_from(HEADER_LEN).unwrap()
+}
 
 async fn encoded(image: Image) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -16,7 +21,7 @@ async fn encoded(image: Image) -> Vec<u8> {
 }
 
 async fn decoded(bytes: Vec<u8>) -> Image {
-    let byte_len = bytes.len() as u64;
+    let byte_len = u64::try_from(bytes.len()).unwrap();
     let value = ImageCodec
         .decode(&mut Cursor::new(bytes), byte_len)
         .await
@@ -39,7 +44,7 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
     for format in ALL_FORMATS {
         let desc = ImageDesc::new(3, 2, format);
         let pixels: Vec<u8> = (0..desc.size_in_bytes())
-            .map(|i| (i * 37 % 251) as u8)
+            .map(|i| u8::try_from(i * 37 % 251).unwrap())
             .collect();
         let image = decoded(
             encoded(Image::from(
@@ -62,10 +67,10 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
     ))
     .await;
     assert_eq!(
-        &bytes[..HEADER_LEN as usize],
+        &bytes[..header_len()],
         &[0, 3, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
     );
-    assert_eq!(&bytes[HEADER_LEN as usize..], pixels);
+    assert_eq!(&bytes[header_len()..], pixels);
 }
 
 /// A planar image keeps its planes: written one after another as
@@ -77,7 +82,7 @@ async fn a_planar_image_round_trips_as_planes() {
     let planar = LinearImage::from_planar_channels(ImageDimensions::new((2, 1), 3), planes.clone());
     let bytes = encoded(Image::from(planar)).await;
     assert_eq!(&bytes[..3], &[1, 3, 2], "planar, three channels, f32");
-    let body: Vec<f32> = bytes[HEADER_LEN as usize..]
+    let body: Vec<f32> = bytes[header_len()..]
         .as_chunks::<4>()
         .0
         .iter()
@@ -104,7 +109,7 @@ async fn a_planar_image_round_trips_as_planes() {
 #[tokio::test]
 async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     async fn error(bytes: Vec<u8>) -> String {
-        let byte_len = bytes.len() as u64;
+        let byte_len = u64::try_from(bytes.len()).unwrap();
         ImageCodec
             .decode(&mut Cursor::new(bytes), byte_len)
             .await
@@ -120,7 +125,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     };
 
     assert_eq!(
-        error(vec![0; HEADER_LEN as usize - 1]).await,
+        error(vec![0; header_len() - 1]).await,
         "image cache payload is only 18 bytes"
     );
     for format in [[0, 0], [2, 0], [3, 3]] {

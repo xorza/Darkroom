@@ -2,15 +2,14 @@
 
 use glam::{DMat2, DVec2};
 
-use crate::registration::distortion::sip::SipPolynomial;
-use crate::registration::transform::inverse_warp::InverseWarp;
-
-/// The unit roundoff of f64: half the gap between 1 and the next float.
 use crate::image::linear_image::LinearImage;
-use crate::registration::resample;
-use crate::registration::resample::WarpResult;
+use crate::registration::distortion::sip::SipPolynomial;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::{WarpBuffers, WarpResult};
 use crate::registration::transform::Transform;
+use crate::registration::transform::inverse_warp::InverseWarp;
+use crate::scratch_pool::{Scratch, ScratchPool};
 
 /// Combined transform + optional SIP distortion correction for warping.
 ///
@@ -40,10 +39,6 @@ impl WarpTransform {
     /// unconditional cost to skip. They are geometry, not pixels, so each row's maps are written
     /// once, from the same source positions every channel of that row samples at.
     ///
-    /// # Arguments
-    /// * `image` - The source (target) image to warp
-    /// * `params` - The interpolation and its clamp
-    ///
     /// # Example
     ///
     /// ```no_run
@@ -58,7 +53,18 @@ impl WarpTransform {
     /// # }
     /// ```
     pub fn warp(&self, image: &LinearImage, params: WarpParams) -> WarpResult {
-        resample::warp(image, self, params)
+        let mut buffers = WarpBuffers::build(image.dimensions());
+        buffers.warp_into(
+            &SourceImage::of(image),
+            self,
+            params,
+            &ScratchPool::default(),
+        );
+        WarpResult {
+            image: buffers.image,
+            coverage: buffers.coverage,
+            confidence: buffers.confidence,
+        }
     }
 
     /// Create a warp transform with no SIP correction.
@@ -106,5 +112,31 @@ impl WarpTransform {
     /// Whether this transform has a nonlinear SIP component.
     pub const fn has_sip(&self) -> bool {
         self.sip.is_some()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
+    use crate::registration::resample::warp_params::WarpParams;
+    use crate::registration::transform::warp_transform::WarpTransform;
+
+    impl WarpTransform {
+        /// One plane warped on its own — the shape the kernel tests and the plane benches compare.
+        pub(crate) fn warp_plane(&self, input: &Buffer2<f32>, params: WarpParams) -> Buffer2<f32> {
+            let image = LinearImage::from_pixels(
+                ImageDimensions::new((input.width(), input.height()), 1),
+                input.pixels().to_vec(),
+            );
+            let warped = self.warp(&image, params);
+            Buffer2::new(
+                input.width(),
+                input.height(),
+                warped.image.channel(0).pixels().to_vec(),
+            )
+        }
     }
 }

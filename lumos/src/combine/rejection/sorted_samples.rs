@@ -106,6 +106,21 @@ impl SortedSamples {
         }
         window.start + low..window.start + low + kept
     }
+
+    /// The `count` samples of `window` nearest `centre`: a run of the sorted samples, found by
+    /// dropping the farther end until `count` remain. A tie drops the higher end, so the lower
+    /// position is kept.
+    pub(crate) fn nearest(&self, window: Range<usize>, centre: f32, count: usize) -> Range<usize> {
+        let Range { mut start, mut end } = window;
+        while end - start > count {
+            if (self.values[end - 1] - centre).abs() >= (self.values[start] - centre).abs() {
+                end -= 1;
+            } else {
+                start += 1;
+            }
+        }
+        start..end
+    }
 }
 
 /// An unsigned integer that orders as the float does: a positive float's bits order as its value

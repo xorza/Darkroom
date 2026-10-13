@@ -15,7 +15,7 @@ use palantir::prelude::*;
 
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::{colored_text, filled_rect, stroked_rect};
+use crate::gui::widgets::support;
 
 /// The "1:1" glyph's share of its button box — the text peer of the `s * k`
 /// factors its drawn siblings are built from, so it scales with the box rather
@@ -64,13 +64,13 @@ pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: RgbaF32) {
         (far - t, far - len, t, len),
     ];
     for (x, y, w, h) in bars {
-        filled_rect(ui, Rect::new(x, y, w, h), t * 0.5, color);
+        support::filled_rect(ui, Rect::new(x, y, w, h), t * 0.5, color);
     }
 }
 
 /// "1:1" label — zoom to 100%.
 pub(super) fn draw_100(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let style = colored_text(ui, color, s * LABEL_GLYPH_FILL);
+    let style = support::colored_text(ui, color, s * LABEL_GLYPH_FILL);
     Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
@@ -83,7 +83,7 @@ pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: RgbaF32) {
         for ix in 0..2 {
             let x = o + ix as f32 * (cell + gap);
             let y = o + iy as f32 * (cell + gap);
-            filled_rect(ui, Rect::new(x, y, cell, cell), 1.0, color);
+            support::filled_rect(ui, Rect::new(x, y, cell, cell), 1.0, color);
         }
     }
 }
@@ -102,7 +102,7 @@ pub(super) fn draw_swatch(
     let o = (s - d) * 0.5;
     let rect = Rect::new(o, o, d, d);
     if let Some(fill) = flat_fill(theme, mode) {
-        filled_rect(ui, rect, SWATCH_RADIUS, fill);
+        support::filled_rect(ui, rect, SWATCH_RADIUS, fill);
     } else {
         let light = RgbaF32::from_srgba(SrgbaU8::rgb(
             CHECKER_LIGHT_U8,
@@ -114,11 +114,11 @@ pub(super) fn draw_swatch(
             CHECKER_DARK_U8,
             CHECKER_DARK_U8,
         ));
-        filled_rect(ui, rect, SWATCH_RADIUS, dark);
+        support::filled_rect(ui, rect, SWATCH_RADIUS, dark);
         // Two light quads on the diagonal make the 2×2 mini checker.
         let h = d * 0.5;
         for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-            filled_rect(ui, cell, 0.0, light);
+            support::filled_rect(ui, cell, 0.0, light);
         }
     }
     // Ring on top so the checker quads can't cover it.
@@ -130,7 +130,7 @@ pub(super) fn draw_swatch(
             theme.card.border_width,
         )
     };
-    stroked_rect(ui, rect, SWATCH_RADIUS, ring, width);
+    support::stroked_rect(ui, rect, SWATCH_RADIUS, ring, width);
 }
 
 /// The single colour `mode` paints, or `None` for the checker, which is a

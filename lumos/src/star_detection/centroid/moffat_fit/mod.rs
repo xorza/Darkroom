@@ -17,17 +17,14 @@ use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_beta_to_alpha, 
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
+use crate::star_detection::centroid;
 use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
 use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp::StampFit;
-use crate::star_detection::centroid::stamp::StampGrid;
-use crate::star_detection::centroid::star_noise::StarNoise;
-use crate::star_detection::centroid::{
-    MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE, fit_is_plausible, position_sigma,
-};
+use crate::star_detection::centroid::stamp;
+use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
+use crate::star_detection::centroid::{MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE};
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 /// A converged 2D Moffat profile fitted to one star stamp: where its centre landed and
 /// the FWHM that follows from its alpha and beta. Build one with [`MoffatFit::new`].
@@ -64,11 +61,7 @@ enum PowStrategy {
 #[inline]
 fn fast_pow_neg(u: f64, strategy: PowStrategy) -> f64 {
     match strategy {
-        PowStrategy::HalfInt { int_part } => {
-            // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
-            let u_n = int_pow(u, int_part);
-            1.0 / (u_n * u.sqrt())
-        }
+        PowStrategy::HalfInt { int_part } => 1.0 / (int_pow(u, int_part) * u.sqrt()),
         PowStrategy::Int { n } => 1.0 / int_pow(u, n),
         // The vector kernel's power, which every Isa computes to the same bits, so a lane and
         // this agree bit for bit.
@@ -123,7 +116,7 @@ struct MoffatFixedBeta {
     stamp_radius: f64,
     beta: f64,
     pow_strategy: PowStrategy,
-    /// The smallest amplitude the fit may take; see [`StampFit::min_amplitude`].
+    /// The smallest amplitude the fit may take; see `stamp::min_amplitude`.
     min_amplitude: f64,
     /// The narrowest α the fit may take, in px: the profile of the FWHM a Gaussian of
     /// [`MIN_PROFILE_SIGMA`] has. The widest is the stamp radius.
@@ -203,30 +196,29 @@ impl LMModel<5> for MoffatFixedBeta {
 }
 
 impl MoffatFit {
-    /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
-    /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
-    /// shot-noisy bright core doesn't bias the fit; `None` is a plain unweighted fit.
+    /// Fit a 2D Moffat profile of `beta` to a star stamp via Levenberg-Marquardt (f64
+    /// throughout). When `inputs.noise` is set, each pixel is weighted by `1/σ²` from the CCD
+    /// noise model so the shot-noisy bright core doesn't bias the fit; `None` is a plain
+    /// unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
     /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
-    /// ([`fit_is_plausible`]), or an amplitude or α pinned at one of
+    /// ([`centroid::fit_is_plausible`]), or an amplitude or α pinned at one of
     /// [`MoffatFixedBeta::constrain`]'s bounds.
-    pub(super) fn new(
-        pixels: &Buffer2<f32>,
-        pos: DVec2,
-        grid: &StampGrid,
-        background: f32,
-        noise: Option<StarNoise>,
-        beta: f32,
-    ) -> Option<Self> {
-        // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
-        let mut fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
+    pub(super) fn new(inputs: FitInputs<'_>, beta: f32) -> Option<Self> {
+        let FitInputs {
+            pos,
+            grid,
+            background,
+            ..
+        } = inputs;
+        let mut fit = StampFit::prepare::<5>(inputs)?;
         let amplitude_seed = fit.amplitude_seed()?;
 
         let mut model = MoffatFixedBeta::new(
             grid.radius as f64,
             f64::from(beta),
-            StampFit::min_amplitude(amplitude_seed),
+            stamp::min_amplitude(amplitude_seed),
         );
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
@@ -250,13 +242,13 @@ impl MoffatFit {
         let shape_free = amplitude > model.min_amplitude
             && alpha > model.min_alpha
             && alpha < model.stamp_radius;
-        if !shape_free || !fit_is_plausible(result_pos, pos, grid.radius) {
+        if !shape_free || !centroid::fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
 
         Some(Self {
             pos: result_pos,
-            position_sigma: position_sigma(&result, fit.stamp.z.len())?,
+            position_sigma: centroid::position_sigma(&result, fit.stamp.z.len())?,
             fwhm: alpha_beta_to_fwhm(alpha as f32, beta),
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result, model.quadrature.nodes().len()),

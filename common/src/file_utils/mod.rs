@@ -33,7 +33,7 @@ impl Publication {
     fn commit(mut self, file: File) -> io::Result<()> {
         // `seal` closes the handle on every path, before a failure drops `self` and removes the
         // temporary: Windows refuses to remove an open file.
-        Self::seal(file, &self.destination, self.mode)?;
+        self.seal(file)?;
         platform::replace(&self.temporary, &self.destination, self.mode)?;
         if self.mode == PublicationMode::Durable {
             let parent = self
@@ -47,10 +47,10 @@ impl Publication {
         Ok(())
     }
 
-    fn seal(mut file: File, destination: &Path, mode: PublicationMode) -> io::Result<()> {
+    fn seal(&self, mut file: File) -> io::Result<()> {
         file.flush()?;
-        prepare_destination(&file, destination)?;
-        if mode == PublicationMode::Durable {
+        prepare_destination(&file, &self.destination)?;
+        if self.mode == PublicationMode::Durable {
             file.sync_all()?;
         }
         Ok(())
@@ -224,33 +224,6 @@ fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
-    }
-}
-
-#[cfg(feature = "internals")]
-pub mod internals {
-    use std::fs;
-    use std::path::{Path, PathBuf};
-
-    /// The publication temporaries beside `destination`: every file named
-    /// like the ones a publication writes before it renames, which one that
-    /// failed must not leave behind.
-    pub fn publication_temp_files(destination: &Path) -> Vec<PathBuf> {
-        let prefix = format!("{}.", destination.file_name().unwrap().to_string_lossy());
-        fs::read_dir(destination.parent().unwrap())
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|candidate| {
-                candidate
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(&prefix)
-                    && candidate
-                        .extension()
-                        .is_some_and(|extension| extension == "tmp")
-            })
-            .collect()
     }
 }
 

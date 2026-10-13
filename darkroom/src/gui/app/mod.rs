@@ -22,6 +22,7 @@ use crate::gui::MAIN_WINDOW;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::commands::prefs::MlModelKind;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::app::session::Session;
 use crate::gui::dialogs;
 use crate::gui::pane::graph::node::port_row::PathPick;
 use crate::gui::requests::Requests;
@@ -33,8 +34,6 @@ pub(crate) mod app_ctx;
 pub(crate) mod commands;
 mod discard_dialog;
 pub(crate) mod session;
-
-use session::Session;
 
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Session`] that authors each
@@ -107,12 +106,6 @@ enum PendingTransition {
     Quit,
     New,
     OpenPicked,
-    // Only `platform::macos` hands a path in; the other two OSes get theirs
-    // through argv at launch, before an `App` exists to guard.
-    #[cfg_attr(
-        all(not(target_os = "macos"), not(test)),
-        expect(dead_code, reason = "only the macOS open-file handler constructs it")
-    )]
     OpenAt(PathBuf),
 }
 
@@ -261,13 +254,8 @@ impl App {
 
     /// Open `path`, prompting first if the current document has unsaved
     /// edits. The entry point for a document the editor did not ask for —
-    /// today, one Finder handed us, which makes this macOS-only: see
-    /// [`crate::platform::route_opened_documents`] for why no other OS has a
-    /// caller.
-    #[cfg_attr(
-        not(target_os = "macos"),
-        expect(dead_code, reason = "only the macOS open-file handler calls it")
-    )]
+    /// one the desktop hands over through
+    /// [`crate::platform::route_opened_documents`].
     pub(crate) fn open_document_at(&mut self, path: PathBuf) {
         self.guard_discard(PendingTransition::OpenAt(path));
     }
@@ -491,7 +479,9 @@ impl App {
         }
         match self.preferences.save() {
             Ok(()) => self.status.succeeded(StatusFamily::Preferences),
-            Err(err) => self.status.error(StatusFamily::Preferences, err),
+            Err(err) => self
+                .status
+                .error(StatusFamily::Preferences, err.to_string()),
         }
     }
 

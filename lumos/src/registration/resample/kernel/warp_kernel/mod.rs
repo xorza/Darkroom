@@ -176,30 +176,7 @@ impl WarpKernel {
 
     /// `filter` at the stretch `warp` needs over an output frame of `size`, the source's own.
     pub(crate) fn for_frame(filter: Filter, warp: &WarpTransform, size: Size2us) -> Self {
-        Self::new(filter, Self::frame_stretch(warp, size))
-    }
-
-    /// The largest local scale of `warp` over the output pixels that land in the source, held to
-    /// at least one. An affine map has one Jacobian; any other is read on [`STRETCH_GRID`] and the
-    /// frame's last row and column. A node that lands outside the source has nothing to alias and
-    /// is left out: near a homography's horizon the scale grows without bound.
-    fn frame_stretch(warp: &WarpTransform, size: Size2us) -> f32 {
-        let largest =
-            if !warp.has_sip() && warp.transform.transform_type() != TransformType::Homography {
-                largest_singular_value(warp.jacobian(DVec2::ZERO))
-            } else {
-                let nodes = |length: usize| {
-                    (0..length)
-                        .step_by(STRETCH_GRID)
-                        .chain((length % STRETCH_GRID != 1).then_some(length - 1))
-                };
-                nodes(size.height)
-                    .flat_map(|y| nodes(size.width).map(move |x| DVec2::new(x as f64, y as f64)))
-                    .filter(|&p| SourcePosition::within(warp.apply(p), size).is_some())
-                    .map(|p| largest_singular_value(warp.jacobian(p)))
-                    .fold(1.0, f64::max)
-            };
-        largest.max(1.0) as f32
+        Self::new(filter, frame_stretch(warp, size))
     }
 
     /// Bilinear at this kernel's stretch: the fallback where this kernel's surviving taps cannot
@@ -306,6 +283,29 @@ fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
     let far = x.lanes_lt(splat(2.0));
     let beyond_one = near.select(outer, inner);
     far.keep(beyond_one)
+}
+
+/// The largest local scale of `warp` over the output pixels that land in the source, held to
+/// at least one. An affine map has one Jacobian; any other is read on [`STRETCH_GRID`] and the
+/// frame's last row and column. A node that lands outside the source has nothing to alias and
+/// is left out: near a homography's horizon the scale grows without bound.
+fn frame_stretch(warp: &WarpTransform, size: Size2us) -> f32 {
+    let largest = if !warp.has_sip() && warp.transform.transform_type() != TransformType::Homography
+    {
+        largest_singular_value(warp.jacobian(DVec2::ZERO))
+    } else {
+        let nodes = |length: usize| {
+            (0..length)
+                .step_by(STRETCH_GRID)
+                .chain((length % STRETCH_GRID != 1).then_some(length - 1))
+        };
+        nodes(size.height)
+            .flat_map(|y| nodes(size.width).map(move |x| DVec2::new(x as f64, y as f64)))
+            .filter(|&p| SourcePosition::within(warp.apply(p), size).is_some())
+            .map(|p| largest_singular_value(warp.jacobian(p)))
+            .fold(1.0, f64::max)
+    };
+    largest.max(1.0) as f32
 }
 
 /// The largest singular value of `m`: the square root of the larger eigenvalue of `mᵀm`, whose

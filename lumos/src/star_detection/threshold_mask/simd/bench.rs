@@ -9,11 +9,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
+use crate::simd::Kernel;
 use crate::simd::tier::Tier;
 use crate::star_detection::bench::Stages;
-use crate::star_detection::threshold_mask::ThresholdParams;
-use crate::star_detection::threshold_mask::simd::internals::process_words_scalar;
-use crate::star_detection::threshold_mask::simd::{ProcessWords, WORD_PIXELS, process_words};
+use crate::star_detection::threshold_mask::simd::{ProcessWords, WORD_PIXELS};
+use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
@@ -40,7 +40,15 @@ pub(crate) fn atomic(c: &mut Criterion) {
             noise,
             threshold,
         } = row();
-        b.iter(|| process_words_scalar(black_box(pixels), noise, threshold, &mut words));
+        b.iter(|| {
+            ProcessWords {
+                pixels: black_box(pixels),
+                noise,
+                threshold,
+                words: &mut words,
+            }
+            .run_scalar();
+        });
     });
     for &tier in &tiers {
         group.bench_function(
@@ -68,7 +76,15 @@ pub(crate) fn atomic(c: &mut Criterion) {
             noise,
             threshold,
         } = row();
-        b.iter(|| process_words(black_box(pixels), noise, threshold, &mut words));
+        b.iter(|| {
+            ProcessWords {
+                pixels: black_box(pixels),
+                noise,
+                threshold,
+                words: &mut words,
+            }
+            .dispatch();
+        });
     });
 }
 

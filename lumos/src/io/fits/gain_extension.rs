@@ -11,14 +11,15 @@ use fits_well::io::{Hdu, HduKind};
 use imaginarium::Buffer2;
 
 use crate::image::flat_gain::{self, FlatGain, GainGrid};
-use crate::io::error::ImageError;
-use crate::io::fits::error::fits_to_io;
+use crate::io::error::{FitsRefusal, ImageError};
+use crate::io::fits;
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
+use crate::io::fits::lumos_extension::LumosExtension;
 use crate::math::size2us::Size2us;
 
 pub(crate) const GAIN_EXTNAME: &str = "LUMGAIN";
-const GAIN_FORMAT: &str = "FLATGAIN";
-const GAIN_VERSION: i64 = 1;
+pub(crate) const GAIN_FORMAT: &str = "FLATGAIN";
+pub(crate) const GAIN_VERSION: i64 = 1;
 /// The keyword that states the pixels between nodes, which a reader must share.
 const STEP_KEYWORD: &str = "LUMGSTEP";
 
@@ -50,11 +51,11 @@ impl GainExtension {
             .and_then(|header| header.set("LUMOSFMT", GAIN_FORMAT))
             .and_then(|header| header.set("LUMOSVER", GAIN_VERSION))
             .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))
-            .map_err(fits_to_io)?;
+            .map_err(fits::to_io)?;
         let grid = GainGrid::of(gain.size());
         let nodes: Vec<f32> = gain.planes().flatten().copied().collect();
         let image =
-            Image::new([grid.columns, grid.rows, gain.channels()], nodes).map_err(fits_to_io)?;
+            Image::new([grid.columns, grid.rows, gain.channels()], nodes).map_err(fits::to_io)?;
         Ok(Some(Self { image, header }))
     }
 
@@ -67,7 +68,8 @@ impl GainExtension {
         image: usize,
         size: Size2us,
     ) -> Result<Option<usize>, ImageError> {
-        let found = ExtensionClaims::of(path, hdus, GAIN_EXTNAME)?.for_image(path, hdus, image)?;
+        let found =
+            ExtensionClaims::of(path, hdus, LumosExtension::Gain)?.for_image(path, hdus, image)?;
         if let Some(index) = found {
             Self::check(path, &hdus[index], size)?;
         }
@@ -77,8 +79,8 @@ impl GainExtension {
     /// Refuse a gain HDU that is not this format's: another version or step, another type or
     /// scaling, or another grid than the `size` image's, of other than one or three planes.
     fn check(path: &Path, hdu: &Hdu, size: Size2us) -> Result<(), ImageError> {
-        let refuse =
-            |reason: &str| ImageError::fits_unsupported(path, format!("{GAIN_EXTNAME}: {reason}"));
+        let extension = LumosExtension::Gain;
+        let refuse = |reason| ImageError::fits_unsupported(path, reason);
         let header = &hdu.header;
         let integer = |keyword| {
             header
@@ -90,34 +92,37 @@ impl GainExtension {
             .map_err(|source| ImageError::fits(path, source))?;
         let version = integer("LUMOSVER")?;
         if format != Some(GAIN_FORMAT) || version != Some(GAIN_VERSION) {
-            return Err(refuse(&format!(
-                "format {format:?} version {version:?}; expected {GAIN_FORMAT} version \
-                 {GAIN_VERSION}"
-            )));
+            return Err(refuse(FitsRefusal::ExtensionFormat {
+                extension,
+                format: format.map(str::to_owned),
+                version,
+            }));
         }
         let step = integer(STEP_KEYWORD)?;
         if step != Some(flat_gain::STEP as i64) {
-            return Err(refuse(&format!(
-                "a node every {step:?} pixels; this reader takes {}",
-                flat_gain::STEP
-            )));
+            return Err(refuse(FitsRefusal::GainStep { step }));
         }
         if hdu.kind != HduKind::Image {
-            return Err(refuse("not an uncompressed image extension"));
+            return Err(refuse(FitsRefusal::ExtensionNotImage { extension }));
         }
         let image = hdu
             .image()
             .map_err(|source| ImageError::fits(path, source))?;
         if image.bitpix != Bitpix::F32 || image.scaling != Scaling::IDENTITY {
-            return Err(refuse("not unscaled BITPIX = -32 floats"));
+            return Err(refuse(FitsRefusal::ExtensionSamples {
+                extension,
+                bitpix: image.bitpix,
+                scaling: image.scaling,
+            }));
         }
         let grid = GainGrid::of(size);
         if !matches!(image.shape, [columns, rows, 1 | 3] if *columns == grid.columns && *rows == grid.rows)
         {
-            return Err(refuse(&format!(
-                "shape {:?} is not one or three {}x{} grids over the image's {}x{}",
-                image.shape, grid.columns, grid.rows, size.width, size.height
-            )));
+            return Err(refuse(FitsRefusal::ExtensionShape {
+                extension,
+                shape: image.shape.to_vec(),
+                image: size,
+            }));
         }
         Ok(())
     }
@@ -141,10 +146,10 @@ impl GainExtension {
         {
             return Err(ImageError::fits_unsupported(
                 path,
-                format!(
-                    "{GAIN_EXTNAME} node {index} holds {}, not a gain",
-                    nodes[index]
-                ),
+                FitsRefusal::NotAGain {
+                    node: index,
+                    value: nodes[index],
+                },
             ));
         }
         let planes: ArrayVec<Buffer2<f32>, 3> = nodes

@@ -9,10 +9,8 @@ use glam::DVec2;
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::drizzle::accumulator::DrizzleAccumulator;
-use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::registration::bench::Pair;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
@@ -98,14 +96,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     kernel,
                     ..DrizzleConfig::default()
                 };
-                let mut accumulator = DrizzleAccumulator::new(
-                    ImageDimensions::new(FRAME, 1),
-                    Deposit::Channels(1),
-                    config,
-                    0,
-                )
-                .expect("a valid drizzle configuration");
                 let frame = DrizzleFrame::new(field.render(FRAME).image, geometry.warp());
+                let mut accumulator = DrizzleAccumulator::new(&frame.source, config, 0)
+                    .expect("a valid drizzle configuration");
                 b.iter(|| accumulator.add_frame(&frame).expect("the frame drizzles"));
             });
         }

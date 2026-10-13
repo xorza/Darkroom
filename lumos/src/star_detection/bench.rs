@@ -11,7 +11,6 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::stages::fwhm;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 use crate::star_detection::star_detector::stages::{detect, filter};
-use crate::star_detection::threshold_mask::{ThresholdParams, create_residual_threshold_mask};
 use crate::star_detection::{
     background, centroid, convolution, labeling, median_filter, threshold_mask,
 };
@@ -44,22 +43,14 @@ pub(crate) struct Stages {
 
 impl Stages {
     pub(crate) fn of(field: Field) -> Self {
-        let config = Self::config(field);
+        let config = config(field);
         let image = field.render(FRAME).image;
         let mut resources = DetectionResources::new(FRAME);
         let frame = PreparedFrame::new(&image, &config, &mut resources);
         let fwhm = fwhm::estimate(&frame, &config, &mut resources).value();
         let plane = frame.detection_plane(fwhm, &config, &mut resources);
         let mut mask = BitBuffer2::new_default(FRAME);
-        create_residual_threshold_mask(
-            &plane.values,
-            &plane.noise.noise,
-            ThresholdParams {
-                sigma: config.extraction.sigma_threshold,
-                min_noise: plane.noise.floor,
-            },
-            &mut mask,
-        );
+        plane.threshold(config.extraction.sigma_threshold, &mut mask);
         Self {
             config,
             frame,
@@ -68,13 +59,13 @@ impl Stages {
             mask,
         }
     }
+}
 
-    /// The configuration a user picks for `field`: the default for a sparse or a typical field,
-    /// the crowded-field preset for a cluster.
-    pub(crate) fn config(field: Field) -> StarDetectionConfig {
-        match field {
-            Field::Sparse | Field::Typical => StarDetectionConfig::default(),
-            Field::Dense => StarDetectionConfig::crowded_field(),
-        }
+/// The configuration a user picks for `field`: the default for a sparse or a typical field, the
+/// crowded-field preset for a cluster.
+pub(crate) fn config(field: Field) -> StarDetectionConfig {
+    match field {
+        Field::Sparse | Field::Typical => StarDetectionConfig::default(),
+        Field::Dense => StarDetectionConfig::crowded_field(),
     }
 }

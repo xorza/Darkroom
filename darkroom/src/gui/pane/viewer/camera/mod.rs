@@ -10,8 +10,8 @@
 use glam::Vec2;
 use palantir::{Rect, Size};
 
-use crate::core::document::Viewport;
-use crate::gui::pane::graph::gesture::pan_zoom::zoom_about;
+use crate::core::document::viewport::Viewport;
+use crate::gui::pane::graph::gesture::pan_zoom;
 
 /// Viewer zoom bounds — far wider than the canvas's
 /// (`pan_zoom::CANVAS_MIN_ZOOM`/`CANVAS_MAX_ZOOM`): out to overview a
@@ -45,7 +45,7 @@ pub(super) fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
 /// fixed — the button sibling of the cursor-anchored wheel zoom.
 pub(super) fn zoom_about_pane_center(mut v: Viewport, zoom: f32, pane: Vec2) -> Viewport {
     let factor = zoom / v.zoom;
-    zoom_about(
+    pan_zoom::zoom_about(
         &mut v.pan,
         &mut v.zoom,
         pane * 0.5,

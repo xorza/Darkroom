@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::math::statistics::{
-    abs_deviation_inplace, mad_to_sigma, median_mut, median_of_magnitudes,
-};
+use crate::math::statistics;
 
 /// A distribution's location and spread — what one pass over the values measures.
 ///
@@ -26,9 +24,9 @@ impl MedianMad {
     pub(crate) fn of_mut(data: &mut [f32]) -> Self {
         debug_assert!(!data.is_empty());
 
-        let median = median_mut(data);
-        abs_deviation_inplace(data, median);
-        let mad = median_of_magnitudes(data);
+        let median = statistics::median_mut(data);
+        statistics::abs_deviation_inplace(data, median);
+        let mad = statistics::median_of_magnitudes(data);
 
         Self { median, mad }
     }
@@ -36,6 +34,6 @@ impl MedianMad {
     /// The MAD rescaled to the standard deviation of an equivalent normal distribution.
     #[inline]
     pub(crate) const fn sigma(self) -> f32 {
-        mad_to_sigma(self.mad)
+        statistics::mad_to_sigma(self.mad)
     }
 }

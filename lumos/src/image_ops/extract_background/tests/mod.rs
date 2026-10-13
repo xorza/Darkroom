@@ -5,7 +5,6 @@ use crate::image_ops::extract_background::*;
 use crate::image_ops::stretch::{Stretch, StretchMethod};
 use crate::internals::images::rgb_image as rgb;
 use crate::internals::prelude::*;
-use crate::math::statistics::median_mut;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
@@ -32,12 +31,16 @@ fn energy(p: &[f32]) -> f64 {
 }
 
 #[test]
-fn poly_terms_are_correct() {
-    assert_eq!(poly_terms(0), vec![(0, 0)]);
-    assert_eq!(poly_terms(1), vec![(0, 0), (0, 1), (1, 0)]);
+fn monomials_take_every_term_to_the_degree() {
+    let monomial = |x, y| Monomial { x, y };
+    assert_eq!(Monomial::up_to(0), [monomial(0, 0)]);
+    assert_eq!(
+        Monomial::up_to(1),
+        [monomial(0, 0), monomial(0, 1), monomial(1, 0)]
+    );
     // total 2 adds (0,2),(1,1),(2,0) → 6 terms = (2+1)(2+2)/2.
-    assert_eq!(poly_terms(2).len(), 6);
-    assert_eq!(poly_terms(4).len(), 15);
+    assert_eq!(Monomial::up_to(2).len(), 6);
+    assert_eq!(Monomial::up_to(4).len(), 15);
 }
 
 #[test]
@@ -250,33 +253,32 @@ fn outlier_tiles_are_rejected_from_the_fit() {
     assert_eq!(unrejecting, unrefined);
 }
 
-/// The fitted surface is evaluated two ways: `eval`, a sum of `powi` monomials, and
+/// The fitted surface is evaluated two ways: `Polynomial::at`, a sum of `powi` monomials, and
 /// `Surface::remove`, Horner over row-collapsed coefficients; `Surface::mean` is a third, from
 /// closed-form axis moments. On a non-square frame at every degree they agree: the f64 evaluations
 /// to 1e-12 of the coefficients' magnitude (a few dozen f64 roundings), the stored model to that
-/// plus its f32 rounding, and the mean to the average of `eval` over every pixel.
+/// plus its f32 rounding, and the mean to the average of `Polynomial::at` over every pixel.
 #[test]
 fn surface_evaluators_agree() {
     let size = Size2us::new(37, 23);
     for degree in 1..=4 {
-        let terms = poly_terms(degree);
-        let coeffs = DVector::from_fn(terms.len(), |k, _| {
-            0.3 - 0.17 * k as f64 + 0.011 * (k * k) as f64
-        });
-        let magnitude: f64 = coeffs.iter().map(|c| c.abs()).sum();
-        let surface = Surface::new(&coeffs, &terms, size);
+        let terms = Monomial::up_to(degree);
+        let polynomial = Polynomial {
+            terms: &terms,
+            coeffs: DVector::from_fn(terms.len(), |k, _| {
+                0.3 - 0.17 * k as f64 + 0.011 * (k * k) as f64
+            }),
+        };
+        let magnitude: f64 = polynomial.coeffs.iter().map(|c| c.abs()).sum();
+        let surface = Surface::new(&polynomial, size);
         let mut model = Buffer2::new_filled(size.width, size.height, 0.0f32);
         surface.remove(&mut model, |_, m| m);
 
         let mut total = 0.0;
         for y in 0..size.height {
             for x in 0..size.width {
-                let expected = eval(
-                    &coeffs,
-                    &terms,
-                    norm(x as f64, size.width),
-                    norm(y as f64, size.height),
-                );
+                let expected =
+                    polynomial.at(norm(x as f64, size.width), norm(y as f64, size.height));
                 total += expected;
                 let got = f64::from(model[(x, y)]);
                 let bound = 1e-12 * magnitude + f64::from(f32::EPSILON) / 2.0 * expected.abs();
@@ -389,7 +391,7 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
         ExtractBackground::default().apply(&mut img).unwrap();
         stretch.apply(&mut img).unwrap();
         let mut px = img.channel(0).pixels().to_vec();
-        let median = median_mut(&mut px);
+        let median = statistics::median_mut(&mut px);
         let target = StretchMethod::AUTO_TARGET_BACKGROUND;
         assert!(
             (median - target).abs() < 1e-4,

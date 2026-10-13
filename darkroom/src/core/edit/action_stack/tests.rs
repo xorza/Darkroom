@@ -5,8 +5,8 @@ use glam::Vec2;
 use scenarium::{Library, NodeId};
 
 use super::*;
-use crate::core::document::Viewport;
 use crate::core::document::internals::{self, DocFixture};
+use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 

@@ -1,7 +1,7 @@
 //! [`Budget`]: what one run plans against.
 
 /// What one run plans against, read once at its entry: the bytes it may hold — the share
-/// [`memory_budget`](crate::memory::memory_budget) leaves of the memory it plans for — and the
+/// [`usable`](crate::memory::usable) leaves of the memory it plans for — and the
 /// workers its stages fan out on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Budget {
@@ -11,7 +11,7 @@ pub(crate) struct Budget {
 
 impl Budget {
     pub(crate) const fn new(usable: u64, workers: usize) -> Self {
-        assert!(workers > 0, "a run has one worker at least");
+        debug_assert!(workers > 0, "a run has one worker at least");
         Self { usable, workers }
     }
 

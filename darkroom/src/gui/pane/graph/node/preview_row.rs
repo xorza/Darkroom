@@ -18,17 +18,15 @@ use palantir::widget::Shape;
 use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
 use scenarium::NodeId;
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
-use crate::gui::widgets::format::fmt_bytes;
-use crate::gui::widgets::support::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, ROW_GAP, bare_value, footer_background, labeled_value,
-    sized_text,
-};
+use crate::gui::widgets::format::bytes::Bytes;
+use crate::gui::widgets::support;
+use crate::gui::widgets::support::{CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, ROW_GAP};
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
 /// normal node's so a thumbnail has somewhere to be; the body still hugs
@@ -54,7 +52,7 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
-pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
+pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let theme = ncx.theme();
     let node = ncx;
     let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
@@ -79,7 +77,7 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     None => ui.intern(EMPTY_LABEL),
                 };
                 Text::new(text)
-                    .style(&sized_text(ui, theme.text.label))
+                    .style(&support::sized_text(ui, theme.text.label))
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
             }
@@ -121,18 +119,23 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
         // rounded bottom, the way the header rounds the top.
-        .background(footer_background(theme, theme.card.inner_radius()))
+        .background(support::footer_background(theme, theme.card.inner_radius()))
         .show(ui, |ui| {
             let size = image.preview.native_size;
-            bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
-            bare_value(ui, theme, FormatLabel(image.preview.native_format));
+            support::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
+            support::bare_value(ui, theme, FormatLabel(image.preview.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
                 .gap(ROW_GAP)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
-                    labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes as u64));
+                    support::labeled_value(
+                        ui,
+                        theme,
+                        "Source",
+                        Bytes::new(image.source_bytes as u64),
+                    );
                 });
         });
 }

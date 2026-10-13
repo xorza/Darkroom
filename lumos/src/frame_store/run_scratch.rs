@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::Pod;
 
-use crate::frame::frame_quality::FramePlane;
+use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::platform::ScratchFile;
+use crate::platform::{Eviction, ScratchFile};
 
 /// The files one run parks frames in, private to it and gone when it ends, however it ends: each
 /// a [`ScratchFile`], deleted while it is open, so a frame's disk space returns the moment its
@@ -23,9 +23,9 @@ pub(crate) struct RunScratch {
     /// The next file's number. Two runs over one root count alike and pass over each other's
     /// names, which the exclusive create finds taken.
     next: AtomicU64,
-    /// Whether each map keeps its file's handle, for a bench of cold reads to evict its pages; a
-    /// run's scratch never does, so it holds no handle per plane.
-    evictable: bool,
+    /// Whether a bench of cold reads may evict each map's pages; a run's scratch never does, so it
+    /// holds no handle per plane.
+    eviction: Eviction,
 }
 
 impl RunScratch {
@@ -34,7 +34,7 @@ impl RunScratch {
         Ok(Self {
             root: DiskRoot::create(root)?,
             next: AtomicU64::new(0),
-            evictable: false,
+            eviction: Eviction::Never,
         })
     }
 
@@ -53,7 +53,7 @@ impl RunScratch {
         file.write_all(bytemuck::cast_slice(pixels))
             .map_err(write_error)?;
         let mapped = file
-            .map(self.evictable)
+            .map(self.eviction)
             .map_err(|source| FrameStoreError::MemoryMap {
                 path: self.root.path().to_path_buf(),
                 source,
@@ -115,12 +115,13 @@ pub(crate) mod internals {
 
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::run_scratch::RunScratch;
+    use crate::platform::Eviction;
 
     impl RunScratch {
         /// [`RunScratch::create`] whose planes a bench of cold reads can evict.
         pub(crate) fn create_evictable(root: &Path) -> Result<Self, FrameStoreError> {
             Ok(Self {
-                evictable: true,
+                eviction: Eviction::Allowed,
                 ..Self::create(root)?
             })
         }

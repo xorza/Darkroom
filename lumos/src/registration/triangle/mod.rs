@@ -14,7 +14,8 @@
 //! 6. Extract high-confidence matches from vote matrix
 
 mod geometry;
-pub(super) mod matching;
+mod matching;
+mod reference_triangles;
 pub(crate) mod triangle_config;
 pub(crate) mod voting;
 

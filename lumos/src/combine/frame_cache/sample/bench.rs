@@ -8,7 +8,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::STACKED_LIGHTS;
-use crate::combine::frame_cache::sample::CombinedSample;
+use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples};
 use crate::combine::rejection::bench::{BLOCK, Block};
 use crate::math::sum;
 
@@ -23,15 +23,15 @@ pub(crate) fn atomic(c: &mut Criterion) {
             .chunks_exact(frames)
             .map(|pixel| sum::weighted_mean_f32(pixel, &block.weights))
             .collect();
+        let mut samples = block.samples.clone();
         b.iter(|| {
-            for (pixel, &mean) in block.samples.chunks_exact(frames).zip(&means) {
-                black_box(CombinedSample::from_survivors(
-                    mean,
-                    pixel,
-                    &block.weights,
-                    0..frames,
-                    Some(block.noise()),
-                ));
+            for (values, &mean) in samples.chunks_exact_mut(frames).zip(&means) {
+                let pixel = PixelSamples {
+                    values,
+                    weights: &block.weights,
+                    noise: Some(block.noise()),
+                };
+                black_box(CombinedSample::from_survivors(mean, &pixel, 0..frames));
             }
         });
     });

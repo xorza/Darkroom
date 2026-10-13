@@ -18,20 +18,17 @@ fn gamma_k2(x: f64) -> f64 {
 /// Scores a hypothesis's residuals by the truncated Welsch loss of the module docs.
 #[derive(Debug)]
 pub(super) struct WelschScorer {
-    /// Maximum sigma squared (`σ²_max`)
+    /// `σ²_max`.
     max_sigma_sq: f64,
-    /// Outlier loss (assigned to points beyond threshold)
+    /// The loss of a point past the threshold.
     outlier_loss: f64,
-    /// Threshold squared for outlier classification (χ² · `σ²_max`)
+    /// The squared outlier threshold, `χ²₀.₉₉(2)·σ²_max`.
     threshold_sq: f64,
 }
 
 impl WelschScorer {
-    /// The scorer at noise scale `max_sigma`.
-    ///
-    /// # Arguments
-    /// * `max_sigma` - Maximum noise scale in pixels. Points with residuals
-    ///   greater than ~`3·max_sigma` are treated as outliers.
+    /// The scorer at noise scale `max_sigma`, in pixels: residuals past `√χ²₀.₉₉(2)·max_sigma`,
+    /// about `3·max_sigma`, are outliers.
     pub(super) fn new(max_sigma: f64) -> Self {
         let max_sigma_sq = max_sigma * max_sigma;
         let threshold_sq = CHI2_99_2DOF * max_sigma_sq;
@@ -58,7 +55,6 @@ impl WelschScorer {
             return self.outlier_loss;
         }
 
-        // x = r² / (2σ²_max)
         let x = residual_sq / (2.0 * self.max_sigma_sq);
 
         // Monotone saturating loss: ≈ r²/4 near zero (least-squares), saturating at σ²_max/2 as the
@@ -67,7 +63,7 @@ impl WelschScorer {
         self.max_sigma_sq / 2.0 * gamma_k2(x)
     }
 
-    /// Check if a point should be considered an inlier for counting purposes.
+    /// Whether a point counts as an inlier.
     #[inline]
     pub(super) fn is_inlier(&self, residual_sq: f64) -> bool {
         residual_sq <= self.threshold_sq

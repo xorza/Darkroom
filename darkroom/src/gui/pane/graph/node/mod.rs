@@ -7,7 +7,7 @@ mod value_editor;
 pub(super) mod wid;
 pub(super) mod widget;
 
-use crate::core::document::StackedItem;
+use crate::core::document::graph_view::StackedItem;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;

@@ -3,7 +3,7 @@ use common::TempFile;
 
 use crate::containers::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::slot::OutputSnapshot;
+use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::index::{NodeIdx, OutputAddr};

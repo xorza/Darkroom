@@ -27,7 +27,6 @@ use crate::image_ops::error::OpError;
 use crate::math::noise::mrs_noise::MrsNoise;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;
-use crate::math::wavelet::{atrous_smooth, max_scales};
 use crate::stack_product::quality_map::QualityMap;
 use std::mem;
 
@@ -107,7 +106,7 @@ impl Denoise {
     /// # Errors
     /// [`OpError::InvalidConfig`] on out-of-range parameters.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply_with_noise(image, None)
+        self.apply_with_noise(image, ImageNoise::Measured)
     }
 
     /// [`Self::apply`] with the threshold at each pixel scaled by the stack's own σ there, the
@@ -130,20 +129,20 @@ impl Denoise {
         image: &mut LinearImage,
         variance: &QualityMap,
     ) -> Result<(), OpError> {
-        self.apply_with_noise(image, Some(variance))
+        self.apply_with_noise(image, ImageNoise::Variance(variance))
     }
 
     fn apply_with_noise(
         &self,
         image: &mut LinearImage,
-        variance: Option<&QualityMap>,
+        noise: ImageNoise<'_>,
     ) -> Result<(), OpError> {
         self.validate()?;
         if self.strength == 0.0 {
             return Ok(());
         }
         let size = Size2us::new(image.width(), image.height());
-        let scales = self.scales.min(max_scales(size));
+        let scales = self.scales.min(wavelet::max_scales(size));
         let mut scratch = DenoiseScratch::new(size);
         let flags = image.flags.clone();
         let excluded = |index: usize| {
@@ -152,8 +151,8 @@ impl Denoise {
                 .is_some_and(|flags| flags.at(index) != QualityFlags::default())
         };
         for (channel, plane) in image.planes_mut().enumerate() {
-            let noise = match variance {
-                Some(variance) => {
+            let noise = match noise {
+                ImageNoise::Variance(variance) => {
                     let plane = variance.channel(channel);
                     assert_eq!(
                         (plane.width(), plane.height()),
@@ -162,23 +161,28 @@ impl Denoise {
                     );
                     PlaneNoise::Variance(plane.pixels())
                 }
-                None => PlaneNoise::White(MrsNoise::estimate(plane.pixels(), size, excluded)),
+                ImageNoise::Measured => {
+                    PlaneNoise::White(MrsNoise::estimate(plane.pixels(), size, excluded))
+                }
             };
-            self.denoise_plane(plane.pixels_mut(), scales, noise, &mut scratch);
+            let channel = Channel {
+                samples: plane.pixels_mut(),
+                noise,
+            };
+            self.denoise_channel(channel, scales, &mut scratch);
         }
         Ok(())
     }
 
-    /// Denoise one channel in place. Reconstructs `c_J + Σ thresh(w_j)` without ever materializing all
-    /// planes: it starts from the original (`c_0`) and subtracts only the *removed* noise per scale, so
-    /// the coarse residual `c_J` is preserved implicitly (the telescoping sum `c_0 = c_J + Σ w_j`).
-    fn denoise_plane(
-        &self,
-        plane: &mut [f32],
-        scales: usize,
-        noise: PlaneNoise<'_>,
-        scratch: &mut DenoiseScratch,
-    ) {
+    /// Denoise one channel in place over `scales` scales. Reconstructs `c_J + Σ thresh(w_j)`
+    /// without ever materializing all planes: it starts from the original (`c_0`) and subtracts
+    /// only the *removed* noise per scale, so the coarse residual `c_J` is preserved implicitly
+    /// (the telescoping sum `c_0 = c_J + Σ w_j`).
+    fn denoise_channel(&self, channel: Channel<'_>, scales: usize, scratch: &mut DenoiseScratch) {
+        let Channel {
+            samples: plane,
+            noise,
+        } = channel;
         let Self {
             k,
             threshold,
@@ -190,10 +194,10 @@ impl Denoise {
         c_curr.pixels_mut().copy_from_slice(plane);
         for j in 0..scales {
             let step = 1usize << j;
-            atrous_smooth(c_curr, c_next, step); // c_next = c_{j+1}
+            wavelet::atrous_smooth(c_curr, c_next, step);
 
-            // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed part
-            // is computed inline, saving a full read+write pass over the plane each scale.
+            // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed
+            // part is computed inline, saving a full read+write pass over the plane each scale.
             let per_sigma = k * wavelet::white_noise_sigma(j) as f32;
             let removed = |p: &mut f32, cc: f32, cn: f32, t: f32| {
                 let w = cc - cn;
@@ -228,7 +232,7 @@ impl Denoise {
                 }
             }
 
-            mem::swap(c_curr, c_next); // c_curr = c_{j+1}
+            mem::swap(c_curr, c_next);
         }
     }
 
@@ -251,6 +255,22 @@ impl Denoise {
     }
 }
 
+/// Where an image's noise comes from.
+#[derive(Debug, Clone, Copy)]
+enum ImageNoise<'a> {
+    /// Measured on each channel by its multiresolution support.
+    Measured,
+    /// The stack's own variance planes.
+    Variance(&'a QualityMap),
+}
+
+/// One channel's samples, and the noise its thresholds scale with.
+#[derive(Debug)]
+struct Channel<'a> {
+    samples: &'a mut [f32],
+    noise: PlaneNoise<'a>,
+}
+
 /// The noise one channel's thresholds scale with.
 #[derive(Debug, Clone, Copy)]
 enum PlaneNoise<'a> {
@@ -260,7 +280,7 @@ enum PlaneNoise<'a> {
     Variance(&'a [f32]),
 }
 
-/// Reusable buffers for [`Denoise::denoise_plane`], allocated once and shared across channels.
+/// Reusable buffers for [`Denoise::denoise_channel`], allocated once and shared across channels.
 #[derive(Debug)]
 struct DenoiseScratch {
     /// Current smooth `c_j` (and, after the loop, the coarse residual `c_J`).

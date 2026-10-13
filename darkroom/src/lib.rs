@@ -3,8 +3,6 @@
 
 #![deny(unsafe_code)]
 
-#[cfg(feature = "internals")]
-pub mod bench;
 mod core;
 mod gui;
 mod platform;
@@ -61,7 +59,7 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
 
     // Between `build` and `run` because that is the only window that works on
     // macOS; every other platform has nothing to do here.
-    platform::route_opened_documents(host.handle());
+    platform::route_opened_documents(host.handle(), App::open_document_at);
     host.run()
 }
 
@@ -92,6 +90,9 @@ pub fn init_tracing() {
         .try_init()
         .ok();
 }
+
+#[cfg(feature = "internals")]
+pub mod bench;
 
 #[cfg(test)]
 #[expect(

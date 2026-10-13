@@ -1,4 +1,4 @@
-//! Both passes over the [`RunSchedule`](super::RunSchedule), each with the fixture
+//! Both passes over the [`RunSchedule`](crate::execution::schedule::RunSchedule), each with the fixture
 //! its own pass needs: a bare program for the structural walk, and a program plus a
 //! primed cache for the sweep that reads one.
 

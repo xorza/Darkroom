@@ -3,9 +3,8 @@
 
 use std::path::PathBuf;
 
-use common::CancelToken;
 use lumos::{
-    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NoMasterCache, ProgressCallback,
+    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NoMasterCache, ProgressMonitor,
     RunReport, StackConfig,
 };
 
@@ -35,12 +34,7 @@ fn a_stack_stays_within_its_budget() {
         let ingest = session.ingest(budget);
         let run = session.measure(|| {
             StackConfig::light()
-                .stack_paths(
-                    &paths,
-                    &ingest,
-                    ProgressCallback::default(),
-                    CancelToken::never(),
-                )
+                .stack_paths(&paths, &ingest, ProgressMonitor::unattended())
                 .unwrap()
         });
         let report = &run.value.report;
@@ -73,8 +67,7 @@ fn a_master_stays_within_its_budget() {
             DEFAULT_SIGMA_THRESHOLD,
             &ingest,
             &NoMasterCache,
-            &ProgressCallback::default(),
-            &CancelToken::never(),
+            &ProgressMonitor::unattended(),
         )
         .unwrap()
     });

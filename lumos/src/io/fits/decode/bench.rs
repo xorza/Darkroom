@@ -11,7 +11,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::fits::decode::{load_cfa_fits, load_linear_fits};
+use crate::io::fits::decode;
 use crate::io::load_context::LoadContext;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -22,15 +22,19 @@ pub(crate) fn atomic(c: &mut Criterion) {
     // camera's 16-bit light, which loads as a CFA image.
     group.bench_function(BenchmarkId::new("decode/u16", field.name()), |b| {
         let file = FitsFile::write(Format::U16, field);
-        b.iter_with_large_drop(|| load_linear_fits(&file.path, &LoadContext::default()).unwrap());
+        b.iter_with_large_drop(|| {
+            decode::load_linear(&file.path, &LoadContext::default()).unwrap()
+        });
     });
     group.bench_function(BenchmarkId::new("decode/f32", field.name()), |b| {
         let file = FitsFile::write(Format::F32, field);
-        b.iter_with_large_drop(|| load_linear_fits(&file.path, &LoadContext::default()).unwrap());
+        b.iter_with_large_drop(|| {
+            decode::load_linear(&file.path, &LoadContext::default()).unwrap()
+        });
     });
     group.bench_function(BenchmarkId::new("decode/cfa_u16", field.name()), |b| {
         let file = FitsFile::write(Format::CfaU16, field);
-        b.iter_with_large_drop(|| load_cfa_fits(&file.path, &LoadContext::default()).unwrap());
+        b.iter_with_large_drop(|| decode::load_cfa(&file.path, &LoadContext::default()).unwrap());
     });
 }
 

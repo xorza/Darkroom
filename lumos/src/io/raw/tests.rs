@@ -22,11 +22,11 @@ fn black(black: u32) -> BayerDump {
 }
 
 #[test]
-fn load_raw_invalid_path() {
+fn load_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
     // A path that cannot be read is an `Io` error; a readable file libraw
-    // refuses is a `Raw` one, pinned by `load_raw_rejects_invalid_files`.
-    let error = load_raw(path, &LoadContext::default()).unwrap_err();
+    // refuses is a `Raw` one, pinned by `load_rejects_invalid_files`.
+    let error = load(path, &LoadContext::default()).unwrap_err();
     assert!(
         matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
         "a missing file should read as an Io error, got: {error}",
@@ -36,21 +36,21 @@ fn load_raw_invalid_path() {
     cancel.cancel();
     let cancelled = LoadContext::new(cancel, u64::MAX);
     assert!(matches!(
-        load_raw(path, &cancelled),
+        load(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
-        load_raw_cfa(path, &cancelled),
+        load_cfa(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
-        raw_cfa_frame_info(path, &cancelled),
+        cfa_frame_info(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
 }
 
 #[test]
-fn load_raw_rejects_invalid_files() {
+fn load_rejects_invalid_files() {
     #[derive(Debug)]
     struct InvalidRawCase {
         name: &'static str,
@@ -72,15 +72,12 @@ fn load_raw_rejects_invalid_files() {
     for case in cases {
         let path = directory.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
-        assert!(
-            load_raw(&path, &LoadContext::default()).is_err(),
-            "{case:?}"
-        );
+        assert!(load(&path, &LoadContext::default()).is_err(), "{case:?}");
 
         // The rejection happens while libraw is being opened, so the handle exists and has to
         // free itself on the way out — the failure path most likely to leak the instance. The file
         // reads back, so what libraw refuses is its contents: a `Raw` error naming the open.
-        let error = load_raw_cfa(&path, &LoadContext::default()).unwrap_err();
+        let error = load_cfa(&path, &LoadContext::default()).unwrap_err();
         assert!(
             matches!(
                 &error,
@@ -174,8 +171,7 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
 
 #[cfg(feature = "real-data")]
 #[test]
-fn load_raw_valid_file() {
-    // Check mean is reasonable (not all zeros or all ones)
+fn load_valid_file() {
     use crate::internals::synthetic::metrics::pixel_stats;
 
     use crate::internals::init_tracing;
@@ -185,15 +181,14 @@ fn load_raw_valid_file() {
 
     init_tracing();
 
-    let result = load_raw(&path, &LoadContext::default());
+    let result = load(&path, &LoadContext::default());
     assert!(result.is_ok(), "Failed to load {path:?}: {result:?}");
 
     let image = result.unwrap();
 
-    // Validate dimensions
     assert!(image.dimensions().width() > 0);
     assert!(image.dimensions().height() > 0);
-    assert_eq!(image.dimensions().channels(), 3); // RGB output
+    assert_eq!(image.dimensions().channels(), 3);
 
     // Every channel is inside the light-frame contract. The demosaic kernels overshoot on their
     // own, so this is what catches a decode path that stopped clamping their output.
@@ -407,7 +402,7 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
     );
     for (row, col) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
         let p = parity(row, col);
-        let channel = libraw_filter_color(raw.visible_filters, row, col);
+        let channel = filter_color(raw.visible_filters, row, col);
         let mean = 2048.0 + p as f64 + (p + 1) as f64 / 13.0;
         assert_eq!(color.black + color.cblack[channel], 2048 + p as u32);
         assert!(

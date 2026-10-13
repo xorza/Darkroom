@@ -6,12 +6,12 @@ use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
 use crate::core::document::node_key::NodeKey;
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph::node::header::subscription_glyph_wid;
-use crate::gui::pane::graph::node::port_row::{event_glyph_wid, port_circle_wid};
+use crate::gui::pane::graph::node::header;
+use crate::gui::pane::graph::node::port_row;
 use crate::gui::pane::graph::node::wid;
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every
@@ -321,19 +321,19 @@ impl CanvasGeometry {
             };
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
-                    let r = ui.response_for(port_circle_wid(port));
+                    let r = ui.response_for(port_row::port_circle_wid(port));
                     self.ports.record(port, r, node_min, n.pos);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_refs() {
-                let r = ui.response_for(event_glyph_wid(ev));
+                let r = ui.response_for(port_row::event_glyph_wid(ev));
                 self.events.record(ev, r, node_min, n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
-                let r = ui.response_for(subscription_glyph_wid(n.id));
+                let r = ui.response_for(header::subscription_glyph_wid(n.id));
                 self.subs.record(n.id, r, node_min, n.pos);
             }
         }

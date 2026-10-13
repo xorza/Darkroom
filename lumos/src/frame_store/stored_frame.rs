@@ -9,7 +9,6 @@ use imaginarium::Buffer2;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame::stackable_image::{ImageParts, StackableImage};
-use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::decode_cache::frame_spill::{
     Carries, Committed, Decoded, FrameSpill, PlaneDigests,
 };
@@ -72,12 +71,12 @@ impl ReusedFrame {
             planes: frame
                 .channels
                 .iter()
-                .map(|plane| Buffer2::new(size.width, size.height, plane.chunk(0, pixels).to_vec()))
+                .map(|plane| Buffer2::new(size.width, size.height, plane.chunk(0..pixels).to_vec()))
                 .collect(),
             flags: frame
                 .flags
                 .as_ref()
-                .map(|plane| PixelFlags::from_bytes(size, plane.chunk(0, pixels))),
+                .map(|plane| PixelFlags::from_bytes(size, plane.chunk(0..pixels))),
         };
         I::from_parts(parts, frame.source_stats.facts.cfa_type, metadata)
     }
@@ -160,20 +159,15 @@ impl StoredFrame {
             .collect()
     }
 
-    /// [`Self::spill`], then commit the files as a kept frame decoded under `key`, with the
-    /// image's shape and metadata.
+    /// [`Self::spill`] of `image` as it decoded, unwarped, then commit the files as a kept frame,
+    /// with the image's shape and metadata.
     pub(crate) fn cache(
         spill: &FrameSpill<'_>,
-        key: CacheKey,
         image: &impl StackableImage,
-        quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        debug_assert!(
-            quality.coverage().is_none(),
-            "a kept frame is unwarped, and so carries no quality planes"
-        );
-        let frame = Self::spill(spill, image, quality, source_stats)?;
+        let quality = FrameQuality::for_unwarped(image);
+        let frame = Self::spill(spill, image, &quality, source_stats)?;
         let carries = match (quality.mask(), &frame.flags) {
             (Some(_), _) => Carries::NullMask,
             (None, Some(_)) => Carries::Flags,
@@ -181,7 +175,6 @@ impl StoredFrame {
         };
         let digests = PlaneDigests::of(&frame.channels, frame.flags.as_ref());
         spill.commit(
-            key,
             Decoded {
                 dimensions: image.dimensions(),
                 carries,
@@ -193,20 +186,17 @@ impl StoredFrame {
         Ok(frame)
     }
 
-    /// The frame [`Self::cache`] committed to `spill`'s files under `key`, mapped, with the shape
-    /// and metadata it was committed with, its flat gain back in RAM from them; `None` when there
-    /// is none whole to reuse — no commit for this source under this key, or a plane missing, of
-    /// another size, or holding other bytes than it was committed with. The digests read every
-    /// page of the planes, which the checks a reused frame passes read next anyway.
-    pub(crate) fn reuse(
-        spill: &FrameSpill<'_>,
-        key: CacheKey,
-    ) -> Result<Option<ReusedFrame>, FrameStoreError> {
+    /// The frame [`Self::cache`] committed to `spill`'s files, mapped, with the shape and metadata
+    /// it was committed with, its flat gain back in RAM from them; `None` when there is none whole
+    /// to reuse — no commit for this source under the spill's key, or a plane missing, of another
+    /// size, or holding other bytes than it was committed with. The digests read every page of the
+    /// planes, which the checks a reused frame passes read next anyway.
+    pub(crate) fn reuse(spill: &FrameSpill<'_>) -> Result<Option<ReusedFrame>, FrameStoreError> {
         let Some(Committed {
             stats: source_stats,
             decoded,
             digests,
-        }) = spill.committed(key)
+        }) = spill.committed()
         else {
             return Ok(None);
         };
@@ -329,7 +319,7 @@ mod tests {
         assert_eq!(frame.planes().count(), 5);
         assert_eq!(frame.evict(), MappedFile::EVICTS);
         for (channel, level) in frame.channels.iter().zip([0.25, 0.5, 0.75]) {
-            let read = channel.chunk(0, size.pixel_count());
+            let read = channel.chunk(0..size.pixel_count());
             assert!(read.iter().all(|&value| value == level));
         }
     }

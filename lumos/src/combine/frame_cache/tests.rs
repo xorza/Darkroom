@@ -1,9 +1,14 @@
+use common::TempDir;
+
+use crate::combine::frame_cache::normalized_stats::NormalizedStats;
+use crate::combine::frame_cache::sample::SampleQuality;
 use crate::combine::frame_cache::*;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::combine::rejection::Rejection;
-use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
-use crate::combine::stack_config::Weighting;
-use crate::frame::frame_quality::{DropPlanes, FramePlane, FrameQuality};
+use crate::combine::rejection::mean_combine::MeanCombine;
+use crate::combine::stack_config::{CombineMethod, DEFAULT_MIN_SURVIVORS, Weighting};
+use crate::frame::frame_plane::FramePlane;
+use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::tier::CombineBudget;
@@ -15,7 +20,6 @@ use crate::internals::prelude::*;
 use crate::math::statistics;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
-use common::TempDir;
 
 /// A mono request with the default survivor minimum, no weights and no noise.
 fn request(planes: QualityPlanes) -> CombineRequest<'static> {
@@ -52,16 +56,15 @@ fn unrequested_quality_planes_are_never_allocated() {
         Normalization::None,
     );
     let reduce = |samples: PixelSamples<'_>, _: &mut ScratchBuffers| {
-        let PixelSamples {
-            values, weights, ..
-        } = samples;
-        let count = values.len();
+        let count = samples.values.len();
+        let mean = samples.values.iter().sum::<f32>() / count as f32;
         CombinedSample::from_survivors(
-            values.iter().sum::<f32>() / count as f32,
-            values,
-            weights,
+            mean,
+            &PixelSamples {
+                noise: None,
+                ..samples
+            },
             0..count,
-            None,
         )
     };
 
@@ -101,27 +104,65 @@ fn unrequested_quality_planes_are_never_allocated() {
     );
 }
 
+/// A median drops the inverse variance and the dispersion, any mean keeps every plane asked for,
+/// and the reducer measures a pixel's quality exactly when one of weight, inverse variance and
+/// dispersion is asked for: coverage is written by the gather, not the reducer.
 #[test]
 fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
+    let median = CombineMethod::Median;
     assert_eq!(
-        QualityPlanes::ALL.resolve(false),
-        QualityPlanes::STANDARD.resolve(false),
+        QualityPlanes::ALL.resolve(median),
+        QualityPlanes::STANDARD.resolve(median),
         "a reducer that is not a weighted mean reports no variance factor and no dispersion"
     );
     assert_eq!(
-        QualityPlanes::ALL.resolve(false),
+        QualityPlanes::ALL.resolve(median),
         QualityPlanes {
             inverse_variance: false,
             dispersion: false,
             ..QualityPlanes::ALL
         },
     );
-    assert_eq!(QualityPlanes::ALL.resolve(true), QualityPlanes::ALL);
+    for mean in [Rejection::None, Rejection::sigma_clip(2.5)].map(CombineMethod::Mean) {
+        assert_eq!(QualityPlanes::ALL.resolve(mean), QualityPlanes::ALL);
+        assert_eq!(
+            QualityPlanes::IMAGE_ONLY.resolve(mean),
+            QualityPlanes::IMAGE_ONLY,
+            "resolving never adds a plane the caller declined"
+        );
+    }
+
     assert_eq!(
-        QualityPlanes::IMAGE_ONLY.resolve(true),
-        QualityPlanes::IMAGE_ONLY,
-        "resolving never adds a plane the caller declined"
+        SampleQuality::of(QualityPlanes::IMAGE_ONLY),
+        SampleQuality::ValueOnly
     );
+    assert_eq!(
+        SampleQuality::of(QualityPlanes {
+            coverage: true,
+            ..QualityPlanes::IMAGE_ONLY
+        }),
+        SampleQuality::ValueOnly
+    );
+    for planes in [
+        QualityPlanes {
+            weight: true,
+            ..QualityPlanes::IMAGE_ONLY
+        },
+        QualityPlanes {
+            inverse_variance: true,
+            ..QualityPlanes::IMAGE_ONLY
+        },
+        QualityPlanes {
+            dispersion: true,
+            ..QualityPlanes::IMAGE_ONLY
+        },
+    ] {
+        assert_eq!(
+            SampleQuality::of(planes),
+            SampleQuality::Measured,
+            "{planes:?}"
+        );
+    }
 }
 
 /// Every frame of `frames` through the per-frame checks, in order.
@@ -367,15 +408,22 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
     let slots = Slots::new(None, cache.core.dimensions.channels());
     let weights = weights.map(|weights| {
-        FrameWeights::resolve(&Weighting::Manual(weights.to_vec()), [], None, slots)
-            .unwrap()
-            .unwrap()
+        FrameWeights::resolve(
+            &Weighting::Manual(weights.to_vec()),
+            NormalizedStats {
+                stats: [],
+                norms: None,
+                slots,
+            },
+        )
+        .unwrap()
+        .unwrap()
     });
-    let noise = SampleNoise::new(
-        cache.frames.iter().map(|frame| &frame.source_stats),
-        None,
+    let noise = SampleNoise::new(NormalizedStats {
+        stats: cache.frames.iter().map(|frame| &frame.source_stats),
+        norms: None,
         slots,
-    );
+    });
     let request = CombineRequest {
         weights: weights.as_ref(),
         planes: QualityPlanes::ALL,
@@ -384,7 +432,12 @@ fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
         slots,
     };
     let combined = cache.process_chunked(request, |samples, scratch| {
-        Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, true)
+        MeanCombine {
+            rejection: Rejection::None,
+            min_survivors: DEFAULT_MIN_SURVIVORS,
+            quality: SampleQuality::Measured,
+        }
+        .combine(&samples, scratch)
     });
     cache.finish_product(combined, QualityPlanes::ALL, None)
 }
@@ -411,13 +464,8 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
                 }
             });
         }
-        FrameCache::from_stack_frames(
-            frames,
-            Normalization::None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("frames are valid")
+        FrameCache::from_stack_frames(frames, Normalization::None, ProgressMonitor::unattended())
+            .expect("frames are valid")
     };
     let cache = frames(false);
     // A row of the 2 × 1 output reads `input` bytes a pixel of every frame, and the output holds
@@ -473,8 +521,7 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
             })
             .collect(),
         Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
     .expect("frames are valid");
     assert_eq!(
@@ -570,13 +617,8 @@ fn finish_product_partial_coverage() {
         })
         .collect();
     let cache = with_unit_noise(
-        FrameCache::from_stack_frames(
-            frames,
-            Normalization::None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("frames are valid"),
+        FrameCache::from_stack_frames(frames, Normalization::None, ProgressMonitor::unattended())
+            .expect("frames are valid"),
     );
     let product = mean_product(&cache, None);
     let inverse_variance = product.inverse_variance.as_ref().unwrap();
@@ -629,9 +671,16 @@ fn light_and_calibration_frames_combine_through_one_engine() {
     }
     for cache in caches(&[10.0, 20.0]) {
         let slots = Slots::new(cache.frames[0].source_stats.facts.cfa_type, 1);
-        let weights = FrameWeights::resolve(&Weighting::Manual(vec![1.0, 3.0]), [], None, slots)
-            .unwrap()
-            .unwrap();
+        let weights = FrameWeights::resolve(
+            &Weighting::Manual(vec![1.0, 3.0]),
+            NormalizedStats {
+                stats: [],
+                norms: None,
+                slots,
+            },
+        )
+        .unwrap()
+        .unwrap();
         let weighted = cache.process_chunked(
             CombineRequest {
                 weights: Some(&weights),
@@ -639,7 +688,12 @@ fn light_and_calibration_frames_combine_through_one_engine() {
                 ..request(QualityPlanes::IMAGE_ONLY)
             },
             |samples, scratch| {
-                Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
+                MeanCombine {
+                    rejection: Rejection::None,
+                    min_survivors: DEFAULT_MIN_SURVIVORS,
+                    quality: SampleQuality::ValueOnly,
+                }
+                .combine(&samples, scratch)
             },
         );
         assert_eq!(weighted.pixels.channel(0).pixels(), &[17.5; 4]);
@@ -656,7 +710,12 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         Normalization::None,
     );
     let mean = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, scratch| {
-        Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
+        MeanCombine {
+            rejection: Rejection::None,
+            min_survivors: DEFAULT_MIN_SURVIVORS,
+            quality: SampleQuality::ValueOnly,
+        }
+        .combine(&samples, scratch)
     });
     for (channel, level) in [3.0, 4.0, 5.0].into_iter().enumerate() {
         assert_eq!(mean.pixels.channel(channel).pixels(), &[level; 4]);
@@ -711,7 +770,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     );
     for cache in [&resident, &spilled] {
         let plane = &cache.frames[0].channels[0];
-        assert_eq!(plane.chunk(4, 8), &ramp[4..8]);
-        assert_eq!(plane.chunk(0, 12), ramp.as_slice());
+        assert_eq!(plane.chunk(4..8), &ramp[4..8]);
+        assert_eq!(plane.chunk(0..12), ramp.as_slice());
     }
 }

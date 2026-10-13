@@ -2,15 +2,19 @@
 //! statistics, read about the tile's own plane for the sky, and the crowding-aware Pearson-mode
 //! sky estimator for a single tile box.
 
-use crate::background_mesh::workspace::TileScratch;
+use std::fmt;
+use std::fmt::Formatter;
+
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
+use crate::scratch_pool::Shapeless;
 
 /// Maximum samples per tile for statistics computation.
-pub(crate) const MAX_TILE_SAMPLES: usize = 1024;
+pub(super) const MAX_TILE_SAMPLES: usize = 1024;
 const _: () = assert!(
     MAX_TILE_SAMPLES.is_multiple_of(2),
     "sample_ordinal needs an even count"
@@ -24,6 +28,45 @@ const CLIP_KAPPA: f32 = 3.0;
 /// inflates, so faint star wings inside that wide band tilt it; the second reads the clip about
 /// the first plane, at the noise's own width. A third measured no better.
 const PLANE_FITS: usize = 2;
+
+/// What every tile of a mesh is measured from: the plane, the mask that leaves pixels out, which
+/// pixels may take part at all, and the σ-clip passes of each tile.
+#[derive(Clone, Copy)]
+pub(super) struct TileInput<'a> {
+    pub(super) pixels: &'a Buffer2<f32>,
+    pub(super) mask: Option<&'a BitBuffer2>,
+    pub(super) eligible: Option<&'a Eligible<'a>>,
+    pub(super) sigma_clip_iterations: usize,
+}
+
+impl fmt::Debug for TileInput<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TileInput")
+            .field("pixels", &self.pixels)
+            .field("mask", &self.mask)
+            .field("eligible", &self.eligible.map(|_| ".."))
+            .field("sigma_clip_iterations", &self.sigma_clip_iterations)
+            .finish()
+    }
+}
+
+/// A tile's working buffers, kept across tiles by the mesh's scratch pool.
+#[derive(Debug, Default)]
+pub(super) struct TileScratch {
+    pub(super) samples: TileSamples,
+    /// The samples less the tile's plane, reordered by the clip.
+    detrended: Vec<f32>,
+    pub(super) deviations: Vec<f32>,
+}
+
+impl Shapeless for TileScratch {}
+
+/// A tile's samples, each with its doubled offset from the tile's centre (see [`centred`]).
+#[derive(Debug, Default)]
+pub(super) struct TileSamples {
+    pub(super) values: Vec<f32>,
+    offsets: Vec<[i32; 2]>,
+}
 
 /// Tile statistics computed during background estimation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -53,17 +96,17 @@ impl TileSlope {
         self.x * f64::from(offset[0]) + self.y * f64::from(offset[1])
     }
 
-    /// The least-squares slope of the samples whose value off this plane lies within `band` of
+    /// The least-squares slope of the `samples` whose value off this plane lies within `band` of
     /// `center`. `None` when those samples do not span a plane: fewer than three, or all on one
     /// line.
     ///
     /// The offsets are integers, so the position moments and the determinant are exact in `i128`,
     /// and "on one line" is an exact zero rather than a tolerance.
-    fn refit(self, values: &[f32], offsets: &[[i32; 2]], center: f32, band: f32) -> Option<Self> {
+    fn refit(self, samples: &TileSamples, center: f32, band: f32) -> Option<Self> {
         let (mut n, mut sx, mut sy, mut sxx, mut syy, mut sxy) =
             (0i128, 0i128, 0i128, 0i128, 0i128, 0i128);
         let (mut sv, mut sxv, mut syv) = (0.0f64, 0.0f64, 0.0f64);
-        for (&value, &offset) in values.iter().zip(offsets) {
+        for (&value, &offset) in samples.values.iter().zip(&samples.offsets) {
             let value = f64::from(value);
             if (value - self.at(offset) - f64::from(center)).abs() > f64::from(band) {
                 continue;
@@ -166,68 +209,70 @@ impl TileStats {
     /// where the sky changes fast across a tile the mesh follows it worst: a σ about the plane
     /// drops the threshold under that model error, and on a vignetted or nebulous field the sky's
     /// residual then joins the stars into a few large regions that hide most of them.
-    /// `eligible`, when given, limits the tile to the pixels it takes, such as one colour of a
-    /// mosaic; the half is then of those pixels.
-    pub(crate) fn compute(
-        pixels: &Buffer2<f32>,
-        mask: Option<&BitBuffer2>,
-        eligible: Option<&Eligible<'_>>,
+    /// `input.eligible`, when given, limits the tile to the pixels it takes, such as one colour of
+    /// a mosaic; the half is then of those pixels.
+    pub(super) fn compute(
+        input: &TileInput<'_>,
         tile: URect,
-        sigma_clip_iterations: usize,
         scratch: &mut TileScratch,
     ) -> Option<Self> {
         let TileScratch {
-            values,
-            offsets,
+            samples,
             detrended,
             deviations,
         } = scratch;
-        values.clear();
-        offsets.clear();
+        samples.values.clear();
+        samples.offsets.clear();
 
-        match (mask, eligible) {
-            (_, Some(eligible)) => {
-                let counted = count_eligible_pixels(mask, eligible, tile);
-                if counted.unmasked == 0 || 2 * counted.unmasked < counted.eligible {
-                    return None;
-                }
-                collect_eligible_pixels(
-                    pixels,
+        match (input.mask, input.eligible) {
+            (mask, Some(eligible)) => {
+                let selection = EligibleTile {
                     mask,
                     eligible,
                     tile,
-                    counted.unmasked,
-                    values,
-                    offsets,
-                );
+                };
+                let counted = selection.count();
+                if counted.unmasked == 0 || 2 * counted.unmasked < counted.eligible {
+                    return None;
+                }
+                samples.collect_eligible(input.pixels, &selection, counted.unmasked);
             }
             (Some(m), None) => {
                 if 2 * count_unmasked_pixels(m, tile) < tile.area() {
                     return None;
                 }
-                collect_unmasked_pixels(pixels, m, tile, values, offsets);
+                samples.collect_unmasked(input.pixels, m, tile);
             }
-            (None, None) => collect_tile_pixels(pixels, tile, values, offsets),
+            (None, None) => samples.collect_tile(input.pixels, tile),
         }
-        debug_assert!(!values.is_empty(), "a tile holds at least one pixel");
+        debug_assert!(
+            !samples.values.is_empty(),
+            "a tile holds at least one pixel"
+        );
 
+        let samples = &*samples;
         let clipped = |slope: TileSlope, detrended: &mut Vec<f32>, deviations: &mut Vec<f32>| {
             detrended.clear();
             detrended.extend(
-                values
+                samples
+                    .values
                     .iter()
-                    .zip(offsets.iter())
+                    .zip(&samples.offsets)
                     .map(|(&value, &offset)| (f64::from(value) - slope.at(offset)) as f32),
             );
-            ClippedStats::sigma_clipped(detrended, deviations, CLIP_KAPPA, sigma_clip_iterations)
+            ClippedStats::sigma_clipped(
+                detrended,
+                deviations,
+                CLIP_KAPPA,
+                input.sigma_clip_iterations,
+            )
         };
         let mut slope = TileSlope::default();
         // A zero slope leaves every sample as it is: these are the raw statistics.
         let raw = clipped(slope, detrended, deviations);
         let mut stats = raw;
         for _ in 0..PLANE_FITS {
-            let Some(fit) = slope.refit(values, offsets, stats.median, CLIP_KAPPA * stats.sigma)
-            else {
+            let Some(fit) = slope.refit(samples, stats.median, CLIP_KAPPA * stats.sigma) else {
                 break;
             };
             slope = fit;
@@ -297,85 +342,115 @@ fn centred(tile: URect, x: usize, y: usize) -> [i32; 2] {
     ]
 }
 
-/// Every pixel of `tile`, or [`MAX_TILE_SAMPLES`] of them picked by [`sample_ordinal`], each with
-/// its [`centred`] offset.
-fn collect_tile_pixels(
-    pixels: &Buffer2<f32>,
-    tile: URect,
-    values: &mut Vec<f32>,
-    offsets: &mut Vec<[i32; 2]>,
-) {
-    let width = pixels.width();
-    let tile_width = tile.width();
-    let candidates = tile.area();
-    let count = sample_count(candidates);
-    values.reserve_exact(count);
-    offsets.reserve_exact(count);
-    for k in 0..count {
-        let ordinal = sample_ordinal(k, count, candidates);
-        let (x, y) = (
-            tile.min.x + ordinal % tile_width,
-            tile.min.y + ordinal / tile_width,
-        );
-        values.push(pixels[y * width + x]);
-        offsets.push(centred(tile, x, y));
-    }
-}
-
-#[inline]
-fn collect_unmasked_pixels(
-    pixels: &Buffer2<f32>,
-    mask: &BitBuffer2,
-    tile: URect,
-    values: &mut Vec<f32>,
-    offsets: &mut Vec<[i32; 2]>,
-) {
-    let unmasked_count = count_unmasked_pixels(mask, tile);
-    let sample_count = sample_count(unmasked_count);
-    if sample_count == 0 {
-        return;
-    }
-
-    let width = pixels.width();
-    let mask_words = &mask.words;
-    let words_per_row = mask.words_per_row();
-    let mut next_ordinal = sample_ordinal(0, sample_count, unmasked_count);
-    let mut ordinal = 0;
-    let mut selected_count = 0;
-
-    for y in tile.min.y..tile.max.y {
-        let row_start = y * width;
-        let word_row_start = y * words_per_row;
-        let mut x = tile.min.x;
-
-        while x < tile.max.x {
-            let word_idx = x / 64;
-            let bit_offset = x % 64;
-            let mask_word = mask_words[word_row_start + word_idx];
-            let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
-            let mut bits = unmasked_bits(mask_word, bit_offset, bits_to_process);
-            while bits != 0 {
-                if ordinal == next_ordinal {
-                    let column = x + bits.trailing_zeros() as usize;
-                    values.push(pixels[row_start + column]);
-                    offsets.push(centred(tile, column, y));
-                    selected_count += 1;
-                    if selected_count == sample_count {
-                        return;
-                    }
-                    next_ordinal = sample_ordinal(selected_count, sample_count, unmasked_count);
-                }
-                ordinal += 1;
-                bits &= bits - 1;
-            }
-            x += bits_to_process;
+impl TileSamples {
+    /// Every pixel of `tile`, or [`MAX_TILE_SAMPLES`] of them picked by [`sample_ordinal`], each
+    /// with its [`centred`] offset.
+    fn collect_tile(&mut self, pixels: &Buffer2<f32>, tile: URect) {
+        let width = pixels.width();
+        let tile_width = tile.width();
+        let candidates = tile.area();
+        let count = sample_count(candidates);
+        self.values.reserve_exact(count);
+        self.offsets.reserve_exact(count);
+        for k in 0..count {
+            let ordinal = sample_ordinal(k, count, candidates);
+            let (x, y) = (
+                tile.min.x + ordinal % tile_width,
+                tile.min.y + ordinal / tile_width,
+            );
+            self.values.push(pixels[y * width + x]);
+            self.offsets.push(centred(tile, x, y));
         }
     }
-    unreachable!("unmasked pixel count changed between sampling passes");
+
+    /// The pixels of `tile` that `mask` leaves, or [`MAX_TILE_SAMPLES`] of them picked by
+    /// [`sample_ordinal`], each with its [`centred`] offset.
+    #[inline]
+    fn collect_unmasked(&mut self, pixels: &Buffer2<f32>, mask: &BitBuffer2, tile: URect) {
+        let unmasked_count = count_unmasked_pixels(mask, tile);
+        let sample_count = sample_count(unmasked_count);
+        if sample_count == 0 {
+            return;
+        }
+
+        let width = pixels.width();
+        let mask_words = &mask.words;
+        let words_per_row = mask.words_per_row();
+        let mut next_ordinal = sample_ordinal(0, sample_count, unmasked_count);
+        let mut ordinal = 0;
+        let mut selected_count = 0;
+
+        for y in tile.min.y..tile.max.y {
+            let row_start = y * width;
+            let word_row_start = y * words_per_row;
+            let mut x = tile.min.x;
+
+            while x < tile.max.x {
+                let word_idx = x / 64;
+                let bit_offset = x % 64;
+                let mask_word = mask_words[word_row_start + word_idx];
+                let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
+                let mut bits = unmasked_bits(mask_word, bit_offset, bits_to_process);
+                while bits != 0 {
+                    if ordinal == next_ordinal {
+                        let column = x + bits.trailing_zeros() as usize;
+                        self.values.push(pixels[row_start + column]);
+                        self.offsets.push(centred(tile, column, y));
+                        selected_count += 1;
+                        if selected_count == sample_count {
+                            return;
+                        }
+                        next_ordinal = sample_ordinal(selected_count, sample_count, unmasked_count);
+                    }
+                    ordinal += 1;
+                    bits &= bits - 1;
+                }
+                x += bits_to_process;
+            }
+        }
+        unreachable!("unmasked pixel count changed between sampling passes");
+    }
+
+    /// The pixels `selection` takes, `candidates` of them, or [`MAX_TILE_SAMPLES`] picked by
+    /// [`sample_ordinal`], each with its [`centred`] offset.
+    fn collect_eligible(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        selection: &EligibleTile<'_>,
+        candidates: usize,
+    ) {
+        let count = sample_count(candidates);
+        self.values.reserve_exact(count);
+        self.offsets.reserve_exact(count);
+        let tile = selection.tile;
+        let mut ordinal = 0;
+        for y in tile.min.y..tile.max.y {
+            for x in tile.min.x..tile.max.x {
+                if !selection.takes(Vec2us::new(x, y)) {
+                    continue;
+                }
+                if self.values.len() < count
+                    && ordinal == sample_ordinal(self.values.len(), count, candidates)
+                {
+                    self.values.push(pixels[(x, y)]);
+                    self.offsets.push(centred(tile, x, y));
+                }
+                ordinal += 1;
+            }
+        }
+        debug_assert_eq!(self.values.len(), count);
+    }
 }
 
 /// Which pixels a tile may read beyond the mask, by position: one colour of a mosaic, for one.
-pub(crate) type Eligible<'a> = dyn Fn(Vec2us) -> bool + Sync + 'a;
+pub(super) type Eligible<'a> = dyn Fn(Vec2us) -> bool + Sync + 'a;
+
+/// One tile's pixels that an eligibility test takes and the mask leaves.
+struct EligibleTile<'a> {
+    mask: Option<&'a BitBuffer2>,
+    eligible: &'a Eligible<'a>,
+    tile: URect,
+}
 
 /// A tile's pixels that `eligible` takes, and how many of those the mask leaves.
 #[derive(Debug, Clone, Copy)]
@@ -384,56 +459,40 @@ struct EligibleCount {
     unmasked: usize,
 }
 
-fn count_eligible_pixels(
-    mask: Option<&BitBuffer2>,
-    eligible: &Eligible<'_>,
-    tile: URect,
-) -> EligibleCount {
-    let mut count = EligibleCount {
-        eligible: 0,
-        unmasked: 0,
-    };
-    for y in tile.min.y..tile.max.y {
-        for x in tile.min.x..tile.max.x {
-            let position = Vec2us::new(x, y);
-            if eligible(position) {
-                count.eligible += 1;
-                count.unmasked += usize::from(!mask.is_some_and(|mask| mask.get_at(position)));
+impl EligibleTile<'_> {
+    fn count(&self) -> EligibleCount {
+        let mut count = EligibleCount {
+            eligible: 0,
+            unmasked: 0,
+        };
+        for y in self.tile.min.y..self.tile.max.y {
+            for x in self.tile.min.x..self.tile.max.x {
+                let position = Vec2us::new(x, y);
+                if (self.eligible)(position) {
+                    count.eligible += 1;
+                    count.unmasked += usize::from(!self.masked(position));
+                }
             }
         }
+        count
     }
-    count
+
+    fn takes(&self, position: Vec2us) -> bool {
+        (self.eligible)(position) && !self.masked(position)
+    }
+
+    fn masked(&self, position: Vec2us) -> bool {
+        self.mask.is_some_and(|mask| mask.get_at(position))
+    }
 }
 
-/// The eligible, unmasked pixels of `tile`, `candidates` of them, or [`MAX_TILE_SAMPLES`] picked by
-/// [`sample_ordinal`], each with its [`centred`] offset.
-fn collect_eligible_pixels(
-    pixels: &Buffer2<f32>,
-    mask: Option<&BitBuffer2>,
-    eligible: &Eligible<'_>,
-    tile: URect,
-    candidates: usize,
-    values: &mut Vec<f32>,
-    offsets: &mut Vec<[i32; 2]>,
-) {
-    let count = sample_count(candidates);
-    values.reserve_exact(count);
-    offsets.reserve_exact(count);
-    let mut ordinal = 0;
-    for y in tile.min.y..tile.max.y {
-        for x in tile.min.x..tile.max.x {
-            let position = Vec2us::new(x, y);
-            if !eligible(position) || mask.is_some_and(|mask| mask.get_at(position)) {
-                continue;
-            }
-            if values.len() < count && ordinal == sample_ordinal(values.len(), count, candidates) {
-                values.push(pixels[(x, y)]);
-                offsets.push(centred(tile, x, y));
-            }
-            ordinal += 1;
-        }
+impl fmt::Debug for EligibleTile<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EligibleTile")
+            .field("mask", &self.mask)
+            .field("tile", &self.tile)
+            .finish_non_exhaustive()
     }
-    debug_assert_eq!(values.len(), count);
 }
 
 #[inline]

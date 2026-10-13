@@ -2,9 +2,8 @@
 
 use crate::internals::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
 use crate::simd::tier::Tier;
-use crate::star_detection::threshold_mask::internals::test_params;
 use crate::star_detection::threshold_mask::simd::ProcessWords;
-use crate::star_detection::threshold_mask::simd::internals::process_words_scalar;
+use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
 /// The shared sweep plus widths spanning whole 64-pixel words. The kernel takes full words from the
 /// row and pads the partial last one, so a word exactly filled, a word and a little, and several
@@ -35,7 +34,7 @@ fn assert_tier_matches_scalar(tier: Tier) {
             // boundary rather than near it.
             for index in [0, 1, 63, 64, 65, width / 2, width - 1] {
                 if index < width {
-                    pixels[index] = test_params(sigma).level(noise[index]);
+                    pixels[index] = ThresholdParams::test(sigma).level(noise[index]);
                 }
             }
 
@@ -44,7 +43,7 @@ fn assert_tier_matches_scalar(tier: Tier) {
             let words_len = width.div_ceil(64) + 1;
             let mut backend_words = vec![u64::MAX; words_len];
             let mut scalar_words = vec![0u64; words_len];
-            let threshold = test_params(sigma);
+            let threshold = ThresholdParams::test(sigma);
 
             tier.run(ProcessWords {
                 pixels: &pixels,
@@ -52,7 +51,13 @@ fn assert_tier_matches_scalar(tier: Tier) {
                 threshold,
                 words: &mut backend_words,
             });
-            process_words_scalar(&pixels, &noise, threshold, &mut scalar_words);
+            ProcessWords {
+                pixels: &pixels,
+                noise: &noise,
+                threshold,
+                words: &mut scalar_words,
+            }
+            .run_scalar();
 
             assert_eq!(
                 backend_words, scalar_words,

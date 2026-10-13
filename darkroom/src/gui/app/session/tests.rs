@@ -4,19 +4,19 @@ use scenarium::NodeId;
 use std::sync::Arc;
 
 use crate::alloc_audit;
-use crate::core::document::TabRef;
 use crate::core::document::internals::DocFixture;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::preview::preview_func;
+use crate::core::preview;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::session::internals::SessionHarness;
-use crate::gui::pane::graph::node::preview_row::preview_image_wid;
-use crate::gui::pane::graph::toolbar::internals::run_chip_wid;
+use crate::gui::pane::graph::node::preview_row;
+use crate::gui::pane::graph::toolbar;
 use crate::gui::pane::viewer::ImageViewer;
+use crate::gui::state::preview_store;
 use crate::gui::state::preview_store::StoredContent;
-use crate::gui::state::preview_store::internals::opaque_image_value;
 
 /// Frames to settle the scene before the window opens. The caches that
 /// grow once — text shaping, palantir's widget tables, the record store's
@@ -46,11 +46,13 @@ const AUDITED_FRAMES: usize = 64;
 #[test]
 fn a_settled_frame_records_without_allocating() {
     let mut fixture = DocFixture::probes(6);
-    let node = fixture.add(&preview_func(Arc::default()));
+    let node = fixture.add(&preview::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    test.run_state
-        .previews
-        .ingest_preview(test.ui.ui(), node, opaque_image_value());
+    test.run_state.previews.ingest_preview(
+        test.ui.ui(),
+        node,
+        preview_store::internals::opaque_image_value(),
+    );
     // A reading, so the memory readout renders its longest form rather
     // than the absent-figure path.
     test.process_memory = 3 * 1024 * 1024;
@@ -75,11 +77,13 @@ fn a_settled_frame_records_without_allocating() {
 #[test]
 fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
     let mut fixture = DocFixture::default();
-    let node = fixture.add(&preview_func(Arc::default()));
+    let node = fixture.add(&preview::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    test.run_state
-        .previews
-        .ingest_preview(test.ui.ui(), node, opaque_image_value());
+    test.run_state.previews.ingest_preview(
+        test.ui.ui(),
+        node,
+        preview_store::internals::opaque_image_value(),
+    );
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
@@ -93,7 +97,7 @@ fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
         "a card-only preview never uploads its full-resolution source"
     );
 
-    test.ui.click_on(preview_image_wid(node));
+    test.ui.click_on(preview_row::preview_image_wid(node));
     let _ = test.frame();
     assert!(
         test.session
@@ -213,7 +217,7 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
         ..Modifiers::NONE
     });
     test.ui.key(Key::Char('S'));
-    test.ui.click_on(run_chip_wid());
+    test.ui.click_on(toolbar::internals::run_chip_wid());
 
     let commands = test.frame();
     assert!(

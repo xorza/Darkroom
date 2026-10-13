@@ -58,7 +58,7 @@ use crate::gui::state::preview_store::PreviewStore;
 /// acknowledged, so a miss is a protocol violation rather than a state to
 /// tolerate.
 fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
-    assert!(
+    debug_assert!(
         compiled.contains(node_id),
         "worker report identity must belong to the acknowledged compiled graph"
     );

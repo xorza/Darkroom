@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn plausibility_hand_cases() {
     let ten_degrees = Some(10.0f64.to_radians());
-    let usual = Some((0.8, 1.2));
+    let usual = Some(ScaleRange { min: 0.8, max: 1.2 });
     let similarity = |angle_deg: f64, scale| {
         Transform::similarity(DVec2::new(5.0, -3.0), angle_deg.to_radians(), scale)
     };
@@ -59,7 +59,10 @@ fn plausibility_hand_cases() {
         (
             Transform::translation(DVec2::new(100.0, -50.0)),
             Some(1.0f64.to_radians()),
-            Some((0.99, 1.01)),
+            Some(ScaleRange {
+                min: 0.99,
+                max: 1.01,
+            }),
             true,
             "a translation has rotation 0 and scale 1",
         ),
@@ -97,8 +100,12 @@ fn estimate_honours_the_plausibility_limits() {
     // Every hypothesis is implausible, so none is scored: the whole budget runs and the best
     // gathered no inliers.
     assert_eq!(
-        estimate_uniform(&estimator, &ref_points, &rotated, TransformType::Similarity)
-            .map(|result| result.inliers),
+        estimate_uniform(
+            &estimator,
+            &pairs(&ref_points, &rotated),
+            TransformType::Similarity
+        )
+        .map(|result| result.inliers),
         Err(RansacFailure {
             reason: RansacFailureReason::NoInliersFound,
             iterations: RansacConfig::default().max_iterations,
@@ -109,8 +116,12 @@ fn estimate_honours_the_plausibility_limits() {
         &Transform::similarity(DVec2::new(5.0, -3.0), 5.0f64.to_radians(), 1.05),
         &ref_points,
     );
-    let result =
-        estimate_uniform(&estimator, &ref_points, &mild, TransformType::Similarity).unwrap();
+    let result = estimate_uniform(
+        &estimator,
+        &pairs(&ref_points, &mild),
+        TransformType::Similarity,
+    )
+    .unwrap();
     assert_eq!(result.inliers, (0..20).collect::<Vec<_>>());
 }
 
@@ -135,8 +146,7 @@ fn the_limits_steer_ransac_to_the_plausible_group() {
     let limited = estimator(1.0, ten_degree_limit());
     let result = estimate_uniform(
         &limited,
-        &ref_points,
-        &target_points,
+        &pairs(&ref_points, &target_points),
         TransformType::Similarity,
     )
     .unwrap();
@@ -152,8 +162,7 @@ fn the_limits_steer_ransac_to_the_plausible_group() {
     );
     let result = estimate_uniform(
         &unlimited,
-        &ref_points,
-        &target_points,
+        &pairs(&ref_points, &target_points),
         TransformType::Similarity,
     )
     .unwrap();

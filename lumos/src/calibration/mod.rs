@@ -12,9 +12,12 @@ pub(crate) mod defect_map;
 pub(crate) mod error;
 pub(crate) mod light_calibration;
 pub(crate) mod master_cache;
+pub(crate) mod master_recipe;
 pub(crate) mod master_role;
+pub(crate) mod master_stack;
 pub(crate) mod master_subtraction;
 pub(crate) mod prepared_flat;
+pub(crate) mod subtractor;
 pub(crate) mod temperature_difference;
 pub(crate) mod temperature_source;
 

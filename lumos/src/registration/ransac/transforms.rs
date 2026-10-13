@@ -10,7 +10,8 @@ use crate::math::dmat3::DMat3;
 use crate::registration::point_normalization::{PointNormalization, centroid};
 use crate::registration::transform::{Transform, TransformType};
 
-/// Compute adaptive iteration count for early termination.
+/// The iterations after which an all-inlier sample of `sample_size` has been drawn with
+/// `confidence`, at `inlier_ratio`: `N = ln(1 − confidence) / ln(1 − wⁿ)`.
 #[expect(
     clippy::cast_sign_loss,
     reason = "both logarithms are negative, so their quotient is positive"
@@ -20,8 +21,6 @@ pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
         return 1;
     }
 
-    // N = log(1 - confidence) / log(1 - w^n)
-    // where w = inlier_ratio, n = sample_size
     let w_n =
         inlier_ratio.powi(i32::try_from(sample_size).expect("a minimal sample is a few points"));
     if w_n >= 1.0 {
@@ -36,7 +35,8 @@ pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
     (log_conf / log_outlier).ceil() as usize
 }
 
-/// Estimate transformation from point correspondences.
+/// The `transform_type` that maps `ref_points` onto `target_points`, paired by index, best in
+/// least squares; `None` when the points do not determine it.
 pub(crate) fn estimate_transform(
     ref_points: &[DVec2],
     target_points: &[DVec2],
@@ -51,7 +51,7 @@ pub(crate) fn estimate_transform(
     }
 }
 
-/// Estimate translation (average displacement).
+/// The mean displacement.
 fn estimate_translation(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.is_empty() {
         return None;
@@ -80,7 +80,6 @@ fn estimate_euclidean(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<T
     let ref_centroid = centroid(ref_points);
     let tar_centroid = centroid(target_points);
 
-    // Cross-covariance terms (no ref_var needed since scale=1)
     let mut sxx = 0.0;
     let mut sxy = 0.0;
     let mut syx = 0.0;
@@ -97,7 +96,6 @@ fn estimate_euclidean(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<T
     let angle = (sxy - syx).atan2(sxx + syy);
     let (sin_a, cos_a) = angle.sin_cos();
 
-    // Translation with scale=1
     let t = DVec2::new(
         tar_centroid.x - (cos_a * ref_centroid.x - sin_a * ref_centroid.y),
         tar_centroid.y - (sin_a * ref_centroid.x + cos_a * ref_centroid.y),
@@ -112,7 +110,6 @@ fn estimate_similarity(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         return None;
     }
 
-    // Compute centroids
     let ref_centroid = centroid(ref_points);
     let tar_centroid = centroid(target_points);
 
@@ -139,10 +136,8 @@ fn estimate_similarity(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         return None;
     }
 
-    // Compute rotation angle
     let angle = (sxy - syx).atan2(sxx + syy);
 
-    // Compute scale
     let cos_a = angle.cos();
     let sin_a = angle.sin();
     let scale = ((sxx + syy) * cos_a + (sxy - syx) * sin_a) / ref_var;
@@ -151,7 +146,6 @@ fn estimate_similarity(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         return None;
     }
 
-    // Compute translation
     let t = DVec2::new(
         tar_centroid.x - scale * (cos_a * ref_centroid.x - sin_a * ref_centroid.y),
         tar_centroid.y - scale * (sin_a * ref_centroid.x + cos_a * ref_centroid.y),
@@ -182,7 +176,6 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
 
     let n = ref_points.len() as f64;
 
-    // Compute sums on normalized points
     let mut sum_x = 0.0;
     let mut sum_y = 0.0;
     let mut sum_xx = 0.0;
@@ -234,12 +227,10 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
     let m12 = (sum_xy * sum_x - sum_xx * sum_y) * inv_det;
     let m22 = (sum_xx * sum_yy - sum_xy * sum_xy) * inv_det;
 
-    // Solve for x-coordinate parameters (in normalized space)
     let a = m00 * sum_x_tx + m01 * sum_y_tx + m02 * sum_tx;
     let b = m01 * sum_x_tx + m11 * sum_y_tx + m12 * sum_tx;
     let e = m02 * sum_x_tx + m12 * sum_y_tx + m22 * sum_tx;
 
-    // Solve for y-coordinate parameters (in normalized space)
     let c = m00 * sum_x_ty + m01 * sum_y_ty + m02 * sum_ty;
     let d = m01 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
     let f = m02 * sum_x_ty + m12 * sum_y_ty + m22 * sum_ty;

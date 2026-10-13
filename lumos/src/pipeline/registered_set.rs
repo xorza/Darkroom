@@ -1,20 +1,18 @@
 //! [`RegisteredSet`]: every light's registration outcome, and the combine of the survivors.
 
-use common::CancelToken;
-
+use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::stack::stack_stored_frames;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
-use crate::pipeline::align_stack_config::AlignStackConfig;
-use crate::pipeline::align_stack_result::AlignStackResult;
+use crate::pipeline::align_stack_result::{AlignStackResult, AlignmentSummary};
+use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
 use crate::pipeline::frame_registrar::ParkedFrame;
-use crate::progress::progress_callback::ProgressCallback;
 use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
 /// Every light's parked frame in input order — `None` only where the run was cancelled — with
-/// what the combine of the survivors and the result need.
+/// what the combine of the survivors and the result need, and the tier the frames are parked in.
 #[derive(Debug)]
 pub(crate) struct RegisteredSet {
     pub(crate) outcomes: Vec<Option<ParkedFrame>>,
@@ -25,17 +23,16 @@ pub(crate) struct RegisteredSet {
     pub(crate) dimensions: ImageDimensions,
     /// Each light's detection funnel, in input order, including the lights that were dropped.
     pub(crate) detection: Vec<DetectionDiagnostics>,
+    pub(crate) parking: FrameParking,
 }
 
 impl RegisteredSet {
-    /// Combine the frames that registered.
-    pub(crate) fn combine(
+    /// Combine the frames that registered, under `run`.
+    pub(super) fn combine(
         self,
-        parking: FrameParking,
-        config: &AlignStackConfig,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        run: &AlignStackRun<'_>,
     ) -> Result<AlignStackResult, AlignStackError> {
+        let cancel = run.cancel();
         if cancel.is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
@@ -70,26 +67,29 @@ impl RegisteredSet {
 
         let registered = frames.len();
         tracing::info!(frames = registered, "Stacking aligned frames");
-        let parked_lights = parking.parked_lights();
+        let parked_lights = self.parking.parked_lights();
         let mut stacked = stack_stored_frames(
             frames,
-            parking.into_tier(),
-            self.dimensions,
-            self.metadata,
-            &config.stack.for_survivors(&dropped),
-            progress,
-            cancel,
+            CacheCore {
+                tier: self.parking.into_tier(),
+                dimensions: self.dimensions,
+                metadata: self.metadata,
+                monitor: run.ingest.monitor(),
+            },
+            &run.config.stack.for_survivors(&dropped),
         )
         // The combine numbers the survivors by position; the caller numbers its lights.
         .map_err(|error| error.renumbered(&survivors))?;
         tracing::info!("Stack complete");
         stacked.report.parked_lights = parked_lights;
 
-        Ok(AlignStackResult::from_product(
-            stacked,
-            self.reference,
-            registrations,
-            self.detection,
-        ))
+        Ok(AlignStackResult {
+            product: stacked,
+            alignment: AlignmentSummary {
+                reference: self.reference,
+                frames: registrations,
+            },
+            detection: self.detection,
+        })
     }
 }

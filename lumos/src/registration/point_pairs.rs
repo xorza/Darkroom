@@ -2,6 +2,8 @@
 
 use glam::DVec2;
 
+use crate::registration::triangle::voting::{MatchIndices, PointMatch};
+
 /// A set of matched points as two parallel position slices, paired by index.
 ///
 /// The estimators and the distortion fitter take positions, not matches — they know nothing about
@@ -23,24 +25,35 @@ impl PointPairs {
         }
     }
 
+    /// The positions of `matches`, from the `reference` and `target` catalogs they index.
+    pub(super) fn from_matches(
+        matches: &[PointMatch],
+        reference: &[DVec2],
+        target: &[DVec2],
+    ) -> Self {
+        let mut pairs = Self::default();
+        pairs.refill(matches.iter().map(|m| m.indices), reference, target);
+        pairs
+    }
+
     /// Refill from the points `indices` selects on both sides — a RANSAC sample or inlier set,
     /// where one index names the pair.
     pub(super) fn gather(&mut self, indices: &[usize], reference: &[DVec2], target: &[DVec2]) {
-        self.gather_matched(
-            indices.iter().map(|&index| (index, index)),
+        self.refill(
+            indices.iter().map(|&index| MatchIndices {
+                reference: index,
+                target: index,
+            }),
             reference,
             target,
         );
     }
 
-    /// Refill from `(reference, target)` index pairs — the shape a match carries, where the two
-    /// sides are indexed independently.
-    ///
     /// Both sides are filled in one walk so a pair can never reach one and not the other, which is
     /// the correspondence the estimators rely on and cannot check for themselves.
-    pub(super) fn gather_matched(
+    fn refill(
         &mut self,
-        matched: impl ExactSizeIterator<Item = (usize, usize)>,
+        matched: impl ExactSizeIterator<Item = MatchIndices>,
         reference: &[DVec2],
         target: &[DVec2],
     ) {
@@ -48,9 +61,9 @@ impl PointPairs {
         self.target.clear();
         self.reference.reserve_exact(matched.len());
         self.target.reserve_exact(matched.len());
-        for (from_reference, from_target) in matched {
-            self.reference.push(reference[from_reference]);
-            self.target.push(target[from_target]);
+        for pair in matched {
+            self.reference.push(reference[pair.reference]);
+            self.target.push(target[pair.target]);
         }
         debug_assert_eq!(self.reference.len(), self.target.len());
     }

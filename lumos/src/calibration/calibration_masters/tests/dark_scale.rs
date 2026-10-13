@@ -22,11 +22,18 @@ const DARK_CURRENT: f32 = 0.004;
 /// The light's read and shot noise, Gaussian.
 const LIGHT_NOISE: f32 = 0.002;
 
+/// A master dark and its hot pixels: each one's position and true excess.
+#[derive(Debug)]
+struct HotDark {
+    dark: CfaImage,
+    hot: Vec<(Vec2us, f32)>,
+}
+
 /// A bias-removed master dark of 300 s at −10 °C, `count` hot pixels on a 16-px grid 8 px in from
-/// every edge, so each has its whole ring, with excesses evenly from 0.02 to 0.32: the positions,
-/// and each one's true excess. The last `saturated` read 0.002 short of it, flagged saturated: a
-/// level the sensor clipped just below the excess.
-fn dark(count: usize, saturated: usize) -> (CfaImage, Vec<(Vec2us, f32)>) {
+/// every edge, so each has its whole ring, with excesses evenly from 0.02 to 0.32. The last
+/// `saturated` read 0.002 short of it, flagged saturated: a level the sensor clipped just below the
+/// excess.
+fn dark(count: usize, saturated: usize) -> HotDark {
     let hot: Vec<(Vec2us, f32)> = (0..count)
         .map(|k| {
             let position = Vec2us::new(8 + 16 * (k % 16), 8 + 16 * (k / 16));
@@ -55,7 +62,7 @@ fn dark(count: usize, saturated: usize) -> (CfaImage, Vec<(Vec2us, f32)>) {
     dark.metadata.exposure_time = Some(300.0);
     dark.metadata.ccd_temp = Some(-10.0);
     dark.metadata.calibration = CalibrationState::BIAS;
-    (dark, hot)
+    HotDark { dark, hot }
 }
 
 /// A light of `exposure` s at `temperature` °C whose dark signal is `scale` times the dark's, on a
@@ -127,7 +134,7 @@ fn masters(dark: CfaImage) -> CalibrationMasters {
 /// 6%.
 #[test]
 fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
-    let (dark, hot) = dark(256, 5);
+    let HotDark { dark, hot } = dark(256, 5);
     let masters = masters(dark);
     for (scale, temperature) in [(1.37f32, -10.0), (1.42, -7.0)] {
         let mut light = light(&hot, scale, 10, 300.0, temperature);
@@ -168,7 +175,7 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
 /// over 300 s, then 300 s over 120 s — and the outcome says how many pixels the fit had.
 #[test]
 fn too_few_hot_pixels_fall_back_to_the_exposures() {
-    let (dark, hot) = dark(50, 0);
+    let HotDark { dark, hot } = dark(50, 0);
     let masters = masters(dark);
     for (exposure, ratio) in [(300.0, 1.0), (750.0, 2.5)] {
         let mut light = light(&hot, 1.0, 0, exposure, -10.0);

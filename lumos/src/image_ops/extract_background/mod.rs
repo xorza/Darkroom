@@ -19,12 +19,12 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
-use crate::background_mesh::workspace::MeshWorkspace;
+use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::robust_sigma_f64;
+use crate::math::statistics;
 use crate::star_detection::star_detection_config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
 
 /// How the modeled background is removed from the image.
@@ -111,14 +111,51 @@ impl ExtractBackground {
         workspace: &mut MeshWorkspace,
     ) -> Result<Surface, OpError> {
         let samples = collect_samples(plane, self.tile_size, workspace);
-        let terms = poly_terms(effective_degree(samples.len(), self.degree));
-        let coeffs = fit_surface(&samples, &terms, self.rejection_sigma, self.iterations)?;
-        let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
+        let terms = Monomial::up_to(effective_degree(samples.len(), self.degree));
+        let polynomial = self.fit_surface(&samples, &terms)?;
+        let surface = Surface::new(&polynomial, Size2us::new(plane.width(), plane.height()));
         let mean = surface.mean();
         if self.mode == BackgroundMode::Divide && mean <= 0.0 {
             return Err(OpError::NonPositiveBackground { mean });
         }
         Ok(surface)
+    }
+
+    /// Fit the surface, then iteratively reject samples whose residual exceeds
+    /// `rejection_sigma·σ` and refit (σ = MAD-scaled residual spread). Rejects tiles sitting on
+    /// nebulosity or unrejected stars.
+    fn fit_surface<'a>(
+        &self,
+        samples: &[Sample],
+        terms: &'a [Monomial],
+    ) -> Result<Polynomial<'a>, OpError> {
+        let mut active: Vec<Sample> = samples.to_vec();
+        let mut polynomial = Polynomial::fit(terms, &active)?;
+        // Reused by every refit rather than reallocated per iteration.
+        let mut deviations: Vec<f64> = Vec::new();
+        for _ in 0..self.iterations {
+            let residuals: Vec<f64> = active
+                .iter()
+                .map(|s| s.z - polynomial.at(s.x, s.y))
+                .collect();
+            let sigma = statistics::robust_sigma_f64(&residuals, &mut deviations);
+            if sigma <= 0.0 {
+                break;
+            }
+            let thresh = f64::from(self.rejection_sigma) * sigma;
+            let kept: Vec<Sample> = active
+                .iter()
+                .zip(&residuals)
+                .filter(|(_, r)| r.abs() <= thresh)
+                .map(|(&s, _)| s)
+                .collect();
+            if kept.len() == active.len() || kept.len() < terms.len() {
+                break; // converged, or refusing to drop below a determined fit
+            }
+            active = kept;
+            polynomial = Polynomial::fit(terms, &active)?;
+        }
+        Ok(polynomial)
     }
 
     /// Remove a fitted surface from its channel, in place. The model is evaluated on the fly inside
@@ -131,7 +168,8 @@ impl ExtractBackground {
                 // Only the model's variation is removed; its mean stays as the sky pedestal, as
                 // Siril does. Without it the sky sits at ≈0 and the next step that measures the
                 // background against zero (an auto stretch) has nothing to place. Each channel
-                // keeps its own level, like `Divide` — neutralizing the sky colour is a separate op.
+                // keeps its own level, like `Divide` — neutralizing the sky colour is a separate
+                // op.
                 surface.remove(plane, |p, m| p - (m - mean));
             }
             BackgroundMode::Divide => {
@@ -190,7 +228,15 @@ fn collect_samples(
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
     let size = Size2us::new(channel.width(), channel.height());
-    let grid = workspace.tile_stats(channel, None, tile, DEFAULT_SIGMA_CLIP_ITERATIONS, false);
+    let grid = workspace.tile_stats(
+        channel,
+        None,
+        MeshParams {
+            tile_size: tile,
+            sigma_clip_iterations: DEFAULT_SIGMA_CLIP_ITERATIONS,
+            median_filter: MedianFilter::Skip,
+        },
+    );
 
     let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
     for ty in 0..grid.stats.height() {
@@ -216,15 +262,62 @@ fn effective_degree(n: usize, requested: usize) -> usize {
     d
 }
 
-/// Exponent pairs `(i, j)` for every monomial `x^i·y^j` with `i + j ≤ degree`.
-fn poly_terms(degree: usize) -> Vec<(u8, u8)> {
-    let mut terms = Vec::new();
-    for total in 0..=u8::try_from(degree).expect("the degree is at most 4") {
-        for i in 0..=total {
-            terms.push((i, total - i));
+/// One monomial of the surface, by the exponent of each coordinate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Monomial {
+    x: u8,
+    y: u8,
+}
+
+impl Monomial {
+    /// Every monomial `x^i·y^j` with `i + j ≤ degree`, by total degree, then by `i`.
+    fn up_to(degree: usize) -> Vec<Self> {
+        let mut terms = Vec::new();
+        for total in 0..=u8::try_from(degree).expect("the degree is at most 4") {
+            for x in 0..=total {
+                terms.push(Self { x, y: total - x });
+            }
         }
+        terms
     }
-    terms
+}
+
+/// A polynomial in the normalized coordinates: its monomials and their coefficients.
+#[derive(Debug)]
+struct Polynomial<'a> {
+    terms: &'a [Monomial],
+    coeffs: DVector<f64>,
+}
+
+impl<'a> Polynomial<'a> {
+    /// The least-squares fit of `terms` to `samples`, by the SVD of the design matrix.
+    fn fit(terms: &'a [Monomial], samples: &[Sample]) -> Result<Self, OpError> {
+        let (m, k) = (samples.len(), terms.len());
+        let a = DMatrix::from_fn(m, k, |r, c| {
+            let term = terms[c];
+            samples[r].x.powi(i32::from(term.x)) * samples[r].y.powi(i32::from(term.y))
+        });
+        let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
+        let lstsq = Lstsq::new(a);
+        let solution = lstsq.solve(&z).ok_or_else(|| OpError::RankDeficient {
+            operation: "background surface fit",
+            rank: lstsq.rank(),
+            required_rank: k,
+        })?;
+        Ok(Self {
+            terms,
+            coeffs: DVector::from_column_slice(solution.as_slice()),
+        })
+    }
+
+    /// The polynomial at normalized `(x, y)`.
+    fn at(&self, x: f64, y: f64) -> f64 {
+        self.terms
+            .iter()
+            .zip(self.coeffs.iter())
+            .map(|(term, &c)| c * x.powi(i32::from(term.x)) * y.powi(i32::from(term.y)))
+            .sum()
+    }
 }
 
 /// Map a pixel/centre coordinate to `[-1, 1]` (conditioning for the least-squares fit).
@@ -234,69 +327,6 @@ fn norm(c: f64, n: usize) -> f64 {
     } else {
         0.0
     }
-}
-
-/// Evaluate the polynomial at normalized `(x, y)`.
-fn eval(coeffs: &DVector<f64>, terms: &[(u8, u8)], x: f64, y: f64) -> f64 {
-    terms
-        .iter()
-        .zip(coeffs.iter())
-        .map(|(&(i, j), &c)| c * x.powi(i32::from(i)) * y.powi(i32::from(j)))
-        .sum()
-}
-
-/// Least-squares solve of the original design matrix using SVD.
-fn solve_ls(samples: &[Sample], terms: &[(u8, u8)]) -> Result<DVector<f64>, OpError> {
-    let (m, k) = (samples.len(), terms.len());
-    let a = DMatrix::from_fn(m, k, |r, c| {
-        let (i, j) = terms[c];
-        samples[r].x.powi(i32::from(i)) * samples[r].y.powi(i32::from(j))
-    });
-    let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
-    let lstsq = Lstsq::new(a);
-    let solution = lstsq.solve(&z).ok_or_else(|| OpError::RankDeficient {
-        operation: "background surface fit",
-        rank: lstsq.rank(),
-        required_rank: k,
-    })?;
-    Ok(DVector::from_column_slice(solution.as_slice()))
-}
-
-/// Fit the surface, then iteratively reject samples whose residual exceeds `kappa·σ` and refit
-/// (σ = MAD-scaled residual spread). Rejects tiles sitting on nebulosity or unrejected stars.
-fn fit_surface(
-    samples: &[Sample],
-    terms: &[(u8, u8)],
-    kappa: f32,
-    iterations: usize,
-) -> Result<DVector<f64>, OpError> {
-    let mut active: Vec<Sample> = samples.to_vec();
-    let mut coeffs = solve_ls(&active, terms)?;
-    // Reused by every refit rather than reallocated per iteration.
-    let mut deviations: Vec<f64> = Vec::new();
-    for _ in 0..iterations {
-        let residuals: Vec<f64> = active
-            .iter()
-            .map(|s| s.z - eval(&coeffs, terms, s.x, s.y))
-            .collect();
-        let sigma = robust_sigma_f64(&residuals, &mut deviations);
-        if sigma <= 0.0 {
-            break;
-        }
-        let thresh = f64::from(kappa) * sigma;
-        let kept: Vec<Sample> = active
-            .iter()
-            .zip(&residuals)
-            .filter(|(_, r)| r.abs() <= thresh)
-            .map(|(&s, _)| s)
-            .collect();
-        if kept.len() == active.len() || kept.len() < terms.len() {
-            break; // converged, or refusing to drop below a determined fit
-        }
-        active = kept;
-        coeffs = solve_ls(&active, terms)?;
-    }
-    Ok(coeffs)
 }
 
 /// The fitted polynomial surface, packed for fast on-the-fly evaluation.
@@ -314,18 +344,19 @@ struct Surface {
 }
 
 impl Surface {
-    fn new(coeffs: &DVector<f64>, terms: &[(u8, u8)], size: Size2us) -> Self {
-        let degree = terms
+    fn new(polynomial: &Polynomial<'_>, size: Size2us) -> Self {
+        let degree = polynomial
+            .terms
             .iter()
-            .map(|&(i, j)| usize::from(i + j))
+            .map(|term| usize::from(term.x + term.y))
             .max()
             .unwrap_or(0);
         // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` fits fixed buffers.
         assert!(degree <= 4, "background surface degree {degree} exceeds 4");
         let d1 = degree + 1;
         let mut c_mat = [0.0f64; 25];
-        for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
-            c_mat[usize::from(i) * d1 + usize::from(j)] = c;
+        for (term, &c) in polynomial.terms.iter().zip(polynomial.coeffs.iter()) {
+            c_mat[usize::from(term.x) * d1 + usize::from(term.y)] = c;
         }
         Self {
             c_mat,

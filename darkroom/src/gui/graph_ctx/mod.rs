@@ -30,7 +30,10 @@ use scenarium::{
     DataType, Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription,
 };
 
-use crate::core::document::{Document, GraphView, PortKind, PortRef, StackedItem, Viewport};
+use crate::core::document::Document;
+use crate::core::document::graph_view::{GraphView, StackedItem};
+use crate::core::document::port_ref::{PortKind, PortRef};
+use crate::core::document::viewport::Viewport;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -199,7 +202,7 @@ impl<'a> GraphCtx<'a> {
     ///
     /// Ids rather than resolved nodes because the sort needs a buffer and a
     /// [`NodeCtx`] borrows this context — see
-    /// [`GraphView::paint_order`](crate::core::document::GraphView::paint_order)
+    /// [`GraphView::paint_order`](crate::core::document::graph_view::GraphView::paint_order)
     /// for why the buffer is the caller's.
     pub(crate) fn paint_order(self, out: &mut Vec<StackedItem>) {
         self.view().paint_order(out);

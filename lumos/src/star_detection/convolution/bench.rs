@@ -10,7 +10,7 @@ use imaginarium::Buffer2;
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench::Stages;
-use crate::star_detection::convolution::{FilterKernels, matched_filter};
+use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -32,7 +32,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let mut kernels = FilterKernels::default();
             b.iter_batched_ref(
                 || residual.clone(),
-                |values| matched_filter(values, filter, &mut temp, &mut kernels),
+                |values| kernels.matched_filter(values, filter, &mut temp),
                 fixture::fresh_copies(size_of_val(residual.pixels())),
             );
         });

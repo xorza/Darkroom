@@ -1,7 +1,7 @@
 //! The install-local **dense index space**: `NodeIdx`, `OutputIdx`,
 //! `OutputAddr`, and the `…Idx` positions in the packed port columns. The
 //! containers keyed by them are [`Column`](crate::containers::column::Column) and
-//! [`IdxSet`](crate::containers::set::IdxSet).
+//! [`IdxSet`](crate::containers::idx_set::IdxSet).
 //!
 //! This is an *index* space, not a second identity space. A node in a
 //! compiled program is the authored node, named by the same

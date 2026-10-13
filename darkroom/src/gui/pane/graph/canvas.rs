@@ -11,19 +11,19 @@
 //! under the pane needs one: the gestures poll the outer response, and the
 //! backdrop and the cull read its rect. Keeping them together is what stops
 //! two callers disagreeing about which canvas they mean. The transform
-//! *between* them is [`Viewport::to_world`](crate::core::document::Viewport::to_world),
+//! *between* them is [`Viewport::to_world`](crate::core::document::viewport::Viewport::to_world),
 //! on the camera itself.
 
 use palantir::WidgetId;
 
 /// Stable id for the outer (pan-capture) canvas — the rect the gestures poll,
 /// the backdrop paints, and the cull measures against.
-pub(crate) fn outer_canvas_widget_id() -> WidgetId {
+pub(crate) fn outer_wid() -> WidgetId {
     WidgetId::from_hash("graph.canvas.outer")
 }
 
 /// Stable id for the inner (transformed) canvas. Used as the widget seed and
 /// for resolving the canvas's pre-transform origin in connection draws.
-pub(super) fn inner_canvas_widget_id() -> WidgetId {
+pub(super) fn inner_wid() -> WidgetId {
     WidgetId::from_hash("graph.canvas.inner")
 }

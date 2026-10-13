@@ -7,7 +7,6 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
-use common::CancelToken;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
@@ -20,7 +19,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::math::size2us::Size2us;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::warp_transform::WarpTransform;
 
 /// Each light's side.
@@ -58,8 +57,7 @@ fn stage(c: &mut Criterion) {
                     .drizzle_images(
                         frames,
                         &IngestConfig::default(),
-                        ProgressCallback::default(),
-                        CancelToken::never(),
+                        ProgressMonitor::unattended(),
                     )
                     .unwrap()
             },
@@ -97,12 +95,7 @@ fn end_to_end(c: &mut Criterion) {
             },
             |frames| {
                 config
-                    .drizzle_cfa_paths(
-                        frames,
-                        &ingest,
-                        ProgressCallback::default(),
-                        CancelToken::never(),
-                    )
+                    .drizzle_cfa_paths(frames, &ingest, ProgressMonitor::unattended())
                     .unwrap()
             },
             BatchSize::PerIteration,

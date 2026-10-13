@@ -8,8 +8,8 @@ use imaginarium::Buffer2;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::io::raw;
 use crate::io::raw::error::BlackLevelError;
-use crate::io::raw::libraw_filter_color;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
 
@@ -130,7 +130,7 @@ impl BlackLevel {
             let mut colors = [0usize; 4];
             let mut last_green = None;
             for (c, color) in colors.iter_mut().enumerate() {
-                *color = libraw_filter_color(libraw.filters, c / 2, c % 2);
+                *color = raw::filter_color(libraw.filters, c / 2, c % 2);
                 if *color == 1 {
                     last_green = Some(c);
                 }

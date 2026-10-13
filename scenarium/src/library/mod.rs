@@ -1,132 +1,16 @@
-use crate::graph::identity::FuncId;
+pub(crate) mod type_entry;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::hash_map::Values;
 use std::sync::Arc;
 
-use crate::CustomValueCodec;
 use crate::data::codec::Codecs;
 use crate::data::type_system::Strictness;
 use crate::graph::func::{Func, FuncInput, OutputType};
-use crate::{ConstValue, DataType, EnumVariants, TypeId};
-
-#[derive(Clone, Debug)]
-enum TypeEntryKind {
-    Custom {
-        display_name: String,
-        codec: Option<Arc<dyn CustomValueCodec>>,
-    },
-    Enum {
-        display_name: String,
-        variants: Vec<String>,
-    },
-}
-
-/// A registered nominal type. A custom type may carry a disk codec; an enum
-/// carries only its display metadata and variants.
-#[derive(Clone, Debug)]
-pub struct TypeEntry {
-    kind: TypeEntryKind,
-}
-
-impl TypeEntry {
-    fn custom_entry(
-        display_name: impl Into<String>,
-        codec: Option<Arc<dyn CustomValueCodec>>,
-    ) -> Self {
-        Self {
-            kind: TypeEntryKind::Custom {
-                display_name: display_name.into(),
-                codec,
-            },
-        }
-    }
-
-    /// A custom type with no disk codec (not cacheable).
-    pub fn custom(display_name: impl Into<String>) -> Self {
-        Self::custom_entry(display_name, None)
-    }
-
-    /// A custom type with a disk codec.
-    pub fn custom_with_codec(
-        display_name: impl Into<String>,
-        codec: Arc<dyn CustomValueCodec>,
-    ) -> Self {
-        Self::custom_entry(display_name, Some(codec))
-    }
-
-    /// An enum type with the variant names taken from `E` (via strum).
-    pub fn enum_of<E: EnumVariants>(display_name: impl Into<String>) -> Self {
-        Self::enum_with_variants(display_name, E::variant_names())
-    }
-
-    /// An enum type with an explicit variant list (for runtime-discovered enums
-    /// where the concrete type isn't available — see `lens`'s config builders).
-    pub fn enum_with_variants(display_name: impl Into<String>, variants: Vec<String>) -> Self {
-        Self {
-            kind: TypeEntryKind::Enum {
-                display_name: display_name.into(),
-                variants,
-            },
-        }
-    }
-
-    pub fn display_name(&self) -> &str {
-        match &self.kind {
-            TypeEntryKind::Custom { display_name, .. }
-            | TypeEntryKind::Enum { display_name, .. } => display_name,
-        }
-    }
-
-    /// The variant names for an enum entry; `None` for a custom type.
-    pub fn variants(&self) -> Option<&[String]> {
-        match &self.kind {
-            TypeEntryKind::Enum { variants, .. } => Some(variants),
-            TypeEntryKind::Custom { .. } => None,
-        }
-    }
-
-    /// Whether `other` declares this same type: the same name, the same
-    /// variants, and the same codec instance.
-    fn same_as(&self, other: &Self) -> bool {
-        match (&self.kind, &other.kind) {
-            (
-                TypeEntryKind::Custom {
-                    display_name,
-                    codec,
-                },
-                TypeEntryKind::Custom {
-                    display_name: other_name,
-                    codec: other_codec,
-                },
-            ) => {
-                display_name == other_name
-                    && match (codec, other_codec) {
-                        (None, None) => true,
-                        (Some(codec), Some(other)) => Arc::ptr_eq(codec, other),
-                        _ => false,
-                    }
-            }
-            (
-                TypeEntryKind::Enum {
-                    display_name,
-                    variants,
-                },
-                TypeEntryKind::Enum {
-                    display_name: other_name,
-                    variants: other_variants,
-                },
-            ) => display_name == other_name && variants == other_variants,
-            _ => false,
-        }
-    }
-
-    fn codec(&self) -> Option<&Arc<dyn CustomValueCodec>> {
-        match &self.kind {
-            TypeEntryKind::Custom { codec, .. } => codec.as_ref(),
-            TypeEntryKind::Enum { .. } => None,
-        }
-    }
-}
+use crate::graph::identity::FuncId;
+use crate::library::type_entry::TypeEntry;
+use crate::{ConstValue, DataType, TypeId};
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
 /// nominal types (with their disk codecs). This is runtime registry state, not a persistence
@@ -154,10 +38,11 @@ impl Library {
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
-        self.funcs().find(|func| func.name == name)
+        self.iter().find(|func| func.name == name)
     }
 
-    pub fn funcs(&self) -> impl ExactSizeIterator<Item = &Func> {
+    /// The registered funcs, in no particular order.
+    pub fn iter(&self) -> Values<'_, FuncId, Func> {
         self.funcs.values()
     }
 
@@ -291,8 +176,9 @@ impl Library {
         &self.codecs
     }
 
-    pub fn merge<T: Into<Self>>(&mut self, other: T) {
-        let other = other.into();
+    /// Add every func and type `other` holds, under the same gates
+    /// [`add`](Self::add) and [`register_type`](Self::register_type) apply.
+    pub fn merge(&mut self, other: Self) {
         for func in other.funcs.into_values() {
             self.add(func);
         }
@@ -372,16 +258,12 @@ fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<
     }
 }
 
-impl<It> From<It> for Library
-where
-    It: IntoIterator<Item = Func>,
-{
-    fn from(iter: It) -> Self {
-        let mut library = Self::default();
-        for func in iter {
-            library.add(func);
-        }
-        library
+impl<'a> IntoIterator for &'a Library {
+    type Item = &'a Func;
+    type IntoIter = Values<'a, FuncId, Func>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

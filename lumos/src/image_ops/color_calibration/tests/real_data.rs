@@ -5,10 +5,12 @@
 use crate::image_ops::rgb::Rgb;
 use crate::internals::visual;
 
-use crate::image_ops::color_calibration::neutralize_background::channel_backgrounds;
+use crate::image_ops::color_calibration::neutralize_background;
+use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::scnr::Scnr;
+use crate::image_ops::stretch::Stretch;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
-use crate::{NeutralizeBackground, Scnr, Stretch};
 
 fn spread(bg: Rgb) -> f32 {
     bg.r.max(bg.g).max(bg.b) - bg.r.min(bg.g).min(bg.b)
@@ -22,7 +24,7 @@ fn neutralize_then_stretch_removes_green() {
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds
     // differ.
-    let before = channel_backgrounds(&image);
+    let before = neutralize_background::channel_backgrounds(&image);
     let spread_before = spread(before);
     eprintln!(
         "background before: R={} G={} B={}  (spread {spread_before:.6})",
@@ -33,10 +35,9 @@ fn neutralize_then_stretch_removes_green() {
         "the raw stack has a colored background: {before:?}"
     );
 
-    // Neutralize in the linear domain → background goes neutral (all channels to a common level).
     let mut img = image;
     NeutralizeBackground.apply(&mut img).unwrap();
-    let after = channel_backgrounds(&img);
+    let after = neutralize_background::channel_backgrounds(&img);
     let spread_after = spread(after);
     eprintln!(
         "background after:  R={} G={} B={}  (spread {spread_after:.6})",
@@ -51,12 +52,10 @@ fn neutralize_then_stretch_removes_green() {
         "backgrounds neutralized to a common level: {after:?}"
     );
 
-    // Neutralized → stretch → save (compare against the un-neutralized green stretch from
-    // `stretching::tests::real_data`).
+    // To compare against the un-neutralized green stretch of `stretch::tests::real_data`.
     Stretch::auto_stf().apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_stf");
 
-    // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_scnr");
 

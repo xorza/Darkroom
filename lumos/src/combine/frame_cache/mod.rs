@@ -5,9 +5,12 @@ pub(crate) mod frame_chunk;
 pub(crate) mod frame_gate;
 pub(crate) mod frame_weights;
 pub(crate) mod loader;
+pub(crate) mod normalized_stats;
 pub(crate) mod sample;
 pub(crate) mod sample_noise;
 pub(crate) mod slots;
+
+use std::path::Path;
 
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -20,23 +23,23 @@ use crate::combine::frame_cache::frame_gate::FrameGate;
 use crate::combine::frame_cache::frame_weights::FrameWeights;
 use crate::combine::frame_cache::loader::LoadedCache;
 use crate::combine::frame_cache::sample::{
-    CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
+    CombineScratch, CombinedSample, FlagTallies, GatheredSamples, PixelSamples,
 };
 use crate::combine::frame_cache::sample_noise::{NoiseColumns, SampleNoise};
 use crate::combine::frame_cache::slots::Slots;
 use crate::combine::normalization::FrameNorm;
+use crate::combine::normalization::slot_planes::SlotPlanes;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::combine::stack::StackFrame;
+use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack_config::{Normalization, StackConfig};
-use crate::error::Cancelled;
-use crate::error::FrameDimensionMismatch;
+use crate::error::{Cancelled, FrameDimensionMismatch};
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::flag_counts::{AtomicFlagCounts, FlagCounts};
+use crate::image::flag_counts::AtomicFlagCounts;
 use crate::image::flat_gain::{GainGrid, GainRows};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
@@ -50,14 +53,13 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
 use crate::math::vec2us::Vec2us;
 use crate::memory::stage::{Stage, Units};
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
 use crate::stack_product::quality_planes::QualityPlanes;
 use crate::stack_product::run_report::RunReport;
-use std::path::Path;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
 /// ask for it.
@@ -131,7 +133,7 @@ impl FrameCache {
         // stated (domain, row order, pattern) is the input's, and is checked here always.
         let mut facts = SetFacts::default();
         for (index, frame) in frames.iter().enumerate() {
-            Cancelled::check(&core.cancel)?;
+            Cancelled::check(&core.monitor.cancel)?;
             facts.admit(index, &frame.source_stats.facts)?;
             #[expect(
                 clippy::debug_assert_with_mut_call,
@@ -149,26 +151,17 @@ impl FrameCache {
                 );
             }
         }
-        let slots = Slots::of_frames(&frames, core.dimensions);
-        let frame_norms =
-            FrameNorm::measure(&frames, core.dimensions, slots, normalization, &core.cancel)?;
-        Ok(Self {
-            frames,
-            slots,
-            frame_norms,
-            core,
-        })
+        Self::measured(frames, core, normalization)
     }
 
     /// Build an in-memory frame-quality-aware cache from [`StackFrame`]s.
     pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
         normalization: Normalization,
-        progress: ProgressCallback,
-        cancel: CancelToken,
+        monitor: ProgressMonitor,
     ) -> Result<Self, StackError> {
         debug_assert!(!frames.is_empty(), "`combine_cached` refuses an empty set");
-        Cancelled::check(&cancel)?;
+        Cancelled::check(&monitor.cancel)?;
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata.clone();
 
@@ -197,24 +190,44 @@ impl FrameCache {
         for (index, frame) in stored.iter().enumerate() {
             FrameCheck {
                 index,
-                cancel: &cancel,
+                cancel: &monitor.cancel,
             }
             .stored(frame, dimensions, &mut facts)?;
         }
-        let slots = Slots::of_frames(&stored, dimensions);
-        let frame_norms = FrameNorm::measure(&stored, dimensions, slots, normalization, &cancel)?;
-
-        Ok(Self {
-            frames: stored,
-            slots,
-            frame_norms,
-            core: CacheCore {
+        Self::measured(
+            stored,
+            CacheCore {
                 tier: Tier::Resident,
                 dimensions,
                 metadata,
-                progress,
-                cancel,
+                monitor,
             },
+            normalization,
+        )
+    }
+
+    /// A cache over `frames`, every check passed, on `core`: their slots, and their norms under
+    /// `normalization`.
+    fn measured(
+        frames: Vec<StoredFrame>,
+        core: CacheCore,
+        normalization: Normalization,
+    ) -> Result<Self, StackError> {
+        let slots = Slots::of_frames(&frames, core.dimensions);
+        let frame_norms = FrameNorm::measure(
+            SlotPlanes {
+                frames: &frames,
+                dimensions: core.dimensions,
+                slots,
+                cancel: &core.monitor.cancel,
+            },
+            normalization,
+        )?;
+        Ok(Self {
+            frames,
+            slots,
+            frame_norms,
+            core,
         })
     }
 
@@ -274,15 +287,15 @@ impl FrameCache {
         StackProduct {
             image,
             coverage: planes.coverage.then(|| match coverage {
-                Some(coverage) => Coverage::PerPixel(QualityMap::from_pixels(coverage)),
+                Some(coverage) => Coverage::PerPixel(QualityMap::from(coverage)),
                 None => Coverage::Uniform {
                     value: 1.0,
                     size: dimensions.size(),
                 },
             }),
-            weight: weight_pixels.map(QualityMap::from_pixels),
-            inverse_variance: inverse_variance_pixels.map(QualityMap::from_pixels),
-            dispersion: dispersion_pixels.map(QualityMap::from_pixels),
+            weight: weight_pixels.map(QualityMap::from),
+            inverse_variance: inverse_variance_pixels.map(QualityMap::from),
+            dispersion: dispersion_pixels.map(QualityMap::from),
             cfa_type,
             report,
         }
@@ -314,7 +327,7 @@ impl FrameCache {
         debug_assert!(noise.is_none_or(|noise| noise.slots() == slots));
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
-        let cancel = self.core.cancel.clone();
+        let cancel = self.core.monitor.cancel.clone();
         let frame_norms = self.frame_norms.as_deref();
         let dimensions = self.core.dimensions;
         let chunking = self.core.chunk_rows(self.combine_stage(planes));
@@ -457,8 +470,7 @@ impl FrameCache {
                         let noise_background = noise_background.as_mut_slice();
                         let noise_sky = noise_sky.as_mut_slice();
                         let noise_inverse_electrons = noise_inverse_electrons.as_mut_slice();
-                        let mut row_excluded = FlagCounts::default();
-                        let mut row_kept = FlagCounts::default();
+                        let mut row_tallies = FlagTallies::default();
                         let row_offset = row_in_chunk * width;
                         let y = pixel_offset / width + row_in_chunk;
                         for pixel_in_row in 0..width {
@@ -513,8 +525,7 @@ impl FrameCache {
                                 .leave_out_flagged(
                                     covered,
                                     min_survivors,
-                                    &mut row_excluded,
-                                    &mut row_kept,
+                                    &mut row_tallies,
                                 )
                             } else {
                                 covered
@@ -566,8 +577,8 @@ impl FrameCache {
                                 dispersion[pixel_in_row] = sample.dispersion;
                             }
                         }
-                        excluded.add(&row_excluded);
-                        kept_flagged.add(&row_kept);
+                        excluded.add(&row_tallies.excluded);
+                        kept_flagged.add(&row_tallies.kept);
                     },
                 );
             });
@@ -639,15 +650,15 @@ impl FrameCache {
     }
 
     /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.
-    pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
+    pub(crate) fn from_cfa_paths<P: AsRef<Path>>(
         paths: &[P],
         config: &StackConfig,
         run: IngestRun,
         step: Option<&dyn FrameStep<CfaImage, Error = SubtractionError>>,
-        progress: ProgressCallback,
     ) -> Result<Self, StackError> {
+        let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage, P>(paths, config, run, step, progress)?,
+            loader::load_tiered::<CfaImage>(&paths, config, run, step)?,
             config.normalization,
         )
     }
@@ -655,14 +666,13 @@ impl FrameCache {
     /// Build a cache from light-frame image files, tiered in RAM or on disk under `run`. Nothing
     /// here was warped, so a frame has full support and unit confidence everywhere unless its
     /// source declared pixels with no measurement.
-    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
-        paths: &[P],
+    pub(crate) fn from_paths(
+        paths: &[&Path],
         config: &StackConfig,
         run: IngestRun,
-        progress: ProgressCallback,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage, P>(paths, config, run, None, progress)?,
+            loader::load_tiered::<LinearImage>(paths, config, run, None)?,
             config.normalization,
         )
     }
@@ -678,15 +688,7 @@ impl FrameCache {
         for (index, frame) in frames.iter().enumerate() {
             facts.admit(index, &frame.source_stats.facts)?;
         }
-        let slots = Slots::of_frames(&frames, core.dimensions);
-        let frame_norms =
-            FrameNorm::measure(&frames, core.dimensions, slots, normalization, &core.cancel)?;
-        Ok(Self {
-            frames,
-            slots,
-            frame_norms,
-            core,
-        })
+        Self::measured(frames, core, normalization)
     }
 }
 

@@ -5,9 +5,9 @@ pub(crate) mod deposit;
 pub(crate) mod drizzle_config;
 pub(crate) mod drizzle_frame;
 pub(crate) mod drizzle_result;
+pub(crate) mod drizzle_run;
 pub(crate) mod drizzle_shape;
 pub(crate) mod error;
-pub(crate) mod stack;
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;

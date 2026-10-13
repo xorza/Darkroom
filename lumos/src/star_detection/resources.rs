@@ -6,10 +6,10 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::background::workspace::BackgroundWorkspace;
-use crate::star_detection::convolution::FilterKernels;
+use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::labeling::labeler::Labeler;
-use crate::star_detection::star_detector::stages::filter::DuplicateScratch;
+use crate::star_detection::star_detector::stages::filter::duplicate_scratch::DuplicateScratch;
 use imaginarium::Buffer2;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
@@ -75,8 +75,8 @@ pub(crate) mod internals {
     #[cfg(test)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct BufferCounts {
-        pub floats: usize,
-        pub bitmasks: usize,
+        pub(crate) floats: usize,
+        pub(crate) bitmasks: usize,
     }
 
     impl DetectionResources {

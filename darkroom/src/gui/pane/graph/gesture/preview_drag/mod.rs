@@ -3,25 +3,25 @@
 //!
 //! The one-gesture counterpart to the port menu's "Add preview"
 //! ([`crate::gui::pane::graph::node::port_row`]), which both build their intents through
-//! [`add_preview_intents`]. Once the node exists this is an ordinary node drag,
+//! [`port_row::add_preview_intents`]. Once the node exists this is an ordinary node drag,
 //! so the whole after-the-latch half is [`GroupDrag`]'s.
 //!
 //! [`ConnectionUI`](crate::gui::pane::graph::gesture::connection) drops the output column
 //! from its own latch candidates under the same modifier
-//! ([`preview_drag_modifier`]), so exactly one controller claims the press.
+//! ([`canvas_gesture::preview_drag_modifier`]), so exactly one controller claims the press.
 
 use std::sync::Arc;
 
 use palantir::Ui;
 use scenarium::NodeId;
 
-use crate::core::document::PortKind;
+use crate::core::document::port_ref::PortKind;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
+use crate::gui::pane::graph::gesture::canvas_gesture;
 use crate::gui::pane::graph::gesture::group_drag::GroupDrag;
-use crate::gui::pane::graph::node::port_row::{add_preview_intents, port_circle_wid};
+use crate::gui::pane::graph::node::port_row;
 use crate::gui::requests::Requests;
 
 /// The in-flight spawn-and-place drag, or none.
@@ -48,7 +48,9 @@ impl PreviewDrag {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, graph_ctx, cx.cancelled(), out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, graph_ctx, cx.cancelled(), out)
+            || !canvas_gesture::preview_drag_modifier(ui)
+        {
             return;
         }
         let Some(port) = geometry
@@ -76,7 +78,7 @@ impl PreviewDrag {
         let node_id = NodeId::unique();
         // Start it *at* the port so it visually grows out of the circle;
         // the drag below carries it from there.
-        out.extend_graph(add_preview_intents(func, port, center, node_id));
+        out.extend_graph(port_row::add_preview_intents(func, port, center, node_id));
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
@@ -85,7 +87,7 @@ impl PreviewDrag {
             pos: center,
         }]);
         self.drag
-            .latch(node_id, members, port_circle_wid(port), out);
+            .latch(node_id, members, port_row::port_circle_wid(port), out);
     }
 }
 

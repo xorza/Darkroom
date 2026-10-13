@@ -12,9 +12,10 @@ use imaginarium::Buffer2;
 
 use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
+use crate::star_detection::centroid;
+use crate::star_detection::centroid::MAX_STAMP_PIXELS;
 use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
-use crate::star_detection::centroid::{MAX_STAMP_PIXELS, stamp_centre};
 
 /// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
 ///
@@ -59,13 +60,32 @@ pub(super) struct StampData {
     pub(super) origin: DVec2,
 }
 
+/// What a profile fit is fit to: the stamp of `pixels` of `grid`'s radius about `pos`, above the
+/// sky `background`, each pixel weighted by `1/σ²` from `noise` when it is set.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FitInputs<'a> {
+    pub(super) pixels: &'a Buffer2<f32>,
+    pub(super) pos: DVec2,
+    pub(super) grid: &'a StampGrid,
+    pub(super) background: f32,
+    pub(super) noise: Option<StarNoise>,
+}
+
+/// The smallest amplitude a fit from `seed` may take: a millionth of it, so positive — a profile
+/// of zero amplitude has no centre or width to fit — and relative to the star rather than to the
+/// data's units. A fit pinned there found no star in the stamp.
+pub(super) fn min_amplitude(seed: f64) -> f64 {
+    1e-6 * seed
+}
+
 /// Gaussian-equivalent width from a stamp's weighted second moments: for a Gaussian
 /// `E[r²] = 2σ²`, so `σ = sqrt(E[r²]/2)`. A better seed for L-M than a fixed value.
 ///
 /// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the range
 /// its own `constrain` enforces — starting outside it just spends the first iteration being clamped
-/// back. Always at least [`MIN_STAMP_RADIUS`](super::measure_grid::MIN_STAMP_RADIUS), so the 0.5 floor cannot
-/// cross it.
+/// back. Always at least
+/// [`MIN_STAMP_RADIUS`](crate::star_detection::centroid::measure_grid::MIN_STAMP_RADIUS), so the
+/// 0.5 floor cannot cross it.
 pub(super) fn sigma_from_moments(sum_r2: f64, sum_w: f64, max_sigma: f64) -> f32 {
     if sum_w > f64::EPSILON {
         (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, max_sigma) as f32
@@ -101,15 +121,17 @@ impl StampFit {
     /// `sigma_est`, and the inverse-variance weights. Computing them per consumer instead costs an
     /// extraction walk plus one walk each: three traversals of the same 225 f64 per candidate, on
     /// the hottest path in `measure_star`.
-    pub(super) fn prepare<const N: usize>(
-        pixels: &Buffer2<f32>,
-        pos: DVec2,
-        grid: &StampGrid,
-        background: f32,
-        noise: Option<StarNoise>,
-    ) -> Option<Self> {
+    pub(super) fn prepare<const N: usize>(inputs: FitInputs<'_>) -> Option<Self> {
+        let FitInputs {
+            pixels,
+            pos,
+            grid,
+            background,
+            noise,
+        } = inputs;
         let radius = grid.radius;
-        let centre = stamp_centre(pos, Size2us::new(pixels.width(), pixels.height()), radius)?;
+        let centre =
+            centroid::stamp_centre(pos, Size2us::new(pixels.width(), pixels.height()), radius)?;
         let stamp_size = 2 * radius + 1;
         if stamp_size * stamp_size <= N {
             return None;
@@ -228,13 +250,6 @@ impl StampFit {
     pub(super) fn amplitude_seed(&self) -> Option<f64> {
         let seed = f64::from(self.stamp.peak) - self.sky;
         (seed > 0.0).then_some(seed)
-    }
-
-    /// The smallest amplitude a fit from `seed` may take: a millionth of it, so positive — a
-    /// profile of zero amplitude has no centre or width to fit — and relative to the star rather
-    /// than to the data's units. A fit pinned there found no star in the stamp.
-    pub(super) fn min_amplitude(seed: f64) -> f64 {
-        1e-6 * seed
     }
 
     /// Lift a fitted centre out of the stamp frame back into image coordinates.

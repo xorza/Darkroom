@@ -59,6 +59,12 @@ pub enum IntegerKind {
     Usize,
 }
 
+impl Display for IntegerKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.type_name())
+    }
+}
+
 impl IntegerKind {
     const fn type_name(self) -> &'static str {
         match self {
@@ -83,6 +89,12 @@ impl IntegerKind {
 pub enum FloatKind {
     F32,
     F64,
+}
+
+impl Display for FloatKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.type_name())
+    }
 }
 
 impl FloatKind {
@@ -189,30 +201,20 @@ pub enum FieldKind {
 }
 
 /// A numeric field value that cannot be represented by its declared Rust type.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("field `{field}` value {value} cannot be represented as {target}")]
-pub struct IntrospectError {
-    field: &'static str,
-    value: String,
-    target: &'static str,
-}
-
-impl IntrospectError {
-    fn integer(field: &'static str, value: IntegerValue, target: IntegerKind) -> Self {
-        Self {
-            field,
-            value: value.to_string(),
-            target: target.type_name(),
-        }
-    }
-
-    fn float(field: &'static str, value: f64, target: FloatKind) -> Self {
-        Self {
-            field,
-            value: value.to_string(),
-            target: target.type_name(),
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum IntrospectError {
+    #[error("field `{field}` value {value} cannot be represented as {target}")]
+    Integer {
+        field: &'static str,
+        value: IntegerValue,
+        target: IntegerKind,
+    },
+    #[error("field `{field}` value {value} cannot be represented as {target}")]
+    Float {
+        field: &'static str,
+        value: f64,
+        target: FloatKind,
+    },
 }
 
 #[doc(hidden)]
@@ -222,7 +224,11 @@ pub trait IntrospectInteger:
     const KIND: IntegerKind;
 
     fn from_field_value(field: &'static str, value: IntegerValue) -> Result<Self, IntrospectError> {
-        Self::try_from(value).map_err(|_| IntrospectError::integer(field, value, Self::KIND))
+        Self::try_from(value).map_err(|_| IntrospectError::Integer {
+            field,
+            value,
+            target: Self::KIND,
+        })
     }
 }
 
@@ -270,7 +276,11 @@ impl IntrospectFloat for f32 {
         if value.is_finite() && value >= f64::from(Self::MIN) && value <= f64::from(Self::MAX) {
             Ok(value as Self)
         } else {
-            Err(IntrospectError::float(field, value, Self::KIND))
+            Err(IntrospectError::Float {
+                field,
+                value,
+                target: Self::KIND,
+            })
         }
     }
 }

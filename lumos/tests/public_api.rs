@@ -16,8 +16,8 @@ use lumos::{
     RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
     Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN,
     StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig, StarDetector,
-    StarMatch, TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig,
-    TrimConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    StarField, StarMatch, TransferProvenance, Transform, TransformModel, TransformType,
+    TriangleConfig, TrimConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -275,7 +275,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     let registration_error = RegistrationError::InvalidStarField {
         catalog: RegistrationCatalog::Target,
         index: 7,
-        field: "FWHM",
+        field: StarField::Fwhm,
         value: f64::INFINITY,
     };
     assert_eq!(

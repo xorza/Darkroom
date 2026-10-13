@@ -106,8 +106,14 @@ fn gaussian_fit_with_contamination() {
         .stamp(Size2us::new(31, 31), 0.1);
     SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::gaussian(2.5))
         .add_exact(&mut pixels);
-    let fit = GaussianFit::new(&pixels, DVec2::splat(15.0), &StampGrid::new(8), 0.1, None)
-        .expect("the fit lands");
+    let fit = GaussianFit::new(FitInputs {
+        pixels: &pixels,
+        pos: DVec2::splat(15.0),
+        grid: &StampGrid::new(8),
+        background: 0.1,
+        noise: None,
+    })
+    .expect("the fit lands");
     assert!((fit.pos.x - 15.0 - 0.38168).abs() <= 1e-4, "{}", fit.pos);
     assert!((fit.pos.y - 15.0).abs() <= 1e-9, "{}", fit.pos);
 }
@@ -244,13 +250,13 @@ fn gaussian_fit_rotated_ellipse() {
         FRAC_PI_4,
         0.8,
     );
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::new(true_cx, true_cy),
-        &StampGrid::new(8),
+    let result = GaussianFit::new(FitInputs {
+        pixels: &pixels,
+        pos: DVec2::new(true_cx, true_cy),
+        grid: &StampGrid::new(8),
         background,
-        None,
-    );
+        noise: None,
+    });
 
     assert!(result.is_some(), "Should fit rotated ellipse");
     let result = result.unwrap();
@@ -298,17 +304,13 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         area: 200,
     };
     let expected_fwhm = 6.23;
-    let star = measure_star(
-        MeasurePlanes {
-            residual: &bg.residual_of(&pixels),
-            sky: &bg.sky_noise(),
-            saturation: &unsaturated(&pixels),
-            no_data: None,
-        },
-        &region,
-        &config,
-        &MeasureGrid::new(expected_fwhm),
-    )
+    let star = MeasurePlanes {
+        residual: &bg.residual_of(&pixels),
+        sky: &bg.sky_noise(),
+        saturation: &unsaturated(&pixels),
+        no_data: None,
+    }
+    .measure_star(&region, &config, &MeasureGrid::new(expected_fwhm))
     .expect("the star measures");
     // FWHM = 2√(2 ln 2)·√(3.5·2) = 6.230268. The covariance is fitted to noiseless samples of its
     // own model, so both hold to a few f32 ulps; 1e-5 bounds that.

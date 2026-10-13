@@ -59,6 +59,9 @@ pub(super) fn deserialize_nodes<'de, D: Deserializer<'de>>(
     deserializer.deserialize_map(NodesVisitor)
 }
 
+/// The most a decode reserves on a document's word alone.
+const MAX_PREALLOC_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug)]
 struct NodesVisitor;
 
@@ -70,7 +73,12 @@ impl<'de> Visitor<'de> for NodesVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let mut nodes = HashMap::with_capacity(access.size_hint().unwrap_or_default());
+        // The hint is the document's own claim, so a corrupt one must not
+        // decide the allocation: capped, as serde caps its own collections,
+        // to what a megabyte of entries holds, and grown past that only by
+        // entries that actually decode.
+        let cap = MAX_PREALLOC_BYTES / size_of::<(NodeId, Node)>();
+        let mut nodes = HashMap::with_capacity(access.size_hint().unwrap_or_default().min(cap));
         while let Some((node_id, node)) = access.next_entry::<NodeId, Node>()? {
             if nodes.insert(node_id, node).is_some() {
                 return Err(A::Error::custom(format!("duplicate node id {node_id:?}")));

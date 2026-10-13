@@ -3,7 +3,7 @@
 use glam::Vec2;
 use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::preview;
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
@@ -205,7 +205,7 @@ impl<'a> NodeCtx<'a> {
     /// stub rather than an empty card.
     pub(crate) fn preview(self) -> bool {
         self.func.is_some()
-            && matches!(self.node.kind, NodeKind::Func(func_id) if preview::is_preview(func_id))
+            && matches!(self.node.kind, NodeKind::Func(func_id) if preview::is_func(func_id))
     }
 
     /// Whether the header offers the RAM/disk storage chips. An impure func

@@ -6,7 +6,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::star_detection::bench::Stages;
+use crate::star_detection::bench;
 use crate::star_detection::star_detector::StarDetector;
 
 pub(crate) fn integration(c: &mut Criterion) {
@@ -16,7 +16,7 @@ pub(crate) fn integration(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(field.name()), |b| {
             let image = field.render(FRAME).image;
             let mut detector =
-                StarDetector::from_config(Stages::config(field)).expect("a preset is valid");
+                StarDetector::from_config(bench::config(field)).expect("a preset is valid");
             b.iter(|| detector.detect(&image));
         });
     }

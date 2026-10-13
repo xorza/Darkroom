@@ -10,7 +10,7 @@ fn single_hot_pixel() {
     pixels[(2, 2)] = 1.0; // Center pixel
 
     let mut output = Buffer2::new_default(5, 5);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Hot pixel should be replaced with median of neighbors (0.1)
     assert!(
@@ -31,7 +31,7 @@ fn gradient_image() {
     let pixels = Buffer2::new(width, height, data);
 
     let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Interior pixel (3,3): 3x3 neighborhood values = (x+y)/20 for
     // x in 2..=4, y in 2..=4:
@@ -63,7 +63,7 @@ fn gradient_image() {
 fn small_image_2x2() {
     let pixels = Buffer2::new(2, 2, vec![0.1, 0.2, 0.3, 0.4]);
     let mut output = Buffer2::new_default(2, 2);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Image too small for 3×3 filter, should return exact copy
     assert_eq!(output[(0, 0)], 0.1);
@@ -76,7 +76,7 @@ fn small_image_2x2() {
 fn small_image_1x1() {
     let pixels = Buffer2::new(1, 1, vec![0.5]);
     let mut output = Buffer2::new_default(1, 1);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     assert_eq!(output.len(), 1);
     assert!((output[0] - 0.5).abs() < 1e-6);
@@ -93,7 +93,7 @@ fn filters_a_3x3_image() {
     ]);
 
     let mut output = Buffer2::new_default(3, 3);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Center pixel has full 9-element neighborhood
     // Median of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] = 0.5
@@ -116,7 +116,7 @@ fn corner_pixels() {
     ]);
 
     let mut output = Buffer2::new_default(4, 4);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Top-left corner has 4 neighbors: [0.1, 0.2, 0.5, 0.6]
     // Median of 4 = average of middle two = (0.2 + 0.5) / 2 = 0.35
@@ -139,7 +139,7 @@ fn edge_pixels() {
     ]);
 
     let mut output = Buffer2::new_default(4, 4);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Top edge (1,0) has 6 neighbors: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
     // Sorted: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
@@ -162,7 +162,7 @@ fn salt_and_pepper_noise() {
     pixels[89] = 1.0; // salt
 
     let mut output = Buffer2::new_default(10, 10);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // All noisy pixels should be close to 0.5 after filtering
     assert!(
@@ -237,7 +237,7 @@ fn median6_averages_the_two_middle_values() {
 fn wrong_pixel_count() {
     let pixels = Buffer2::new(20, 10, vec![0.5f32; 100]); // Expects 200 pixels
     let mut output = Buffer2::new_default(20, 10);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn bayer_pattern_removal() {
     let pixels = Buffer2::new(width, height, data);
 
     let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Interior pixel at (5,3) — odd row (y=3, value=0.6).
     // 3×3 neighborhood rows: y=2 (0.4), y=3 (0.6), y=4 (0.4)
@@ -361,7 +361,7 @@ fn interior_row_replaces_a_hot_pixel_with_its_neighbourhood_median() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_interior_row(&pixels, 5, 2, &mut output_row);
+    filter_interior_row(&Buffer2::new(5, 5, pixels), 2, &mut output_row);
 
     // Center pixel (x=2) should be filtered
     // Neighborhood: [0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5]
@@ -386,7 +386,7 @@ fn filter_edge_row_top() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&pixels, Size2us::new(5, 5), 0, &mut output_row);
+    filter_edge_row(&Buffer2::new(5, 5, pixels), 0, &mut output_row);
 
     // Check first pixel (corner)
     // Neighbors: [0.1, 0.2, 0.6, 0.7] -> median = (0.2 + 0.6) / 2 = 0.4
@@ -410,7 +410,7 @@ fn filter_edge_row_bottom() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&pixels, Size2us::new(5, 5), 4, &mut output_row);
+    filter_edge_row(&Buffer2::new(5, 5, pixels), 4, &mut output_row);
 
     // Check last pixel (corner)
     // Neighbors: [1.9, 2.0, 2.4, 2.5] -> median = (2.0 + 2.4) / 2 = 2.2
@@ -433,7 +433,7 @@ fn filters_the_interior_of_a_4x4_image() {
     ]);
 
     let mut output = Buffer2::new_default(4, 4);
-    median_filter_3x3(&pixels, &mut output);
+    apply_3x3(&pixels, &mut output);
 
     // Interior (1,1): neighbors [1,2,3,5,6,7,9,10,11] → median = 6.0
     assert!(
@@ -512,7 +512,7 @@ fn matches_a_sorted_reference_everywhere() {
             (0..width * height).map(|_| rng.next_f32()).collect(),
         );
         let mut output = Buffer2::new_default(width, height);
-        median_filter_3x3(&pixels, &mut output);
+        apply_3x3(&pixels, &mut output);
         for y in 0..height {
             for x in 0..width {
                 assert_eq!(

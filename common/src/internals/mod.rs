@@ -8,7 +8,7 @@ pub(crate) mod unreadable;
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -41,8 +41,28 @@ pub fn scratch_dir(name: &str) -> PathBuf {
     workspace_root().join(".tmp").join(name)
 }
 
+/// The publication temporaries beside `destination`: every file named like the ones
+/// [`file_utils`](crate::file_utils) writes before it renames, which a publication that failed
+/// must not leave behind.
+pub fn publication_temp_files(destination: &Path) -> Vec<PathBuf> {
+    let prefix = format!("{}.", destination.file_name().unwrap().to_string_lossy());
+    fs::read_dir(destination.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|candidate| {
+            candidate
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+                && candidate
+                    .extension()
+                    .is_some_and(|extension| extension == "tmp")
+        })
+        .collect()
+}
+
 fn workspace_root() -> PathBuf {
-    // `common` sits one level under the workspace root.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("`common` sits under the workspace root")

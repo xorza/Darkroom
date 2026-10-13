@@ -5,6 +5,7 @@ use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
 use crate::scratch_pool::Scratch;
+use crate::stack_product::quality_planes::QualityPlanes;
 
 /// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says
 /// the value is not the photosite's own measurement.
@@ -75,6 +76,13 @@ impl Scratch for CombineScratch {
     }
 }
 
+/// The flagged samples a combine left out, and those it had to keep.
+#[derive(Debug, Default)]
+pub(super) struct FlagTallies {
+    pub(super) excluded: FlagCounts,
+    pub(super) kept: FlagCounts,
+}
+
 /// One pixel's gather buffers, borrowed as slices: the gather loop stores into these, so it holds
 /// them as plain slices rather than reaching through the scratch for every sample.
 #[derive(Debug)]
@@ -91,13 +99,12 @@ impl GatheredSamples<'_> {
     /// Leave out the first `count` samples' flagged ones, those [`SOFT_EXCLUDED`] names, keeping
     /// the rest in order with everything gathered beside them, when at least `min_survivors`
     /// unflagged samples remain; otherwise keep every sample. Returns how many samples stay at the
-    /// front, and counts each flagged sample as left out or as kept.
+    /// front, and counts each flagged sample in `tallies` as left out or as kept.
     pub(super) fn leave_out_flagged(
         &mut self,
         count: usize,
         min_survivors: usize,
-        excluded: &mut FlagCounts,
-        kept_flagged: &mut FlagCounts,
+        tallies: &mut FlagTallies,
     ) -> usize {
         let flagged = self.sample_flags[..count]
             .iter()
@@ -108,7 +115,9 @@ impl GatheredSamples<'_> {
         }
         if count - flagged < min_survivors {
             for &byte in &self.sample_flags[..count] {
-                kept_flagged.tally(QualityFlags::from_byte(byte).intersection(SOFT_EXCLUDED));
+                tallies
+                    .kept
+                    .tally(QualityFlags::from_byte(byte).intersection(SOFT_EXCLUDED));
             }
             return count;
         }
@@ -116,7 +125,9 @@ impl GatheredSamples<'_> {
         for read in 0..count {
             let sample_flags = QualityFlags::from_byte(self.sample_flags[read]);
             if sample_flags.intersects(SOFT_EXCLUDED) {
-                excluded.tally(sample_flags.intersection(SOFT_EXCLUDED));
+                tallies
+                    .excluded
+                    .tally(sample_flags.intersection(SOFT_EXCLUDED));
             } else {
                 self.values[write] = self.values[read];
                 self.eff_weights[write] = self.eff_weights[read];
@@ -128,6 +139,27 @@ impl GatheredSamples<'_> {
             }
         }
         write
+    }
+}
+
+/// What a reduced pixel reports beside its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SampleQuality {
+    /// The value alone: the walk over the survivors would produce figures nothing reads, and it
+    /// costs one pass over the frames per pixel.
+    ValueOnly,
+    /// The survivors' weight, the inverse variance of the value and the survivors' dispersion.
+    Measured,
+}
+
+impl SampleQuality {
+    /// What a combine writing `planes` measures of each pixel.
+    pub(crate) const fn of(planes: QualityPlanes) -> Self {
+        if planes.weight || planes.inverse_variance || planes.dispersion {
+            Self::Measured
+        } else {
+            Self::ValueOnly
+        }
     }
 }
 
@@ -143,12 +175,12 @@ pub(crate) struct CombinedSample {
 }
 
 impl CombinedSample {
-    /// A weighted mean `value` over the samples at `survivors`: the weight is `Σwᵢ`, and the
-    /// inverse variance is `(Σwᵢ)² / Σwᵢ²·vᵢ` with each sample's model variance `vᵢ` taken at the
-    /// combined value, the estimate of the true signal. Taken at each sample's own value instead,
-    /// an upward fluctuation would carry a larger variance and pull the figure down. Without noise
-    /// columns, for a reducer whose request has no inverse variance plane, it reads `+∞`, which
-    /// nothing reads.
+    /// A weighted mean `value` over the samples of `samples` at `survivors`: the weight is `Σwᵢ`,
+    /// and the inverse variance is `(Σwᵢ)² / Σwᵢ²·vᵢ` with each sample's model variance `vᵢ` taken
+    /// at the combined value, the estimate of the true signal. Taken at each sample's own value
+    /// instead, an upward fluctuation would carry a larger variance and pull the figure down.
+    /// Without noise columns, for a reducer whose request has no inverse variance plane, it reads
+    /// `+∞`, which nothing reads.
     ///
     /// The dispersion is the variance of the same mean as the samples' scatter shows it, with no
     /// noise model: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`. Where each sample's variance is `c / wᵢ`, the
@@ -158,11 +190,14 @@ impl CombinedSample {
     /// error of the mean. NaN for fewer than two survivors, whose scatter says nothing.
     pub(crate) fn from_survivors(
         value: f32,
-        values: &[f32],
-        weights: &[f32],
+        samples: &PixelSamples<'_>,
         survivors: impl IntoIterator<Item = usize>,
-        noise: Option<NoiseColumns<'_>>,
     ) -> Self {
+        let PixelSamples {
+            values,
+            weights,
+            noise,
+        } = samples;
         let mut count = 0usize;
         let mut weight = 0.0f32;
         let mut weighted_variance = 0.0f32;

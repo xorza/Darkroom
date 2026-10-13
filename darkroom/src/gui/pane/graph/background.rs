@@ -2,7 +2,8 @@ use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{Image, ImageFit, ImageHandle, SrgbaU8, UVec2, Ui};
 
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::core::document::viewport::Viewport;
+use crate::gui::pane::graph::canvas;
 use crate::gui::theme::Theme;
 
 /// Target on-screen tile spacing range, as a multiple of the theme's
@@ -51,10 +52,11 @@ impl DotKey {
 impl CanvasBackground {
     /// Draw the backdrop in the outer-canvas (screen-local) frame. Call
     /// inside the outer canvas, before the inner transformed canvas, so
-    /// it sits beneath every connection and node. `pan`/`zoom` are the
-    /// live viewport; a screen point `s` maps to grid coord
+    /// it sits beneath every connection and node. `viewport` is the live
+    /// camera; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
-    pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, pan: Vec2, zoom: f32) {
+    pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, viewport: Viewport) {
+        let Viewport { pan, zoom } = viewport;
         let spacing = theme.canvas.dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
             return;
@@ -62,7 +64,7 @@ impl CanvasBackground {
         // Last frame's canvas size — the grid's repeat count. A 1-frame
         // stale count on window resize is invisible. Absent on frame 1.
         let Some(size) = ui
-            .response_for(outer_canvas_widget_id())
+            .response_for(canvas::outer_wid())
             .layout_rect
             .map(|r| r.size)
         else {

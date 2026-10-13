@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
 
+use common::SerdeFormat;
 use hashbrown::HashMap;
+use ron::ser;
+use serde::de::value::{self, MapAccessDeserializer};
+use serde::de::{DeserializeSeed, MapAccess};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::{Node, NodeKind};
+use crate::graph::serde::{deserialize_bindings, deserialize_nodes};
 use crate::graph::{Binding, Graph};
-use common::{SerdeFormat, deserialize, serialize};
-
-use super::{deserialize_bindings, deserialize_nodes};
-use ron::ser;
 
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
@@ -37,8 +38,9 @@ fn duplicate_ports_fail_in_every_binding_format() {
     ]);
 
     for format in SerdeFormat::ALL {
-        let bytes = serialize(&bindings, format).unwrap();
-        let error = deserialize::<CheckedBindings>(&bytes, format)
+        let bytes = format.serialize(&bindings).unwrap();
+        let error = format
+            .deserialize::<CheckedBindings>(&bytes)
             .expect_err("a repeated input port does not decode")
             .to_string();
 
@@ -107,4 +109,42 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let document = format!("(nodes:{{{key}:{first}}},bindings:[],subscriptions:[])");
     let graph: Graph = ron::from_str(&document).expect("a well-formed document loads");
     assert_eq!(graph.len(), 1);
+}
+
+/// A map that claims more entries than any document could hold and then
+/// yields none — the hint alone, with nothing behind it.
+#[derive(Debug)]
+struct OverclaimingMap;
+
+impl<'de> MapAccess<'de> for OverclaimingMap {
+    type Error = value::Error;
+
+    fn next_key_seed<K: DeserializeSeed<'de>>(
+        &mut self,
+        _seed: K,
+    ) -> Result<Option<K::Value>, value::Error> {
+        Ok(None)
+    }
+
+    fn next_value_seed<V: DeserializeSeed<'de>>(
+        &mut self,
+        _seed: V,
+    ) -> Result<V::Value, value::Error> {
+        unreachable!("no key was yielded")
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(usize::MAX)
+    }
+}
+
+/// The node table's length hint comes from the document, so a corrupt one
+/// decodes to what the entries hold rather than reserving what it claims —
+/// `usize::MAX` entries would abort on capacity overflow before the first
+/// entry was read.
+#[test]
+fn a_node_table_overclaiming_its_length_reserves_only_what_decodes() {
+    let nodes = deserialize_nodes(MapAccessDeserializer::new(OverclaimingMap))
+        .expect("an empty table decodes");
+    assert!(nodes.is_empty());
 }

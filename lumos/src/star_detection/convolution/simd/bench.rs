@@ -10,11 +10,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::math::fwhm::fwhm_to_sigma;
+use crate::simd::Kernel;
 use crate::simd::tier::Tier;
 use crate::star_detection::bench::Stages;
-use crate::star_detection::convolution::simd::internals::convolve_row_scalar;
-use crate::star_detection::convolution::simd::{ConvolveRow, convolve_row};
-use crate::star_detection::convolution::{fill_gaussian_kernel_1d, kernel_radius};
+use crate::star_detection::convolution;
+use crate::star_detection::convolution::simd::ConvolveRow;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
@@ -22,7 +22,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let stages: &Stages = stages.get_or_init(|| Stages::of(Field::Typical));
         let sigma = fwhm_to_sigma(stages.fwhm.expect("the default configuration filters"));
         let mut kernel = Vec::new();
-        fill_gaussian_kernel_1d(sigma, kernel_radius(sigma), &mut kernel);
+        convolution::fill_gaussian_kernel_1d(sigma, convolution::kernel_radius(sigma), &mut kernel);
         let y = FRAME.height / 2;
         let row = &stages.frame.measure.pixels()[y * FRAME.width..(y + 1) * FRAME.width];
         Inputs { row, kernel }
@@ -33,7 +33,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
         let Inputs { row, kernel } = inputs();
-        b.iter(|| convolve_row_scalar(black_box(row), &mut output, &kernel));
+        b.iter(|| {
+            ConvolveRow {
+                input: black_box(row),
+                output: &mut output,
+                kernel: &kernel,
+            }
+            .run_scalar();
+        });
     });
     for &tier in &tiers {
         group.bench_function(
@@ -52,7 +59,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     }
     group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
         let Inputs { row, kernel } = inputs();
-        b.iter(|| convolve_row(black_box(row), &mut output, &kernel));
+        b.iter(|| {
+            ConvolveRow {
+                input: black_box(row),
+                output: &mut output,
+                kernel: &kernel,
+            }
+            .dispatch();
+        });
     });
 }
 

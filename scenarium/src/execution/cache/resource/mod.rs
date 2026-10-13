@@ -61,9 +61,9 @@ pub(super) struct StampJob {
     /// Files anywhere beneath the directory being walked, relative to it,
     /// kept as **raw bytes**.
     ///
-    /// `to_string_lossy` maps every non-UTF-8 name onto the same
+    /// `to_string_lossy` would map every non-UTF-8 name onto the same
     /// replacement text, so on any filesystem that admits arbitrary byte
-    /// names a rename between two such names left the directory's
+    /// names a rename between two such names would leave the directory's
     /// identity — and so a pure node's cache key — exactly where it was.
     files: Vec<PathBuf>,
     /// Directories seen but not yet listed, relative to the root.
@@ -166,15 +166,13 @@ impl StampJob {
     /// plain list of paths rather than a list of records: nothing has to
     /// be remembered about a file between seeing it and hashing it.
     ///
-    /// A file that vanishes between the passes fails the stamp. That is
-    /// the race the one-pass walk already had between `read_dir` and its
-    /// `stat`, only wider — and failing is the point: a subtree seen in
-    /// part must not hash like one seen whole.
+    /// A file that vanishes between the passes fails the stamp: a subtree
+    /// seen in part must not hash like one seen whole.
     ///
     /// **Only files are folded.** A directory has no content of its own,
     /// and everything it holds surfaces here as a file appearing,
     /// vanishing, or changing its relative path. What that gives up is
-    /// the empty directory, which no longer moves the identity at all —
+    /// the empty directory, which does not move the identity at all —
     /// nothing a node reads is a function of it.
     fn stamp_directory(
         &mut self,

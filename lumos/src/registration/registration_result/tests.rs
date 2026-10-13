@@ -1,6 +1,8 @@
 use crate::error::InvalidConfigField;
 use crate::internals::prelude::*;
-use crate::registration::error::{RansacFailureReason, RegistrationCatalog, RegistrationError};
+use crate::registration::error::{
+    RansacFailureReason, RegistrationCatalog, RegistrationError, StarField,
+};
 use crate::registration::registration_result::{RegistrationResult, StarMatch};
 use crate::registration::transform::Transform;
 use crate::registration::triangle::voting::MatchIndices;
@@ -174,7 +176,7 @@ fn registration_error_messages_include_context() {
             RegistrationError::InvalidStarField {
                 catalog: RegistrationCatalog::Target,
                 index: 7,
-                field: "FWHM",
+                field: StarField::Fwhm,
                 value: f64::INFINITY,
             },
             "target star 7 FWHM must be finite, got inf",

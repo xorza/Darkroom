@@ -319,8 +319,26 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
     };
     let psf_sigma = MeasureGrid::new(TEST_EXPECTED_FWHM).window_sigma;
 
-    let global = compute_star(&residual, pos, TEST_STAMP_RADIUS, psf_sigma, global_bg).unwrap();
-    let local = compute_star(&residual, pos, TEST_STAMP_RADIUS, psf_sigma, local_bg).unwrap();
+    let global = compute_star(
+        StampAt {
+            residual: &residual,
+            pos,
+            radius: TEST_STAMP_RADIUS,
+        },
+        psf_sigma,
+        global_bg,
+    )
+    .unwrap();
+    let local = compute_star(
+        StampAt {
+            residual: &residual,
+            pos,
+            radius: TEST_STAMP_RADIUS,
+        },
+        psf_sigma,
+        local_bg,
+    )
+    .unwrap();
 
     let npix = (2 * TEST_STAMP_RADIUS + 1).pow(2) as f32;
     let flux_diff = global.flux - local.flux;
@@ -394,7 +412,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
-    let radius = MeasureGrid::stamp_radius(4.0);
+    let radius = measure_grid::stamp_radius(4.0);
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
         bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
@@ -414,9 +432,11 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     )
     .expect("annulus has samples");
     let expected = compute_star(
-        &measured.residual,
-        star.pos,
-        radius,
+        StampAt {
+            residual: &measured.residual,
+            pos: star.pos,
+            radius,
+        },
         MeasureGrid::new(4.0).window_sigma,
         StarBackground {
             offset: sky_at_fit.offset,
@@ -468,8 +488,16 @@ fn sky_noise_adds_no_flux_or_snr() {
     residual[(24, 24)] += 1.0;
 
     for radius in [7, 13, 15] {
-        let star = compute_star(&residual, pos, radius, 1.0, global_background(&sky, pos))
-            .expect("a one-pixel star");
+        let star = compute_star(
+            StampAt {
+                residual: &residual,
+                pos,
+                radius,
+            },
+            1.0,
+            global_background(&sky, pos),
+        )
+        .expect("a one-pixel star");
         assert_eq!(
             star.flux,
             1.0 + SIGMA,
@@ -505,9 +533,15 @@ fn empty_sky_stamps_measure_no_signal() {
         for &cy in &centres {
             for &cx in &centres {
                 let pos = DVec2::new(cx as f64, cy as f64);
-                if let Some(star) =
-                    compute_star(&residual, pos, radius, 1.0, global_background(&sky, pos))
-                {
+                if let Some(star) = compute_star(
+                    StampAt {
+                        residual: &residual,
+                        pos,
+                        radius,
+                    },
+                    1.0,
+                    global_background(&sky, pos),
+                ) {
                     measured += 1;
                     assert!(
                         star.snr < 4.5,
@@ -541,17 +575,13 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     let grid = MeasureGrid::new(TEST_EXPECTED_FWHM);
     assert_eq!(grid.stamp.radius, 11);
     let measure = |residual: &Buffer2<f32>, no_data: &BitBuffer2| {
-        measure_star(
-            MeasurePlanes {
-                residual,
-                sky: &star.sky,
-                saturation: &star.saturation,
-                no_data: Some(no_data),
-            },
-            &region,
-            &config,
-            &grid,
-        )
+        MeasurePlanes {
+            residual,
+            sky: &star.sky,
+            saturation: &star.saturation,
+            no_data: Some(no_data),
+        }
+        .measure_star(&region, &config, &grid)
     };
     let clean = measure(&star.residual, &BitBuffer2::new_default(size)).unwrap();
 

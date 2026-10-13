@@ -24,19 +24,19 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     // (1000+200, 500+100) = (1200, 600) → size (1250, 600). Without
     // the cache, b would count as a point and max.x would be 1000 —
     // its whole 200×100 body left outside the fit.
-    let all = node_bounds(&geometry, scene.graph_ctx(), false).unwrap();
+    let all = node_bounds(&geometry, scene.graph_ctx(), Bounded::All).unwrap();
     assert_eq!(all.min, Vec2::new(-50.0, 0.0));
     assert_eq!(all.size, Size::new(1250.0, 600.0));
 
-    // selected_only filters to exactly the selected node's rect.
+    // `Bounded::Selected` filters to exactly the selected node's rect.
     let mut scene = scene.with_selection([b]);
-    let sel = node_bounds(&geometry, scene.graph_ctx(), true).unwrap();
+    let sel = node_bounds(&geometry, scene.graph_ctx(), Bounded::Selected).unwrap();
     assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
     let mut empty = GraphCtxFixture::over(DocFixture::default());
-    assert!(node_bounds(&geometry, empty.graph_ctx(), false).is_none());
+    assert!(node_bounds(&geometry, empty.graph_ctx(), Bounded::All).is_none());
 }
 
 /// Wheel up zooms in, wheel down zooms out, and each notch multiplies by the
@@ -65,6 +65,7 @@ fn scroll_to_zoom_factor_is_one_step_per_pixel() {
 /// and the factor that applies is not the one asked for.
 #[test]
 fn zoom_about_holds_the_pivot_and_clamps() {
+    #[derive(Debug)]
     struct Case {
         pan: Vec2,
         zoom: f32,

@@ -6,7 +6,7 @@ use std::fmt::Formatter;
 use std::fs;
 use std::future;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,8 +27,8 @@ const WATCH_DIRECTORY_FUNC_ID: FuncId =
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).
 struct WatchState {
-    path: String,
-    recursive: bool,
+    path: PathBuf,
+    mode: RecursiveMode,
     /// Trailing-edge quiet window: after the first change the event lambda keeps
     /// absorbing follow-up changes until the directory is silent this long, then
     /// fires once. Collapses the burst of low-level events one user action (paste,
@@ -48,63 +48,57 @@ struct WatchState {
 enum WatchError {
     #[error("failed to inspect watch directory {path:?}: {source}")]
     Inspect {
-        path: String,
+        path: PathBuf,
         #[source]
         source: io::Error,
     },
     #[error("watch path is not a directory: {path:?}")]
-    NotDirectory { path: String },
+    NotDirectory { path: PathBuf },
     #[error("failed to create filesystem watcher: {0}")]
     Create(#[source] notify::Error),
     #[error("failed to watch {path:?}: {source}")]
     Register {
-        path: String,
+        path: PathBuf,
         #[source]
         source: notify::Error,
     },
 }
 
 impl WatchState {
-    fn new(path: &str, recursive: bool, debounce: Duration) -> Result<Self, WatchError> {
+    fn new(path: &Path, mode: RecursiveMode, debounce: Duration) -> Result<Self, WatchError> {
         let metadata = fs::metadata(path).map_err(|source| WatchError::Inspect {
-            path: path.to_owned(),
+            path: path.to_path_buf(),
             source,
         })?;
         if !metadata.is_dir() {
             return Err(WatchError::NotDirectory {
-                path: path.to_owned(),
+                path: path.to_path_buf(),
             });
         }
 
         let signal = Arc::new(Notify::new());
         let callback_signal = Arc::clone(&signal);
-        let owned_path = path.to_string();
-        let callback_path = owned_path.clone();
+        let callback_path = path.to_path_buf();
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
                 Ok(event) if is_content_change(event.kind) => callback_signal.notify_one(),
                 Ok(_) => {}
                 Err(error) => tracing::warn!(
-                    path = %callback_path,
+                    path = %callback_path.display(),
                     %error,
                     "filesystem watcher backend error"
                 ),
             })
             .map_err(WatchError::Create)?;
-        let mode = if recursive {
-            RecursiveMode::Recursive
-        } else {
-            RecursiveMode::NonRecursive
-        };
         watcher
-            .watch(Path::new(path), mode)
+            .watch(path, mode)
             .map_err(|source| WatchError::Register {
-                path: path.to_owned(),
+                path: path.to_path_buf(),
                 source,
             })?;
         Ok(Self {
-            path: owned_path,
-            recursive,
+            path: path.to_path_buf(),
+            mode,
             debounce,
             signal,
             _watcher: watcher,
@@ -116,7 +110,7 @@ impl Debug for WatchState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("WatchState")
             .field("path", &self.path)
-            .field("recursive", &self.recursive)
+            .field("mode", &self.mode)
             .field("debounce", &self.debounce)
             .finish_non_exhaustive()
     }
@@ -156,8 +150,11 @@ pub fn fs_watch_library() -> Library {
                         let path = inputs[0]
                             .required_fs_path()
                             .to_string();
-                        let recursive = inputs[1]
-                            .required_bool();
+                        let mode = if inputs[1].required_bool() {
+                            RecursiveMode::Recursive
+                        } else {
+                            RecursiveMode::NonRecursive
+                        };
                         let debounce = Duration::from_millis(
                             // A negative debounce is none.
                             u64::try_from(inputs[2].required_i64())
@@ -174,12 +171,12 @@ pub fn fs_watch_library() -> Library {
                                 .lock()
                                 .await
                                 .get::<WatchState>()
-                                .is_none_or(|w| w.path != path || w.recursive != recursive);
+                                .is_none_or(|w| w.path != Path::new(&path) || w.mode != mode);
                             if needs_rebuild {
-                                let watch_path = path.clone();
+                                let watch_path = PathBuf::from(&path);
                                 // Watch registration can block on slow or network filesystems.
                                 let replacement = task::spawn_blocking(move || {
-                                    WatchState::new(&watch_path, recursive, debounce)
+                                    WatchState::new(&watch_path, mode, debounce)
                                 })
                                 .await
                                 .expect("filesystem watcher setup task panicked");

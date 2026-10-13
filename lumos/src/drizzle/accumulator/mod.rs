@@ -3,7 +3,7 @@
 mod drop_quad;
 pub(crate) mod frame_source;
 mod input_map;
-mod kernel_plan;
+pub(crate) mod kernel_plan;
 mod output_band;
 
 use arrayvec::ArrayVec;
@@ -92,19 +92,20 @@ pub(crate) struct DrizzledPlanes {
 }
 
 impl DrizzleAccumulator {
-    /// Create a new drizzle accumulator for frames of `input_dims` whose samples reach the output
-    /// as `deposit` says, whose first frame is the run's frame `first_frame`.
+    /// An empty accumulator for frames shaped as `image` — of its dimensions, and its samples
+    /// reaching the output as its own do — whose first frame is the run's frame `first_frame`.
     ///
     /// # Errors
     ///
     /// Returns an error when `config` is invalid.
     pub(crate) fn new(
-        input_dims: ImageDimensions,
-        deposit: Deposit,
+        image: &impl StackableImage,
         config: DrizzleConfig,
         first_frame: usize,
     ) -> Result<Self, DrizzleError> {
         config.validate()?;
+        let input_dims = image.dimensions();
+        let deposit = Deposit::of(image);
         let output = config.output_size(input_dims.size());
         let planes = |count: usize| -> ArrayVec<_, MAX_CHANNELS> {
             (0..count)
@@ -173,13 +174,7 @@ impl DrizzleAccumulator {
         {
             self.flags = Some(Buffer2::new_default(self.output.width, self.output.height));
         }
-        let source = FrameSource::new(
-            &frame.source,
-            self.deposit,
-            &frame.warp,
-            f64::from(self.config.scale),
-            frame.pixel_weight_map.as_ref(),
-        );
+        let source = FrameSource::new(frame, self.deposit, f64::from(self.config.scale));
         let plan = self.plan;
         let reach = plan.reach();
 
@@ -187,12 +182,7 @@ impl DrizzleAccumulator {
         self.scans.clear();
         self.scans
             .extend((0..height).step_by(band_rows).map(|start| {
-                source.band_scan(
-                    &(start..(start + band_rows).min(height)),
-                    width,
-                    reach.output,
-                    reach.input,
-                )
+                source.band_scan(&(start..(start + band_rows).min(height)), width, reach)
             }));
 
         let Self {
@@ -213,29 +203,31 @@ impl DrizzleAccumulator {
         let mut flags = flags
             .as_mut()
             .map(|flags| flags.pixels_mut().chunks_mut(span_len));
+        let (radial, lattice) = (&*radial, &*lattice);
         let bands: Vec<OutputBand<'_>> = (0..height.div_ceil(band_rows))
             .map(|index| {
                 let start = index * band_rows;
-                let planes = PlaneSpan {
-                    data: next_band(&mut data),
-                    weight: next_band(&mut weight),
-                    weight_sq: next_band(&mut weight_sq),
-                    flags: flags
-                        .as_mut()
-                        .map(|chunks| chunks.next().expect("one chunk per band")),
-                };
-                OutputBand::new(
-                    start..(start + band_rows).min(height),
+                OutputBand {
+                    rows: start..(start + band_rows).min(height),
                     width,
-                    planes,
+                    planes: PlaneSpan {
+                        data: next_band(&mut data),
+                        weight: next_band(&mut weight),
+                        weight_sq: next_band(&mut weight_sq),
+                        flags: flags
+                            .as_mut()
+                            .map(|chunks| chunks.next().expect("one chunk per band")),
+                    },
                     index,
                     scans,
-                )
+                    radial,
+                    lattice,
+                }
             })
             .collect();
         *unconverged_points += bands
             .into_par_iter()
-            .map(|mut band| band.distribute(&source, plan, radial, lattice))
+            .map(|mut band| band.distribute(&source, plan))
             .sum::<usize>();
         Ok(())
     }

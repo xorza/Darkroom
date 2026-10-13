@@ -6,15 +6,16 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, generate_random_stars,
 };
-use crate::registration::final_fit::{FitCatalogs, FitModel};
-use crate::registration::kd_tree::KdTree;
+use crate::registration::error::RegistrationError;
+use crate::registration::final_fit::FitModel;
+use crate::registration::final_fit::fit_catalogs::FitCatalogs;
+use crate::registration::model_search::ModelSearch;
+use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::ransac_config::RansacConfig;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation};
-use crate::registration::transform::{Transform, TransformModel};
-use crate::registration::triangle::voting::{MatchIndices, PointMatch};
-use crate::registration::{
-    RegistrationConfig, RegistrationError, TransformType, estimate_and_refine,
-};
+use crate::registration::transform::{Transform, TransformModel, TransformType};
+use crate::registration::triangle::voting::MatchIndices;
 use crate::star_detection::star::Star;
 
 /// How far an exact fit may stray, in pixels, anywhere on the field.
@@ -637,15 +638,6 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
             }
         })
         .collect();
-    let matches: Vec<PointMatch> = (0..12)
-        .map(|i| PointMatch {
-            indices: MatchIndices {
-                reference: i,
-                target: i,
-            },
-            confidence: 1.0,
-        })
-        .collect();
     let mut config = RegistrationConfig {
         transform_type: TransformModel::Fixed(TransformType::Translation),
         ..RegistrationConfig::default()
@@ -653,19 +645,19 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
     config.ransac.seed = 1;
     let as_stars = |points: &[DVec2]| points.iter().map(|&p| Star::at(p)).collect::<Vec<_>>();
     let catalogs = FitCatalogs::new(&as_stars(&reference), &as_stars(&target)).unwrap();
-    let error = estimate_and_refine(
-        &reference,
-        &KdTree::build(target).unwrap(),
-        &matches,
-        &catalogs,
-        FitModel {
+    let search = ModelSearch {
+        pairs: PointPairs { reference, target },
+        confidences: vec![1.0; 12],
+        catalogs: &catalogs,
+        max_sigma: 1.0,
+        config: &config,
+    };
+    let error = search
+        .estimate_and_refine(FitModel {
             transform: TransformType::Translation,
             sip: None,
-        },
-        1.0,
-        &config,
-    )
-    .unwrap_err();
+        })
+        .unwrap_err();
     assert!(
         matches!(
             error,

@@ -76,3 +76,18 @@ impl WarpParams {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+
+    impl WarpParams {
+        /// The default parameters with `method` as the kernel.
+        pub(crate) fn with_method(method: InterpolationMethod) -> Self {
+            Self {
+                method,
+                ..Self::default()
+            }
+        }
+    }
+}

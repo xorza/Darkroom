@@ -16,7 +16,7 @@ use crate::io::fits::decode as fits_decode;
 use crate::io::input_format::InputFormat;
 use crate::io::load_context::LoadContext;
 use crate::io::raw;
-use crate::io::standard::{f32_target_format, read_standard_image};
+use crate::io::standard;
 
 /// A decoded display or inspection product that cannot enter the scientific pipeline directly.
 #[derive(Debug)]
@@ -41,20 +41,23 @@ pub enum PreviewPixels {
 
 impl PreviewImage {
     /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
-        let path = path.as_ref();
+    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
+        Self::load_path(path.as_ref(), context)
+    }
+
+    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         context.check_cancelled(path)?;
         let format = match InputFormat::of(path)? {
             InputFormat::Fits => {
-                return fits_decode::load_preview_fits(path, context).map(Into::into);
+                return fits_decode::load_preview(path, context).map(Into::into);
             }
-            InputFormat::CameraRaw => return raw::load_raw(path, context).map(Into::into),
+            InputFormat::CameraRaw => return raw::load(path, context).map(Into::into),
             InputFormat::Raster(format) => format,
         };
-        let decoded = read_standard_image(path)?;
+        let decoded = standard::read(path)?;
         context.check_cancelled(path)?;
         let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
-        let target = f32_target_format(&decoded);
+        let target = standard::f32_target_format(&decoded);
         let image = decoded.convert(target);
         let metadata = ImageMetadata {
             provenance: Some(ImageProvenance {

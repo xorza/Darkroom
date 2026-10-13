@@ -17,7 +17,7 @@ fn library() -> Library {
 /// The kept columns as `(category, row names)`, refiltered by `query_lc`
 /// into one `PaletteRows` the whole test reuses.
 fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(String, Vec<String>)> {
-    rows.refilter(library, library.funcs().map(PaletteEntry::Func), query_lc);
+    rows.refilter(library, library.iter().map(PaletteEntry::Func), query_lc);
     rows.columns()
         .map(|column| {
             let entries: Vec<_> = column

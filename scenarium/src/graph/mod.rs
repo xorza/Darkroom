@@ -46,8 +46,6 @@ pub enum Binding {
     Bind(OutputPort),
 }
 
-// A node is pure authored data. Identity is its key in `Graph::nodes`; port/event
-// arity comes from the func it resolves to, and wiring lives in side tables.
 /// Deliberately not `Clone`: node ids are unique across a whole document, so
 /// duplicating a graph is never a neutral act — a copy either mints fresh ids
 /// for what it took (an editor's duplicate) or is the only one of its identity
@@ -55,10 +53,8 @@ pub enum Binding {
 ///
 /// The side tables split on how they're reached, not on how sensitive they
 /// are: `bindings` is a plain map a caller keys into directly, so it is public
-/// rather than fronted by trivial accessors; `nodes` stays `pub(crate)` for
-/// cross-module test call sites that force every node's cache mode directly,
-/// while `subscriptions` is reached only through the methods below and so is
-/// private.
+/// rather than fronted by trivial accessors, while `nodes` and `subscriptions`
+/// are reached only through the methods below and so are private.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     /// Every node, keyed by the id that reaches it — so an id is unique here
@@ -67,7 +63,7 @@ pub struct Graph {
     /// [`serde::deserialize_nodes`](crate::graph::serde) refuses one instead of
     /// letting the map absorb it.
     #[serde(deserialize_with = "crate::graph::serde::deserialize_nodes")]
-    pub(crate) nodes: HashMap<NodeId, Node>,
+    nodes: HashMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port. Sparse: only bound ports
     /// appear; absence means unbound. A `BTreeMap` keeps
@@ -524,7 +520,7 @@ impl Graph {
                             func_id: *func_id,
                         });
                     };
-                    Self::check_signature(*node_id, node, func)?;
+                    check_signature(*node_id, node, func)?;
                 }
                 NodeKind::Special(_) => {}
             }
@@ -555,24 +551,26 @@ impl Graph {
             let Some(func) = library.by_id(func_id) else {
                 continue;
             };
-            Self::check_signature(*node_id, node, func)?;
+            check_signature(*node_id, node, func)?;
             node.signature
                 .get_or_insert_with(|| FuncSignature::of(func));
         }
         Ok(())
     }
+}
 
-    fn check_signature(node_id: NodeId, node: &Node, func: &Func) -> ValidationResult<()> {
-        match node.signature {
-            Some(signature) if signature != FuncSignature::of(func) => {
-                Err(GraphValidationError::SignatureMismatch {
-                    node_id,
-                    func_id: func.id,
-                    func_name: func.name.clone(),
-                })
-            }
-            _ => Ok(()),
+/// Refuse `node` when the signature it was authored against differs from
+/// `func`'s; a node with none recorded passes.
+fn check_signature(node_id: NodeId, node: &Node, func: &Func) -> ValidationResult<()> {
+    match node.signature {
+        Some(signature) if signature != FuncSignature::of(func) => {
+            Err(GraphValidationError::SignatureMismatch {
+                node_id,
+                func_id: func.id,
+                func_name: func.name.clone(),
+            })
         }
+        _ => Ok(()),
     }
 }
 

@@ -1,3 +1,5 @@
+use std::array;
+
 use crate::image_ops::ml::backend::*;
 
 /// A plane whose every sample names its pixel and channel: `c/4 + (x + y·w)/(4·w·h)`, inside
@@ -116,18 +118,16 @@ fn an_identity_model_reproduces_the_input() {
     }));
     let gray = LinearImage::from(ramp(size.width, size.height, 1));
     for image in [rgb, gray] {
-        let pixels = size.pixel_count();
-        let mut acc = [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]];
-        let mut weight = vec![0.0f32; pixels];
+        let mut blend = FeatherBlend::new(image.dimensions());
         let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
         for &ty in &tile_starts(size.height, 256) {
             for &tx in &tile_starts(size.width, 256) {
                 let tile = Vec2us::new(tx, ty);
                 fill_tile_input(&image, tile, &mut input);
-                accumulate(&input, tile, size.width, &mut acc, &mut weight);
+                blend.add(&input, tile);
             }
         }
-        let output = build_output(image.is_rgb(), &acc, &weight, size);
+        let output = blend.into_image();
         assert_eq!(output.channels(), image.channels());
         for c in 0..image.channels() {
             for (i, (&got, &expected)) in output

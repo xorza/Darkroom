@@ -94,7 +94,7 @@ impl<'a> FlaggedSources<'a> {
     /// The carried flags of source pixel `index`, none when it is excluded: an excluded pixel is
     /// never sampled.
     pub(crate) fn carried_at(&self, index: usize) -> QualityFlags {
-        Self::carried(self.flags.at(index))
+        carried(self.flags.at(index))
     }
 
     /// The carried flags of every in-bounds source pixel the window of `x` and `y` gives a weight
@@ -109,14 +109,6 @@ impl<'a> FlaggedSources<'a> {
             }
         }
         carried
-    }
-
-    fn carried(flags: QualityFlags) -> QualityFlags {
-        if flags.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
-            QualityFlags::default()
-        } else {
-            flags.intersection(QualityFlags::RESAMPLE_CARRIED)
-        }
     }
 }
 
@@ -153,6 +145,15 @@ impl ExcludedSources {
             validity: flags.validity_plane(QualityFlags::RESAMPLE_EXCLUDED),
             zeroed,
         }
+    }
+}
+
+/// The carried part of `flags`, none when they exclude the pixel.
+fn carried(flags: QualityFlags) -> QualityFlags {
+    if flags.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
+        QualityFlags::default()
+    } else {
+        flags.intersection(QualityFlags::RESAMPLE_CARRIED)
     }
 }
 

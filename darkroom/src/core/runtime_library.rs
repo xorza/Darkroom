@@ -51,7 +51,7 @@ impl RuntimeLibrary {
 
 fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> ScenariumLibrary {
     let mut library = ScenariumLibrary::default();
-    library.add(preview::preview_func(Arc::clone(previews)));
+    library.add(preview::func(Arc::clone(previews)));
     library.merge(math_library());
     library.merge(system_library());
     library.merge(worker_events_library());
@@ -91,8 +91,8 @@ mod tests {
         let library = compose(&paths, &Arc::default());
         let preview = 1;
         assert_eq!(
-            library.funcs().count(),
-            preview + parts.iter().map(|part| part.funcs().count()).sum::<usize>()
+            library.iter().count(),
+            preview + parts.iter().map(|part| part.iter().count()).sum::<usize>()
         );
         assert_eq!(
             library.types().len(),

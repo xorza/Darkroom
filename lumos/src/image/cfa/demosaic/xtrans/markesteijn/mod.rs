@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Cancelled;
 use crate::image::cfa::demosaic::tiled;
-use crate::image::cfa::demosaic::tiled::Tiling;
+use crate::image::cfa::demosaic::tiled::{Mosaic, TileKernel, Tiling};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::tile::Tile;
 use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
@@ -109,17 +109,19 @@ pub(crate) fn demosaic(
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     let hex = HexTable::new(xtrans.pattern);
-    tiled::demosaic(
-        xtrans.data,
-        xtrans.size,
-        |position| xtrans.pattern.color_at(position).index(),
-        passes.tiling(),
-        || Tile::new(passes.directions()),
-        |tile, place, out| unsafe {
+    let mosaic = Mosaic {
+        data: xtrans.data,
+        size: xtrans.size,
+        color_at: |position| xtrans.pattern.color_at(position).index(),
+    };
+    let kernel = TileKernel {
+        tiling: passes.tiling(),
+        new_tile: || Tile::new(passes.directions()),
+        run: |tile: &mut Tile, place, out| unsafe {
             tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out);
         },
-        cancel,
-    )
+    };
+    mosaic.demosaic(kernel, cancel)
 }
 
 #[cfg(test)]

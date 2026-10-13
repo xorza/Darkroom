@@ -11,7 +11,8 @@ use fits_well::{FitsReader, FitsWriter};
 
 use crate::image::image_provenance::TransferProvenance;
 use crate::image::linear_image::LinearImage;
-use crate::io::fits::provenance::FitsTransferProvenance;
+use crate::io::error::{FitsRefusal, ImageError};
+use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
 
 /// Write `image` to `path` as a FITS file, with `header`'s cards when given.
 pub(crate) fn write_fits(path: &Path, image: &Image, header: Option<&Header>) {
@@ -51,4 +52,12 @@ pub(crate) fn fits_transfer(image: &LinearImage) -> &FitsTransferProvenance {
         Some(TransferProvenance::FitsNormalized(transfer)) => transfer,
         other => panic!("expected an image the FITS decoder produced, got {other:?}"),
     }
+}
+
+/// Why `error` refused a FITS file; panics on any other error.
+pub(crate) fn fits_refusal(error: ImageError) -> FitsRefusal {
+    let ImageError::FitsUnsupported { reason, .. } = error else {
+        panic!("expected an unsupported-FITS refusal, got {error:?}");
+    };
+    reason
 }

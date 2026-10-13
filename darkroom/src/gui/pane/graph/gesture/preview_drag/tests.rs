@@ -4,7 +4,7 @@ use scenarium::{Binding, NodeKind};
 use crate::core::document::internals::DocFixture;
 use crate::core::preview;
 use crate::gui::pane::graph::internals::CanvasHarness;
-use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::pane::graph::node::port_row;
 use std::sync::Arc;
 
 /// Ctrl+drag off an output port spawns a preview node already reading it, as
@@ -18,16 +18,16 @@ use std::sync::Arc;
 fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use palantir::{Modifiers, PointerButton};
 
-    use crate::core::document::PortRef;
+    use crate::core::document::port_ref::PortRef;
     use crate::core::edit::graph_intent::GraphIntent;
-    use crate::core::preview::{PreviewSink, preview_func};
+    use crate::core::preview::PreviewSink;
 
     // The preview func is declared but not placed — the gesture is what
     // spawns a node from it.
     let mut fixture = DocFixture::probes(1);
     fixture
         .library
-        .add(preview_func(Arc::<PreviewSink>::default()));
+        .add(preview::func(Arc::<PreviewSink>::default()));
     let producer = fixture.node(0);
     let out_port = PortRef::output(producer, 0);
 
@@ -44,7 +44,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         ..Default::default()
     });
     let from = h.port_center(out_port);
-    h.ui.press_on(port_circle_wid(out_port));
+    h.ui.press_on(port_row::port_circle_wid(out_port));
     h.frame();
     // `first_drag_started` polls the *drag* edge, not the press, so the
     // pointer has to actually move past palantir's threshold.
@@ -62,7 +62,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         unreachable!("filtered to AddNode");
     };
     assert!(
-        matches!(node.kind, NodeKind::Func(id) if preview::is_preview(id)),
+        matches!(node.kind, NodeKind::Func(id) if preview::is_func(id)),
         "the spawned node is a preview"
     );
     assert!(

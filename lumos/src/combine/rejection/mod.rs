@@ -8,6 +8,7 @@
 
 pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
+pub(crate) mod mean_combine;
 pub(crate) mod normal_scores;
 pub(crate) mod pass;
 pub(crate) mod rejection_scale;
@@ -20,7 +21,6 @@ pub(crate) mod winsorized_clip_config;
 
 use std::ops::Range;
 
-use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples};
 use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
@@ -28,11 +28,9 @@ use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
-use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 use crate::error::InvalidConfigField;
-use crate::math::sum;
 
 /// An iteration cap must leave at least one pass to run. Shared by the methods that iterate.
 fn validate_max_passes(max_passes: u32) -> Result<(), InvalidConfigField> {
@@ -153,8 +151,8 @@ impl Rejection {
         })
     }
 
-    /// The window of `sorted` that survives. The floor under every measured σ is the noise
-    /// models' σ at the pass's centre, from `noise`.
+    /// The window of `scratch`'s sorted samples that survives. The floor under every measured σ is
+    /// the noise models' σ at the pass's centre, from `noise`.
     ///
     /// Passes run until one rejects nothing, or until the method's cap. When a pass proposes fewer
     /// than `min_survivors` samples, the driver keeps the `min_survivors` samples of the window
@@ -163,12 +161,14 @@ impl Rejection {
     /// sample reorders the window so its survivors stay one ascending run.
     pub(crate) fn surviving_window(
         &self,
-        sorted: &mut SortedSamples,
+        scratch: &mut ScratchBuffers,
         noise: Option<NoiseColumns<'_>>,
         min_survivors: usize,
-        scratch: &mut MethodScratch,
     ) -> Range<usize> {
         debug_assert!(min_survivors >= 1);
+        let ScratchBuffers {
+            sorted, methods, ..
+        } = scratch;
         let noise = noise.filter(|_| self.measures_spread());
         let mut window = 0..sorted.values().len();
         for index in 0..self.passes() {
@@ -183,21 +183,20 @@ impl Rejection {
                 min_survivors,
                 noise,
             };
-            let proposal = match self.narrow(&pass, scratch) {
+            let proposal = match self.narrow(&pass, methods) {
                 None => break,
                 Some(Narrowing::Window(proposal)) => proposal,
-                Some(Narrowing::PerSample { centre, bounds }) => {
+                Some(Narrowing::PerSample(band)) => {
                     let noise = noise.expect("a per-sample band reads the noise models");
-                    let keep = |value: f32, position: u32| {
-                        noise.within(position as usize, value, centre, bounds)
-                    };
+                    let keep =
+                        |value: f32, position: u32| band.keeps(&noise, position as usize, value);
                     if sorted.count_kept(window.clone(), keep) < min_survivors {
-                        window = nearest(sorted.values(), window, centre, min_survivors);
+                        window = sorted.nearest(window, band.centre, min_survivors);
                         break;
                     }
                     Proposal {
-                        window: sorted.partition(window.clone(), centre, keep),
-                        centre,
+                        window: sorted.partition(window.clone(), band.centre, keep),
+                        centre: band.centre,
                     }
                 }
             };
@@ -210,89 +209,13 @@ impl Rejection {
                 break;
             }
             if proposal.window.len() < min_survivors {
-                window = nearest(sorted.values(), window, proposal.centre, min_survivors);
+                window = sorted.nearest(window, proposal.centre, min_survivors);
                 break;
             }
             window = proposal.window;
         }
         window
     }
-
-    /// Reject outliers, then reduce the survivors to their weighted mean.
-    ///
-    /// The one reduction entry point. `measure_quality` asks for the survivors' effective weight as
-    /// well, which is a second pass over the samples.
-    ///
-    /// Only the mean is weighted; the rejection decides survivors from the values alone. That
-    /// matches what `ImageIntegration`, Siril and DSS do: rejection asks which samples disagree
-    /// with the others, which is a question about the normalized values, not about how much each
-    /// frame is trusted. It also keeps GESD a valid test: its critical values come from the
-    /// t-distribution for `n` iid observations, and there is no weighted form of them.
-    pub(crate) fn combine_mean(
-        &self,
-        samples: PixelSamples<'_>,
-        min_survivors: usize,
-        scratch: &mut ScratchBuffers,
-        measure_quality: bool,
-    ) -> CombinedSample {
-        let PixelSamples {
-            values,
-            weights,
-            noise,
-        } = samples;
-        debug_assert_eq!(values.len(), weights.len());
-        if matches!(self, Self::None) || values.len() <= min_survivors {
-            scratch.survivors = None;
-            let value = sum::weighted_mean_f32(values, weights);
-            return if measure_quality {
-                CombinedSample::from_survivors(value, values, weights, 0..values.len(), noise)
-            } else {
-                CombinedSample::value_only(value)
-            };
-        }
-
-        scratch.sorted.fill(values);
-        let window = self.surviving_window(
-            &mut scratch.sorted,
-            noise,
-            min_survivors,
-            &mut scratch.methods,
-        );
-        let positions = &scratch.sorted.positions()[window.clone()];
-        scratch.weights.clear();
-        scratch
-            .weights
-            .extend(positions.iter().map(|&position| weights[position as usize]));
-        let value =
-            sum::weighted_mean_f32(&scratch.sorted.values()[window.clone()], &scratch.weights);
-        let sample = if measure_quality {
-            CombinedSample::from_survivors(
-                value,
-                values,
-                weights,
-                positions.iter().map(|&position| position as usize),
-                noise,
-            )
-        } else {
-            CombinedSample::value_only(value)
-        };
-        scratch.survivors = Some(window);
-        sample
-    }
-}
-
-/// The `count` samples of `window` nearest `centre`: a run of the sorted samples, found by dropping
-/// the farther end until `count` remain. A tie drops the higher end, so the lower position is kept.
-fn nearest(sorted: &[f32], window: Range<usize>, centre: f32, count: usize) -> Range<usize> {
-    let Range { mut start, mut end } = window;
-    while end - start > count {
-        if (sorted[end - 1] - centre).abs() >= (sorted[start] - centre).abs() {
-            end -= 1;
-        } else {
-            start += 1;
-        }
-    }
-    start..end
 }
 
 #[cfg(feature = "internals")]

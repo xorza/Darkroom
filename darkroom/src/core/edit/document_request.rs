@@ -2,7 +2,7 @@
 
 use palantir::DockOperation;
 
-use crate::core::document::TabRef;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 
 /// A request the document applies itself: an edit of its graph, or of the

@@ -6,8 +6,7 @@ use imaginarium::{Image as RawImage, ImageDesc};
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::internals::DocFixture;
-use crate::core::preview::preview_func;
-use crate::gui::state::preview_store::internals::image_value;
+use crate::core::preview;
 
 /// A document holding one preview node at `node`. The id is the caller's, so a
 /// test can build the same node's document twice and have the store recognise
@@ -18,7 +17,7 @@ use crate::gui::state::preview_store::internals::image_value;
 /// open or visible.
 fn document_with_preview(node: NodeId) -> Document {
     let mut fixture = DocFixture::default();
-    let func = preview_func(Arc::default());
+    let func = preview::func(Arc::default());
     fixture.library.add(func.clone());
     fixture.doc.graph.insert(node, Node::from(&func));
     fixture.doc
@@ -87,7 +86,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
 #[test]
 fn a_drawable_reports_its_source_alongside_the_capped_texture() {
     let mut arena = UiHarness::arena();
-    let value = image_value(1024, 512, ColorFormat::RGB_F32);
+    let value = internals::image_value(1024, 512, ColorFormat::RGB_F32);
     let image = value.as_custom::<LensImage>().unwrap();
 
     // The viewer names no ceiling of its own, so the device's is the only one
@@ -126,7 +125,7 @@ fn the_full_texture_is_uploaded_on_the_first_ask_and_reused_after() {
     store.ingest_preview(
         arena.ui(),
         node,
-        image_value(512, 256, ColorFormat::RGBA_U8),
+        internals::image_value(512, 256, ColorFormat::RGBA_U8),
     );
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("an image value must create an image resource");

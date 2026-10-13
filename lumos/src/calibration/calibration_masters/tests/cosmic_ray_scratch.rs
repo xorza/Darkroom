@@ -11,7 +11,6 @@ use crate::calibration::cosmic_ray::masks::CONCURRENT_MASKS;
 use crate::calibration::cosmic_ray::masks::internals::new_cr_mask;
 use crate::calibration::cosmic_ray::mono::MONO_SCRATCH_PLANES;
 use crate::calibration::cosmic_ray::mono::internals::mono_scratch_floats;
-use crate::calibration::cosmic_ray::reject_cosmic_rays;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::cfa::cfa_from_plane;
@@ -65,7 +64,7 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
     // pass that never reaches `replace_flagged`'s snapshot buffer.
-    let repaired = reject_cosmic_rays(
+    let repaired = cosmic_ray::reject(
         &mut cfa_from_plane(
             Buffer2::new(size.width, size.height, data.clone()),
             CfaType::Mono,

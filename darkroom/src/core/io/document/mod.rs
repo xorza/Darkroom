@@ -1,116 +1,21 @@
 //! Darkroom document archives: one validated RON document inside a ZIP file.
 
+pub(crate) mod error;
+
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, file_utils};
-use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::document::Document;
-use crate::core::document::error::DocumentValidationError;
+use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 
 pub(crate) const EXTENSION: &str = "darkroom";
 const DOCUMENT_ENTRY: &str = "document.ron";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DocumentLoadError {
-    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
-    InvalidExtension { path: PathBuf },
-    #[error("{path}: {source}", path = .path.display())]
-    Open {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-    #[error("{path} is not a valid Darkroom archive: {source}", path = .path.display())]
-    InvalidArchive {
-        path: PathBuf,
-        #[source]
-        source: ZipError,
-    },
-    #[error("failed to inspect {path}: {source}", path = .path.display())]
-    InspectArchive {
-        path: PathBuf,
-        #[source]
-        source: ZipError,
-    },
-    #[error("{path} contains overlapping ZIP entries", path = .path.display())]
-    OverlappingEntries { path: PathBuf },
-    #[error("{path} must contain exactly one {DOCUMENT_ENTRY}, found {count}", path = .path.display())]
-    DocumentEntryCount { path: PathBuf, count: usize },
-    #[error("failed to open {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
-    OpenDocumentEntry {
-        path: PathBuf,
-        #[source]
-        source: ZipError,
-    },
-    #[error("{path} contains a non-file {DOCUMENT_ENTRY} entry", path = .path.display())]
-    NonFileDocumentEntry { path: PathBuf },
-    #[error(
-        "{DOCUMENT_ENTRY} in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
-        path = .path.display(),
-        max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
-    )]
-    DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("failed to read {DOCUMENT_ENTRY} from {path}: {source}", path = .path.display())]
-    ReadDocument {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-    #[error("invalid {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
-    DeserializeDocument {
-        path: PathBuf,
-        /// Boxed: a spanned RON error carries its whole span, which every
-        /// `load` on the happy path would otherwise pay for in its `Result`.
-        #[source]
-        source: Box<common::DeserializeError>,
-    },
-    #[error("{path}: {source}", path = .path.display())]
-    InvalidDocument {
-        path: PathBuf,
-        #[source]
-        source: DocumentValidationError,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DocumentSaveError {
-    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
-    InvalidExtension { path: PathBuf },
-    #[error("failed to serialize {DOCUMENT_ENTRY} for {path}: {source}", path = .path.display())]
-    Serialize {
-        path: PathBuf,
-        #[source]
-        source: common::SerializeError,
-    },
-    #[error(
-        "{DOCUMENT_ENTRY} for {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
-        path = .path.display(),
-        max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
-    )]
-    DocumentTooLarge { path: PathBuf, size: u64 },
-    /// Refused *before* writing, so a document that the next [`load`]
-    /// would reject can never replace the file already on disk. Same
-    /// predicate as [`DocumentLoadError::InvalidDocument`] — the two
-    /// directions can't drift.
-    #[error("{path}: {source}", path = .path.display())]
-    InvalidDocument {
-        path: PathBuf,
-        #[source]
-        source: DocumentValidationError,
-    },
-    #[error("{path}: {source}", path = .path.display())]
-    Publish {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-}
 
 pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
     if !has_extension(path) {
@@ -176,7 +81,9 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         });
     }
 
-    let mut encoded = Vec::with_capacity(entry.size() as usize);
+    let mut encoded = Vec::with_capacity(
+        usize::try_from(entry.size()).expect("`fits` bounds the entry to an addressable size"),
+    );
     (&mut entry)
         .take(MAX_DOCUMENT_BYTES + 1)
         .read_to_end(&mut encoded)
@@ -191,7 +98,7 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         });
     }
 
-    let document: Document = common::deserialize(&encoded, SerdeFormat::Ron).map_err(|source| {
+    let document: Document = SerdeFormat::Ron.deserialize(&encoded).map_err(|source| {
         DocumentLoadError::DeserializeDocument {
             path: path.to_path_buf(),
             source: Box::new(source),
@@ -219,12 +126,13 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
             source,
         })?;
 
-    let encoded = common::serialize(document, SerdeFormat::Ron).map_err(|source| {
-        DocumentSaveError::Serialize {
-            path: path.to_path_buf(),
-            source,
-        }
-    })?;
+    let encoded =
+        SerdeFormat::Ron
+            .serialize(document)
+            .map_err(|source| DocumentSaveError::Serialize {
+                path: path.to_path_buf(),
+                source,
+            })?;
     if !fits(encoded.len() as u64) {
         return Err(DocumentSaveError::DocumentTooLarge {
             path: path.to_path_buf(),

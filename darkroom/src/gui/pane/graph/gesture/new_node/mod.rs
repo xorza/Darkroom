@@ -9,8 +9,8 @@ use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
-use crate::core::document::PortRef;
-use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
+use crate::core::document::port_ref::PortRef;
+use crate::gui::pane::graph::canvas;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::new_node::node_palette::NodePalette;
@@ -97,7 +97,7 @@ impl NewNodeUi {
         out: &mut Requests,
     ) {
         let graph_ctx = cx.graph_ctx();
-        let resp = ui.response_for(outer_canvas_widget_id());
+        let resp = ui.response_for(canvas::outer_wid());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.

@@ -14,7 +14,7 @@ use crate::internals::synthetic::fixtures::star_field;
 use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::DrizzleAccumulator;
 use crate::drizzle::accumulator::frame_source::internals::band_scan;
-use crate::drizzle::deposit::Deposit;
+use crate::drizzle::accumulator::kernel_plan::DropReach;
 use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_result::DrizzleResult;
@@ -22,7 +22,7 @@ use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::error::FrameDimensionMismatch;
 use crate::image::pixel_flags::PixelFlags;
 use crate::io::load_context::LoadContext;
-use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
@@ -38,14 +38,13 @@ const MAX_DEPOSITS: f32 = 49.0;
 /// axis. The other kernels' weights are all positive, so it is 1 for them.
 const LOBE_EXCESS: f32 = 1.7;
 
+/// An accumulator for frames of `input_dims`, each channel reaching its own.
 fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
-    DrizzleAccumulator::new(
+    let blank = LinearImage::from_planar_channels(
         input_dims,
-        Deposit::Channels(input_dims.channels()),
-        config,
-        0,
-    )
-    .expect("test drizzle config must be valid")
+        (0..input_dims.channels()).map(|_| vec![0.0; input_dims.pixel_count()]),
+    );
+    DrizzleAccumulator::new(&blank, config, 0).expect("test drizzle config must be valid")
 }
 
 /// The combine that makes the drizzled frames the single-pass drizzle: a mean of every sample,
@@ -71,8 +70,7 @@ fn drizzle_plain(
     .drizzle_images(
         frames,
         &IngestConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        ProgressMonitor::unattended(),
     )
 }
 
@@ -99,16 +97,12 @@ fn usual_config(kernel: DrizzleKernel) -> DrizzleConfig {
     }
 }
 
-/// Drizzle one mono frame of `size` and finalize.
-fn drizzle_one(
-    size: Size2us,
-    config: DrizzleConfig,
-    image: LinearImage,
-    transform: &Transform,
-    pixel_weights: Option<&Buffer2<f32>>,
-) -> StackProduct {
-    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
-    acc.add_image(image, transform, pixel_weights);
+/// Drizzle one frame and finalize.
+fn drizzle_one(config: DrizzleConfig, frame: &DrizzleFrame<LinearImage>) -> StackProduct {
+    let mut acc = DrizzleAccumulator::new(&frame.source, config, 0)
+        .expect("test drizzle config must be valid");
+    acc.add_frame(frame)
+        .expect("test frame must be coherent with the accumulator");
     acc.finalize()
 }
 

@@ -13,7 +13,7 @@ use crate::math::noise::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
-use crate::math::wavelet::{atrous_smooth, max_scales};
+use crate::math::wavelet;
 
 /// The noise standard deviation of an image by Starck & Murtagh's multiresolution-support method
 /// (PASP 110, 1998), as PixInsight's `NoiseMRS` computes it.
@@ -44,17 +44,20 @@ const SCALES: usize = 4;
 const LAYER_SIGMA: [f64; SCALES] = [0.889, 0.200, 0.086, 0.041];
 /// The significance threshold in units of a layer's noise.
 const K: f64 = 3.0;
-/// The relative change that ends the iterations, as the reference.
-const CONVERGENCE: f64 = 1e-4;
+/// When the support iterations end, as the reference.
+const CONVERGENCE: Convergence = Convergence {
+    tolerance: 1e-4,
+    iterations: 50,
+};
 /// What the uncorrected estimate reads for white Gaussian noise of unit σ: 0.97826, the mean over
 /// 32 frames of 10⁶ analysed pixels, with a standard error of 1.3 × 10⁻⁴. Not closed-form: the
 /// support truncates four correlated layers at once.
 const WHITE_NOISE_RESPONSE: f64 = 0.97826;
-/// Iterations at most: the reference converges in 4 to 8.
-const MAX_ITERATIONS: usize = 50;
 /// The k-σ start: its relative accuracy and its iteration cap, as PixInsight's `NoiseKSigma`.
-const START_CONVERGENCE: f64 = 0.01;
-const START_ITERATIONS: usize = 10;
+const START: Convergence = Convergence {
+    tolerance: 0.01,
+    iterations: 10,
+};
 /// The least share of the analysed pixels an MRS estimate stands on, one in this many, as
 /// PixInsight's noise evaluation requires 1%; below it, or with no convergence, the k-σ estimate
 /// stands instead.
@@ -208,7 +211,12 @@ impl MrsNoise {
         size: Size2us,
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> f32 {
-        sigma(coefficients(plane, size, &excluded).all(), size) as f32
+        let plane = NoisePlane {
+            samples: plane,
+            size,
+            excluded,
+        };
+        sigma(plane.coefficients().all(), size) as f32
     }
 
     /// The background of `plane` under a flat whose gain at pixel `index` is `gain(index)`: the
@@ -221,11 +229,14 @@ impl MrsNoise {
         gain: impl Fn(usize) -> f32 + Sync,
         bins: &GainBins,
     ) -> BackgroundSplit {
-        let binned = BinnedSamples::of(
-            coefficients(plane, size, &excluded),
-            bins,
-            |coefficients, position| gain(coefficients.index[position]),
-        );
+        let plane = NoisePlane {
+            samples: plane,
+            size,
+            excluded,
+        };
+        let binned = BinnedSamples::of(plane.coefficients(), bins, |coefficients, position| {
+            gain(coefficients.index[position])
+        });
         BackgroundSplit::fit(&binned.measure(|run| sigma(run, size).powi(2)))
     }
 
@@ -254,35 +265,111 @@ impl MrsNoise {
     }
 }
 
-/// The coefficients of every tile's core pixels that `excluded` does not name, in tile order and
-/// row-major within a tile: each tile writes its core into its own share of columns sized for every
-/// core pixel, and the shares close up over the pixels excluded.
-fn coefficients(
-    plane: &[f32],
+/// A plane whose noise is estimated: its samples, row-major over `size`, less the pixels
+/// `excluded` names.
+#[derive(Debug)]
+struct NoisePlane<'a, E> {
+    samples: &'a [f32],
     size: Size2us,
-    excluded: &(impl Fn(usize) -> bool + Sync),
-) -> Coefficients {
-    debug_assert_eq!(plane.len(), size.pixel_count());
-    let scales = SCALES.min(max_scales(size));
-    let tiles = tiles(size);
-    let mut coefficients = Coefficients::zeroed(tiles.iter().map(|tile| tile.core.area()).sum());
-    let shares = coefficients.shares(&tiles);
-    let mut kept = Vec::with_capacity(tiles.len());
-    tiles
-        .par_iter()
-        .zip(shares)
-        .map(|(&tile, mut share)| {
-            tile_coefficients(plane, size, tile, scales, excluded, &mut share)
-        })
-        .collect_into_vec(&mut kept);
-    let (mut start, mut end) = (0, 0);
-    for (tile, kept) in tiles.iter().zip(kept) {
-        coefficients.move_within(start, kept, end);
-        start += tile.core.area();
-        end += kept;
+    excluded: E,
+}
+
+impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
+    /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
+    /// and row-major within a tile: each tile writes its core into its own share of columns sized
+    /// for every core pixel, and the shares close up over the pixels excluded.
+    fn coefficients(&self) -> Coefficients {
+        let size = self.size;
+        debug_assert_eq!(self.samples.len(), size.pixel_count());
+        let scales = SCALES.min(wavelet::max_scales(size));
+        let tiles = tiles(size);
+        let mut coefficients =
+            Coefficients::zeroed(tiles.iter().map(|tile| tile.core.area()).sum());
+        let shares = coefficients.shares(&tiles);
+        let mut kept = Vec::with_capacity(tiles.len());
+        tiles
+            .par_iter()
+            .zip(shares)
+            .map(|(&tile, mut share)| self.tile_coefficients(tile, scales, &mut share))
+            .collect_into_vec(&mut kept);
+        let (mut start, mut end) = (0, 0);
+        for (tile, kept) in tiles.iter().zip(kept) {
+            coefficients.move_within(start, kept, end);
+            start += tile.core.area();
+            end += kept;
+        }
+        coefficients.truncate(end);
+        coefficients
     }
-    coefficients.truncate(end);
-    coefficients
+
+    /// The transform of one tile, and the coefficients of its core pixels that `excluded` does not
+    /// name, written to the front of `share`, one place a core pixel; how many it wrote.
+    fn tile_coefficients(
+        &self,
+        tile: Tile,
+        scales: usize,
+        share: &mut CoefficientShare<'_>,
+    ) -> usize {
+        let Self {
+            samples: plane,
+            size,
+            excluded,
+        } = self;
+        debug_assert_eq!(share.index.len(), tile.core.area());
+        let region = tile.region;
+        let (width, height) = (region.width(), region.height());
+        let mut pixels = Vec::with_capacity(region.area());
+        for y in region.min.y..region.max.y {
+            pixels.extend_from_slice(
+                &plane[y * size.width + region.min.x..y * size.width + region.max.x],
+            );
+        }
+        let image = Buffer2::new(width, height, pixels);
+        let mut smooth = Buffer2::new_default(width, height);
+        let mut next = Buffer2::new_default(width, height);
+        // The first layer is built as it is first smoothed, so neither it nor the significance is
+        // cleared first: the largest significance of one layer is that layer's.
+        wavelet::atrous_smooth(&image, &mut smooth, 1);
+        let first_layer: Vec<f64> = smooth
+            .pixels()
+            .iter()
+            .zip(image.pixels())
+            .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse))
+            .collect();
+        let mut significance: Vec<f64> = first_layer
+            .iter()
+            .map(|detail| detail.abs() / LAYER_SIGMA[0])
+            .collect();
+        for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
+            wavelet::atrous_smooth(&smooth, &mut next, 1 << scale);
+            for ((significance, &coarse), &fine) in significance
+                .iter_mut()
+                .zip(next.pixels())
+                .zip(smooth.pixels())
+            {
+                let detail = f64::from(fine) - f64::from(coarse);
+                *significance = significance.max(detail.abs() / layer_sigma);
+            }
+            mem::swap(&mut smooth, &mut next);
+        }
+        let core = tile.core;
+        let mut kept = 0;
+        for y in core.min.y..core.max.y {
+            for x in core.min.x..core.max.x {
+                if excluded(y * size.width + x) {
+                    continue;
+                }
+                let local = (y - region.min.y) * width + (x - region.min.x);
+                share.index[kept] = y * size.width + x;
+                share.first_layer[kept] = first_layer[local];
+                share.significance[kept] = significance[local];
+                share.detail[kept] =
+                    f64::from(image.pixels()[local]) - f64::from(smooth.pixels()[local]);
+                kept += 1;
+            }
+        }
+        kept
+    }
 }
 
 /// The noise standard deviation the support iteration settles on over `coefficients`, of a `size`
@@ -311,28 +398,30 @@ fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
         interior = (0..count).filter(|&position| interior(position)).count(),
         "the multiresolution support leaves too few noise pixels; using the k-σ estimate"
     );
-    k_sigma(coefficients, &interior, CONVERGENCE, MAX_ITERATIONS)
-        / FIRST_LAYER_RESPONSE
-        / K_SIGMA_RESPONSE
+    k_sigma(coefficients, &interior, CONVERGENCE) / FIRST_LAYER_RESPONSE / K_SIGMA_RESPONSE
 }
 
 /// The support iteration's σ over `coefficients`, uncorrected; `None` when an iteration leaves
 /// fewer than one in [`MIN_NOISE_SHARE`] of them, or two, outside the support, or none converges.
 fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
     let floor = coefficients.index.len().div_ceil(MIN_NOISE_SHARE).max(2);
-    let mut sigma =
-        k_sigma(coefficients, &|_| true, START_CONVERGENCE, START_ITERATIONS) / LAYER_SIGMA[0];
+    let mut sigma = k_sigma(coefficients, &|_| true, START) / LAYER_SIGMA[0];
     let mut mean = None;
-    for _ in 0..MAX_ITERATIONS {
-        let (values, gate, below) = (coefficients.detail, coefficients.significance, K * sigma);
+    for _ in 0..CONVERGENCE.iterations {
+        let kept = Kept {
+            values: coefficients.detail,
+            gate: coefficients.significance,
+            below: K * sigma,
+            within: &|_| true,
+        };
         let next = match mean {
-            None => Deviation::of(values, gate, below, &|_| true),
-            Some(shift) => Deviation::around(values, gate, below, &|_| true, shift),
+            None => kept.deviation(),
+            Some(shift) => kept.deviation_around(shift),
         };
         if next.count < floor {
             return None;
         }
-        let converged = (next.sigma - sigma).abs() <= CONVERGENCE * next.sigma;
+        let converged = (next.sigma - sigma).abs() <= CONVERGENCE.tolerance * next.sigma;
         sigma = next.sigma;
         mean = Some(next.mean);
         if converged || sigma == 0.0 {
@@ -385,92 +474,40 @@ fn tiles(size: Size2us) -> Vec<Tile> {
         .collect()
 }
 
-/// The transform of one tile, and the coefficients of its core pixels that `excluded` does not
-/// name, written to the front of `share`, one place a core pixel; how many it wrote.
-fn tile_coefficients(
-    plane: &[f32],
-    size: Size2us,
-    tile: Tile,
-    scales: usize,
-    excluded: &impl Fn(usize) -> bool,
-    share: &mut CoefficientShare<'_>,
-) -> usize {
-    debug_assert_eq!(share.index.len(), tile.core.area());
-    let region = tile.region;
-    let (width, height) = (region.width(), region.height());
-    let mut pixels = Vec::with_capacity(region.area());
-    for y in region.min.y..region.max.y {
-        pixels.extend_from_slice(
-            &plane[y * size.width + region.min.x..y * size.width + region.max.x],
-        );
-    }
-    let image = Buffer2::new(width, height, pixels);
-    let mut smooth = Buffer2::new_default(width, height);
-    let mut next = Buffer2::new_default(width, height);
-    // The first layer is built as it is first smoothed, so neither it nor the significance is
-    // cleared first: the largest significance of one layer is that layer's.
-    atrous_smooth(&image, &mut smooth, 1);
-    let first_layer: Vec<f64> = smooth
-        .pixels()
-        .iter()
-        .zip(image.pixels())
-        .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse))
-        .collect();
-    let mut significance: Vec<f64> = first_layer
-        .iter()
-        .map(|detail| detail.abs() / LAYER_SIGMA[0])
-        .collect();
-    for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
-        atrous_smooth(&smooth, &mut next, 1 << scale);
-        for ((significance, &coarse), &fine) in significance
-            .iter_mut()
-            .zip(next.pixels())
-            .zip(smooth.pixels())
-        {
-            let detail = f64::from(fine) - f64::from(coarse);
-            *significance = significance.max(detail.abs() / layer_sigma);
-        }
-        mem::swap(&mut smooth, &mut next);
-    }
-    let core = tile.core;
-    let mut kept = 0;
-    for y in core.min.y..core.max.y {
-        for x in core.min.x..core.max.x {
-            if excluded(y * size.width + x) {
-                continue;
-            }
-            let local = (y - region.min.y) * width + (x - region.min.x);
-            share.index[kept] = y * size.width + x;
-            share.first_layer[kept] = first_layer[local];
-            share.significance[kept] = significance[local];
-            share.detail[kept] =
-                f64::from(image.pixels()[local]) - f64::from(smooth.pixels()[local]);
-            kept += 1;
-        }
-    }
-    kept
-}
-
 /// The k-σ clipped standard deviation of the first detail layer of the pixels `within` keeps,
-/// iterated until it moves by less than `convergence` of itself or `iterations` run out.
+/// iterated until it moves by less than `convergence.tolerance` of itself or its iterations run
+/// out.
 fn k_sigma(
     coefficients: CoefficientRun<'_>,
     within: &(impl Fn(usize) -> bool + Sync),
-    convergence: f64,
-    iterations: usize,
+    convergence: Convergence,
 ) -> f64 {
     let layer = coefficients.first_layer;
-    let mut deviation = Deviation::of(layer, layer, f64::INFINITY, within);
-    for _ in 0..iterations {
+    let kept = |below: f64| Kept {
+        values: layer,
+        gate: layer,
+        below,
+        within,
+    };
+    let mut deviation = kept(f64::INFINITY).deviation();
+    for _ in 0..convergence.iterations {
         let sigma = deviation.sigma;
-        deviation = Deviation::around(layer, layer, K * sigma, within, deviation.mean);
-        if (deviation.sigma - sigma).abs() <= convergence * deviation.sigma
+        deviation = kept(K * sigma).deviation_around(deviation.mean);
+        if (deviation.sigma - sigma).abs() <= convergence.tolerance * deviation.sigma
             || deviation.sigma == 0.0
         {
             break;
         }
     }
     deviation.sigma
+}
+
+/// When an iteration ends: a step that moves its figure by at most `tolerance` of itself, or
+/// `iterations` steps.
+#[derive(Debug, Clone, Copy)]
+struct Convergence {
+    tolerance: f64,
+    iterations: usize,
 }
 
 /// A sample standard deviation, the mean it was taken about, and how many values it was taken
@@ -483,38 +520,6 @@ struct Deviation {
 }
 
 impl Deviation {
-    /// The sample standard deviation of `values` at the positions whose `gate` is below `below` in
-    /// magnitude and that `within` keeps; `0` for fewer than two. The mean in one pass, then the
-    /// deviations from it in a second, their square sum corrected by their sum: Chan, Golub &
-    /// LeVeque's two-pass algorithm, which errs less than an update per value and divides by
-    /// nothing per value.
-    fn of(
-        values: &[f64],
-        gate: &[f64],
-        below: f64,
-        within: &(impl Fn(usize) -> bool + Sync),
-    ) -> Self {
-        let first = Sums::over(values, gate, below, within, 0.0);
-        if first.count < 2 {
-            return Self::from_sums(first, 0.0);
-        }
-        Self::around(values, gate, below, within, first.sum / first.count as f64)
-    }
-
-    /// The same in one pass, the deviations taken from `shift` and corrected by their sum, which
-    /// is exact whatever the shift and rounds as the two-pass algorithm's second pass does while
-    /// the shift is a small part of σ from the mean. An iteration passes the mean the one before it
-    /// found, which its own differs from by a sliver of σ.
-    fn around(
-        values: &[f64],
-        gate: &[f64],
-        below: f64,
-        within: &(impl Fn(usize) -> bool + Sync),
-        shift: f64,
-    ) -> Self {
-        Self::from_sums(Sums::over(values, gate, below, within, shift), shift)
-    }
-
     fn from_sums(sums: Sums, shift: f64) -> Self {
         if sums.count < 2 {
             return Self {
@@ -533,6 +538,87 @@ impl Deviation {
     }
 }
 
+/// The values one pass keeps: those at the positions whose `gate` is below `below` in magnitude
+/// and that `within` keeps.
+#[derive(Debug)]
+struct Kept<'a, W> {
+    values: &'a [f64],
+    gate: &'a [f64],
+    below: f64,
+    within: &'a W,
+}
+
+impl<W: Fn(usize) -> bool + Sync> Kept<'_, W> {
+    /// The sample standard deviation of the kept values; `0` for fewer than two. The mean in one
+    /// pass, then the deviations from it in a second, their square sum corrected by their sum:
+    /// Chan, Golub & LeVeque's two-pass algorithm, which errs less than an update per value and
+    /// divides by nothing per value.
+    fn deviation(&self) -> Deviation {
+        let first = self.sums(0.0);
+        if first.count < 2 {
+            return Deviation::from_sums(first, 0.0);
+        }
+        self.deviation_around(first.sum / first.count as f64)
+    }
+
+    /// The same in one pass, the deviations taken from `shift` and corrected by their sum, which
+    /// is exact whatever the shift and rounds as the two-pass algorithm's second pass does while
+    /// the shift is a small part of σ from the mean. An iteration passes the mean the one before it
+    /// found, which its own differs from by a sliver of σ.
+    fn deviation_around(&self, shift: f64) -> Deviation {
+        Deviation::from_sums(self.sums(shift), shift)
+    }
+
+    /// The count, sum and square sum of the kept values' offsets from `shift`, in shares of
+    /// [`PASS_SHARE`], each summed in four lanes so that no one chain of additions serializes it.
+    fn sums(&self, shift: f64) -> Sums {
+        debug_assert_eq!(self.values.len(), self.gate.len());
+        let mut shares = Vec::with_capacity(self.values.len().div_ceil(PASS_SHARE));
+        self.values
+            .par_chunks(PASS_SHARE)
+            .zip(self.gate.par_chunks(PASS_SHARE))
+            .enumerate()
+            .map(|(share, (values, gate))| {
+                let start = share * PASS_SHARE;
+                Kept {
+                    values,
+                    gate,
+                    below: self.below,
+                    within: &|i| (self.within)(start + i),
+                }
+                .share_sums(shift)
+            })
+            .collect_into_vec(&mut shares);
+        shares.into_iter().fold(Sums::default(), Sums::plus)
+    }
+}
+
+impl<W: Fn(usize) -> bool> Kept<'_, W> {
+    /// [`Self::sums`] over one share, in four lanes.
+    fn share_sums(self, shift: f64) -> Sums {
+        let Self {
+            values,
+            gate,
+            below,
+            within,
+        } = self;
+        let mut lanes = [Sums::default(); 4];
+        let (value_quads, value_rest) = values.as_chunks::<4>();
+        let (gate_quads, gate_rest) = gate.as_chunks::<4>();
+        for (quad, (values, gates)) in value_quads.iter().zip(gate_quads).enumerate() {
+            for (lane, sums) in lanes.iter_mut().enumerate() {
+                let kept = gates[lane].abs() < below && within(4 * quad + lane);
+                sums.add(kept, values[lane] - shift);
+            }
+        }
+        let start = 4 * value_quads.len();
+        for (i, (&value, &gate)) in value_rest.iter().zip(gate_rest).enumerate() {
+            lanes[0].add(gate.abs() < below && within(start + i), value - shift);
+        }
+        lanes.into_iter().fold(Sums::default(), Sums::plus)
+    }
+}
+
 /// How many values one parallel share of a pass sums: small enough that one gain bin of a split
 /// estimate still spreads over every worker. The shares' sums are added in order, so a pass gives
 /// the same bits whatever the thread count.
@@ -547,52 +633,6 @@ struct Sums {
 }
 
 impl Sums {
-    /// Over `values` in shares of [`PASS_SHARE`], each summed in four lanes so that no one chain
-    /// of additions serializes it.
-    fn over(
-        values: &[f64],
-        gate: &[f64],
-        below: f64,
-        within: &(impl Fn(usize) -> bool + Sync),
-        shift: f64,
-    ) -> Self {
-        debug_assert_eq!(values.len(), gate.len());
-        let mut shares = Vec::with_capacity(values.len().div_ceil(PASS_SHARE));
-        values
-            .par_chunks(PASS_SHARE)
-            .zip(gate.par_chunks(PASS_SHARE))
-            .enumerate()
-            .map(|(share, (values, gate))| {
-                let start = share * PASS_SHARE;
-                Self::share(values, gate, below, &|i| within(start + i), shift)
-            })
-            .collect_into_vec(&mut shares);
-        shares.into_iter().fold(Self::default(), Self::plus)
-    }
-
-    fn share(
-        values: &[f64],
-        gate: &[f64],
-        below: f64,
-        within: &impl Fn(usize) -> bool,
-        shift: f64,
-    ) -> Self {
-        let mut lanes = [Self::default(); 4];
-        let (value_quads, value_rest) = values.as_chunks::<4>();
-        let (gate_quads, gate_rest) = gate.as_chunks::<4>();
-        for (quad, (values, gates)) in value_quads.iter().zip(gate_quads).enumerate() {
-            for (lane, sums) in lanes.iter_mut().enumerate() {
-                let kept = gates[lane].abs() < below && within(4 * quad + lane);
-                sums.add(kept, values[lane] - shift);
-            }
-        }
-        let start = 4 * value_quads.len();
-        for (i, (&value, &gate)) in value_rest.iter().zip(gate_rest).enumerate() {
-            lanes[0].add(gate.abs() < below && within(start + i), value - shift);
-        }
-        lanes.into_iter().fold(Self::default(), Self::plus)
-    }
-
     fn add(&mut self, kept: bool, offset: f64) {
         let offset = if kept { offset } else { 0.0 };
         self.count += usize::from(kept);

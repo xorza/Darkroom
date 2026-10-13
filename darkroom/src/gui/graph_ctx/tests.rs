@@ -4,9 +4,9 @@ use scenarium::{
     Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
 };
 
-use crate::core::document::TabRef;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::port_ref::{PortKind, PortRef};
+use crate::core::document::tab_ref::TabRef;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 

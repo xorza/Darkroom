@@ -1,5 +1,8 @@
 //! Why an intent could never have applied.
 
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use glam::Vec2;
 use scenarium::{DetachedNodeError, InputPort, NodeId};
 use thiserror::Error;
@@ -16,14 +19,14 @@ use thiserror::Error;
 ///
 /// Each variant names the check that rejected it rather than carrying a
 /// formatted string, so a test can assert *which* precondition broke without
-/// matching on prose, and the common `role` stays a `&'static str` instead of
-/// allocating a message on a path that is supposed to be unreachable.
+/// matching on prose, and nothing allocates a message on a path that is
+/// supposed to be unreachable.
 #[derive(Debug, Error)]
 pub(crate) enum MalformedIntent {
     /// A nil id where the intent must name something: never stale, as no
     /// document holds it.
     #[error("{role} node id is nil")]
-    NilNodeId { role: &'static str },
+    NilNodeId { role: Role },
     /// A new id the document already holds. Scenarium requires node ids to be
     /// unique across the whole authoring tree, and `Graph::insert` panics
     /// outright on a collision.
@@ -36,7 +39,7 @@ pub(crate) enum MalformedIntent {
     /// Unlike a stale reference this is malformed: an insertion's wiring is
     /// authored in the same breath as its node.
     #[error("{role} node {node_id:?} is not in the graph")]
-    NodeAbsent { role: &'static str, node_id: NodeId },
+    NodeAbsent { role: Role, node_id: NodeId },
     /// A seed binding reading the very node it feeds. That is a cycle of one,
     /// which the planner refuses outright (`Error::CycleDetected`) — so the
     /// graph would author fine and then never run.
@@ -60,8 +63,45 @@ pub(crate) enum MalformedIntent {
     /// `GraphView::validate` — which runs only on save and load, so an
     /// unchecked NaN surfaces as a document that won't reopen.
     #[error("{role} position {pos:?} is not finite")]
-    NonFinitePosition { role: &'static str, pos: Vec2 },
+    NonFinitePosition { role: Role, pos: Vec2 },
     /// Same corruption path as [`Self::NonFinitePosition`], one level up.
     #[error("viewport needs finite pan and positive finite zoom")]
     InvalidViewport,
+}
+
+/// Which identity or position of an intent a check was holding to — what a
+/// [`MalformedIntent`] names alongside the value it refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Role {
+    /// The id an insertion introduces.
+    New,
+    /// The producer an insertion's seed binding reads.
+    BindingProducer,
+    AddNode,
+    RemoveNode,
+    MoveSelection,
+    RenameNode,
+    SetInputDestination,
+    SetInputProducer,
+    SetNodeProperty,
+    SetSubscriptionEmitter,
+    SetSubscriptionSubscriber,
+}
+
+impl Display for Role {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::New => "new",
+            Self::BindingProducer => "binding producer",
+            Self::AddNode => "AddNode",
+            Self::RemoveNode => "RemoveNode",
+            Self::MoveSelection => "MoveSelection",
+            Self::RenameNode => "RenameNode",
+            Self::SetInputDestination => "SetInput destination",
+            Self::SetInputProducer => "SetInput producer",
+            Self::SetNodeProperty => "SetNodeProperty",
+            Self::SetSubscriptionEmitter => "SetSubscription emitter",
+            Self::SetSubscriptionSubscriber => "SetSubscription subscriber",
+        })
+    }
 }

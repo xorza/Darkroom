@@ -3,12 +3,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::str;
 
-use common::{SerdeFormat, TempDir, deserialize, serialize};
+use common::{SerdeFormat, TempDir};
 use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;
 
-use crate::core::io::preferences::error::PreferencesLoadError;
+use crate::core::io::preferences;
+use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::core::io::preferences::{Preferences, ViewerBackground, ViewerPreferences, WindowState};
 
 /// The file is named for the app, and lies in the OS's configuration directory
@@ -16,14 +17,18 @@ use crate::core::io::preferences::{Preferences, ViewerBackground, ViewerPreferen
 #[test]
 fn the_preferences_file_is_named_for_the_app() {
     assert_eq!(
-        Preferences::path().file_name(),
+        preferences::path().file_name(),
         Some(OsStr::new("darkroom.preferences.ron"))
     );
 }
 
 fn roundtrip(cfg: &Preferences) -> Preferences {
-    let bytes = serialize(cfg, SerdeFormat::Ron).expect("preferences RON serializes");
-    deserialize(&bytes, SerdeFormat::Ron).expect("preferences RON round-trips")
+    let bytes = SerdeFormat::Ron
+        .serialize(cfg)
+        .expect("preferences RON serializes");
+    SerdeFormat::Ron
+        .deserialize(&bytes)
+        .expect("preferences RON round-trips")
 }
 
 /// A populated file and the default both read back equal, field for field.
@@ -48,7 +53,9 @@ fn preferences_roundtrip() {
             star_removal: PathBuf::from("/models/s.onnx"),
         },
     };
-    let bytes = serialize(&populated, SerdeFormat::Ron).expect("preferences RON serializes");
+    let bytes = SerdeFormat::Ron
+        .serialize(&populated)
+        .expect("preferences RON serializes");
     let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
 
@@ -60,12 +67,15 @@ fn preferences_roundtrip() {
 /// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads.
 #[test]
 fn partial_preferences_fill_defaults() {
-    let empty: Preferences = deserialize(b"()", SerdeFormat::Ron).expect("empty preferences");
+    let empty: Preferences = SerdeFormat::Ron
+        .deserialize(b"()")
+        .expect("empty preferences");
     assert_eq!(empty, Preferences::default());
 
     let partial = b"(confirm_unsaved_changes: false)";
-    let cfg: Preferences =
-        deserialize(partial, SerdeFormat::Ron).expect("partial preferences deserializes");
+    let cfg: Preferences = SerdeFormat::Ron
+        .deserialize(partial)
+        .expect("partial preferences deserializes");
     assert_eq!(
         cfg,
         Preferences {
@@ -95,8 +105,9 @@ fn partial_window_entry_fills_missing_fields_and_omits_position() {
     // `maximized` defaults to `false` and, with no `position` key, the
     // physical position stays `None` (the Wayland case).
     let partial = b"(window: Some((size: (800, 600))))";
-    let cfg: Preferences =
-        deserialize(partial, SerdeFormat::Ron).expect("partial window entry deserializes");
+    let cfg: Preferences = SerdeFormat::Ron
+        .deserialize(partial)
+        .expect("partial window entry deserializes");
     assert_eq!(
         cfg.window,
         Some(WindowState {
@@ -140,5 +151,35 @@ fn only_a_missing_file_reads_as_the_defaults() {
     assert!(matches!(
         Preferences::load_from(&path),
         Err(PreferencesLoadError::Read { path: failed, .. }) if failed == path
+    ));
+}
+
+/// A save creates the missing configuration directory and writes a file the
+/// next load reads back whole; a save whose directory cannot be made, or
+/// whose target cannot be written, names the path that failed.
+#[test]
+fn a_save_reads_back_and_a_failed_one_names_the_path() {
+    let dir = TempDir::new("darkroom-preferences-save");
+    let path = dir.join("config").join("darkroom.preferences.ron");
+    let saved = Preferences {
+        load_last_document: false,
+        ..Preferences::default()
+    };
+    saved.save_to(&path).unwrap();
+    assert_eq!(Preferences::load_from(&path).unwrap(), saved);
+
+    let blocker = dir.join("not-a-dir");
+    fs::write(&blocker, b"").unwrap();
+    let under_file = blocker.join("darkroom.preferences.ron");
+    assert!(matches!(
+        saved.save_to(&under_file),
+        Err(PreferencesSaveError::CreateDir { path: failed, .. }) if failed == blocker
+    ));
+
+    let occupied = dir.join("occupied");
+    fs::create_dir(&occupied).unwrap();
+    assert!(matches!(
+        saved.save_to(&occupied),
+        Err(PreferencesSaveError::Write { path: failed, .. }) if failed == occupied
     ));
 }

@@ -6,11 +6,12 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::gui::HostHandle;
+use crate::gui::app::App;
 
 /// Nothing to arrange: `packaging/linux/com.cssodessa.darkroom.desktop` passes
 /// the path as `%f`, so a document opened from a file manager arrives in argv
 /// and the CLI already reads it.
-pub(super) fn route_opened_documents(_handle: HostHandle) {}
+pub(super) fn route_opened_documents(_handle: HostHandle, _open: fn(&mut App, PathBuf)) {}
 
 pub(super) fn url_opener() -> Command {
     Command::new("xdg-open")

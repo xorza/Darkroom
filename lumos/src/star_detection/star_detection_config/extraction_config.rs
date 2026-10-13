@@ -42,11 +42,9 @@ pub enum Deblend {
 
 /// Upper bound for [`Deblend::MultiThreshold`]'s `n_thresholds`.
 ///
-/// The multi-threshold deblend tree's max depth is `n_thresholds + 1`
-/// (`build_deblend_tree`'s level loop), and `collect_significant_leaves` recurses
-/// along that depth with no independent cutoff — an unbounded `n_thresholds` risks
-/// stack overflow on a component with enough real structure to keep splitting.
-/// 256 levels is already far beyond the documented useful range ("32+ = SExtractor-style").
+/// Each level of the multi-threshold tree is a pass over the component's pixels that stood above
+/// the level below, so the cap bounds the passes one component costs. 256 levels is already eight
+/// times SExtractor's default of 32.
 pub(super) const MAX_DEBLEND_N_THRESHOLDS: usize = 256;
 
 /// Configuration for candidate detection, deblending, and region filtering.

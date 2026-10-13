@@ -9,7 +9,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::graph::node::port_color::event_color;
+use crate::gui::pane::graph::node::port_color;
 use crate::gui::pane::graph::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph::paint::wire::{Wire, WirePass, WireTint};
 use crate::gui::requests::Requests;
@@ -196,7 +196,7 @@ impl SubscriptionUI {
             }
         };
         let theme = graph_ctx.theme();
-        Wire::event(p0, p3).add(ui, theme.stroke_width, event_color(theme, false));
+        Wire::event(p0, p3).add(ui, theme.stroke_width, port_color::event(theme, false));
     }
 }
 
@@ -226,7 +226,7 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         // Events carry no data type, so one neutral swatch runs the whole
         // curve rather than a per-end gradient.
         if pass.draw_wire(ui, &wire, hover, || {
-            WireTint::flat(event_color(theme, false))
+            WireTint::flat(port_color::event(theme, false))
         }) {
             pass.probe.mark_broken_subscription(s);
         }

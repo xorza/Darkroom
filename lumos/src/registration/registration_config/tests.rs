@@ -1,4 +1,3 @@
-use crate::internals::prelude::*;
 use crate::registration::registration_config::*;
 
 #[test]
@@ -102,7 +101,10 @@ fn config_precise_wide_field_preset() {
 fn config_mosaic_preset() {
     let config = RegistrationConfig::mosaic();
     assert!(config.ransac.max_rotation.is_none());
-    assert_eq!(config.ransac.scale_range, Some((0.5, 2.0)));
+    assert_eq!(
+        config.ransac.scale_range,
+        Some(ScaleRange { min: 0.5, max: 2.0 })
+    );
     config.validate().unwrap();
 }
 
@@ -264,7 +266,7 @@ fn config_validation_rejects_invalid() {
         (
             RegistrationConfig {
                 ransac: RansacConfig {
-                    scale_range: Some((1.5, 0.5)),
+                    scale_range: Some(ScaleRange { min: 1.5, max: 0.5 }),
                     ..Default::default()
                 },
                 ..RegistrationConfig::default()
@@ -274,7 +276,10 @@ fn config_validation_rejects_invalid() {
         (
             RegistrationConfig {
                 ransac: RansacConfig {
-                    scale_range: Some((0.8, f64::INFINITY)),
+                    scale_range: Some(ScaleRange {
+                        min: 0.8,
+                        max: f64::INFINITY,
+                    }),
                     ..Default::default()
                 },
                 ..RegistrationConfig::default()
@@ -284,7 +289,10 @@ fn config_validation_rejects_invalid() {
         (
             RegistrationConfig {
                 ransac: RansacConfig {
-                    scale_range: Some((f64::INFINITY, 1.2)),
+                    scale_range: Some(ScaleRange {
+                        min: f64::INFINITY,
+                        max: 1.2,
+                    }),
                     ..Default::default()
                 },
                 ..RegistrationConfig::default()

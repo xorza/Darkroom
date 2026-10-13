@@ -12,15 +12,15 @@ use fits_well::image::Data as FitsData;
 use fits_well::io::StreamReader;
 
 use crate::io::error::ImageError;
-use crate::io::fits::cfa::{validate_cfa_container_format, validate_cfa_image_header};
+use crate::io::fits::cfa;
 use crate::io::fits::decode::DecodedFitsImage;
-use crate::io::fits::decode::pixels;
-use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription, preflight_fits_image};
+use crate::io::fits::decode::pixels::HduDecode;
+use crate::io::fits::decode::plan::{self, FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::selection;
+use crate::io::fits::fits_load_options::FitsChecksumPolicy;
+use crate::io::fits::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
-use crate::io::fits::options::FitsChecksumPolicy;
-use crate::io::fits::provenance::FitsHduProvenance;
 use crate::io::load_context::LoadContext;
 
 /// A FITS file opened for one image: the reader, the HDU the options select, and that HDU's
@@ -54,13 +54,13 @@ impl SelectedFits {
         })?;
         let reader = FitsReader::open(file).map_err(|source| ImageError::fits(path, source))?;
         context.check_cancelled(path)?;
-        validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
+        cfa::validate_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
         let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
         let hdu = &reader.hdus()[selected.index];
-        let lumos_cfa = validate_cfa_image_header(path, &hdu.header)?;
-        let plan = preflight_fits_image(
+        let lumos_cfa = cfa::validate_image_header(path, &hdu.header)?;
+        let plan = plan::preflight(
             path,
-            FitsHduDescription::from_hdu(path, hdu)?,
+            FitsHduDescription::from_hdu(path, hdu, selected.index)?,
             context.fits.cube,
             context.fits.float_scale,
             context.memory_limit_bytes,
@@ -119,14 +119,15 @@ impl SelectedFits {
             context.fits.checksum
         };
         let size = self.plan.dimensions.size();
-        let mut decoded = pixels::read_stream_hdu(
-            &mut self.reader,
-            self.selected,
-            policy,
+        let header = self.header().clone();
+        let mut decoded = HduDecode {
+            hdu: self.selected,
+            header: &header,
+            plan: &self.plan,
             path,
-            &self.plan,
             context,
-        )?;
+        }
+        .read_stream(&mut self.reader, policy)?;
         if let Some(flags_hdu) = self.flags_hdu {
             context.check_cancelled(path)?;
             let stored = read_extension(

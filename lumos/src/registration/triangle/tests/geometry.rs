@@ -145,9 +145,10 @@ fn vertex_ordering_is_the_same_for_every_input_order() {
 /// empty set has no tree.
 #[test]
 fn the_invariant_tree_indexes_triangles_by_their_ratios() {
-    assert!(build_invariant_tree(&[]).is_none());
+    assert!(ReferenceTriangles::new(Vec::new()).is_none());
     let triangles = triangles_of(&IRREGULAR, 4);
-    let tree = build_invariant_tree(&triangles).unwrap();
+    let reference = ReferenceTriangles::new(triangles.clone()).unwrap();
+    let tree = reference.invariants();
     assert_eq!(tree.len(), triangles.len());
     for (i, tri) in triangles.iter().enumerate() {
         assert_eq!(tree.get_point(i), DVec2::new(tri.ratios.0, tri.ratios.1));

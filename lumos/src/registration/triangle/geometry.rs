@@ -45,8 +45,7 @@ impl Triangle {
         let d12 = (p2 - p1).length();
         let d20 = (p0 - p2).length();
 
-        // Sort sides and track which vertices are at each position.
-        // Tiebreak equal sides by original vertex index for deterministic ordering.
+        // Equal sides tie-break by vertex index, so the order is deterministic.
         let mut side_vertex_pairs = [(d01, 2), (d12, 0), (d20, 1)];
         side_vertex_pairs.sort_by(|a, b| {
             a.0.partial_cmp(&b.0)
@@ -79,7 +78,6 @@ impl Triangle {
             indices[side_vertex_pairs[2].1],
         ];
 
-        // Compute orientation from reordered vertex positions
         let rp0 = positions[side_vertex_pairs[0].1];
         let rp1 = positions[side_vertex_pairs[1].1];
         let rp2 = positions[side_vertex_pairs[2].1];
@@ -96,10 +94,25 @@ impl Triangle {
         })
     }
 
-    /// Check if two triangles are similar within tolerance.
+    /// Whether both ratios are within `tolerance` of `other`'s.
     pub(super) fn is_similar(&self, other: &Self, tolerance: f64) -> bool {
         let dr0 = (self.ratios.0 - other.ratios.0).abs();
         let dr1 = (self.ratios.1 - other.ratios.1).abs();
         dr0 < tolerance && dr1 < tolerance
+    }
+
+    /// Whether sides `i` and `j` are equal within `tolerance` of the longest, so noise can trade
+    /// their vertices' roles.
+    pub(super) fn ties(&self, i: usize, j: usize, tolerance: f64) -> bool {
+        (self.ratio(i) - self.ratio(j)).abs() < tolerance
+    }
+
+    /// Side `side`, by length from the shortest, over the longest.
+    const fn ratio(&self, side: usize) -> f64 {
+        match side {
+            0 => self.ratios.0,
+            1 => self.ratios.1,
+            _ => 1.0,
+        }
     }
 }

@@ -6,7 +6,7 @@ use std::cell::OnceCell;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
-use crate::registration::bench::Pair;
+use crate::registration::bench::{self, Pair};
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
@@ -25,11 +25,12 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let pair: &Pair = pair.get_or_init(Pair::typical);
             let trees = pair.trees(count);
             let matches = pair.matches(&trees, &config);
+            let pairs = trees.pairs(&matches);
+            let confidences = bench::confidences(&matches);
             let estimator = RansacEstimator::new(config.ransac.clone(), pair.max_sigma());
-            let (reference, target) = (trees.reference.points(), trees.target.points());
             b.iter(|| {
                 estimator
-                    .estimate(&matches, reference, target, transform)
+                    .estimate(&pairs, &confidences, transform)
                     .expect("the pair registers")
             });
         });

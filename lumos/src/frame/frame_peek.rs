@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::{FrameNorm, SetCoverage};
+use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::combine::stack_config::StackConfig;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame::stackable_image::StackableImage;
@@ -81,14 +81,15 @@ impl FramePeek {
             },
             Stage {
                 kept,
-                held: FrameNorm::heap_bytes(
+                held: PlannedNormalization {
                     frame_count,
                     dimensions,
-                    Slots::new(self.mosaic, dimensions.channels()),
-                    config.normalization,
-                    SetCoverage::Common,
-                    workers,
-                ),
+                    slots: Slots::new(self.mosaic, dimensions.channels()),
+                    normalization: config.normalization,
+                    coverage: SetCoverage::Common,
+                    threads: workers,
+                }
+                .heap_bytes(),
                 in_flight: 0,
                 units: Units::Whole,
             },

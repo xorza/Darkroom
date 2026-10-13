@@ -1,0 +1,47 @@
+//! [`PipelineFrame`]: the frame carrier the registered-stacking pipeline moves between stages.
+
+use crate::frame_store::stored_image::StoredImage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::linear_image::LinearImage;
+
+/// A calibrated frame waiting to be registered, held wherever the memory tier put it.
+///
+/// The two variants are the whole difference between the all-RAM and the memory-bounded runs:
+/// the pipeline body downstream is identical, because the warp reads either from RAM — a spilled
+/// frame read back whole first ([`Self::into_resident`]).
+#[derive(Debug)]
+pub(crate) enum PipelineFrame {
+    Resident(LinearImage),
+    Spilled(StoredImage),
+}
+
+impl PipelineFrame {
+    /// The frame in RAM, as the warp reads it. A parked frame is read back whole, one pass front
+    /// to back over each of its planes: the warp then reads in whatever order its transform asks —
+    /// a column per output row for a quarter turn — from memory the plan already charges for its
+    /// source, not by faulting pages of a map the plan does not count.
+    pub(crate) fn into_resident(self) -> LinearImage {
+        match self {
+            Self::Resident(image) => image,
+            Self::Spilled(stored) => stored.load(),
+        }
+    }
+
+    pub(crate) const fn metadata(&self) -> &ImageMetadata {
+        match self {
+            Self::Resident(image) => &image.metadata,
+            Self::Spilled(stored) => &stored.metadata,
+        }
+    }
+
+    pub(crate) fn dimensions(&self) -> ImageDimensions {
+        match self {
+            Self::Resident(image) => image.dimensions(),
+            Self::Spilled(stored) => stored.dimensions,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

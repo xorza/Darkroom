@@ -7,8 +7,7 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 
-use crate::calibration::defect_map::sampling::collect_color_sample_indices;
-use crate::calibration::defect_map::sampling::internals::collect_color_samples;
+use crate::calibration::defect_map::sampling::internals::color_samples;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::cfa::make_cfa;
 
@@ -49,7 +48,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             }
 
             let indices =
-                collect_color_sample_indices(Size2us::new(width, height), cfa_type, target_color);
+                sampling::color_sample_indices(Size2us::new(width, height), cfa_type, target_color);
             assert_eq!(
                 indices.len(),
                 population.min(MAX_MEDIAN_SAMPLES),
@@ -111,7 +110,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
                     .map(|index| data[index])
                     .collect(),
             );
-            let sampled = median_mad(collect_color_samples(&data, cfa_type, 0));
+            let sampled = median_mad(color_samples(&data, cfa_type, 0));
             let level_count = if row_pattern { height / 2 } else { width / 2 };
             let pattern_name = if row_pattern { "row" } else { "column" };
             let expected = MedianMad {
@@ -229,7 +228,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         Some(master_sigma),
         "a master states its inputs' step"
     );
-    // Defect detection consumes the mosaic master, the same projection `stack_cfa_master` makes.
+    // Defect detection consumes the mosaic master, the same projection `MasterStack` makes.
     let master = product.into_cfa_master();
     let detected = DefectMap::new(master.size())
         .detect_hot(&master, 5.0, &CancelToken::never())

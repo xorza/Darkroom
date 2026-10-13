@@ -12,8 +12,8 @@ use palantir::prelude::*;
 use scenarium::RamUsage;
 
 use crate::gui::app::app_ctx::AppCtx;
-use crate::gui::widgets::format::fmt_bytes;
-use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
+use crate::gui::widgets::format::bytes::Bytes;
+use crate::gui::widgets::support;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -23,7 +23,7 @@ const PAD_Y: f32 = 3.0;
 
 /// The bar is a window singleton, so it carries a global id rather than a
 /// parent-scoped salt — one strip, one name, reachable from a test.
-pub(crate) fn status_bar_id() -> WidgetId {
+pub(crate) fn id() -> WidgetId {
     WidgetId::from_hash("darkroom::status_bar")
 }
 
@@ -32,21 +32,22 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
     let ram = MemoryLabel::resolve(ctx.process_memory(), ctx.run_state().cache_ram);
     let colors = &ctx.theme().colors;
     Panel::hstack()
-        .id(status_bar_id())
+        .id(id())
         .size((Sizing::FILL, Sizing::HUG))
         .child_align(Align::new(HAlign::Right, VAlign::Center))
         .padding(Spacing::xy(PAD_X, PAD_Y))
         .background(Background::fill(colors.chrome_fill))
         .show(ui, |ui| {
             if let Some(msg) = ctx.status_error() {
-                let style = colored_text(ui, ctx.theme().status.error, ctx.theme().text.body);
+                let style =
+                    support::colored_text(ui, ctx.theme().status.error, ctx.theme().text.body);
                 Text::new(msg).style(&style).show(ui);
             }
             // Spacer: pins the message to the left edge and the memory
             // readout to the right.
-            hspacer(ui, "status_spacer");
+            support::hspacer(ui, "status_spacer");
             if let Some(label) = ram {
-                let style = muted_text(ui, ctx.theme(), ctx.theme().text.body);
+                let style = support::muted_text(ui, ctx.theme(), ctx.theme().text.body);
                 Text::new(fmt!(ui, "{label}")).style(&style).show(ui);
             }
         });
@@ -86,9 +87,9 @@ impl MemoryLabel {
 
 impl Display for MemoryLabel {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MEM {}", fmt_bytes(self.process))?;
+        write!(f, "MEM {}", Bytes::new(self.process))?;
         if self.cached > 0 {
-            write!(f, " · Cache {}", fmt_bytes(self.cached))?;
+            write!(f, " · Cache {}", Bytes::new(self.cached))?;
         }
         Ok(())
     }

@@ -5,6 +5,7 @@
 //! [`StoredPlane::chunk`] either way.
 
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::path::Path;
 
 use bytemuck::Pod;
@@ -74,13 +75,14 @@ impl<T: Pod> StoredPlane<T> {
         }
     }
 
+    /// The samples `range` covers.
     #[inline]
-    pub(crate) fn chunk(&self, start: usize, end: usize) -> &[T] {
+    pub(crate) fn chunk(&self, range: Range<usize>) -> &[T] {
         match self {
-            Self::Memory(buffer) => &buffer[start..end],
-            Self::Mapped { file, .. } => {
-                bytemuck::cast_slice(&file.bytes()[start * size_of::<T>()..end * size_of::<T>()])
-            }
+            Self::Memory(buffer) => &buffer[range],
+            Self::Mapped { file, .. } => bytemuck::cast_slice(
+                &file.bytes()[range.start * size_of::<T>()..range.end * size_of::<T>()],
+            ),
         }
     }
 }
@@ -137,7 +139,7 @@ mod tests {
             assert_eq!(written, Some(1.0));
             assert_eq!(plane.resident_share(), Some(0.0));
         }
-        let sum: f64 = plane.chunk(0, samples).iter().map(|&v| f64::from(v)).sum();
+        let sum: f64 = plane.chunk(0..samples).iter().map(|&v| f64::from(v)).sum();
         assert_eq!(sum, 0.5 * samples as f64);
         assert_eq!(plane.resident_share(), written);
     }

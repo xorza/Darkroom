@@ -1,313 +1,22 @@
 pub(crate) mod error;
 pub(crate) mod graph_revision;
+pub(crate) mod graph_view;
 pub(crate) mod node_key;
 pub(crate) mod open_document;
+pub(crate) mod port_ref;
+pub(crate) mod tab_ref;
+pub(crate) mod viewport;
 
-use ::serde::{Deserialize, Serialize};
-use glam::Vec2;
-use palantir::DockState;
-use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, OutputPort};
-use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
+use palantir::DockState;
+use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeKind};
+use serde::{Deserialize, Serialize};
+
 use crate::core::document::error::DocumentValidationError;
-use crate::core::document::error::GraphViewValidationError;
-use crate::core::document::node_key::NodeKey;
+use crate::core::document::graph_view::GraphView;
+use crate::core::document::tab_ref::TabRef;
 use crate::core::preview;
-
-/// Whether a port consumes a binding (`Input`) or produces a value
-/// (`Output`). Scoped to the data-port subset until Trigger/Event are
-/// reintroduced. `Input` ports live in the left column, `Output` in
-/// the right; `opposite` flips between them for snap-target tests.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum PortKind {
-    Input,
-    Output,
-}
-
-impl PortKind {
-    pub(crate) const fn opposite(self) -> Self {
-        match self {
-            Self::Input => Self::Output,
-            Self::Output => Self::Input,
-        }
-    }
-}
-
-/// One port's identity in the graph. Domain-keyed so UI passes can derive
-/// its `WidgetId` (see `crate::gui::pane::graph::node::port_row::port_circle_wid`)
-/// without threading a cache, and serializable so a persisted tab
-/// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
-/// the whole document, so no graph ref is needed alongside — enforced by
-/// [`Document::validate`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct PortRef {
-    pub(crate) node_id: NodeId,
-    pub(crate) kind: PortKind,
-    pub(crate) port_idx: usize,
-}
-
-impl NodeKey for PortRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl PortRef {
-    /// `node_id`'s `port_idx`th input — the left-column counterpart of the
-    /// graph's [`InputPort`].
-    pub(crate) const fn input(node_id: NodeId, port_idx: usize) -> Self {
-        Self {
-            node_id,
-            kind: PortKind::Input,
-            port_idx,
-        }
-    }
-
-    /// `node_id`'s `port_idx`th output — the right-column counterpart of the
-    /// graph's [`OutputPort`].
-    pub(crate) const fn output(node_id: NodeId, port_idx: usize) -> Self {
-        Self {
-            node_id,
-            kind: PortKind::Output,
-            port_idx,
-        }
-    }
-}
-
-impl From<InputPort> for PortRef {
-    fn from(port: InputPort) -> Self {
-        Self::input(port.node_id, port.port_idx)
-    }
-}
-
-impl From<OutputPort> for PortRef {
-    fn from(port: OutputPort) -> Self {
-        Self::output(port.node_id, port.port_idx)
-    }
-}
-
-/// What an editor tab shows: the document's graph ([`TabRef::Graph`]), or a
-/// non-graph app view like [`TabRef::Preferences`] (the settings window) or an
-/// image viewer. Persisted + undoable like the rest of the tab/view state, so
-/// reopening a document restores its open tabs and Ctrl+Z walks tab
-/// open/close.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum TabRef {
-    /// The graph pane.
-    Graph,
-    /// The app-preferences / settings view — no graph, no canvas.
-    Preferences,
-    /// A full-resolution viewer of one port's runtime image — one tab per
-    /// port, deduped on open. Content is runtime-only
-    /// (`crate::gui::pane::viewer`): a restored tab pulls any current value
-    /// from `RunState` when drawn. Pruned when its node is deleted.
-    ///
-    /// Keyed by the preview node whose value it shows — the same identity the
-    /// preview card on the canvas uses, so the two can never disagree about
-    /// which value a tab is for.
-    ImageViewer(NodeId),
-}
-
-/// An affine 2D camera: `local = pan + zoom * content`. One value shared by
-/// the persisted per-graph [`GraphView`], the `GraphCtx` a canvas reads it
-/// through, and the `SetViewport` edit, so the three can't drift on field
-/// names or semantics.
-///
-/// The graph canvas reads `pan` as a canvas-local px offset and `zoom` as a
-/// world scale factor. The image viewer reuses the same algebra over a
-/// different content space — `pan` is the image's top-left offset in
-/// pane-local px, `zoom` is display px per texel — which is why
-/// `pan_zoom::zoom_about` and `fold_scroll_zoom` serve both.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Viewport {
-    pub(crate) pan: Vec2,
-    pub(crate) zoom: f32,
-}
-
-impl Viewport {
-    /// Invert the camera: a point in the surface's local space → the point of
-    /// *content* under it. The exact inverse of the `local = pan + zoom *
-    /// content` this type documents, so it is defined here rather than
-    /// re-derived by each reader.
-    ///
-    /// The graph canvas calls its content space "world" — node positions, wire
-    /// endpoints and the cull region all live in it — and is the only caller
-    /// today; the image viewer needs the forward direction instead.
-    pub(crate) fn to_world(self, local: Vec2) -> Vec2 {
-        (local - self.pan) / self.zoom
-    }
-
-    /// Whether this is a *persistable graph* camera — what
-    /// `GraphViewValidationError::InvalidViewport` reports on. Only the
-    /// document's own viewport round-trips through serde and so needs
-    /// checking on the way back in; the image viewer's is rebuilt from the
-    /// pane every session and never validated.
-    pub(crate) fn is_valid(self) -> bool {
-        self.pan.is_finite() && self.zoom.is_finite() && self.zoom > 0.0
-    }
-}
-
-impl Default for Viewport {
-    /// Origin pan, 1:1 zoom.
-    fn default() -> Self {
-        Self {
-            pan: Vec2::ZERO,
-            zoom: 1.0,
-        }
-    }
-}
-
-/// Where one node body sits and how far forward it paints.
-///
-/// The two are independent: dragging a node changes `pos` and nothing else,
-/// raising it changes `z` and nothing else. Keeping the stacking order as a
-/// *value* here rather than as the position of an entry in an ordered map is
-/// what lets [`GraphView`] derive its equality and serde, and what makes
-/// `Raise` a field write instead of a reorder.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ItemPlacement {
-    /// Canvas-world position of the body's top-left corner.
-    pub(crate) pos: Vec2,
-    /// Paint depth: higher paints later, so it sits in front. Ties break by
-    /// `NodeId`, so the order is total and stable across frames — see
-    /// [`GraphView::paint_order`].
-    pub(crate) z: u32,
-}
-
-/// One entry of a [`GraphView::paint_order`] sweep, sorted by its own derived
-/// order — depth first, then id.
-///
-/// The tie-break on `id` is what makes the order *total*: several items share
-/// the seed `z` of 0 until something raises them, and a comparator that let
-/// those tie would leave their relative order at the mercy of the sort's
-/// stability. Carrying `z` alongside the id is what keeps the sort from
-/// descending [`GraphView::item_placements`] once per comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct StackedItem {
-    /// Paint depth: higher paints later, so it sits in front.
-    pub(crate) z: u32,
-    pub(crate) id: NodeId,
-}
-
-/// Editor-side view metadata for the document's graph: per-item placements,
-/// the viewport, and the selection (`Document::main_view`). The graph *data*
-/// itself lives in the core `Graph`; this is purely how the editor presents
-/// and navigates it.
-///
-/// **Everything here is persisted and undoable, by design** — reopening
-/// a file restores the exact camera and selection, and Ctrl+Z walks
-/// camera/selection changes alongside structural edits.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub(crate) struct GraphView {
-    /// Every node body's placement. Exactly one entry per graph node —
-    /// enforced by [`Self::validate`].
-    ///
-    /// Order-insensitive on purpose: paint order rides in each entry's
-    /// [`ItemPlacement::z`], so this map is free to be keyed and compared as a
-    /// set. Ten of the eleven callers that walk the nodes don't care about
-    /// stacking at all, and the one that does asks for [`Self::paint_order`].
-    pub(crate) item_placements: BTreeMap<NodeId, ItemPlacement>,
-    pub(crate) viewport: Viewport,
-    /// `BTreeSet` so equality and serialization are order-independent
-    /// (no spurious undo entries from reordering).
-    pub(crate) selected: BTreeSet<NodeId>,
-}
-
-impl GraphView {
-    /// A fresh view over `graph`: one zero-positioned, unraised placement per
-    /// node, the default camera, nothing selected.
-    ///
-    /// The only way a view is built from a graph, so there is nowhere for the
-    /// two to disagree about which nodes are placed — which is exactly what
-    /// [`Self::validate`] checks on the way back in from disk.
-    pub(crate) fn new(graph: &CoreGraph) -> Self {
-        Self {
-            item_placements: graph
-                .iter()
-                .map(|node| (node.id, ItemPlacement::default()))
-                .collect(),
-            ..Self::default()
-        }
-    }
-
-    /// The items back-to-front into `out`: what a paint pass draws in order,
-    /// and the only place stacking is resolved. `out` is cleared first, so a
-    /// caller hands the same buffer over every frame.
-    ///
-    /// Fills a caller-owned buffer rather than returning one because the
-    /// production caller is the per-frame node draw: a fresh `Vec` here would
-    /// be one allocation per graph pane per frame, sized to the whole graph
-    /// and taken before culling drops the off-screen nodes.
-    pub(crate) fn paint_order(&self, out: &mut Vec<StackedItem>) {
-        out.clear();
-        out.reserve_exact(self.item_placements.len());
-        out.extend(
-            self.item_placements
-                .iter()
-                .map(|(id, placement)| StackedItem {
-                    z: placement.z,
-                    id: *id,
-                }),
-        );
-        out.sort_unstable();
-    }
-
-    /// The depth that puts an item in front of every other. One past the
-    /// current maximum, so a raise never has to renumber its neighbours.
-    pub(crate) fn front_z(&self) -> u32 {
-        self.item_placements
-            .values()
-            .map(|placement| placement.z)
-            .max()
-            .map_or(0, |top| top.saturating_add(1))
-    }
-
-    /// The depth that puts `key` in front of every *other* item, or its own depth when it already
-    /// paints last. Paint order is `(z, NodeId)`, so a tie on depth puts the higher id in front.
-    /// `None` when `key` has no placement.
-    pub(crate) fn raised_z(&self, key: NodeId) -> Option<u32> {
-        let own = self.item_placements.get(&key)?.z;
-        let top_other = self
-            .item_placements
-            .iter()
-            .filter(|(id, _)| **id != key)
-            .map(|(id, placement)| (placement.z, *id))
-            .max();
-        Some(match top_other {
-            Some((top_z, top_id)) if (top_z, top_id) > (own, key) => top_z.saturating_add(1),
-            _ => own,
-        })
-    }
-
-    fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
-        if !self.viewport.is_valid() {
-            return Err(GraphViewValidationError::InvalidViewport);
-        }
-
-        for (key, placement) in &self.item_placements {
-            if !placement.pos.is_finite() {
-                return Err(GraphViewValidationError::NonFinitePosition { item: *key });
-            }
-        }
-        // A map guarantees unique keys, so counts plus reverse membership
-        // prove the graph and view contain exactly the same node set.
-        if self.item_placements.len() != graph.len() {
-            return Err(GraphViewValidationError::NodeCount);
-        }
-        for node in graph.iter() {
-            if !self.item_placements.contains_key(&node.id) {
-                return Err(GraphViewValidationError::MissingNode { node_id: node.id });
-            }
-        }
-        for key in &self.selected {
-            if !self.item_placements.contains_key(key) {
-                return Err(GraphViewValidationError::MissingSelectedItem { item: *key });
-            }
-        }
-        Ok(())
-    }
-}
 
 /// The thing being edited: the authoring `Graph`, the editor view metadata
 /// positioning it, and the pane layout showing it. The `Library` it resolves
@@ -325,7 +34,7 @@ pub(crate) struct Document {
     /// the focused group. Persisted like the rest of the view state, and
     /// mutated only through a `DockOperation` — none of which is undoable, so
     /// Ctrl+Z walks past a tab switch to the last graph edit.
-    #[serde(default = "Document::new_layout")]
+    #[serde(default = "new_layout")]
     pub(crate) layout: DockState<TabRef>,
 }
 
@@ -339,18 +48,12 @@ impl Default for Document {
         Self {
             graph: CoreGraph::default(),
             main_view: GraphView::default(),
-            layout: Self::new_layout(),
+            layout: new_layout(),
         }
     }
 }
 
 impl Document {
-    /// A fresh dock: one pane showing the graph. `Graph` is the pinned
-    /// tab, so it refuses to close and the tree is never empty.
-    fn new_layout() -> DockState<TabRef> {
-        DockState::new(DOCK_SEED, TabRef::Graph)
-    }
-
     /// Drop a node from both the graph and the view (its placement and any
     /// selection membership) — the one edit that has to touch both to leave
     /// the document consistent.
@@ -423,7 +126,7 @@ impl Document {
         self.graph
             .find(node_id)
             .is_some_and(|node| match node.kind {
-                NodeKind::Func(func_id) => preview::is_preview(func_id),
+                NodeKind::Func(func_id) => preview::is_func(func_id),
                 NodeKind::Special(_) => false,
             })
     }
@@ -448,14 +151,14 @@ impl Document {
         // layout out for the call splits them: the predicate borrows a
         // `Document` whose layout is a placeholder, and it never asks about
         // one. Cold path only — the fast path above already returned.
-        let mut layout = mem::replace(&mut self.layout, Self::new_layout());
+        let mut layout = mem::replace(&mut self.layout, new_layout());
         layout.retain_tabs(|tab| self.holds_tab(tab));
         self.layout = layout;
     }
 
     /// Full structural validation for untrusted documents.
     ///
-    /// The layout is held to what [`Self::new_layout`] builds: the graph tab
+    /// The layout is held to what [`new_layout`] builds: the graph tab
     /// pinned, which palantir's own load check already makes present, and
     /// this editor's dock seed.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
@@ -468,7 +171,7 @@ impl Document {
         if tab != TabRef::Graph {
             return Err(DocumentValidationError::PinnedTab { tab });
         }
-        if self.layout.seed() != Self::new_layout().seed() {
+        if self.layout.seed() != new_layout().seed() {
             return Err(DocumentValidationError::ForeignDock);
         }
 
@@ -487,9 +190,15 @@ impl From<CoreGraph> for Document {
         Self {
             graph,
             main_view,
-            layout: Self::new_layout(),
+            layout: new_layout(),
         }
     }
+}
+
+/// A fresh dock: one pane showing the graph. `Graph` is the pinned
+/// tab, so it refuses to close and the tree is never empty.
+fn new_layout() -> DockState<TabRef> {
+    DockState::new(DOCK_SEED, TabRef::Graph)
 }
 
 #[cfg(test)]
@@ -497,13 +206,15 @@ pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests {
-    use common::SerdeFormat;
-    use scenarium::Node;
     use std::sync::Arc;
+
+    use common::SerdeFormat;
+    use glam::Vec2;
+    use palantir::DockOperation;
+    use scenarium::Node;
 
     use super::*;
     use crate::core::document::internals::DocFixture;
-    use palantir::DockOperation;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two
     /// narrowings of it are strict subsets — so a node that is gone is gone by
@@ -514,7 +225,7 @@ mod tests {
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();
-        let preview_func = preview::preview_func(Arc::default());
+        let preview_func = preview::func(Arc::default());
         fixture.library.add(preview_func.clone());
         let preview = fixture.doc.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);
@@ -568,8 +279,10 @@ mod tests {
                 side: SplitSide::Right,
             },
         });
-        let bytes = common::serialize(&doc, SerdeFormat::Ron).expect("serialize with dock layout");
-        let back: Document = common::deserialize(&bytes, SerdeFormat::Ron).expect("deserialize");
+        let bytes = SerdeFormat::Ron
+            .serialize(&doc)
+            .expect("serialize with dock layout");
+        let back: Document = SerdeFormat::Ron.deserialize(&bytes).expect("deserialize");
         back.validate().expect("round-tripped document is valid");
         assert_eq!(
             back.layout, doc.layout,
@@ -598,37 +311,5 @@ mod tests {
             doc.validate(),
             Err(DocumentValidationError::ForeignDock)
         ));
-    }
-
-    /// Paint order is a total order over `(z, NodeId)`, so items sharing the
-    /// seed depth still come out in a fixed sequence, and `front_z` puts a
-    /// raise past every one of them. Both matter for stability: equal depths
-    /// are the common case until something is raised.
-    #[test]
-    fn paint_order_is_total_and_front_z_clears_every_item() {
-        let mut view = GraphView::default();
-        assert_eq!(view.front_z(), 0, "an empty view seeds at zero");
-
-        let (low, high) = (NodeId::from_u128(1), NodeId::from_u128(2));
-        view.item_placements.insert(high, ItemPlacement::default());
-        view.item_placements.insert(low, ItemPlacement::default());
-        // Reused across both sweeps, the way the draw pass reuses its own.
-        let mut order = Vec::new();
-        view.paint_order(&mut order);
-        assert_eq!(
-            order.iter().map(|item| item.id).collect::<Vec<_>>(),
-            [low, high],
-            "equal depths break by id, not by insertion"
-        );
-
-        assert_eq!(view.front_z(), 1, "one past the shared depth of zero");
-        view.item_placements.get_mut(&low).unwrap().z = view.front_z();
-        view.paint_order(&mut order);
-        assert_eq!(
-            order.iter().map(|item| item.id).collect::<Vec<_>>(),
-            [high, low],
-            "raising the lower id lifts it past the higher one"
-        );
-        assert_eq!(view.front_z(), 2, "and the next raise clears that one too");
     }
 }

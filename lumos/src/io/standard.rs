@@ -10,7 +10,8 @@ use imaginarium::{ChannelCount, ColorFormat, Image};
 
 use crate::io::error::ImageError;
 
-pub(crate) fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
+/// The image at `path`, read through imaginarium.
+pub(crate) fn read(path: &Path) -> Result<Image, ImageError> {
     Image::read_file(path).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),
         source,

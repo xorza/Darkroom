@@ -18,8 +18,10 @@ pub(crate) mod stage;
 /// slack, the OS page cache, and whatever else the machine is doing.
 const MEMORY_PERCENT: u64 = 75;
 
-pub(crate) fn memory_budget(available_memory: u64) -> u64 {
-    (u128::from(available_memory) * u128::from(MEMORY_PERCENT) / 100) as u64
+/// The bytes of `available` the pipeline commits: [`MEMORY_PERCENT`] of it, rounded down.
+pub(crate) fn usable(available: u64) -> u64 {
+    u64::try_from(u128::from(available) * u128::from(MEMORY_PERCENT) / 100)
+        .expect("a share below 100% of a u64 fits a u64")
 }
 
 /// Image-sized planes the star detector's pool holds at its high-water mark over every preset: four
@@ -29,8 +31,8 @@ pub(crate) fn memory_budget(available_memory: u64) -> u64 {
 /// measured around, and the pixels with no data). A bitmask is a thirty-second of an f32 plane;
 /// charging each as a whole one keeps this integral and errs high.
 ///
-/// `star_detection::tests::pool_working_set` pins the detector's actual pool and checks it against this,
-/// so a stage that grows its scratch cannot drift away from the planner silently.
+/// `star_detection::tests::pool_working_set` pins the detector's actual pool and checks it against
+/// this, so a stage that grows its scratch cannot drift away from the planner silently.
 pub(crate) const DETECTION_WORKING_PLANES: usize = 9;
 
 #[cfg(test)]

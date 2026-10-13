@@ -2,13 +2,13 @@ use std::fs;
 use std::io;
 use std::io::{Seek as _, SeekFrom, Write as _};
 use std::sync::{Arc, Barrier};
+use std::thread;
 
 use tokio::io::AsyncWriteExt as _;
 
 use crate::TempDir;
-use crate::file_utils::internals::publication_temp_files;
 use crate::file_utils::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
-use std::thread;
+use crate::internals;
 
 #[test]
 fn publication_replaces_complete_files_and_cleans_up_failures() {
@@ -48,7 +48,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "a failed write preserves the prior complete file"
     );
     assert!(
-        publication_temp_files(&path).is_empty(),
+        internals::publication_temp_files(&path).is_empty(),
         "failed writes do not leave sibling temporary files"
     );
 
@@ -61,7 +61,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     );
     assert_eq!(fs::read(directory_target.join("keep")).unwrap(), b"old");
     assert!(
-        publication_temp_files(&directory_target).is_empty(),
+        internals::publication_temp_files(&directory_target).is_empty(),
         "failed replacement does not leave a sibling temporary file"
     );
 
@@ -95,7 +95,7 @@ async fn two_phase_publication_commits_or_cleans_up() {
     file.write_all(b"complete").await.unwrap();
     file.commit().await.unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"complete");
-    assert!(publication_temp_files(&path).is_empty());
+    assert!(internals::publication_temp_files(&path).is_empty());
 
     let mut file = AtomicFile::new(&path, PublicationMode::Cache)
         .await
@@ -103,7 +103,7 @@ async fn two_phase_publication_commits_or_cleans_up() {
     file.write_all(b"incomplete").await.unwrap();
     drop(file);
     assert_eq!(fs::read(&path).unwrap(), b"complete");
-    assert!(publication_temp_files(&path).is_empty());
+    assert!(internals::publication_temp_files(&path).is_empty());
 }
 
 #[test]
@@ -135,5 +135,5 @@ fn concurrent_publications_never_interleave() {
         payloads.contains(&published),
         "the final file is exactly one writer's complete payload"
     );
-    assert!(publication_temp_files(&path).is_empty());
+    assert!(internals::publication_temp_files(&path).is_empty());
 }

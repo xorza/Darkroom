@@ -14,6 +14,13 @@ use crate::registration::transform::warp_transform::WarpTransform;
 /// under 0.1 input pixel — inside the extra pixel the outline adds for it.
 const SIP_BOUNDARY_STRIDE: usize = 8;
 
+/// A rectangle of the output grid, `min` to `max` on each axis.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct OutputRect {
+    pub(super) min: DVec2,
+    pub(super) max: DVec2,
+}
+
 /// Input pixels onto the output grid, and output points back onto the input.
 #[derive(Debug)]
 pub(super) enum InputMap {
@@ -66,21 +73,17 @@ impl InputMap {
         }
     }
 
-    /// The output rectangle `[left, right] × [low, high]` taken back onto the input, reaching
-    /// `input_margin` beyond, or `None` when no outline bounds it and the whole frame has to be
-    /// scanned.
+    /// The output rectangle `rect` taken back onto the input, reaching `input_margin` beyond, or
+    /// `None` when no outline bounds it and the whole frame has to be scanned.
     #[expect(
         clippy::cast_sign_loss,
         reason = "an output rectangle's width and height are non-negative, and an empty one saturates to 0"
     )]
-    pub(super) fn outline(
-        &self,
-        low: f64,
-        high: f64,
-        left: f64,
-        right: f64,
-        input_margin: f64,
-    ) -> Option<Outline> {
+    pub(super) fn outline(&self, rect: OutputRect, input_margin: f64) -> Option<Outline> {
+        let OutputRect {
+            min: DVec2 { x: left, y: low },
+            max: DVec2 { x: right, y: high },
+        } = rect;
         match self {
             Self::Transform { to_input, .. } => {
                 let corners = [

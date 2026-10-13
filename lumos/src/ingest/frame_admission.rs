@@ -6,7 +6,7 @@ use common::CancelToken;
 
 use crate::error::FrameDimensionMismatch;
 use crate::frame::frame_facts::FrameFacts;
-use crate::frame::frame_stats::FrameStats;
+use crate::frame::frame_stats::{FrameStats, Spreads};
 use crate::frame::stackable_image::StackableImage;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::error::AdmissionError;
@@ -27,8 +27,8 @@ pub(crate) struct FrameAdmission<'a> {
     dimensions: ImageDimensions,
     cancel: &'a CancelToken,
     first_facts: OnceLock<SetFacts>,
-    /// Measure each frame's spread too: see [`FrameStats::measure_with_spread`].
-    with_spread: bool,
+    /// Whether each frame's spread is measured too: see [`FrameStats::measure_as`].
+    spreads: Spreads,
 }
 
 impl<'a> FrameAdmission<'a> {
@@ -37,13 +37,13 @@ impl<'a> FrameAdmission<'a> {
             dimensions,
             cancel,
             first_facts: OnceLock::new(),
-            with_spread: false,
+            spreads: Spreads::Skipped,
         }
     }
 
     /// This admission, measuring each frame's spread beside its other statistics.
     pub(crate) const fn measuring_spread(mut self) -> Self {
-        self.with_spread = true;
+        self.spreads = Spreads::Measured;
         self
     }
 
@@ -64,11 +64,7 @@ impl<'a> FrameAdmission<'a> {
             cancel: self.cancel,
         }
         .samples(image)?;
-        let stats = if self.with_spread {
-            FrameStats::measure_with_spread(image)
-        } else {
-            FrameStats::measure(image)
-        };
+        let stats = FrameStats::measure_as(image, self.spreads);
         if index == 0 {
             self.first_facts
                 .set(SetFacts::of_first(&stats.facts))

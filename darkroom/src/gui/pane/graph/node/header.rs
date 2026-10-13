@@ -4,7 +4,7 @@
 //! business; how a chip *looks* belongs to
 //! [`Badge`].
 //!
-//! The markers ride in the [`header`] band beside the title; the run-time
+//! The markers ride in the header band ([`show`]) beside the title; the run-time
 //! label (left) and the interactive controls (right) share the [`status_row`]
 //! below it. Drawn as the top children of each node body by
 //! [`crate::gui::pane::graph::node::NodeUI`].
@@ -15,26 +15,26 @@ use palantir::prelude::*;
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::draw_ctx::DrawCtx;
-use crate::gui::pane::graph::node::port_color::event_color;
+use crate::gui::pane::graph::node::port_color;
 use crate::gui::pane::graph::node::wid;
-use crate::gui::pane::graph::node::widget::exec_color;
-use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
+use crate::gui::pane::graph::node::widget;
+use crate::gui::pane::graph::paint::inspector;
+use crate::gui::pane::graph::paint::inspector::InspectMode;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_SIZE, Badge};
-use crate::gui::widgets::format::fmt_elapsed;
+use crate::gui::widgets::format::elapsed::Elapsed;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::port_glyph::PortGlyph;
-use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP, header_background, hspacer, mono_text,
-    play_triangle,
-};
+use crate::gui::widgets::support;
+use crate::gui::widgets::support::{CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP};
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
@@ -60,7 +60,7 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 fn run_time_style(ui: &Ui, theme: &Theme, color: RgbaF32) -> TextStyle {
     TextStyle {
         color,
-        ..mono_text(ui, theme.text.label)
+        ..support::mono_text(ui, theme.text.label)
     }
 }
 
@@ -90,7 +90,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
     PortGlyph::arrow(
         subscription_glyph_wid(node.id),
         theme.ports.size,
-        event_color(theme, hovered),
+        port_color::event(theme, hovered),
     )
     .turn(PI + FRAC_PI_4)
     .centered_on(node.pos)
@@ -117,7 +117,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// Reports whether the inspect chip was clicked — cycling a panel needs
 /// `&mut Inspectors`, which the draw holds only shared, so the caller applies
 /// it once the draw is over.
-pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) -> bool {
+pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) -> bool {
     let (theme, node) = (ncx.theme(), ncx);
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -130,7 +130,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
         .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
-        .background(header_background(theme, r))
+        .background(support::header_background(theme, r))
         .show(ui, |ui| {
             // The run affordance leads the band, ahead of the title — the
             // one control that *does* something with the node's output
@@ -144,7 +144,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
             title(ui, ncx, out);
             // Splits the title (left) from the descriptive cluster
             // (right): the markers, then inspect.
-            hspacer(ui, "header_spacer");
+            support::hspacer(ui, "header_spacer");
             // Read-only markers — what the node *is* (flat tinted pills, not
             // interactive, so they read as labels). They ride here beside the
             // title; the interactive controls stay in `status_row` below.
@@ -178,7 +178,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
                 "i",
                 color,
                 mode == Some(InspectMode::Pinned),
-                inspect_badge_wid(node.id),
+                inspector::inspect_badge_wid(node.id),
                 "Inspect — values, status, log",
             )
             .show(ui)
@@ -217,7 +217,8 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 _ => None,
             };
             if let Some(secs) = elapsed {
-                let color = exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
+                let color =
+                    widget::exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
                 // A comet spinner while computing, just left of the live time,
                 // so glow + spin + ticking time read as one "running" cue.
                 if matches!(node.exec_status(), ExecStatus::Running(_)) {
@@ -226,7 +227,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         .color(color)
                         .show(ui);
                 }
-                let elapsed = fmt!(ui, "{}", fmt_elapsed(secs));
+                let elapsed = fmt!(ui, "{}", Elapsed::new(secs));
                 Text::new(elapsed)
                     .style(&run_time_style(ui, theme, color))
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
@@ -234,7 +235,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
             }
             // Pushes the controls to the right edge, keeping the
             // run-time label pinned left.
-            hspacer(ui, "ctrl_spacer");
+            support::hspacer(ui, "ctrl_spacer");
             // Interactive controls: what you can *do* to the node. Bordered
             // chips that lift on hover.
             //
@@ -413,7 +414,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
 /// the rounding radius: the SDF rounds by dilating, so the glyph grows
 /// back out to the intended extents.
 fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
-    play_triangle(ui, BADGE_SIZE, 0.5, color);
+    support::play_triangle(ui, BADGE_SIZE, 0.5, color);
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
@@ -421,7 +422,7 @@ fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
 /// selects (the label would otherwise swallow the body's click).
 fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let node = ncx;
-    let shift = ui.modifiers().shift;
+    let mode = ClickMode::with_shift(ui.modifiers().shift);
     let id = wid::rename(node.id);
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
@@ -431,7 +432,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         .max_chars(NODE_NAME_MAX_CHARS)
         .show(ui);
     if ev.clicked {
-        out.extend_graph(GraphIntent::click(shift, ncx.graph_ctx.selected(), node.id));
+        out.extend_graph(GraphIntent::click(mode, ncx.graph_ctx.selected(), node.id));
     }
     if let Some(to) = ev.committed {
         out.push_graph(GraphIntent::RenameNode {
@@ -454,9 +455,9 @@ mod tests {
     use crate::gui::pane::graph::internals::CanvasHarness;
     use crate::gui::pane::graph::node::wid;
     use crate::gui::theme::Theme;
-    use crate::gui::widgets::format::fmt_elapsed;
+    use crate::gui::widgets::format::elapsed::Elapsed;
 
-    /// Every run time `fmt_elapsed` writes, from each unit's smallest to its
+    /// Every run time `Elapsed::new` writes, from each unit's smallest to its
     /// widest, fits the floor the label reserves — measured with real shaping
     /// in the label's own style, so neither side can drift alone.
     #[test]
@@ -476,7 +477,7 @@ mod tests {
         h.frame(|ui| {
             for (i, &s) in secs.iter().enumerate() {
                 let style = run_time_style(ui, &theme, RgbaF32::WHITE);
-                Text::new(fmt_elapsed(s).to_string())
+                Text::new(Elapsed::new(s).to_string())
                     .id(id(i))
                     .style(&style)
                     .show(ui);
@@ -487,7 +488,7 @@ mod tests {
             assert!(
                 width <= RUN_TIME_MIN_WIDTH,
                 "{} is {width} px wide, past the {RUN_TIME_MIN_WIDTH} px floor",
-                fmt_elapsed(s),
+                Elapsed::new(s),
             );
         }
     }

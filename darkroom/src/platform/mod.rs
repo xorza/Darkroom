@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use crate::gui::HostHandle;
+use crate::gui::app::App;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -33,10 +34,12 @@ use windows as sys;
 /// without this the association in `packaging/macos/Info.plist` would launch the
 /// editor empty.
 ///
+/// Each document is handed to `open` on the main thread, once `App` exists.
+///
 /// Call once, after the host is built and before it runs — that window is the
 /// only one that works, for the reasons in `macos::open_files`.
-pub(crate) fn route_opened_documents(handle: HostHandle) {
-    sys::route_opened_documents(handle);
+pub(crate) fn route_opened_documents(handle: HostHandle, open: fn(&mut App, PathBuf)) {
+    sys::route_opened_documents(handle, open);
 }
 
 /// Where this OS keeps the editor's configuration, darkroom's own component

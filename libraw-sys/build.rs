@@ -13,10 +13,10 @@ fn main() {
     compile(root);
     generate_bindings(root);
 
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=shim");
+    println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=shim");
     for dir in ["src", "libraw", "internal"] {
-        println!("cargo:rerun-if-changed={}", root.join(dir).display());
+        println!("cargo::rerun-if-changed={}", root.join(dir).display());
     }
 }
 
@@ -47,7 +47,7 @@ fn compile(root: &Path) {
     build.include(zlib_include());
     // LibRaw parallelizes its tiled decoders — Canon CR3, compressed Fuji, Panasonic v8 — under
     // OpenMP alone, which it enables wherever the compiler defines `_OPENMP`.
-    let openmp = openmp(&build);
+    let openmp = OpenMp::find(&build);
     match &openmp {
         Some(openmp) => {
             for flag in &openmp.flags {
@@ -55,7 +55,7 @@ fn compile(root: &Path) {
             }
         }
         None => println!(
-            "cargo:warning=no OpenMP runtime links with this compiler: LibRaw decodes CR3, \
+            "cargo::warning=no OpenMP runtime links with this compiler: LibRaw decodes CR3, \
              compressed Fuji and Panasonic v8 frames on one thread each"
         ),
     }
@@ -65,10 +65,10 @@ fn compile(root: &Path) {
     if let Some(openmp) = openmp {
         println!("cargo::rustc-cfg=libraw_openmp");
         if let Some(search) = &openmp.search {
-            println!("cargo:rustc-link-search=native={}", search.display());
+            println!("cargo::rustc-link-search=native={}", search.display());
         }
         if let Some(library) = openmp.library {
-            println!("cargo:rustc-link-lib={library}");
+            println!("cargo::rustc-link-lib={library}");
         }
     }
 }
@@ -109,46 +109,46 @@ struct OpenMp {
     search: Option<PathBuf>,
 }
 
-/// OpenMP for `build`'s compiler, or `None` when it cannot compile and link a program using it:
-/// GCC's `-fopenmp` and libgomp, Clang's and libomp, MSVC's `/openmp`, and on macOS, whose Clang
-/// ships no runtime, Homebrew's libomp.
-fn openmp(build: &cc::Build) -> Option<OpenMp> {
-    let compiler = build.get_compiler();
-    let openmp = if compiler.is_like_msvc() {
-        OpenMp {
-            flags: vec!["/openmp".to_owned()],
-            library: None,
-            search: None,
-        }
-    } else if env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "macos") {
-        let prefix = ["/opt/homebrew/opt/libomp", "/usr/local/opt/libomp"]
-            .into_iter()
-            .map(PathBuf::from)
-            .find(|prefix| prefix.join("include/omp.h").is_file())?;
-        OpenMp {
-            flags: vec![
-                "-Xpreprocessor".to_owned(),
-                "-fopenmp".to_owned(),
-                format!("-I{}", prefix.join("include").display()),
-            ],
-            library: Some("omp"),
-            search: Some(prefix.join("lib")),
-        }
-    } else {
-        OpenMp {
-            flags: vec!["-fopenmp".to_owned()],
-            library: Some(if compiler.is_like_clang() {
-                "omp"
-            } else {
-                "gomp"
-            }),
-            search: None,
-        }
-    };
-    openmp.links(&compiler).then_some(openmp)
-}
-
 impl OpenMp {
+    /// OpenMP for `build`'s compiler, or `None` when it cannot compile and link a program using
+    /// it: GCC's `-fopenmp` and libgomp, Clang's and libomp, MSVC's `/openmp`, and on macOS, whose
+    /// Clang ships no runtime, Homebrew's libomp.
+    fn find(build: &cc::Build) -> Option<Self> {
+        let compiler = build.get_compiler();
+        let openmp = if compiler.is_like_msvc() {
+            Self {
+                flags: vec!["/openmp".to_owned()],
+                library: None,
+                search: None,
+            }
+        } else if env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "macos") {
+            let prefix = ["/opt/homebrew/opt/libomp", "/usr/local/opt/libomp"]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|prefix| prefix.join("include/omp.h").is_file())?;
+            Self {
+                flags: vec![
+                    "-Xpreprocessor".to_owned(),
+                    "-fopenmp".to_owned(),
+                    format!("-I{}", prefix.join("include").display()),
+                ],
+                library: Some("omp"),
+                search: Some(prefix.join("lib")),
+            }
+        } else {
+            Self {
+                flags: vec!["-fopenmp".to_owned()],
+                library: Some(if compiler.is_like_clang() {
+                    "omp"
+                } else {
+                    "gomp"
+                }),
+                search: None,
+            }
+        };
+        openmp.links(&compiler).then_some(openmp)
+    }
+
     /// Whether `compiler` compiles and links a program calling the runtime under these flags: the
     /// flag alone can pass where the runtime is missing, and the link would then fail later.
     fn links(&self, compiler: &cc::Tool) -> bool {

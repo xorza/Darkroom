@@ -42,7 +42,7 @@ impl BackgroundRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::BackgroundRuntime;
+    use crate::core::background_runtime::BackgroundRuntime;
 
     #[test]
     fn enter_spawns_on_owned_runtime_and_block_on_joins_the_task() {

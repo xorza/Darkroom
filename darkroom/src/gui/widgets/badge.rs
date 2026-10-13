@@ -9,7 +9,7 @@
 
 use palantir::prelude::*;
 
-use crate::gui::widgets::support::tooltip_after;
+use crate::gui::widgets::support;
 
 /// Side of an indicator chip (px), and its glyph font size. Public because a
 /// caller drawing a vector glyph ([`Badge::action`]) paints into this box, and the
@@ -211,7 +211,7 @@ impl Badge {
         // ends before the tooltip records into `ui`.
         let snapshot = chip.response.snapshot();
         let clicked = chip.response.left.clicked();
-        tooltip_after(ui, &snapshot, Some(tip));
+        support::tooltip_after(ui, &snapshot, Some(tip));
         clicked
     }
 }

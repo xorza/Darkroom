@@ -14,7 +14,7 @@ use crate::math::error_function;
 /// The default method is ten weighted-moments steps with a window of `σ_w = 0.8 · σ(seed FWHM 4.0)`
 /// = 1.359 px, each step shrinking the error by `c = σ² / (σ² + σ_w²)` — see
 /// `moments_contract_and_fits_ignore_the_seed`. The flux sums the residual over the
-/// (2r+1)² stamp around the rounded centroid, r = `MeasureGrid::stamp_radius(4.0)` = 7, and the
+/// (2r+1)² stamp around the rounded centroid, r = `measure_grid::stamp_radius(4.0)` = 7, and the
 /// samples are point values of a separable profile: A · Σᵢ g(i − x₀) · Σⱼ g(j − y₀).
 #[test]
 fn a_detected_star_measures_as_on_its_true_sky() {
@@ -31,7 +31,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         },
         ..Default::default()
     };
-    let radius = MeasureGrid::stamp_radius(SEED_FWHM);
+    let radius = measure_grid::stamp_radius(SEED_FWHM);
     let window_sigma = f64::from(0.8 * fwhm_to_sigma(SEED_FWHM));
     for (x, y, sigma) in [(64.3, 64.7, 2.5f32), (64.0, 64.0, 3.0), (64.6, 63.8, 3.0)] {
         let truth = DVec2::new(x, y);

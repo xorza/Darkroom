@@ -9,11 +9,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME};
 use crate::calibration::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
-use crate::calibration::calibration_masters::subtract_master;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::DefectMap;
-use crate::calibration::defect_map::sampling::collect_color_sample_indices;
+use crate::calibration::defect_map::sampling;
 use crate::calibration::master_role::MasterRole;
+use crate::calibration::subtractor::Subtractor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 
@@ -28,7 +28,12 @@ pub(crate) fn atomic(c: &mut Criterion) {
             bias, dark, flat, ..
         } = scene::masters(FRAME, cfa_type);
         let (bias, dark, mut flat) = (bias.unwrap(), dark.unwrap(), flat.unwrap());
-        subtract_master(&mut flat, &bias, MasterRole::Bias, None).unwrap();
+        Subtractor {
+            role: MasterRole::Bias,
+            master: &bias,
+        }
+        .subtract_from(&mut flat, None)
+        .unwrap();
         b.iter_with_large_drop(|| {
             DefectMap::new(FRAME)
                 .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
@@ -39,6 +44,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
     });
     let size = format!("{}x{}", FRAME.width, FRAME.height);
     group.bench_function(BenchmarkId::new("color_sample_indices/rggb", size), |b| {
-        b.iter_with_large_drop(|| collect_color_sample_indices(black_box(FRAME), cfa_type, 0));
+        b.iter_with_large_drop(|| sampling::color_sample_indices(black_box(FRAME), cfa_type, 0));
     });
 }
