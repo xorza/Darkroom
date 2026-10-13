@@ -12,7 +12,7 @@ use std::string::FromUtf8Error;
 
 use thiserror::Error;
 
-use crate::data::type_system::TypeId;
+use crate::data::data_type::TypeId;
 
 /// The failure a [`CustomValueCodec`](crate::data::codec::CustomValueCodec)
 /// hands back. Codecs are written outside this crate — the value type, its

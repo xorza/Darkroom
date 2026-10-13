@@ -486,10 +486,12 @@ impl OutputBand<'_> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_frame::DrizzleFrame;
-    use crate::internals::prelude::*;
+    use crate::internals::images::gray_image;
+    use crate::math::size2us::Size2us;
     use crate::registration::distortion::sip::SipModel;
     use crate::registration::transform::Transform;
     use crate::registration::transform::warp_transform::WarpTransform;

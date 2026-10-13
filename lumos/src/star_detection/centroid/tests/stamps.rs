@@ -1,3 +1,5 @@
+use glam::Vec2;
+
 use super::*;
 use crate::math::pixel_gaussian::PixelGaussian;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
@@ -165,7 +167,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
     const AMPLITUDE: f32 = 0.8;
     const PEDESTAL: f32 = 0.02;
     let sigma = 1.5f32;
-    let fwhm = sigma_to_fwhm(sigma);
+    let fwhm = fwhm::from_sigma(sigma);
     let radius = measure_grid::stamp_radius(fwhm);
     assert_eq!(radius, 7);
     let pixels = SyntheticStar::new(

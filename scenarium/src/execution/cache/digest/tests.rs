@@ -2,7 +2,7 @@ use super::*;
 use common::TempFile;
 
 use crate::containers::column::Column;
-use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;

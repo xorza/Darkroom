@@ -15,7 +15,7 @@ fn the_windowed_centroid_converges_and_the_fits_ignore_the_seed() {
         let pixels =
             SyntheticStar::new(truth.as_vec2(), 0.8, StarProfile::gaussian(sigma)).stamp(size, 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
-        let fwhm = sigma_to_fwhm(sigma);
+        let fwhm = fwhm::from_sigma(sigma);
         let start = DVec2::new(x.round(), y.round());
         let error = |p: DVec2| (p - truth).length();
         for from in [
@@ -88,7 +88,7 @@ fn the_windowed_centroid_converges_on_stars_wider_than_its_window() {
         let pixels = SyntheticStar::new(
             truth.as_vec2(),
             0.8,
-            StarProfile::gaussian(fwhm_to_sigma(fwhm)),
+            StarProfile::gaussian(fwhm::to_sigma(fwhm)),
         )
         .stamp(size, 0.1);
         let centre = Measured::flat(&pixels, 0.1, 0.01)

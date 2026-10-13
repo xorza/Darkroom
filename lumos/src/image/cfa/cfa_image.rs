@@ -11,6 +11,7 @@ use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame_store::decode_cache::cache_key::DecoderKind;
 use crate::image::cfa::cfa_colour::CfaColour;
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
@@ -37,29 +38,6 @@ use crate::math::vec2us::Vec2us;
 use crate::frame::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CfaFrameInfo {
-    pub(crate) dimensions: ImageDimensions,
-    pub(crate) cfa_type: CfaType,
-    /// What the decoder holds beside the frame while it makes it: a camera RAW's whole file, which
-    /// LibRaw parses in place, and the raw buffer it unpacks into; nothing for a FITS file, which
-    /// is streamed.
-    pub(crate) decoder_bytes: usize,
-}
-
-impl CfaFrameInfo {
-    pub(crate) fn from_file(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::cfa_frame_info(path, context),
-            InputFormat::CameraRaw => raw::cfa_frame_info(path, context),
-            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::RasterCfa,
-            )),
-        }
-    }
-}
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.
@@ -135,6 +113,44 @@ impl CfaImage {
     /// The sensor extent the samples cover.
     pub(crate) const fn size(&self) -> Size2us {
         Size2us::new(self.data.width(), self.data.height())
+    }
+
+    /// OR `flags` into every pixel whose row-major index satisfies `holds`, creating the flag
+    /// plane when the image has none and some pixel does.
+    pub(crate) fn add_flags_where(
+        &mut self,
+        flags: QualityFlags,
+        holds: impl Fn(usize) -> bool + Sync,
+    ) {
+        let size = self.size();
+        match &mut self.flags {
+            Some(existing) => {
+                debug_assert_eq!(existing.size(), size, "flags for another geometry");
+                existing.or_where(flags, holds);
+            }
+            None => {
+                self.flags = PixelFlags::from_fn(size, |index| {
+                    if holds(index) {
+                        flags
+                    } else {
+                        QualityFlags::default()
+                    }
+                });
+            }
+        }
+    }
+
+    /// OR `flags` into the pixels at `indices`, creating the flag plane when the image has none
+    /// and some index is given.
+    pub(crate) fn add_flags_at(&mut self, flags: QualityFlags, indices: &[usize]) {
+        let size = self.size();
+        match &mut self.flags {
+            Some(existing) => {
+                debug_assert_eq!(existing.size(), size, "flags for another geometry");
+                existing.or_at(flags, indices);
+            }
+            None => self.flags = PixelFlags::at_indices(size, flags, indices),
+        }
     }
 
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
@@ -220,9 +236,7 @@ impl CfaImage {
             let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
         });
-        PixelFlags::add_where(&mut self.flags, size, QualityFlags::REPAIRED, |index| {
-            nulls.get(index)
-        });
+        self.add_flags_where(QualityFlags::REPAIRED, |index| nulls.get(index));
     }
 
     /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`.
@@ -454,8 +468,7 @@ impl CfaImage {
         }) else {
             return;
         };
-        let size = self.size();
-        PixelFlags::add_where(&mut self.flags, size, QualityFlags::NO_DATA, |index| {
+        self.add_flags_where(QualityFlags::NO_DATA, |index| {
             flags.at(index).intersects(QualityFlags::UNMEASURED)
         });
     }

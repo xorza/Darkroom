@@ -25,14 +25,17 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
-use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
+use crate::internals::test_rng::TestRng;
 use crate::io::fits::cfa;
 use crate::io::load_context::LoadContext;
+use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
@@ -41,7 +44,8 @@ use crate::registration::transform::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::TempDir;
+use common::{CancelToken, TempDir};
+use glam::DVec2;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
 fn pinned_host() -> bool {

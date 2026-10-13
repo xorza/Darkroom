@@ -8,12 +8,15 @@
 
 use crate::combine::stack_config::{Normalization, StackConfig, Weighting};
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::ingest::error::AdmissionError;
-use crate::internals::prelude::*;
+use crate::internals::assertions::assert_close;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use std::fs::File;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::combine::error::StackError;
 use crate::drizzle::drizzle_config::DrizzleConfig;
@@ -22,6 +25,7 @@ use crate::drizzle::error::DrizzleError;
 use crate::frame::frame_peek::FramePeek;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::sample_domain::{DomainMap, ScaleOrigin};
+use crate::ingest::frame_step::NoStep;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
@@ -42,7 +46,7 @@ use crate::{
     CalibrationMasters, CalibrationSet, CfaImage, CfaType, ColorProvenance, PreviewImage,
     PreviewPixels,
 };
-use common::TempDir;
+use common::{CancelToken, TempDir};
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
@@ -468,7 +472,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
                 &config,
                 IngestRun::planned(memory, &ingest),
-                None,
+                &NoStep,
             )
         });
         assert!(

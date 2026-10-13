@@ -4,6 +4,8 @@
 //! hand-built frames. These check the reconstruction on sub-pixel-dithered renders: total flux, a
 //! source's position, the quality maps' closed form, and the resolution dithering recovers.
 
+use glam::DVec2;
+
 use super::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, render};

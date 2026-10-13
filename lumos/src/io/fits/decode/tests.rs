@@ -1,4 +1,5 @@
-use crate::internals::prelude::*;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::math::size2us::Size2us;
 
 use crate::image::sample_domain::Pedestal;
 
@@ -18,7 +19,7 @@ use crate::io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
-use common::TempDir;
+use common::{CancelToken, TempDir};
 use std::fs;
 
 fn load_context() -> LoadContext {

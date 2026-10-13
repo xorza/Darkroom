@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::TempDir;
+use common::{CancelToken, TempDir};
+use glam::{DVec2, Vec2};
+use imaginarium::Buffer2;
 
 use crate::combine::frame_cache::slots::Slots;
 use crate::combine::rejection::Rejection;
@@ -22,28 +24,30 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
+use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
-use crate::internals::assertions::bits;
-use crate::internals::prelude::*;
+use crate::internals::assertions::{assert_close, bits};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::test_rng::TestRng;
 use crate::math::noise::mosaic_noise::MosaicNoise;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::registration::resample::warp_params::InterpolationMethod;
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
 use crate::registration::transform::warp_transform::WarpTransform;
 use crate::stack_product::quality_map::QualityMap;

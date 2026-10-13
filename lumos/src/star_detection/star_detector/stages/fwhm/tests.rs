@@ -1,4 +1,5 @@
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::star_detection::roundness::Roundness;
 use crate::star_detection::star_detector::stages::fwhm::*;
 

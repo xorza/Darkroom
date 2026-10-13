@@ -5,9 +5,13 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
     make_test_component, separated_pair,

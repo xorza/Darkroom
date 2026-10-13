@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[tokio::test]
 async fn execute_emits_started_then_succeeded_progress_per_node() {
-    use crate::execution::report::RunPhase;
+    use crate::execution::report::run_reporter::RunPhase;
 
     let mut e = TestEngine::over(TestGraph::sample());
     let ReportedRun { run, progress } = e.run_sinks_reporting().await;
@@ -40,7 +40,7 @@ async fn execute_emits_started_then_succeeded_progress_per_node() {
 /// consumers it starves never start.
 #[tokio::test]
 async fn a_failing_node_finishes_as_a_failure() {
-    use crate::execution::report::RunPhase;
+    use crate::execution::report::run_reporter::RunPhase;
 
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.fails("sum", "boom"));

@@ -5,11 +5,14 @@ use ron::value::RawValue;
 
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
+use crate::graph::binding::Binding;
+use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
-use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
+use crate::graph::subscription::Subscription;
+use crate::graph::{InputPort, NodeId, OutputPort};
 use crate::internals;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode, DetachedNodeParts};
@@ -794,7 +797,9 @@ type FuncEdit = (&'static str, fn(&mut Func));
 
 /// A two-input, one-output, one-event func to hold a signature against.
 fn signed_func() -> Func {
-    use crate::graph::func::{FuncEvent, FuncInput, FuncOutput};
+    use crate::graph::func::FuncEvent;
+    use crate::graph::func::func_input::FuncInput;
+    use crate::graph::func::func_output::FuncOutput;
     Func {
         inputs: vec![
             FuncInput::required("a", DataType::Int),
@@ -813,7 +818,7 @@ fn signed_func() -> Func {
 /// order, and the events' names — and nothing a binding does not land by.
 #[test]
 fn a_signature_covers_the_ports_and_nothing_else() {
-    use crate::graph::func::OutputType;
+    use crate::graph::func::func_output::OutputType;
     use crate::graph::func::signature::FuncSignature;
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;

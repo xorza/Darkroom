@@ -25,7 +25,7 @@ impl PortKind {
 }
 
 /// One port's identity in the graph. Domain-keyed so UI passes can derive
-/// its `WidgetId` (see `crate::gui::pane::graph::node::port_row::port_circle_wid`)
+/// its `WidgetId` (see `crate::gui::pane::graph_ui::node_ui::port_row::port_circle_wid`)
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`](crate::core::document::tab_ref::TabRef::ImageViewer))
 /// can bind to it. Node ids are unique across the whole document, so no graph

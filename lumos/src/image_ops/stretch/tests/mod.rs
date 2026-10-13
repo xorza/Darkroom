@@ -2,8 +2,9 @@
 mod real_data;
 
 use crate::image_ops::stretch::*;
-use crate::internals::images::{gray_image as gray, rgb_image as rgb};
-use crate::internals::prelude::*;
+use crate::internals::assertions::assert_close;
+use crate::internals::images::{gray_image, rgb_image};
+use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use std::f32::consts::LN_10;
 use std::iter;
@@ -570,7 +571,7 @@ fn ghs_d_controls_strength() {
 fn ghs_end_to_end_lifts_the_background() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(iter::repeat_n(0.8f32, 10));
-    let mut img = gray(Size2us::new(10, 10), px.clone());
+    let mut img = gray_image(Size2us::new(10, 10), px.clone());
     Stretch {
         method: StretchMethod::Ghs {
             black_point: 0.0,
@@ -592,7 +593,7 @@ fn ghs_end_to_end_lifts_the_background() {
 #[test]
 fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
-    let mut img = rgb(
+    let mut img = rgb_image(
         Size2us::new(2, 1),
         vec![0.3, 0.9],
         vec![0.15, 0.45],
@@ -625,8 +626,8 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let r = vec![0.20, 0.21, 0.19, 0.20, 0.50];
     let g = vec![0.05, 0.06, 0.04, 0.05, 0.50];
     let b = vec![0.05, 0.06, 0.04, 0.05, 0.50];
-    let mut linked = rgb(Size2us::new(5, 1), r.clone(), g.clone(), b.clone());
-    let mut unlinked = rgb(Size2us::new(5, 1), r, g, b);
+    let mut linked = rgb_image(Size2us::new(5, 1), r.clone(), g.clone(), b.clone());
+    let mut unlinked = rgb_image(Size2us::new(5, 1), r, g, b);
 
     Stretch::auto_stf().apply(&mut linked).unwrap();
     Stretch {
@@ -670,7 +671,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     px.extend(iter::repeat_n(0.6f32, 10));
     let input_median = median_of(&px);
 
-    let mut img = gray(Size2us::new(10, 10), px);
+    let mut img = gray_image(Size2us::new(10, 10), px);
     let stretch = Stretch::auto_stf();
     let StretchMethod::AutoStf {
         target_background, ..
@@ -702,7 +703,7 @@ fn subsampled_intensity_is_the_intensity_plane_subsampled() {
             .map(|i| (i.wrapping_mul(2_654_435_761).wrapping_add(seed) >> 8) as f32 / 16_777_216.0)
             .collect()
     };
-    let image = rgb(size, plane(1), plane(2), plane(3));
+    let image = rgb_image(size, plane(1), plane(2), plane(3));
     let sample = Subsample::new(size.pixel_count(), MAX_STATISTIC_SAMPLES);
     assert_eq!(sample.count(), 500_500);
     let expected: Vec<f32> = sample.of(image.intensity_plane().pixels()).collect();
@@ -723,7 +724,7 @@ fn default_config_is_color_preserving_auto_asinh() {
 #[test]
 fn faint_h_alpha_keeps_its_hue() {
     let stretch = |black_point: f32| {
-        let mut image = rgb(Size2us::new(1, 1), vec![0.055], vec![0.05], vec![0.05]);
+        let mut image = rgb_image(Size2us::new(1, 1), vec![0.055], vec![0.05], vec![0.05]);
         Stretch {
             method: StretchMethod::Asinh {
                 black_point,
@@ -762,7 +763,7 @@ fn the_auto_black_point_keeps_a_faint_colour() {
         .collect();
     let background = MedianMad::of_mut(&mut intensities);
     let black = background.median - StretchMethod::AUTO_SHADOW_SIGMAS * background.sigma();
-    let mut image = rgb(size, r, g, b);
+    let mut image = rgb_image(size, r, g, b);
     Stretch::auto_asinh().apply(&mut image).unwrap();
     let (out_r, out_g, out_b) = (
         image.channel(0).pixels()[1],
@@ -807,7 +808,7 @@ fn a_nan_sample_is_black_on_every_curve() {
         .eval(f32::NAN),
         0.0
     );
-    let mut image = rgb(Size2us::new(1, 1), vec![f32::NAN], vec![0.2], vec![0.2]);
+    let mut image = rgb_image(Size2us::new(1, 1), vec![f32::NAN], vec![0.2], vec![0.2]);
     Stretch {
         method: StretchMethod::Ghs {
             black_point: 0.0,

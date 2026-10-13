@@ -6,8 +6,10 @@ use std::collections::hash_map::Values;
 use std::sync::Arc;
 
 use crate::data::codec::Codecs;
-use crate::data::type_system::Strictness;
-use crate::graph::func::{Func, FuncInput, OutputType};
+use crate::data::data_type::Strictness;
+use crate::graph::func::Func;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::OutputType;
 use crate::graph::identity::FuncId;
 use crate::library::type_entry::TypeEntry;
 use crate::{ConstValue, DataType, TypeId};

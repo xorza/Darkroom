@@ -6,11 +6,14 @@
 //! fixture is checked to be one connected component first, and the contrast and the separation
 //! are each shown to move the split.
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
+use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use crate::star_detection::star_detector::stages::detect::internals::{
@@ -48,7 +51,7 @@ fn deblend_config(n_thresholds: usize, min_contrast: f32) -> ExtractionConfig {
 /// more than one region, exactly one component must have been split — the stars shared it, so
 /// the split is the deblender's and not the threshold's.
 fn deblend_blend(size: Size2us, stars: &[(f32, f32, f32)], contrast: f32) -> Vec<Region> {
-    let pixels = field(size, fwhm_to_sigma(4.0), stars, 42);
+    let pixels = field(size, fwhm::to_sigma(4.0), stars, 42);
     let background = background_estimate(&pixels);
     let result = detect_test(
         &background.residual_of(&pixels),
@@ -82,7 +85,7 @@ fn deblend_resolves_equal_pair_into_exactly_two() {
         "an equal pair must split into exactly 2"
     );
     assert_eq!(
-        matched_truths(&candidates, &[(x1, y), (x2, y)], fwhm_to_sigma(4.0)),
+        matched_truths(&candidates, &[(x1, y), (x2, y)], fwhm::to_sigma(4.0)),
         2,
         "both true positions must be recovered"
     );
@@ -101,7 +104,7 @@ fn deblend_resolves_chain_of_five() {
         "a chain of 5 must split into exactly 5"
     );
     assert_eq!(
-        matched_truths(&candidates, &truths, fwhm_to_sigma(4.0)),
+        matched_truths(&candidates, &truths, fwhm::to_sigma(4.0)),
         5,
         "every chain member must be recovered"
     );
@@ -118,7 +121,7 @@ fn deblend_resolves_unequal_pair() {
     let split = deblend_blend(Size2us::new(256, 256), &stars, 0.005);
     assert_eq!(split.len(), 2, "the unequal pair must split into exactly 2");
     assert_eq!(
-        matched_truths(&split, &[(x1, y), (x2, y)], fwhm_to_sigma(4.0)),
+        matched_truths(&split, &[(x1, y), (x2, y)], fwhm::to_sigma(4.0)),
         2,
         "both bright and faint companion must be recovered"
     );
@@ -161,7 +164,7 @@ fn a_crowded_group_splits_into_every_star() {
         })
         .collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.3)).collect();
-    let pixels = field(Size2us::new(256, 256), fwhm_to_sigma(4.0), &stars, 42);
+    let pixels = field(Size2us::new(256, 256), fwhm::to_sigma(4.0), &stars, 42);
     let background = background_estimate(&pixels);
     for deblend in [
         ExtractionConfig::default().deblend,
@@ -186,7 +189,7 @@ fn a_crowded_group_splits_into_every_star() {
         let group_area: usize = result.regions.iter().map(|region| region.area).sum();
         assert!(group_area > config.max_area, "{deblend:?}: {group_area} px");
         assert_eq!(
-            matched_truths(&result.regions, &truths, fwhm_to_sigma(4.0)),
+            matched_truths(&result.regions, &truths, fwhm::to_sigma(4.0)),
             16,
             "{deblend:?}: every star of the group"
         );

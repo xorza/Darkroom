@@ -6,7 +6,7 @@ use imaginarium::Image as RawImage;
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::internals::DocFixture;
-use crate::core::preview;
+use crate::core::preview_sink;
 
 /// A document holding one preview node at `node`. The id is the caller's, so a
 /// test can build the same node's document twice and have the store recognise
@@ -17,7 +17,7 @@ use crate::core::preview;
 /// open or visible.
 fn document_with_preview(node: NodeId) -> Document {
     let mut fixture = DocFixture::default();
-    let func = preview::func(Arc::default());
+    let func = preview_sink::func(Arc::default());
     fixture.library.add(func.clone());
     fixture.doc.graph.insert(node, Node::from(&func));
     fixture.doc

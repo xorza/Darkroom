@@ -173,7 +173,7 @@ impl Ranked {
 mod tests {
     use super::*;
     use crate::internals::invariance::Affine;
-    use crate::internals::prelude::TestRng;
+    use crate::internals::test_rng::TestRng;
     use crate::math::statistics::median_mut;
 
     /// The centre and the MAD are medians at both parities. [1, 3, 7, 9]: centre (3 + 7)/2 = 5,

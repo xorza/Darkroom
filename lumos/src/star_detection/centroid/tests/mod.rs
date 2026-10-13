@@ -5,12 +5,16 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+use imaginarium::Buffer2;
+
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use std::f32::consts::FRAC_PI_4;
 
-use crate::internals::synthetic::background_map;
-use crate::internals::synthetic::patterns;
-use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_to_sigma, sigma_to_fwhm};
+use crate::internals::synthetic::{background_map, patterns};
+use crate::math::fwhm;
+use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;

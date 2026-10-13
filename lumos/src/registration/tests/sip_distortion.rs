@@ -4,7 +4,8 @@
 //! radial (barrel) optical distortion through `register()` end-to-end and verifies the SIP fit
 //! recovers it — the residuals collapse versus a linear-only registration of the same field.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
 use crate::registration::distortion::sip::SipConfig;

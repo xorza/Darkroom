@@ -7,11 +7,11 @@ mod sensor_layout;
 mod unpacked_raw;
 
 use libraw_sys as sys;
-use std::ffi;
-use std::fs;
 use std::path::Path;
+use std::{ffi, fs};
 
-use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;

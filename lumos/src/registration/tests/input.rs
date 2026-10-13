@@ -1,7 +1,8 @@
 //! Registration's handling of the star lists it is handed: too few, degenerate FWHM,
 //! mismatched counts.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
 use crate::registration::registration_config::{RegistrationConfig, median_fwhm};
 use crate::registration::tuning;

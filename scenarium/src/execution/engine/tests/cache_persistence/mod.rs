@@ -2,7 +2,7 @@ use super::*;
 
 use common::TempDir;
 
-use crate::execution::cache::runtime::error::CacheNodeError;
+use crate::execution::cache::runtime_cache::error::CacheNodeError;
 use crate::execution::schedule::NodeState;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};

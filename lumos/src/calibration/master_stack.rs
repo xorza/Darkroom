@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use crate::calibration::error::SubtractionError;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_subtraction::MasterSubtraction;
 use crate::calibration::subtractor::Subtractor;
@@ -13,7 +12,6 @@ use crate::combine::stack::{FrameSet, FrameSource};
 use crate::combine::stack_config::StackConfig;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -77,15 +75,12 @@ impl<P: AsRef<Path>> MasterStack<'_, P> {
             quality: QualityPlanes::IMAGE_ONLY,
             ..config
         };
-        let step = subtraction
-            .as_ref()
-            .map(|step| -> &dyn FrameStep<CfaImage, Error = SubtractionError> { step });
         let set = FrameSet {
             source: FrameSource::CfaPaths,
             count: paths.len(),
         };
         let product = stack::combine_cached(&config, set, || {
-            let cache = FrameCache::from_cfa_paths(paths, &config, run, step)?;
+            let cache = FrameCache::from_cfa_paths(paths, &config, run, &subtraction)?;
             if role.is_dark() {
                 let conditions = cache
                     .frames

@@ -3,8 +3,11 @@
 //! The synthetic stars sit on integer centres, so a centre pixel holds exactly its amplitude plus
 //! what its neighbours add there — zero beyond their labelled cutoff — and peaks compare exactly.
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};

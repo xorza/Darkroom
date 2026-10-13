@@ -15,7 +15,7 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::document;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::preferences::Preferences;
-use crate::core::status::StatusLog;
+use crate::core::status_log::StatusLog;
 use scenarium::{DataType, FuncSignature, Graph, Library, Node, system_library};
 
 #[test]

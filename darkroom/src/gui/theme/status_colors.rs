@@ -7,7 +7,7 @@ use crate::gui::theme::palette::Palette;
 /// The app's semantic feedback palette: what an outcome *means*, not
 /// which surface reports it.
 ///
-/// Node execution is the largest consumer — `gui::pane::graph::node`
+/// Node execution is the largest consumer — `gui::pane::graph_ui::node_ui`
 /// maps an `ExecStatus` onto these — but it is not the only one, which is
 /// why these are not named for it. `error` is also the invalid-path
 /// outline in preferences, the status-bar message and `LogLevel::Error`.

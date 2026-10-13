@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use crate::internals::prelude::*;
+use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::tests::{Mask, check};
 
 #[derive(Debug)]

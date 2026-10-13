@@ -2,13 +2,17 @@
 mod real_data;
 mod synthetic;
 
-use crate::internals::prelude::*;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::internals::assertions::assert_close;
+use crate::math::vec2us::Vec2us;
 use common::TempDir;
 use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
 use crate::io::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::error::{ImageError, ScientificRefusal};
 use fits_well::image::SampleType;
+use imaginarium::Buffer2;
 
 use crate::frame::stackable_image::StackableImage;
 use crate::image::image_metadata::ImageMetadata;

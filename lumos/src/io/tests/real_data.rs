@@ -3,10 +3,10 @@
 //! Kept apart from the rest of `io`'s tests so the decoder-facing imports they need are
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
-use common::CancelToken;
-use common::internals;
+use common::{CancelToken, internals};
 
-use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::real_data::raw_frames;
 use crate::io::load_context::LoadContext;

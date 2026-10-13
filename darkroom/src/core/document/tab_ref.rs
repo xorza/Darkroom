@@ -16,7 +16,7 @@ pub(crate) enum TabRef {
     Preferences,
     /// A full-resolution viewer of one port's runtime image — one tab per
     /// port, deduped on open. Content is runtime-only
-    /// (`crate::gui::pane::viewer`): a restored tab pulls any current value
+    /// (`crate::gui::pane::image_viewer`): a restored tab pulls any current value
     /// from `RunState` when drawn. Pruned when its node is deleted.
     ///
     /// Keyed by the preview node whose value it shows — the same identity the

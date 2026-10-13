@@ -15,9 +15,9 @@ use scenarium::{Graph, NodeId};
 use crate::core::io::cache;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::core::status::{StatusFamily, StatusLog};
+use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
-use crate::core::worker::WorkerBridge;
+use crate::core::worker_bridge::WorkerBridge;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeHost {

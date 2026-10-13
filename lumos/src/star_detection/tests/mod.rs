@@ -26,8 +26,11 @@ pub(crate) mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 
+use glam::DVec2;
+
 use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::internals::prelude::*;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::fixtures::{
@@ -35,6 +38,7 @@ use crate::internals::synthetic::fixtures::{
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 

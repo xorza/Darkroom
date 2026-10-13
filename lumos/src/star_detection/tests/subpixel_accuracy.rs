@@ -5,11 +5,13 @@
 //! [`Observation`] translation, and verify the detector's centroids recover that shift to well
 //! under 0.1 px — grading per-frame completeness through [`metrics`] against captured truth.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{match_catalogs, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::tests::{

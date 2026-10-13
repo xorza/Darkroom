@@ -1,5 +1,6 @@
+use glam::DVec2;
+
 use crate::error::InvalidConfigField;
-use crate::internals::prelude::*;
 use crate::registration::error::{
     RansacFailureReason, RegistrationCatalog, RegistrationError, StarField,
 };

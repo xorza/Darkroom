@@ -40,7 +40,7 @@ use palantir::Ui;
 
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::{StatusFamily, StatusLog};
+use crate::core::status_log::{StatusFamily, StatusLog};
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;

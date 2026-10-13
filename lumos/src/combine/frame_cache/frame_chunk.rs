@@ -145,15 +145,17 @@ impl ChunkCopy {
 mod tests {
     use arrayvec::ArrayVec;
     use common::TempDir;
+    use imaginarium::Buffer2;
 
     use crate::combine::frame_cache::frame_chunk::{ChunkCopy, FrameChunk};
     use crate::frame::frame_quality::{DropPlanes, FrameQuality};
     use crate::frame::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::StoredFrame;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
-    use crate::internals::prelude::*;
 
     /// A copied chunk reads what the planes hold there, plane for plane, for a frame with warp
     /// planes and flags and for a drizzled one with drops per channel, spilled and resident alike:

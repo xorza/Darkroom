@@ -8,8 +8,7 @@
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::fwhm::fwhm_beta_to_alpha;
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
@@ -60,7 +59,7 @@ impl PsfModel {
     ) {
         let (profile, amplitude) = match *self {
             Self::Moffat { fwhm, beta } => {
-                let alpha = fwhm_beta_to_alpha(fwhm * seeing_scale, beta);
+                let alpha = fwhm::to_alpha(fwhm * seeing_scale, beta);
                 (
                     StarProfile::Moffat { alpha, beta },
                     flux * (beta - 1.0) / (PI * alpha * alpha),
@@ -72,7 +71,7 @@ impl PsfModel {
                 angle,
             } => {
                 // σ_maj·σ_min == σ² so total flux is independent of eccentricity.
-                let sigma = fwhm_to_sigma(fwhm * seeing_scale);
+                let sigma = fwhm::to_sigma(fwhm * seeing_scale);
                 let one_minus_e2 = 1.0 - eccentricity * eccentricity;
                 let sigma_major = sigma / one_minus_e2.sqrt().sqrt();
                 let sigma_minor = sigma_major * one_minus_e2.sqrt();

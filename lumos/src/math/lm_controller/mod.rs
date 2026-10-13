@@ -41,14 +41,25 @@ pub(crate) struct LmFit<const N: usize> {
     pub(crate) params: [f64; N],
     pub(crate) chi2: f64,
     /// The steps the fit took; only the fits' tests read it, to check how fast a fit converges.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "only tests read the step count")
-    )]
+    #[cfg(test)]
     pub(crate) iterations: usize,
     /// The diagonal of `(JᵀWJ)⁻¹` at the solution: each parameter's variance per unit of the
     /// residuals' variance. `None` when the undamped Hessian is singular there.
     pub(crate) inverse_hessian_diagonal: Option<[f64; N]>,
+}
+
+impl<const N: usize> LmFit<N> {
+    /// This fit as `iterations` steps reached it.
+    #[cfg(test)]
+    const fn after(self, iterations: usize) -> Self {
+        Self { iterations, ..self }
+    }
+
+    /// This fit: only tests keep the step count.
+    #[cfg(not(test))]
+    const fn after(self, _iterations: usize) -> Self {
+        self
+    }
 }
 
 /// Levenberg–Marquardt as Madsen, Nielsen and Tingleff state it (*Methods for Non-Linear Least
@@ -114,7 +125,7 @@ impl LmController {
             }
             let scale = Scale::of(&equations.hessian)?;
             if chi2 == 0.0 || self.gradient_is_orthogonal(&equations, &scale, chi2) {
-                return Some(self.fitted(problem, params, chi2, iteration - 1));
+                return Some(self.fitted(problem, params, chi2).after(iteration - 1));
             }
             if let Some(step) = scale.solve_damped(&equations, 0.0)
                 && (self.is_negligible(&step, &params, &scale)
@@ -126,7 +137,7 @@ impl LmController {
                 }
                 problem.constrain(&mut params);
                 let chi2 = problem.chi2(&params);
-                return Some(self.fitted(problem, params, chi2, iteration));
+                return Some(self.fitted(problem, params, chi2).after(iteration));
             }
             let step = scale.solve_damped(&equations, damping)?;
             let mut trial = params;
@@ -145,7 +156,7 @@ impl LmController {
                 damping *= (1.0 - (2.0 * ratio - 1.0).powi(3)).max(1.0 / 3.0);
                 growth = 2.0;
                 if settled {
-                    return Some(self.fitted(problem, params, chi2, iteration));
+                    return Some(self.fitted(problem, params, chi2).after(iteration));
                 }
                 equations = problem.normal_equations(&params);
             } else {
@@ -193,13 +204,13 @@ impl LmController {
         problem: &impl LmProblem<N>,
         params: [f64; N],
         chi2: f64,
-        iterations: usize,
     ) -> LmFit<N> {
         let equations = problem.normal_equations(&params);
         LmFit {
             params,
             chi2,
-            iterations,
+            #[cfg(test)]
+            iterations: 0,
             inverse_hessian_diagonal: Scale::of(&equations.hessian)
                 .and_then(|scale| scale.inverse_diagonal(&equations.hessian)),
         }

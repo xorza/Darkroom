@@ -11,7 +11,6 @@
 //! only name it has.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Deref;
 
 use ::serde::{Deserialize, Serialize};
 use hashbrown::hash_map::Entry;
@@ -19,32 +18,35 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::ConstValue;
 use crate::DataType;
+use crate::graph::binding::Binding;
+use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::DetachedNode;
 use crate::graph::error::GraphValidationError;
 use crate::graph::error::ValidationResult;
+use crate::graph::func::Func;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::FuncOutput;
+use crate::graph::func::func_output::OutputType;
 use crate::graph::func::signature::FuncSignature;
-use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
 use crate::graph::node::{Node, NodeKind};
+use crate::graph::node_ref::NodeRef;
 use crate::graph::output_types::OutputTypeSource;
+use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
+pub(crate) mod binding;
+pub(crate) mod binding_entry;
 pub(crate) mod detached;
 pub(crate) mod error;
 pub(crate) mod func;
 pub(crate) mod identity;
 pub(crate) mod node;
+pub(crate) mod node_ref;
 pub(crate) mod output_types;
 mod serde;
-
-/// What a consumer input port is wired to. Stored sparsely: `Graph.bindings`
-/// only holds these values, and an absent port is unbound.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Binding {
-    Const(ConstValue),
-    Bind(OutputPort),
-}
+pub(crate) mod subscription;
 
 /// Deliberately not `Clone`: node ids are unique across a whole document, so
 /// duplicating a graph is never a neutral act — a copy either mints fresh ids
@@ -83,60 +85,6 @@ pub struct Graph {
     /// reads them in deterministic.
     #[serde(default)]
     subscriptions: BTreeSet<Subscription>,
-}
-
-/// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, `event_idx`, subscriber) so the
-/// `BTreeSet` holding these dedups and iterates deterministically — which is
-/// what lets a compile wire each emitter's subscriber lists in a fixed order.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Subscription {
-    pub emitter: NodeId,
-    pub event_idx: usize,
-    pub subscriber: NodeId,
-}
-
-impl Subscription {
-    /// Whether this edge touches `node_id` from either end — it emits to that
-    /// node, or that node emits it. [`Binding::touches`](crate::Binding) for
-    /// an event edge.
-    pub(crate) fn touches(&self, node_id: NodeId) -> bool {
-        self.emitter == node_id || self.subscriber == node_id
-    }
-}
-
-/// One data edge as a value: the consumer port, and what it was bound to.
-///
-/// The unit every reversible edit collects severed wiring into: a
-/// [`DetachedNode`] carries the edges that touched its node, so an attach
-/// restores exactly what a detach took.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BindingEntry {
-    pub port: InputPort,
-    pub binding: Binding,
-}
-
-/// A [`Node`] with its id attached — the item [`Graph::iter`] yields.
-///
-/// Iteration is the one lookup whose caller does not already hold the id, so it
-/// is the one that has to hand one back; a node stores no id of its own, so
-/// there would otherwise be nothing to read it from. [`Graph::find`] and
-/// [`Graph::find_mut`] are *given* the id and return the node alone. That is
-/// the whole rule — not an inconsistency to reconcile.
-#[derive(Clone, Copy, Debug)]
-pub struct NodeRef<'a> {
-    pub id: NodeId,
-    /// Private so only this file's lookups mint one; readers go through
-    /// [`Deref`], which is the point of the type.
-    node: &'a Node,
-}
-
-impl Deref for NodeRef<'_> {
-    type Target = Node;
-
-    fn deref(&self) -> &Self::Target {
-        self.node
-    }
 }
 
 impl Graph {
@@ -574,36 +522,10 @@ fn check_signature(node_id: NodeId, node: &Node, func: &Func) -> ValidationResul
     }
 }
 
-impl Binding {
-    /// A data binding wired to producer `node_id`'s output port `port_idx`.
-    pub const fn bind(node_id: NodeId, port_idx: usize) -> Self {
-        Self::Bind(OutputPort::new(node_id, port_idx))
-    }
-
-    /// Whether this edge — the binding on `port` — touches `node_id` from
-    /// either end: it lands on that node, or it reads from it. How a detach
-    /// finds the wiring it has to take with it, and how the record it
-    /// produced proves it took only that.
-    pub(crate) fn touches(&self, port: InputPort, node_id: NodeId) -> bool {
-        port.node_id == node_id || matches!(self, Self::Bind(src) if src.node_id == node_id)
-    }
-}
-
-impl From<OutputPort> for Binding {
-    fn from(value: OutputPort) -> Self {
-        Self::Bind(value)
-    }
-}
-
-impl From<ConstValue> for Binding {
-    fn from(value: ConstValue) -> Self {
-        Self::Const(value)
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::graph::{Graph, NodeRef};
+    use crate::graph::Graph;
+    use crate::graph::node_ref::NodeRef;
 
     impl Graph {
         /// A node named `name`, or `None` if this graph holds none. Names are

@@ -15,8 +15,6 @@ mod characterization;
 pub(crate) mod fits;
 pub(crate) mod images;
 pub(crate) mod invariance;
-#[cfg(test)]
-pub(crate) mod prelude;
 #[cfg(all(test, feature = "real-data"))]
 pub(crate) mod real_data;
 #[cfg(test)]

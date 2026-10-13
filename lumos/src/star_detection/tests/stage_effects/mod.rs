@@ -8,7 +8,9 @@
 //! A test that calls a *single* stage's function directly belongs in that module's own `tests/`,
 //! beside the unit tests for the same code — see the placement rule in the parent module.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::background_map;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::deblend::region::Region;

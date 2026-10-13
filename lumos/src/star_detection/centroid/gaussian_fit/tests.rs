@@ -1,6 +1,9 @@
 //! Tests for 2D Gaussian fitting.
-use crate::internals::prelude::*;
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::patterns;
+use crate::math::size2us::Size2us;
 use std::f32::consts::FRAC_PI_4;
 use std::f64::consts::PI;
 

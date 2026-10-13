@@ -1,6 +1,6 @@
 //! Small shapes, each with its labels worked out by hand for both connectivities.
 
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::tests::{Mask, check};
 
 /// Expected labels, one string per row: `.` is background, a digit the label.

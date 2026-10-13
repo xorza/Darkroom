@@ -9,7 +9,7 @@ use crate::gui::theme::palette::Palette;
 ///
 /// Positional colours only — a *typed* port takes its hue from
 /// [`TypeColors`](crate::gui::theme::type_colors::TypeColors) instead,
-/// resolved by `gui::pane::graph::node::port_color`, which needs this
+/// resolved by `gui::pane::graph_ui::node_ui::port_color`, which needs this
 /// roster and the type roster together and so stays a function over the
 /// whole [`Theme`](crate::gui::theme::Theme). Every colour here is a
 /// resting one; the pointer lift is applied at that call site.

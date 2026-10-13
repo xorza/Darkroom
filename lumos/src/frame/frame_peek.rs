@@ -8,7 +8,7 @@ use crate::combine::stack_config::StackConfig;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::cfa::cfa_image::CfaFrameInfo;
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::footprint::Footprint;

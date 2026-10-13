@@ -1,5 +1,6 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
+use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::calibration::error::SubtractionError;
@@ -45,7 +46,7 @@ pub(super) fn load_tiered<I: StackableImage>(
     paths: &[&Path],
     config: &StackConfig,
     run: IngestRun,
-    step: Option<&dyn FrameStep<I, Error = SubtractionError>>,
+    step: &impl FrameStep<I, Error = SubtractionError>,
 ) -> Result<LoadedCache, StackError> {
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0];
@@ -58,9 +59,7 @@ pub(super) fn load_tiered<I: StackableImage>(
     } else {
         let source = CachedSource::of(first_path, I::DECODER, &run.context);
         let mut image = load_image::<I>(first_path, &run.context)?;
-        if let Some(step) = step {
-            step.apply(0, &mut image)?;
-        }
+        step.apply(0, &mut image)?;
         (
             FramePeek::of_decoded(&image),
             Some(Decoded { image, source }),
@@ -87,7 +86,7 @@ pub(super) fn load_tiered<I: StackableImage>(
     // A decode-level memo: looked up before any decode on every tier, its planes mapped from the
     // files whatever the tier, since a mapped plane reads as a resident one does. A frame through
     // a step is not what its source decodes to, so a stepped run neither reads nor writes it.
-    let kept = (run.keep_cache && step.is_none())
+    let kept = (run.keep_cache && !step.changes_frames())
         .then(|| DecodeCache::open(&run.cache_dir))
         .transpose()?;
     let tier = Tier::for_plan(
@@ -119,6 +118,7 @@ pub(super) fn load_tiered<I: StackableImage>(
         kept: kept.as_ref(),
         intake: &intake,
         step,
+        image: PhantomData,
     };
 
     // Frame 0 carries the stack metadata, which a kept frame keeps with it. Frame 0 decoded for
@@ -179,25 +179,24 @@ struct LoadedFrame {
 
 /// One frame set's load into its tier: where each frame goes, and how it is taken in.
 #[derive(Debug)]
-struct FrameLoad<'a, I> {
+struct FrameLoad<'a, I, S> {
     paths: &'a [&'a Path],
     tier: &'a Tier,
     /// The decode cache, when `keep_cache` asked for one.
     kept: Option<&'a DecodeCache>,
     intake: &'a FrameIntake<'a>,
-    step: Option<&'a dyn FrameStep<I, Error = SubtractionError>>,
+    step: &'a S,
+    image: PhantomData<fn() -> I>,
 }
 
-impl<I: StackableImage> FrameLoad<'_, I> {
+impl<I: StackableImage, S: FrameStep<I, Error = SubtractionError>> FrameLoad<'_, I, S> {
     /// Frame `index` decoded, through the step when there is one, with its source as it was
     /// before the decode.
     fn decode(&self, index: usize) -> Result<Decoded<I>, StackError> {
         let path = self.paths[index];
         let source = CachedSource::of(path, I::DECODER, self.intake.context());
         let mut image = load_image::<I>(path, self.intake.context())?;
-        if let Some(step) = self.step {
-            step.apply(index, &mut image)?;
-        }
+        self.step.apply(index, &mut image)?;
         Ok(Decoded { image, source })
     }
 

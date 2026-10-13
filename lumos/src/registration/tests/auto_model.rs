@@ -2,7 +2,8 @@
 //! for a blend, honours the caller's accuracy gate, keeps a model that fit when another fails, and
 //! reports every model's reason when none fits.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::internals::synthetic::transforms::{add_star_noise, generate_random_stars};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::error::RegistrationError;

@@ -1,7 +1,8 @@
 use super::*;
 
 use crate::execution::error::RunError;
-use crate::execution::report::{LogLevel, NodeExecutionStatus};
+use crate::execution::report::log_entry::LogLevel;
+use crate::execution::report::node_status::NodeExecutionStatus;
 use crate::graph::func::lambda::internals;
 use crate::graph::identity::NodeId;
 

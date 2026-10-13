@@ -6,9 +6,10 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::FuncOutput;
+use crate::graph::func::Func;
 use crate::graph::func::error::InvokeError;
+use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::lambda::Invocation;
-use crate::graph::func::{Func, FuncInput};
 use crate::internals;
 use crate::internals::func_invoker::FuncInvoker;
 use crate::library::Library;

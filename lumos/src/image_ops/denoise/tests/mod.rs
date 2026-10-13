@@ -1,11 +1,17 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
+use imaginarium::Buffer2;
+
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::image_ops::denoise::{Denoise, Threshold};
+use crate::internals::assertions::assert_close;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
-use crate::internals::prelude::*;
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
+use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
 use crate::stack_product::quality_map::QualityMap;
 
 /// A flat `bg` with white Gaussian noise of `sigma`.

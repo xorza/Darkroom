@@ -15,23 +15,23 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::{StatusFamily, StatusLog};
+use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::app_command::prefs_command::MlModelKind;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
-use crate::gui::app::commands::prefs::MlModelKind;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::app::session::Session;
 use crate::gui::dialogs;
-use crate::gui::pane::graph::node::port_row::PathPick;
+use crate::gui::pane::graph_ui::node_ui::port_row::PathPick;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
+pub(crate) mod app_command;
 pub(crate) mod app_ctx;
-pub(crate) mod commands;
 mod discard_dialog;
 pub(crate) mod session;
 

@@ -7,10 +7,11 @@ use serde::de::value::{self, MapAccessDeserializer};
 use serde::de::{DeserializeSeed, MapAccess};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::graph::Graph;
+use crate::graph::binding::Binding;
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::{Node, NodeKind};
 use crate::graph::serde::{deserialize_bindings, deserialize_nodes};
-use crate::graph::{Binding, Graph};
 
 #[derive(Debug, Serialize)]
 #[serde(transparent)]

@@ -1,8 +1,10 @@
 //! Tests for SIMD convolution implementations.
 
-use crate::internals::prelude::*;
+use imaginarium::Buffer2;
+
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use crate::math::size2us::Size2us;
 use crate::simd::Kernel;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{

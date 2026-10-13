@@ -1,6 +1,7 @@
 //! Shared test helpers for synthetic registration tests.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::registration::registration_config::RegistrationMatchingConfig;
 use crate::registration::transform::Transform;
 use crate::star_detection::star::Star;

@@ -1,4 +1,6 @@
-use crate::internals::prelude::*;
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::scratch_pool::Pooled;

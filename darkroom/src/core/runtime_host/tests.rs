@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::core::status::StatusLog;
+use crate::core::status_log::StatusLog;
 use common::TempDir;
 use lens::MlModelPaths;
 use scenarium::{Binding, CacheMode, ConstValue, Graph, InputPort, NodeId};

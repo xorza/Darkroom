@@ -1,4 +1,5 @@
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use std::mem;
 use std::panic::catch_unwind;
 

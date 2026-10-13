@@ -1,7 +1,9 @@
 use crate::DataType;
 use crate::async_lambda;
+use crate::graph::func::Func;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::Invocation;
-use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
 use crate::library::Library;
 

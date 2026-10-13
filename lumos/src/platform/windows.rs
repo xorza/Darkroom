@@ -173,4 +173,8 @@ pub(crate) mod internals {
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
     }
+
+    /// Yes: a scratch file is deleted only when its last handle closes.
+    #[cfg(test)]
+    pub(crate) const SCRATCH_KEEPS_NAME: bool = true;
 }

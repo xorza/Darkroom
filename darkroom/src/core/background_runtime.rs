@@ -1,4 +1,4 @@
-//! RAII wrapper for [`WorkerBridge`](crate::core::worker::WorkerBridge)'s
+//! RAII wrapper for [`WorkerBridge`](crate::core::worker_bridge::WorkerBridge)'s
 //! dedicated background tokio runtime.
 //!
 //! The bridge builds one, `enter`s it just long enough to construct its

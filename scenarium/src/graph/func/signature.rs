@@ -5,7 +5,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::DataType;
-use crate::graph::func::{Func, OutputType};
+use crate::graph::func::Func;
+use crate::graph::func::func_output::OutputType;
 
 /// A digest of a func's ports: its inputs' names and types, its outputs' names and types, and
 /// its events' names, in order.
@@ -93,8 +94,10 @@ mod tests {
     use std::fmt::Write as _;
 
     use crate::DataType;
+    use crate::graph::func::func_input::FuncInput;
+    use crate::graph::func::func_output::FuncOutput;
     use crate::graph::func::signature::FuncSignature;
-    use crate::graph::func::{Func, FuncEvent, FuncInput, FuncOutput};
+    use crate::graph::func::{Func, FuncEvent};
     use crate::graph::identity::FuncId;
     use crate::internals;
 

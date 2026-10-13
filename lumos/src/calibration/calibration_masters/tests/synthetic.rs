@@ -6,15 +6,18 @@
 //! a vignette + dark + bias, recovers a star field through a single noisy light, and the
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
+use common::CancelToken;
+
 use crate::calibration::defect_map::DefectMap;
 use crate::internals::cfa::{constant_cfa, make_cfa};
-use crate::internals::prelude::*;
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
 
 /// A uniformly lit sky seen through a vignette, with bias and dark on top, calibrates to the sky

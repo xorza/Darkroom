@@ -24,7 +24,8 @@ use fits_well::io::StreamReader;
 
 use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
-use crate::image::cfa::cfa_image::{CfaFrameInfo, CfaImage};
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
 use crate::io::fits::cfa;

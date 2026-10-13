@@ -22,7 +22,7 @@ use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::io::document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
-use crate::core::status::{StatusFamily, StatusLog};
+use crate::core::status_log::{StatusFamily, StatusLog};
 use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds

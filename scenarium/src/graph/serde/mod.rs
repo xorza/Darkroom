@@ -17,7 +17,7 @@ use ::serde::de::{MapAccess, Visitor};
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use hashbrown::HashMap;
 
-use crate::graph::Binding;
+use crate::graph::binding::Binding;
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::Node;
 

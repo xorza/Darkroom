@@ -1,5 +1,5 @@
 use super::*;
-use crate::execution::report::NodeExecutionStatus;
+use crate::execution::report::node_status::NodeExecutionStatus;
 
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 

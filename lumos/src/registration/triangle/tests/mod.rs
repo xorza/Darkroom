@@ -1,6 +1,7 @@
 //! Tests for triangle matching module.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::geometry::{Orientation, Triangle};
 use crate::registration::triangle::matching::{

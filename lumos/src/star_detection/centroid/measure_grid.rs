@@ -1,6 +1,6 @@
 //! [`MeasureGrid`]: what follows from the FWHM a detection expects, shared by every star of it.
 
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
 use crate::star_detection::centroid::stamp::StampGrid;
 
 /// Stamp radius as a multiple of FWHM. A circle of 1.75 FWHM = 4.12σ holds
@@ -58,7 +58,7 @@ pub(super) struct AnnulusRadii {
 impl MeasureGrid {
     pub(crate) fn new(expected_fwhm: f32) -> Self {
         let radius = stamp_radius(expected_fwhm);
-        let window_sigma = f64::from(fwhm_to_sigma(expected_fwhm)).clamp(1.0, radius as f64 / 2.0);
+        let window_sigma = f64::from(fwhm::to_sigma(expected_fwhm)).clamp(1.0, radius as f64 / 2.0);
         Self {
             stamp: StampGrid::new(radius),
             window_sigma,

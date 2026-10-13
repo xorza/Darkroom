@@ -3,8 +3,11 @@ mod real_data;
 
 use crate::image_ops::extract_background::*;
 use crate::image_ops::stretch::{Stretch, StretchMethod};
+use crate::internals::assertions::assert_close;
+use crate::internals::images::gray_image;
 use crate::internals::images::rgb_image as rgb;
-use crate::internals::prelude::*;
+use crate::internals::test_rng::TestRng;
+use crate::math::vec2us::Vec2us;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
