@@ -43,10 +43,11 @@ use crate::execution::compile::compiled_graph::{
 };
 use crate::execution::compile::error::CompileError;
 use crate::execution::index::{InputIdx, NodeIdx, OutputAddr};
-use crate::graph::func::FuncInput;
+use crate::graph::Graph;
+use crate::graph::binding::Binding;
+use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::output_types::OutputTypes;
-use crate::graph::{Binding, Graph};
 use crate::library::Library;
 
 /// One node awaiting placement: its id, which the sort keys on, and the one

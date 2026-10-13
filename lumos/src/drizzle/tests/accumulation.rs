@@ -5,11 +5,14 @@
 
 use std::path::PathBuf;
 
-use common::TempDir;
+use common::{CancelToken, TempDir};
+use glam::DVec2;
 
 use super::*;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::ingest::error::AdmissionError;
+use crate::internals::images::rgb_image;
+use crate::math::vec2us::Vec2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::distortion::sip::SipModel;
 

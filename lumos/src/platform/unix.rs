@@ -41,3 +41,10 @@ pub(super) fn free_space(path: &Path) -> Option<u64> {
         .find(|disk| fs::metadata(disk.mount_point()).is_ok_and(|mount| mount.dev() == device))
         .map(Disk::available_space)
 }
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    /// No: a scratch file is unlinked as soon as it is created.
+    #[cfg(test)]
+    pub(crate) const SCRATCH_KEEPS_NAME: bool = false;
+}

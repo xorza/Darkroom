@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
+use crate::graph::func::Func;
 use crate::graph::func::error::{FuncValidationError, OverrideRule};
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
+use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::FuncId;
 use crate::graph::node::CacheMode;
 use crate::internals;

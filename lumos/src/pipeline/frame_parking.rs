@@ -141,9 +141,10 @@ mod tests {
     use crate::frame::frame_stats::FrameStats;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::tier::Tier;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
-    use crate::internals::prelude::*;
     use crate::pipeline::frame_parking::FrameParking;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 

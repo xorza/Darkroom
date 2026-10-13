@@ -14,7 +14,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
@@ -143,7 +143,7 @@ struct Measured {
 impl Measured {
     /// `star` rendered by `psf` at an off-centre position, its peak at half the full well.
     fn of(star: Star, psf: PsfModel) -> Self {
-        let sigma = f64::from(fwhm_to_sigma(star.fwhm));
+        let sigma = f64::from(fwhm::to_sigma(star.fwhm));
         let pos = DVec2::new(64.3, 64.7);
         let flux = (0.5 * TAU * sigma * sigma) as f32;
         let scene = Scene::single(SIZE, pos, flux, BackgroundField::Uniform { level: SKY });

@@ -62,7 +62,6 @@ use crate::calibration::error::CalibrationError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::mad_to_sigma;
@@ -292,12 +291,7 @@ impl DefectMap {
             );
         }
         for indices in [&self.hot.indices, &self.cold_indices] {
-            PixelFlags::add_at(
-                &mut image.flags,
-                self.dimensions,
-                QualityFlags::DEFECT.union(QualityFlags::REPAIRED),
-                indices,
-            );
+            image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), indices);
         }
     }
 }

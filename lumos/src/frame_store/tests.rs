@@ -27,9 +27,11 @@ use crate::image::quality_flags::QualityFlags;
 use crate::internals::panic_message;
 use crate::io::fits::fits_load_options::{FitsHduSelector, FitsLoadOptions};
 use crate::io::load_context::LoadContext;
+use crate::platform::ScratchFile;
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
-/// back with none. Its files have no name while it lives, on Unix, and none outlive it anywhere.
+/// back with none. Its files have no name while it lives where a scratch file keeps none, and none
+/// outlive it anywhere.
 #[test]
 fn a_parked_image_reads_back_and_leaves_no_file() {
     let directory = TempDir::new("frame_store_image");
@@ -39,7 +41,7 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
     image.metadata.exposure_time = Some(30.0);
 
     let stored = StoredImage::spill(&scratch, &image).unwrap();
-    if cfg!(unix) {
+    if !ScratchFile::KEEPS_NAME {
         assert_eq!(directory.entry_count(), 0, "a parked plane kept its name");
     }
     assert_eq!(
@@ -91,7 +93,7 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
     for (i, plane) in planes.iter().enumerate() {
         assert_eq!(plane.chunk(0..6), &[i as f32; 6]);
     }
-    if cfg!(unix) {
+    if !ScratchFile::KEEPS_NAME {
         assert_eq!(root.entry_count(), 1, "a scratch file is visible by name");
     }
     drop((planes, first, second));

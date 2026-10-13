@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use crate::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::report::RunPhase;
+use crate::execution::report::run_reporter::RunPhase;
 use crate::graph::identity::NodeId;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::run_summary::RunSummary;

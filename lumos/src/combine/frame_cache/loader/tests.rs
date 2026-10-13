@@ -16,6 +16,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::error::AdmissionError;
+use crate::ingest::frame_step::NoStep;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::fits::write_fits;
 use crate::memory::run_memory::RunMemory;
@@ -56,12 +57,13 @@ impl SetFrame<'_> {
             combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
         };
         let paths = vec![source; index + 1];
-        FrameLoad::<I> {
+        FrameLoad::<I, NoStep> {
             paths: &paths,
             tier: &tier,
             kept: Some(&DecodeCache::open(cache_dir).unwrap()),
             intake: &intake,
-            step: None,
+            step: &NoStep,
+            image: PhantomData,
         }
         .frame(index, None)
         .map(|loaded| loaded.frame)
@@ -320,7 +322,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
                 &path_refs,
                 &config,
                 IngestRun::planned(RunMemory::new(1 << 30, memory_override), &ingest),
-                None,
+                &NoStep,
             )
             .unwrap()
         };

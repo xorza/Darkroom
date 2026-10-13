@@ -7,12 +7,13 @@
 
 mod matched_filter;
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+
 use crate::internals::synthetic::patterns;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
+use crate::math::fwhm;
 use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
 use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
@@ -294,7 +295,7 @@ fn matched_filter_detects_star() {
         &mut temp,
     );
 
-    let kernel = gaussian_kernel_1d(fwhm_to_sigma(3.0));
+    let kernel = gaussian_kernel_1d(fwhm::to_sigma(3.0));
     let c = kernel.len() / 2;
     let norm: f32 = kernel.iter().map(|&k| k * k).sum();
     let expected = (0.5f32 - 0.1) * kernel[c] * kernel[c] * (1.0 / norm);
@@ -325,7 +326,7 @@ fn matched_filter_peaks_at_the_star() {
     matched_filter_fresh(
         &mut result,
         MatchedFilter {
-            fwhm: sigma_to_fwhm(sigma),
+            fwhm: fwhm::from_sigma(sigma),
             axis_ratio: 1.0,
             angle: 0.0,
         },

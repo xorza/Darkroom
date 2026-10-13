@@ -4,7 +4,7 @@ use glam::Vec2;
 use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
 use crate::core::document::port_ref::{PortKind, PortRef};
-use crate::core::preview;
+use crate::core::preview_sink;
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
@@ -29,7 +29,7 @@ const MISSING_FUNC_LABEL: &str = "missing func";
 /// the prepass gestures, and the record all read nodes through this same type.
 /// The facts that only a *record* has settled — the effective selection, the
 /// open inspectors, the cull region — stay on
-/// [`DrawCtx`](crate::gui::pane::graph::draw_ctx::DrawCtx), which travels beside
+/// [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx), which travels beside
 /// this rather than inside it, so a reader cannot reach for one in a phase
 /// where it does not exist yet.
 ///
@@ -110,7 +110,7 @@ impl<'a> NodeCtx<'a> {
     /// record pass for everything below the node body that asks it.
     ///
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
-    /// `gui::pane::graph::node`'s (`wid::hovered`), and this type sits below
+    /// `gui::pane::graph_ui::node_ui`'s (`wid::hovered`), and this type sits below
     /// that module.
     pub(crate) const fn with_hover(self, hovered: bool) -> Self {
         Self { hovered, ..self }
@@ -205,7 +205,7 @@ impl<'a> NodeCtx<'a> {
     /// stub rather than an empty card.
     pub(crate) fn preview(self) -> bool {
         self.func.is_some()
-            && matches!(self.node.kind, NodeKind::Func(func_id) if preview::is_func(func_id))
+            && matches!(self.node.kind, NodeKind::Func(func_id) if preview_sink::is_func(func_id))
     }
 
     /// Whether the header offers the RAM/disk storage chips. An impure func

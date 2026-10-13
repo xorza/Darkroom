@@ -7,9 +7,14 @@ mod kernels;
 mod square;
 mod synthetic;
 
+use imaginarium::Buffer2;
+
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::internals::prelude::*;
+use crate::internals::images::gray_image;
 use crate::internals::synthetic::fixtures::star_field;
+use crate::math::size2us::Size2us;
 
 use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
 use crate::drizzle::accumulator::DrizzleAccumulator;

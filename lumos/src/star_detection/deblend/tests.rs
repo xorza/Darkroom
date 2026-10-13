@@ -1,8 +1,10 @@
 //! Tests of the shared component data, and comparisons of `local_maxima` with
 //! `multi_threshold`.
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::{

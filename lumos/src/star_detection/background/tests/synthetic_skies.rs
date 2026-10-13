@@ -1,12 +1,15 @@
 //! Background estimation on rendered skies under stars and camera noise, each saved as its input,
 //! background and residual images for inspection.
 
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::internals::init_tracing;
-use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::internals::synthetic::scene::BackgroundField;
 use crate::internals::visual::{ToneMap, save};
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::Scenario;

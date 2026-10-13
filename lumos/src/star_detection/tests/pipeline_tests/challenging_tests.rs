@@ -1,8 +1,9 @@
 //! Star detection under difficult conditions: each test renders a hard forward-model field and
 //! runs the whole detector, held to what its truth decides exactly (see [`run_test`]).
 
+use glam::Vec2;
+
 use crate::internals::init_tracing;
-use crate::internals::prelude::*;
 use crate::internals::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::PsfModel;
 use crate::internals::synthetic::scene::BackgroundField;

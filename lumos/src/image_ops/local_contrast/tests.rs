@@ -1,8 +1,10 @@
+use imaginarium::Buffer2;
+
 use crate::image_ops::local_contrast::{LocalContrast, N_BINS, TileAxis, TileGrid, clip_histogram};
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
-use crate::internals::prelude::*;
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
+use crate::math::size2us::Size2us;
 
 /// A low-contrast horizontal gradient, intensity 0.45 to 0.55.
 fn low_contrast(size: Size2us) -> Vec<f32> {

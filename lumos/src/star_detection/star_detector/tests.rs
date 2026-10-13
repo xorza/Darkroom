@@ -1,3 +1,6 @@
+use glam::DVec2;
+
+use crate::internals::images::gray_image;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
@@ -14,12 +17,19 @@ use crate::star_detection::tests::{Placement, Scenario};
 /// 0.015 of standard deviation: within 5 of them.
 #[test]
 fn a_demosaiced_frame_measures_its_stars_unfiltered() {
+    use glam::Vec2;
+    use imaginarium::Buffer2;
+
     use crate::image::image_provenance::{
         ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
         SourceContainer, TransferProvenance,
     };
-    use crate::internals::prelude::*;
+    use crate::image::linear_image::LinearImage;
+
+    use crate::internals::images::rgb_image;
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+    use crate::internals::test_rng::TestRng;
+    use crate::math::size2us::Size2us;
 
     let size = Size2us::new(64, 64);
     let mut star = Buffer2::new_filled(size.width, size.height, 0.0f32);
@@ -93,7 +103,6 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
 #[test]
 fn detection_is_invariant_to_scale_zero_point_and_rotation() {
     use crate::internals::invariance::Affine;
-    use crate::internals::prelude::*;
 
     let frame = Scenario::default().frame();
     let size = Size2us::new(frame.image.width(), frame.image.height());

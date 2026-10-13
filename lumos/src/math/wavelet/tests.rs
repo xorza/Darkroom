@@ -1,4 +1,6 @@
-use crate::internals::prelude::*;
+use imaginarium::Buffer2;
+
+use crate::math::size2us::Size2us;
 use crate::math::wavelet::{atrous_smooth, max_scales, reflect, white_noise_sigma};
 
 fn pattern(size: Size2us) -> Buffer2<f32> {

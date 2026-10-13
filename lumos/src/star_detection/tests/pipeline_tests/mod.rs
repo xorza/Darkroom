@@ -6,15 +6,17 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::background_map;
 use crate::internals::synthetic::observe::SimFrame;
 use crate::internals::visual::report::{DetectionMetrics, save_metrics};
 use crate::internals::visual::{ToneMap, save, save_comparison};
+use crate::math::size2us::Size2us;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
-use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
+use crate::star_detection::star_detection_config::fwhm_config::{FwhmMode, MatchedFilter};
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
 

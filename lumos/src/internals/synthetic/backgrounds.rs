@@ -143,7 +143,7 @@ pub(super) fn add_nebula_background(pixels: &mut [f32], size: Size2us, config: &
 
 #[cfg(test)]
 mod tests {
-    use crate::internals::prelude::*;
+    use crate::internals::assertions::assert_close;
     use crate::internals::synthetic::backgrounds::*;
 
     use crate::internals::synthetic::patterns;

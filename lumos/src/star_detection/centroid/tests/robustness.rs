@@ -1,3 +1,5 @@
+use glam::Vec2;
+
 use super::*;
 use crate::star_detection::star_detector::stages::filter::FilterRejection;
 
@@ -30,7 +32,7 @@ fn make_blended_stars(
 #[test]
 fn the_windowed_centre_is_pulled_toward_a_companion_as_derived() {
     let size = Size2us::new(64, 64);
-    let fwhm = sigma_to_fwhm(2.5);
+    let fwhm = fwhm::from_sigma(2.5);
     let window = MeasureGrid::new(fwhm).window_sigma;
     let spread = 2.0 * (2.5f64 * 2.5 + 1.0 / 12.0 + window * window);
     let alone = Measured::flat(
@@ -137,7 +139,7 @@ fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
             .stamp(Size2us::new(side, side), 0.1);
         let measured = Measured::flat(&pixels, 0.1, 0.01);
         let centre = measured
-            .windowed(start, sigma_to_fwhm(sigma))
+            .windowed(start, fwhm::from_sigma(sigma))
             .expect("the centroid converges")
             .pos;
         assert!(

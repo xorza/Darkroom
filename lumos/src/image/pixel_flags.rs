@@ -47,72 +47,55 @@ impl PixelFlags {
         counts.any().then_some(Self { bits, counts })
     }
 
-    /// OR `flags` into every pixel whose row-major index satisfies `holds`, creating the plane in
-    /// `slot` when it has none and some pixel does. The counts take the bits it sets, row by row,
-    /// rather than a recount of the plane.
-    pub(crate) fn add_where(
-        slot: &mut Option<Self>,
-        size: Size2us,
-        flags: QualityFlags,
-        holds: impl Fn(usize) -> bool + Sync,
-    ) {
-        match slot {
-            Some(existing) => {
-                debug_assert_eq!(existing.size(), size, "flags for another geometry");
-                let width = size.width.max(1);
-                let added = existing
-                    .bits
-                    .pixels_mut()
-                    .par_chunks_mut(width)
-                    .enumerate()
-                    .map(|(y, row)| {
-                        let mut added = FlagCounts::default();
-                        for (x, byte) in row.iter_mut().enumerate() {
-                            if holds(y * width + x) {
-                                added.tally(QualityFlags::from_byte(flags.byte() & !*byte));
-                                *byte |= flags.byte();
-                            }
-                        }
-                        added
-                    })
-                    .reduce(FlagCounts::default, FlagCounts::merged);
-                existing.counts = existing.counts.merged(added);
-            }
-            None => {
-                *slot = Self::from_fn(size, |index| {
-                    if holds(index) {
-                        flags
-                    } else {
-                        QualityFlags::default()
+    /// OR `flags` into every pixel whose row-major index satisfies `holds`. The counts take the
+    /// bits it sets, row by row, rather than a recount of the plane.
+    pub(crate) fn or_where(&mut self, flags: QualityFlags, holds: impl Fn(usize) -> bool + Sync) {
+        let width = self.size().width.max(1);
+        let added = self
+            .bits
+            .pixels_mut()
+            .par_chunks_mut(width)
+            .enumerate()
+            .map(|(y, row)| {
+                let mut added = FlagCounts::default();
+                for (x, byte) in row.iter_mut().enumerate() {
+                    if holds(y * width + x) {
+                        added.tally(QualityFlags::from_byte(flags.byte() & !*byte));
+                        *byte |= flags.byte();
                     }
-                });
-            }
-        }
+                }
+                added
+            })
+            .reduce(FlagCounts::default, FlagCounts::merged);
+        self.counts = self.counts.merged(added);
     }
 
-    /// OR `flags` into the pixels at `indices`, creating the plane in `slot` when it has none and
-    /// some index is given; the counts take the bits it sets.
-    pub(crate) fn add_at(
-        slot: &mut Option<Self>,
-        size: Size2us,
-        flags: QualityFlags,
-        indices: &[usize],
-    ) {
-        if indices.is_empty() {
-            return;
-        }
-        let existing = slot.get_or_insert_with(|| Self {
-            bits: Buffer2::new_default(size.width, size.height),
-            counts: FlagCounts::default(),
-        });
-        debug_assert_eq!(existing.size(), size, "flags for another geometry");
-        let bytes = existing.bits.pixels_mut();
+    /// OR `flags` into the pixels at `indices`; the counts take the bits it sets.
+    pub(crate) fn or_at(&mut self, flags: QualityFlags, indices: &[usize]) {
+        let bytes = self.bits.pixels_mut();
         for &index in indices {
-            existing
-                .counts
+            self.counts
                 .tally(QualityFlags::from_byte(flags.byte() & !bytes[index]));
             bytes[index] |= flags.byte();
         }
+    }
+
+    /// A `size` plane holding `flags` at `indices` alone; `None` when there are none, so no pixel
+    /// holds one.
+    pub(crate) fn at_indices(
+        size: Size2us,
+        flags: QualityFlags,
+        indices: &[usize],
+    ) -> Option<Self> {
+        if indices.is_empty() || flags == QualityFlags::default() {
+            return None;
+        }
+        let mut plane = Self {
+            bits: Buffer2::new_default(size.width, size.height),
+            counts: FlagCounts::default(),
+        };
+        plane.or_at(flags, indices);
+        Some(plane)
     }
 
     /// [`Self::dilate_window`] over the square `radius` either side of each pixel.

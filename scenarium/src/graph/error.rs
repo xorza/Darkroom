@@ -7,10 +7,10 @@
 
 use thiserror::Error;
 
-use crate::graph::Subscription;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
+use crate::graph::subscription::Subscription;
 
 /// Every graph validation returns this.
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;

@@ -9,7 +9,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
 use crate::simd::Kernel;
 use crate::simd::tier::Tier;
 use crate::star_detection::bench::Stages;
@@ -20,7 +20,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
     let inputs = || {
         let stages: &Stages = stages.get_or_init(|| Stages::of(Field::Typical));
-        let sigma = fwhm_to_sigma(stages.fwhm.expect("the default configuration filters"));
+        let sigma = fwhm::to_sigma(stages.fwhm.expect("the default configuration filters"));
         let mut kernel = Vec::new();
         convolution::fill_gaussian_kernel_1d(sigma, convolution::kernel_radius(sigma), &mut kernel);
         let y = FRAME.height / 2;

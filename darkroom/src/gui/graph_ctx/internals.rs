@@ -13,9 +13,9 @@ use crate::core::document::internals::{self, DocFixture};
 use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
-use crate::gui::window::window_ctx::WindowCtx;
 
 /// An open document, and the theme / library / run a context resolves it
 /// against.

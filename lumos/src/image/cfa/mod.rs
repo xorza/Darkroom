@@ -2,6 +2,7 @@
 //! they leave before demosaicing, which calibration works on, and the demosaic itself.
 
 pub(crate) mod cfa_colour;
+pub(crate) mod cfa_frame_info;
 pub(crate) mod cfa_image;
 pub(crate) mod cfa_lattice;
 pub(crate) mod cfa_pattern;

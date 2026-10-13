@@ -1,4 +1,5 @@
 use super::*;
+use crate::internals::test_rng::TestRng;
 use crate::math::statistics::CHI2_99_2DOF;
 
 /// One estimation: exact points under `known`, the listed indices moved far away, at `confidences`.

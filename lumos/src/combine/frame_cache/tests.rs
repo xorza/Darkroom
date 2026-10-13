@@ -16,7 +16,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;

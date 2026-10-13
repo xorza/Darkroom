@@ -21,7 +21,7 @@ use crate::execution::index::NodeIdx;
 /// slice, and the whole structure is four flat allocations instead of one per
 /// node.
 ///
-/// [`RuntimeCache`]: crate::execution::cache::runtime::RuntimeCache
+/// [`RuntimeCache`]: crate::execution::cache::runtime_cache::RuntimeCache
 #[derive(Debug, Default)]
 pub(crate) struct ConsumerCone {
     /// Reader runs, concatenated in node order.

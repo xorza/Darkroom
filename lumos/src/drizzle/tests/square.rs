@@ -1,3 +1,5 @@
+use glam::DVec2;
+
 use super::*;
 
 /// Two input pixels of different values mixing in one output cell, through the square kernel's

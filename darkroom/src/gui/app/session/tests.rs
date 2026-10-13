@@ -7,14 +7,14 @@ use crate::alloc_audit;
 use crate::core::document::internals::DocFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::preview;
-use crate::gui::app::commands::AppCommand;
-use crate::gui::app::commands::file::FileCommand;
-use crate::gui::app::commands::run::RunCommand;
+use crate::core::preview_sink;
+use crate::gui::app::app_command::AppCommand;
+use crate::gui::app::app_command::file_command::FileCommand;
+use crate::gui::app::app_command::run_command::RunCommand;
 use crate::gui::app::session::internals::SessionHarness;
-use crate::gui::pane::graph::node::preview_row;
-use crate::gui::pane::graph::toolbar;
-use crate::gui::pane::viewer::ImageViewer;
+use crate::gui::pane::graph_ui::node_ui::preview_row;
+use crate::gui::pane::graph_ui::toolbar;
+use crate::gui::pane::image_viewer::ImageViewer;
 use crate::gui::state::preview_store;
 use crate::gui::state::preview_store::StoredContent;
 
@@ -46,7 +46,7 @@ const AUDITED_FRAMES: usize = 64;
 #[test]
 fn a_settled_frame_records_without_allocating() {
     let mut fixture = DocFixture::probes(6);
-    let node = fixture.add(&preview::func(Arc::default()));
+    let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state.previews.ingest_preview(
         test.ui.ui(),
@@ -77,7 +77,7 @@ fn a_settled_frame_records_without_allocating() {
 #[test]
 fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
     let mut fixture = DocFixture::default();
-    let node = fixture.add(&preview::func(Arc::default()));
+    let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state.previews.ingest_preview(
         test.ui.ui(),

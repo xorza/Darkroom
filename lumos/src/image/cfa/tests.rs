@@ -7,6 +7,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::frame::stackable_image::StackableImage;
+use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_image::*;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::*;
@@ -20,11 +21,9 @@ use crate::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::DomainMap;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::assertions::assert_close;
-use crate::internals::cfa::XTRANS_PATTERN;
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::internals::test_rng::TestRng;
 use crate::io::error::FitsRefusal;
@@ -1039,9 +1038,7 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         .map(|index| (index % 6 + 10 * (index / 6)) as f32)
         .collect();
     let mut bayer = make_cfa(size, pixels.clone(), CfaType::Bayer(CfaPattern::Rggb));
-    PixelFlags::add_where(&mut bayer.flags, size, QualityFlags::SATURATED, |index| {
-        index == 1
-    });
+    bayer.add_flags_where(QualityFlags::SATURATED, |index| index == 1);
     let proxy = bayer.green_proxy();
     let plane = proxy.channel(0);
     assert_eq!(plane[(0, 0)], 5.5);

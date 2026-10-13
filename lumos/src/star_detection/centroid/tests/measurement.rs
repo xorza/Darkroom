@@ -3,6 +3,8 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+use glam::Vec2;
+
 use super::*;
 use crate::scratch_pool::Pooled;
 use std::f32::consts::PI;

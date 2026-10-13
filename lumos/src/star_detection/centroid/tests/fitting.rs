@@ -13,7 +13,7 @@ use rayon::prelude::*;
 #[test]
 fn every_method_on_a_sub_pixel_grid() {
     let size = Size2us::new(32, 32);
-    let fwhm = sigma_to_fwhm(2.5);
+    let fwhm = fwhm::from_sigma(2.5);
     let moments = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
@@ -115,7 +115,7 @@ fn moment_metrics_of_gaussian_stars() {
             angle: 0.0,
         };
         let pixels = SyntheticStar::new(at.as_vec2(), 0.8, profile).stamp(size, 0.1);
-        let radius = measure_grid::stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
+        let radius = measure_grid::stamp_radius(fwhm::from_sigma(sigma_x.max(sigma_y)));
         let star = Measured::flat(&pixels, 0.1, 0.01)
             .compute(at, radius)
             .expect("a star");

@@ -1,9 +1,13 @@
+use common::CancelToken;
+
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::internals::prelude::*;
+use crate::internals::images::gray_image;
+use crate::internals::test_rng::TestRng;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
@@ -221,7 +225,10 @@ fn prepare_rgb_red_star_survives() {
 #[test]
 fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
     use crate::image::pixel_flags::PixelFlags;
-    use crate::internals::prelude::*;
+
+    use crate::internals::images::rgb_image;
+
+    use crate::math::size2us::Size2us;
 
     let size = Size2us::new(2, 1);
     let image = rgb_image(size, vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]);

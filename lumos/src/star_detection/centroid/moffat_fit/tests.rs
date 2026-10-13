@@ -1,6 +1,9 @@
 //! Tests for Moffat profile fitting.
 
-use crate::internals::prelude::*;
+use glam::Vec2;
+use imaginarium::Buffer2;
+
+use crate::math::size2us::Size2us;
 
 use std::f64::consts::PI;
 
@@ -232,7 +235,7 @@ fn moffat_fit_recovers_known_parameters() {
                 ),
                 (
                     "FWHM",
-                    relative(result.fwhm, alpha_beta_to_fwhm(case.alpha, case.beta)),
+                    relative(result.fwhm, fwhm::from_alpha_beta(case.alpha, case.beta)),
                 ),
             ] {
                 assert!(error <= bound, "{}: {what} off by {error:e}", case.name);

@@ -6,8 +6,12 @@ use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::prelude::*;
+use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use common::CancelToken;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around

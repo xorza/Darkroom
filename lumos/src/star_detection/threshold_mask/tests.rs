@@ -1,7 +1,9 @@
 //! Tests for threshold mask creation (packed `BitBuffer2` version).
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
 /// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.

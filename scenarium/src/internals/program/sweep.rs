@@ -2,7 +2,7 @@
 //! and [`Swept`], what it leaves behind.
 
 use crate::DynamicValue;
-use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;

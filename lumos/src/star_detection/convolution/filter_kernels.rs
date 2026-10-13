@@ -6,7 +6,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
-use crate::math::fwhm::fwhm_to_sigma;
+use crate::math::fwhm;
 use crate::math::pixel_quadrature::PixelQuadrature;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::Kernel2d;
@@ -78,7 +78,7 @@ impl FilterKernels {
             "Axis ratio must be in (0, 1]"
         );
 
-        let sigma = fwhm_to_sigma(fwhm);
+        let sigma = fwhm::to_sigma(fwhm);
 
         // sqrt(sum(K²)) of the kernel the convolution used; an axis ratio this close to 1 takes
         // the separable circular kernel.

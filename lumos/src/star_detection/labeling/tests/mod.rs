@@ -14,8 +14,10 @@
 
 use std::collections::VecDeque;
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;

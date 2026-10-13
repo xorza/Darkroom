@@ -40,7 +40,6 @@ use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 
@@ -133,9 +132,7 @@ pub(crate) fn reject(
         ),
     };
     if count > 0 {
-        PixelFlags::add_where(
-            &mut image.flags,
-            size,
+        image.add_flags_where(
             QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
             |index| found.get(index),
         );

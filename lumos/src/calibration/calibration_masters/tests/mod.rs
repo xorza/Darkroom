@@ -27,29 +27,30 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::preview_image::PreviewImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::ingest::ingest_config::IngestConfig;
-use crate::internals::assertions::bits;
-use crate::internals::cfa::XTRANS_PATTERN;
-use crate::internals::cfa::cfa_from_plane;
-use crate::internals::cfa::{constant_cfa, make_cfa};
+use crate::internals::assertions::{assert_close, bits};
+use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane, constant_cfa, make_cfa};
 use crate::internals::fits::rewrite_fits;
-use crate::internals::prelude::*;
 use crate::io::load_context::LoadContext;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{
     BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColourDefects,
     DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata, MasterRole,
 };
-use common::TempDir;
+use common::{CancelToken, TempDir};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
+use imaginarium::Buffer2;
 use std::convert::Infallible;
 use std::fs;
 use std::path::PathBuf;

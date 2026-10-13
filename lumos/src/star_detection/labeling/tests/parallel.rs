@@ -1,7 +1,7 @@
 //! Masks tall enough to cut into several bands: every band count in `STRIP_COUNTS` puts its
 //! boundaries somewhere else, so each case is stitched at many rows.
 
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::tests::{Mask, STRIP_COUNTS, check};
 
 const SIZE: Size2us = Size2us::new(400, 300);

@@ -56,8 +56,8 @@ pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
 /// [`bare_value`] behind a muted micro-label, as two direct `Text` widgets
 /// (no wrapping panel — draw it inside the caller's own panel so its `gap`
 /// spaces the pair like any other sibling). Shared shape behind a node body's
-/// memory footer (`gui::pane::graph::node::memory_row`) and a preview node's
-/// image-info footer (`gui::pane::graph::node::preview_row`).
+/// memory footer (`gui::pane::graph_ui::node_ui::memory_row`) and a preview node's
+/// image-info footer (`gui::pane::graph_ui::node_ui::preview_row`).
 pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: impl Display) {
     Text::new(label)
         .style(&muted_text(ui, theme, theme.text.caption))

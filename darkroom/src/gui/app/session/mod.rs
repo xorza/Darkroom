@@ -18,12 +18,12 @@
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
-use crate::gui::app::commands::AppCommand;
-use crate::gui::app::commands::file::FileCommand;
-use crate::gui::app::commands::run::RunCommand;
+use crate::gui::app::app_command::AppCommand;
+use crate::gui::app::app_command::file_command::FileCommand;
+use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::main_window::MainWindow;
+use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::requests::Requests;
-use crate::gui::window::MainWindow;
-use crate::gui::window::window_ctx::WindowCtx;
 use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 

@@ -1,7 +1,8 @@
+use glam::DVec2;
 use rayon::prelude::*;
 
-use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::generate_random_positions;
+use crate::internals::test_rng::TestRng;
 use crate::registration::final_fit::fit_catalogs::{CAUCHY_TUNING, FitCatalogs};
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
 use crate::registration::final_fit::{FinalFit, FitModel};

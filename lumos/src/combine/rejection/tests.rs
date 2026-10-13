@@ -11,7 +11,7 @@ use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::*;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
 use crate::internals::invariance::Affine;
-use crate::internals::prelude::*;
+use crate::internals::test_rng::TestRng;
 
 /// A pixel's samples, each of background noise σ `background`.
 #[derive(Debug, Clone, Copy)]

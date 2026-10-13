@@ -13,7 +13,8 @@
 
 mod simd;
 
-use crate::math::fwhm::{FWHM_PER_SIGMA, alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
+use crate::math::fwhm;
+use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
@@ -222,9 +223,9 @@ impl MoffatFit {
         );
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
-        let fwhm_est = sigma_to_fwhm(fit.sigma_est);
-        let initial_alpha = f64::from(fwhm_beta_to_alpha(fwhm_est, beta))
-            .clamp(model.min_alpha, model.stamp_radius);
+        let fwhm_est = fwhm::from_sigma(fit.sigma_est);
+        let initial_alpha =
+            f64::from(fwhm::to_alpha(fwhm_est, beta)).clamp(model.min_alpha, model.stamp_radius);
 
         let initial_params: [f64; 5] = [
             fit.local_pos.x,
@@ -249,7 +250,7 @@ impl MoffatFit {
         Some(Self {
             pos: result_pos,
             position_sigma: centroid::position_sigma(&result, fit.stamp.z.len())?,
-            fwhm: alpha_beta_to_fwhm(alpha as f32, beta),
+            fwhm: fwhm::from_alpha_beta(alpha as f32, beta),
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result, model.quadrature.nodes().len()),
         })

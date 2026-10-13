@@ -4,7 +4,7 @@
 //! with a fixed window biases wide stars and clips narrow ones, so the window iterates toward the
 //! star's own width, and the 2×2 matrix that results is small enough to invert in closed form.
 
-use crate::math::fwhm::equal_area_fwhm;
+use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid;
 use crate::star_detection::centroid::{MAX_STAMP_SIZE, StampAt};
@@ -25,9 +25,9 @@ impl Cov2 {
         self.xx * self.yy - self.xy * self.xy
     }
 
-    /// The FWHM of the circle of equal area — see [`equal_area_fwhm`].
+    /// The FWHM of the circle of equal area — see [`fwhm::equal_area`].
     pub(super) fn fwhm(self) -> f32 {
-        equal_area_fwhm(self.det())
+        fwhm::equal_area(self.det())
     }
 
     /// `√(1 − λ₂/λ₁)` from the principal variances `λ₁ ≥ λ₂`: 0 for a round profile, toward 1 as

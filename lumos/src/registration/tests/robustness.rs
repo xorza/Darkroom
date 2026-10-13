@@ -2,10 +2,12 @@
 //! positions, missing and spurious stars, partial overlap, large rotations and scales, and the
 //! smallest catalogs that register.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::internals::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, generate_random_stars,
 };
+use crate::internals::test_rng::TestRng;
 use crate::registration::error::RegistrationError;
 use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;

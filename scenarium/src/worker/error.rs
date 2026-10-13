@@ -9,7 +9,7 @@
 
 use std::fmt::Display;
 
-use crate::execution::cache::runtime::error::{CacheFlushUnsupported, CacheNodeFailure};
+use crate::execution::cache::runtime_cache::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::execution::error::Error;
 
 #[derive(Debug, thiserror::Error)]

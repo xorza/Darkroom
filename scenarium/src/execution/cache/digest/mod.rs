@@ -4,14 +4,14 @@
 //! A node's output is a pure function of its function identity, its resolved input
 //! values, the outputs of its upstream producers, and the prepared identities of
 //! external resources it reads.
-//! [`RuntimeCache::node_digest`](crate::execution::cache::runtime::RuntimeCache::node_digest)
+//! [`RuntimeCache::node_digest`](crate::execution::cache::runtime_cache::RuntimeCache::node_digest)
 //! folds that into a 256-bit
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
 //! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
 //! versioning them; the fold itself is a cache method, since all three things it reads
 //! (slots, the path memo, the program) are the cache's. External identities come from that
-//! memo, filled once per run by a [`StampJob`](crate::execution::cache::resource::StampJob),
+//! memo, filled once per run by a [`StampJob`](crate::execution::cache::stamp_job::StampJob),
 //! keeping this fold I/O-free.
 //! Equal digests ⇒ identical computation, so the digest is at once the cache key
 //! and the invalidation signal: change anything upstream and every downstream digest
@@ -24,15 +24,16 @@
 //!   different values for the same inputs reuses every digest it already produced. Give the
 //!   changed implementation a new id — that also drops the node's persistent
 //!   `state`/`event_state` at the next install
-//!   ([`RuntimeCache::reconcile`](crate::execution::cache::runtime::RuntimeCache::reconcile)),
+//!   ([`RuntimeCache::reconcile`](crate::execution::cache::runtime_cache::RuntimeCache::reconcile)),
 //!   so a new implementation never inherits its predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
 //! - **`FsPath` identity is `(len, mtime)`** — a file's own, or that of every file
 //!   beneath a directory (empty directories are not part of it),
-//!   prepared by [`RuntimeCache::prepare`](crate::execution::cache::runtime::RuntimeCache::prepare), so a
-//!   folder-reading node can be `Pure` and still re-key when its contents change. A
+//!   prepared by
+//!   [`RuntimeCache::prepare`](crate::execution::cache::runtime_cache::RuntimeCache::prepare),
+//!   so a folder-reading node can be `Pure` and still re-key when its contents change. A
 //!   same-size edit within mtime granularity can slip through; explicit runtime cache
 //!   eviction removes the affected node and downstream blobs.
 //! - **A reference is dereferenced only through an input declared with its resource

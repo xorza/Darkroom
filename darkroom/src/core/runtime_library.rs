@@ -6,7 +6,7 @@ use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_
 use scenarium::Library as ScenariumLibrary;
 use scenarium::{math_library, system_library, worker_events_library};
 
-use crate::core::preview::{self, PreviewSink};
+use crate::core::preview_sink::{self, PreviewSink};
 
 #[derive(Debug)]
 pub(crate) struct RuntimeLibrary {
@@ -51,7 +51,7 @@ impl RuntimeLibrary {
 
 fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> ScenariumLibrary {
     let mut library = ScenariumLibrary::default();
-    library.add(preview::func(Arc::clone(previews)));
+    library.add(preview_sink::func(Arc::clone(previews)));
     library.merge(math_library());
     library.merge(system_library());
     library.merge(worker_events_library());

@@ -1,5 +1,5 @@
 use crate::internals::synthetic::star_profiles::*;
-use crate::math::fwhm::{fwhm_beta_to_alpha, fwhm_to_sigma};
+use crate::math::fwhm;
 use std::f32::consts::FRAC_PI_2;
 
 const GAUSSIAN_2: StarProfile = StarProfile::gaussian(2.0);
@@ -121,14 +121,14 @@ fn moffat_carries_heavier_wings_than_a_gaussian_of_equal_fwhm() {
         Vec2::splat(32.0),
         1.0,
         StarProfile::Moffat {
-            alpha: fwhm_beta_to_alpha(fwhm, beta),
+            alpha: fwhm::to_alpha(fwhm, beta),
             beta,
         },
     );
     let gaussian = SyntheticStar::new(
         Vec2::splat(32.0),
         1.0,
-        StarProfile::gaussian(fwhm_to_sigma(fwhm)),
+        StarProfile::gaussian(fwhm::to_sigma(fwhm)),
     );
 
     // Equal FWHM means they cross at the half-maximum point...
@@ -144,9 +144,9 @@ fn moffat_needs_a_wider_radius_than_a_gaussian_to_reach_the_same_floor() {
     // 8α vs 4σ: for equal FWHM the Moffat box is the larger one.
     let beta = 2.5;
     let moffat = StarProfile::Moffat {
-        alpha: fwhm_beta_to_alpha(4.0, beta),
+        alpha: fwhm::to_alpha(4.0, beta),
         beta,
     };
-    let gaussian = StarProfile::gaussian(fwhm_to_sigma(4.0));
+    let gaussian = StarProfile::gaussian(fwhm::to_sigma(4.0));
     assert!(moffat.radius() > gaussian.radius());
 }

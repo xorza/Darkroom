@@ -16,11 +16,14 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BackgroundField, Scene};
+use crate::internals::test_rng::TestRng;
+use crate::math::vec2us::Vec2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::{TransformModel, TransformType};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::TempDir;
+use common::{CancelToken, TempDir};
+use glam::DVec2;
 
 /// The known scene: colour `colour`'s value at reference pixel `(x, y)`, distinct in every
 /// colour and every pixel of a period, and a multiple of 1/64 so every sum below is exact.

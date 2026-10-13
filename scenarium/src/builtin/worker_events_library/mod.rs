@@ -2,11 +2,13 @@ use std::future;
 use std::time::Duration;
 
 use crate::DataType;
+use crate::graph::func::Func;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::error::InvokeResult;
 use crate::graph::func::event::EventLambda;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
-use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
 use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;

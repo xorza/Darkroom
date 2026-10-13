@@ -1,5 +1,7 @@
 use std::ops::RangeInclusive;
 
+use glam::DVec2;
+
 use crate::math::fwhm::FWHM_PER_SIGMA;
 
 use super::*;

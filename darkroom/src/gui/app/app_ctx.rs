@@ -14,11 +14,11 @@ use crate::gui::theme::Theme;
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`WindowCtx`](crate::gui::window::window_ctx::WindowCtx) pairs this with the
+/// [`WindowCtx`](crate::gui::main_window::window_ctx::WindowCtx) pairs this with the
 /// document being edited, [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) adds
 /// the resolved output types a canvas reads, and everything under the canvas
 /// reads the theme, the library and the run back off *that* — which is why
-/// nothing below [`MainWindow`](crate::gui::window::MainWindow) names this
+/// nothing below [`MainWindow`](crate::gui::main_window::MainWindow) names this
 /// type.
 ///
 /// **No document here**, deliberately: `App` composes one of these once per
@@ -75,7 +75,7 @@ impl<'a> AppCtx<'a> {
     }
 
     /// The last failed action's message (the engine's
-    /// [`StatusLog::current`](crate::core::status::StatusLog::current)),
+    /// [`StatusLog::current`](crate::core::status_log::StatusLog::current)),
     /// shown in the status bar until a success of its family clears it.
     pub(crate) const fn status_error(self) -> Option<&'a str> {
         self.status.error

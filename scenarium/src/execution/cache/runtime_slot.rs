@@ -99,7 +99,7 @@ pub(crate) struct RuntimeSlot {
     /// The node's current content digest — its cache-validity key (`None` when not reproducible),
     /// stamped producer-first by the resolver and refreshed at execution reach only for a late
     /// bound-path identity
-    /// ([`RuntimeCache::node_digest`](crate::execution::cache::runtime::RuntimeCache::node_digest)).
+    /// ([`RuntimeCache::node_digest`](crate::execution::cache::runtime_cache::RuntimeCache::node_digest)).
     /// A resident value hits iff its `produced_under` equals this — so a flipped-back input can't
     /// serve a stale value.
     pub(crate) current_digest: Option<Digest>,

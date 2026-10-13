@@ -6,16 +6,16 @@ use common::CancelToken;
 
 use crate::worker::error::WorkerExited;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::task::{WorkerLinks, WorkerTask};
+use crate::worker::worker_task::{WorkerLinks, WorkerTask};
 
+pub(crate) mod active_event_loop;
 pub(crate) mod activity;
-pub(crate) mod batch;
+pub(crate) mod batch_intent;
 pub(crate) mod error;
-pub(crate) mod event_loop;
 pub(crate) mod pause_gate;
 pub(crate) mod protocol;
 pub(crate) mod run_summary;
-mod task;
+mod worker_task;
 
 #[derive(Debug)]
 pub struct Worker {

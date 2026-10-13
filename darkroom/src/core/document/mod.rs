@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::tab_ref::TabRef;
-use crate::core::preview;
+use crate::core::preview_sink;
 
 /// The thing being edited: the authoring `Graph`, the editor view metadata
 /// positioning it, and the pane layout showing it. The `Library` it resolves
@@ -82,7 +82,7 @@ impl Document {
     ///
     /// **Who asks it, and where the next one goes.** Two sweeps run from
     /// `App::update`, once a frame, and between them their bodies name every
-    /// cache: [`MainWindow::reconcile`](crate::gui::window::MainWindow::reconcile)
+    /// cache: [`MainWindow::reconcile`](crate::gui::main_window::MainWindow::reconcile)
     /// for what the window owns, and `RunState::sync` for the published preview
     /// values (through [`Self::holds_preview_node`]). A new cache derived from
     /// the document joins one of those two bodies rather than earning a third
@@ -126,7 +126,7 @@ impl Document {
         self.graph
             .find(node_id)
             .is_some_and(|node| match node.kind {
-                NodeKind::Func(func_id) => preview::is_func(func_id),
+                NodeKind::Func(func_id) => preview_sink::is_func(func_id),
                 NodeKind::Special(_) => false,
             })
     }
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();
-        let preview_func = preview::func(Arc::default());
+        let preview_func = preview_sink::func(Arc::default());
         fixture.library.add(preview_func.clone());
         let preview = fixture.doc.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);

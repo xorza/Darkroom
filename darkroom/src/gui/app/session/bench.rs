@@ -46,7 +46,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
-use crate::core::preview;
+use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::session::Session;
@@ -132,7 +132,7 @@ impl Editor {
         let adjust = func("Brightness / Contrast");
         let transform = func("Transform");
         let blend = func("Blend");
-        let show = preview::registered(&library)
+        let show = preview_sink::registered(&library)
             .expect("the runtime library holds the preview node")
             .clone();
 

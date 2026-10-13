@@ -5,7 +5,11 @@
 
 use std::f64::consts::PI;
 
+use glam::DVec2;
+
 use super::*;
+use crate::internals::images::rgb_image;
+use crate::math::vec2us::Vec2us;
 
 /// An image of `value` with `pixel` set to `bright`.
 fn one_pixel_image(size: Size2us, value: f32, pixel: Vec2us, bright: f32) -> LinearImage {

@@ -184,6 +184,16 @@ impl FileSystem {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::platform::{MappedFile, os};
+    #[cfg(test)]
+    use crate::platform::{ScratchFile, files};
+
+    #[cfg(test)]
+    impl ScratchFile {
+        /// Whether a scratch file keeps its name in its directory while it is open: not on Unix,
+        /// which unlinks it as it is created; on Windows, which deletes it as its last handle
+        /// closes.
+        pub(crate) const KEEPS_NAME: bool = files::internals::SCRATCH_KEEPS_NAME;
+    }
 
     impl MappedFile {
         /// Whether [`Self::evict`] can drop a file's pages on this system: on Linux, not on macOS

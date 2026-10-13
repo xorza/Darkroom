@@ -5,7 +5,7 @@ use crate::graph::func::Func;
 use crate::graph::func::error::InvokeResult;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::runtime::any_state::AnyState;
-use crate::runtime::context::ContextManager;
+use crate::runtime::context_manager::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// The five collaborators a lambda is handed, held so a test can just say what

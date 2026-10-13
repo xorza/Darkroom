@@ -3,19 +3,23 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::masks::CrMasks;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
 use crate::calibration::cosmic_ray::mono::replace_flagged;
 use crate::calibration::cosmic_ray::*;
 use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::image::pixel_flags::PixelFlags;
 use crate::internals::assertions::bits;
-use crate::internals::cfa::XTRANS_PATTERN;
-use crate::internals::cfa::cfa_from_plane;
-use crate::internals::prelude::*;
+use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane};
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
+use crate::internals::test_rng::TestRng;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::median_mut;
+use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::ScratchPool;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars

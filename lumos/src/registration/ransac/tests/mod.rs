@@ -1,6 +1,7 @@
 //! Tests for RANSAC module.
 
-use crate::internals::prelude::*;
+use glam::DVec2;
+
 use crate::registration::ransac::ransac_config::ScaleRange;
 use crate::registration::ransac::*;
 use std::f64::consts::PI;

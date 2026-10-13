@@ -170,7 +170,9 @@ impl StackProduct {
 mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
-    use crate::internals::prelude::*;
+    use crate::image::image_dimensions::ImageDimensions;
+    use crate::image::linear_image::LinearImage;
+    use crate::math::size2us::Size2us;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;

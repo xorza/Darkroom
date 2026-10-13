@@ -9,7 +9,7 @@
 //! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
 //!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
-//! 3. **execute** — the [`RuntimeCache`](cache::runtime::RuntimeCache) prepares filesystem
+//! 3. **execute** — the [`RuntimeCache`](cache::runtime_cache::RuntimeCache) prepares filesystem
 //!    identities on the blocking pool; [`resolve`](schedule::RunSchedule::resolve) stamps
 //!    content digests, then derives cache-aware liveness, exact output demand, and reader
 //!    counts in one consumer-first sweep, refining that same schedule. The

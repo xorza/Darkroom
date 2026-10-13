@@ -6,12 +6,13 @@
 )]
 
 use crate::internals::init_tracing;
-use crate::internals::prelude::*;
 use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
+use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
+use glam::DVec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 

@@ -1,7 +1,10 @@
+use imaginarium::Buffer2;
+
 use crate::image_ops::hdr::Hdr;
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{gray_image as gray, rgb_image as rgb};
-use crate::internals::prelude::*;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
 use std::mem;
 

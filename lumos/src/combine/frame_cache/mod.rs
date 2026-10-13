@@ -49,7 +49,7 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::ingest::frame_check::FrameCheck;
-use crate::ingest::frame_step::FrameStep;
+use crate::ingest::frame_step::{FrameStep, NoStep};
 use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
 use crate::math::vec2us::Vec2us;
@@ -665,7 +665,7 @@ impl FrameCache {
         paths: &[P],
         config: &StackConfig,
         run: IngestRun,
-        step: Option<&dyn FrameStep<CfaImage, Error = SubtractionError>>,
+        step: &impl FrameStep<CfaImage, Error = SubtractionError>,
     ) -> Result<Self, StackError> {
         let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
         Self::from_tiered_paths(
@@ -683,7 +683,7 @@ impl FrameCache {
         run: IngestRun,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage>(paths, config, run, None)?,
+            loader::load_tiered::<LinearImage>(paths, config, run, &NoStep)?,
             config.normalization,
         )
     }

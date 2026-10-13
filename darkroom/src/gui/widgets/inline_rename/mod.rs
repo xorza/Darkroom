@@ -1,7 +1,7 @@
 //! Reusable inline-rename label. Renders plain text that swaps to a
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
-//! (`gui::pane::graph::node::header`), which maps the returned
+//! (`gui::pane::graph_ui::node_ui::header`), which maps the returned
 //! [`RenameEvent`] onto a `RenameNode` intent.
 
 use palantir::prelude::*;

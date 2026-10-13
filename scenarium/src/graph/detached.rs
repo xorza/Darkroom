@@ -12,11 +12,11 @@
 
 use ::serde::{Deserialize, Serialize};
 
-use crate::graph::BindingEntry;
-use crate::graph::Subscription;
+use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::DetachedNodeError;
 use crate::graph::identity::NodeId;
 use crate::graph::node::Node;
+use crate::graph::subscription::Subscription;
 
 /// A node taken out of a graph, with every binding and subscription that
 /// touched it, in the order the graph keeps them. Well formed by

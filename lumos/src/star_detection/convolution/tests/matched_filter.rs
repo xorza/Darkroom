@@ -8,9 +8,11 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use crate::internals::prelude::*;
+use imaginarium::Buffer2;
+
 use crate::internals::synthetic::background_map;
 use crate::internals::visual::{ToneMap, save};
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;

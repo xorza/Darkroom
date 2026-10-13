@@ -437,7 +437,10 @@ impl From<LinearImage> for Image {
 
 #[cfg(test)]
 mod tests {
-    use crate::internals::prelude::*;
+    use imaginarium::Buffer2;
+
+    use crate::internals::images::{gray_image, rgb_image};
+    use crate::math::size2us::Size2us;
 
     #[test]
     fn map_rgb_maps_every_channel_of_a_pixel_and_skips_grayscale() {

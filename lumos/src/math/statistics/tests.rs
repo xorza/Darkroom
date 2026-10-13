@@ -2,7 +2,7 @@
 
 use std::f64::consts::{PI, SQRT_2};
 
-use crate::internals::prelude::*;
+use crate::internals::assertions::assert_close;
 use crate::math::statistics::clipped_stats::ClippedStats;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::*;

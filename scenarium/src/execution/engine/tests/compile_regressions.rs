@@ -2,8 +2,8 @@ use std::slice;
 
 use super::*;
 
-use crate::graph::func::FuncInput;
-use crate::graph::func::FuncOutput;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::FuncOutput;
 use crate::{FsPathConfig, FsPathMode};
 
 /// The output pool is range-addressed: when a consumer precedes its producer

@@ -17,7 +17,7 @@ fn noisy_stars_land_within_their_reported_sigma() {
     const NOISE: f32 = 0.01;
     const SKY: f32 = 0.1;
     let fwhm = 4.0f32;
-    let sigma = fwhm_to_sigma(fwhm);
+    let sigma = fwhm::to_sigma(fwhm);
     let stars = [
         (DVec2::new(50.0, 50.0), 0.28f32),
         (DVec2::new(100.3, 50.2), 0.28),
@@ -88,7 +88,7 @@ fn the_position_sigma_matches_the_scatter() {
     let clean = SyntheticStar::new(
         truth.as_vec2(),
         0.3,
-        StarProfile::gaussian(fwhm_to_sigma(fwhm)),
+        StarProfile::gaussian(fwhm::to_sigma(fwhm)),
     )
     .stamp(Size2us::new(32, 32), 0.1);
     let grid = MeasureGrid::new(fwhm);

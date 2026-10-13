@@ -1,6 +1,6 @@
 //! What a publication that did not fail actually did.
 
-use crate::data::type_system::TypeId;
+use crate::data::data_type::TypeId;
 
 /// What a publication that did not fail actually did.
 ///

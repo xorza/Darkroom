@@ -32,7 +32,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         ..Default::default()
     };
     let radius = measure_grid::stamp_radius(SEED_FWHM);
-    let window_sigma = f64::from(0.8 * fwhm_to_sigma(SEED_FWHM));
+    let window_sigma = f64::from(0.8 * fwhm::to_sigma(SEED_FWHM));
     for (x, y, sigma) in [(64.3, 64.7, 2.5f32), (64.0, 64.0, 3.0), (64.6, 63.8, 3.0)] {
         let truth = DVec2::new(x, y);
         let pixels = SyntheticStar::new(
