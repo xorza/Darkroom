@@ -4,14 +4,10 @@ use crate::math::size2us::Size2us;
 use crate::math::wavelet::{atrous_smooth, max_scales, reflect, white_noise_sigma};
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
-    let px = (0..size.pixel_count())
-        .map(|i| {
-            let p = size.point_of(i);
-            let (x, y) = (p.x as f32, p.y as f32);
-            0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
-        })
-        .collect();
-    Buffer2::new(size.width, size.height, px)
+    Buffer2::from_fn(size.width, size.height, |x, y| {
+        let (x, y) = (x as f32, y as f32);
+        0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
+    })
 }
 
 #[test]

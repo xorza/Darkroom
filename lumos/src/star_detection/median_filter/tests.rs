@@ -25,10 +25,7 @@ fn gradient_image() {
     // 10x10 gradient: pixel(x,y) = (x+y)/20.0
     let width = 10;
     let height = 10;
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 20.0))
-        .collect();
-    let pixels = Buffer2::new(width, height, data);
+    let pixels = Buffer2::from_fn(width, height, |x, y| (x + y) as f32 / 20.0);
 
     let mut output = Buffer2::new_default(width, height);
     apply_3x3(&pixels, &mut output);
@@ -245,13 +242,7 @@ fn bayer_pattern_removal() {
     // Alternating row brightness: even rows = 0.4, odd rows = 0.6
     let width = 10;
     let height = 10;
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| {
-            let base = if y % 2 == 0 { 0.4 } else { 0.6 };
-            (0..width).map(move |_| base)
-        })
-        .collect();
-    let pixels = Buffer2::new(width, height, data);
+    let pixels = Buffer2::from_fn(width, height, |_, y| if y % 2 == 0 { 0.4 } else { 0.6 });
 
     let mut output = Buffer2::new_default(width, height);
     apply_3x3(&pixels, &mut output);
@@ -507,11 +498,7 @@ fn matches_a_sorted_reference_everywhere() {
         (1031, 37),
     ] {
         let mut rng = TestRng::new((width * 1000 + height) as u64);
-        let pixels = Buffer2::new(
-            width,
-            height,
-            (0..width * height).map(|_| rng.next_f32()).collect(),
-        );
+        let pixels = Buffer2::from_fn(width, height, |_, _| rng.next_f32());
         let mut output = Buffer2::new_default(width, height);
         apply_3x3(&pixels, &mut output);
         for y in 0..height {

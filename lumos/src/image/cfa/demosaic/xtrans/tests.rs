@@ -217,16 +217,10 @@ fn a_uniform_frame_demosaics_to_itself() {
 fn markesteijn_is_odd() {
     let size = Size2us::new(96, 96);
     let mut rng = TestRng::new(13);
-    let data = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|index| {
-                let stripe = (index % size.width + index / size.width) % 7 < 3;
-                (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
-            })
-            .collect(),
-    );
+    let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+        let stripe = (x + y) % 7 < 3;
+        (if stripe { -0.05 } else { -0.45 }) + 0.01 * (rng.next_f32() - 0.5)
+    });
     let negated = Buffer2::new(
         size.width,
         size.height,
@@ -259,13 +253,9 @@ fn markesteijn_is_odd() {
 fn f32_demosaic_preserves_signed_native_samples() {
     let size = Size2us::new(18, 18);
     let pattern = XTRANS_PATTERN;
-    let data = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|index| (index % 17) as f32 * 0.25 - 2.0)
-            .collect(),
-    );
+    let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+        ((y * size.width + x) % 17) as f32 * 0.25 - 2.0
+    });
     let rgb = markesteijn::demosaic(
         &XTransImage::new(&data, pattern),
         MarkesteijnPasses::One,
@@ -294,13 +284,10 @@ fn f32_demosaic_preserves_signed_native_samples() {
 fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let size = Size2us::new(18, 18);
     let pedestal = 0.375;
-    let base = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|index| 0.2 + (index * 37 % 101) as f32 / 200.0)
-            .collect(),
-    );
+    let base = Buffer2::from_fn(size.width, size.height, |x, y| {
+        let index = y * size.width + x;
+        0.2 + (index * 37 % 101) as f32 / 200.0
+    });
     let shifted = Buffer2::new(
         size.width,
         size.height,
@@ -330,20 +317,13 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     }
 
     let contrast = Size2us::new(30, 30);
-    let blocks = Buffer2::new(
-        contrast.width,
-        contrast.height,
-        (0..contrast.pixel_count())
-            .map(|index| {
-                let (x, y) = (index % contrast.width, index / contrast.width);
-                if (x / 2 + y / 3) % 2 == 0 {
-                    0.008
-                } else {
-                    0.977
-                }
-            })
-            .collect(),
-    );
+    let blocks = Buffer2::from_fn(contrast.width, contrast.height, |x, y| {
+        if (x / 2 + y / 3) % 2 == 0 {
+            0.008
+        } else {
+            0.977
+        }
+    });
     let rgb = markesteijn::demosaic(
         &XTransImage::new(&blocks, XTRANS_PATTERN),
         MarkesteijnPasses::One,

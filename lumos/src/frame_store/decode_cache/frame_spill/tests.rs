@@ -86,13 +86,9 @@ fn metadata() -> ImageMetadata {
     let grid = GainGrid::of(size);
     let nodes = (0..3)
         .map(|channel| {
-            Buffer2::new(
-                grid.columns,
-                grid.rows,
-                (0..grid.columns * grid.rows)
-                    .map(|node| 1.0 + 0.125 * (node + channel) as f32)
-                    .collect(),
-            )
+            Buffer2::from_fn(grid.columns, grid.rows, |x, y| {
+                1.0 + 0.125 * (y * grid.columns + x + channel) as f32
+            })
         })
         .collect();
     ImageMetadata {

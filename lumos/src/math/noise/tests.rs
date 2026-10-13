@@ -8,10 +8,9 @@ use crate::math::statistics::median_mad::MedianMad;
 
 fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
-    let pixels = (0..size.pixel_count())
-        .map(|_| sigma * rng.next_gaussian_f32())
-        .collect();
-    Buffer2::new(size.width, size.height, pixels)
+    Buffer2::from_fn(size.width, size.height, |_, _| {
+        sigma * rng.next_gaussian_f32()
+    })
 }
 
 /// White Gaussian noise of σ = 1 reads its σ. Two fresh frames of 10⁶ analysed pixels: each
@@ -68,18 +67,10 @@ fn excluded_pixels_leave_the_estimate() {
     let size = Size2us::new(512, 512);
     let left = white_noise(size, 0.01, 5);
     let right = white_noise(size, 0.05, 6);
-    let frame = Buffer2::new(
+    let frame = Buffer2::from_fn(
         512,
         512,
-        (0..size.pixel_count())
-            .map(|index| {
-                if index % 512 < 256 {
-                    left[index]
-                } else {
-                    right[index]
-                }
-            })
-            .collect(),
+        |x, y| if x < 256 { left[(x, y)] } else { right[(x, y)] },
     );
     let sigma = MrsNoise::estimate(&frame, |index| index % 512 >= 256);
     assert!((sigma - 0.01).abs() < 0.000_3, "{sigma}");

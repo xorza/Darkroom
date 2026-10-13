@@ -53,15 +53,9 @@ impl Mask {
     }
 
     /// The pixels `(x, y)` for which `set` holds.
-    fn from_fn(size: Size2us, mut set: impl FnMut(usize, usize) -> bool) -> Self {
-        let mut data = Vec::with_capacity(size.pixel_count());
-        for y in 0..size.height {
-            for x in 0..size.width {
-                data.push(set(x, y));
-            }
-        }
+    fn from_fn(size: Size2us, set: impl FnMut(usize, usize) -> bool) -> Self {
         Self {
-            data: Buffer2::new(size.width, size.height, data),
+            data: Buffer2::from_fn(size.width, size.height, set),
         }
     }
 

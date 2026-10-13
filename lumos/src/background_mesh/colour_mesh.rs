@@ -153,20 +153,11 @@ mod tests {
         let size = 128;
         let cfa = CfaType::Bayer(CfaPattern::Rggb);
         let red = |x: usize| 0.125 + x as f32 / 1024.0;
-        let pixels = Buffer2::new(
-            size,
-            size,
-            (0..size * size)
-                .map(|index| {
-                    let position = Vec2us::new(index % size, index / size);
-                    match cfa.color_at(position) {
-                        0 => red(position.x),
-                        1 => 0.25,
-                        _ => 0.375,
-                    }
-                })
-                .collect(),
-        );
+        let pixels = Buffer2::from_fn(size, size, |x, y| match cfa.color_at(Vec2us::new(x, y)) {
+            0 => red(x),
+            1 => 0.25,
+            _ => 0.375,
+        });
         let mesh = ColourMesh::measure(MaskedPlane::from(&pixels), &cfa, 64);
         for position in [
             Vec2us::new(31, 31),

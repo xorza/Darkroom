@@ -88,10 +88,9 @@ fn clahe_increases_low_contrast_and_every_knob_matters() {
 
 #[test]
 fn clahe_tile_mappings_are_monotonic() {
-    let px: Vec<f32> = (0..80 * 80)
-        .map(|i| f32::midpoint((i % 80) as f32 / 79.0, (i / 80) as f32 / 79.0))
-        .collect();
-    let intensity = Buffer2::new(80, 80, px);
+    let intensity = Buffer2::from_fn(80, 80, |x, y| {
+        f32::midpoint(x as f32 / 79.0, y as f32 / 79.0)
+    });
     let grid = TileGrid {
         columns: TileAxis::new(80, 4),
         rows: TileAxis::new(80, 4),

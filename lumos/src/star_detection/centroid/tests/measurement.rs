@@ -468,20 +468,13 @@ fn sky_noise_adds_no_flux_or_snr() {
     const SIGMA: f32 = 0.0625;
     const SKY: f32 = 0.25;
     let size = Size2us::new(48, 48);
-    let pixels = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|i| {
-                let (x, y) = (i % size.width, i / size.width);
-                if (x + y) % 2 == 0 {
-                    SKY + SIGMA
-                } else {
-                    SKY - SIGMA
-                }
-            })
-            .collect(),
-    );
+    let pixels = Buffer2::from_fn(size.width, size.height, |x, y| {
+        if (x + y) % 2 == 0 {
+            SKY + SIGMA
+        } else {
+            SKY - SIGMA
+        }
+    });
     let bg = background_map::uniform(size, SKY, SIGMA);
     let pos = DVec2::splat(24.0);
     let sky = bg.sky_noise();

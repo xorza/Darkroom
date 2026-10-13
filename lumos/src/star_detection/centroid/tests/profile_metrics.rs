@@ -134,17 +134,11 @@ fn windowed_covariance_deconvolves_to_the_source() {
             sigma_y,
             angle: 0.0,
         };
-        let pixels = Buffer2::new(
-            size.width,
-            size.height,
-            (0..size.pixel_count())
-                .map(|index| {
-                    let dx = (index % size.width) as f64 - pos.x;
-                    let dy = (index / size.width) as f64 - pos.y;
-                    profile.shape_at(dx, dy) as f32
-                })
-                .collect(),
-        );
+        let pixels = Buffer2::from_fn(size.width, size.height, |x, y| {
+            let dx = x as f64 - pos.x;
+            let dy = y as f64 - pos.y;
+            profile.shape_at(dx, dy) as f32
+        });
         let measured = Measured::flat(&pixels, 0.0, 1.0);
         let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
         for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {

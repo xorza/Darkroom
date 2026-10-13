@@ -75,16 +75,9 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
     let pattern = XTRANS_PATTERN;
     for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
         for ((name, scene), expected) in scenes.into_iter().zip(digests) {
-            let data = Buffer2::new(
-                size.width,
-                size.height,
-                (0..size.pixel_count())
-                    .map(|index| {
-                        let (x, y) = (index % WIDTH, index / WIDTH);
-                        scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
-                    })
-                    .collect(),
-            );
+            let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+                scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
+            });
             let planes = demosaic(
                 &XTransImage::new(&data, pattern),
                 passes,
@@ -119,13 +112,9 @@ fn constant_colour_reconstructs_to_rounding_at_every_size() {
     for side in [12, 24, 25, 37, 130] {
         let size = Size2us::new(side, side);
         for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
-            let data = Buffer2::new(
-                size.width,
-                size.height,
-                (0..size.pixel_count())
-                    .map(|index| colour[pattern.color_at(size.point_of(index)).index()])
-                    .collect(),
-            );
+            let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+                colour[pattern.color_at(Vec2us::new(x, y)).index()]
+            });
             for passes in PASSES {
                 let planes = demosaic(
                     &XTransImage::new(&data, pattern),
@@ -153,13 +142,9 @@ fn constant_colour_reconstructs_to_rounding_at_every_size() {
 #[test]
 fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
     let size = Size2us::new(40, 40);
-    let ramp = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|i| i as f32 / size.pixel_count() as f32)
-            .collect(),
-    );
+    let ramp = Buffer2::from_fn(size.width, size.height, |x, y| {
+        (y * size.width + x) as f32 / size.pixel_count() as f32
+    });
     let zeros = Buffer2::new_filled(size.width, size.height, 0.0f32);
     for passes in PASSES {
         let planes = demosaic(
@@ -210,13 +195,7 @@ fn margin_is_the_least_that_reads_only_computed_colours() {
                 size: extent,
             };
             let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
-            let data = Buffer2::new(
-                size.width,
-                size.height,
-                (0..size.pixel_count())
-                    .map(|_| 0.1 + 0.8 * rng.next_f32())
-                    .collect(),
-            );
+            let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
             let xtrans = XTransImage::new(&data, pattern);
             let hex = HexTable::new(pattern);
             let mut tile = Tile::new(passes.directions());
@@ -260,13 +239,7 @@ fn margin_is_the_least_that_reads_only_computed_colours() {
 fn markesteijn_inside_the_border_matches_a_larger_frame() {
     let large = Size2us::new(152, 144);
     let mut rng = TestRng::new(7);
-    let samples = Buffer2::new(
-        large.width,
-        large.height,
-        (0..large.pixel_count())
-            .map(|_| 0.1 + 0.8 * rng.next_f32())
-            .collect(),
-    );
+    let samples = Buffer2::from_fn(large.width, large.height, |_, _| 0.1 + 0.8 * rng.next_f32());
     let rows = *XTRANS_PATTERN.rows();
     for passes in PASSES {
         let whole = demosaic(
@@ -283,16 +256,8 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
                     *colour = rows[(y + oy) % 6][(x + ox) % 6];
                 }
             }
-            let crop = Buffer2::new(
-                small.width,
-                small.height,
-                (0..small.pixel_count())
-                    .map(|index| {
-                        let pos = small.point_of(index);
-                        samples[large.index_of(Vec2us::new(pos.x + ox, pos.y + oy))]
-                    })
-                    .collect(),
-            );
+            let crop =
+                Buffer2::from_fn(small.width, small.height, |x, y| samples[(x + ox, y + oy)]);
             let pattern = XTransPattern::new(shifted).unwrap();
             let part = demosaic(
                 &XTransImage::new(&crop, pattern),

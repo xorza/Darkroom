@@ -42,17 +42,11 @@ fn a_mono_master_replicates_into_all_three_model_channels() {
     // channels at zero — and the clamp is what keeps a sub-background or star-core sample in
     // the [0,1] domain the model was trained on.
     let side = WINDOW;
-    let plane = Buffer2::new(
-        side,
-        side,
-        (0..side * side)
-            .map(|i| match i {
-                0 => -0.25,
-                1 => 1.5,
-                _ => 0.5,
-            })
-            .collect(),
-    );
+    let plane = Buffer2::from_fn(side, side, |x, y| match (x, y) {
+        (0, 0) => -0.25,
+        (1, 0) => 1.5,
+        _ => 0.5,
+    });
     let planar = LinearImage::from(plane);
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     fill_tile_input(&planar, Vec2us::new(0, 0), &mut input);

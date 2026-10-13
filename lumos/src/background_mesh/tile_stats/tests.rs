@@ -78,13 +78,7 @@ fn sample_ordinals_are_even_and_point_symmetric() {
 #[test]
 fn tile_samples_centre_on_the_tile() {
     let size = Size2us::new(100, 100);
-    let pixels = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|i| (i % size.width + 1000 * (i / size.width)) as f32)
-            .collect(),
-    );
+    let pixels = Buffer2::from_fn(size.width, size.height, |x, y| (x + 1000 * y) as f32);
     let tile = URect::new(Vec2us::new(10, 20), Vec2us::new(74, 84));
     let mut samples = TileSamples::default();
     samples.collect_tile(&pixels, tile);
@@ -155,11 +149,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
 
     for case in cases {
         let size = case.size;
-        let pixels = Buffer2::new(
-            size.width,
-            size.height,
-            (0..size.pixel_count()).map(|i| i as f32).collect(),
-        );
+        let pixels = Buffer2::from_fn(size.width, size.height, |x, y| (y * size.width + x) as f32);
         let mut mask = BitBuffer2::new_filled(size, false);
         if let Some(modulus) = case.mask_modulus {
             for y in 0..size.height {
@@ -222,14 +212,10 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
     // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
     let tile = URect::new(Vec2us::new(4, 6), Vec2us::new(36, 38));
     let frame = |level: &dyn Fn(usize, usize) -> f32, checker: f32| {
-        let pixels = (0..size.pixel_count())
-            .map(|i| {
-                let (x, y) = (i % size.width, i / size.width);
-                let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };
-                level(x, y) + sign * checker
-            })
-            .collect();
-        Buffer2::new(size.width, size.height, pixels)
+        Buffer2::from_fn(size.width, size.height, |x, y| {
+            let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };
+            level(x, y) + sign * checker
+        })
     };
     let plane = |x: usize, y: usize| 0.25 * x as f32 + 2.0 * y as f32;
     let flat = |_: usize, _: usize| 47.875;

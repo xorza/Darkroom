@@ -341,7 +341,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2) -> Buffer2<f32>
 fn a_repair_matches_a_snapshot_reference() {
     let size = Size2us::new(12, 12);
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
-    let pixels = Buffer2::new(12, 12, (0..size.pixel_count()).map(|i| i as f32).collect());
+    let pixels = Buffer2::from_fn(12, 12, |x, y| (y * 12 + x) as f32);
 
     let mut mask = BitBuffer2::new_default(size);
     let at = |x, y| size.index_of(Vec2us::new(x, y));
@@ -478,14 +478,14 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 fn a_faint_hit_on_a_gradient_is_caught() {
     let size = Size2us::new(128, 128);
     let mut rng = TestRng::new(0x6A);
-    let mut pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.05 + 0.4 * (index % 128) as f32 / 128.0 + 0.002 * rng.next_gaussian_f32())
-        .collect();
+    let mut pixels = Buffer2::from_fn(128, 128, |x, _| {
+        0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
+    });
     let hit = Vec2us::new(70, 70);
     pixels[size.index_of(hit)] += 0.04;
     let whole_frame_sigma = MedianMad::of_mut(&mut pixels.clone()).sigma();
     assert!(whole_frame_sigma > 0.08, "premise: {whole_frame_sigma}");
-    let mut image = cfa_from_plane(Buffer2::new(128, 128, pixels), CfaType::Mono);
+    let mut image = cfa_from_plane(pixels, CfaType::Mono);
     reject(&mut image, &CosmicRayConfig::default()).unwrap();
     assert!(
         image

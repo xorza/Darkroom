@@ -28,13 +28,10 @@ use crate::registration::transform::warp_transform::WarpTransform;
 #[test]
 fn integer_shifts_copy_the_source() {
     let size = Size2us::new(24, 20);
-    let input = Buffer2::new(
-        size.width,
-        size.height,
-        (0..size.pixel_count())
-            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
-            .collect(),
-    );
+    let input = Buffer2::from_fn(size.width, size.height, |x, y| {
+        let i = y * size.width + x;
+        ((i * 13 + y * 7) % 31) as f32 / 9.0 - 1.7
+    });
     let range = 30.0 / 9.0;
     let largest = 1.7f32;
     for shift in [(0, 0), (2, -1), (-3, 4), (7, 0)] {

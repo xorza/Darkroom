@@ -291,13 +291,7 @@ mod tests {
                 CfaType::Bayer(_) => 0.125 * (1 + position.x % 2 + 2 * (position.y % 2)) as f32,
                 _ => 0.125 * (cfa.color_at(position) + 1) as f32,
             };
-            let pixels = Buffer2::new(
-                size.width,
-                size.height,
-                (0..size.pixel_count())
-                    .map(|index| level(Vec2us::new(index % 25, index / 25)))
-                    .collect(),
-            );
+            let pixels = Buffer2::from_fn(size.width, size.height, |x, y| level(Vec2us::new(x, y)));
             let mut scratch = Gathered::default();
             for y in 0..size.height {
                 for x in 0..size.width {
@@ -397,7 +391,7 @@ mod tests {
     fn deinterleave_takes_one_phase() {
         let lattice = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
         let size = Size2us::new(5, 3);
-        let mosaic = Buffer2::new(5, 3, (0..15).map(|index| index as f32).collect());
+        let mosaic = Buffer2::from_fn(5, 3, |x, y| (y * 5 + x) as f32);
         let mut plane = Buffer2::default();
         lattice.deinterleave(&mosaic, Vec2us::new(1, 0), &mut plane);
         assert_eq!(Size2us::from(&plane), Size2us::new(2, 2));

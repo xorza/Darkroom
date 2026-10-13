@@ -164,13 +164,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     let size = Size2us::new(12, 6);
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::new(
-            12,
-            6,
-            (0..size.pixel_count())
-                .map(|index| 1.0 - 0.3 * (index % 12) as f32 / 12.0)
-                .collect(),
-        ),
+        &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
         &bayer,
         |_| false,
     ));
@@ -450,13 +444,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let mut cfa = make_cfa(size, pixels, cfa_type);
     cfa.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0);
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::new(
-            64,
-            64,
-            (0..size.pixel_count())
-                .map(|index| 1.0 - 0.5 * (index % 64) as f32 / 64.0)
-                .collect(),
-        ),
+        &Buffer2::from_fn(64, 64, |x, _| 1.0 - 0.5 * x as f32 / 64.0),
         &cfa_type,
         |_| false,
     ));

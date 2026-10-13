@@ -92,17 +92,10 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     for (width, height) in [(800, 800), (1000, 800), (800, 1000)] {
         for row_pattern in [true, false] {
-            let pixels = (0..width * height)
-                .map(|index| {
-                    let coordinate = if row_pattern {
-                        index / width
-                    } else {
-                        index % width
-                    };
-                    (coordinate / 2) as f32
-                })
-                .collect();
-            let data = Buffer2::new(width, height, pixels);
+            let data = Buffer2::from_fn(width, height, |x, y| {
+                let coordinate = if row_pattern { y } else { x };
+                (coordinate / 2) as f32
+            });
             let exact = median_mad(
                 (0..width * height)
                     .filter(|&index| {
@@ -436,14 +429,9 @@ fn per_channel_detection_bayer() {
 #[test]
 fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
     let size = Size2us::new(192usize, 128usize);
-    let pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let x = (index % size.width) as f32;
-            let y = (index / size.width) as f32;
-            0.02 + 0.0001 * x + 0.0002 * y
-        })
-        .collect();
-    let data = Buffer2::new(size.width, size.height, pixels);
+    let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+        0.02 + 0.0001 * x as f32 + 0.0002 * y as f32
+    });
     let background = ColourMesh::measure(
         MaskedPlane::from(&data),
         &CfaType::Mono,
