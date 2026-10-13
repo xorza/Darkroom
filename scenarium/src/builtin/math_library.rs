@@ -17,7 +17,7 @@ const TANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-1fda-2837-f4bd-75bea81
 const ARCSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-6920-1641-593c-5a1d91c033cb");
 const ARCCOSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-a3ef-681e-6fbb-5133c96f720c");
 const ARCTANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-e6f4-726c-5d4e-a2f90c4fc43b");
-const DIVIDE_FUNC_ID: FuncId = FuncId::literal("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b");
+const DIVIDE_FUNC_ID: FuncId = FuncId::literal("65011378-e8e2-4471-960f-40c638089df4");
 
 #[derive(Debug, Clone, Copy)]
 struct FloatInputSpec {

@@ -2,7 +2,6 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// The process's allocator: [`System`], with a count of the bytes its allocations hold and the
 /// most they held since [`Self::restart_peak`].
@@ -13,9 +12,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub(crate) struct LiveHeap {
     live: AtomicUsize,
     peak: AtomicUsize,
-    /// Held by the one test measuring: the harness runs the binary's tests on threads of one
-    /// process, and another test's allocations would land in its count.
-    serial: Mutex<()>,
 }
 
 impl LiveHeap {
@@ -23,14 +19,7 @@ impl LiveHeap {
         Self {
             live: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
-            serial: Mutex::new(()),
         }
-    }
-
-    /// The counts for the caller alone, until the guard drops. A test that failed while it held
-    /// them leaves nothing the next one depends on, so a poisoned lock is taken all the same.
-    pub(crate) fn exclusive(&self) -> MutexGuard<'_, ()> {
-        self.serial.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn live_bytes(&self) -> usize {

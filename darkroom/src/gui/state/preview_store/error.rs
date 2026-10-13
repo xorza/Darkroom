@@ -16,6 +16,9 @@ pub(crate) enum PreviewImageError {
     NotAnImage,
     #[error("image is empty")]
     Empty,
+    /// An edge longer than `u32::MAX` pixels, which no texture can hold.
+    #[error("image is {width}×{height}, past the longest texture edge")]
+    EdgeTooLong { width: usize, height: usize },
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
     #[error("{0}")]

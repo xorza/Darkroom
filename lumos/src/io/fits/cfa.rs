@@ -1,4 +1,3 @@
-use std::io;
 use std::path::Path;
 
 use common::file_utils;
@@ -8,8 +7,7 @@ use fits_well::image::Image;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::quality_flags::QualityFlags;
-use crate::io::error::{FitsRefusal, ImageError};
-use crate::io::fits;
+use crate::io::error::{FitsRefusal, FitsWriteError, ImageError};
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::metadata;
@@ -72,7 +70,7 @@ pub(crate) fn validate_image_header(path: &Path, image: &Header) -> Result<bool,
     Ok(is_lumos_cfa)
 }
 
-pub(crate) fn save(path: &Path, image: &CfaImage) -> io::Result<()> {
+pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), FitsWriteError> {
     let encoded = CfaFitsHdu::encode(
         image,
         CfaFitsHduMetadata {
@@ -85,18 +83,12 @@ pub(crate) fn save(path: &Path, image: &CfaImage) -> io::Result<()> {
     let gain = GainExtension::encode(image.metadata.flat_gain.as_deref(), None)?;
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer
-            .write_image(&encoded.image, Some(&encoded.header))
-            .map_err(fits::to_io)?;
+        writer.write_image(&encoded.image, Some(&encoded.header))?;
         if let Some(flags) = &flags {
-            writer
-                .write_image(&flags.image, Some(&flags.header))
-                .map_err(fits::to_io)?;
+            writer.write_image(&flags.image, Some(&flags.header))?;
         }
         if let Some(gain) = &gain {
-            writer
-                .write_image(&gain.image, Some(&gain.header))
-                .map_err(fits::to_io)?;
+            writer.write_image(&gain.image, Some(&gain.header))?;
         }
         Ok(())
     })
@@ -104,22 +96,23 @@ pub(crate) fn save(path: &Path, image: &CfaImage) -> io::Result<()> {
 
 impl CfaFitsHdu {
     /// Build the image and header a CFA HDU writes, from `cfa` plus the per-HDU metadata.
-    pub(crate) fn encode(cfa: &CfaImage, hdu_metadata: CfaFitsHduMetadata<'_>) -> io::Result<Self> {
+    pub(crate) fn encode(
+        cfa: &CfaImage,
+        hdu_metadata: CfaFitsHduMetadata<'_>,
+    ) -> Result<Self, FitsWriteError> {
         let mut header = Header::new();
         header
             .set("LUMOSFMT", CFA_FITS_FORMAT)
-            .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))
-            .map_err(fits::to_io)?;
+            .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))?;
         if let Some(extname) = hdu_metadata.extname {
-            header.set("EXTNAME", extname).map_err(fits::to_io)?;
-            header.set("LUMROLE", extname).map_err(fits::to_io)?;
+            header.set("EXTNAME", extname)?;
+            header.set("LUMROLE", extname)?;
         }
         if hdu_metadata.prepared {
-            header.set("LUMPREP", true).map_err(fits::to_io)?;
+            header.set("LUMPREP", true)?;
         }
-        metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)
-            .map_err(fits::to_io)?;
-        metadata::write_cfa(&mut header, cfa).map_err(fits::to_io)?;
+        metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)?;
+        metadata::write_cfa(&mut header, cfa)?;
 
         let mut samples = cfa.data.pixels().to_vec();
         if let Some(flags) = cfa
@@ -137,8 +130,7 @@ impl CfaFitsHdu {
                 .mask_of(QualityFlags::NO_DATA)
                 .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
         }
-        let image =
-            Image::new([cfa.data.width(), cfa.data.height()], samples).map_err(fits::to_io)?;
+        let image = Image::new([cfa.data.width(), cfa.data.height()], samples)?;
         Ok(Self { image, header })
     }
 }

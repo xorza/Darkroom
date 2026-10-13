@@ -13,10 +13,10 @@ use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use std::mem;
 
-const BRIGHTNESS_CONTRAST_FUNC_ID: FuncId = FuncId::literal("b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e");
+const BRIGHTNESS_CONTRAST_FUNC_ID: FuncId = FuncId::literal("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860");
 const CONVERT_FUNC_ID: FuncId = FuncId::literal("80aa1ee7-3b75-4200-b480-b9db913bd6eb");
 const BLEND_FUNC_ID: FuncId = FuncId::literal("975cc74b-8412-4293-b2cb-ef8d41fdd9b3");
-const TRANSFORM_FUNC_ID: FuncId = FuncId::literal("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a");
+const TRANSFORM_FUNC_ID: FuncId = FuncId::literal("c99c2613-a381-4ef1-9fca-b75aa9656cd2");
 
 pub(super) fn register(library: &mut Library) {
     register_brightness(library);

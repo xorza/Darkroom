@@ -7,8 +7,6 @@
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
 use std::fs::File;
-use std::io;
-use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
 
 use common::file_utils;
@@ -26,8 +24,7 @@ use crate::calibration::error::{BundleError, DefectTableError};
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::io::error::ImageError;
-use crate::io::fits;
+use crate::io::error::{FitsWriteError, ImageError};
 use crate::io::fits::cfa::{CfaFitsHdu, CfaFitsHduMetadata};
 use crate::io::fits::decode;
 use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
@@ -52,12 +49,10 @@ struct BundleIndices {
     defects: Option<usize>,
 }
 
-pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> {
+pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), FitsWriteError> {
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer
-            .write_raw_hdu(&bundle_primary_header()?, &[])
-            .map_err(fits::to_io)?;
+        writer.write_raw_hdu(&bundle_primary_header()?, &[])?;
 
         let mut flags_written = 0;
         for (role, image) in masters.masters() {
@@ -72,24 +67,18 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
                     prepared: role.prepared(),
                 },
             )?;
-            writer
-                .write_image(&encoded.image, Some(&encoded.header))
-                .map_err(fits::to_io)?;
+            writer.write_image(&encoded.image, Some(&encoded.header))?;
             if let Some(flags) =
                 FlagsExtension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
             {
-                writer
-                    .write_image(&flags.image, Some(&flags.header))
-                    .map_err(fits::to_io)?;
+                writer.write_image(&flags.image, Some(&flags.header))?;
                 flags_written += 1;
             }
         }
 
         if let Some(defect_map) = &masters.defect_map {
             let encoded = encode_defect_map(defect_map)?;
-            writer
-                .write_table(&encoded.table, Some(&encoded.header))
-                .map_err(fits::to_io)?;
+            writer.write_table(&encoded.table, Some(&encoded.header))?;
         }
         Ok(())
     })
@@ -127,7 +116,7 @@ pub(super) fn load(path: &Path, context: &LoadContext) -> Result<CalibrationMast
     Ok(masters)
 }
 
-fn bundle_primary_header() -> io::Result<Header> {
+fn bundle_primary_header() -> Result<Header, FitsWriteError> {
     let mut header = Header::new();
     header
         .set("SIMPLE", true)
@@ -135,8 +124,7 @@ fn bundle_primary_header() -> io::Result<Header> {
         .and_then(|header| header.set("NAXIS", 0))
         .and_then(|header| header.set("EXTEND", true))
         .and_then(|header| header.set("LUMOSFMT", BUNDLE_FORMAT))
-        .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))
-        .map_err(fits::to_io)?;
+        .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))?;
     Ok(header)
 }
 
@@ -304,7 +292,7 @@ struct EncodedDefectMap {
     header: Header,
 }
 
-fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
+fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, FitsWriteError> {
     let (hot, cold) = (map.hot(), map.cold_indices());
     let rows = hot.indices.len() + cold.len();
     let mut kinds = Vec::with_capacity(rows);
@@ -318,10 +306,9 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
         .iter()
         .chain(cold)
         .map(|&index| {
-            i64::try_from(index)
-                .map_err(|_| invalid_data("defect index exceeds the FITS signed-64 range"))
+            i64::try_from(index).map_err(|_| FitsWriteError::DefectIndexOutOfRange { index })
         })
-        .collect::<io::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     let table = TableBuilder::explicit(
         kinds.len(),
         [
@@ -329,30 +316,25 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
             WriteColumn::scalar("INDEX", ColumnData::I64(indices)),
             WriteColumn::scalar("EXCESS", ColumnData::F32(excess)),
         ],
-    )
-    .map_err(fits::to_io)?;
+    )?;
     let mut header = Header::new();
     header
         .set("EXTNAME", CalibrationComponent::Defects.extname())
         .and_then(|header| header.set("LUMOSFMT", DEFECT_FORMAT))
-        .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))
-        .map_err(fits::to_io)?;
+        .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))?;
     let dimensions = map.dimensions();
-    let extent = |extent: usize, name: &str| {
-        i64::try_from(extent).map_err(|_| {
-            invalid_data(format!(
-                "defect-map {name} exceeds the FITS signed-64 range"
-            ))
-        })
+    let (Ok(width), Ok(height)) = (
+        i64::try_from(dimensions.width),
+        i64::try_from(dimensions.height),
+    ) else {
+        return Err(FitsWriteError::DefectExtentOutOfRange {
+            width: dimensions.width,
+            height: dimensions.height,
+        });
     };
-    let (width, height) = (
-        extent(dimensions.width, "width")?,
-        extent(dimensions.height, "height")?,
-    );
     header
         .set("LUMWID", width)
-        .and_then(|header| header.set("LUMHEI", height))
-        .map_err(fits::to_io)?;
+        .and_then(|header| header.set("LUMHEI", height))?;
     Ok(EncodedDefectMap { table, header })
 }
 
@@ -373,6 +355,22 @@ fn read_defect_dimensions(header: &Header) -> Result<Option<Size2us>, BundleErro
         .map(|_| Size2us::new(width, height)))
 }
 
-fn invalid_data(message: impl Into<String>) -> IoError {
-    IoError::new(ErrorKind::InvalidData, message.into())
+#[cfg(test)]
+mod tests {
+    use crate::calibration::calibration_masters::fits::encode_defect_map;
+    use crate::calibration::defect_map::DefectMap;
+    use crate::io::error::FitsWriteError;
+    use crate::math::size2us::Size2us;
+
+    /// A sensor extent past `i64::MAX` is refused with both edges, not written as a wrapped
+    /// `LUMWID`; a zero height keeps the map's mask empty.
+    #[test]
+    fn a_defect_extent_past_the_fits_range_is_refused() {
+        let width = usize::try_from(i64::MAX).unwrap() + 1;
+        let map = DefectMap::new(Size2us::new(width, 0));
+        assert!(matches!(
+            encode_defect_map(&map),
+            Err(FitsWriteError::DefectExtentOutOfRange { width: w, height: 0 }) if w == width
+        ));
+    }
 }

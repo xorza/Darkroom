@@ -14,7 +14,7 @@ use std::fmt;
 use std::num::NonZeroU32;
 
 use glam::UVec2;
-use imaginarium::{ColorFormat, Image as CpuImage, Preview};
+use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, Preview};
 use lens::Image as LensImage;
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
@@ -248,10 +248,7 @@ fn prepare_drawable(
     max_dim: Option<NonZeroU32>,
 ) -> Result<DrawableImage, PreviewImageError> {
     let cpu = image.interleaved();
-    let native_size = UVec2::new(cpu.desc().width as u32, cpu.desc().height as u32);
-    if native_size.x == 0 || native_size.y == 0 {
-        return Err(PreviewImageError::Empty);
-    }
+    let native_size = native_size(cpu.desc())?;
     let ceiling = [max_dim, ui.max_image_dimension()]
         .into_iter()
         .flatten()
@@ -262,6 +259,18 @@ fn prepare_drawable(
         native_size,
         native_format: cpu.desc().color_format,
     })
+}
+
+/// The texel size of an image `desc` describes, or why no texture holds it.
+fn native_size(desc: ImageDesc) -> Result<UVec2, PreviewImageError> {
+    let (width, height) = (desc.width, desc.height);
+    let (Ok(x), Ok(y)) = (u32::try_from(width), u32::try_from(height)) else {
+        return Err(PreviewImageError::EdgeTooLong { width, height });
+    };
+    if x == 0 || y == 0 {
+        return Err(PreviewImageError::Empty);
+    }
+    Ok(UVec2::new(x, y))
 }
 
 /// Downscale to `target` and convert to RGBA8 — the one place pixels are
@@ -295,7 +304,7 @@ fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::{Image as RawImage, ImageDesc};
+    use imaginarium::Image as RawImage;
 
     use super::*;
 

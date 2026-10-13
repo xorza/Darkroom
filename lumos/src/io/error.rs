@@ -17,6 +17,34 @@ use crate::io::raw::error::{LibrawCode, RawError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
+/// Why lumos could not write a FITS file.
+#[derive(Debug, Error)]
+pub enum FitsWriteError {
+    /// Creating, writing or publishing the file failed, in lumos or inside fits-well.
+    #[error("failed to write FITS file: {0}")]
+    Io(#[from] io::Error),
+    /// fits-well refused a keyword, an image or a table it was asked to encode.
+    #[error("failed to encode FITS data: {0}")]
+    Fits(#[source] fits_well::FitsError),
+    /// A defect's pixel index past the FITS signed 64-bit range.
+    #[error("defect index {index} exceeds the FITS signed 64-bit range")]
+    DefectIndexOutOfRange { index: usize },
+    /// A defect map's sensor extent past the FITS signed 64-bit range.
+    #[error("defect map of {width}×{height} exceeds the FITS signed 64-bit range")]
+    DefectExtentOutOfRange { width: usize, height: usize },
+}
+
+/// fits-well's own I/O failure is an I/O failure here too, so a caller finds every one in
+/// [`FitsWriteError::Io`].
+impl From<fits_well::FitsError> for FitsWriteError {
+    fn from(source: fits_well::FitsError) -> Self {
+        match source {
+            fits_well::FitsError::Io(source) => Self::Io(source),
+            source => Self::Fits(source),
+        }
+    }
+}
+
 /// Errors that can occur when loading an astronomical image from disk.
 #[derive(Debug, Error)]
 pub enum ImageError {
@@ -623,5 +651,35 @@ impl<T: Display> Display for Stated<'_, T> {
             Some(value) => value.fmt(f),
             None => f.write_str("none"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use crate::io::error::FitsWriteError;
+
+    /// fits-well's I/O failure lands in [`FitsWriteError::Io`], beside lumos's own; any other
+    /// fits-well refusal keeps its type.
+    #[test]
+    fn a_fits_io_failure_is_an_io_failure() {
+        let io_error = fits_well::FitsError::Io(io::Error::other("disk full"));
+        assert!(matches!(
+            FitsWriteError::from(io_error),
+            FitsWriteError::Io(error) if error.to_string() == "disk full"
+        ));
+        let refusal = fits_well::FitsError::InvalidCompressionParameter {
+            detail: "x".to_string(),
+        };
+        let wrapped = FitsWriteError::from(refusal);
+        assert!(
+            std::error::Error::source(&wrapped).is_some(),
+            "the refusal stays the error's cause"
+        );
+        assert!(matches!(
+            wrapped,
+            FitsWriteError::Fits(fits_well::FitsError::InvalidCompressionParameter { .. })
+        ));
     }
 }

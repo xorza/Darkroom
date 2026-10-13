@@ -9,18 +9,18 @@
     "env": { "RUST_BACKTRACE": "1" },
   },
   {
-    "label": "run darkroom release",
+    "label": "run darkroom release-dev",
     "command": "cargo",
-    "args": ["run", "--release", "-p", "darkroom"],
+    "args": ["run", "--profile", "release-dev", "-p", "darkroom"],
     "env": { "RUST_BACKTRACE": "1" },
   },
   {
-    "label": "run darkroom release-max with tracy",
+    "label": "run darkroom with tracy",
     "command": "cargo",
     "args": [
       "run",
       "--profile",
-      "release-max",
+      "bench",
       "-p",
       "darkroom",
       "--features",
@@ -32,7 +32,8 @@
     "command": "cargo",
     "args": [
       "run",
-      "--release",
+      "--profile",
+      "release-dev",
       "--manifest-path",
       "palantir/Cargo.toml",
       "--example",
@@ -46,7 +47,7 @@
     "args": [
       "run",
       "--profile",
-      "release-max",
+      "bench",
       "--manifest-path",
       "palantir/Cargo.toml",
       "--example",

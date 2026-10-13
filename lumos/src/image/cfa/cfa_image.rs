@@ -2,7 +2,6 @@
 //! file says about it.
 
 use std::f64::consts::FRAC_1_SQRT_2;
-use std::io;
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -26,7 +25,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::DomainMap;
-use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::error::{FitsWriteError, ImageError, ScientificRefusal};
 use crate::io::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::input_format::InputFormat;
 use crate::io::load_context::LoadContext;
@@ -182,7 +181,7 @@ impl CfaImage {
 
     /// Save this sensor-domain image as a checksummed floating-point FITS file, with its flags
     /// in a `LUMFLAGS` extension when they hold more than the NaN of a sample with no data.
-    pub fn save_fits(&self, path: &Path) -> io::Result<()> {
+    pub fn save_fits(&self, path: &Path) -> Result<(), FitsWriteError> {
         fits_cfa::save(path, self)
     }
 

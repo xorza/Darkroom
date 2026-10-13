@@ -204,15 +204,16 @@ pub fn publish_bytes(path: &Path, bytes: &[u8], mode: PublicationMode) -> io::Re
 /// Readers see either the previous complete file or the new complete file.
 /// Durable publication synchronizes the file before replacement and the
 /// directory entry after replacement. Cache publication skips those durability
-/// barriers because a lost cache entry can be rebuilt.
-pub fn publish(
+/// barriers because a lost cache entry can be rebuilt. `write` fails with its own
+/// error type, which carries this function's I/O failures too.
+pub fn publish<E: From<io::Error>>(
     path: &Path,
     mode: PublicationMode,
-    write: impl FnOnce(&mut File) -> io::Result<()>,
-) -> io::Result<()> {
+    write: impl FnOnce(&mut File) -> Result<(), E>,
+) -> Result<(), E> {
     let mut file = SyncAtomicFile::new(path, mode)?;
     write(&mut file.file)?;
-    file.commit()
+    Ok(file.commit()?)
 }
 
 fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {
