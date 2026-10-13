@@ -82,9 +82,28 @@ impl<T> Buffer2<T> {
         &mut self.pixels
     }
 
+    /// The values its allocation holds, which [`reshape`](Self::reshape) grows only for a larger
+    /// size.
+    #[inline]
+    pub const fn capacity(&self) -> usize {
+        self.pixels.capacity()
+    }
+
     #[inline]
     pub fn into_vec(self) -> Vec<T> {
         self.pixels
+    }
+}
+
+/// The empty 0×0 buffer, with no allocation: a scratch plane before its first
+/// [`reshape`](Buffer2::reshape).
+impl<T> Default for Buffer2<T> {
+    fn default() -> Self {
+        Self {
+            pixels: Vec::new(),
+            width: 0,
+            height: 0,
+        }
     }
 }
 
@@ -101,6 +120,15 @@ impl<T: Clone> Buffer2<T> {
             width,
             height,
         }
+    }
+
+    /// This buffer as `width × height`, in the allocation it has: the first `width · height` of
+    /// its values stay where they lie in row-major order, and any past the old length are `value`.
+    /// For a scratch plane reused across sizes, which grows only for a larger one.
+    pub fn reshape(&mut self, width: usize, height: usize, value: T) {
+        self.pixels.resize(pixel_count(width, height), value);
+        self.width = width;
+        self.height = height;
     }
 }
 
@@ -283,6 +311,30 @@ mod tests {
     fn a_row_past_the_height_is_refused() {
         let buf = Buffer2::new(3, 2, vec![0u8; 6]);
         let _ = buf.row(2);
+    }
+
+    /// The default buffer is 0×0. Shrinking keeps the first values in their order and the
+    /// allocation; growing keeps them all and fills the rest: 2×2 `[1, 2, 3, 4]` is `[1, 2, 3]` as
+    /// 3×1, then `[1, 2, 3, 9, 9, 9]` as 2×3.
+    #[test]
+    fn reshape_keeps_the_values_in_order_and_the_allocation() {
+        let empty = Buffer2::<u8>::default();
+        assert_eq!(
+            (empty.width(), empty.height(), empty.pixels()),
+            (0, 0, &[][..])
+        );
+        let mut buffer = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        let start = buffer.pixels().as_ptr();
+        buffer.reshape(3, 1, 0);
+        assert_eq!((buffer.width(), buffer.height()), (3, 1));
+        assert_eq!(buffer.pixels(), [1, 2, 3]);
+        assert_eq!(buffer.pixels().as_ptr(), start);
+        assert_eq!(buffer.capacity(), 4);
+        assert_eq!(buffer.row(0), [1, 2, 3]);
+        buffer.reshape(2, 3, 9);
+        assert_eq!((buffer.width(), buffer.height()), (2, 3));
+        assert_eq!(buffer.pixels(), [1, 2, 3, 9, 9, 9]);
+        assert_eq!(buffer.row(2), [9, 9]);
     }
 
     /// RGB 2×1: R = [1, 4], G = [2, 5], B = [3, 6] ⟷ pixels [[1, 2, 3], [4, 5, 6]].
