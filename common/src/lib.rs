@@ -22,7 +22,7 @@
 //!   exported for generated code to name rather than for hand-written `use`s.
 //! - [`file_utils`] — atomic same-directory publication, and [`FileIdentity`].
 //!
-//! [`FloatExt`], [`is_debug`] and [`id_type!`] stand on their own. `TempDir`,
+//! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build.
 
@@ -32,20 +32,20 @@
 // crate-root `pub use`s below (one canonical path per item). Modules that are
 // free-function namespaces stay `pub` and are used as `common::<module>::fn`.
 
-#[macro_use]
-mod macros;
 pub mod file_utils;
 #[cfg(feature = "internals")]
 pub mod internals;
 
 mod cancel_token;
 mod float_ext;
+mod id;
 mod introspect;
 mod serde;
 
 pub use cancel_token::CancelToken;
 pub use file_utils::file_identity::{FileId, FileIdentity};
 pub use float_ext::FloatExt;
+pub use id::Id;
 #[cfg(feature = "internals")]
 pub use internals::temp_dir::TempDir;
 #[cfg(feature = "internals")]

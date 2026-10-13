@@ -30,13 +30,13 @@ fits-well = { path = "fits-well" }
 libraw-sys = { path = "libraw-sys" }
 
 serde = { version = "1.0", features = ["derive", "rc"] }
-uuid = { version = "1.28", features = ["v4", "v5", "serde"] }
+uuid = { version = "1.28", features = ["v4", "serde"] }
 thiserror = { version = "2.0" }
 bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 glam = { version = "0.34", features = ["serde"] }
 strum = { version = "0.28" }
 rand = { version = "0.10" }
-tokio = { version = "1.53", features = ["full"] }
+tokio = { version = "1.53" }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -59,7 +59,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 sysinfo = { version = "0.39" }
 bitcode = { version = "0.6", features = ["serde"] }
 blake3 = { version = "1.8" }
-windows-sys = { version = "0.61" }
 windows = { version = "0.62" }
 libc = { version = "0.2" }
 objc2 = { version = "0.6" }
