@@ -9,13 +9,13 @@ const CHILD: &str = "LUMOS_MEMORY_BUDGET_ALONE";
 
 /// Run `body` in a child process that runs this test alone.
 ///
-/// The heap's count is the process's, and in one process the harness's own threads allocate
-/// beside a measurement: the main thread recording a result and starting the next test, a
-/// finished test's thread freeing what it held as it exits. In the child, the harness's main
-/// thread waits on the one test it started, so every byte counted is the measured work's,
-/// whichever of its threads allocates it.
+/// The heap's count is every thread's but the harness's, and in one process other tests run
+/// beside a measurement, and a finished test's thread frees what it held as it exits. In the
+/// child, the only threads are the harness's, which [`LiveHeap`](crate::live_heap::LiveHeap)
+/// leaves out, and the work's, so every byte counted is the measured work's, whichever of its
+/// threads allocates it.
 pub(crate) fn alone(body: impl FnOnce()) {
-    if env::var_os(CHILD).is_some() {
+    if in_child() {
         body();
         return;
     }
@@ -34,4 +34,9 @@ pub(crate) fn alone(body: impl FnOnce()) {
         "{name} failed alone:\n{stdout}{}",
         String::from_utf8_lossy(&output.stderr),
     );
+}
+
+/// Whether this process is a child [`alone`] started, running one test and nothing beside it.
+pub(crate) fn in_child() -> bool {
+    env::var_os(CHILD).is_some()
 }

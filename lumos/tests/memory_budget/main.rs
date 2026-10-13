@@ -4,6 +4,11 @@
 //! One binary, whose allocator counts the bytes each allocation holds: [`live_heap`]. Each test
 //! runs [`alone`] in a process of its own, takes the count through a [`session`], runs its entry on
 //! synthetic exposures, [`star_field`], and holds the run to its [`budget`].
+#![expect(
+    clippy::disallowed_types,
+    reason = "the allocator marks the harness's thread in a thread-local: a global allocator is a \
+              static, with no owner to carry the state"
+)]
 
 mod alone;
 mod budget;

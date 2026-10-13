@@ -10,11 +10,12 @@ use crate::star_field::StarField;
 const SIDE: usize = 256;
 
 /// A three-channel master through background extraction, denoising and a stretch keeps, after
-/// each, exactly the heap it held before: its planes, and nothing an operation kept.
+/// each, exactly the heap it held before: its planes, and nothing an operation kept. On one
+/// worker, as an exact count takes — see [`Session::on_workers`].
 #[test]
 fn each_operation_gives_back_its_working_set() {
     alone(|| {
-        let session = Session::new("lumos_budget_image_ops");
+        let session = Session::on_workers("lumos_budget_image_ops", 1);
         let field = StarField::new(SIDE, 40, 0x0B5);
         let channels = (0..3).map(|index| field.frame(index).channel(0).to_vec());
         let mut master =
