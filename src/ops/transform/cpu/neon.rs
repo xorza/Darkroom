@@ -39,7 +39,7 @@ pub(super) trait NeonPacked: Sample {
 
 impl NeonPacked for u8 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[u8], base: usize) -> float32x4_t {
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> float32x4_t {
         unsafe {
             let p = pixels.as_ptr().add(base);
             // Pack the channels into the low bytes of a u32; for N==3 read the 3
@@ -54,7 +54,7 @@ impl NeonPacked for u8 {
         }
     }
     #[inline]
-    unsafe fn store<const N: usize>(out: &mut [u8], base: usize, v: float32x4_t) {
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: float32x4_t) {
         unsafe {
             let u = clamp_to_u32(v, 255.0);
             let p = out.as_mut_ptr().add(base);
@@ -66,9 +66,9 @@ impl NeonPacked for u8 {
                     p.cast::<u32>().write_unaligned(packed);
                 }
                 3 => {
-                    *p = vgetq_lane_u32::<0>(u) as u8;
-                    *p.add(1) = vgetq_lane_u32::<1>(u) as u8;
-                    *p.add(2) = vgetq_lane_u32::<2>(u) as u8;
+                    *p = vgetq_lane_u32::<0>(u) as Self;
+                    *p.add(1) = vgetq_lane_u32::<1>(u) as Self;
+                    *p.add(2) = vgetq_lane_u32::<2>(u) as Self;
                 }
                 _ => unreachable!(),
             }
@@ -78,7 +78,7 @@ impl NeonPacked for u8 {
 
 impl NeonPacked for u16 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[u16], base: usize) -> float32x4_t {
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> float32x4_t {
         unsafe {
             let p = pixels.as_ptr().add(base);
             let u16x = match N {
@@ -90,16 +90,16 @@ impl NeonPacked for u16 {
         }
     }
     #[inline]
-    unsafe fn store<const N: usize>(out: &mut [u16], base: usize, v: float32x4_t) {
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: float32x4_t) {
         unsafe {
             let u = clamp_to_u32(v, 65535.0);
             let p = out.as_mut_ptr().add(base);
             match N {
                 4 => vst1_u16(p, vmovn_u32(u)),
                 3 => {
-                    *p = vgetq_lane_u32::<0>(u) as u16;
-                    *p.add(1) = vgetq_lane_u32::<1>(u) as u16;
-                    *p.add(2) = vgetq_lane_u32::<2>(u) as u16;
+                    *p = vgetq_lane_u32::<0>(u) as Self;
+                    *p.add(1) = vgetq_lane_u32::<1>(u) as Self;
+                    *p.add(2) = vgetq_lane_u32::<2>(u) as Self;
                 }
                 _ => unreachable!(),
             }
@@ -109,7 +109,7 @@ impl NeonPacked for u16 {
 
 impl NeonPacked for f32 {
     #[inline]
-    unsafe fn load<const N: usize>(pixels: &[f32], base: usize) -> float32x4_t {
+    unsafe fn load<const N: usize>(pixels: &[Self], base: usize) -> float32x4_t {
         unsafe {
             let p = pixels.as_ptr().add(base);
             match N {
@@ -120,7 +120,7 @@ impl NeonPacked for f32 {
         }
     }
     #[inline]
-    unsafe fn store<const N: usize>(out: &mut [f32], base: usize, v: float32x4_t) {
+    unsafe fn store<const N: usize>(out: &mut [Self], base: usize, v: float32x4_t) {
         // Unclamped, matching the scalar `f32::from_f32`.
         unsafe {
             let p = out.as_mut_ptr().add(base);
