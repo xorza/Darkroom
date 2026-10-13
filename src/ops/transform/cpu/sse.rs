@@ -10,7 +10,7 @@
 //! (`cvtps2dq` under the default MXCSR) like `round_ties_even`. The
 //! `sse_matches_scalar` test asserts exact equality.
 //!
-//! All SIMD work flows through `process_row`, which is `#[target_feature(enable =
+//! All SIMD work flows through `Resample::row`, which is `#[target_feature(enable =
 //! "sse4.1")]`; the `#[inline]` helpers below are pulled into that feature
 //! context, so the caller only has to confirm SSE4.1 at runtime before dispatch.
 
@@ -22,7 +22,7 @@ use rayon::prelude::*;
 use crate::common::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::Transform;
-use crate::ops::transform::cpu::pixel_index;
+use crate::ops::transform::cpu::packed_source::PackedSource;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
@@ -193,20 +193,13 @@ fn mix(a: __m128, b: __m128, t: f32) -> __m128 {
 }
 
 /// Reads the tap at integer `(x, y)` into the low `N` lanes; out-of-bounds taps
-/// read as all-zero, matching the scalar `read_pixel`.
+/// read as all-zero, matching the scalar `PackedSource::read`.
 #[inline]
-fn read_tap<T: SsePacked, const N: usize>(
-    pixels: &[T],
-    w: usize,
-    h: usize,
-    x: i32,
-    y: i32,
-) -> __m128 {
-    let Some(pixel) = pixel_index(w, h, x, y) else {
+fn read_tap<T: SsePacked, const N: usize>(source: PackedSource<'_, T>, x: i32, y: i32) -> __m128 {
+    let Some(base) = source.tap::<N>(x, y) else {
         return unsafe { _mm_setzero_ps() };
     };
-    let base = pixel * N;
-    unsafe { T::load::<N>(pixels, base) }
+    unsafe { T::load::<N>(source.pixels, base) }
 }
 
 /// Bilinear-resamples `input` into `output` with SSE4.1, one rayon job per row.
@@ -218,13 +211,11 @@ pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
     input: &Image,
     output: &mut Image,
 ) {
-    let in_w = input.desc().width;
-    let in_h = input.desc().height;
-    let out_w = output.desc().width;
     let out_stride = output.desc().row_bytes();
-
-    let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
-    let inv = transform.inverse();
+    let resample = Resample {
+        source: PackedSource::<T>::of(input),
+        inverse: transform.inverse(),
+    };
 
     output
         .bytes_mut()
@@ -232,35 +223,39 @@ pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
         .enumerate()
         .for_each(|(y, out_row_bytes)| {
             let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);
-            unsafe { process_row::<T, N>(in_pixels, in_w, in_h, inv, out_w, y, out_row) };
+            unsafe { resample.row::<N>(y, out_row) };
         });
 }
 
-#[target_feature(enable = "sse4.1")]
-unsafe fn process_row<T: SsePacked, const N: usize>(
-    in_pixels: &[T],
-    in_w: usize,
-    in_h: usize,
-    inv: Affine2,
-    out_w: usize,
-    y: usize,
-    out_row: &mut [T],
-) {
-    for x in 0..out_w {
-        let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-        let src = inv.transform_point2(out_pos) - Vec2::splat(0.5);
-        let x0f = src.x.floor();
-        let y0f = src.y.floor();
-        let fx = src.x - x0f;
-        let fy = src.y - y0f;
-        let (x0, y0) = (x0f as i32, y0f as i32);
+/// One transform's resampling: the image it reads, and `inverse`, the map from an output position
+/// to the input position it samples.
+#[derive(Debug, Clone, Copy)]
+struct Resample<'a, T> {
+    source: PackedSource<'a, T>,
+    inverse: Affine2,
+}
 
-        let c00 = read_tap::<T, N>(in_pixels, in_w, in_h, x0, y0);
-        let c10 = read_tap::<T, N>(in_pixels, in_w, in_h, x0 + 1, y0);
-        let c01 = read_tap::<T, N>(in_pixels, in_w, in_h, x0, y0 + 1);
-        let c11 = read_tap::<T, N>(in_pixels, in_w, in_h, x0 + 1, y0 + 1);
+impl<T: SsePacked> Resample<'_, T> {
+    /// Output row `y`, every pixel of `out_row`.
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn row<const N: usize>(self, y: usize, out_row: &mut [T]) {
+        let Self { source, inverse } = self;
+        for x in 0..out_row.len() / N {
+            let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+            let src = inverse.transform_point2(out_pos) - Vec2::splat(0.5);
+            let x0f = src.x.floor();
+            let y0f = src.y.floor();
+            let fx = src.x - x0f;
+            let fy = src.y - y0f;
+            let (x0, y0) = (x0f as i32, y0f as i32);
 
-        let v = mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
-        unsafe { T::store::<N>(out_row, x * N, v) };
+            let c00 = read_tap::<T, N>(source, x0, y0);
+            let c10 = read_tap::<T, N>(source, x0 + 1, y0);
+            let c01 = read_tap::<T, N>(source, x0, y0 + 1);
+            let c11 = read_tap::<T, N>(source, x0 + 1, y0 + 1);
+
+            let v = mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
+            unsafe { T::store::<N>(out_row, x * N, v) };
+        }
     }
 }

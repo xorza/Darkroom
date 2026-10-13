@@ -6,7 +6,7 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
-use std::array;
+mod packed_source;
 
 use glam::Vec2;
 use rayon::prelude::*;
@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::common::sample::Sample;
 use crate::image::Image;
+use crate::ops::transform::cpu::packed_source::PackedSource;
 use crate::ops::transform::{FilterMode, Transform};
 use crate::simd_tier::SimdTier;
 
@@ -128,12 +129,9 @@ fn apply_typed<T, const N: usize>(transform: &Transform, input: &Image, output: 
 where
     T: Sample,
 {
-    let in_w = input.desc().width;
-    let in_h = input.desc().height;
+    let source = PackedSource::<T>::of(input);
     let out_w = output.desc().width;
     let out_stride = output.desc().row_bytes();
-
-    let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
 
     let inv = transform.inverse();
     let filter = transform.filter;
@@ -148,44 +146,12 @@ where
                 let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 let src = inv.transform_point2(out_pos) - Vec2::splat(0.5);
                 let rgba = match filter {
-                    FilterMode::Nearest => sample_nearest::<T, N>(in_pixels, in_w, in_h, src),
-                    FilterMode::Bilinear => sample_bilinear::<T, N>(in_pixels, in_w, in_h, src),
+                    FilterMode::Nearest => source.nearest::<N>(src),
+                    FilterMode::Bilinear => source.bilinear::<N>(src),
                 };
                 write_pixel::<T, N>(&mut out_row[x * N..x * N + N], rgba);
             }
         });
-}
-
-/// Reads the `N` channels of the pixel at integer `(x, y)` into the low lanes of
-/// an `[f32; 4]` (unused lanes stay zero); out-of-bounds reads as all-zero. Only
-/// the low `N` lanes are ever written back, so the padding never affects output.
-#[inline]
-fn read_pixel<T, const N: usize>(
-    pixels: &[T],
-    width: usize,
-    height: usize,
-    x: i32,
-    y: i32,
-) -> [f32; 4]
-where
-    T: Sample,
-{
-    let Some(pixel) = pixel_index(width, height, x, y) else {
-        return [0.0; 4];
-    };
-    let base = pixel * N;
-    let mut px = [0.0f32; 4];
-    for (lane, &raw) in px.iter_mut().zip(&pixels[base..base + N]) {
-        *lane = raw.to_f32();
-    }
-    px
-}
-
-/// The index of pixel `(x, y)` in a `width × height` image, or `None` outside it.
-#[inline]
-pub(super) fn pixel_index(width: usize, height: usize, x: i32, y: i32) -> Option<usize> {
-    let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
-    (x < width && y < height).then_some(y * width + x)
 }
 
 /// Writes the low `N` lanes back into the output pixel's channels.
@@ -197,55 +163,6 @@ where
     for (dst, &v) in out.iter_mut().zip(rgba.iter()) {
         *dst = T::from_f32(v);
     }
-}
-
-#[inline]
-fn sample_nearest<T, const N: usize>(
-    pixels: &[T],
-    width: usize,
-    height: usize,
-    pos: Vec2,
-) -> [f32; 4]
-where
-    T: Sample,
-{
-    // `round_ties_even` matches WGSL `round`, which rounds halves to even.
-    let x = pos.x.round_ties_even() as i32;
-    let y = pos.y.round_ties_even() as i32;
-    read_pixel::<T, N>(pixels, width, height, x, y)
-}
-
-#[inline]
-fn sample_bilinear<T, const N: usize>(
-    pixels: &[T],
-    width: usize,
-    height: usize,
-    pos: Vec2,
-) -> [f32; 4]
-where
-    T: Sample,
-{
-    let fx0 = pos.x.floor();
-    let fy0 = pos.y.floor();
-    let fx = pos.x - fx0;
-    let fy = pos.y - fy0;
-    let x0 = fx0 as i32;
-    let y0 = fy0 as i32;
-
-    let c00 = read_pixel::<T, N>(pixels, width, height, x0, y0);
-    let c10 = read_pixel::<T, N>(pixels, width, height, x0 + 1, y0);
-    let c01 = read_pixel::<T, N>(pixels, width, height, x0, y0 + 1);
-    let c11 = read_pixel::<T, N>(pixels, width, height, x0 + 1, y0 + 1);
-
-    let c0 = mix(c00, c10, fx);
-    let c1 = mix(c01, c11, fx);
-    mix(c0, c1, fy)
-}
-
-/// `mix(a, b, t) = a * (1 - t) + b * t`, per channel — matching WGSL `mix`.
-#[inline]
-fn mix(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    array::from_fn(|i| a[i] * (1.0 - t) + b[i] * t)
 }
 
 #[cfg(test)]

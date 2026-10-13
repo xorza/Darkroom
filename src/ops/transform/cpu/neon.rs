@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use crate::common::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::Transform;
-use crate::ops::transform::cpu::pixel_index;
+use crate::ops::transform::cpu::packed_source::PackedSource;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
@@ -153,17 +153,14 @@ fn mix(a: float32x4_t, b: float32x4_t, t: f32) -> float32x4_t {
 
 #[inline]
 fn read_tap<T: NeonPacked, const N: usize>(
-    pixels: &[T],
-    w: usize,
-    h: usize,
+    source: PackedSource<'_, T>,
     x: i32,
     y: i32,
 ) -> float32x4_t {
-    let Some(pixel) = pixel_index(w, h, x, y) else {
+    let Some(base) = source.tap::<N>(x, y) else {
         return unsafe { vdupq_n_f32(0.0) };
     };
-    let base = pixel * N;
-    unsafe { T::load::<N>(pixels, base) }
+    unsafe { T::load::<N>(source.pixels, base) }
 }
 
 /// Bilinear-resamples `input` into `output` with NEON, one rayon job per row.
@@ -176,12 +173,9 @@ pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
     input: &Image,
     output: &mut Image,
 ) {
-    let in_w = input.desc().width;
-    let in_h = input.desc().height;
+    let source = PackedSource::<T>::of(input);
     let out_w = output.desc().width;
     let out_stride = output.desc().row_bytes();
-
-    let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
     let inv = transform.inverse();
 
     output
@@ -199,10 +193,10 @@ pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
                 let fy = src.y - y0f;
                 let (x0, y0) = (x0f as i32, y0f as i32);
 
-                let c00 = read_tap::<T, N>(in_pixels, in_w, in_h, x0, y0);
-                let c10 = read_tap::<T, N>(in_pixels, in_w, in_h, x0 + 1, y0);
-                let c01 = read_tap::<T, N>(in_pixels, in_w, in_h, x0, y0 + 1);
-                let c11 = read_tap::<T, N>(in_pixels, in_w, in_h, x0 + 1, y0 + 1);
+                let c00 = read_tap::<T, N>(source, x0, y0);
+                let c10 = read_tap::<T, N>(source, x0 + 1, y0);
+                let c01 = read_tap::<T, N>(source, x0, y0 + 1);
+                let c11 = read_tap::<T, N>(source, x0 + 1, y0 + 1);
 
                 let v = mix(mix(c00, c10, fx), mix(c01, c11, fx), fy);
                 unsafe { T::store::<N>(out_row, x * N, v) };

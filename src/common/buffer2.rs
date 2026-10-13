@@ -42,6 +42,20 @@ impl<T> Buffer2<T> {
         }
     }
 
+    /// The `width × height` buffer whose value at `(x, y)` is `f(x, y)`, called once per pixel in
+    /// row-major order — so a stateful `f`, a random draw, lays its values out row by row.
+    pub fn from_fn(width: usize, height: usize, mut f: impl FnMut(usize, usize) -> T) -> Self {
+        let mut pixels = Vec::with_capacity(pixel_count(width, height));
+        for y in 0..height {
+            pixels.extend((0..width).map(|x| f(x, y)));
+        }
+        Self {
+            pixels,
+            width,
+            height,
+        }
+    }
+
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> &T {
         &self[(x, y)]
@@ -311,6 +325,29 @@ mod tests {
     fn a_row_past_the_height_is_refused() {
         let buf = Buffer2::new(3, 2, vec![0u8; 6]);
         let _ = buf.row(2);
+    }
+
+    /// `f` runs once per pixel in row-major order with each pixel's own `(x, y)`: 3×2 of `10·y + x`
+    /// is `[0, 1, 2, 10, 11, 12]`, and a counter it advances numbers the pixels 0 to 5 in that
+    /// order. An empty side calls it never.
+    #[test]
+    fn from_fn_takes_each_position_in_row_major_order() {
+        let positions = Buffer2::from_fn(3, 2, |x, y| 10 * y + x);
+        assert_eq!((positions.width(), positions.height()), (3, 2));
+        assert_eq!(positions.pixels(), [0, 1, 2, 10, 11, 12]);
+        assert_eq!(*positions.get(2, 1), 12);
+        let mut next = 0;
+        let order = Buffer2::from_fn(3, 2, |_, _| {
+            next += 1;
+            next - 1
+        });
+        assert_eq!(order.pixels(), [0, 1, 2, 3, 4, 5]);
+        let mut calls = 0;
+        let empty = Buffer2::<u8>::from_fn(0, 4, |_, _| {
+            calls += 1;
+            0
+        });
+        assert_eq!((empty.width(), empty.height(), calls), (0, 4, 0));
     }
 
     /// The default buffer is 0×0. Shrinking keeps the first values in their order and the
