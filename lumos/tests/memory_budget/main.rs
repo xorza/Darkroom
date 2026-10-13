@@ -2,9 +2,10 @@
 //! and every stage without a plan holds the same heap however much it is given to do.
 //!
 //! One binary, whose allocator counts the bytes each allocation holds: [`live_heap`]. Each test
-//! takes it through a [`session`], runs its entry on synthetic exposures, [`star_field`], and holds
-//! the run to its [`budget`].
+//! runs [`alone`] in a process of its own, takes the count through a [`session`], runs its entry on
+//! synthetic exposures, [`star_field`], and holds the run to its [`budget`].
 
+mod alone;
 mod budget;
 mod detection;
 mod drizzle;

@@ -1,7 +1,6 @@
 //! [`GainExtension`]: the `LUMGAIN` image extension that keeps an image's [`FlatGain`] beside it
 //! in a FITS file.
 
-use std::io;
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -11,8 +10,7 @@ use fits_well::io::{Hdu, HduKind};
 use imaginarium::Buffer2;
 
 use crate::image::flat_gain::{self, FlatGain, GainGrid};
-use crate::io::error::{FitsRefusal, ImageError};
-use crate::io::fits;
+use crate::io::error::{FitsRefusal, FitsWriteError, ImageError};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::math::size2us::Size2us;
@@ -40,7 +38,7 @@ impl GainExtension {
     pub(crate) fn encode(
         gain: Option<&FlatGain>,
         image_name: Option<&str>,
-    ) -> io::Result<Option<Self>> {
+    ) -> Result<Option<Self>, FitsWriteError> {
         let Some(gain) = gain else {
             return Ok(None);
         };
@@ -50,12 +48,10 @@ impl GainExtension {
             .and_then(|header| header.set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY)))
             .and_then(|header| header.set("LUMOSFMT", GAIN_FORMAT))
             .and_then(|header| header.set("LUMOSVER", GAIN_VERSION))
-            .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))
-            .map_err(fits::to_io)?;
+            .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))?;
         let grid = GainGrid::of(gain.size());
         let nodes: Vec<f32> = gain.planes().flatten().copied().collect();
-        let image =
-            Image::new([grid.columns, grid.rows, gain.channels()], nodes).map_err(fits::to_io)?;
+        let image = Image::new([grid.columns, grid.rows, gain.channels()], nodes)?;
         Ok(Some(Self { image, header }))
     }
 

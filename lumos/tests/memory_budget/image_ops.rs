@@ -3,6 +3,7 @@
 
 use lumos::{Denoise, ExtractBackground, ImageDimensions, LinearImage, Stretch};
 
+use crate::alone::alone;
 use crate::session::Session;
 use crate::star_field::StarField;
 
@@ -12,21 +13,23 @@ const SIDE: usize = 256;
 /// each, exactly the heap it held before: its planes, and nothing an operation kept.
 #[test]
 fn each_operation_gives_back_its_working_set() {
-    let session = Session::new("lumos_budget_image_ops");
-    let field = StarField::new(SIDE, 40, 0x0B5);
-    let channels = (0..3).map(|index| field.frame(index).channel(0).to_vec());
-    let mut master =
-        LinearImage::from_planar_channels(ImageDimensions::new((SIDE, SIDE), 3), channels);
-    let mut apply = |label: &str, op: fn(&mut LinearImage)| {
-        assert_eq!(session.measure(|| op(&mut master)).kept_bytes, 0, "{label}");
-    };
-    apply("background extraction", |master| {
-        ExtractBackground::default().apply(master).unwrap();
-    });
-    apply("denoising", |master| {
-        Denoise::default().apply(master).unwrap();
-    });
-    apply("stretch", |master| {
-        Stretch::default().apply(master).unwrap();
+    alone(|| {
+        let session = Session::new("lumos_budget_image_ops");
+        let field = StarField::new(SIDE, 40, 0x0B5);
+        let channels = (0..3).map(|index| field.frame(index).channel(0).to_vec());
+        let mut master =
+            LinearImage::from_planar_channels(ImageDimensions::new((SIDE, SIDE), 3), channels);
+        let mut apply = |label: &str, op: fn(&mut LinearImage)| {
+            assert_eq!(session.measure(|| op(&mut master)).kept_bytes, 0, "{label}");
+        };
+        apply("background extraction", |master| {
+            ExtractBackground::default().apply(master).unwrap();
+        });
+        apply("denoising", |master| {
+            Denoise::default().apply(master).unwrap();
+        });
+        apply("stretch", |master| {
+            Stretch::default().apply(master).unwrap();
+        });
     });
 }

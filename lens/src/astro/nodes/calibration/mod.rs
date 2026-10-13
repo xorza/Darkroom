@@ -12,7 +12,7 @@ use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
     IngestConfig, LoadContext, MasterBuildError, MasterCache, MasterInputs, MasterRole,
 };
-use lumos::{ProgressCallback, ProgressMonitor};
+use lumos::{FitsWriteError, ProgressCallback, ProgressMonitor};
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
 
@@ -37,6 +37,12 @@ enum FrameSetKeyError {
 enum CacheError {
     #[error(transparent)]
     FrameSet(#[from] FrameSetKeyError),
+    #[error("failed to write cached calibration master '{path}': {source}", path = .path.display())]
+    WriteMaster {
+        path: PathBuf,
+        #[source]
+        source: FitsWriteError,
+    },
     #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
     Write {
         path: PathBuf,
@@ -269,7 +275,7 @@ impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
         };
         master
             .save_fits(&paths.master)
-            .map_err(|source| CacheError::Write {
+            .map_err(|source| CacheError::WriteMaster {
                 path: paths.master.clone(),
                 source,
             })?;

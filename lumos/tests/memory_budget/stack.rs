@@ -8,6 +8,7 @@ use lumos::{
     RunReport, StackConfig,
 };
 
+use crate::alone::alone;
 use crate::budget::Budget;
 use crate::session::Session;
 use crate::star_field::{Layout, StarField};
@@ -25,51 +26,57 @@ const FRAMES: usize = 6;
 /// 1 691 016 B are past it.
 #[test]
 fn a_stack_stays_within_its_budget() {
-    let session = Session::new("lumos_budget_stack");
-    let paths = StarField::new(SIDE, 30, 0x57AC).expose(session.scratch(), FRAMES, Layout::Mono);
-    for (label, budget, spilled, overcommit) in [
-        ("spilled", Budget::mib(2), FRAMES as u64, 118_152),
-        ("resident", Budget::mib(16), 0, 0),
-    ] {
-        let ingest = session.ingest(budget);
-        let run = session.measure(|| {
-            StackConfig::light()
-                .stack_paths(&paths, &ingest, ProgressMonitor::unattended())
-                .unwrap()
-        });
-        let report = &run.value.report;
-        assert_eq!(
-            (report.spilled_frames, report.overcommit_bytes),
-            (spilled, overcommit),
-            "{label}"
-        );
-        budget.assert_held(label, run.peak_bytes, report);
-    }
+    alone(|| {
+        let session = Session::new("lumos_budget_stack");
+        let paths =
+            StarField::new(SIDE, 30, 0x57AC).expose(session.scratch(), FRAMES, Layout::Mono);
+        for (label, budget, spilled, overcommit) in [
+            ("spilled", Budget::mib(2), FRAMES as u64, 118_152),
+            ("resident", Budget::mib(16), 0, 0),
+        ] {
+            let ingest = session.ingest(budget);
+            let run = session.measure(|| {
+                StackConfig::light()
+                    .stack_paths(&paths, &ingest, ProgressMonitor::unattended())
+                    .unwrap()
+            });
+            let report = &run.value.report;
+            assert_eq!(
+                (report.spilled_frames, report.overcommit_bytes),
+                (spilled, overcommit),
+                "{label}"
+            );
+            budget.assert_held(label, run.peak_bytes, report);
+        }
+    });
 }
 
 /// A master dark stacked from [`FRAMES`] mosaics stays within a budget that holds every stage's
 /// smallest step, whichever tier its frames take: the masters report no overcommit to allow for.
 #[test]
 fn a_master_stays_within_its_budget() {
-    let session = Session::new("lumos_budget_master");
-    let darks = StarField::new(SIDE, 0, 0xDA4C).expose(session.scratch(), FRAMES, Layout::Mosaic);
-    let budget = Budget::mib(2);
-    let ingest = session.ingest(budget);
-    let none: &[PathBuf] = &[];
-    let run = session.measure(|| {
-        CalibrationMasters::build(
-            CalibrationSet {
-                dark: darks.as_slice(),
-                flat: none,
-                bias: none,
-                flat_dark: none,
-            },
-            DEFAULT_SIGMA_THRESHOLD,
-            &ingest,
-            &NoMasterCache,
-            &ProgressMonitor::unattended(),
-        )
-        .unwrap()
+    alone(|| {
+        let session = Session::new("lumos_budget_master");
+        let darks =
+            StarField::new(SIDE, 0, 0xDA4C).expose(session.scratch(), FRAMES, Layout::Mosaic);
+        let budget = Budget::mib(2);
+        let ingest = session.ingest(budget);
+        let none: &[PathBuf] = &[];
+        let run = session.measure(|| {
+            CalibrationMasters::build(
+                CalibrationSet {
+                    dark: darks.as_slice(),
+                    flat: none,
+                    bias: none,
+                    flat_dark: none,
+                },
+                DEFAULT_SIGMA_THRESHOLD,
+                &ingest,
+                &NoMasterCache,
+                &ProgressMonitor::unattended(),
+            )
+            .unwrap()
+        });
+        budget.assert_held("master dark", run.peak_bytes, &RunReport::default());
     });
-    budget.assert_held("master dark", run.peak_bytes, &RunReport::default());
 }

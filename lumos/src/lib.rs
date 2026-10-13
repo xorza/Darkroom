@@ -92,7 +92,7 @@ pub use image::preview_image::{PreviewImage, PreviewPixels};
 pub use image::quality_flags::QualityFlags;
 pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use io::PREVIEW_IMAGE_EXTENSIONS;
-pub use io::error::{FitsAllocation, FitsRefusal, ImageError, ScientificRefusal};
+pub use io::error::{FitsAllocation, FitsRefusal, FitsWriteError, ImageError, ScientificRefusal};
 pub use io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 pub use io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,

@@ -2,7 +2,7 @@ use super::*;
 use palantir::internals::ui_harness::UiHarness;
 use std::sync::Arc;
 
-use imaginarium::{Image as RawImage, ImageDesc};
+use imaginarium::Image as RawImage;
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::internals::DocFixture;
@@ -111,6 +111,26 @@ fn a_drawable_reports_its_source_alongside_the_capped_texture() {
     assert_eq!(thumb.handle.size(), UVec2::new(256, 128));
     assert_eq!(thumb.native_size, UVec2::new(1024, 512));
     assert_eq!(thumb.native_format, ColorFormat::RGB_F32);
+}
+
+/// An edge one past `u32::MAX` is refused, not wrapped to a 0-wide texture, on either
+/// axis; `u32::MAX` itself fits, and a zero edge is empty. Descriptions only: no image
+/// that wide fits in memory.
+#[test]
+fn native_size_refuses_an_edge_no_texture_holds() {
+    let size = |width, height| native_size(ImageDesc::new(width, height, ColorFormat::RGB_U8));
+    let max = usize::try_from(u32::MAX).unwrap();
+    assert_eq!(size(max, 3).unwrap(), UVec2::new(u32::MAX, 3));
+    for (width, height) in [(max + 1, 3), (3, max + 1)] {
+        assert!(
+            matches!(
+                size(width, height),
+                Err(PreviewImageError::EdgeTooLong { width: w, height: h }) if (w, h) == (width, height)
+            ),
+            "{width}×{height}",
+        );
+    }
+    assert!(matches!(size(0, 3), Err(PreviewImageError::Empty)));
 }
 
 /// An image's source becomes a full-resolution texture only when a viewer

@@ -3,6 +3,7 @@
 
 use lumos::{StarDetectionConfig, StarDetector};
 
+use crate::alone::alone;
 use crate::session::Session;
 use crate::star_field::StarField;
 
@@ -35,25 +36,35 @@ fn holds_the_same_heap_for_any_frame_count(config: &StarDetectionConfig) {
 /// FWHM estimate's extra detection, the multi-threshold deblender.
 #[test]
 fn the_default_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::default());
+    alone(|| {
+        holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::default());
+    });
 }
 
 #[test]
 fn a_wide_field_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::wide_field());
+    alone(|| {
+        holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::wide_field());
+    });
 }
 
 #[test]
 fn a_high_resolution_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::high_resolution());
+    alone(|| {
+        holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::high_resolution());
+    });
 }
 
 #[test]
 fn a_crowded_field_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::crowded_field());
+    alone(|| {
+        holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::crowded_field());
+    });
 }
 
 #[test]
 fn a_precise_ground_detector_holds_the_same_heap_for_any_frame_count() {
-    holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::precise_ground());
+    alone(|| {
+        holds_the_same_heap_for_any_frame_count(&StarDetectionConfig::precise_ground());
+    });
 }

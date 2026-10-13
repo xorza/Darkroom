@@ -3,7 +3,6 @@
 
 pub(super) mod fits;
 
-use std::io;
 use std::path::Path;
 
 use common::CancelToken;
@@ -25,6 +24,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain};
 use crate::ingest::ingest_config::IngestConfig;
+use crate::io::error::FitsWriteError;
 use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -277,7 +277,7 @@ impl CalibrationMasters {
     ///
     /// The flat is stored prepared and the dark with its bias state. Loading the bundle does not
     /// repeat flat preparation or defect detection.
-    pub fn save(&self, path: &Path) -> io::Result<()> {
+    pub fn save(&self, path: &Path) -> Result<(), FitsWriteError> {
         fits::save(path, self)
     }
 
