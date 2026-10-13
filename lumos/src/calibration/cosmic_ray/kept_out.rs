@@ -56,17 +56,28 @@ impl KeptOut {
         })
     }
 
-    /// The same, over the pixels of `plane_size` that `at` places in the frame: a Bayer phase.
-    pub(crate) fn sampled(&self, plane_size: Size2us, at: impl Fn(Vec2us) -> Vec2us) -> Self {
-        let sample = |mask: &BitBuffer2| {
-            let mut plane = BitBuffer2::new_default(plane_size);
-            plane.fill_from_predicate(|index| mask.get_at(at(plane_size.point_of(index))));
-            plane
-        };
+    /// Nothing kept out, of no pixels: what [`Self::sample_into`] fills.
+    pub(crate) const fn empty() -> Self {
         Self {
-            never_flagged: sample(&self.never_flagged),
-            unread: sample(&self.unread),
+            never_flagged: BitBuffer2::empty(),
+            unread: BitBuffer2::empty(),
         }
+    }
+
+    /// Into `plane`, the same over the pixels of `plane_size` that `at` places in the frame: a
+    /// Bayer phase. Fills `plane`'s allocations, which grow only for a larger plane.
+    pub(crate) fn sample_into(
+        &self,
+        plane: &mut Self,
+        plane_size: Size2us,
+        at: impl Fn(Vec2us) -> Vec2us,
+    ) {
+        let sample = |mask: &BitBuffer2, into: &mut BitBuffer2| {
+            into.clear_to(plane_size);
+            into.fill_from_predicate(|index| mask.get_at(at(plane_size.point_of(index))));
+        };
+        sample(&self.never_flagged, &mut plane.never_flagged);
+        sample(&self.unread, &mut plane.unread);
     }
 }
 

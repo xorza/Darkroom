@@ -116,30 +116,28 @@ impl ChunkCopy {
         }
     }
 
-    /// Each frame's chunk as the last [`Self::fill`] left it, shaped as `frames` are.
-    pub(crate) fn views<'a>(&'a self, frames: &[StoredFrame]) -> Vec<FrameChunk<'a>> {
-        frames
-            .iter()
-            .zip(&self.frames)
-            .map(|(frame, buffers)| {
-                let mut quality = buffers.quality.iter();
-                FrameChunk {
-                    channels: buffers.channels.iter().map(Vec::as_slice).collect(),
-                    quality: frame
-                        .quality
-                        .try_map(|_, _| {
-                            Ok::<_, Infallible>(
-                                quality
-                                    .next()
-                                    .expect("a buffer for every quality plane")
-                                    .as_slice(),
-                            )
-                        })
-                        .unwrap_or_else(|never| match never {}),
-                    flags: buffers.flags.as_deref(),
-                }
-            })
-            .collect()
+    /// Into `out`, cleared first, each frame's chunk as the last [`Self::fill`] left it, shaped
+    /// as `frames` are.
+    pub(crate) fn views_into<'a>(&'a self, frames: &[StoredFrame], out: &mut Vec<FrameChunk<'a>>) {
+        out.clear();
+        out.extend(frames.iter().zip(&self.frames).map(|(frame, buffers)| {
+            let mut quality = buffers.quality.iter();
+            FrameChunk {
+                channels: buffers.channels.iter().map(Vec::as_slice).collect(),
+                quality: frame
+                    .quality
+                    .try_map(|_, _| {
+                        Ok::<_, Infallible>(
+                            quality
+                                .next()
+                                .expect("a buffer for every quality plane")
+                                .as_slice(),
+                        )
+                    })
+                    .unwrap_or_else(|never| match never {}),
+                flags: buffers.flags.as_deref(),
+            }
+        }));
     }
 }
 
@@ -194,7 +192,9 @@ mod tests {
         ];
         let mut copy = ChunkCopy::new(&frames, 3);
         copy.fill(&frames, 2..5);
-        for (frame, copied) in frames.iter().zip(copy.views(&frames)) {
+        let mut views = Vec::new();
+        copy.views_into(&frames, &mut views);
+        for (frame, copied) in frames.iter().zip(views) {
             let borrowed = FrameChunk::borrowed(frame, 2..5);
             assert_eq!(copied.channels, borrowed.channels);
             assert_eq!(copied.flags, borrowed.flags);

@@ -73,6 +73,8 @@ pub(super) struct MonoDetector<'a> {
     config: &'a CosmicRayConfig,
     noise: NoiseModel,
     scratch: MonoScratch,
+    /// The masks of the detection at hand, cleared for each plane.
+    masks: CrMasks,
     /// The window medians' per-job scratch, reused by every pass.
     windows: ScratchPool<WindowScratch>,
     /// One flag a row: whether the last repair changed it, every row before the first, which
@@ -99,6 +101,7 @@ impl<'a> MonoDetector<'a> {
             config,
             noise,
             scratch: MonoScratch::default(),
+            masks: CrMasks::empty(),
             windows: ScratchPool::default(),
             changed: Vec::new(),
             bands: Vec::new(),
@@ -151,11 +154,12 @@ impl<'a> MonoDetector<'a> {
             config,
             noise: noise_model,
             scratch,
+            masks,
             windows,
             changed,
             bands,
         } = self;
-        let mut masks = CrMasks::new(size);
+        masks.clear_to(size);
         let width = size.width;
         changed.clear();
         changed.resize(size.height, true);

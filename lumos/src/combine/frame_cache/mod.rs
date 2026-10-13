@@ -10,6 +10,7 @@ pub(crate) mod sample;
 pub(crate) mod sample_noise;
 pub(crate) mod slots;
 
+use std::mem;
 use std::path::Path;
 
 use common::CancelToken;
@@ -54,6 +55,7 @@ use crate::ingest::set_facts::SetFacts;
 use crate::math::vec2us::Vec2us;
 use crate::memory::stage::{Stage, Units};
 use crate::progress::progress_monitor::ProgressMonitor;
+use crate::recycle;
 use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
@@ -352,6 +354,12 @@ impl FrameCache {
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
         // chunk per channel, so the leases have to outlive any single `for_each_init`.
         let scratch_pool = ScratchPool::<CombineScratch>::new(self.frames.len());
+        // What each chunk borrows its planes through, kept empty between chunks so the combine
+        // allocates each once.
+        let mut kept_gates: Vec<FrameGate<'static>> = Vec::new();
+        let mut kept_flags: Vec<Option<&'static [u8]>> = Vec::new();
+        let mut kept_gains: Vec<Option<GainRows<'static>>> = Vec::new();
+        let mut kept_rows: Vec<QualityRows<'static>> = Vec::new();
         let pixels = self
             .core
             .process_chunks(&self.frames, chunking.units, |output_slice, ctx| {
@@ -366,42 +374,41 @@ impl FrameCache {
                 let chunk_pixels = output_slice.len();
                 debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
                 let chunk_end = pixel_offset + chunk_pixels;
-                let gates: Vec<FrameGate<'_>> = chunks
-                    .iter()
-                    .map(|chunk| FrameGate::of_chunk(chunk, channel))
-                    .collect();
-                let flags: Vec<Option<&[u8]>> = chunks.iter().map(|chunk| chunk.flags).collect();
+                let mut gates: Vec<FrameGate<'_>> = recycle::emptied(mem::take(&mut kept_gates));
+                gates.extend(
+                    chunks
+                        .iter()
+                        .map(|chunk| FrameGate::of_chunk(chunk, channel)),
+                );
+                let mut flags: Vec<Option<&[u8]>> = recycle::emptied(mem::take(&mut kept_flags));
+                flags.extend(chunks.iter().map(|chunk| chunk.flags));
                 // The node rows of each frame's flat gain the chunk reads, for the noise model, and
                 // the grid they share: every frame has the stack's size.
                 let gain_grid = GainGrid::of(dimensions.size());
-                let gains: Vec<Option<GainRows<'_>>> = self
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        frame
-                            .flat_gain
-                            .as_ref()
-                            .filter(|_| noise.is_some())
-                            .map(|gain| {
-                                debug_assert_eq!(gain.grid(), gain_grid);
-                                debug_assert_eq!(gain.channels(), slots.count());
-                                gain.rows(pixel_offset / width..chunk_end / width)
-                            })
-                    })
-                    .collect();
+                let mut gains: Vec<Option<GainRows<'_>>> =
+                    recycle::emptied(mem::take(&mut kept_gains));
+                gains.extend(self.frames.iter().map(|frame| {
+                    frame
+                        .flat_gain
+                        .as_ref()
+                        .filter(|_| noise.is_some())
+                        .map(|gain| {
+                            debug_assert_eq!(gain.grid(), gain_grid);
+                            debug_assert_eq!(gain.channels(), slots.count());
+                            gain.rows(pixel_offset / width..chunk_end / width)
+                        })
+                }));
                 // One row bundle per output row, so an unrequested plane simply has no slice
                 // to write instead of needing its own copy of the gather loop below.
-                let mut rows: Vec<QualityRows<'_>> = output_slice
-                    .chunks_mut(width)
-                    .map(|value| QualityRows {
-                        value,
-                        coverage: None,
-                        weight: None,
-                        inverse_variance: None,
-                        dispersion: None,
-                        flags: None,
-                    })
-                    .collect();
+                let mut rows: Vec<QualityRows<'_>> = recycle::emptied(mem::take(&mut kept_rows));
+                rows.extend(output_slice.chunks_mut(width).map(|value| QualityRows {
+                    value,
+                    coverage: None,
+                    weight: None,
+                    inverse_variance: None,
+                    dispersion: None,
+                    flags: None,
+                }));
                 // A coverage plane shared by the channels is their one gate, so the first channel's
                 // gather writes it; one per channel is written by its own.
                 if let Some(pixels) = output_coverage
@@ -444,7 +451,7 @@ impl FrameCache {
                         row.flags = Some(chunk);
                     }
                 }
-                rows.into_par_iter().enumerate().for_each_init(
+                rows.par_drain(..).enumerate().for_each_init(
                     || scratch_pool.acquire(),
                     |scratch, (row_in_chunk, mut row)| {
                         // Cancelled: skip the row's work (output stays zero; the
@@ -581,6 +588,10 @@ impl FrameCache {
                         kept_flagged.add(&row_tallies.kept);
                     },
                 );
+                kept_rows = recycle::emptied(rows);
+                kept_gains = recycle::emptied(gains);
+                kept_flags = recycle::emptied(flags);
+                kept_gates = recycle::emptied(gates);
             });
         CombineOutput {
             pixels,
