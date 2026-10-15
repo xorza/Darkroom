@@ -75,7 +75,7 @@ criterion = { version = "0.8" }
 statrs = { version = "0.19", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
 winresource = { version = "0.1" }
-ort = { version = "2.0.0-rc.13" }
+ort = { version = "2.0.0-rc.14" }
 cc = { version = "1.8" }
 libz-sys = { version = "1.1", default-features = false, features = ["static"] }
 bindgen = { version = "0.73", default-features = false }
