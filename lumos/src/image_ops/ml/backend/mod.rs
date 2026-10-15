@@ -9,7 +9,9 @@
 //! ~60 s for a full 24 MP frame on a 10-core machine.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
+use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
 
@@ -76,7 +78,7 @@ impl TiledOnnxConfig {
         if size.width < WINDOW || size.height < WINDOW {
             return Err(MlError::TooSmall(size));
         }
-        let mut session = Session::builder()?.commit_from_file(&self.weights)?;
+        let mut session = Session::builder(&environment()?)?.commit_from_file(&self.weights)?;
 
         let mut blend = FeatherBlend::new(image.dimensions());
         // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
@@ -101,6 +103,19 @@ impl TiledOnnxConfig {
         }
         Ok(blend.into_image())
     }
+}
+
+/// The process's ONNX Runtime environment, built on first use. ONNX Runtime allows one environment
+/// per process, created once even after a release, so it is never dropped.
+fn environment() -> Result<Environment, ort::Error> {
+    static ENVIRONMENT: Mutex<Option<Environment>> = Mutex::new(None);
+    let mut environment = ENVIRONMENT.lock().unwrap();
+    if let Some(environment) = environment.as_ref() {
+        return Ok(environment.clone());
+    }
+    let built = ort::init().build()?;
+    *environment = Some(built.clone());
+    Ok(built)
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge. The
