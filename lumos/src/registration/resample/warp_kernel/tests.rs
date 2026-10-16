@@ -1,11 +1,10 @@
-use crate::registration::resample::source_position::SourcePosition;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::image::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_position::AxisPosition;
+use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{
     Filter, TapAxis, TapRange, WarpKernel, largest_singular_value,

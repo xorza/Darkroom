@@ -2,9 +2,9 @@ use super::*;
 
 /// A hypothesis is plausible when its rotation is at most `max_rotation` in magnitude and both its
 /// principal stretches inside `scale_range`, either check off when its limit is `None`; it never
-/// mirrors, and every support point lies in front of a homography's horizon. The first column
-/// alone reads `[[1, 0], [0, 3]]`, the shear `[[1, 0.6], [0, 1]]` and the mirror `[[1, 0], [0, −1]]`
-/// as rotation 0 and scale 1; the shear's stretches are (√(4.36) ± 0.6)/2 = 1.344 and 0.744. The
+/// mirrors, and every support point lies in front of a homography's horizon. The first column alone
+/// reads `[[1, 0], [0, 3]]`, the shear `[[1, 0.6], [0, 1]]` and the mirror `[[1, 0], [0, −1]]` as
+/// rotation 0 and scale 1; the shear's stretches are (√(4.36) ± 0.6)/2 = 1.344 and 0.744. The
 /// homography with `g = −0.01` puts the horizon at x = 100: a support point at x = 150 is past it.
 #[test]
 fn plausibility_hand_cases() {

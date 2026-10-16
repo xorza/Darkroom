@@ -1,7 +1,8 @@
 //! Row-major 3x3 matrix of f64 values.
 
-use glam::DVec2;
 use std::ops::Index;
+
+use glam::DVec2;
 
 /// Row-major 3x3 matrix of f64 values.
 ///

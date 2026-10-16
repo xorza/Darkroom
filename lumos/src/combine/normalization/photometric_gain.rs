@@ -347,7 +347,7 @@ impl SamplePair<'_> {
                 |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
             ));
         }
-        // Measuring leaves each residual's deviation from the median in its place.
+        // Measuring leaves the residuals' absolute deviations from their median in the buffer.
         let residual_stats = MedianMad::of_mut(&mut residuals);
         let resolution = Spread::resolution(reference_stats.median);
         if residual_stats.mad <= resolution && seed.scatter == 0.0 {

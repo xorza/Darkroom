@@ -1,5 +1,7 @@
 //! [`RingingClamp`]: PixInsight's limit on what a kernel's negative lobes may take from a sample.
 
+use crate::registration::resample::warp_params::ClampingThreshold;
+
 /// One channel's sums over a window, split as the clamp reads them.
 ///
 /// The clamp is defined on light, values at or above zero, so it reads `f⁺ = max(f, 0)` by the
@@ -87,4 +89,3 @@ impl RingingClamp {
 
 #[cfg(test)]
 mod tests;
-use crate::registration::resample::warp_params::ClampingThreshold;

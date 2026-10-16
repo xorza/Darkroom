@@ -1,9 +1,8 @@
 //! [`RunScratch`]: where one run parks its frames, in files deleted while they are open.
 
-use std::io;
 use std::path::Path;
-use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{io, process};
 
 use bytemuck::Pod;
 

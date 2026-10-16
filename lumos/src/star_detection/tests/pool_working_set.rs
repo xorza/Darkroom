@@ -3,8 +3,8 @@
 //! A reused [`StarDetector`] recycles a fixed set of image-sized scratch buffers through its
 //! [`DetectionResources`]. The planner charges [`DetectionResources::heap_bytes`] for it, from the
 //! pool's peak counts, which only means anything while they match what the pool holds:
-//! [`WORKING_SET`] pins the pool, and the counts are checked against the pin. That the detector's heap stays the same
-//! from frame to frame is the `memory_budget` integration test's.
+//! [`WORKING_SET`] pins the pool, and the counts are checked against the pin. That the detector's
+//! heap stays the same from frame to frame is the `memory_budget` integration test's.
 //!
 //! [`StarDetector`]: crate::star_detection::star_detector::StarDetector
 //! [`DetectionResources`]: crate::star_detection::resources::DetectionResources
@@ -13,9 +13,8 @@ use rayon::prelude::*;
 
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
-use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::resources::internals::BufferCounts;
-use crate::star_detection::resources::{PEAK_BITMASKS, PEAK_FLOATS};
+use crate::star_detection::resources::{DetectionResources, PEAK_BITMASKS, PEAK_FLOATS};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 

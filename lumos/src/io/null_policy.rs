@@ -32,9 +32,9 @@ pub enum NullPolicy {
 }
 
 impl NullPolicy {
-    /// This policy applied to the decoded `planes` of the image at `path`, each `size` pixels: the
-    /// flags that mark their null pixels, with every null filled ([`fill`]), or `None` when they
-    /// hold none.
+    /// This policy applied to the decoded `planes` of one image, each `size` pixels: the flags
+    /// that mark their null pixels, with every null filled ([`fill`]), or `None` when they hold
+    /// none.
     pub(crate) fn resolve(
         self,
         planes: &mut [&mut [f32]],

@@ -195,8 +195,8 @@ impl FilterKernels {
 
 impl EllipticalGaussian {
     /// The narrowest σ the ellipse has along either pixel axis at a fixed offset along the other:
-    /// `1/√P` for the larger diagonal entry `P` of its inverse covariance. Near `σ·axis_ratio` for a
-    /// thin ellipse off the axes, it is what the pixel quadrature has to resolve.
+    /// `1/√P` for the larger diagonal entry `P` of its inverse covariance. Near `σ·axis_ratio` for
+    /// a thin ellipse off the axes, it is what the pixel quadrature has to resolve.
     fn axis_sigma(self) -> f64 {
         let major = f64::from(self.sigma);
         let minor = major * f64::from(self.axis_ratio);

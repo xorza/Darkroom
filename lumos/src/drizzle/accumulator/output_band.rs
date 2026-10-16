@@ -150,9 +150,9 @@ impl OutputBand<'_> {
                 radius,
                 inv_2sigma_sq,
             } => self.distribute_radial(source, radius, |step, nearest| {
-                // `d² − d₀²` for `d = step + d₀`: the nearest tap is 1 and every other one below it,
-                // so the sum stays at least 1 however narrow the drop and however far off a pixel
-                // centre it lands, where `exp(−d²/2σ²)` underflows to a sum of 0.
+                // `d² − d₀²` for `d = step + d₀`: the nearest tap is 1 and every other one below
+                // it, so the sum stays at least 1 however narrow the drop and however far off a
+                // pixel centre it lands, where `exp(−d²/2σ²)` underflows to a sum of 0.
                 let excess = step as f64 * (step as f64 + 2.0 * nearest);
                 (-(excess as f32) * inv_2sigma_sq).exp()
             }),

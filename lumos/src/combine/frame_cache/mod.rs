@@ -26,12 +26,10 @@ use crate::combine::frame_cache::sample::{CombineScratch, FlagTallies, GatheredS
 use crate::combine::frame_cache::sample_noise::SampleNoise;
 use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::combine::frame_read::slots::Slots;
-use crate::combine::normalization::FrameNorm;
-use crate::combine::normalization::Normalization;
 use crate::combine::normalization::slot_planes::SlotPlanes;
+use crate::combine::normalization::{FrameNorm, Normalization};
 use crate::combine::reducer::combined_sample::CombinedSample;
-use crate::combine::reducer::pixel_samples::NoiseColumns;
-use crate::combine::reducer::pixel_samples::PixelSamples;
+use crate::combine::reducer::pixel_samples::{NoiseColumns, PixelSamples};
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::planned_combine::PlannedCombine;
 use crate::combine::stack_frame::StackFrame;
@@ -69,6 +67,7 @@ use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
 use crate::stack_product::run_report::RunReport;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
 /// ask for it.
@@ -80,6 +79,8 @@ pub(crate) struct CombineOutput {
     /// channel when a frame is gathered by each channel's own rule.
     coverage: Option<LinearPixels>,
     weight: Option<LinearPixels>,
+    /// What the frame weights summed in `weight` were.
+    weight_kind: WeightKind,
     inverse_variance: Option<LinearPixels>,
     dispersion: Option<LinearPixels>,
     /// The stack's flags, for a frame set where a frame carries flags or is not gathered at every
@@ -248,6 +249,7 @@ impl FrameCache {
             pixels,
             coverage,
             weight: weight_pixels,
+            weight_kind,
             inverse_variance: inverse_variance_pixels,
             dispersion: dispersion_pixels,
             flags,
@@ -305,6 +307,7 @@ impl FrameCache {
                 },
             }),
             weight: weight_pixels.map(QualityMap::from),
+            weight_kind,
             inverse_variance: inverse_variance_pixels.map(QualityMap::from),
             dispersion: dispersion_pixels.map(QualityMap::from),
             cfa_type,
@@ -607,6 +610,7 @@ impl FrameCache {
             pixels,
             coverage: output_coverage,
             weight: output_weight,
+            weight_kind: weights.map_or(WeightKind::Count, FrameWeights::kind),
             inverse_variance: output_inverse_variance,
             dispersion: output_dispersion,
             flags: output_flags,

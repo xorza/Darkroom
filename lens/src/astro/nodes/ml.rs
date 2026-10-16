@@ -1,19 +1,17 @@
 //! ONNX-backed denoise and star-removal nodes.
 
 use std::mem;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
-use scenarium::async_lambda;
-use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::{Func, FuncId, FuncInput, FuncOutput, Library};
+use scenarium::{
+    ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, FuncInput,
+    FuncOutput, Invocation, Library, async_lambda,
+};
 
-use crate::astro::nodes::MlModelPaths;
-use crate::astro::nodes::runtime;
+use crate::astro::nodes::{MlModelPaths, runtime};
 use crate::image::{IMAGE_DATA_TYPE, Image};
-use scenarium::Invocation;
 
 const DENOISE_FUNC_ID: FuncId = FuncId::from_u128(0xace7_86f9_8a02_4ed1_93a0_ad67_bf06_80f8);
 const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::from_u128(0x60c3_1a76_eed4_467c_9ba3_5c89_d294_a91b);

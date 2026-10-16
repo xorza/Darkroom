@@ -1,18 +1,17 @@
+use imaginarium::Buffer2;
+
+use crate::calibration::defect_map::sampling::internals::color_samples;
 use crate::calibration::defect_map::*;
 use crate::combine::frame_cache::FrameCache;
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::image::cfa::cfa_color::CfaColor;
-use crate::internals::cfa::XTRANS_PATTERN;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-
-use crate::calibration::defect_map::sampling::internals::color_samples;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::internals::cfa::make_cfa;
-use imaginarium::Buffer2;
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)

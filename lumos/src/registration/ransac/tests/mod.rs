@@ -1,10 +1,11 @@
 //! Tests for RANSAC module.
 
+use std::f64::consts::PI;
+
 use glam::DVec2;
 
 use crate::registration::ransac::ransac_config::ScaleRange;
 use crate::registration::ransac::*;
-use std::f64::consts::PI;
 
 /// An estimator for `max_sigma` under `config`.
 fn estimator(max_sigma: f64, config: RansacConfig) -> RansacEstimator {

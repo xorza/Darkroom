@@ -5,9 +5,7 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
-use crate::internals::visual;
+use crate::internals::{init_tracing, real_data, visual};
 use crate::math::statistics;
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,

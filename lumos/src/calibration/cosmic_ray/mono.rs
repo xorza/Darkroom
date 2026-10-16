@@ -4,23 +4,21 @@
 //! → fine structure `F` → flag → grow → in-paint → iterate. Also serves each deinterleaved Bayer
 //! phase, whose dense neighbours are same-color in the mosaic.
 
-use std::array;
-use std::fmt;
 use std::ops::Range;
+use std::{array, fmt};
 
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
-use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
-use crate::scratch_pool::{ScratchPool, Shapeless};
-
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
+use crate::math::size2us::Size2us;
+use crate::math::statistics;
+use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::{ScratchPool, Shapeless};
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
 pub(crate) const MONO_SCRATCH_PLANES: usize = 5;

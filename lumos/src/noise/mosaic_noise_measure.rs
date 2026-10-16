@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
@@ -11,7 +13,6 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 use crate::noise::mosaic_sampling::MosaicSampling;
-use imaginarium::Buffer2;
 
 /// An undemosaiced mosaic of three colors, as its noise is measured: its plane under its
 /// pattern, the flags that leave photosites out, the flat gain that divided it when one did, and

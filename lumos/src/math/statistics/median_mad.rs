@@ -19,10 +19,10 @@ pub(crate) struct MedianMad<F = f32> {
 }
 
 impl<F: Float> MedianMad<F> {
-    /// Measure both together, in one pass over `data`, which must not be empty.
+    /// Measure both together, in one pass over `data`, which must not be empty, and leave `data`
+    /// holding each value's absolute deviation from the median, in no particular order.
     ///
     /// More efficient than computing separately since the median is needed for the MAD.
-    /// Mutates the input buffer.
     pub(crate) fn of_mut(data: &mut [F]) -> Self {
         debug_assert!(!data.is_empty());
 

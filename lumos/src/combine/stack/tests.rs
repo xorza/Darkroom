@@ -58,6 +58,7 @@ use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
@@ -1269,6 +1270,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         );
     }
     assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
+    assert_eq!(first.weight_kind, WeightKind::InverseVariance);
 }
 
 /// Two warped frames that share no pixel cannot be normalized, but combine without it: each
@@ -1660,19 +1662,21 @@ fn requested_planes_decide_what_the_combine_allocates() {
     assert!(standard.inverse_variance.is_some() && standard.dispersion.is_none());
 
     // A median is not a linear combination, so its variance plane is absent even though the
-    // request asked for it — and is never allocated, not allocated and cleared.
+    // request asked for it — and is never allocated, not allocated and cleared. It weighs no
+    // frame, whatever the weighting, so its weight is a count.
     let median = stack(StackConfig {
         combine: Combine {
             method: CombineMethod::Median,
             small_n: SmallN::none(),
         },
         quality: QualityPlanes::ALL,
-        weighting: Weighting::Equal,
+        weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
     });
     assert!(median.coverage.is_some());
     assert!(median.weight.is_some(), "a median still reports weight");
+    assert_eq!(median.weight_kind, WeightKind::Count);
     assert!(
         median.inverse_variance.is_none() && median.dispersion.is_none(),
         "a median has no linear-combine variance factor and no dispersion"

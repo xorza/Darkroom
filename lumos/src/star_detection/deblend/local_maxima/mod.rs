@@ -57,8 +57,8 @@ impl LocalMaximaParams {
         component.split_at(peaks, assignment, out)
     }
 
-    /// Into `kept.peaks`, the local maxima of `component` that are at least `min_relative_height` of
-    /// its peak and `min_separation` from every brighter one kept, brightest first.
+    /// Into `kept.peaks`, the local maxima of `component` that are at least `min_relative_height`
+    /// of its peak and `min_separation` from every brighter one kept, brightest first.
     ///
     /// All candidates are collected before any is kept: a candidate too close to a brighter one
     /// that is itself suppressed must still be kept, which a single pass in raster order cannot

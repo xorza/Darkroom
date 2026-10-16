@@ -1,10 +1,11 @@
 //! Tests for morphological dilation.
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::bit_buffer2::dilation::dilate_mask;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
 fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {

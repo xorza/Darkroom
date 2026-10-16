@@ -150,6 +150,6 @@ pub(crate) fn preview(
 }
 
 /// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF.
-pub(crate) fn save(image: &LinearImage, path: &Path) -> Result<(), WriteError> {
+pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
     Ok(Image::from(image).save_file(path)?)
 }

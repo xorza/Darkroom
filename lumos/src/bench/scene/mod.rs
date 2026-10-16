@@ -6,6 +6,9 @@
 //! calibrated frame is a light as calibration leaves it: the filters' color balance and the hot
 //! pixels stay, the bias, the dark current and the vignette are gone.
 
+use glam::DVec2;
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
@@ -20,8 +23,6 @@ use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
 use crate::{CalibrationSet, MasterRole};
-use glam::DVec2;
-use imaginarium::Buffer2;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.
 pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);

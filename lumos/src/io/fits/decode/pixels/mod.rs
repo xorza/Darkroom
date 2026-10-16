@@ -3,23 +3,15 @@ use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use common::CancelToken;
 use fits_well::header::Header;
 use fits_well::image::{Scaling, View as FitsView};
 use fits_well::io::StreamReader;
 use rayon::prelude::*;
 
-use common::CancelToken;
-
 use crate::concurrency;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::fits::decode::DecodedFitsImage;
-use crate::io::fits::decode::hdu_sections::HduSections;
-use crate::io::fits::decode::plan::FitsDecodePlan;
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::FitsRefusal;
-use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-
 use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::image_provenance::{
@@ -29,12 +21,16 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::image::sample_domain::SampleDomain;
+use crate::io::fits::decode::DecodedFitsImage;
+use crate::io::fits::decode::hdu_sections::HduSections;
+use crate::io::fits::decode::plan::FitsDecodePlan;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_options::FitsChecksumPolicy;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 use crate::io::load_context::LoadContext;
-use crate::io::null_policy::NullSamples;
-use crate::io::null_policy::{self, NullPolicy};
+use crate::io::null_policy::{self, NullPolicy, NullSamples};
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 
 /// The decode of one image HDU: the HDU, its header and the plan its preflight made, and the file
 /// it is read from under the load's context.

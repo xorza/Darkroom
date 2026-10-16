@@ -1,8 +1,7 @@
 //! Why a registration found no transform.
 
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 use glam::DVec2;
 

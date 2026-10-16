@@ -36,9 +36,11 @@ use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
+use crate::stack_product::weight_kind::WeightKind;
 
-/// 1: the report in the primary header, the quality planes in `CCDData`'s layout.
-pub(crate) const PRODUCT_VERSION: i64 = 1;
+/// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
+/// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
+pub(crate) const PRODUCT_VERSION: i64 = 2;
 pub(crate) const QUALITY_FORMAT: &str = "QUALPLAN";
 pub(crate) const QUALITY_VERSION: i64 = 1;
 /// The `UTYPE` astropy names an inverse-variance uncertainty by: its class's name.
@@ -50,6 +52,14 @@ const PRODUCT_KEYWORD: &str = "LUMPRODV";
 const UNCERTAINTY_TYPE: &str = "UTYPE";
 /// The primary header's keyword for a coverage of one value at every pixel, which no plane holds.
 const UNIFORM_COVERAGE: &str = "LUMCOVU";
+/// The primary header's keyword for what the frame weights the `WEIGHT` plane sums were.
+const WEIGHT_KIND: &str = "LUMWGTK";
+/// Each [`WeightKind`] by the value [`WEIGHT_KIND`] names it with.
+const WEIGHT_KINDS: [(WeightKind, &str); 3] = [
+    (WeightKind::Count, "COUNT"),
+    (WeightKind::InverseVariance, "INVERSE_VARIANCE"),
+    (WeightKind::Relative, "RELATIVE"),
+];
 
 /// The planes after the flags and gain, in the order the file holds them: `CCDData`'s two first.
 const PLANES: [LumosExtension; 5] = [
@@ -66,15 +76,23 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     let mut primary = LinearFitsHdu::encode(image, product.cfa_type)?;
     primary.header.set(PRODUCT_KEYWORD, PRODUCT_VERSION)?;
     report_keywords::write(&mut primary.header, &product.report)?;
+    primary
+        .header
+        .set(WEIGHT_KIND, weight_kind_name(product.weight_kind))?;
     if let Some(Coverage::Uniform { value, .. }) = &product.coverage {
         primary.header.set(UNIFORM_COVERAGE, f64::from(*value))?;
     }
     let flags = FlagsExtension::encode(image.flags(), None, 1)?;
     let gain = GainExtension::encode(image.flat_gain().map(Arc::as_ref), None)?;
-    let scale = image_scale(image);
+    let described = DescribedImage {
+        size: image.dimensions().size(),
+        channels: image.channels(),
+        scale: image_scale(image),
+        weight_kind: Some(product.weight_kind),
+    };
     let mut planes = Vec::with_capacity(PLANES.len());
     if let Some(mask) = mask(image) {
-        planes.push(encode_plane(LumosExtension::Mask, mask, scale)?);
+        planes.push(encode_plane(LumosExtension::Mask, mask, &described)?);
     }
     let maps = [
         (
@@ -93,7 +111,7 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     ];
     for (extension, map) in maps {
         if let Some(map) = map {
-            planes.push(encode_plane(extension, map_samples(map), scale)?);
+            planes.push(encode_plane(extension, map_samples(map), &described)?);
         }
     }
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
@@ -130,6 +148,7 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
         return Err(FitsRefusal::ProductVersion { version }.into());
     }
     let report = report_keywords::read(&primary)?;
+    let weight_kind = read_weight_kind(&primary)?;
     let uniform_coverage = primary
         .get_real(UNIFORM_COVERAGE)?
         .map(|value| {
@@ -169,12 +188,17 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
         }
     })?;
 
-    let scale = image_scale(&image);
+    let described = DescribedImage {
+        size: image.dimensions().size(),
+        channels: image.channels(),
+        scale: image_scale(&image),
+        weight_kind: Some(weight_kind),
+    };
     let mut planes = QualityPlanesRead::default();
     let mut mask = None;
     for Found { extension, index } in found {
         Cancelled::check(&context.cancel)?;
-        let stored = read_plane(&mut reader, index, extension, &image, scale)?;
+        let stored = read_plane(&mut reader, index, extension, &described)?;
         match extension {
             LumosExtension::Mask => mask = Some(stored),
             LumosExtension::Uncertainty => planes.inverse_variance = Some(stored),
@@ -198,6 +222,7 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
         image,
         coverage,
         weight: map(planes.weight),
+        weight_kind,
         inverse_variance: map(planes.inverse_variance),
         dispersion: map(planes.dispersion),
         cfa_type,
@@ -234,6 +259,32 @@ struct EncodedPlane {
 struct PlaneSamples<T> {
     shape: Vec<usize>,
     samples: Vec<T>,
+}
+
+/// The value [`WEIGHT_KIND`] names `kind` with.
+fn weight_kind_name(kind: WeightKind) -> &'static str {
+    WEIGHT_KINDS
+        .into_iter()
+        .find_map(|(named, name)| (named == kind).then_some(name))
+        .expect("every weight kind has a name")
+}
+
+/// The weight kind `header` states, refused when it states none or one no product names.
+fn read_weight_kind(header: &Header) -> Result<WeightKind, FitsLoadError> {
+    let name = header
+        .get_text(WEIGHT_KIND)?
+        .ok_or_else(|| FitsRefusal::MissingKeyword {
+            keyword: WEIGHT_KIND.to_owned(),
+        })?;
+    WEIGHT_KINDS
+        .into_iter()
+        .find_map(|(kind, named)| (named == name).then_some(kind))
+        .ok_or_else(|| {
+            FitsRefusal::KeywordOutOfRange {
+                keyword: WEIGHT_KIND.to_owned(),
+            }
+            .into()
+        })
 }
 
 /// Multiply a sample of the image by this to recover the source's value: its domain's scale.
@@ -290,7 +341,7 @@ fn image_shape(size: Size2us, channels: usize) -> Vec<usize> {
 fn encode_plane<T>(
     extension: LumosExtension,
     plane: PlaneSamples<T>,
-    scale: Option<f64>,
+    image: &DescribedImage,
 ) -> Result<EncodedPlane, WriteError>
 where
     Vec<T>: Into<FitsData>,
@@ -304,7 +355,7 @@ where
     if extension == LumosExtension::Uncertainty {
         header.set(UNCERTAINTY_TYPE, INVERSE_VARIANCE)?;
     }
-    let image = Image::new_scaled(plane.shape, plane.samples, extension.scaling(scale))?;
+    let image = Image::new_scaled(plane.shape, plane.samples, extension.scaling(image))?;
     Ok(EncodedPlane { image, header })
 }
 
@@ -314,18 +365,10 @@ fn read_plane(
     reader: &mut StreamReader<File>,
     index: usize,
     extension: LumosExtension,
-    image: &LinearImage,
-    scale: Option<f64>,
+    image: &DescribedImage,
 ) -> Result<FitsData, FitsLoadError> {
     let hdu = &reader.hdus()[index];
-    extension.check(
-        hdu,
-        &DescribedImage {
-            size: image.dimensions().size(),
-            channels: image.channels(),
-            scale,
-        },
-    )?;
+    extension.check(hdu, image)?;
     if extension == LumosExtension::Uncertainty {
         let utype = hdu.header.get_text(UNCERTAINTY_TYPE)?;
         if utype != Some(INVERSE_VARIANCE) {

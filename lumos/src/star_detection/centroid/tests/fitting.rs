@@ -1,6 +1,7 @@
+use rayon::prelude::*;
+
 use super::*;
 use crate::math::error_function;
-use rayon::prelude::*;
 
 /// Every centroid method over a 10 × 10 grid of sub-pixel offsets in 0.1 px steps, each fit seeded
 /// at the pixel nearest the star; the cells are independent, so they run in parallel.

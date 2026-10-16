@@ -4,10 +4,12 @@
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-
 use common::CancelToken;
 
+use crate::calibration::calibration_component::CalibrationComponent;
+use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::calibration_pass::{CalibrationPass, Saturation};
+use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource, FitLight};
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::defect_summary::DefectSummary;
@@ -15,7 +17,9 @@ use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::error::{CalibrationError, MasterBuildError};
 use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs, SubtractedFrames};
 use crate::calibration::master_recipe::MasterRecipe;
+use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
+use crate::calibration::prepared_flat::PreparedFlat;
 use crate::calibration::sensor::Sensor;
 use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
@@ -26,12 +30,6 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::Pedestal;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::progress::progress_monitor::ProgressMonitor;
-
-use crate::calibration::calibration_component::CalibrationComponent;
-use crate::calibration::calibration_outcome::CalibrationOutcome;
-use crate::calibration::calibration_set::CalibrationSet;
-use crate::calibration::master_role::MasterRole;
-use crate::calibration::prepared_flat::PreparedFlat;
 
 /// The calibration a light receives: what to subtract, the flat to divide by, and the defects to
 /// repair. Only what [`Self::calibrate`] reads is kept; the flat-dark is spent on the flat.
@@ -56,7 +54,7 @@ pub struct CalibrationMasters {
 }
 
 /// What [`CalibrationMasters::build`] stacks: each role's frames, the sigma threshold of defect
-/// detection ([``] by default), and the cache of masters it reads and
+/// detection ([`SigmaThreshold::DEFAULT`] by default), and the cache of masters it reads and
 /// writes.
 #[derive(Debug)]
 pub struct MasterBuild<'a, P, C> {
@@ -79,12 +77,13 @@ impl CalibrationMasters {
     /// Stack every role of the build's frames into its master under the role's preset, read as
     /// `ingest` says, and assemble the set ([`Self::from_images`]): the bias and the flat-dark
     /// first, then the flats, then the dark. Each flat loses its additive parts before the
-    /// multiplicative normalization scales it, as PixInsight and Siril calibrate flats, by the
-    /// rule a light loses them by: the bias as it stands, and the flat-dark's dark signal — the
+    /// multiplicative normalization scales it, as PixInsight and Siril calibrate flats, by the rule
+    /// a light loses them by: the bias as it stands, and the flat-dark's dark signal — the
     /// flat-dark without the bias, when there is one — scaled to the flat's own exposure. With no
-    /// bias the flat-dark holds the bias too, and only a flat of its exposure can take it. A role with no frames has no master. The cache is read before a role is
-    /// stacked, and written once it is under the key that read gave;
-    /// [`NoMasterCache`](crate::NoMasterCache) stacks every one.
+    /// bias the flat-dark holds the bias too, and only a flat of its exposure can take it. A role
+    /// with no frames has no master. The cache is read before a role is stacked, and written once
+    /// it is under the key that read gave; [`NoMasterCache`](crate::NoMasterCache) stacks every
+    /// one.
     ///
     /// # Errors
     ///

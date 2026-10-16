@@ -5,12 +5,15 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
+use common::CancelToken;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
@@ -22,13 +25,9 @@ use crate::image::masked_plane::MaskedPlane;
 use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-
-use crate::image::cfa::demosaic::Demosaic;
-use crate::image::stackable_image::{ImageParts, StackableImage};
-use common::CancelToken;
-use imaginarium::Buffer2;
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.

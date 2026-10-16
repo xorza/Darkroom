@@ -1,18 +1,16 @@
-use crate::calibration::subtraction::internals::subtract_bias;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::internals::cfa::XTRANS_PATTERN;
-use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-
 use crate::CfaType;
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
+use crate::calibration::subtraction::internals::subtract_bias;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::test_rng::TestRng;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
     if let Some(subtractor) = subtractor {

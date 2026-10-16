@@ -178,8 +178,8 @@ impl AlignStackConfig {
     }
 
     /// Detect → register → warp → stack calibrated linear lights read from files: FITS or
-    /// floating-point TIFF, as [`LoadContext::linear`](crate::LoadContext::linear) reads them — the output of Siril or
-    /// PixInsight, for one.
+    /// floating-point TIFF, as [`LoadContext::linear`](crate::LoadContext::linear) reads them — the
+    /// output of Siril or PixInsight, for one.
     ///
     /// [`Self::align_stack_images`] for frames on disk: each light is decoded on a worker, checked,
     /// and its stars detected, and when the set would not fit the memory it plans against, parked

@@ -7,10 +7,9 @@ use std::mem;
 
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
-
-use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;

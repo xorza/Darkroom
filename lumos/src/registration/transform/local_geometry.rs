@@ -6,10 +6,10 @@ use glam::DMat2;
 /// and the stretch along the two principal axes of `S`, its singular values.
 ///
 /// For `J = [[a, b], [c, d]]` they have a closed form: with `E = |(a + d, c − b)|` and
-/// `F = |(a − d, c + b)|`, the stretches are `(E + F)/2` and `(E − F)/2` and `θ = atan2(c − b, a + d)`.
-/// Their product is `det J`, so the second stretch is negative exactly when the map mirrors.
-/// A similarity has two equal stretches, its scale, and its own angle; only an affine or a
-/// homography stretches the two axes apart.
+/// `F = |(a − d, c + b)|`, the stretches are `(E + F)/2` and `(E − F)/2` and
+/// `θ = atan2(c − b, a + d)`. Their product is `det J`, so the second stretch is negative exactly
+/// when the map mirrors. A similarity has two equal stretches, its scale, and its own angle; only
+/// an affine or a homography stretches the two axes apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LocalGeometry {
     /// The rotation, in radians, in `(−π, π]`.

@@ -1,7 +1,6 @@
 //! [`XTransPattern`]: a checked 6×6 X-Trans color layout.
 
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;

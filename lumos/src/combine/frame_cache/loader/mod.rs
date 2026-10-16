@@ -246,40 +246,32 @@ struct FrameLoad<'a, D, S> {
 }
 
 impl<D: Decoder, S: FrameStep<D::Image>> FrameLoad<'_, D, S> {
-    /// Frame `index` decoded, through the step when there is one: with its source as it was
-    /// before the decode when its planes are kept, through the storage otherwise.
-    fn decode<E: From<StackError> + From<S::Error>>(
-        &self,
-        index: usize,
-    ) -> Result<Decoded<D::Image>, E> {
-        let path = self.paths[index];
-        let (mut image, source) = match self.kept {
-            Some(_) => {
-                let source = stack(CachedSource::of(path, D::KIND, self.context))?;
-                (stack(D::load(path, self.context))?, Some(source))
-            }
-            None => (stack(self.storage.decode::<D>(path, self.context))?, None),
-        };
+    /// Frame `index` decoded through the storage, through the step when there is one: how a frame
+    /// is taken when no decode cache holds the frames themselves.
+    fn decode<E: From<StackError> + From<S::Error>>(&self, index: usize) -> Result<D::Image, E> {
+        let mut image = stack(self.storage.decode::<D>(self.paths[index], self.context))?;
         self.step.apply(index, &mut image)?;
-        Ok(Decoded { image, source })
+        Ok(image)
     }
 
     /// Frame 0 before the plan: kept by a run before when the decode cache holds it, decoded
-    /// otherwise.
+    /// otherwise. The decode cache holds the frames only when the step changes none, so a decode
+    /// it will keep takes no step.
     fn early<E: From<StackError> + From<S::Error>>(&self) -> Result<Early<D::Image>, E> {
-        if let Some(kept) = self.kept {
-            let source = stack(CachedSource::of(self.paths[0], D::KIND, self.context))?;
-            if let Some(reused) = kept.reuse(&source) {
-                return Ok(Early::Kept(Box::new(reused)));
-            }
-            let mut image = stack(D::load(self.paths[0], self.context))?;
-            self.step.apply(0, &mut image)?;
+        let Some(kept) = self.kept else {
             return Ok(Early::Decoded(Decoded {
-                image,
-                source: Some(source),
+                image: self.decode::<E>(0)?,
+                source: None,
             }));
+        };
+        let source = stack(CachedSource::of(self.paths[0], D::KIND, self.context))?;
+        if let Some(reused) = kept.reuse(&source) {
+            return Ok(Early::Kept(Box::new(reused)));
         }
-        Ok(Early::Decoded(self.decode::<E>(0)?))
+        Ok(Early::Decoded(Decoded {
+            image: stack(D::load(self.paths[0], self.context))?,
+            source: Some(source),
+        }))
     }
 }
 
@@ -311,7 +303,7 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
         let image = match early {
             Some(Early::Decoded(decoded)) => decoded.image,
             Some(Early::Kept(_)) => unreachable!("a frame is kept only with a decode cache"),
-            None => self.load.decode::<E>(index)?.image,
+            None => self.load.decode::<E>(index)?,
         };
         let admitted = stack(self.intake.admit(index, &image))?;
         let metadata = (index == 0).then(|| image.metadata().clone());

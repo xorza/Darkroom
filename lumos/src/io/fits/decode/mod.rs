@@ -17,25 +17,23 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
-use std::sync::Arc;
-
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
-use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::frame_info::FrameInfo;
-use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
-
 use crate::image::flat_gain::FlatGain;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
+use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
+use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
+use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 mod hdu_sections;
 mod pixels;
@@ -100,7 +98,7 @@ fn check_gain_channels(flat_gain: Option<&FlatGain>, channels: usize) -> Result<
 
 /// Refuse, as a linear load of `path` does, an image whose header declares a mosaic: it loads as a
 /// `CfaImage`, to be calibrated before it is demosaiced.
-fn linear(path: &Path, selected: &SelectedFits<'_>) -> Result<(), ImageError> {
+fn refuse_mosaic(path: &Path, selected: &SelectedFits<'_>) -> Result<(), ImageError> {
     if selected.is_mosaic() {
         return Err(ImageError::scientific_rejection(
             path,
@@ -115,7 +113,7 @@ pub(crate) fn load_linear(path: &Path, context: &LoadContext) -> Result<LinearIm
     let fits = |error| ImageError::fits_load(path, error);
     let mut reader = selected_fits::open(path, context).map_err(fits)?;
     let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
-    linear(path, &selected)?;
+    refuse_mosaic(path, &selected)?;
     selected
         .read(context, Checksum::Judged)
         .and_then(DecodedFitsImage::into_linear)
@@ -171,7 +169,7 @@ pub(crate) fn linear_info(path: &Path, context: &LoadContext) -> Result<FrameInf
     let fits = |error| ImageError::fits_load(path, error);
     let mut reader = selected_fits::open(path, context).map_err(fits)?;
     let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
-    linear(path, &selected)?;
+    refuse_mosaic(path, &selected)?;
     Ok(FrameInfo {
         dimensions: selected.plan.dimensions,
         cfa_type: CfaType::Mono,

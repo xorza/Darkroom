@@ -30,13 +30,7 @@ use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
-use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
-
-/// An iteration cap must leave at least one pass to run. Shared by the methods that iterate.
-fn validate_max_passes(max_iterations: u32) -> Result<(), InvalidConfigField> {
-    ConfigValue::new("max_iterations", max_iterations).must_be("at least 1", max_iterations >= 1)
-}
 
 /// Pixel rejection algorithm applied before combining.
 #[derive(Debug, Clone, Copy, PartialEq)]

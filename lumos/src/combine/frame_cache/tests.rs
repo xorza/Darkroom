@@ -584,6 +584,7 @@ fn finish_product_uniform_equal_weights() {
     };
     assert_eq!(weight.pixels(), &[4.0; 6]);
     assert_eq!(inverse_variance.pixels(), &[4.0; 6]);
+    assert_eq!(product.weight_kind, WeightKind::Count);
 }
 
 #[test]
@@ -604,6 +605,7 @@ fn finish_product_uniform_manual_weights() {
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
         assert_eq!(inverse_variance.channel(0)[p], 100.0 / 30.0);
     }
+    assert_eq!(product.weight_kind, WeightKind::Relative);
 }
 
 #[test]

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +18,6 @@ use crate::math::vec2us::Vec2us;
 use crate::noise::ccd_noise::CcdNoise;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use crate::noise::mrs_noise::{self, NoisePlane, PixelGains};
-use imaginarium::Buffer2;
 
 /// Per-frame statistics, per slot: a channel, or a color of a mosaic, whose one channel holds three
 /// colors of their own level and noise.
@@ -46,8 +46,9 @@ pub(crate) struct FrameStats {
 
 impl FrameStats {
     /// Measure each slot's median on `image`, and its white noise before any interpolation: on a
-    /// mosaic, per color; on a demosaiced frame, the [`MosaicNoise`](crate::image::mosaic_noise::MosaicNoise) its demosaic measured, because
-    /// the frame's own correlated pixels would understate it; elsewhere, per channel.
+    /// mosaic, per color; on a demosaiced frame, the
+    /// [`MosaicNoise`](crate::image::mosaic_noise::MosaicNoise) its demosaic measured, because the
+    /// frame's own correlated pixels would understate it; elsewhere, per channel.
     ///
     /// Pixels the source declared no measurement for are left out: the decoder fills a null with
     /// the frame's own median, so a frame with a large masked region would otherwise report the
@@ -63,8 +64,9 @@ impl FrameStats {
     }
 
     /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
-    /// workers: its noise first — a mosaic's by [`MosaicNoiseMeasure`], any other frame's by [`NoisePlane`]
-    /// one channel at a time — then the samples its levels sort, every slot's at once.
+    /// workers: its noise first — a mosaic's by [`MosaicNoiseMeasure`], any other frame's by
+    /// [`NoisePlane`] one channel at a time — then the samples its levels sort, every slot's at
+    /// once.
     pub(crate) fn heap_bytes(
         dimensions: ImageDimensions,
         mosaic: Option<&CfaType>,

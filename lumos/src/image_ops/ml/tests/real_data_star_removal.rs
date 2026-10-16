@@ -1,9 +1,7 @@
 use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::remove_stars::RemoveStars;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
 use crate::internals::real_data::ml_support::onnx_weights;
-use crate::internals::visual;
+use crate::internals::{init_tracing, real_data, visual};
 
 fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)

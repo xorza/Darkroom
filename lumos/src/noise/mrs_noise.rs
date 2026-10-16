@@ -1,4 +1,5 @@
-//! [`NoisePlane`]: the standard deviation of an image's white noise from its multiresolution support.
+//! [`NoisePlane`]: the standard deviation of an image's white noise from its multiresolution
+//! support.
 
 use std::mem;
 use std::ops::Range;
@@ -205,8 +206,9 @@ pub(crate) struct PixelGains<'a, G> {
     pub(crate) bins: &'a GainBins,
 }
 
-/// A plane whose white noise is estimated, its samples less the pixels `excluded` names, by Starck & Murtagh's multiresolution-support method
-/// (PASP 110, 1998), as PixInsight's `NoiseMRS` computes it.
+/// A plane whose white noise is estimated, its samples less the pixels `excluded` names, by Starck
+/// & Murtagh's multiresolution-support method (PASP 110, 1998), as PixInsight's `NoiseMRS` computes
+/// it.
 ///
 /// An à trous (starlet) transform splits the image into detail layers `w_j` and a smooth residual
 /// `c_J`. A pixel belongs to the support when some layer is significant there, `|w_j| ≥ k·σ·σ_j`,

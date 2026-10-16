@@ -7,11 +7,11 @@ mod input_map;
 pub(crate) mod kernel_plan;
 mod output_band;
 
+use std::slice::ChunksMut;
+
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
-
-use std::slice::ChunksMut;
 
 use crate::combine::error::StackError;
 use crate::drizzle::accumulator::band_scan::BandScan;
@@ -387,6 +387,7 @@ pub(crate) mod internals {
     use crate::registration::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
     use crate::stack_product::run_report::RunReport;
+    use crate::stack_product::weight_kind::WeightKind;
 
     /// The single-pass drizzle a test holds the per-frame one to: every frame added scattered into
     /// one set of sums.
@@ -551,6 +552,7 @@ pub(crate) mod internals {
                 ),
                 coverage: None,
                 weight: Some(weight),
+                weight_kind: WeightKind::Count,
                 inverse_variance: None,
                 dispersion: None,
                 cfa_type: None,

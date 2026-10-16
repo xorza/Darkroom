@@ -17,6 +17,7 @@ pub struct MosaicNoise {
     pub background: [BackgroundSplit; 3],
     /// Each color's median, the level `background` was measured at.
     pub sky: [f32; 3],
-    /// The mosaic's quantization σ, the floor of `sigma`. The demosaic clears the frame's own.
+    /// The mosaic's quantization σ, the floor of every color's noise. The demosaic clears the
+    /// frame's own.
     pub quantization_sigma: Option<f32>,
 }

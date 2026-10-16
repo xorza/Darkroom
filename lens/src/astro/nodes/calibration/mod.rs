@@ -1,21 +1,19 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
-use scenarium::FuncId;
-use scenarium::async_lambda;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
-use lumos::writer;
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadContext,
-    MasterBuild, MasterBuildError, MasterCache, MasterInputs, MasterRole, SigmaThreshold,
+    MasterBuild, MasterBuildError, MasterCache, MasterInputs, MasterRole, ProgressCallback,
+    ProgressMonitor, SigmaThreshold, WriteError, writer,
 };
-use lumos::{ProgressCallback, ProgressMonitor, WriteError};
-use scenarium::Invocation;
-use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, InvokeError, Library};
+use scenarium::{
+    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
+    async_lambda,
+};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
@@ -184,7 +182,8 @@ pub(crate) fn register(library: &mut Library) {
             FuncInput::required("Sigma", DataType::Float)
                 .description(
                     "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
-                     above its color's dark background is a defect. Values below 1 count as 1.",
+                     above its color's dark background is a defect. It must be finite and \
+                     at least 1.",
                 )
                 .default(f64::from(SigmaThreshold::DEFAULT.get())),
         )
@@ -206,8 +205,8 @@ fn frames_input(name: &str, what: &str) -> FuncInput {
 }
 
 /// Each master kept next to its frames, which must share one directory, beside a marker that keys
-/// it by them, by the frames of each master subtracted from them, and by lumos's recipe for it, so a
-/// flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
+/// it by them, by the frames of each master subtracted from them, and by lumos's recipe for it, so
+/// a flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
 /// nothing and keys nothing: a key is a `stat` per frame, and one that fails would fail a build
 /// that never reads the cache.
 #[derive(Debug)]

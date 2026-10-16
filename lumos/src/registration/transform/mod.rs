@@ -3,13 +3,13 @@
 pub(crate) mod linear_model;
 pub(crate) mod local_geometry;
 
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use glam::{DMat2, DVec2};
 
 use crate::math::dmat3::DMat3;
 use crate::registration::transform::local_geometry::LocalGeometry;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 
 /// The unit roundoff of f64: half the gap between 1 and the next float.
 const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
@@ -32,12 +32,12 @@ const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZAT
 
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
-/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two.
-/// Every variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a
-/// model to be *chosen* is [`TransformModel::Auto`](crate::TransformModel::Auto), which is a different question and a
-/// different type.
-/// No `Default`: nothing asks for "the" model, and picking one here would be an answer invented
-/// to satisfy the derive. A caller with nothing to go on wants [`TransformModel::Auto`](crate::TransformModel::Auto).
+/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two. Every
+/// variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a model
+/// to be *chosen* is [`TransformModel::Auto`](crate::TransformModel::Auto), which is a different
+/// question and a different type. No `Default`: nothing asks for "the" model, and picking one here
+/// would be an answer invented to satisfy the derive. A caller with nothing to go on wants
+/// [`TransformModel::Auto`](crate::TransformModel::Auto).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)

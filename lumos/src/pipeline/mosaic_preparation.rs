@@ -48,8 +48,8 @@ impl MosaicPreparation<'_> {
             })?;
             tracing::info!(removed, "rejected cosmic rays");
         }
-        // The demosaic polls the cancel token between its passes.
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
+        // The demosaic polls the cancel token between its passes.
         cfa.demosaic(context.xtrans_passes, noise, &context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }

@@ -7,10 +7,11 @@
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
 //! telescoping identity, so the layer pyramid is never materialized.
 
-use crate::math::size2us::Size2us;
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+
+use crate::math::size2us::Size2us;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];

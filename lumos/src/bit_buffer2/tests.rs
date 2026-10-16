@@ -1,11 +1,12 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use std::mem;
 use std::panic::catch_unwind;
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;
-use imaginarium::Buffer2;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {

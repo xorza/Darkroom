@@ -82,8 +82,7 @@ pub use image::cfa::xtrans_pattern::XTransPattern;
 pub use image::channel_layout::ChannelLayout;
 pub use image::dark_comparison::DarkComparison;
 pub use image::derived_facts::DerivedFacts;
-pub use image::error::XTransPatternError;
-pub use image::error::{DimensionsError, FrameDimensionMismatch};
+pub use image::error::{DimensionsError, FrameDimensionMismatch, XTransPatternError};
 pub use image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 pub use image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 pub use image::flat_gain::FlatGain;
@@ -202,6 +201,7 @@ pub use stack_product::StackProduct;
 pub use stack_product::coverage::Coverage;
 pub use stack_product::quality_planes::QualityPlanes;
 pub use stack_product::run_report::RunReport;
+pub use stack_product::weight_kind::WeightKind;
 
 pub use pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 pub use pipeline::align_stack_result::{AlignStackResult, LightOutcome};

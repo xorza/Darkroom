@@ -5,9 +5,7 @@ use rand_chacha::ChaCha8Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::combine::reducer::combined_sample::CombinedSample;
-
 use crate::combine::reducer::pixel_samples::PixelSamples;
-
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::*;
@@ -1073,8 +1071,8 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
     }
 }
 
-/// [`MeanCombine::reducer`] averages the survivors under their own weights. Each expected value is the
-/// weighted mean of survivors derived above, an exact quotient rounded once.
+/// [`MeanCombine::reducer`] averages the survivors under their own weights. Each expected value is
+/// the weighted mean of survivors derived above, an exact quotient rounded once.
 ///
 /// - No rejection over 1 … 5: 15/5, and with frame 0 weighing 10: (10 + 14)/14.
 /// - Sigma clipping at 2σ drops the 100 of the ramp: 17.5/7. At low 4σ, high 2σ with frame 0

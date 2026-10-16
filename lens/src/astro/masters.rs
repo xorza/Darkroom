@@ -5,8 +5,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use lumos::CalibrationMasters;

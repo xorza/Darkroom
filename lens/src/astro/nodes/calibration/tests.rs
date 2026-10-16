@@ -1,7 +1,5 @@
-use std::fs;
-use std::io;
 use std::path::PathBuf;
-use std::slice;
+use std::{fs, io, slice};
 
 use common::{CancelToken, TempDir};
 use imaginarium::Buffer2;

@@ -2,6 +2,8 @@
 //!
 //! Provides utilities to create `BackgroundEstimate` instances for benchmarks and tests.
 
+use imaginarium::Buffer2;
+
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
@@ -10,7 +12,6 @@ use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
 use crate::star_detection::refined_background::RefinedBackground;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
-use imaginarium::Buffer2;
 
 /// Create a uniform `BackgroundEstimate` with constant background and noise values.
 pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundEstimate {

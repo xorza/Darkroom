@@ -1,5 +1,9 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use common::CancelToken;
+use imaginarium::Buffer2;
+use rayon::ThreadPoolBuilder;
+
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::bayer::rcd;
@@ -11,9 +15,6 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use common::CancelToken;
-use imaginarium::Buffer2;
-use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
 /// it; `TRUE`, which names no phase, is refused like any other value.

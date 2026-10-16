@@ -1,9 +1,8 @@
 //! [`BlackLevel`]: a RAW file's black level in ADU, folded as LibRaw folds it, without its
 //! roundings.
 
-use rayon::prelude::*;
-
 use imaginarium::Buffer2;
+use rayon::prelude::*;
 
 use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::PixelFlags;

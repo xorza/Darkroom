@@ -10,8 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bytemuck::Pod;
-use common::SerdeFormat;
-use common::file_utils;
+use common::{SerdeFormat, file_utils};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -107,8 +106,8 @@ impl<'a> FrameSpill<'a> {
     }
 
     /// Record a kept frame whose planes are all written: decoded into `decoded`, with the digests
-    /// of the planes as written and what its admission found, in one record. It goes last, so a run killed
-    /// before it leaves a cache the next run rebuilds.
+    /// of the planes as written and what its admission found, in one record. It goes last, so a run
+    /// killed before it leaves a cache the next run rebuilds.
     pub(crate) fn commit(
         &self,
         decoded: &Decoded,

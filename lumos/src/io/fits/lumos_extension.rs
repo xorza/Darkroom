@@ -13,6 +13,7 @@ use crate::io::fits::gain_extension::{GAIN_EXTNAME, GAIN_FORMAT, GAIN_VERSION};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::product::{QUALITY_FORMAT, QUALITY_VERSION};
 use crate::math::size2us::Size2us;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// An image extension that describes another image of its file rather than being one; it shows
 /// as its `EXTNAME`.
@@ -92,14 +93,20 @@ impl LumosExtension {
         }
     }
 
-    /// The scaling the extension is written at, for an image whose samples are `scale` source
-    /// units each: the one that puts it in the units of the image as a reader scales it. A
-    /// variance is in the image's units squared and an inverse variance in their inverse square;
+    /// The scaling the extension is written at beside `image`: the one that puts it in the units
+    /// of the image as a reader scales it. A variance is in the image's units squared and an
+    /// inverse variance in their inverse square, a weight plane of inverse variances among them;
     /// the others carry none.
-    pub(crate) fn scaling(self, scale: Option<f64>) -> Scaling {
-        let bscale = match (self, scale) {
-            (Self::Uncertainty, Some(scale)) => 1.0 / (scale * scale),
-            (Self::Dispersion, Some(scale)) => scale * scale,
+    pub(crate) fn scaling(self, image: &DescribedImage) -> Scaling {
+        let Some(scale) = image.scale else {
+            return Scaling::IDENTITY;
+        };
+        let bscale = match self {
+            Self::Uncertainty => 1.0 / (scale * scale),
+            Self::Weight if image.weight_kind == Some(WeightKind::InverseVariance) => {
+                1.0 / (scale * scale)
+            }
+            Self::Dispersion => scale * scale,
             _ => return Scaling::IDENTITY,
         };
         Scaling {
@@ -155,7 +162,7 @@ impl LumosExtension {
             return Err(FitsRefusal::ExtensionNotImage { extension: self }.into());
         }
         let stored = hdu.image()?;
-        if stored.bitpix != self.bitpix() || stored.scaling != self.scaling(image.scale) {
+        if stored.bitpix != self.bitpix() || stored.scaling != self.scaling(image) {
             return Err(FitsRefusal::ExtensionSamples {
                 extension: self,
                 bitpix: stored.bitpix,
@@ -201,6 +208,9 @@ pub(crate) struct DescribedImage {
     pub(crate) channels: usize,
     /// What a sample of the image is worth in the source's units: its domain's scale.
     pub(crate) scale: Option<f64>,
+    /// What the frame weights of a stack product's weight plane were; `None` for an image that is
+    /// no product.
+    pub(crate) weight_kind: Option<WeightKind>,
 }
 
 impl Display for LumosExtension {

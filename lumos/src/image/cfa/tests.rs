@@ -1,12 +1,16 @@
-use crate::frame::frame_stats::FrameStats;
-use crate::image::calibration_state::CalibrationState;
-use crate::io::fits::metadata::VERSION_KEYWORD;
-use crate::io::writer;
 use std::f64::consts::FRAC_1_SQRT_2;
+use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
+use common::TempDir;
+use fits_well::FitsReader;
+use fits_well::header::Header;
+use fits_well::io::{ChecksumReport, ChecksumStatus};
 use imaginarium::Buffer2;
 
+use crate::frame::frame_stats::FrameStats;
+use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::*;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::*;
@@ -27,17 +31,12 @@ use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::internals::test_rng::TestRng;
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
+use crate::io::fits::metadata::VERSION_KEYWORD;
 use crate::io::load_context::LoadContext;
-use crate::io::raw;
+use crate::io::{raw, writer};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use common::TempDir;
-use fits_well::FitsReader;
-use fits_well::header::Header;
-use fits_well::io::{ChecksumReport, ChecksumStatus};
-use std::fs;
-use std::sync::Arc;
 
 #[test]
 fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {

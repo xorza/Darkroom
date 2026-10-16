@@ -12,7 +12,6 @@
 //! pollution is colored), and runs on the linear master *before* color calibration and the
 //! stretch.
 
-use crate::math::lstsq::Lstsq;
 use arrayvec::ArrayVec;
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
@@ -26,6 +25,7 @@ use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
+use crate::math::lstsq::Lstsq;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 
@@ -89,8 +89,9 @@ impl ExtractBackground {
     /// image as it was.
     ///
     /// # Errors
-    /// [`OpError::Config`] on out-of-range parameters; [`OpError::RankDeficient`] when the
-    /// sample geometry cannot determine the requested polynomial;
+    /// [`OpError::Config`] on out-of-range parameters; [`OpError::TooFewSamples`] when the image
+    /// gives fewer sample tiles than the requested polynomial has terms;
+    /// [`OpError::RankDeficient`] when the sample geometry cannot determine it;
     /// [`OpError::NonPositiveBackground`] when [`BackgroundMode::Divide`] meets a model whose mean
     /// is not positive.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
@@ -216,8 +217,8 @@ struct Sample {
 /// the shared [`crate::background_mesh::BackgroundMesh`] SExtractor-style sky estimate (per-tile
 /// ±σ-clip → Pearson mode), the estimator star detection reads its sky from. Its grid 3×3 median
 /// filter is **off** here, where the detector's is on: it would bias a real gradient's boundary
-/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. A `None` object mask for now — a star/bright-signal mask from the star detector belongs
-/// in that slot.
+/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. A `None`
+/// object mask for now — a star/bright-signal mask from the star detector belongs in that slot.
 fn collect_samples(
     channel: &Buffer2<f32>,
     tile: usize,

@@ -42,8 +42,8 @@ impl LinearFitClipConfig {
         max_iterations: 4,
     };
 
-    /// Clipping to `sigma` about the fitted line, for at most `max_iterations` passes, the first clip
-    /// about the median among them.
+    /// Clipping to `sigma` about the fitted line, for at most `max_iterations` passes, the first
+    /// clip about the median among them.
     pub const fn new(sigma: SigmaBounds, max_iterations: u32) -> Self {
         Self {
             sigma,

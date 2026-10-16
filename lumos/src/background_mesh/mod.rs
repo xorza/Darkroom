@@ -16,6 +16,12 @@ pub(crate) mod mesh_workspace;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
 
+use std::mem;
+use std::ops::RangeInclusive;
+
+use imaginarium::Buffer2;
+use rayon::prelude::*;
+
 use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::tile_stats::{TileInput, TileScratch, TileStats};
 use crate::math::size2us::Size2us;
@@ -23,10 +29,6 @@ use crate::math::statistics;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::ScratchPool;
-use imaginarium::Buffer2;
-use rayon::prelude::*;
-use std::mem;
-use std::ops::RangeInclusive;
 
 /// Tile grid with each tile's statistics and centre.
 #[derive(Debug)]

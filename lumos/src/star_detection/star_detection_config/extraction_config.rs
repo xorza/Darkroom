@@ -23,8 +23,8 @@ pub enum Connectivity {
 /// How a connected component is split into stars.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Deblend {
-    /// Every residual peak at least `min_relative_height` of the component's brightest, and at least
-    /// `deblend_min_separation` from a brighter one, is its own star.
+    /// Every residual peak at least `min_relative_height` of the component's brightest, and at
+    /// least `deblend_min_separation` from a brighter one, is its own star.
     LocalMaxima {
         /// A peak's height as a share of the component's brightest residual, in `[0, 1]`: a
         /// relative height, not a prominence — no saddle to the brighter peak is measured.

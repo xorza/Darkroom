@@ -2,10 +2,9 @@ use std::ops::RangeInclusive;
 
 use glam::DVec2;
 
-use crate::math::fwhm::FWHM_PER_SIGMA;
-
 use super::*;
 use crate::image::channel_layout::ChannelLayout;
+use crate::math::fwhm::FWHM_PER_SIGMA;
 
 /// A frame at half the reference's image scale — B, its pixels twice as far apart, each covering
 /// four of the reference's — gives every output pixel a quarter of the weight per unit area that an

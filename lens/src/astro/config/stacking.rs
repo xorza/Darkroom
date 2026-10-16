@@ -12,9 +12,9 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
-    Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, TransformModel, Weighting,
+    Combine, FwhmMode, Normalization, RegistrationConfig, SipConfig, StackConfig,
+    StarDetectionConfig, TransformModel, Weighting,
 };
-use lumos::{FwhmMode, StarDetectionConfig};
 
 use crate::astro::config::preset::Preset;
 

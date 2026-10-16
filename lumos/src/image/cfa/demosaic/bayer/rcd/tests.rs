@@ -1,4 +1,5 @@
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
@@ -12,7 +13,6 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::portable::Portable;
 use crate::simd::{F32_LANES, F32x8, Isa};
-use imaginarium::Buffer2;
 
 /// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
 fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {

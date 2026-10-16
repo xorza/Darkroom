@@ -3,12 +3,13 @@
 use crate::combine::rejection::Rejection;
 use crate::combine::stack_config::combine_method::CombineMethod;
 
-/// Small-sample fallback policy for [`Combine`](crate::Combine). Where fewer than `min_frames` frames reach a
-/// pixel the configured [`Combine::method`](crate::Combine::method)'s rejection statistics are unreliable, so the combine
-/// uses `fallback` there instead: at every pixel of a stack of fewer frames, and at the pixels of a
-/// larger one that only some frames cover, such as a mosaic's edges. This makes the fallback an explicit, inspectable part of the config
-/// rather than a runtime transformation. `fallback` must be rejection-free (`Median` or
-/// `Mean(None)`) so it never needs a fallback of its own.
+/// Small-sample fallback policy for [`Combine`](crate::Combine). Where fewer than `min_frames`
+/// frames reach a pixel the configured [`Combine::method`](crate::Combine::method)'s rejection
+/// statistics are unreliable, so the combine uses `fallback` there instead: at every pixel of a
+/// stack of fewer frames, and at the pixels of a larger one that only some frames cover, such as a
+/// mosaic's edges. This makes the fallback an explicit, inspectable part of the config rather than
+/// a runtime transformation. `fallback` must be rejection-free (`Median` or `Mean(None)`) so it
+/// never needs a fallback of its own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SmallN {
     /// Frames below which `fallback` replaces the configured method.

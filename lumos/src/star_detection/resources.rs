@@ -2,6 +2,8 @@
 //!
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
@@ -12,7 +14,6 @@ use crate::star_detection::deblend::region::Region;
 use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star::Star;
-use imaginarium::Buffer2;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
 /// frame after the first allocates nothing but the stars it hands back.

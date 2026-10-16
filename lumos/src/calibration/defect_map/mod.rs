@@ -54,6 +54,10 @@ pub(crate) mod ring_reference;
 pub(crate) mod sampling;
 pub(crate) mod sigma_threshold;
 
+use arrayvec::ArrayVec;
+use common::CancelToken;
+use rayon::prelude::*;
+
 use crate::background_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::defect_map::defect_summary::{ColorDefects, ColorShares, DefectSummary};
@@ -68,10 +72,6 @@ use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
-use common::CancelToken;
-
-use arrayvec::ArrayVec;
-use rayon::prelude::*;
 
 /// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
 /// dark, and **cold/dead** pixels (abnormally low response) from a master flat.

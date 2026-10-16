@@ -1,3 +1,6 @@
+use common::CancelToken;
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
@@ -8,8 +11,6 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use common::CancelToken;
-use imaginarium::Buffer2;
 
 #[test]
 fn xtrans_pattern_color_at() {

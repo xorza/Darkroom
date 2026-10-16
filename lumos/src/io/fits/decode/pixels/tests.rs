@@ -1,8 +1,8 @@
 use common::CancelToken;
+use fits_well::image::{Scaling, View as FitsView};
 
 use crate::error::Cancelled;
 use crate::io::fits::decode::pixels::{ChunkScan, Conversion, NullSummary, SampleScan};
-use fits_well::image::{Scaling, View as FitsView};
 
 const IDENTITY: Scaling = Scaling {
     bscale: 1.0,

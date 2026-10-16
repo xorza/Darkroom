@@ -1,4 +1,5 @@
-//! [`DarkComparison`]: what taking a master of dark signal from a frame compared, and what it found.
+//! [`DarkComparison`]: what taking a master of dark signal from a frame compared, and what it
+//! found.
 
 use std::fmt;
 

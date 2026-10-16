@@ -6,56 +6,56 @@
 //! exemption from it), and both halves of the null convention. The demosaic path is exercised by
 //! building mosaics from known colors and demosaicing them back.
 
-use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
-use crate::combine::normalization::Normalization;
-use crate::combine::stack_config::StackConfig;
-use crate::combine::stack_config::weighting::Weighting;
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
-use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
-use crate::ingest::error::AdmissionError;
-use crate::internals::assertions::assert_close;
-use crate::io::decoder::Decoder;
-use crate::io::decoder::cfa_decoder::CfaDecoder;
-use crate::io::frame_info::FrameInfo;
-use crate::io::writer;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use std::convert::Infallible;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use crate::combine::error::StackError;
-use crate::combine::frame_cache::frame_step::SteppedPaths;
-use crate::combine::stack::planned_combine::PlannedCombine;
-use crate::drizzle::drizzle_config::DrizzleConfig;
-use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::error::DrizzleError;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::sample_domain::{DomainMap, ScaleOrigin};
-use crate::ingest::ingest_config::IngestConfig;
-use crate::ingest::ingest_run::IngestRun;
-use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::decode;
-use crate::io::fits::error::FitsRefusal;
-use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions};
-use crate::io::load_context::LoadContext;
-use crate::io::null_policy::NullPolicy;
-use crate::memory::run_memory::RunMemory;
-use crate::progress::progress_monitor::ProgressMonitor;
-use crate::registration::transform::Transform;
-use crate::registration::warp_transform::WarpTransform;
-
-use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::fits::{fits_refusal, write_fits};
-use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewPixels};
 use common::{CancelToken, TempDir};
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
+
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
+use crate::combine::error::StackError;
+use crate::combine::frame_cache::frame_step::SteppedPaths;
+use crate::combine::normalization::Normalization;
+use crate::combine::stack::planned_combine::PlannedCombine;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::drizzle::error::DrizzleError;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::image::quality_flags::QualityFlags;
+use crate::image::sample_domain::{DomainMap, ScaleOrigin};
+use crate::ingest::error::AdmissionError;
+use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
+use crate::internals::assertions::assert_close;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::fits::{fits_refusal, write_fits};
+use crate::io::decoder::Decoder;
+use crate::io::decoder::cfa_decoder::CfaDecoder;
+use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::fits::decode;
+use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions};
+use crate::io::frame_info::FrameInfo;
+use crate::io::load_context::LoadContext;
+use crate::io::null_policy::NullPolicy;
+use crate::io::writer;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::memory::run_memory::RunMemory;
+use crate::progress::progress_monitor::ProgressMonitor;
+use crate::registration::transform::Transform;
+use crate::registration::warp_transform::WarpTransform;
+use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewPixels};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {

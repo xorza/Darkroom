@@ -9,8 +9,7 @@ pub(crate) mod nodes;
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use lumos::{ChannelLayout, ImageDimensions, LinearImage};

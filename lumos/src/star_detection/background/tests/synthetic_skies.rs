@@ -2,6 +2,7 @@
 //! background and residual images for inspection.
 
 use glam::Vec2;
+use imaginarium::Buffer2;
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::background_map;
@@ -12,7 +13,6 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::Scenario;
-use imaginarium::Buffer2;
 
 /// Each sky against the truth it was rendered from, in three parts.
 ///

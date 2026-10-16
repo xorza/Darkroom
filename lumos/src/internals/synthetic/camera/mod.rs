@@ -5,15 +5,17 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::internals::synthetic::noise)).
 
+use std::f32::consts::PI;
+
+use glam::Vec2;
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use glam::Vec2;
-use imaginarium::Buffer2;
-use std::f32::consts::PI;
 
 /// Point-spread function the camera convolves every point source with.
 #[derive(Debug, Clone, Copy)]

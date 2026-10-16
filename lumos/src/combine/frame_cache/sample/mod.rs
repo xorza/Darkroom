@@ -26,7 +26,8 @@ pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
     pub(super) eff_weights: Vec<f32>,
     pub(super) sample_flags: Vec<u8>,
-    /// The columns of [`NoiseColumns`](crate::combine::reducer::pixel_samples::NoiseColumns), filled only when the combine asked for noise.
+    /// The columns of [`NoiseColumns`](crate::combine::reducer::pixel_samples::NoiseColumns),
+    /// filled only when the combine asked for noise.
     pub(super) noise_background: Vec<f32>,
     pub(super) noise_sky: Vec<f32>,
     pub(super) noise_per_unit: Vec<f32>,

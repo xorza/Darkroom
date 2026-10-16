@@ -19,8 +19,8 @@ const STRIP_GUARD: f64 = 1e-6;
 pub(super) struct Outline {
     pub(super) vertices: Vec<DVec2>,
     pub(super) reach: f64,
-    /// Whether its columns bound a scan: a closed-form outline's do, see
-    /// [`BandScan::new`].
+    /// Whether its columns bound a scan: a closed-form outline's do, and a SIP map's sampled one
+    /// does not, as `FrameSource::band_scan` states.
     pub(super) bounds_columns: bool,
 }
 

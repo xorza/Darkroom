@@ -1,10 +1,9 @@
 use fits_well::header::Header;
-
-use crate::image::calibration_state::CalibrationState;
-use crate::image::cfa::cfa_type::CfaType;
 use fits_well::image::SampleType;
 
+use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
@@ -14,10 +13,9 @@ use crate::image::temperature_difference::TemperatureDifference;
 use crate::image::temperature_source::TemperatureSource;
 use crate::internals::fits::fits_refusal;
 use crate::io::fits::error::FitsRefusal;
-use crate::io::fits::metadata::domain_keywords;
 use crate::io::fits::metadata::{
-    self, Bayerpat, SOURCE_ROW_ORDER, parse_sexagesimal, read_camera_white_balance,
-    read_declared_row_order, read_row_order,
+    self, Bayerpat, SOURCE_ROW_ORDER, domain_keywords, parse_sexagesimal,
+    read_camera_white_balance, read_declared_row_order, read_row_order,
 };
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.

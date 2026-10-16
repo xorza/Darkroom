@@ -9,6 +9,11 @@
   `DISPERSION` beside it, so `CCDData.read` loads it and every plane round-trips bit for bit.
   Refused: a master-only writer, which drops the quality planes, and a layout of our own, which
   no other tool reads.
+- **The product states what its weight plane sums, and scales it by that.** `StackProduct`
+  carries its `WeightKind`, the primary header states it in `LUMWGTK`, and a `WEIGHT` plane of
+  inverse variances takes the `1/scale²` that `UNCERT` takes, as DrizzlePac keeps an IVM `WHT` in
+  its image's units. Refused: an unscaled plane with no stated kind, which a reader cannot
+  interpret, and a plane normalized to relative weights, which loses its inverse variance.
 - **CCD-model rejection refuses a set with a frame of unknown gain.** `RejectionScale::CcdModel`
   fails before the combine and names the first such frame, as IRAF `ccdclip` requires a gain.
   The inverse-variance plane keeps its background-only model with its `RunReport` flag, and

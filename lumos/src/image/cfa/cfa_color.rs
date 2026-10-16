@@ -1,5 +1,7 @@
 //! [`CfaColor`]: the color of a photosite's filter.
 
+use std::fmt;
+
 /// The color of a photosite's filter. Its [`index`](Self::index) is its slot in a per-color
 /// array: red 0, green 1, blue 2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,5 +30,15 @@ impl CfaColor {
             2 => Some(Self::Blue),
             _ => None,
         }
+    }
+}
+
+impl fmt::Display for CfaColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Red => "red",
+            Self::Green => "green",
+            Self::Blue => "blue",
+        })
     }
 }

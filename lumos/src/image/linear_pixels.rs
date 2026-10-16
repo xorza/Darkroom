@@ -1,7 +1,6 @@
 //! [`LinearPixels`]: the planes of a [`LinearImage`](crate::image::linear_image::LinearImage).
 
-use std::array;
-use std::slice;
+use std::{array, slice};
 
 use arrayvec::ArrayVec;
 use imaginarium::{Buffer2, ChannelCount, Image};

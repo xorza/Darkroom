@@ -3,10 +3,9 @@
 pub(crate) mod detection_result;
 pub(super) mod stages;
 
+use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::math::size2us::Size2us;
-
-use crate::error::InvalidConfigField;
 use crate::math::statistics;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::StarDetectionConfig;

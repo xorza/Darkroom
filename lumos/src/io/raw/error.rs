@@ -1,9 +1,8 @@
 //! Why a camera RAW file did not decode: what LibRaw refused, and what the file claims that lumos
 //! refuses; and why a directory could not be scanned for RAW files.
 
-use std::fmt;
-use std::io;
 use std::path::PathBuf;
+use std::{fmt, io};
 
 use libraw_sys as sys;
 

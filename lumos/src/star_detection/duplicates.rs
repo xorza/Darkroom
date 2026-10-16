@@ -3,8 +3,8 @@
 
 use crate::star_detection::star::Star;
 
-/// The duplicate search, with its working sets kept from frame to frame: each star's cell beside its
-/// index, and which stars it keeps.
+/// The duplicate search, with its working sets kept from frame to frame: each star's cell beside
+/// its index, and which stars it keeps.
 #[derive(Debug, Default)]
 pub(crate) struct Duplicates {
     members: Vec<((i64, i64), usize)>,

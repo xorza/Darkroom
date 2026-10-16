@@ -70,20 +70,27 @@ impl RegistrationMatchingConfig {
 /// Configuration for image registration.
 ///
 /// All parameters have sensible defaults calibrated against industry standards
-/// (OpenCV, Astroalign, PixInsight). Most users only need to set `transform_type`
-/// if they want a specific model.
+/// (OpenCV, Astroalign, PixInsight). Most users only need to set `model` if they
+/// want a specific model.
 ///
 /// # Example
 ///
 /// ```no_run
 /// use lumos::{RegistrationConfig, Star};
 ///
-/// # fn example(ref_stars: &[Star], target_stars: &[Star]) -> Result<(), Box<dyn std::error::Error>> {
+/// # fn example(
+/// #     ref_stars: &[Star],
+/// #     target_stars: &[Star],
+/// # ) -> Result<(), Box<dyn std::error::Error>> {
 /// // Use defaults
-/// let result = RegistrationConfig::default().registrar()?.register(ref_stars, target_stars)?;
+/// let result = RegistrationConfig::default()
+///     .registrar()?
+///     .register(ref_stars, target_stars)?;
 ///
 /// // Use a preset
-/// let result = RegistrationConfig::wide_field().registrar()?.register(ref_stars, target_stars)?;
+/// let result = RegistrationConfig::wide_field()
+///     .registrar()?
+///     .register(ref_stars, target_stars)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -205,9 +212,9 @@ impl RegistrationConfig {
 
     /// Precise wide-field configuration: high accuracy with lens distortion handling.
     ///
-    /// Builds on [`Self::wide_field`] (SIP up to an affine map, unlimited rotation/scale) and takes its
-    /// iteration budget and RMS gate from [`Self::precise`], with extra stars, tighter matching and
-    /// stricter confidence of its own.
+    /// Builds on [`Self::wide_field`] (SIP up to an affine map, unlimited rotation/scale) and takes
+    /// its iteration budget and RMS gate from [`Self::precise`], with extra stars, tighter matching
+    /// and stricter confidence of its own.
     ///
     /// Both bases are read rather than copied: a preset that re-typed `precise()`'s numbers as
     /// literals would drift from it the first time either was tuned.

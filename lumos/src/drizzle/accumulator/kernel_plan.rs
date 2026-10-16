@@ -15,9 +15,9 @@ pub(super) const LANCZOS_ORDER: LanczosOrder = LanczosOrder::Three;
 
 /// Everything a kernel needs beyond the frame, resolved once for a run.
 ///
-/// Every field is a function of the kernel, the pixfrac and the scale alone, so resolving it here is what keeps a band
-/// from recomputing an `exp`'s σ, or a drop's area, on each of the bands a frame's scatter is split
-/// into.
+/// Every field is a function of the kernel, the pixfrac and the scale alone, so resolving it here
+/// is what keeps a band from recomputing an `exp`'s σ, or a drop's area, on each of the bands a
+/// frame's scatter is split into.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum KernelPlan {
     /// Half the drop's side, in *input* pixels: the square kernel shrinks the input pixel and then

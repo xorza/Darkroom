@@ -67,9 +67,9 @@ impl BitLayout {
 ///
 /// **Padding invariant — the bits past each row's width are always clear.** Every constructor and
 /// method keeps them so, which lets a word-wise reader count, compare, smear and visit whole words
-/// with no mask. A writer through [`Self::row_words_mut`] or [`Self::par_rows_mut`] keeps them clear
-/// too: the bits of a row's last pixel word outside [`Self::last_word_mask`], and the words after
-/// it.
+/// with no mask. A writer through [`Self::row_words_mut`] or [`Self::par_rows_mut`] keeps them
+/// clear too: the bits of a row's last pixel word outside [`Self::last_word_mask`], and the words
+/// after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BitBuffer2 {
     /// Packed bit storage, 64 values per word, each row's padding clear.

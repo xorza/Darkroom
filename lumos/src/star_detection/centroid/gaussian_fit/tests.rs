@@ -1,13 +1,13 @@
 //! Tests for 2D Gaussian fitting.
+use std::f32::consts::FRAC_PI_4;
+use std::f64::consts::PI;
+
 use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::internals::synthetic::patterns;
-use crate::math::size2us::Size2us;
-use std::f32::consts::FRAC_PI_4;
-use std::f64::consts::PI;
-
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::*;
 use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,

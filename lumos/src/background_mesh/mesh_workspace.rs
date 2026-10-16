@@ -8,8 +8,8 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
 
-/// The σ-clip passes of each tile a mesh measures by default, for the sky of a frame and the samples
-/// of a gradient alike.
+/// The σ-clip passes of each tile a mesh measures by default, for the sky of a frame and the
+/// samples of a gradient alike.
 pub(crate) const DEFAULT_SIGMA_CLIP_MAX_ITERATIONS: usize = 3;
 
 /// The buffers a tile mesh is measured in: the grid itself, the median filter's second grid, and

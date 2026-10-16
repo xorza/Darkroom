@@ -2,11 +2,10 @@
 //! report.
 
 use std::ffi::{CStr, c_char, c_int, c_void};
-use std::fmt;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{fmt, slice};
 
 use common::CancelToken;
 use libraw_sys as sys;

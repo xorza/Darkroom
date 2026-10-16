@@ -215,7 +215,8 @@ mod tests {
     use super::*;
 
     /// Unsigned keys order as `total_cmp` orders the floats — negative and positive, zeros of both
-    /// signs, subnormals, the largest magnitudes and the infinities — and map back to the same bits.
+    /// signs, subnormals, the largest magnitudes and the infinities — and map back to the same
+    /// bits.
     #[test]
     fn unsigned_keys_follow_the_total_order() {
         let ascending = [

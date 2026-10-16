@@ -1,10 +1,11 @@
 //! Image resampling orchestration for registered frames.
 
+use std::slice;
+use std::sync::Arc;
+
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
-use std::slice;
-use std::sync::Arc;
 
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::image::image_dimensions::ImageDimensions;

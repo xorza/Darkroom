@@ -6,9 +6,9 @@ use crate::registration::transform::linear_model::LinearModel;
 
 /// Which model a registration should fit: a specific one, or a request to choose.
 ///
-/// Kept apart from [`TransformType`] so that "pick a model for me" cannot reach the places that
-/// can only act on a chosen one — RANSAC, transform estimation, and [`Transform`](crate::Transform) itself, each of
-/// which would otherwise need its own arm rejecting it.
+/// Kept apart from [`TransformType`] so that "pick a model for me" cannot reach the places that can
+/// only act on a chosen one — RANSAC, transform estimation, and [`Transform`](crate::Transform)
+/// itself, each of which would otherwise need its own arm rejecting it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransformModel {
     /// Fit exactly this model, with no distortion correction.

@@ -1,12 +1,13 @@
 //! [`RingReference`]: the dark level a hot-pixel candidate is held to, from the photosites of its
 //! color around it.
 
+use imaginarium::Buffer2;
+
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 
 /// The ring's inner reach, in pixels: a same-color cluster of up to this many pixels across keeps
 /// most of itself out of its members' rings, and what it leaves in, the clip takes out.

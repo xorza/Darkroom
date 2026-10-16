@@ -3,8 +3,7 @@
 
 use fits_well::io::Hdu;
 
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
@@ -28,10 +27,9 @@ struct Claim {
 }
 
 impl ExtensionClaims {
-    /// The `extension` HDUs of `file`, refused unless each names one image of the file that no
-    /// other names.
-    pub(crate) fn of(file: &[Hdu], extension: LumosExtension) -> Result<Self, FitsLoadError> {
-        let hdus = file;
+    /// The `extension` HDUs of `hdus`, a file's, refused unless each names one image of the file
+    /// that no other names.
+    pub(crate) fn of(hdus: &[Hdu], extension: LumosExtension) -> Result<Self, FitsLoadError> {
         let mut images = Vec::new();
         let mut claims = Vec::new();
         for (index, hdu) in hdus.iter().enumerate() {
@@ -44,7 +42,7 @@ impl ExtensionClaims {
                 })?;
                 claims.push(Claim { hdu: index, image });
             } else if Self::holds_image(hdu)?
-                && let Some(name) = image_name(file, index)?
+                && let Some(name) = image_name(hdus, index)?
             {
                 images.push(name);
             }
@@ -74,10 +72,10 @@ impl ExtensionClaims {
     /// The extension for the image at HDU `image`; `None` when it has none.
     pub(crate) fn for_image(
         &self,
-        file: &[Hdu],
+        hdus: &[Hdu],
         image: usize,
     ) -> Result<Option<usize>, FitsLoadError> {
-        let Some(name) = image_name(file, image)? else {
+        let Some(name) = image_name(hdus, image)? else {
             return Ok(None);
         };
         Ok(self
@@ -91,9 +89,7 @@ impl ExtensionClaims {
     /// extension that describes another image is. A header-only image extension (`NAXIS = 0`) is
     /// none; one with a zero-length axis is, and is refused for that when it is read.
     pub(crate) fn holds_image(hdu: &Hdu) -> Result<bool, FitsLoadError> {
-        Ok(hdu.is_image()
-            && hdu.header.naxis().is_ok_and(|naxis| naxis > 0)
-            && !Self::describes_another(hdu)?)
+        Ok(hdu.is_image() && hdu.header.naxis()? > 0 && !Self::describes_another(hdu)?)
     }
 
     /// Whether `hdu` is an extension that describes another image rather than being one.
@@ -109,8 +105,8 @@ impl ExtensionClaims {
 
 /// The name an extension refers to the image at HDU `index` by: its `EXTNAME`, or [`PRIMARY`] for
 /// an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(file: &[Hdu], index: usize) -> Result<Option<String>, FitsLoadError> {
-    let extname = metadata::read_text(&file[index].header, "EXTNAME")?;
+fn image_name(hdus: &[Hdu], index: usize) -> Result<Option<String>, FitsLoadError> {
+    let extname = metadata::read_text(&hdus[index].header, "EXTNAME")?;
     Ok(match extname {
         Some(extname) => Some(extname),
         None => (index == 0).then(|| PRIMARY.to_owned()),

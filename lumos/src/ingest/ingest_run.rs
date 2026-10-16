@@ -110,7 +110,7 @@ mod tests {
 
     /// The budget is 75% of the override, and the decode ceiling 75% of the system reading whatever
     /// the override: 75 of 100 and 6000 of 8000 here. A decode takes every one of the run's three
-    /// workers. The FITS policy and the storage are the config's: nulls refused, and the kept cache
+    /// workers. The null policy and the storage are the config's: nulls refused, and the kept cache
     /// under `cache`. The monitor's halves land where the stages read them, and join again whole,
     /// borrowed or taken: its token is the decode context's, cancelled through either, and its
     /// callback hears the run's reports.

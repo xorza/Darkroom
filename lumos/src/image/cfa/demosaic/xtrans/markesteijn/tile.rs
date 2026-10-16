@@ -2,14 +2,13 @@
 
 use std::ops::Range;
 
-use crate::math::vec2us::Vec2us;
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
-
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, MarkesteijnPasses, READ_REACH, TILE};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::math::vec2us::Vec2us;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// Half the tile, the width of the green bounds, which hold one entry per pair of columns.
 const HALF_TILE: usize = TILE / 2;

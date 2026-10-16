@@ -1,8 +1,7 @@
-use crate::image::image_dimensions::ImageDimensions;
-use crate::math::size2us::Size2us;
+use std::fs;
+use std::fs::File;
 
-use crate::image::sample_domain::Pedestal;
-
+use common::{CancelToken, TempDir};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
@@ -12,6 +11,8 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::fits_checksum_provenance::FitsChecksumState;
 use crate::image::fits_transfer_provenance::FitsTransferProvenance;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
 use crate::io::error::OverBudget;
@@ -22,9 +23,7 @@ use crate::io::fits::error::FitsAllocation;
 use crate::io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
 };
-use common::{CancelToken, TempDir};
-use std::fs;
-use std::fs::File;
+use crate::math::size2us::Size2us;
 
 fn load_context() -> LoadContext {
     LoadContext::new(CancelToken::never(), u64::MAX)
@@ -173,7 +172,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         .unwrap_err(),
     );
     assert_eq!(reason, FitsRefusal::PlaneCount { planes: 4 });
-    assert_eq!(reason.to_string(), "Unsupported channel count (NAXIS3): 4");
+    assert_eq!(reason.to_string(), "unsupported channel count (NAXIS3): 4");
 }
 
 #[test]

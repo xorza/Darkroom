@@ -1,8 +1,7 @@
 //! [`DefectSummary`]: how many pixels a defect map names, in all and per color.
 
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 use crate::image::cfa::cfa_color::CfaColor;
 

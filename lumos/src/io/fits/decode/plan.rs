@@ -1,16 +1,13 @@
 use fits_well::FitsError;
 use fits_well::header::Header;
-use fits_well::image::Scaling;
-use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType};
+use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType, Scaling};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
-
-use crate::io::error::OverBudget;
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::{FitsAllocation, FitsRefusal};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::sample_domain::ScaleOrigin;
+use crate::io::error::OverBudget;
+use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
@@ -160,11 +157,12 @@ impl<'a> FitsHduDescription<'a> {
     /// calibration path depends on (see [`crate::io::raw`]'s unclamped normalization).
     ///
     /// A floating-point `BITPIX` declares no full scale, so the only evidence available is
-    /// `data_max`, the header's `DATAMAX` as [`metadata::read_data_max`] reads it: a declared saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are
-    /// ADU rather than `[0, 1]` and they are divided by [`FLOAT_ADU_DIVISOR`], the threshold and
-    /// divisor Siril uses. Anything else — a `DATAMAX` of about 1, or none at all — is taken as
-    /// already normalized, which is PixInsight's default for a float FITS and what keeps a
-    /// Lumos-written master round-tripping.
+    /// `data_max`, the header's `DATAMAX` as [`metadata::read_data_max`] reads it: a declared
+    /// saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are ADU rather than
+    /// `[0, 1]` and they are divided by [`FLOAT_ADU_DIVISOR`], the threshold and divisor Siril
+    /// uses. Anything else — a `DATAMAX` of about 1, or none at all — is taken as already
+    /// normalized, which is PixInsight's default for a float FITS and what keeps a Lumos-written
+    /// master round-tripping.
     ///
     /// The divisor comes from the *header*, never from the pixels, and that is where this departs
     /// from Siril: with `DATAMAX` absent it scans the data instead (three sampled pixels on the

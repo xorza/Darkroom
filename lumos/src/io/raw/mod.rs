@@ -7,11 +7,12 @@ pub(crate) mod raw_files;
 mod sensor_layout;
 mod unpacked_raw;
 
-use libraw_sys as sys;
 use std::ffi;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+
+use libraw_sys as sys;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;

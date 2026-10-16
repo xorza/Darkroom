@@ -48,8 +48,8 @@ impl LibrawFilters {
         })
     }
 
-    /// The Bayer phase LibRaw's `filters` word holds, which holds the color of each position of an 8 × 2
-    /// block (see [`raw::filter_color`]). Color indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
+    /// The Bayer phase LibRaw's `filters` word holds, which holds the color of each position of an
+    /// 8 × 2 block (see [`raw::filter_color`]). Color indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
     ///
     /// Returns `None` when the word is not a 2×2 Bayer phase repeated down all eight rows —
     /// X-Trans, monochrome, and other exotic sensors all land here.
@@ -95,13 +95,13 @@ mod tests {
     use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::raw::libraw_filters::LibrawFilters;
 
-    /// LibRaw's `filters`, `colors` and `cdesc` classify a sensor: one color is mono whatever the word
-    /// says, `filters == 0` with three colors is a linear DNG or sRAW that LibRaw processes itself,
-    /// `9` is X-Trans with the pattern LibRaw keeps apart, a 2-row-periodic word is Bayer, and any
-    /// other word is an exotic CFA that LibRaw processes too. Four colors are no RGB mosaic whatever
-    /// the word: the Sony DSC-F828's `0x9c9c9c9c` reads R, E / G, B (emerald where a Bayer phase has
-    /// green) and the Nikon E950's CMYG `0x1e1e1e1e` reads as BGGR's phases; LibRaw describes them
-    /// `RGBE` and `CMYG`, with four colors.
+    /// LibRaw's `filters`, `colors` and `cdesc` classify a sensor: one color is mono whatever the
+    /// word says, `filters == 0` with three colors is a linear DNG or sRAW that LibRaw processes
+    /// itself, `9` is X-Trans with the pattern LibRaw keeps apart, a 2-row-periodic word is Bayer,
+    /// and any other word is an exotic CFA that LibRaw processes too. Four colors are no RGB mosaic
+    /// whatever the word: the Sony DSC-F828's `0x9c9c9c9c` reads R, E / G, B (emerald where a Bayer
+    /// phase has green) and the Nikon E950's CMYG `0x1e1e1e1e` reads as BGGR's phases; LibRaw
+    /// describes them `RGBE` and `CMYG`, with four colors.
     #[test]
     fn from_libraw_classifies_the_sensor() {
         let xtrans = XTRANS_PATTERN.rows();

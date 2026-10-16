@@ -14,19 +14,20 @@
 
 mod simd;
 
+use std::ops::RangeInclusive;
+
+use glam::DVec2;
+
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
 use crate::star_detection::centroid::profile_bounds::ProfileBounds;
-use crate::star_detection::centroid::profile_problem;
 use crate::star_detection::centroid::profile_problem::{FitData, LMModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp;
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
-use glam::DVec2;
-use std::ops::RangeInclusive;
+use crate::star_detection::centroid::{profile_problem, stamp};
 
 /// A converged 2D Gaussian fitted to one star stamp: where its centre landed and its
 /// shape. Build one with [`GaussianFit::new`].

@@ -8,10 +8,11 @@
 pub(crate) mod comparison;
 pub(crate) mod report;
 
+use std::path::{Path, PathBuf};
+
 use common::internals;
 use image::GrayImage;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
-use std::path::{Path, PathBuf};
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;

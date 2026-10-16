@@ -4,8 +4,7 @@ use std::convert::Infallible;
 
 use thiserror::Error;
 
-use crate::error::Cancelled;
-use crate::error::InvalidConfigField;
+use crate::error::{Cancelled, InvalidConfigField};
 use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::error::{FrameStoreError, LoadError};
 use crate::image::error::FrameDimensionMismatch;

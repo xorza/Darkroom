@@ -143,8 +143,8 @@ impl<'a> ReferenceSpline<'a> {
 
 /// Along one axis, five tiles of 32 px hold a checkerboard `vᵢ ± aᵢ`, the same across the other
 /// axis: each tile's median and mean are `vᵢ`, its MAD `aᵢ`, so its sky is `vᵢ` and its σ
-/// `sigma_of_mad(aᵢ, 1024)`, exactly (dyadic values, exact sums). Both sequences rise, which the 3×3
-/// median keeps. The maps along that axis are then the natural cubic splines through those tile
+/// `sigma_of_mad(aᵢ, 1024)`, exactly (dyadic values, exact sums). Both sequences rise, which the
+/// 3×3 median keeps. The maps along that axis are then the natural cubic splines through those tile
 /// values at the tile centres 15.5 + 32i — checked against an independent f64 spline at every
 /// pixel, the end intervals' extrapolation included, and constant across. The noise map is that
 /// spline clipped to the tile σ's range, which its extrapolation leaves at both ends. The f32

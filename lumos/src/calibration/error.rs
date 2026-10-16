@@ -30,7 +30,7 @@ pub enum CalibrationError {
     /// The flat, once its own bias or flat-dark is subtracted, has no positive mean to normalize
     /// by — in the given color of its mosaic, or over the whole frame of a mono sensor (`None`).
     /// Swapped roles (a dark given as the flat) and a subtractor at the wrong level both end here.
-    #[error("the subtracted flat has no positive mean{}", color.map_or(String::new(), |color| format!(" in its {color:?} photosites")))]
+    #[error("the subtracted flat has no positive mean{}", color.map_or(String::new(), |color| format!(" in its {color} photosites")))]
     NonPositiveFlat { color: Option<CfaColor> },
     /// The flat still holds an additive offset — its pedestal is kept or unknown — and the set has
     /// no bias or flat-dark to remove it: divided by, it would add an inverse-vignetting pattern of

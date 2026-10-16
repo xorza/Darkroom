@@ -14,7 +14,8 @@ pub(super) const MIN_FRAMES_FOR_GESD: usize = 15;
 /// it falls back to below the frame count that rejection needs.
 ///
 /// The constructors are the method presets. They set the method alone; the normalization and the
-/// weighting belong to the role of the frames, which [`StackConfig`](crate::StackConfig)'s presets carry.
+/// weighting belong to the role of the frames, which [`StackConfig`](crate::StackConfig)'s presets
+/// carry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Combine {
     /// How to combine pixel values across frames. For `Mean`, includes the rejection algorithm.

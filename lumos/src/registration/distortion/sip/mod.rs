@@ -30,10 +30,9 @@
 
 pub(crate) mod sip_order;
 
+use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
-
-use arrayvec::ArrayVec;
 
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;

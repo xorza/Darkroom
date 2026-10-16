@@ -42,7 +42,7 @@ pub(crate) struct FlaggedSources<'a> {
 }
 
 /// The planes a flagged frame's warp prepares beside the frame, kept in a pool from one frame to
-/// the next. Every calibrated light flags pixels — its saturation at least — so a set a
+/// the next. Every calibrated light flags pixels — its saturation at least — so a new set each
 /// frame would pay their whole area in allocation and first-touch page faults each time.
 #[derive(Debug, Default)]
 pub(crate) struct FlagScratch {

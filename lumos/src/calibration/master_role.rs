@@ -1,8 +1,7 @@
 //! The four master frames a calibration bundle can carry.
 
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 use crate::combine::stack_config::StackConfig;
 use crate::image::calibration_state::CalibrationState;

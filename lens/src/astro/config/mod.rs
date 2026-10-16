@@ -9,8 +9,7 @@ use std::fmt;
 
 use common::Introspect;
 use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, Scnr};
-use scenarium::FuncId;
-use scenarium::Library;
+use scenarium::{FuncId, Library};
 
 use crate::astro::config::processing::StretchKnobs;
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};

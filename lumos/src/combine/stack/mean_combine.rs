@@ -2,9 +2,7 @@
 //! reached for the rejection, combined by the small-sample fallback.
 
 use crate::combine::reducer::combined_sample::CombinedSample;
-
 use crate::combine::reducer::pixel_samples::PixelSamples;
-
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;

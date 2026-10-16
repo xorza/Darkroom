@@ -4,6 +4,7 @@
 pub(crate) mod coverage;
 pub(crate) mod quality_planes;
 pub(crate) mod run_report;
+pub(crate) mod weight_kind;
 
 use rayon::prelude::*;
 
@@ -13,6 +14,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::run_report::RunReport;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// A stacked science product, of a statistical combine or of a drizzle.
 ///
@@ -46,6 +48,9 @@ pub struct StackProduct {
     /// It is the denominator the image was divided by, under the same weights as
     /// [`Self::inverse_variance`].
     pub weight: Option<QualityMap>,
+    /// What the frame weights [`Self::weight`] sums were: a count, an inverse variance or relative
+    /// weights. Stated whether the plane was asked for or not, as it is a fact of the combine.
+    pub weight_kind: WeightKind,
     /// The inverse variance of each pixel's value, in the image's units to the power −2:
     /// `(Σwᵢ)² / Σwᵢ²·vᵢ` over the samples that formed it. A pixel nothing formed reads 0, no
     /// information, which is what an inverse-variance consumer gives it; a variance plane would
@@ -55,8 +60,8 @@ pub struct StackProduct {
     /// noise of the signal above the sky when the frame states its gain
     /// ([`RunReport::variance_background_only`] says when one did not), both scaled by the gain the
     /// frame's flat applied at the sample — the read noise and dark current by its square — carried
-    /// through normalization and divided by the warp's confidence, or a drizzled frame's drops' Kish
-    /// size. The combine takes it at the combined value. Drizzle spreads one input pixel over
+    /// through normalization and divided by the warp's confidence, or a drizzled frame's drops'
+    /// Kish size. The combine takes it at the combined value. Drizzle spreads one input pixel over
     /// several output pixels, so its noise correlates between neighbours (Fruchter & Hook 2002):
     /// this plane is each pixel's own variance, not their covariance.
     ///
@@ -201,6 +206,7 @@ mod tests {
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;
+    use crate::stack_product::weight_kind::WeightKind;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
         let dimensions = ImageDimensions::new((2, 1), ChannelLayout::try_from(channels).unwrap());
@@ -214,6 +220,7 @@ mod tests {
             image,
             coverage: None,
             weight: None,
+            weight_kind: WeightKind::Count,
             inverse_variance: None,
             dispersion: None,
             cfa_type,

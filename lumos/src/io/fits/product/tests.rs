@@ -21,12 +21,14 @@ use crate::image::temperature_difference::TemperatureDifference;
 use crate::image::temperature_source::TemperatureSource;
 use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::load_context::LoadContext;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::run_report::RunReport;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// An edit of one HDU of a file, by index: its header and data, `false` to drop it.
 type Edit = Box<dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool>;
@@ -89,6 +91,7 @@ fn rgb_product() -> StackProduct {
             plane(41.0),
             plane(42.0),
         ])),
+        weight_kind: WeightKind::InverseVariance,
         inverse_variance: Some(QualityMap::PerChannel(inverse_variance)),
         dispersion: Some(QualityMap::PerChannel(dispersion)),
         cfa_type: None,
@@ -148,7 +151,8 @@ fn assert_map_eq(read: Option<&QualityMap>, written: Option<&QualityMap>, name: 
 /// the image too, but under its pixel of no data, which holds no measurement and reads back as
 /// the fill. The file is in `CCDData`'s layout: `UNCERT` names its kind astropy's way and carries
 /// `BSCALE = 1/scale²`, so astropy's scaling puts it in the image's physical units, as
-/// `DISPERSION`'s `scale²` does; `MASK` is a byte per sample of the image's own shape, 1 under
+/// `DISPERSION`'s `scale²` does and `WEIGHT`'s `1/scale²`, its weights inverse variances; `MASK` is
+/// a byte per sample of the image's own shape, 1 under
 /// the pixel of no data in every channel. The image alone still loads as a linear image: the
 /// quality planes describe it, so the file holds one image.
 #[test]
@@ -215,8 +219,13 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
     assert_eq!(scaling(2), Scaling::IDENTITY);
     assert_eq!(scaling(3).bscale, 1.0 / (SCALE * SCALE));
     assert_eq!(scaling(4), Scaling::IDENTITY);
-    assert_eq!(scaling(5), Scaling::IDENTITY);
+    assert_eq!(scaling(5).bscale, 1.0 / (SCALE * SCALE));
     assert_eq!(scaling(6).bscale, SCALE * SCALE);
+    assert_eq!(read.weight_kind, WeightKind::InverseVariance);
+    assert_eq!(
+        file.hdus()[0].header.get_text("LUMWGTK").unwrap(),
+        Some("INVERSE_VARIANCE")
+    );
     assert_eq!(
         file.hdus()[3].header.get_text("UTYPE").unwrap(),
         Some("InverseVariance")
@@ -245,7 +254,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
 
 /// A monochrome product of undemosaiced Bayer frames: its pattern comes back, its coverage of one
 /// value too, held as a keyword rather than a plane of that value, and of its planes only the
-/// weight it holds. With no pixel of no data it writes no `MASK`. A linear image written alone
+/// weight it holds, a count, which no scale changes. With no pixel of no data it writes no `MASK`. A linear image written alone
 /// reloads as itself, an RGB one as a cube no load option has to name.
 #[test]
 fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
@@ -259,6 +268,7 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
             size: SIZE,
         }),
         weight: Some(QualityMap::Shared(plane(1.0))),
+        weight_kind: WeightKind::Count,
         inverse_variance: None,
         dispersion: None,
         cfa_type: Some(cfa_type),
@@ -281,6 +291,8 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let bytes = fs::read(&path).unwrap();
     let file = FitsReader::from_bytes(&bytes).unwrap();
     assert_eq!(file.hdus().len(), 2, "the primary and WEIGHT");
+    assert_eq!(file.hdus()[1].image().unwrap().scaling, Scaling::IDENTITY);
+    assert_eq!(read.weight_kind, WeightKind::Count);
 
     let rgb = rgb_product().image;
     let linear_path = directory.join("linear.fits");
@@ -322,11 +334,52 @@ fn a_product_edited_out_of_its_format_is_refused() {
             "another product version",
             Box::new(|index, header, _| {
                 if index == 0 {
-                    header.set("LUMPRODV", 2).unwrap();
+                    header.set("LUMPRODV", 3).unwrap();
                 }
                 true
             }),
-            FitsRefusal::ProductVersion { version: 2 },
+            FitsRefusal::ProductVersion { version: 3 },
+        ),
+        (
+            "no weight kind",
+            Box::new(|index, header, _| {
+                if index == 0 {
+                    header.remove("LUMWGTK");
+                }
+                true
+            }),
+            FitsRefusal::MissingKeyword {
+                keyword: "LUMWGTK".to_owned(),
+            },
+        ),
+        (
+            "a weight kind no product names",
+            Box::new(|index, header, _| {
+                if index == 0 {
+                    header.set("LUMWGTK", "EXPOSURE").unwrap();
+                }
+                true
+            }),
+            FitsRefusal::KeywordOutOfRange {
+                keyword: "LUMWGTK".to_owned(),
+            },
+        ),
+        (
+            "inverse-variance weights named a count",
+            Box::new(|index, header, _| {
+                if index == 0 {
+                    header.set("LUMWGTK", "COUNT").unwrap();
+                }
+                true
+            }),
+            FitsRefusal::ExtensionSamples {
+                extension: LumosExtension::Weight,
+                bitpix: Bitpix::F32,
+                scaling: Scaling {
+                    bscale: 1.0 / (SCALE * SCALE),
+                    ..Scaling::IDENTITY
+                },
+            },
         ),
         (
             "a report field missing",

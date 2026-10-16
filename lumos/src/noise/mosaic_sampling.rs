@@ -3,6 +3,7 @@
 use std::f32::consts::SQRT_2;
 
 use arrayvec::ArrayVec;
+use imaginarium::Buffer2;
 
 use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_type::CfaType;
@@ -12,7 +13,6 @@ use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
 use crate::noise::background_split;
 use crate::noise::binned_samples::BinnedSamples;
-use imaginarium::Buffer2;
 
 /// The photosites of a `size` mosaic of `cfa_type` a statistic samples: those of the rows
 /// [`CfaType::sampled_rows`] takes for about `per_color` samples a color, less the pixels
@@ -129,8 +129,8 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
     }
 
     /// Each color's background under the flat `gain` divided `mosaic` by: the noise of
-    /// [`Self::noise`] measured over each of the color's gain bins on its own, a pair at the mean of
-    /// its two photosites' gain, and fitted by [`background_split::fit`]; unflattened, of
+    /// [`Self::noise`] measured over each of the color's gain bins on its own, a pair at the mean
+    /// of its two photosites' gain, and fitted by [`background_split::fit`]; unflattened, of
     /// [`Self::noise`], for a mosaic no flat divided.
     pub(crate) fn backgrounds(
         &self,

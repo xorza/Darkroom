@@ -11,6 +11,9 @@ mod snapshot;
 
 use std::path::PathBuf;
 
+use common::{CancelToken, TempDir};
+use glam::DVec2;
+
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
@@ -50,8 +53,6 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::{CancelToken, TempDir};
-use glam::DVec2;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
 fn pinned_host() -> bool {

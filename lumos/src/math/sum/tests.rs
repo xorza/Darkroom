@@ -1,12 +1,13 @@
 //! Tests for sum operations.
 
+use std::iter;
+
 use crate::internals::test_rng::TestRng;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 use crate::simd::Isa;
 use crate::simd::portable::Portable;
 use crate::simd::tier::Tier;
-use std::iter;
 
 /// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
 /// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.

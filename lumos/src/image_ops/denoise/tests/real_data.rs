@@ -7,9 +7,7 @@ use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackgr
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
 use crate::image_ops::stretch::Stretch;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
-use crate::internals::visual;
+use crate::internals::{init_tracing, real_data, visual};
 use crate::math::statistics::median_mad::MedianMad;
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow

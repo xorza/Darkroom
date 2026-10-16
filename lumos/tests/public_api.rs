@@ -19,7 +19,7 @@ use lumos::{
     Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SipOrder, SmallN,
     SourceProvenance, StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
     StarDetector, StarField, StarMatch, Transform, TransformModel, TransformType, TriangleConfig,
-    TrimConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    TrimConfig, WarpParams, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -358,6 +358,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
             vec![1.0, 0.5],
         )))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
+        weight_kind: WeightKind::InverseVariance,
         inverse_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,

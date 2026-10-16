@@ -151,8 +151,6 @@ pub(crate) enum TileComponent {
     Sigma,
 }
 
-impl TileComponent {}
-
 impl TileStats {
     /// The statistic `component` names.
     pub(crate) const fn get(self, component: TileComponent) -> f32 {

@@ -1,5 +1,4 @@
 use std::path::Path;
-
 use std::sync::Arc;
 
 use common::file_utils;
@@ -10,14 +9,12 @@ use fits_well::image::Image;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::io::error::WriteError;
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::linear::LINEAR_FITS_FORMAT;
 use crate::io::fits::metadata;
-use crate::io::fits::metadata::domain_keywords;
-use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
+use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
 /// 5: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration

@@ -1,11 +1,10 @@
 use std::fs;
 
-use common::TempDir;
-
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use common::CancelToken;
+use common::{CancelToken, TempDir};
+use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::error::LibrawCode;
@@ -14,7 +13,6 @@ use crate::io::raw::unpacked_raw::{instrument, saturation_level};
 use crate::io::raw::*;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 
 /// A dump at black `black`, with no other option.
 fn black(black: u32) -> BayerDump {

@@ -51,8 +51,8 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
     assert_eq!(peak, 14_155_776, "peak cosmic-ray mask footprint");
 }
 
-/// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `max_iterations` is — it is
-/// allocated on the first iteration and reused by the rest.
+/// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `max_iterations` is —
+/// it is allocated on the first iteration and reused by the rest.
 ///
 /// This is the side of the detector's footprint that dwarfs the masks above: 720 MB on a 6144²
 /// frame against their 14 MB. A plane added back (or a stage that allocates its own again) costs

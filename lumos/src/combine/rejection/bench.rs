@@ -10,8 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
-use crate::combine::reducer::pixel_samples::NoiseColumns;
-use crate::combine::reducer::pixel_samples::PixelSamples;
+use crate::combine::reducer::pixel_samples::{NoiseColumns, PixelSamples};
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;

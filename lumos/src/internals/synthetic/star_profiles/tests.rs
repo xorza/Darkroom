@@ -1,6 +1,7 @@
+use std::f32::consts::FRAC_PI_2;
+
 use crate::internals::synthetic::star_profiles::*;
 use crate::math::fwhm;
-use std::f32::consts::FRAC_PI_2;
 
 const GAUSSIAN_2: StarProfile = StarProfile::gaussian(2.0);
 

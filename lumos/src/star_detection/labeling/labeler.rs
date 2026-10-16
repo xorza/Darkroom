@@ -8,10 +8,9 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::component_data::ComponentData;
-use crate::star_detection::labeling::run;
 use crate::star_detection::labeling::run::{Run, RunJoin};
 use crate::star_detection::labeling::union_find::UnionFind;
-use crate::star_detection::labeling::{LabelMap, LabelRun};
+use crate::star_detection::labeling::{LabelMap, LabelRun, run};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose

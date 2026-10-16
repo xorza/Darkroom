@@ -9,8 +9,7 @@ use imaginarium::Buffer2;
 
 use crate::image::flat_gain::{self, FlatGain, GainGrid};
 use crate::io::error::WriteError;
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};

@@ -58,9 +58,9 @@ impl DecodeCache {
         KeptFrame::reuse(&self.spill(source))
     }
 
-    /// Keep `image`, decoded from `source` after it was read, as its admission found it. The source is read
-    /// again first, and one that changed while it was decoded is refused rather than kept under
-    /// the identity it had before.
+    /// Keep `image`, decoded from `source` after it was read, as its admission found it. The source
+    /// is read again first, and one that changed while it was decoded is refused rather than kept
+    /// under the identity it had before.
     ///
     /// # Errors
     ///

@@ -15,7 +15,8 @@ pub(crate) struct CaptureConditions {
     pub(crate) exposure_time: Option<f64>,
     /// Degrees Celsius — see [`ObservationHeader::ccd_temp`](crate::ObservationHeader::ccd_temp).
     pub(crate) ccd_temp: Option<f64>,
-    /// Degrees Celsius — see [`ObservationHeader::camera_temp`](crate::ObservationHeader::camera_temp).
+    /// Degrees Celsius — see
+    /// [`ObservationHeader::camera_temp`](crate::ObservationHeader::camera_temp).
     pub(crate) camera_temp: Option<f64>,
 }
 

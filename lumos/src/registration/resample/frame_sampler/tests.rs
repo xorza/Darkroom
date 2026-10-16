@@ -17,8 +17,9 @@ use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
-use crate::registration::resample::warp_params::ClampingThreshold;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_params::{
+    ClampingThreshold, InterpolationMethod, WarpParams,
+};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;

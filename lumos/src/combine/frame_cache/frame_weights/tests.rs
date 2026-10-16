@@ -4,11 +4,11 @@ use crate::combine::error::StackError;
 use crate::combine::frame_cache::frame_weights::FrameWeights;
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_read::slots::Slots;
-use crate::combine::normalization::FrameNorm;
-use crate::combine::normalization::SlotNorm;
+use crate::combine::normalization::{FrameNorm, SlotNorm};
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::frame_stats::FrameStats;
 use crate::image::background_split::BackgroundSplit;
+use crate::stack_product::weight_kind::WeightKind;
 
 fn stats(noise: &[f32]) -> FrameStats {
     FrameStats {
@@ -54,6 +54,7 @@ fn noise_weights_are_inverse_variances_per_slot() {
         (weights.weight(0, 0), weights.weight(1, 0)),
         (4096.0, 1024.0)
     );
+    assert_eq!(weights.kind(), WeightKind::InverseVariance);
 
     let rgb = Slots::new(None, 3);
     let weights = FrameWeights::resolve(
@@ -89,6 +90,7 @@ fn manual_and_equal_weights_and_a_noiseless_frame() {
     .unwrap();
     assert_eq!([0, 1, 2].map(|slot| manual.weight(1, slot)), [3.0; 3]);
     assert_eq!(manual.weight(0, 2), 1.0);
+    assert_eq!(manual.kind(), WeightKind::Relative);
     assert!(
         FrameWeights::resolve(
             &Weighting::Equal,

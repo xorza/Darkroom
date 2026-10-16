@@ -1,11 +1,10 @@
 //! Windows: a scratch file deleted when its last handle closes, the free space of a volume, the
 //! memory limits of the job object the process runs in, and the cache under `%LOCALAPPDATA%`.
 
-use std::env;
 use std::fs::{File, OpenOptions};
-use std::io;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::{env, io};
 
 use memmap2::Mmap;
 use sysinfo::System;

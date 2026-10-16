@@ -1,8 +1,7 @@
 //! [`BinnedSamples`]: a frame's noise samples, grouped by the bin of flat gain each was taken at.
 
-use std::array;
-use std::mem;
 use std::ops::Range;
+use std::{array, mem};
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;

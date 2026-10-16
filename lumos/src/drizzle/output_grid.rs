@@ -1,4 +1,5 @@
-//! [`OutputGrid`]: the grid a drizzle run reconstructs onto, `scale` times finer than its reference.
+//! [`OutputGrid`]: the grid a drizzle run reconstructs onto, `scale` times finer than its
+//! reference.
 
 use glam::DVec2;
 

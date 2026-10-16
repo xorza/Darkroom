@@ -53,10 +53,10 @@ pub(crate) struct CombinePlan<'a> {
 }
 
 /// Warn when manual frame weights were given but the combine is a median, which has no weighted
-/// form here — the weights would be silently dropped. A pixel the small-sample fallback combines
-/// by its median drops them too, which the run report counts. Noise weighting is a role's policy
-/// rather than a request, as [`StackConfig::light`](crate::StackConfig::light) carries it whatever the method, so a median
-/// that leaves it unused says nothing.
+/// form here — the weights would be silently dropped. A pixel the small-sample fallback combines by
+/// its median drops them too, which the run report counts. Noise weighting is a role's policy
+/// rather than a request, as [`StackConfig::light`](crate::StackConfig::light) carries it whatever
+/// the method, so a median that leaves it unused says nothing.
 fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     if matches!(method, CombineMethod::Median) && matches!(weighting, Weighting::Manual(_)) {
         tracing::warn!(

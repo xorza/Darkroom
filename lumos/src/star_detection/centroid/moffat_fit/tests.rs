@@ -1,13 +1,12 @@
 //! Tests for Moffat profile fitting.
 
+use std::f64::consts::PI;
+
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-use crate::math::size2us::Size2us;
-
-use std::f64::consts::PI;
-
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::moffat_fit::*;
 use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,

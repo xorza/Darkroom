@@ -25,10 +25,10 @@ use crate::stack_product::quality_planes::QualityPlanes;
 /// `subtract` is taken from every frame, in order, before its statistics and the combine, and each
 /// frame's record of what calibration removed takes what each subtractor still held: flats take
 /// their bias and their flat-dark's dark signal this way, so the multiplicative normalization
-/// scales each flat's own signal. Scaling a flat that still holds its offset `b` and subtracting the offset from the
-/// master afterwards leaves `b·(mean gain − 1)`, a vignetting residual of a few percent, as
-/// PixInsight and Siril avoid by calibrating each flat first. A subtractor holding dark signal is
-/// matched to each frame's exposure and temperature as a dark is to a light.
+/// scales each flat's own signal. Scaling a flat that still holds its offset `b` and subtracting
+/// the offset from the master afterwards leaves `b·(mean gain − 1)`, a vignetting residual of a few
+/// percent, as PixInsight and Siril avoid by calibrating each flat first. A subtractor holding dark
+/// signal is matched to each frame's exposure and temperature as a dark is to a light.
 ///
 /// The master states the exposure and temperature its frames share. The frames of a dark or a
 /// flat-dark have to share them: its signal is one exposure's at one temperature.

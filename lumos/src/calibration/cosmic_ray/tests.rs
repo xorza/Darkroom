@@ -94,9 +94,10 @@ fn removes_cosmic_rays_preserves_stars() {
             out[size.index_of(p)]
         );
     }
-    // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54), and
-    // (51, 49) diagonal to (50, 50), each inside its hit's box and clearing `growth_fraction · detection_sigma`. The
-    // growth tests no contrast, as astroscrappy's does not.
+    // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54),
+    // and (51, 49) diagonal to (50, 50), each inside its hit's box and clearing
+    // `growth_fraction · detection_sigma`. The growth tests no contrast, as astroscrappy's does
+    // not.
     assert_eq!(count, 9);
 }
 
@@ -113,7 +114,8 @@ fn clean_field_few_false_positives() {
 
 #[test]
 fn sigclip_controls_sensitivity() {
-    // A modest spike (~15σ): a sensitive detection_sigma flags it, a strict one doesn't (A→X, B→Y, X≠Y).
+    // A modest spike (~15σ): a sensitive detection_sigma flags it, a strict one doesn't (A→X, B→Y,
+    // X≠Y).
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
@@ -231,9 +233,9 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     );
     // The four CRs, and three pixels the growth pass takes: (10, 10) beside (8, 8), (11, 10) beside
     // (9, 12) and (35, 39) beside (37, 37), each a diagonal neighbour in its CR's phase plane,
-    // inside the 2×2 subsample block that lifts its significance past `growth_fraction · detection_sigma`. The
-    // noise is the local sky σ of each color, which the star does not inflate as it inflated the
-    // whole-plane MAD, so (8, 8) grows as the others do.
+    // inside the 2×2 subsample block that lifts its significance past
+    // `growth_fraction · detection_sigma`. The noise is the local sky σ of each color, which the
+    // star does not inflate as it inflated the whole-plane MAD, so (8, 8) grows as the others do.
     assert_eq!(count, 7);
     // Every in-painted photosite is flagged at its mosaic position, and nothing else is: the four
     // phase planes map back without crossing.
@@ -252,12 +254,12 @@ fn bayer_removes_cosmic_rays_preserves_star() {
 
 #[test]
 fn bayer_tight_star_eaten_is_a_known_limitation() {
-    // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px
-    // in the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
+    // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px in
+    // the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
     // erases its core exactly like a cosmic ray, so the fine-structure test F→0 and L.A.Cosmic
-    // *cannot* tell the core from a CR at any `contrast_limit`. The per-phase detector therefore eats it.
-    // This is why the module doc steers tight / dithered OSC data to stack-time σ-rejection
-    // instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
+    // *cannot* tell the core from a CR at any `contrast_limit`. The per-phase detector therefore
+    // eats it. This is why the module doc steers tight / dithered OSC data to stack-time
+    // σ-rejection instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
     // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
     // which uses a *well-sampled* FWHM≈5.9 px star that survives.
     let size = Size2us::new(48, 48);
@@ -529,15 +531,16 @@ fn a_faint_hit_on_a_gradient_is_caught() {
     );
 }
 
-/// The growth is astroscrappy's: the box about every hit, kept where `S' > detection_sigma`, then the box
-/// about that, kept where `S' > detection_sigma·growth_fraction`, with no contrast test on either. On an 8×3 frame
-/// with `detection_sigma` 5, `growth_fraction` 0.3 (so 1.5) and `contrast_limit` 5, row 1 holds the hit P at x = 2 (S' 10,
-/// no fine structure), A at x = 3 (S' 6, but fine structure 10 σ, so it fails the contrast), B at
-/// x = 4 and C at x = 5 (S' 2 each), and E at x = 0 (S' 6, fine structure 10 σ, so no hit of its
-/// own); D below P has S' 2. P is the hit. A is
-/// in its box and clears `detection_sigma`: the first ring takes it, contrast or not. B is in A's box and
-/// clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring pixel's box,
-/// and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took two.
+/// The growth is astroscrappy's: the box about every hit, kept where `S' > detection_sigma`, then
+/// the box about that, kept where `S' > detection_sigma·growth_fraction`, with no contrast test on
+/// either. On an 8×3 frame with `detection_sigma` 5, `growth_fraction` 0.3 (so 1.5) and
+/// `contrast_limit` 5, row 1 holds the hit P at x = 2 (S' 10, no fine structure), A at x = 3 (S' 6,
+/// but fine structure 10 σ, so it fails the contrast), B at x = 4 and C at x = 5 (S' 2 each), and E
+/// at x = 0 (S' 6, fine structure 10 σ, so no hit of its own); D below P has S' 2. P is the hit. A
+/// is in its box and clears `detection_sigma`: the first ring takes it, contrast or not. B is in
+/// A's box and clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring
+/// pixel's box, and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took
+/// two.
 #[test]
 fn the_mask_grows_in_astroscrappys_two_rings() {
     let size = Size2us::new(8, 3);

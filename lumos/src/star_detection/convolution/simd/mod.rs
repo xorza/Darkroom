@@ -9,10 +9,11 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
+use imaginarium::Buffer2;
+
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
-use imaginarium::Buffer2;
 
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///

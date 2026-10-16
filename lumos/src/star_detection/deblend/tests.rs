@@ -14,7 +14,8 @@ use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 
-/// [`deblend_local_maxima`] at the default config's separation and relative height, into a fresh list.
+/// [`deblend_local_maxima`] at the default config's separation and relative height, into a fresh
+/// list.
 fn local_maxima_regions(component: &Component<'_>) -> Vec<Region> {
     let config = ExtractionConfig::default();
     let Deblend::LocalMaxima {

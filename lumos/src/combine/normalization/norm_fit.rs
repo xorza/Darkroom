@@ -4,7 +4,6 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
-use crate::combine::normalization::Normalization;
 use crate::combine::normalization::common_domain::{ChannelCoverage, CommonDomain};
 use crate::combine::normalization::per_channel_norms::{PerChannelNorms, SlotEstimate};
 use crate::combine::normalization::photometric_gain::{
@@ -12,7 +11,7 @@ use crate::combine::normalization::photometric_gain::{
 };
 use crate::combine::normalization::slot_pixels::SlotPixels;
 use crate::combine::normalization::slot_planes::{PlaneMeasurement, PlaneSampling, SlotPlanes};
-use crate::combine::normalization::{FrameNorm, SlotNorm};
+use crate::combine::normalization::{FrameNorm, Normalization, SlotNorm};
 use crate::frame::frame_stats::SlotSpread;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::math::statistics::median_mad::MedianMad;

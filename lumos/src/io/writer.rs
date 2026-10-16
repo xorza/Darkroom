@@ -6,17 +6,16 @@ use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
 use crate::io::error::WriteError;
-use crate::io::fits::calibration_bundle;
 use crate::io::fits::calibration_bundle::error::BundleError;
-use crate::io::fits::cfa as fits_cfa;
-use crate::io::fits::linear as fits_linear;
-use crate::io::fits::product as fits_product;
+use crate::io::fits::{
+    calibration_bundle, cfa as fits_cfa, linear as fits_linear, product as fits_product,
+};
 use crate::io::raster;
 use crate::stack_product::StackProduct;
 
 /// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF.
 pub fn raster(image: &LinearImage, path: impl AsRef<Path>) -> Result<(), WriteError> {
-    raster::save(image, path.as_ref())
+    raster::save(path.as_ref(), image)
 }
 
 /// Write `image`, a sensor-domain image, to `path` as a checksummed floating-point FITS file, with

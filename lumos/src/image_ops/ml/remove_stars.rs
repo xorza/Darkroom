@@ -4,11 +4,12 @@
 //! 512² tiles, feather-blended) and recovers the stars layer by **unscreen**. A **display-domain**
 //! operation: StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 
+use rayon::prelude::*;
+
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
 use crate::image_ops::ml::backend::OnnxModel;
-use rayon::prelude::*;
 
 /// The two layers from a star-removal pass.
 #[derive(Debug)]

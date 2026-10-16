@@ -15,19 +15,16 @@ use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
-use crate::io::fits::cfa;
-use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::pixels::HduDecode;
 use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription};
-use crate::io::fits::decode::selection;
+use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_options::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
-use crate::io::fits::linear;
 use crate::io::fits::lumos_extension::DescribedImage;
-use crate::io::fits::metadata;
+use crate::io::fits::{cfa, linear, metadata};
 use crate::io::load_context::LoadContext;
 
 /// One image HDU of an open FITS file: the reader, the HDU, its decode plan, the mosaic its header
@@ -147,6 +144,7 @@ impl<'r> SelectedFits<'r> {
             size,
             channels: plan.dimensions.channels(),
             scale: Some(plan.sample_scale.divisor),
+            weight_kind: None,
         };
         let flags_hdu = FlagsExtension::locate(reader.hdus(), selected.index, &described)?;
         if flags_hdu.is_some() {

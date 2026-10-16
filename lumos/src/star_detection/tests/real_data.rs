@@ -3,8 +3,13 @@
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --nocapture`; set
 //! `DARKROOM_TEST_OUTPUT` to keep the annotated images.
 
-use common::internals;
+use std::path::PathBuf;
 use std::time::Instant;
+
+use common::internals;
+use glam::Vec2;
+use imaginarium::drawing::draw_circle;
+use imaginarium::{Color, ColorFormat};
 
 use crate::ImageDimensions;
 use crate::image::channel_layout::ChannelLayout;
@@ -18,11 +23,6 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
-use glam::Vec2;
-use imaginarium::Color;
-use imaginarium::ColorFormat;
-use imaginarium::drawing::draw_circle;
-use std::path::PathBuf;
 
 fn rho_opiuchi_path() -> PathBuf {
     dataset_path("rho-opiuchi.jpg")

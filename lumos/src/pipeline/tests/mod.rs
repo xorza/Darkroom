@@ -1,31 +1,41 @@
-use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
-use crate::combine::normalization::Normalization;
-use crate::combine::stack_config::StackConfig;
-use crate::combine::stack_config::combine::Combine;
-use crate::combine::stack_config::combine_method::CombineMethod;
-use crate::combine::stack_config::small_n::SmallN;
-use crate::combine::stack_config::weighting::Weighting;
-use crate::image::image_dimensions::ImageDimensions;
-use crate::image::linear_image::LinearImage;
-use crate::ingest::error::AdmissionError;
-use crate::ingest::ingest_config::IngestConfig;
-use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::math::size2us::Size2us;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use common::{CancelToken, TempDir};
+use fits_well::image::Image as FitsImage;
+use glam::DVec2;
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
 use crate::calibration::cosmic_ray::error::CosmicRayError;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::error::CalibrationError;
 use crate::combine::error::{StackConfigError, StackError};
+use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::combine_method::CombineMethod;
+use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_config::weighting::Weighting;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::ingest::error::AdmissionError;
+use crate::ingest::ingest_config::IngestConfig;
+use crate::internals::assertions::bits;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::fits::write_fits;
 use crate::internals::synthetic::fixtures::star_field;
+use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::fits::cfa;
+use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::load_context::LoadContext;
+use crate::math::size2us::Size2us;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
@@ -40,17 +50,6 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::TempDir;
-
-use crate::image::channel_layout::ChannelLayout;
-use crate::internals::assertions::bits;
-use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::fits::write_fits;
-use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale};
-use crate::io::load_context::LoadContext;
-use common::CancelToken;
-use fits_well::image::Image as FitsImage;
-use glam::DVec2;
 
 fn base_field() -> LinearImage {
     star_field(Size2us::new(256, 256), 40, 66666).image

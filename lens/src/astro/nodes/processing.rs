@@ -5,16 +5,16 @@
 //! port declared to override the knob, so a wired config is what runs and the
 //! editor shows the knob set aside.
 
-use std::fmt;
-use std::mem;
+use std::{fmt, mem};
 
 use common::Introspect;
 use lumos::{
     BackgroundMode, Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast,
     NeutralizeBackground, OpError, Scnr, ScnrProtection, Stretch,
 };
-use scenarium::async_lambda;
-use scenarium::{DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library};
+use scenarium::{
+    DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
+};
 
 use crate::astro::config::preset::Preset;
 use crate::astro::config::processing::StretchMethodChoice;

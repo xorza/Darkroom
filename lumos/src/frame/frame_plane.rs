@@ -1,8 +1,7 @@
 //! [`FramePlane`]: which of a frame's planes a check is about, and the range its values take.
 
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 /// Which of a frame's planes a validation failure is about.
 ///

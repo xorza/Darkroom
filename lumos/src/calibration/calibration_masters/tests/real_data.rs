@@ -8,9 +8,6 @@
 //! Gated behind the `real-data` feature (the dataset is gitignored; fetch it with
 //! `scripts/fetch-test-data.sh`).
 
-use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
-use crate::io::load_context::LoadContext;
-use crate::math::size2us::Size2us;
 use std::cmp::Ordering;
 use std::path::PathBuf;
 
@@ -18,11 +15,13 @@ use common::CancelToken;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::calibration::defect_map::DefectMap;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::master_stack::MasterStack;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
+use crate::internals::{init_tracing, real_data};
+use crate::io::load_context::LoadContext;
 use crate::io::raw;
+use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{CalibrationSet, CfaImage, MasterRole, StackConfig};
 

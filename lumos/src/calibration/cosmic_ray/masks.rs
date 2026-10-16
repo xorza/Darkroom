@@ -3,10 +3,9 @@
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
-
 use crate::calibration::cosmic_ray::FINE_STRUCTURE_SIGMA_FLOOR;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::math::size2us::Size2us;
 
 /// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
 pub(crate) const CONCURRENT_MASKS: usize = 3;
@@ -52,16 +51,16 @@ impl CrMasks {
 
     /// Flag CRs, as astroscrappy does: `S' > detection_sigma` **and** the fine-structure contrast
     /// `S' > contrast_limit·(F/noise)`; then grow them by the 3×3 box, keeping the pixels where
-    /// `S' > detection_sigma`, and grow that by the box again, keeping those where `S' > detection_sigma·growth_fraction`.
-    /// The growth takes no contrast test: a hit's wings carry its light, not a star's. Merges the
-    /// result into `accumulated` and returns how many pixels that added — zero ends the
-    /// detect→replace loop.
+    /// `S' > detection_sigma`, and grow that by the box again, keeping those where
+    /// `S' > detection_sigma·growth_fraction`. The growth takes no contrast test: a hit's wings
+    /// carry its light, not a star's. Merges the result into `accumulated` and returns how many
+    /// pixels that added — zero ends the detect→replace loop.
     ///
-    /// The contrast is van Dokkum's `L⁺/F > contrast_limit` written in astroscrappy's noise-normalized
-    /// form: comparing the significance image `S'` against `contrast_limit·(F/noise)` (rather than raw `L⁺`
-    /// against `contrast_limit·F`) puts `F` in the same units as `S'`, so the `contrast_limit` default carries the
-    /// same star-core protection as astroscrappy/ccdproc. (Raw `L⁺ > contrast_limit·F` is ~2× more
-    /// aggressive.)
+    /// The contrast is van Dokkum's `L⁺/F > contrast_limit` written in astroscrappy's
+    /// noise-normalized form: comparing the significance image `S'` against
+    /// `contrast_limit·(F/noise)` (rather than raw `L⁺` against `contrast_limit·F`) puts `F` in the
+    /// same units as `S'`, so the `contrast_limit` default carries the same star-core protection as
+    /// astroscrappy/ccdproc. (Raw `L⁺ > contrast_limit·F` is ~2× more aggressive.)
     ///
     /// No pixel `never_flagged` holds is a candidate or grown into, as astroscrappy keeps its
     /// saturated stars and bad pixels out with `goodpix`.

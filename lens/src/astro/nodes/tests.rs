@@ -1,12 +1,11 @@
 //! The astro library's node shapes, its path types, and the builder
 //! nodes' invocation at the input boundary.
 
-use scenarium::internals::func_invoker::FuncInvoker;
-
 use lumos::{
     Denoise, ExtractBackground, Hdr, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
     SigmaThreshold,
 };
+use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
 
 use crate::astro::masters::MASTERS_DATA_TYPE;

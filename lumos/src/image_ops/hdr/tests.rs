@@ -1,3 +1,5 @@
+use std::mem;
+
 use imaginarium::Buffer2;
 
 use crate::image_ops::hdr::Hdr;
@@ -6,7 +8,6 @@ use crate::internals::images::{gray_image, rgb_image};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
-use std::mem;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.

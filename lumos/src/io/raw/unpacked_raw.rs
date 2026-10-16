@@ -1,9 +1,7 @@
 //! [`UnpackedRaw`]: a camera RAW file LibRaw unpacked, and what lumos reads of it.
 
-use std::array;
-use std::ffi;
-use std::mem;
 use std::time::Instant;
+use std::{array, ffi, mem};
 
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -20,8 +18,6 @@ use crate::image::observation_header::ObservationHeader;
 use crate::image::quality_flags::SATURATION_FRACTION;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::load_context::LoadContext;
-use crate::io::null_policy;
-use crate::io::raw;
 use crate::io::raw::black_level::{
     BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
 };
@@ -29,6 +25,7 @@ use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
+use crate::io::{null_policy, raw};
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -265,8 +262,8 @@ impl UnpackedRaw {
     ///
     /// Saturation is decided here, on the raw value before black is subtracted, because after a
     /// dark subtraction and a flat division the level differs at every pixel. LibRaw's own
-    /// processing replaces `zero_is_bad` zeros with a same-color mean (`remove_zeroes`); lumos reads
-    /// the raw buffer itself, so without the flag a dead photosite would normalize to
+    /// processing replaces `zero_is_bad` zeros with a same-color mean (`remove_zeroes`); lumos
+    /// reads the raw buffer itself, so without the flag a dead photosite would normalize to
     /// `−black / span` and enter every stage as a measurement.
     pub(super) fn decode(&self, raw: &[u16]) -> DecodedRaw {
         self.black_level.decode(

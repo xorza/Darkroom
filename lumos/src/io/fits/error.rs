@@ -346,9 +346,9 @@ impl Display for FitsRefusal {
                 "three-plane FITS cube requires FitsCubeInterpretation::Rgb"
             ),
             Self::PlaneCount { planes } => {
-                write!(f, "Unsupported channel count (NAXIS3): {planes}")
+                write!(f, "unsupported channel count (NAXIS3): {planes}")
             }
-            Self::AxisCount { axes } => write!(f, "Unsupported number of dimensions: {axes}"),
+            Self::AxisCount { axes } => write!(f, "unsupported number of dimensions: {axes}"),
             Self::SideTooLong { width, height } => write!(
                 f,
                 "FITS image {width}x{height} has a side past {} px",

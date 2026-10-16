@@ -5,9 +5,9 @@ use crate::calibration::master_role::MasterRole;
 use crate::image::cfa::cfa_image::CfaImage;
 
 /// What one role's master is stacked from: its frames, the masters taken from each of them with
-/// those masters' own frames — a flat's bias and flat-dark — and how lumos stacks it. A cache keys a
-/// master by all of them, so a master stacked before its subtractor changed, by an older lumos, or
-/// under other decode options, is stacked again.
+/// those masters' own frames — a flat's bias and flat-dark — and how lumos stacks it. A cache keys
+/// a master by all of them, so a master stacked before its subtractor changed, by an older lumos,
+/// or under other decode options, is stacked again.
 #[derive(Debug)]
 pub struct MasterInputs<'a, P> {
     pub role: MasterRole,

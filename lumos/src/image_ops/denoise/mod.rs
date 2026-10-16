@@ -15,6 +15,8 @@
 //! A **linear-domain** operation: run after stacking and color calibration, before the stretch (the
 //! stretch's non-uniform gain would distort the noise statistics this relies on).
 
+use std::mem;
+
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -28,7 +30,6 @@ use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;
 use crate::noise::mrs_noise::NoisePlane;
-use std::mem;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
 ///

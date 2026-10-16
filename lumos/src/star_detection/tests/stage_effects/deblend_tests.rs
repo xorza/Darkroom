@@ -220,8 +220,8 @@ fn a_crowded_group_splits_into_every_star() {
 ///   0.005 of it (0.0125), so it stays whole there and at 0.5. Its whole value, the pedestal under
 ///   the split included, cleared 0.005.
 ///
-/// Measured on sky-included values, the 0.1 pedestal turned the relative-height bar into 0.3 · 0.3 =
-/// 0.09 against a 0.15 secondary, so the first case split there and not on a zero sky.
+/// Measured on sky-included values, the 0.1 pedestal turned the relative-height bar into 0.3 · 0.3
+/// = 0.09 against a 0.15 secondary, so the first case split there and not on a zero sky.
 #[test]
 fn deblending_does_not_depend_on_the_sky_level() {
     let size = Size2us::new(48, 48);

@@ -17,8 +17,7 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::metadata;
-use crate::io::fits::metadata::domain_keywords;
-use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
+use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
 
 pub(crate) const LINEAR_FITS_FORMAT: &str = "LINIMAGE";
 /// 1: the samples normalized with the domain's scale as `BSCALE`, an RGB image as a cube of three

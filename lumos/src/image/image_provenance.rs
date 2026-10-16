@@ -3,14 +3,14 @@
 //! [`ImageProvenance`] is the record; the enums below are its fields, each naming one axis of the
 //! decision — which source and how it became samples, what color interpretation, which demosaic.
 
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use imaginarium::FileFormat;
 use serde::{Deserialize, Serialize};
 
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::fits_transfer_provenance::FitsTransferProvenance;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 
 /// The source the samples came from, and how its decoder made samples of what it stored. Each
 /// container has one decoder, so a pairing no load makes cannot be stated.

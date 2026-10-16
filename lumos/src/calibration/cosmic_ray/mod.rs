@@ -35,19 +35,18 @@ pub(crate) mod noise_model;
 
 use crate::background_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
-use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::cfa::cfa_type::CfaType;
-use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
-
 use crate::calibration::cosmic_ray::bayer::BayerDetector;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::masked_plane::MaskedPlane;
+use crate::image::quality_flags::QualityFlags;
+use crate::math::size2us::Size2us;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per color.

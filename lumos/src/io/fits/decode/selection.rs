@@ -1,14 +1,12 @@
-use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::error::FitsRefusal;
+use fits_well::io::Hdu;
 
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::ExtensionClaims;
 use crate::io::fits::fits_load_options::FitsHduSelector;
 use crate::io::fits::metadata;
-use fits_well::io::Hdu;
 
-pub(super) fn selected_hdu(file: &[Hdu], index: usize) -> Result<FitsHduProvenance, FitsLoadError> {
-    let hdus = file;
+pub(super) fn selected_hdu(hdus: &[Hdu], index: usize) -> Result<FitsHduProvenance, FitsLoadError> {
     let hdu = hdus.get(index).ok_or_else(|| {
         FitsLoadError::from(FitsRefusal::HduOutOfRange {
             index,
@@ -29,10 +27,9 @@ pub(super) fn selected_hdu(file: &[Hdu], index: usize) -> Result<FitsHduProvenan
 }
 
 pub(super) fn select_image_hdu(
-    file: &[Hdu],
+    hdus: &[Hdu],
     selector: &FitsHduSelector,
 ) -> Result<FitsHduProvenance, FitsLoadError> {
-    let hdus = file;
     let selected = match selector {
         FitsHduSelector::Auto => {
             let mut images = Vec::new();
@@ -77,7 +74,7 @@ pub(super) fn select_image_hdu(
             }
         }
     };
-    let selected = selected_hdu(file, selected)?;
+    let selected = selected_hdu(hdus, selected)?;
     if !hdus[selected.index].is_image() {
         return Err(FitsLoadError::from(FitsRefusal::NotAnImage {
             hdu: selected.index,
