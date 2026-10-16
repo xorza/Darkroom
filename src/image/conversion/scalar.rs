@@ -73,7 +73,7 @@ const fn row_converter_between<S: Luminance, D: Sample>(
 }
 
 /// One row, pixel by pixel. A source with fewer channels broadcasts grey and adds an opaque
-/// alpha; a source with more drops alpha, and reduces colour to luminance in the source type
+/// alpha; a source with more drops alpha, and reduces color to luminance in the source type
 /// before the sample type changes.
 pub(crate) fn convert_row<S: Luminance, D: Sample, const FROM: usize, const TO: usize>(
     src: &[u8],

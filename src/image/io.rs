@@ -182,7 +182,7 @@ pub(super) fn save_tiff(image: &Image, filename: &Path) -> Result<()> {
     }
 }
 
-/// Writes `image` as the TIFF colour type `C`, whose sample type the caller matched to the
+/// Writes `image` as the TIFF color type `C`, whose sample type the caller matched to the
 /// image's format — so the cast of the image's own aligned storage cannot fail.
 fn write_tiff<C>(image: &Image, filename: &Path) -> Result<()>
 where

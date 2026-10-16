@@ -33,7 +33,7 @@ fn grey_keeps_its_value() {
     }
 }
 
-/// One pixel per channel-count pair, in `u8`: grey broadcasts and gains an opaque alpha, colour
+/// One pixel per channel-count pair, in `u8`: grey broadcasts and gains an opaque alpha, color
 /// keeps its channels or reduces to luminance, alpha is kept only into a format with alpha.
 #[test]
 fn channel_counts_expand_and_reduce() {

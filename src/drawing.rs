@@ -205,7 +205,7 @@ mod tests {
     }
 
     /// A one-pixel cross is one row and one column; a three-pixel one, three of each. Grey
-    /// takes the colour's luminance: green's weight, 0.7152.
+    /// takes the color's luminance: green's weight, 0.7152.
     #[test]
     fn a_cross_is_as_thick_as_asked() {
         let mut image = canvas(ColorFormat::L_F32, 5);
