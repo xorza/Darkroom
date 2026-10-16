@@ -54,7 +54,7 @@ fn store_ps(values: &mut [f32; 8], value: __m256) {
 /// Thirty-two `RGBA_U8` pixels per iteration: four loads, six 16-byte stores.
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
-    // Within each 128-bit lane: the twelve colour bytes of four pixels, then four zeros.
+    // Within each 128-bit lane: the twelve color bytes of four pixels, then four zeros.
     let shuffle = _mm256_setr_epi8(
         0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1, 0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13,
         14, -1, -1, -1, -1,

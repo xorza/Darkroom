@@ -1,4 +1,4 @@
-//! The file cases: the standard frame saved to and read from each file format, in every colour
+//! The file cases: the standard frame saved to and read from each file format, in every color
 //! format the file stores.
 
 use std::hint::black_box;
@@ -66,7 +66,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     group.finish();
 }
 
-/// Every file format with each colour format it stores, found by saving one pixel.
+/// Every file format with each color format it stores, found by saving one pixel.
 fn cases(dir: &ScratchDir) -> Vec<(FileFormat, ColorFormat)> {
     let pairs = FileFormat::ALL
         .into_iter()

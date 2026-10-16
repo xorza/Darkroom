@@ -48,7 +48,7 @@ impl ChannelAffine {
         }
     }
 
-    /// The colour channels of whole RGBA pixels adjusted in place, alpha left as it is: the
+    /// The color channels of whole RGBA pixels adjusted in place, alpha left as it is: the
     /// scalar reference over an RGBA row, and the sub-vector tail of an alpha-preserving kernel.
     #[inline]
     pub(crate) fn apply_rgba<T: Sample>(self, pixels: &mut [T]) {

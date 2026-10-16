@@ -132,7 +132,7 @@ fn brightness_adds_its_share_of_the_full_scale() {
 #[test]
 fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
     // Same mapping as the flat u8 case, but laid out as RGBA pixels: the three
-    // colour channels move, the fourth is copied through even where it would
+    // color channels move, the fourth is copied through even where it would
     // otherwise have clamped.
     let rgb: [u8; 3] = [64, 65, 128];
     let rgb_want: [u8; 3] = [0, 2, 128];
@@ -233,16 +233,16 @@ fn extreme_brightness_clamps_to_the_range_ends() {
         let input = create_test_image(format, 4, 2, 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
 
-        // Saturating up pins every colour channel at the format's maximum, and
+        // Saturating up pins every color channel at the format's maximum, and
         // saturating down pins it at zero. Alpha is exempt.
         for (brightness, want) in [(1.0, affine_max), (-1.0, 0.0)] {
             let mut output = input.clone();
             ContrastBrightness::new(1.0, brightness).apply_cpu(&mut output);
 
             let channels = format.channel_count.count();
-            let colour_channels = channels - usize::from(format.has_alpha());
+            let color_channels = channels - usize::from(format.has_alpha());
             for (index, value) in channel_values(&output).iter().enumerate() {
-                if index % channels >= colour_channels {
+                if index % channels >= color_channels {
                     continue;
                 }
                 assert_eq!(
@@ -254,7 +254,7 @@ fn extreme_brightness_clamps_to_the_range_ends() {
     }
 }
 
-/// Every colour channel of `image` as an `f32`, in its own units.
+/// Every color channel of `image` as an `f32`, in its own units.
 fn channel_values(image: &Image) -> Vec<f32> {
     let format = image.desc().color_format;
     match format.sample_type {

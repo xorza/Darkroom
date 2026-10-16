@@ -17,8 +17,8 @@ pub(crate) const HEIGHT: usize = 4000;
 /// The side of the tile an atomic case hands a kernel that takes an image.
 pub(crate) const TILE: usize = 512;
 
-/// `width` × `height` pixels of sky in `format` from `seed`: in each colour channel 0.1 with
-/// white noise of σ 0.01, one pixel in fifty a star up to 1 above it in every colour channel, all
+/// `width` × `height` pixels of sky in `format` from `seed`: in each color channel 0.1 with
+/// white noise of σ 0.01, one pixel in fifty a star up to 1 above it in every color channel, all
 /// clamped to `[0, 1]`; alpha opaque. Each pixel draws from its own `split_mix` stream, so rows
 /// fill in parallel and a 24 MP frame takes a fraction of a second.
 pub(crate) fn sky(format: ColorFormat, width: usize, height: usize, seed: u64) -> Image {
