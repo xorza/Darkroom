@@ -102,6 +102,22 @@ impl DMat3 {
         })
     }
 
+    /// `w = m[6]·x + m[7]·y + m[8]` at `p`: the homogeneous weight its image is divided by.
+    #[inline]
+    pub(crate) const fn weight_at(&self, p: DVec2) -> f64 {
+        let d = &self.data;
+        d[6] * p.x + d[7] * p.y + d[8]
+    }
+
+    /// Whether a point of homogeneous weight `w` maps to a real image under a matrix with
+    /// `m[8] = 1`, the representation a registration transform keeps: on the side of the
+    /// horizon the origin is on, `w > 0`, and off the horizon itself. A point with `w < 0` lies
+    /// behind the view, and dividing by its `w` gives the antipode of a real position.
+    #[inline]
+    pub(crate) const fn maps_forward(w: f64) -> bool {
+        w > f64::EPSILON
+    }
+
     /// Apply this matrix as a 2D homogeneous transform to a point.
     ///
     /// Computes `(x', y')` where:
@@ -111,17 +127,17 @@ impl DMat3 {
     /// y' = (m[3]*x + m[4]*y + m[5]) / w
     /// ```
     ///
-    /// A point on a homography's horizon (`w ≈ 0`) maps to infinity rather than
-    /// panicking, so a warp treats it as out-of-bounds (→ border) instead of
-    /// crashing. `INFINITY` (not `NaN`) is deliberate: `inf as i32` saturates to
-    /// `i32::MAX` and fails the sampler's bounds check, whereas `NaN as i32` is 0
-    /// and would read pixel (0,0). Affine/similarity/euclidean have a `[0,0,1]`
-    /// bottom row, so `w` is structurally 1 and this branch never fires for them.
+    /// A point on a homography's horizon or past it ([`Self::maps_forward`] false) maps to
+    /// infinity rather than panicking, so a warp treats it as out-of-bounds (→ border) instead of
+    /// crashing or sampling the mirrored point a negative `w` would give. `INFINITY` (not `NaN`)
+    /// is deliberate: `inf as i32` saturates to `i32::MAX` and fails the sampler's bounds check,
+    /// whereas `NaN as i32` is 0 and would read pixel (0,0). Affine/similarity/euclidean have a
+    /// `[0,0,1]` bottom row, so `w` is structurally 1 and this branch never fires for them.
     #[inline]
     pub(crate) const fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
-        let w = d[6] * p.x + d[7] * p.y + d[8];
-        if w.abs() <= f64::EPSILON {
+        let w = self.weight_at(p);
+        if !Self::maps_forward(w) {
             return DVec2::splat(f64::INFINITY);
         }
         let x_prime = (d[0] * p.x + d[1] * p.y + d[2]) / w;

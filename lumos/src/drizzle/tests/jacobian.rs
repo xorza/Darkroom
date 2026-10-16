@@ -5,6 +5,7 @@ use glam::DVec2;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 
 use super::*;
+use crate::image::channel_layout::ChannelLayout;
 
 /// A frame at half the reference's image scale — B, its pixels twice as far apart, each covering
 /// four of the reference's — gives every output pixel a quarter of the weight per unit area that an
@@ -37,7 +38,7 @@ fn a_magnified_frame_weighs_less_per_output_pixel() {
         };
         for (transform, period_mean) in [(magnified, 0.25), (Transform::identity(), 1.0)] {
             let mut alone = accumulator(
-                ImageDimensions::new(size, 1),
+                ImageDimensions::new(size, ChannelLayout::Mono),
                 kernel_config(kernel, 1.0, 1.0),
             );
             alone.add_image(constant_image(size, 1.0), &transform, None);
@@ -55,7 +56,7 @@ fn a_magnified_frame_weighs_less_per_output_pixel() {
         for b in [2.0, 0.0] {
             for (transform, b_weight) in [(magnified, share), (Transform::identity(), 1.0)] {
                 let mut acc = accumulator(
-                    ImageDimensions::new(size, 1),
+                    ImageDimensions::new(size, ChannelLayout::Mono),
                     kernel_config(kernel, 1.0, 1.0),
                 );
                 acc.add_image(constant_image(size, 10.0), &Transform::identity(), None);

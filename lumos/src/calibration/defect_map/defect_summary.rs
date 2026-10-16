@@ -1,11 +1,13 @@
-//! [`DefectSummary`]: how many pixels a defect map names, in all and per colour.
+//! [`DefectSummary`]: how many pixels a defect map names, in all and per color.
 
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use crate::image::cfa::cfa_color::CfaColor;
+
 /// Read-only defect statistics of a calibration bundle: the hot and cold pixels in all, and per
-/// colour of the sensor's filter, so a colour that lost an unusual share of its photosites shows.
+/// color of the sensor's filter, so a color that lost an unusual share of its photosites shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefectSummary {
     /// Hot pixels detected from the master dark.
@@ -16,9 +18,36 @@ pub struct DefectSummary {
     pub defective_pixels: usize,
     /// The sensor's pixels.
     pub pixels: usize,
-    /// Per colour, indexed as [`CfaType::color_at`](crate::CfaType::color_at) numbers them: red,
-    /// green and blue, or the one colour of a mono sensor.
-    pub colours: Vec<ColourDefects>,
+    /// Per color of the sensor's filter.
+    pub colors: ColorShares,
+}
+
+/// The defects of each color of a sensor's filter: a mono sensor's one, or a mosaic's red, green
+/// and blue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorShares {
+    Mono(ColorDefects),
+    /// Each color's, at its [`CfaColor::index`].
+    Mosaic([ColorDefects; 3]),
+}
+
+impl ColorShares {
+    /// The defects of `color`; `None` on a mono sensor, which has no filter color.
+    pub const fn of(&self, color: CfaColor) -> Option<&ColorDefects> {
+        match self {
+            Self::Mono(_) => None,
+            Self::Mosaic(colors) => Some(&colors[color.index()]),
+        }
+    }
+
+    /// The defects of the color in `slot`, as [`CfaType::slot_at`](crate::CfaType::slot_at)
+    /// numbers them.
+    pub(crate) const fn slot_mut(&mut self, slot: usize) -> &mut ColorDefects {
+        match self {
+            Self::Mono(defects) => defects,
+            Self::Mosaic(colors) => &mut colors[slot],
+        }
+    }
 }
 
 impl DefectSummary {
@@ -28,21 +57,21 @@ impl DefectSummary {
     }
 }
 
-/// The defects of one colour of the sensor's filter.
+/// The defects of one color of the sensor's filter.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ColourDefects {
-    /// Hot pixels of this colour.
+pub struct ColorDefects {
+    /// Hot pixels of this color.
     pub hot: usize,
-    /// Cold or dead pixels of this colour.
+    /// Cold or dead pixels of this color.
     pub cold: usize,
     /// Pixels in either class, a pixel in both once.
     pub defective: usize,
-    /// The sensor's photosites of this colour.
+    /// The sensor's photosites of this color.
     pub photosites: usize,
 }
 
-impl ColourDefects {
-    /// The defective photosites as a percentage of this colour's; `0` for a colour the sensor has
+impl ColorDefects {
+    /// The defective photosites as a percentage of this color's; `0` for a color the sensor has
     /// none of.
     pub fn percentage(&self) -> f32 {
         percentage(self.defective, self.photosites)
@@ -57,7 +86,7 @@ fn percentage(part: usize, whole: usize) -> f32 {
     }
 }
 
-/// `12 defective pixels, 0.005%`, and on a colour sensor each colour's share after it:
+/// `12 defective pixels, 0.005%`, and on a color sensor each color's share after it:
 /// `(R 0.010%, G 0.002%, B 0.008%)`.
 impl Display for DefectSummary {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
@@ -67,7 +96,7 @@ impl Display for DefectSummary {
             self.defective_pixels,
             self.percentage()
         )?;
-        if let [red, green, blue] = self.colours.as_slice() {
+        if let ColorShares::Mosaic([red, green, blue]) = &self.colors {
             write!(
                 formatter,
                 " (R {:.3}%, G {:.3}%, B {:.3}%)",

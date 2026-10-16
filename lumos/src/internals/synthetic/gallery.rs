@@ -271,7 +271,7 @@ fn gallery_sensor() {
             edge: 0.4,
             falloff: 2.5,
         }),
-        colour_gain: [1.0; 3],
+        color_gain: [1.0; 3],
     };
     save(
         &vignette_flat.render(size, &CfaType::Mono),

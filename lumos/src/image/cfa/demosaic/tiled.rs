@@ -1,21 +1,8 @@
-//! The tiled driver both demosaics run on: where the tiles lie, the frame's output planes each tile
-//! writes its own part of, the memory a run holds, and the border no tile computes in full.
-//!
-//! A kernel reads its input balanced by the camera's white balance, since its direction decisions
-//! compare neighbours of different colours and would read a colour cast as structure; dcraw,
-//! RawTherapee, darktable and ART all balance before they demosaic. The balance is applied as a
-//! tile reads its input and taken out as it writes: each native sample goes out as it came in,
-//! exact, and each interpolated one is divided by its colour's gain.
-
-use std::ops::Range;
-
-use common::CancelToken;
-use rayon::prelude::*;
+//! The tiling both demosaics run on: where the tiles lie, the frame's output planes each tile
+//! writes its own part of, and the memory a run holds.
 
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
-use crate::error::Cancelled;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::memory::footprint::Footprint;
 
 /// How a kernel tiles a frame.
@@ -50,7 +37,7 @@ impl TilePlace {
     }
 }
 
-/// One pixel of the frame a kernel writes: its flat `index`, its `native` colour, and the `sample`
+/// One pixel of the frame a kernel writes: its flat `index`, its `native` color, and the `sample`
 /// the input holds there.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct NativePixel {
@@ -59,10 +46,12 @@ pub(crate) struct NativePixel {
     pub(crate) sample: f32,
 }
 
-/// The frame's output planes, which every tile writes at the pixels it alone owns.
+/// The frame's output planes, which every tile writes at the pixels it alone owns, and the gains
+/// the kernels balanced the colors by, which a write takes back out.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OutputPlanes {
     planes: [UnsafeSendPtr<f32>; 3],
+    gains: [f32; 3],
 }
 
 impl Tiling {
@@ -73,7 +62,7 @@ impl Tiling {
 
     /// The tiles over a frame of `size`, overlapping by twice the margin so that the parts they
     /// write tile the frame within the border; none when the frame is all border.
-    fn places(self, size: Size2us) -> Vec<TilePlace> {
+    pub(crate) fn places(self, size: Size2us) -> Vec<TilePlace> {
         let border = self.border();
         if size.width <= 2 * border || size.height <= 2 * border {
             return Vec::new();
@@ -102,7 +91,18 @@ impl Tiling {
 }
 
 impl OutputPlanes {
-    /// `values` into plane `channel` from `index` on, as they are.
+    /// The planes over `planes`, written in the balance `gains` take out.
+    pub(crate) fn new(planes: &mut [Vec<f32>; 3], gains: [f32; 3]) -> Self {
+        Self {
+            planes: planes
+                .each_mut()
+                .map(|plane| UnsafeSendPtr::new(plane.as_mut_ptr())),
+            gains,
+        }
+    }
+
+    /// `values` into plane `channel` from `index` on, as they are: native samples, and values
+    /// [`Self::unbalanced`] brought back.
     ///
     /// # Safety
     ///
@@ -118,25 +118,32 @@ impl OutputPlanes {
         }
     }
 
+    /// `value` of `channel`, as a kernel computed it in balanced units, in the frame's own
+    /// balance.
+    #[inline(always)]
+    pub(crate) fn unbalanced(self, channel: usize, value: f32) -> f32 {
+        value / self.gains[channel]
+    }
+
     /// The three channels of `pixel`: each of `values`, as a kernel computed it in balanced units,
-    /// brought back by its channel's gain of `gains` — but at the pixel's native colour its own
-    /// sample, as the input held it, so it leaves exact.
+    /// brought back by its channel's gain — but at the pixel's native color its own sample, as
+    /// the input held it, so it leaves exact.
     ///
     /// # Safety
     ///
     /// The planes cover the frame, and no other tile writes the pixel.
     #[inline(always)]
-    pub(crate) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3], gains: [f32; 3]) {
+    pub(crate) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3]) {
         let NativePixel {
             index,
             native,
             sample,
         } = pixel;
-        for (channel, (value, gain)) in values.into_iter().zip(gains).enumerate() {
+        for (channel, value) in values.into_iter().enumerate() {
             let value = if channel == native {
                 sample
             } else {
-                value / gain
+                self.unbalanced(channel, value)
             };
             unsafe { self.planes[channel].get().add(index).write(value) };
         }
@@ -166,15 +173,6 @@ pub(crate) const fn workspace_bytes(tile_bytes: usize, workers: usize) -> usize 
     workers.saturating_mul(tile_bytes)
 }
 
-/// A frame's mosaic: its samples row by row, its size, and `color_at`, the colour of the photosite
-/// at a point.
-#[derive(Debug)]
-pub(crate) struct Mosaic<'a, C> {
-    pub(crate) data: &'a [f32],
-    pub(crate) size: Size2us,
-    pub(crate) color_at: C,
-}
-
 /// How a kernel runs over a frame's tiles: where they lie, how a worker makes the tile it works
 /// in, and `run`, which demosaics one place with it.
 #[derive(Debug)]
@@ -182,162 +180,4 @@ pub(crate) struct TileKernel<N, R> {
     pub(crate) tiling: Tiling,
     pub(crate) new_tile: N,
     pub(crate) run: R,
-}
-
-impl<C: Fn(Vec2us) -> usize + Sync> Mosaic<'_, C> {
-    /// Demosaic the frame in tiles placed by `kernel.tiling`: each worker makes its tile with
-    /// `kernel.new_tile` and runs `kernel.run` on it at each place, which writes into the planes
-    /// the part of the place `tiling.margin` or more inside its edges, and nothing else. The border
-    /// comes from [`Self::fill_border`].
-    ///
-    /// # Errors
-    ///
-    /// [`Cancelled`] when `cancel` is set, between tiles and before the border.
-    pub(crate) fn demosaic<T>(
-        &self,
-        kernel: TileKernel<
-            impl Fn() -> T + Sync + Send,
-            impl Fn(&mut T, TilePlace, OutputPlanes) + Sync,
-        >,
-        cancel: &CancelToken,
-    ) -> Result<[Vec<f32>; 3], Cancelled> {
-        let TileKernel {
-            tiling,
-            new_tile,
-            run,
-        } = kernel;
-        let pixels = self.size.pixel_count();
-        let mut planes = [
-            vec![0.0f32; pixels],
-            vec![0.0f32; pixels],
-            vec![0.0f32; pixels],
-        ];
-        let places = tiling.places(self.size);
-        let out = OutputPlanes {
-            planes: planes
-                .each_mut()
-                .map(|plane| UnsafeSendPtr::new(plane.as_mut_ptr())),
-        };
-        places
-            .par_iter()
-            .try_for_each_init(new_tile, |tile, &place| {
-                Cancelled::check(cancel)?;
-                run(tile, place, out);
-                Ok(())
-            })?;
-        Cancelled::check(cancel)?;
-        let border = if places.is_empty() {
-            self.size.width.max(self.size.height)
-        } else {
-            tiling.border()
-        };
-        let [r, g, b] = &mut planes;
-        self.fill_border([r, g, b], border);
-        Ok(planes)
-    }
-
-    /// Fill the pixels within `border` of the frame's edge of `out`, row by row in parallel: the
-    /// whole of each row in the band at the top and bottom, and the ends of each row between.
-    fn fill_border(&self, [out_r, out_g, out_b]: [&mut [f32]; 3], border: usize) {
-        let Size2us { width, height } = self.size;
-        out_r
-            .par_chunks_mut(width)
-            .zip(out_g.par_chunks_mut(width))
-            .zip(out_b.par_chunks_mut(width))
-            .enumerate()
-            .for_each(|(y, ((row_r, row_g), row_b))| {
-                let mut fill_span = |span: Range<usize>| {
-                    for x in span {
-                        let [r, g, b] = self.border_pixel(Vec2us::new(x, y));
-                        row_r[x] = r;
-                        row_g[x] = g;
-                        row_b[x] = b;
-                    }
-                };
-                if y < border || y + border >= height || 2 * border >= width {
-                    fill_span(0..width);
-                } else {
-                    fill_span(0..border);
-                    fill_span(width - border..width);
-                }
-            });
-    }
-
-    /// Each colour at `at` of the border: the pixel's own sample in its colour, and each other
-    /// colour from its 3×3 neighbours of that colour, those beside it weighted twice the diagonal
-    /// ones; where none of those is of the colour, the mean of its samples in the smallest square
-    /// window around the pixel that holds any.
-    ///
-    /// A mean of one colour's samples is the same whatever gain balances that colour, so the border
-    /// reads the input as it is, and its native samples are the input's own.
-    fn border_pixel(&self, at: Vec2us) -> [f32; 3] {
-        let Size2us { width, height } = self.size;
-        let Vec2us { x, y } = at;
-        let mut sums = [0.0f32; 3];
-        let mut weights = [0.0f32; 3];
-        for neighbor_y in y.saturating_sub(1)..=(y + 1).min(height - 1) {
-            for neighbor_x in x.saturating_sub(1)..=(x + 1).min(width - 1) {
-                let weight = match (neighbor_y.abs_diff(y), neighbor_x.abs_diff(x)) {
-                    (0, 0) => 0.0,
-                    (0, 1) | (1, 0) => 0.5,
-                    (1, 1) => 0.25,
-                    _ => unreachable!("a 3×3 neighbourhood"),
-                };
-                let color = (self.color_at)(Vec2us::new(neighbor_x, neighbor_y));
-                sums[color] += self.data[neighbor_y * width + neighbor_x] * weight;
-                weights[color] += weight;
-            }
-        }
-        let native = (self.color_at)(at);
-        let sample = self.data[y * width + x];
-        let channel = |color: usize| {
-            if color == native {
-                sample
-            } else if weights[color] > 0.0 {
-                sums[color] / weights[color]
-            } else {
-                self.nearest_mean(at, color).unwrap_or(sample)
-            }
-        };
-        [channel(0), channel(1), channel(2)]
-    }
-
-    /// The mean of `color`'s samples in the smallest square window around `at` that holds any, for
-    /// a border pixel whose 3×3 neighbourhood has none. `None` only when the whole frame has no
-    /// sample of `color`, where there is nothing to interpolate from and the caller keeps the
-    /// pixel's own sample.
-    fn nearest_mean(&self, at: Vec2us, color: usize) -> Option<f32> {
-        let Size2us { width, height } = self.size;
-        let Vec2us { x, y } = at;
-        (2..width.max(height)).find_map(|radius| {
-            let mut sum = 0.0f32;
-            let mut count = 0usize;
-            for neighbor_y in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-                for neighbor_x in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
-                    if (self.color_at)(Vec2us::new(neighbor_x, neighbor_y)) == color {
-                        sum += self.data[neighbor_y * width + neighbor_x];
-                        count += 1;
-                    }
-                }
-            }
-            (count > 0).then(|| sum / count as f32)
-        })
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
-    use crate::image::cfa::demosaic::tiled::OutputPlanes;
-
-    impl OutputPlanes {
-        /// The output planes over `planes`, for a test that runs one tile itself.
-        pub(crate) fn of(planes: &mut [Vec<f32>; 3]) -> Self {
-            Self {
-                planes: planes
-                    .each_mut()
-                    .map(|plane| UnsafeSendPtr::new(plane.as_mut_ptr())),
-            }
-        }
-    }
 }

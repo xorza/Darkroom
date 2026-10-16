@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 use libraw_sys as sys;
 
+use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
+use crate::io::error::OverBudget;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -74,11 +76,17 @@ pub enum RawError {
     /// CFA. Such a file loads as a `LinearImage` through LibRaw's own processing.
     #[error("not a CFA frame: LibRaw delivers this sensor's image already processed")]
     NotACfaFrame,
-    /// A sensor of four colours — Sony's RGBE, Nikon's CMYG — that lumos does not demosaic, and
-    /// whose colours LibRaw's processing would either hand through as four planes or fold to RGB
+    /// A sensor of four colors — Sony's RGBE, Nikon's CMYG — that lumos does not demosaic, and
+    /// whose colors LibRaw's processing would either hand through as four planes or fold to RGB
     /// through a camera matrix lumos does not check.
-    #[error("a four-colour sensor ({colours}) is not supported")]
-    FourColourSensor { colours: String },
+    #[error("a four-color sensor ({colors}) is not supported")]
+    FourColorSensor { colors: String },
+    /// What the decode holds at its peak is past the load's memory limit.
+    #[error("the decode {0}")]
+    OverBudget(#[from] OverBudget),
+    /// The load's cancel token stopped the decode.
+    #[error("the decode was cancelled")]
+    Cancelled,
     /// LibRaw's own processing failed.
     #[error("LibRaw could not process the image: {0}")]
     Process(LibrawCode),
@@ -93,6 +101,12 @@ pub enum RawError {
     /// LibRaw's processed image holds fewer bytes than its shape needs.
     #[error("LibRaw processed the image into {actual} bytes, not {expected}")]
     ProcessedSize { actual: usize, expected: usize },
+}
+
+impl From<Cancelled> for RawError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
+    }
 }
 
 /// A LibRaw return code, as its `LibRaw_errors` names them.

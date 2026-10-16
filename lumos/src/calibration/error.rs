@@ -1,15 +1,13 @@
-//! Why a calibration bundle does not fit the frame it was asked to calibrate, and why a bundle file
-//! could not be read.
-
-use std::io;
+//! Why a calibration bundle does not fit the frame it was asked to calibrate.
 
 use crate::calibration::calibration_component::CalibrationComponent;
-use crate::calibration::calibration_masters::fits::BUNDLE_VERSION;
 use crate::calibration::master_role::MasterRole;
 use crate::combine::error::StackError;
+use crate::error::Cancelled;
+use crate::frame::error::ConditionMismatch;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::sample_domain::SampleDomain;
-use crate::io::error::ImageError;
 use crate::math::size2us::Size2us;
 
 /// A calibration master does not describe the same measurement as the light it is applied to.
@@ -30,10 +28,10 @@ pub enum CalibrationError {
     #[error("calibration-master construction was cancelled")]
     Cancelled,
     /// The flat, once its own bias or flat-dark is subtracted, has no positive mean to normalize
-    /// by — in the given CFA colour channel, or over the whole frame (`None`). Swapped roles (a
-    /// dark given as the flat) and a subtractor at the wrong level both end here.
-    #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
-    NonPositiveFlat { channel: Option<usize> },
+    /// by — in the given color of its mosaic, or over the whole frame of a mono sensor (`None`).
+    /// Swapped roles (a dark given as the flat) and a subtractor at the wrong level both end here.
+    #[error("the subtracted flat has no positive mean{}", color.map_or(String::new(), |color| format!(" in its {color:?} photosites")))]
+    NonPositiveFlat { color: Option<CfaColor> },
     /// The flat still holds an additive offset — its pedestal is kept or unknown — and the set has
     /// no bias or flat-dark to remove it: divided by, it would add an inverse-vignetting pattern of
     /// the offset to every light.
@@ -119,15 +117,24 @@ pub enum DarkMismatch {
 /// master itself, or frame `index` it meets.
 #[derive(Debug, thiserror::Error)]
 pub enum SubtractionError {
-    /// The master a calibration stack subtracts from every frame is of another sensor shape or
-    /// pattern than frame `index`.
-    #[error(
-        "frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}, or of another pattern"
-    )]
+    /// The master a calibration stack subtracts from every frame covers another sensor area than
+    /// frame `index`.
+    #[error("frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}")]
     SubtractorShape {
         index: usize,
         frame: Size2us,
         subtractor: Size2us,
+    },
+
+    /// The master a calibration stack subtracts from every frame is of another sensor pattern than
+    /// frame `index`.
+    #[error(
+        "frame {index} has CFA pattern {frame:?}, but the master it subtracts has {subtractor:?}"
+    )]
+    SubtractorPattern {
+        index: usize,
+        frame: CfaType,
+        subtractor: CfaType,
     },
 
     /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
@@ -171,41 +178,29 @@ pub enum SubtractionError {
     SubtractorConditions { index: usize, source: DarkMismatch },
 }
 
-impl SubtractionError {
-    /// The error with each frame index it holds, a position in the list it was raised over, read
-    /// through `inputs` into the caller's own numbering of those frames.
-    pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
-        match self {
-            Self::SubtractorShape {
-                index,
-                frame,
-                subtractor,
-            } => Self::SubtractorShape {
-                index: inputs[index],
-                frame,
-                subtractor,
-            },
-            Self::SubtractorDomain {
-                index,
-                frame,
-                subtractor,
-            } => Self::SubtractorDomain {
-                index: inputs[index],
-                frame,
-                subtractor,
-            },
-            Self::SubtractedTwice { index, subtractor } => Self::SubtractedTwice {
-                index: inputs[index],
-                subtractor,
-            },
-            Self::SubtractorConditions { index, source } => Self::SubtractorConditions {
-                index: inputs[index],
-                source,
-            },
-            error @ (Self::OverCalibratedSubtractor { .. } | Self::SubtractorForRole { .. }) => {
-                error
-            }
-        }
+/// Why one calibration role's master could not be stacked: the stack, the master its frames
+/// have subtracted, or the conditions its frames had to share.
+#[derive(Debug, thiserror::Error)]
+pub enum MasterStackError {
+    #[error(transparent)]
+    Stack(#[from] StackError),
+    /// The master a calibration stack subtracts from every frame cannot be taken from them.
+    #[error(transparent)]
+    Subtraction(#[from] SubtractionError),
+    /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
+    /// flat-dark — were not all taken under one: the master would state one frame's conditions and
+    /// hold the majority's signal.
+    #[error("the {role} frames must share one exposure and one temperature: {source}")]
+    Conditions {
+        role: MasterRole,
+        source: ConditionMismatch,
+    },
+}
+
+/// A cancelled stack.
+impl From<Cancelled> for MasterStackError {
+    fn from(cancelled: Cancelled) -> Self {
+        Self::Stack(cancelled.into())
     }
 }
 
@@ -214,7 +209,7 @@ impl SubtractionError {
 pub enum MasterBuildError<E> {
     /// A role's master could not be stacked.
     #[error(transparent)]
-    Stack(StackError),
+    Stack(MasterStackError),
     /// The stacked masters do not make a set.
     #[error(transparent)]
     Calibration(CalibrationError),
@@ -228,12 +223,19 @@ pub enum MasterBuildError<E> {
 }
 
 /// A cancel inside a role's stack is the build's cancel.
-impl<E> From<StackError> for MasterBuildError<E> {
-    fn from(error: StackError) -> Self {
+impl<E> From<MasterStackError> for MasterBuildError<E> {
+    fn from(error: MasterStackError) -> Self {
         match error {
-            StackError::Cancelled => Self::Cancelled,
+            MasterStackError::Stack(StackError::Cancelled) => Self::Cancelled,
             error => Self::Stack(error),
         }
+    }
+}
+
+/// A role's stack that fails before its master's own checks.
+impl<E> From<StackError> for MasterBuildError<E> {
+    fn from(error: StackError) -> Self {
+        MasterStackError::Stack(error).into()
     }
 }
 
@@ -247,90 +249,56 @@ impl<E> From<CalibrationError> for MasterBuildError<E> {
     }
 }
 
-/// Why [`CalibrationMasters::load`](crate::CalibrationMasters::load) could not read a bundle.
-#[derive(Debug, thiserror::Error)]
-pub enum BundleError {
-    /// The file could not be opened or read.
-    #[error("calibration-master bundle: {0}")]
-    Io(#[from] io::Error),
-    /// The file is not well-formed FITS, or a header value has the wrong type.
-    #[error("calibration-master bundle: {0}")]
-    Fits(#[from] fits_well::FitsError),
-    /// The file does not start with the dataless primary HDU that names a Lumos bundle.
-    #[error("not a Lumos calibration-master bundle")]
-    NotABundle,
-    /// The primary HDU names a bundle but no version of it.
-    #[error("the calibration-master bundle states no version")]
-    MissingVersion,
-    /// The bundle is of another version than this build reads.
-    #[error("calibration-master bundle version {found}; this build reads version {BUNDLE_VERSION}")]
-    Version { found: i64 },
-    /// An HDU's data or header does not match its checksum.
-    #[error("HDU {hdu} of the calibration-master bundle fails its checksum")]
-    Checksum { hdu: usize },
-    /// An extension has no `EXTNAME` to say what it holds.
-    #[error("HDU {hdu} of the calibration-master bundle has no EXTNAME")]
-    MissingExtname { hdu: usize },
-    /// An extension's `EXTNAME` names nothing a bundle holds.
-    #[error("unknown calibration-master bundle extension {extname:?}")]
-    UnknownExtension { extname: String },
-    /// Two extensions name the same component.
-    #[error("calibration-master bundle extension {extname:?} appears twice")]
-    DuplicateExtension { extname: String },
-    /// A bundle holds no flat-dark: the flat is stored prepared, the flat-dark spent on it.
-    #[error("the calibration-master bundle holds a flat-dark")]
-    FlatDark,
-    /// A defect map without the dark or the flat it was detected on.
-    #[error("the calibration-master bundle holds a defect map without a dark or a flat")]
-    DefectsWithoutMaster,
-    /// A flags extension names no image of the file, or is not this format's.
-    #[error(transparent)]
-    Flags(ImageError),
-    /// A master's HDU is not an uncompressed 32-bit float image.
-    #[error("the {role} master of the bundle is not an uncompressed BITPIX=-32 image")]
-    MasterEncoding { role: MasterRole },
-    /// A master's HDU states another role, or another prepared state, than its `EXTNAME`'s.
-    #[error("the {role} master of the bundle states another role or prepared state")]
-    MasterRecord { role: MasterRole },
-    /// A master's HDU could not be decoded.
-    #[error("the {role} master of the bundle: {source}")]
-    Master {
+/// Why an additive master cannot be taken from a frame, as each caller's error then names it: a
+/// light's calibration, or a frame of a calibration stack.
+#[derive(Debug)]
+pub(crate) enum SubtractionFault {
+    /// The master holds dark signal and was taken under other conditions than the frame.
+    Conditions {
         role: MasterRole,
-        source: ImageError,
+        source: DarkMismatch,
     },
-    /// The defect map's table is not what a bundle writes.
-    #[error("the bundle's defect map: {0}")]
-    DefectTable(#[from] DefectTableError),
-    /// The masters read do not make a set.
-    #[error(transparent)]
-    Calibration(#[from] CalibrationError),
-    /// The load was cancelled while a master was decoded.
-    #[error("calibration-master bundle load cancelled")]
-    Cancelled,
+    /// The master's domain cannot be expressed in the frame's, as the frame stands when the master
+    /// applies.
+    Domain {
+        role: MasterRole,
+        frame: SampleDomain,
+        master: SampleDomain,
+    },
 }
 
-/// What is wrong with a bundle's defect-map table.
-#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
-pub enum DefectTableError {
-    /// Not a binary table of this format and version.
-    #[error("not a Lumos defect table of this version")]
-    Format,
-    /// The sensor extent is missing, not positive, or overflows.
-    #[error("no valid sensor extent")]
-    Extent,
-    /// A column is missing or of another type.
-    #[error("column {column} is missing or of another type")]
-    Column { column: &'static str },
-    /// A column's length is not the table's row count.
-    #[error("the column lengths do not match the row count")]
-    ColumnLength,
-    /// A row's kind is neither hot (0) nor cold (1).
-    #[error("row {row} has kind {kind}, neither hot (0) nor cold (1)")]
-    Kind { row: usize, kind: u8 },
-    /// A row's index is negative or lies outside the sensor.
-    #[error("row {row} indexes no pixel of the sensor")]
-    Index { row: usize },
-    /// A hot row's excess is not a positive finite number, or a cold row's is not NaN.
-    #[error("row {row} has an invalid excess")]
-    Excess { row: usize },
+impl From<SubtractionFault> for CalibrationError {
+    fn from(fault: SubtractionFault) -> Self {
+        match fault {
+            SubtractionFault::Conditions { role, source } => Self::DarkMismatch {
+                component: role,
+                source,
+            },
+            SubtractionFault::Domain {
+                role,
+                frame,
+                master,
+            } => Self::SampleDomainMismatch {
+                component: role,
+                frame,
+                master,
+            },
+        }
+    }
+}
+
+impl SubtractionError {
+    /// The `fault` of taking a master from frame `index` of a calibration stack.
+    pub(crate) fn of_frame(index: usize, fault: SubtractionFault) -> Self {
+        match fault {
+            SubtractionFault::Conditions { source, .. } => {
+                Self::SubtractorConditions { index, source }
+            }
+            SubtractionFault::Domain { frame, master, .. } => Self::SubtractorDomain {
+                index,
+                frame: Box::new(frame),
+                subtractor: Box::new(master),
+            },
+        }
+    }
 }

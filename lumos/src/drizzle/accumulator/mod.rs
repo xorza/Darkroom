@@ -1,5 +1,6 @@
 //! Pixel distribution and accumulation for drizzle reconstruction.
 
+mod band_scan;
 mod drop_quad;
 pub(crate) mod frame_source;
 mod input_map;
@@ -7,30 +8,33 @@ pub(crate) mod kernel_plan;
 mod output_band;
 
 use arrayvec::ArrayVec;
-use glam::DVec2;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use std::slice::ChunksMut;
 
-use crate::drizzle::accumulator::frame_source::{BandScan, FrameSource};
+use crate::combine::error::StackError;
+use crate::drizzle::accumulator::band_scan::BandScan;
+use crate::drizzle::accumulator::frame_source::FrameSource;
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::accumulator::output_band::{CornerLattice, OutputBand, RadialScratch};
 use crate::drizzle::deposit::Deposit;
-use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::error::DrizzleError;
+use crate::drizzle::output_grid::OutputGrid;
+use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::DropPlanes;
-use crate::frame::stackable_image::StackableImage;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::stackable_image::StackableImage;
+use crate::ingest::error::AdmissionError;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
-/// colours, so it never carries more planes, and the output never more channels.
-const MAX_CHANNELS: usize = 3;
+/// colors, so it never carries more planes, and the output never more channels.
+pub(crate) const MAX_CHANNELS: usize = 3;
 /// Output bands per rayon worker — enough for work-stealing to even out bands that different
 /// amounts of the input reach.
 const BANDS_PER_WORKER: usize = 4;
@@ -41,26 +45,35 @@ const BANDS_PER_WORKER: usize = 4;
 struct PlaneSpan<'a> {
     /// Weighted flux per channel.
     data: ArrayVec<&'a mut [f32], MAX_CHANNELS>,
-    /// `Σw` and `Σw²`: one plane every channel shares, or one per colour of a mosaic.
+    /// `Σw` and `Σw²`: one plane every channel shares, or one per color of a mosaic.
     weight: ArrayVec<&'a mut [f32], MAX_CHANNELS>,
     weight_sq: ArrayVec<&'a mut [f32], MAX_CHANNELS>,
     flags: Option<&'a mut [u8]>,
 }
 
-/// The drops of the frames added so far, summed on the output grid: `Σw·x` per channel, `Σw` and
-/// `Σw²`, and the flags the drops carried.
+/// The drizzle of a run's frames, built once from the run's shape and kernel: its grid, its
+/// kernel's constants and the scratch every frame's scatter reuses.
 #[derive(Debug)]
-pub(crate) struct DrizzleAccumulator {
+pub(crate) struct Drizzler {
     input_dims: ImageDimensions,
     deposit: Deposit,
-    output: Size2us,
-    /// The run's index of the next frame added, which an error names.
-    next_frame: usize,
+    grid: OutputGrid,
+    plan: KernelPlan,
+    /// The input pixels each band scans, recomputed per frame.
+    scans: Vec<BandScan>,
+    radial: ScratchPool<RadialScratch>,
+    lattice: ScratchPool<CornerLattice>,
+}
+
+/// The drops scattered onto the output grid: `Σw·x` per channel, `Σw` and `Σw²`, and the flags the
+/// drops carried.
+#[derive(Debug)]
+pub(crate) struct OutputSums {
     /// Accumulated weighted flux values (`Σ fluxᵢ·wᵢ`), one Buffer2 per output channel.
     data: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     /// Accumulated drizzle weight `Σ wᵢ` per output pixel. The per-pixel `wᵢ` is purely geometric
     /// × pixel weight, so one plane serves every channel a drop reaches; a mosaic's photosites
-    /// reach one channel each, so it keeps one per colour.
+    /// reach one channel each, so it keeps one per color.
     weight: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     /// `Σ wᵢ²` per output pixel, in the planes of `weight`, whose ratio to `(Σwᵢ)²` is the drops'
     /// Kish size.
@@ -68,20 +81,11 @@ pub(crate) struct DrizzleAccumulator {
     /// The [`QualityFlags::RESAMPLE_CARRIED`] flags each output pixel's drops carried; allocated
     /// when a frame carrying any arrives.
     flags: Option<Buffer2<u8>>,
-    config: DrizzleConfig,
-    /// The kernel's constants, resolved from `config` once for the run.
-    plan: KernelPlan,
-    /// Input pixels whose position the warp's SIP correction could not invert, over every frame.
-    unconverged_points: usize,
-    /// The input pixels each band scans, recomputed per frame.
-    scans: Vec<BandScan>,
-    radial: ScratchPool<RadialScratch>,
-    lattice: ScratchPool<CornerLattice>,
 }
 
 /// One frame drizzled on its own, as the combine reads it: where its drops landed, each channel
 /// their weighted mean `Σw·x/Σw`, with their summed weight `Σw` and their Kish size `(Σw)²/Σw²` —
-/// one pair every channel shares, or one per colour of a mosaic — and the flags they carried.
+/// one pair every channel shares, or one per color of a mosaic — and the flags they carried.
 /// Where no drop landed in a channel, or the drops' weights sum to none, its pixels, weight and
 /// size are 0, and nowhere else.
 #[derive(Debug)]
@@ -89,96 +93,96 @@ pub(crate) struct DrizzledPlanes {
     pub(crate) pixels: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     pub(crate) drops: ArrayVec<DropPlanes<Buffer2<f32>>, MAX_CHANNELS>,
     pub(crate) flags: Option<PixelFlags>,
+    /// Input pixels whose position the warp's SIP correction could not invert.
+    pub(crate) unconverged_points: usize,
 }
 
-impl DrizzleAccumulator {
-    /// An empty accumulator for frames shaped as `image` — of its dimensions, and its samples
-    /// reaching the output as its own do — whose first frame is the run's frame `first_frame`.
+impl Drizzler {
+    /// The drizzle of frames shaped as `image` — of its dimensions, and its samples reaching the
+    /// output as its own do — onto `grid` by `plan`.
+    pub(crate) fn new(image: &impl StackableImage, plan: KernelPlan, grid: OutputGrid) -> Self {
+        let input_dims = image.dimensions();
+        Self {
+            input_dims,
+            deposit: Deposit::of(image),
+            grid,
+            plan,
+            scans: Vec::new(),
+            radial: ScratchPool::default(),
+            lattice: ScratchPool::new(input_dims.width()),
+        }
+    }
+
+    /// Frame `index` drizzled on its own: see [`DrizzledPlanes`].
     ///
     /// # Errors
     ///
-    /// Returns an error when `config` is invalid.
-    pub(crate) fn new(
-        image: &impl StackableImage,
-        config: DrizzleConfig,
-        first_frame: usize,
-    ) -> Result<Self, DrizzleError> {
-        config.validate()?;
-        let input_dims = image.dimensions();
-        let deposit = Deposit::of(image);
-        let output = config.output_size(input_dims.size());
+    /// As [`Self::scatter`].
+    pub(crate) fn drizzle(
+        &mut self,
+        frame: &DrizzleFrame<impl StackableImage>,
+        index: usize,
+    ) -> Result<DrizzledPlanes, DrizzleError> {
+        let mut sums = self.sums();
+        let unconverged_points = self.scatter(frame, index, &mut sums)?;
+        Ok(sums.into_planes(self.deposit, unconverged_points))
+    }
+
+    /// Nothing scattered yet, on the grid.
+    pub(crate) fn sums(&self) -> OutputSums {
+        let output = self.grid.size();
         let planes = |count: usize| -> ArrayVec<_, MAX_CHANNELS> {
             (0..count)
                 .map(|_| Buffer2::new_default(output.width, output.height))
                 .collect()
         };
-        Ok(Self {
-            input_dims,
-            deposit,
-            output,
-            next_frame: first_frame,
-            data: planes(deposit.output_channels()),
-            weight: planes(deposit.weight_planes()),
-            weight_sq: planes(deposit.weight_planes()),
+        OutputSums {
+            data: planes(self.deposit.output_layout().count()),
+            weight: planes(self.deposit.weight_planes()),
+            weight_sq: planes(self.deposit.weight_planes()),
             flags: None,
-            plan: KernelPlan::new(&config),
-            config,
-            unconverged_points: 0,
-            scans: Vec::new(),
-            radial: ScratchPool::default(),
-            lattice: ScratchPool::new(input_dims.width()),
-        })
+        }
     }
 
-    /// Input pixels, over every frame added, whose position a warp's SIP correction could not
-    /// invert.
-    pub(crate) const fn unconverged_points(&self) -> usize {
-        self.unconverged_points
-    }
-
-    /// The reference point output pixel `output` lies at: the inverse of the output grid, reference
-    /// pixel `p` landing at `s·p + (s − 1)/2`.
-    pub(crate) fn reference_point(&self, output: DVec2) -> DVec2 {
-        let scale = f64::from(self.config.scale);
-        (output - (scale - 1.0) / 2.0) / scale
-    }
-
-    /// Validate and add one coherent frame to the accumulator.
+    /// Scatter frame `index`'s drops into `sums`, and count its input pixels whose position the
+    /// warp's SIP correction could not invert.
     ///
     /// # Errors
     ///
-    /// Returns an error when image dimensions or the mosaic pattern differ from the accumulator,
-    /// when a sample is not finite, or when pixel weights are negative or non-finite. The
-    /// accumulator is unchanged on error.
-    pub(crate) fn add_frame(
+    /// Returns an error when the frame's pixel weights are of another size than it, negative or
+    /// not finite. `sums` is unchanged on error.
+    pub(crate) fn scatter(
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
-    ) -> Result<(), DrizzleError> {
-        self.add_frame_in_bands(frame, Self::balanced_band_rows(self.output.height))
+        index: usize,
+        sums: &mut OutputSums,
+    ) -> Result<usize, DrizzleError> {
+        let band_rows = Self::balanced_band_rows(self.grid.size().height);
+        self.scatter_in_bands(frame, index, sums, band_rows)
     }
 
-    /// [`Self::add_frame`] over output bands of `band_rows` rows each. The result does not depend
+    /// [`Self::scatter`] over output bands of `band_rows` rows each. The result does not depend
     /// on the band height, which the band-invariance test holds to.
-    fn add_frame_in_bands(
+    fn scatter_in_bands(
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
+        index: usize,
+        sums: &mut OutputSums,
         band_rows: usize,
-    ) -> Result<(), DrizzleError> {
-        self.validate(frame)?;
-        self.next_frame += 1;
-        if self.flags.is_none()
+    ) -> Result<usize, DrizzleError> {
+        self.validate(frame, index)?;
+        let Size2us { width, height } = self.grid.size();
+        if sums.flags.is_none()
             && frame
                 .source
                 .flags()
                 .is_some_and(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED))
         {
-            self.flags = Some(Buffer2::new_default(self.output.width, self.output.height));
+            sums.flags = Some(Buffer2::new_default(width, height));
         }
-        let source = FrameSource::new(frame, self.deposit, f64::from(self.config.scale));
+        let source = FrameSource::new(frame, self.deposit, self.grid);
         let plan = self.plan;
         let reach = plan.reach();
-
-        let Size2us { width, height } = self.output;
         self.scans.clear();
         self.scans
             .extend((0..height).step_by(band_rows).map(|start| {
@@ -186,27 +190,22 @@ impl DrizzleAccumulator {
             }));
 
         let Self {
-            data,
-            weight,
-            weight_sq,
-            flags,
             scans,
             radial,
             lattice,
-            unconverged_points,
             ..
-        } = &mut *self;
+        } = &*self;
         let span_len = width * band_rows;
-        let mut data = band_chunks(data, span_len);
-        let mut weight = band_chunks(weight, span_len);
-        let mut weight_sq = band_chunks(weight_sq, span_len);
-        let mut flags = flags
+        let mut data = band_chunks(&mut sums.data, span_len);
+        let mut weight = band_chunks(&mut sums.weight, span_len);
+        let mut weight_sq = band_chunks(&mut sums.weight_sq, span_len);
+        let mut flags = sums
+            .flags
             .as_mut()
             .map(|flags| flags.pixels_mut().chunks_mut(span_len));
-        let (radial, lattice) = (&*radial, &*lattice);
         let bands: Vec<OutputBand<'_>> = (0..height.div_ceil(band_rows))
-            .map(|index| {
-                let start = index * band_rows;
+            .map(|band| {
+                let start = band * band_rows;
                 OutputBand {
                     rows: start..(start + band_rows).min(height),
                     width,
@@ -218,29 +217,98 @@ impl DrizzleAccumulator {
                             .as_mut()
                             .map(|chunks| chunks.next().expect("one chunk per band")),
                     },
-                    index,
+                    index: band,
                     scans,
                     radial,
                     lattice,
                 }
             })
             .collect();
-        *unconverged_points += bands
+        Ok(bands
             .into_par_iter()
             .map(|mut band| band.distribute(&source, plan))
-            .sum::<usize>();
+            .sum::<usize>())
+    }
+
+    /// Refuse a frame whose pixel weights do not fit it; debug-assert what admission already
+    /// checked of frame `index`.
+    fn validate(
+        &self,
+        frame: &DrizzleFrame<impl StackableImage>,
+        index: usize,
+    ) -> Result<(), DrizzleError> {
+        // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
+        // pattern, its samples finite.
+        debug_assert_eq!(
+            frame.source.dimensions(),
+            self.input_dims,
+            "drizzle frame {index} reached the accumulator unadmitted: another shape"
+        );
+        debug_assert_eq!(
+            Deposit::of(&frame.source),
+            self.deposit,
+            "drizzle frame {index} reached the accumulator unadmitted: another pattern"
+        );
+        debug_assert!(
+            (0..self.input_dims.channels()).all(|channel| frame
+                .source
+                .channel(channel)
+                .iter()
+                .all(|v| v.is_finite())),
+            "drizzle frame {index} reached the accumulator unadmitted: a non-finite sample"
+        );
+
+        let Some(pixel_weights) = &frame.pixel_weight_map else {
+            return Ok(());
+        };
+        let actual = Size2us::from(pixel_weights);
+        if actual != self.input_dims.size() {
+            return Err(StackError::PlaneDimensionMismatch {
+                index,
+                plane: FramePlane::PixelWeight,
+                expected: self.input_dims.size(),
+                actual,
+            }
+            .into());
+        }
+        if let Some((pixel, &value)) = pixel_weights
+            .pixels()
+            .par_iter()
+            .enumerate()
+            .find_first(|(_, value)| !FramePlane::PixelWeight.accepts(**value))
+        {
+            return Err(AdmissionError::InvalidQualityPlaneValue {
+                index,
+                plane: FramePlane::PixelWeight,
+                pixel,
+                value,
+            }
+            .into());
+        }
         Ok(())
     }
 
-    /// The frames added, as one drizzled frame: see [`DrizzledPlanes`].
-    pub(crate) fn into_planes(self) -> DrizzledPlanes {
+    /// How many output rows one band covers.
+    ///
+    /// Several per worker so rayon can steal: a band's cost varies with how much of the input
+    /// actually reaches it, which is not uniform once the transform rotates. Not tuned against the
+    /// margin — over-scanning at a band boundary is nearly free (see `FrameSource::band_scan`), so
+    /// there is nothing to trade off against balance.
+    fn balanced_band_rows(output_height: usize) -> usize {
+        let target = rayon::current_num_threads() * BANDS_PER_WORKER;
+        output_height.div_ceil(target.max(1)).max(1)
+    }
+}
+
+impl OutputSums {
+    /// The sums as one drizzled frame of `deposit`'s planes, whose scatter left
+    /// `unconverged_points` input pixels unplaced: see [`DrizzledPlanes`].
+    pub(crate) fn into_planes(self, deposit: Deposit, unconverged_points: usize) -> DrizzledPlanes {
         let Self {
-            deposit,
             mut data,
             weight,
             weight_sq,
             flags,
-            ..
         } = self;
         let drops: ArrayVec<_, MAX_CHANNELS> = weight
             .into_iter()
@@ -280,71 +348,9 @@ impl DrizzleAccumulator {
         DrizzledPlanes {
             pixels: data,
             drops,
-            flags: flags.and_then(PixelFlags::from_buffer),
+            flags: flags.and_then(PixelFlags::from_bytes),
+            unconverged_points,
         }
-    }
-
-    fn validate(&self, frame: &DrizzleFrame<impl StackableImage>) -> Result<(), DrizzleError> {
-        let index = self.next_frame;
-        // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
-        // pattern, its samples finite.
-        debug_assert_eq!(
-            frame.source.dimensions(),
-            self.input_dims,
-            "drizzle frame {index} reached the accumulator unadmitted: another shape"
-        );
-        debug_assert_eq!(
-            Deposit::of(&frame.source),
-            self.deposit,
-            "drizzle frame {index} reached the accumulator unadmitted: another pattern"
-        );
-        debug_assert!(
-            (0..self.input_dims.channels()).all(|channel| frame
-                .source
-                .channel(channel)
-                .iter()
-                .all(|v| v.is_finite())),
-            "drizzle frame {index} reached the accumulator unadmitted: a non-finite sample"
-        );
-
-        let Some(pixel_weights) = &frame.pixel_weight_map else {
-            return Ok(());
-        };
-        if (pixel_weights.width(), pixel_weights.height())
-            != (self.input_dims.width(), self.input_dims.height())
-        {
-            return Err(DrizzleError::PixelWeightDimensionMismatch {
-                index,
-                expected_width: self.input_dims.width(),
-                expected_height: self.input_dims.height(),
-                actual_width: pixel_weights.width(),
-                actual_height: pixel_weights.height(),
-            });
-        }
-        if let Some((pixel_index, &value)) = pixel_weights
-            .pixels()
-            .par_iter()
-            .enumerate()
-            .find_first(|(_, value)| !value.is_finite() || **value < 0.0)
-        {
-            return Err(DrizzleError::InvalidPixelWeight {
-                frame_index: index,
-                pixel_index,
-                value,
-            });
-        }
-        Ok(())
-    }
-
-    /// How many output rows one band covers.
-    ///
-    /// Several per worker so rayon can steal: a band's cost varies with how much of the input
-    /// actually reaches it, which is not uniform once the transform rotates. Not tuned against the
-    /// margin — over-scanning at a band boundary is nearly free (see `FrameSource::band_scan`), so
-    /// there is nothing to trade off against balance.
-    fn balanced_band_rows(output_height: usize) -> usize {
-        let target = rayon::current_num_threads() * BANDS_PER_WORKER;
-        output_height.div_ceil(target.max(1)).max(1)
     }
 }
 
@@ -374,14 +380,74 @@ pub(crate) mod bench;
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;
+    use crate::drizzle::drizzle_config::DrizzleConfig;
     use crate::image::linear_image::LinearImage;
     use crate::image::quality_map::QualityMap;
     use crate::registration::transform::Transform;
-    use crate::registration::transform::warp_transform::WarpTransform;
+    use crate::registration::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
     use crate::stack_product::run_report::RunReport;
 
+    /// The single-pass drizzle a test holds the per-frame one to: every frame added scattered into
+    /// one set of sums.
+    #[derive(Debug)]
+    pub(crate) struct DrizzleAccumulator {
+        drizzler: Drizzler,
+        sums: OutputSums,
+        config: DrizzleConfig,
+        /// The run's index of the next frame added, which an error names.
+        next_frame: usize,
+        unconverged_points: usize,
+    }
+
     impl DrizzleAccumulator {
+        /// An empty accumulator for frames shaped as `image`, whose first frame is the run's frame
+        /// `first_frame`.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error when `config` is invalid.
+        pub(crate) fn new(
+            image: &impl StackableImage,
+            config: DrizzleConfig,
+            first_frame: usize,
+        ) -> Result<Self, DrizzleError> {
+            config.validate()?;
+            let grid = OutputGrid::new(config.scale, image.dimensions().size());
+            let plan = KernelPlan::new(config.kernel, config.pixfrac, config.scale);
+            let drizzler = Drizzler::new(image, plan, grid);
+            let sums = drizzler.sums();
+            Ok(Self {
+                drizzler,
+                sums,
+                config,
+                next_frame: first_frame,
+                unconverged_points: 0,
+            })
+        }
+
+        /// Scatter `frame` into the sums.
+        ///
+        /// # Errors
+        ///
+        /// As [`Drizzler::scatter`].
+        pub(crate) fn add_frame(
+            &mut self,
+            frame: &DrizzleFrame<impl StackableImage>,
+        ) -> Result<(), DrizzleError> {
+            self.unconverged_points +=
+                self.drizzler
+                    .scatter(frame, self.next_frame, &mut self.sums)?;
+            self.next_frame += 1;
+            Ok(())
+        }
+
+        /// Input pixels, over every frame added, whose position a warp's SIP correction could not
+        /// invert.
+        pub(crate) const fn unconverged_points(&self) -> usize {
+            self.unconverged_points
+        }
+
         /// Add `image` as an otherwise default frame, panicking on the mismatches a fixture must
         /// not have. `transform` maps input pixels onto the reference — the direction fixtures are
         /// written in — so the frame carries its inverse, the warp registration would report.
@@ -399,29 +465,32 @@ pub(crate) mod internals {
             .expect("test frame must be coherent with the accumulator");
         }
 
-        /// [`DrizzleAccumulator::add_frame`] with the output band height pinned, so a test can
-        /// compare band counts.
+        /// [`Self::add_frame`] with the output band height pinned, so a test can compare band
+        /// counts.
         pub(crate) fn add_frame_with_band_rows(
             &mut self,
             frame: &DrizzleFrame<LinearImage>,
             band_rows: usize,
         ) {
-            self.add_frame_in_bands(frame, band_rows)
+            self.unconverged_points += self
+                .drizzler
+                .scatter_in_bands(frame, self.next_frame, &mut self.sums, band_rows)
                 .expect("test frame must be coherent with the accumulator");
+            self.next_frame += 1;
         }
 
         /// `Σw` per output pixel as deposited, in the plane every channel shares.
         ///
         /// # Panics
-        /// For a mosaic's accumulator, whose weights are per colour.
+        /// For a mosaic's accumulator, whose weights are per color.
         pub(crate) fn accumulated_weights(&self) -> &Buffer2<f32> {
-            assert_eq!(self.weight.len(), 1, "the weights are per colour");
-            &self.weight[0]
+            assert_eq!(self.sums.weight.len(), 1, "the weights are per color");
+            &self.sums.weight[0]
         }
 
         /// `Σ flux·w` over channel `channel`'s accumulated plane, summed in f64.
         pub(crate) fn accumulated_flux_sum(&self, channel: usize) -> f64 {
-            self.data[channel]
+            self.sums.data[channel]
                 .pixels()
                 .iter()
                 .map(|&value| f64::from(value))
@@ -435,9 +504,10 @@ pub(crate) mod internals {
         pub(crate) fn finalize(self) -> StackProduct {
             let fill_value = self.config.fill_value;
             let gate = self.config.min_weight_fraction;
-            let deposit = self.deposit;
-            let mut data = self.data;
-            let mut weight = self.weight;
+            let deposit = self.drizzler.deposit;
+            let output = self.drizzler.grid.size();
+            let mut data = self.sums.data;
+            let mut weight = self.sums.weight;
             let thresholds: ArrayVec<f32, MAX_CHANNELS> = weight
                 .iter()
                 .map(|weight| {
@@ -463,12 +533,12 @@ pub(crate) mod internals {
                     }
                 }
             }
-            let dimensions = ImageDimensions::new(self.output, data.len());
+            let dimensions = ImageDimensions::new(output, deposit.output_layout());
             let weight = match deposit {
                 Deposit::Mosaic(_) => QualityMap::PerChannel(
                     weight
                         .into_inner()
-                        .expect("a mosaic's three colours each keep a weight plane"),
+                        .expect("a mosaic's three colors each keep a weight plane"),
                 ),
                 Deposit::Channels(_) => {
                     QualityMap::Shared(weight.into_iter().next().expect("one shared plane"))

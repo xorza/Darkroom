@@ -14,14 +14,17 @@ use imaginarium::Buffer2;
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
 use crate::combine::frame_cache::core::CacheCore;
-use crate::combine::rejection;
-use crate::combine::stack::stack_stored_frames;
-use crate::combine::stack_config::{Combine, CombineMethod, StackConfig};
+use crate::combine::frame_cache::sample;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::combine_method::CombineMethod;
+use crate::combine::{normalization, rejection, stack};
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::frame_store::tier::{CombineBudget, Tier};
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::memory::run_memory::RunMemory;
@@ -32,7 +35,18 @@ use crate::stack_product::StackProduct;
 /// The machine the spilled combine plans against.
 const SPILLED_MACHINE_BYTES: u64 = 8 << 30;
 
+pub(crate) fn atomic(c: &mut Criterion) {
+    rejection::bench::atomic(c);
+    sample::bench::atomic(c);
+    normalization::bench::atomic(c);
+}
+
 pub(crate) fn integration(c: &mut Criterion) {
+    set(c);
+    stack::bench::integration(c);
+}
+
+fn set(c: &mut Criterion) {
     let field = Field::Typical;
     let lights = OnceCell::new();
     let lights = || lights.get_or_init(|| Lights::of(field));
@@ -100,7 +114,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 #[derive(Debug)]
 struct Lights {
     images: Vec<LinearImage>,
-    stats: Vec<FrameStats>,
+    stats: Vec<Admitted>,
 }
 
 impl Lights {
@@ -108,7 +122,7 @@ impl Lights {
         let images: Vec<LinearImage> = (0..STACKED_LIGHTS)
             .map(|index| field.aligned(FRAME, index).image)
             .collect();
-        let stats = images.iter().map(FrameStats::measure).collect();
+        let stats = images.iter().map(Admitted::measure).collect();
         Self { images, stats }
     }
 
@@ -134,7 +148,7 @@ impl Lights {
                 SpillFrame {
                     image,
                     quality: &FrameQuality::<Buffer2<f32>>::None,
-                    source_stats: stats.clone(),
+                    admitted: stats.clone(),
                 }
                 .spill(&scratch)
                 .unwrap()
@@ -150,17 +164,17 @@ impl Lights {
     }
 
     fn combine(&self, frames: Vec<StoredFrame>, tier: Tier, config: &StackConfig) -> StackProduct {
-        stack_stored_frames(
-            frames,
-            CacheCore {
-                tier,
-                dimensions: ImageDimensions::new(FRAME, 1),
-                metadata: self.images[0].metadata.clone(),
-                monitor: ProgressMonitor::unattended(),
-            },
-            config,
-        )
-        .unwrap()
+        config
+            .stack_stored_frames(
+                frames,
+                CacheCore {
+                    tier,
+                    dimensions: ImageDimensions::new(FRAME, ChannelLayout::Mono),
+                    metadata: self.images[0].metadata.clone(),
+                    monitor: ProgressMonitor::unattended(),
+                },
+            )
+            .unwrap()
     }
 }
 

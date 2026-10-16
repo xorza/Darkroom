@@ -156,7 +156,7 @@ fn moment_metrics_of_gaussian_stars() {
 /// once here rather than per model.
 #[test]
 fn fit_plausibility_rejects_non_finite_and_keeps_its_bounds() {
-    use crate::star_detection::centroid::fit_is_plausible;
+    use crate::star_detection::centroid::profile_problem::fit_is_plausible;
 
     let at = DVec2::splat(8.0);
     let radius = 8usize;

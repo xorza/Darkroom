@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use lumos::{
-    AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet,
-    DEFAULT_SIGMA_THRESHOLD, IngestConfig, MasterBuild, NoMasterCache, ProgressMonitor,
+    AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet, IngestConfig,
+    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -64,10 +64,10 @@ fn main() {
         )
         .expect("calibrate_align_stack failed");
     tracing::info!(
-        registered = result.alignment.registered(),
+        registered = result.registered(),
         total = light_paths.len(),
-        reference = result.alignment.reference,
-        dropped = ?result.alignment.dropped(),
+        reference = result.reference,
+        dropped = ?result.dropped(),
         width = result.product.image.width(),
         height = result.product.image.height(),
         elapsed = elapsed(step),
@@ -122,11 +122,11 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
                 bias: bias.as_slice(),
                 flat_dark: &[],
             },
-            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            sigma_threshold: SigmaThreshold::DEFAULT,
             cache: &NoMasterCache,
         },
         &IngestConfig::default(),
-        &ProgressMonitor::unattended(),
+        ProgressMonitor::unattended(),
     )
     .expect("failed to build calibration masters");
 

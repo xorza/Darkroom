@@ -61,7 +61,7 @@ enum Placement {
 /// as. Builder chain ending in [`show`](Self::show), like a palantir widget.
 ///
 /// Domain-agnostic like the rest of `widgets` — the caller supplies the id,
-/// size, colours and tooltip, and maps the returned clicks onto its own
+/// size, colors and tooltip, and maps the returned clicks onto its own
 /// intent. What the glyph owns is the part every caller was repeating: the
 /// [`HIT_SCALE`]-grown sensing box, `CLICK | DRAG` so it intercepts the press
 /// before the node body under it and can latch a wire drag, and the tooltip

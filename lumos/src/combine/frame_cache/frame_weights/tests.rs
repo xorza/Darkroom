@@ -3,32 +3,25 @@ use arrayvec::ArrayVec;
 use crate::combine::error::StackError;
 use crate::combine::frame_cache::frame_weights::FrameWeights;
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::FrameNorm;
 use crate::combine::normalization::SlotNorm;
-use crate::combine::stack_config::Weighting;
-use crate::frame::capture_conditions::CaptureConditions;
-use crate::frame::frame_facts::FrameFacts;
+use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame::unverified_conditions::UnverifiedConditions;
+use crate::image::background_split::BackgroundSplit;
 
 fn stats(noise: &[f32]) -> FrameStats {
     FrameStats {
         medians: noise.iter().map(|_| 0.5).collect(),
-        noise: noise.iter().copied().collect(),
-        read_share: [0.0; 3].into_iter().collect(),
+        background: noise
+            .iter()
+            .copied()
+            .map(BackgroundSplit::of_sigma)
+            .collect(),
         sky: noise.iter().map(|_| 0.5).collect(),
         spread: None,
         quantization_sigma: None,
         electrons_per_unit: None,
-        facts: FrameFacts {
-            domain: None,
-            row_order: None,
-            cfa_type: None,
-            saturation_flagged: false,
-            conditions: CaptureConditions::default(),
-            unverified_dark: UnverifiedConditions::NONE,
-        },
     }
 }
 

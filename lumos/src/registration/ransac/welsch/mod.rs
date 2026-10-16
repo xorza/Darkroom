@@ -9,12 +9,6 @@
 
 use crate::math::statistics::CHI2_99_2DOF;
 
-/// Lower incomplete gamma function for k=2: γ(1, x) = 1 - exp(-x).
-#[inline]
-fn gamma_k2(x: f64) -> f64 {
-    if x <= 0.0 { 0.0 } else { 1.0 - (-x).exp() }
-}
-
 /// Scores a hypothesis's residuals by the truncated Welsch loss of the module docs.
 #[derive(Debug)]
 pub(super) struct WelschScorer {
@@ -55,12 +49,10 @@ impl WelschScorer {
             return self.outlier_loss;
         }
 
+        // `1 − e^(−x)` by `expm1`: the subtraction would cancel to nothing for the small `x` of a
+        // good fit, where the loss is ≈ r²/4.
         let x = residual_sq / (2.0 * self.max_sigma_sq);
-
-        // Monotone saturating loss: ≈ r²/4 near zero (least-squares), saturating at σ²_max/2 as the
-        // residual grows. (An earlier `+ r²/4·(1−γ)` term made the loss climb past the outlier
-        // value around r≈2σ then fall back — a non-monotone shape a robust loss must not have.)
-        self.max_sigma_sq / 2.0 * gamma_k2(x)
+        self.max_sigma_sq / 2.0 * -(-x).exp_m1()
     }
 
     /// Whether a point counts as an inlier.

@@ -8,6 +8,7 @@
 //! telescoping identity, so the layer pyramid is never materialized.
 
 use crate::math::size2us::Size2us;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -43,65 +44,141 @@ pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: us
                         reflect(yi + 2 * s, rows),
                     ]
                 };
-                convolve_column(taps.map(|row| src.row(row)), column);
-                convolve_row(column, out, step);
+                SmoothRow {
+                    rows: taps.map(|row| src.row(row)),
+                    column,
+                    out,
+                    step,
+                }
+                .dispatch();
             },
         );
 }
 
-/// The B3 taps of five rows, lane by lane, into `out`.
-fn convolve_column(rows: [&[f32]; 5], out: &mut [f32]) {
-    let [r0, r1, r2, r3, r4] = rows;
-    // Zip-iterated (bounds checks elide) so the compiler auto-vectorizes the 5-tap column.
-    out.iter_mut()
-        .zip(r0.iter())
-        .zip(r1.iter())
-        .zip(r2.iter())
-        .zip(r3.iter())
-        .zip(r4.iter())
-        .for_each(|(((((o, &a), &b), &c), &d), &e)| {
-            *o = B3[0] * a + B3[1] * b + B3[2] * c + B3[3] * d + B3[4] * e;
-        });
+/// One output row of [`atrous_smooth`]: its five source `rows` convolved down the columns into
+/// `column`, then `column` along itself at hole spacing `step` into `out`.
+#[derive(Debug)]
+struct SmoothRow<'a> {
+    rows: [&'a [f32]; 5],
+    column: &'a mut [f32],
+    out: &'a mut [f32],
+    step: usize,
 }
 
-/// The B3 taps of `row` at `x ± step` and `x ± 2·step` (mirror boundary), into `out`.
-fn convolve_row(row: &[f32], out: &mut [f32], step: usize) {
-    let width = row.len();
-    let wi = width as isize;
-    let s = step as isize;
-    // Interior `[lo, hi)` has all five taps in-bounds; only the thin borders need reflection.
-    let lo = (2 * step).min(width);
-    let hi = width.saturating_sub(2 * step);
-    let reflected = |x: usize| {
-        let xi = x as isize;
-        B3[0] * row[reflect(xi - 2 * s, wi)]
-            + B3[1] * row[reflect(xi - s, wi)]
-            + B3[2] * row[x]
-            + B3[3] * row[reflect(xi + s, wi)]
-            + B3[4] * row[reflect(xi + 2 * s, wi)]
+impl Kernel for SmoothRow<'_> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let Self {
+            rows,
+            column,
+            out,
+            step,
+        } = self;
+        five_taps(isa, rows, column);
+        let row: &[f32] = column;
+        let width = row.len();
+        // The interior `[lo, hi)` has all five taps in bounds; only the thin borders reflect.
+        let lo = (2 * step).min(width);
+        let hi = width.saturating_sub(2 * step);
+        for (x, o) in out[..lo].iter_mut().enumerate() {
+            *o = reflected_taps(row, x, step);
+        }
+        if hi > lo {
+            let n = hi - lo;
+            five_taps(
+                isa,
+                [
+                    &row[lo - 2 * step..lo - 2 * step + n],
+                    &row[lo - step..lo - step + n],
+                    &row[lo..lo + n],
+                    &row[lo + step..lo + step + n],
+                    &row[lo + 2 * step..lo + 2 * step + n],
+                ],
+                &mut out[lo..hi],
+            );
+        }
+        let rest = hi.max(lo);
+        for (x, o) in out.iter_mut().enumerate().skip(rest) {
+            *o = reflected_taps(row, x, step);
+        }
+    }
+}
+
+/// The B3 taps of five sample runs as long as `out`, lane by lane, into `out`:
+/// `w₀a + w₁b + w₂c + w₃d + w₄e`, each product rounded, then added left to right — one order in
+/// every lane of every Isa and in the scalar tail, so the transform is the same bits everywhere.
+#[inline(always)]
+fn five_taps<S: Isa>(isa: S, taps: [&[f32]; 5], out: &mut [f32]) {
+    debug_assert!(taps.iter().all(|tap| tap.len() == out.len()));
+    let weights = Weights {
+        w0: isa.splat_f32(B3[0]),
+        w1: isa.splat_f32(B3[1]),
+        w2: isa.splat_f32(B3[2]),
+        w3: isa.splat_f32(B3[3]),
+        w4: isa.splat_f32(B3[4]),
     };
-    for (x, o) in out[..lo].iter_mut().enumerate() {
-        *o = reflected(x);
+    // Four vectors a step, independent of one another, for the add chain of each to overlap the
+    // others'; then a vector at a time, then the scalar tail.
+    let (blocks, _) = out.as_chunks_mut::<{ 4 * F32_LANES }>();
+    let block_len = blocks.len() * 4 * F32_LANES;
+    for (index, block) in blocks.iter_mut().enumerate() {
+        let start = index * 4 * F32_LANES;
+        let (vectors, _) = block.as_chunks_mut::<F32_LANES>();
+        for (lane, o) in vectors.iter_mut().enumerate() {
+            weights.taps(isa, taps, start + lane * F32_LANES).store(o);
+        }
     }
-    // Branchless fixed-offset stencil: zip-iterated so the per-element bounds checks elide and the
-    // compiler can auto-vectorize the (vast-majority) interior.
-    if hi > lo {
-        let n = hi - lo;
-        out[lo..hi]
-            .iter_mut()
-            .zip(row[lo - 2 * step..lo - 2 * step + n].iter())
-            .zip(row[lo - step..lo - step + n].iter())
-            .zip(row[lo..lo + n].iter())
-            .zip(row[lo + step..lo + step + n].iter())
-            .zip(row[lo + 2 * step..lo + 2 * step + n].iter())
-            .for_each(|(((((o, &m2), &m1), &c), &p1), &p2)| {
-                *o = B3[0] * m2 + B3[1] * m1 + B3[2] * c + B3[3] * p1 + B3[4] * p2;
-            });
+    let rest = &mut out[block_len..];
+    let rest_len = rest.len();
+    let (vectors, tail) = rest.as_chunks_mut::<F32_LANES>();
+    for (index, o) in vectors.iter_mut().enumerate() {
+        weights
+            .taps(isa, taps, block_len + index * F32_LANES)
+            .store(o);
     }
-    let rstart = hi.max(lo);
-    for (i, o) in out[rstart..].iter_mut().enumerate() {
-        *o = reflected(rstart + i);
+    let done = block_len + rest_len - tail.len();
+    let [a, b, c, d, e] = taps;
+    for (offset, o) in tail.iter_mut().enumerate() {
+        let x = done + offset;
+        *o = B3[0] * a[x] + B3[1] * b[x] + B3[2] * c[x] + B3[3] * d[x] + B3[4] * e[x];
     }
+}
+
+/// The five B3 weights, each in every lane.
+#[derive(Debug, Clone, Copy)]
+struct Weights<V> {
+    w0: V,
+    w1: V,
+    w2: V,
+    w3: V,
+    w4: V,
+}
+
+impl<V: F32x8> Weights<V> {
+    /// The taps of the vector of each run starting at `at`, in [`five_taps`]'s order.
+    #[inline(always)]
+    fn taps<S: Isa<F32 = V>>(self, isa: S, taps: [&[f32]; 5], at: usize) -> V {
+        let [a, b, c, d, e] = taps;
+        self.w0 * isa.load_f32_at(a, at)
+            + self.w1 * isa.load_f32_at(b, at)
+            + self.w2 * isa.load_f32_at(c, at)
+            + self.w3 * isa.load_f32_at(d, at)
+            + self.w4 * isa.load_f32_at(e, at)
+    }
+}
+
+/// The B3 taps of `row` at `x ± step` and `x ± 2·step`, mirrored at the edges, in
+/// [`five_taps`]'s order.
+#[inline(always)]
+fn reflected_taps(row: &[f32], x: usize, step: usize) -> f32 {
+    let (xi, s, wi) = (x as isize, step as isize, row.len() as isize);
+    B3[0] * row[reflect(xi - 2 * s, wi)]
+        + B3[1] * row[reflect(xi - s, wi)]
+        + B3[2] * row[x]
+        + B3[3] * row[reflect(xi + s, wi)]
+        + B3[4] * row[reflect(xi + 2 * s, wi)]
 }
 
 /// Mirror-reflect an index into `[0, n)` (whole-sample symmetric, no edge repeat), folding

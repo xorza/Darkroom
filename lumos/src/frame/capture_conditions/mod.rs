@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::frame::capture_condition::CaptureCondition;
-use crate::frame_store::error::ConditionMismatch;
+use crate::frame::error::ConditionMismatch;
 use crate::image::image_metadata::ImageMetadata;
 
 /// The exposure and sensor temperature a frame was taken under, as its source states them. Carried
@@ -11,20 +11,20 @@ use crate::image::image_metadata::ImageMetadata;
 /// the first.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub(crate) struct CaptureConditions {
-    /// Seconds — see [`ImageMetadata::exposure_time`].
+    /// Seconds — see [`ObservationHeader::exposure_time`](crate::ObservationHeader::exposure_time).
     pub(crate) exposure_time: Option<f64>,
-    /// Degrees Celsius — see [`ImageMetadata::ccd_temp`].
+    /// Degrees Celsius — see [`ObservationHeader::ccd_temp`](crate::ObservationHeader::ccd_temp).
     pub(crate) ccd_temp: Option<f64>,
-    /// Degrees Celsius — see [`ImageMetadata::camera_temp`].
+    /// Degrees Celsius — see [`ObservationHeader::camera_temp`](crate::ObservationHeader::camera_temp).
     pub(crate) camera_temp: Option<f64>,
 }
 
 impl CaptureConditions {
     pub(crate) const fn of(metadata: &ImageMetadata) -> Self {
         Self {
-            exposure_time: metadata.exposure_time,
-            ccd_temp: metadata.ccd_temp,
-            camera_temp: metadata.camera_temp,
+            exposure_time: metadata.header.exposure_time,
+            ccd_temp: metadata.header.ccd_temp,
+            camera_temp: metadata.header.camera_temp,
         }
     }
 

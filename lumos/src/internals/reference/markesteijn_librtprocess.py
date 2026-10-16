@@ -4,7 +4,7 @@ Fetches librtprocess's `markesteijn.cc` at a pinned commit, builds it with a har
 demosaics each scene on the X-Trans fixture with one pass and with three, and prints, per case,
 the FNV-1a 64 digest of the output's interior: the three planes in order, rows from the pass
 count's border to `HEIGHT` less it, the same columns, each f32's little-endian bytes. Outside that
-band librtprocess reads colours it never computed, and lumos fills the border from neighbours.
+band librtprocess reads colors it never computed, and lumos fills the border from neighbours.
 
 The harness writes each native sample as the input holds it, as lumos does: librtprocess takes
 it from the mean of the chosen directions, which rounds it where three or more are chosen. Every

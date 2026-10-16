@@ -5,23 +5,17 @@ use crate::registration::ransac::welsch::*;
 /// Two closed forms that each round once or twice in the last place of values up to 1.
 const TOL: f64 = 4.0 * f64::EPSILON;
 
+/// A residual far inside the noise keeps its digits: at `r² = 1e-20` and σ = 1, `x = 5e-21`, where
+/// `1 − e^(−x)` by subtraction is exactly 0 and the loss would vanish. `expm1` keeps it at
+/// `x/2·(1 − x/2) ≈ 2.5e-21`, the `r²/4` a good fit is graded by.
 #[test]
-fn gamma_k2_is_one_minus_exp() {
-    for (x, expected) in [
-        (-100.0, 0.0),
-        (-1.0, 0.0),
-        (0.0, 0.0),
-        (0.5, 1.0 - (-0.5f64).exp()),
-        (1.0, 1.0 - 1.0 / E),
-        (2.0, 1.0 - (-2.0f64).exp()),
-        (100.0, 1.0),
-    ] {
-        assert!(
-            (gamma_k2(x) - expected).abs() <= TOL,
-            "γ(1, {x}) = {}",
-            gamma_k2(x)
-        );
-    }
+fn a_tiny_residual_keeps_its_loss() {
+    let loss = WelschScorer::new(1.0).loss(1e-20);
+    assert!(
+        (loss - 2.5e-21).abs() <= TOL * 2.5e-21,
+        "loss(1e-20) = {loss}"
+    );
+    assert_eq!(1.0 - (-5e-21f64).exp(), 0.0);
 }
 
 /// `threshold_sq = χ²₀.₉₉(2)·σ²` and `outlier_loss = σ²/2`: exact for σ a power of two.

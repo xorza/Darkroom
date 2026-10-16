@@ -2,7 +2,9 @@
 
 use std::num::NonZeroUsize;
 
-use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams};
+use crate::background_mesh::mesh_workspace::{
+    DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams,
+};
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
@@ -33,6 +35,11 @@ pub struct IterativeRefinement {
     pub mask_sigma: f32,
 }
 
+impl IterativeRefinement {
+    /// The widest [`Self::mask_dilation`] a configuration takes.
+    pub(crate) const MAX_MASK_DILATION: usize = 50;
+}
+
 impl BackgroundRefinement {
     /// Validate the configuration.
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
@@ -45,8 +52,10 @@ impl BackgroundRefinement {
             }) => {
                 ConfigValue::count("background refinement iterations", iterations.get())
                     .must_be("at most 10", iterations.get() <= 10)?;
-                ConfigValue::count("background refinement mask_dilation", *mask_dilation)
-                    .must_be("at most 50", *mask_dilation <= 50)?;
+                ConfigValue::count("background refinement mask_dilation", *mask_dilation).must_be(
+                    "at most 50",
+                    *mask_dilation <= IterativeRefinement::MAX_MASK_DILATION,
+                )?;
                 ConfigValue::new("background refinement mask_sigma", *mask_sigma)
                     .finite_and("finite and positive", |value| value > 0.0)
             }
@@ -54,17 +63,13 @@ impl BackgroundRefinement {
     }
 }
 
-/// Sigma-clip passes per tile by default: the detector's sky, and the gradient fit's, which reads
-/// the same estimator.
-pub(crate) const DEFAULT_SIGMA_CLIP_ITERATIONS: usize = 3;
-
 /// Configuration for tiled background estimation and optional refinement.
 #[derive(Debug, Clone)]
 pub struct BackgroundConfig {
     /// Width and height of each background-estimation tile in pixels.
     pub tile_size: usize,
     /// Maximum sigma-clipping iterations per tile.
-    pub sigma_clip_iterations: usize,
+    pub sigma_clip_max_iterations: usize,
     /// Optional source-masking refinement strategy.
     pub refinement: BackgroundRefinement,
 }
@@ -73,7 +78,7 @@ impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
             tile_size: 64,
-            sigma_clip_iterations: DEFAULT_SIGMA_CLIP_ITERATIONS,
+            sigma_clip_max_iterations: DEFAULT_SIGMA_CLIP_MAX_ITERATIONS,
             refinement: BackgroundRefinement::None,
         }
     }
@@ -85,7 +90,7 @@ impl BackgroundConfig {
     pub(crate) const fn mesh_params(&self) -> MeshParams {
         MeshParams {
             tile_size: self.tile_size,
-            sigma_clip_iterations: self.sigma_clip_iterations,
+            sigma_clip_max_iterations: self.sigma_clip_max_iterations,
             median_filter: MedianFilter::Apply,
         }
     }
@@ -93,8 +98,8 @@ impl BackgroundConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         ConfigValue::count("tile_size", self.tile_size)
             .must_be("between 16 and 256", (16..=256).contains(&self.tile_size))?;
-        ConfigValue::count("sigma_clip_iterations", self.sigma_clip_iterations)
-            .must_be("at most 10", self.sigma_clip_iterations <= 10)?;
+        ConfigValue::count("sigma_clip_max_iterations", self.sigma_clip_max_iterations)
+            .must_be("at most 10", self.sigma_clip_max_iterations <= 10)?;
         self.refinement.validate()
     }
 }

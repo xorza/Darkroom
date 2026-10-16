@@ -68,19 +68,27 @@ fn inclusive_bounds_accept_their_edges() {
     // still pass. Every bound is expressed as the accepted half, so an inverted comparison
     // shows up here rather than as a config that silently stops working.
     type Edge = (&'static str, fn(&mut StarDetectionConfig));
-    let edges: [Edge; 12] = [
+    let edges: [Edge; 14] = [
         ("electrons_per_unit at the smallest positive f32", |c| {
             c.measurement.electrons_per_unit = Some(f32::MIN_POSITIVE);
         }),
         ("psf_axis_ratio 1", |c| c.fwhm.psf_axis_ratio = 1.0),
-        ("deblend min_prominence 0", |c| {
+        ("fwhm Fixed 20, the widest star", |c| {
+            c.fwhm.mode = Some(FwhmMode::Fixed(20.0));
+        }),
+        // On the pixel axes a thin ellipse filters as two 1D passes and needs no quadrature.
+        ("psf_axis_ratio 1e-4 along the axes", |c| {
+            c.fwhm.psf_axis_ratio = 1e-4;
+            c.fwhm.psf_angle = 0.0;
+        }),
+        ("deblend min_relative_height 0", |c| {
             c.extraction.deblend = Deblend::LocalMaxima {
-                min_prominence: 0.0,
+                min_relative_height: 0.0,
             };
         }),
-        ("deblend min_prominence 1", |c| {
+        ("deblend min_relative_height 1", |c| {
             c.extraction.deblend = Deblend::LocalMaxima {
-                min_prominence: 1.0,
+                min_relative_height: 1.0,
             };
         }),
         ("deblend min_contrast 1", |c| {
@@ -130,8 +138,8 @@ fn config_invalid_parameters_return_exact_errors() {
             10.0,
         ),
         (
-            configured(|config| config.background.sigma_clip_iterations = 11),
-            "sigma_clip_iterations",
+            configured(|config| config.background.sigma_clip_max_iterations = 11),
+            "sigma_clip_max_iterations",
             11.0,
         ),
         (
@@ -196,6 +204,27 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Fixed(20.5))),
+            "fwhm Fixed",
+            20.5,
+        ),
+        (
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Auto { fallback: 25.0 })),
+            "fwhm Auto fallback",
+            25.0,
+        ),
+        // Off the axes, at FWHM 4, an axis ratio of 1e-4 leaves σ 1.7e-4 px across the pixel
+        // axes, past what any pixel rule resolves: one fixed rule's every node would miss the
+        // ridge, and the kernel would sum to 0.
+        (
+            configured(|config| {
+                config.fwhm.psf_axis_ratio = 1e-4;
+                config.fwhm.psf_angle = 0.3;
+            }),
+            "psf_axis_ratio",
+            f64::from(1e-4f32),
+        ),
+        (
             configured(|config| config.fwhm.psf_angle = f32::INFINITY),
             "psf_angle",
             f64::INFINITY,
@@ -218,10 +247,10 @@ fn config_invalid_parameters_return_exact_errors() {
         (
             configured(|config| {
                 config.extraction.deblend = Deblend::LocalMaxima {
-                    min_prominence: 1.5,
+                    min_relative_height: 1.5,
                 };
             }),
-            "deblend min_prominence",
+            "deblend min_relative_height",
             1.5,
         ),
         (
@@ -356,8 +385,10 @@ fn config_rejects_non_finite_float_parameters() {
         ("fwhm estimation_sigma_factor", |c, v| {
             c.fwhm.estimation_sigma_factor = v;
         }),
-        ("deblend min_prominence", |c, v| {
-            c.extraction.deblend = Deblend::LocalMaxima { min_prominence: v };
+        ("deblend min_relative_height", |c, v| {
+            c.extraction.deblend = Deblend::LocalMaxima {
+                min_relative_height: v,
+            };
         }),
         ("deblend min_contrast", |c, v| {
             c.extraction.deblend = Deblend::MultiThreshold {

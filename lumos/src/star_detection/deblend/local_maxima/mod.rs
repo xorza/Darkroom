@@ -1,10 +1,11 @@
 //! Deblending by local maxima.
 //!
-//! 1. Collect every local maximum of the component at least `min_prominence` of its brightest
-//!    pixel.
+//! 1. Collect every local maximum of the component at least `min_relative_height` of its brightest
+//!    pixel: a pixel at least as high as its 8 neighbours, as photutils' `find_peaks` and
+//!    scikit-image's `peak_local_max` take one, with ties broken in raster order so a plateau gives
+//!    a candidate and the component's own peak is always one.
 //! 2. Rank them brightest first and keep each one that is at least `min_separation` from every
-//!    brighter one kept — greedy non-maximum suppression, as in photutils' `find_peaks` and
-//!    scikit-image's `peak_local_max`.
+//!    brighter one kept — greedy non-maximum suppression, as in those two.
 //! 3. Assign every pixel to its nearest kept peak (Voronoi partition).
 
 use imaginarium::Buffer2;
@@ -23,7 +24,7 @@ pub(crate) struct LocalMaximaParams {
     /// Minimum distance from a kept peak to every brighter one kept, in pixels.
     pub(crate) min_separation: usize,
     /// A local maximum's least value, as a share of the component's brightest pixel.
-    pub(crate) min_prominence: f32,
+    pub(crate) min_relative_height: f32,
 }
 
 impl LocalMaximaParams {
@@ -44,7 +45,6 @@ impl LocalMaximaParams {
             assignment,
             ..
         } = buffers;
-        pixels.fill(component);
         self.find_local_maxima(
             component,
             pixels,
@@ -57,23 +57,24 @@ impl LocalMaximaParams {
         component.split_at(peaks, assignment, out)
     }
 
-    /// Into `kept.peaks`, the local maxima of `component` that are at least `min_prominence` of
+    /// Into `kept.peaks`, the local maxima of `component` that are at least `min_relative_height` of
     /// its peak and `min_separation` from every brighter one kept, brightest first.
     ///
     /// All candidates are collected before any is kept: a candidate too close to a brighter one
     /// that is itself suppressed must still be kept, which a single pass in raster order cannot
     /// see. Each candidate checks only the kept peaks inside its separation, in a map of the
-    /// component's pixels, so a component holding thousands of peaks costs candidates ×
-    /// separation², not candidates × peaks, and its memory follows its pixels, not its box.
+    /// component's pixels built into `pixels`, so a component holding thousands of peaks costs
+    /// candidates × separation², not candidates × peaks, and its memory follows its pixels, not its
+    /// box. A component of one candidate, the most common, keeps it with no map.
     fn find_local_maxima(
         self,
         component: &Component<'_>,
-        pixels: &ComponentPixels,
+        pixels: &mut ComponentPixels,
         kept: Kept<'_>,
     ) {
         let Self {
             min_separation,
-            min_prominence,
+            min_relative_height,
         } = self;
         let Kept {
             maxima,
@@ -81,29 +82,32 @@ impl LocalMaximaParams {
             occupied,
         } = kept;
         let residual = component.residual();
-        let min_peak_value = component.peak().value * min_prominence;
+        let min_peak_value = component.peak().value * min_relative_height;
         maxima.clear();
         maxima.extend(
-            pixels
-                .pixels
-                .iter()
-                .copied()
+            component
+                .pixels()
                 .filter(|&p| p.value >= min_peak_value && is_local_maximum(p, residual)),
         );
         maxima.sort_unstable_by(Pixel::brighter_first);
+        peaks.clear();
+        if maxima.len() < 2 {
+            peaks.extend_from_slice(maxima);
+            return;
+        }
+        pixels.fill(component);
 
         occupied.clear();
         occupied.resize(pixels.pixels.len(), false);
         let reach = min_separation.saturating_sub(1);
         let min_sep_sq = min_separation * min_separation;
-        peaks.clear();
         for &candidate in maxima.iter() {
             let pos = candidate.pos;
             let crowded = (pos.y.saturating_sub(reach)..=pos.y + reach).any(|y| {
                 (pos.x.saturating_sub(reach)..=pos.x + reach).any(|x| {
                     let near = Vec2us::new(x, y);
                     pixels.index_of(near).is_some_and(|index| occupied[index])
-                        && deblend::peaks_too_close(pos, near, min_sep_sq)
+                        && deblend::dist_sq(pos, near) < min_sep_sq
                 })
             });
             if !crowded {
@@ -125,7 +129,10 @@ struct Kept<'a> {
     occupied: &'a mut Vec<bool>,
 }
 
-/// Whether `pixel` is strictly greater than each of its 8 neighbours in `residual`; a neighbour
+/// Whether `pixel` is a local maximum of `residual`: at least as high as each of its 8
+/// neighbours, and strictly higher than those before it in raster order, the order
+/// [`Pixel::brighter_first`] breaks ties in. Of an equal-valued patch the pixels with no equal
+/// neighbour before them are candidates, so a flat top is never left without one; a neighbour
 /// outside the image does not count against it.
 #[inline]
 fn is_local_maximum(pixel: Pixel, residual: &Buffer2<f32>) -> bool {
@@ -135,14 +142,16 @@ fn is_local_maximum(pixel: Pixel, residual: &Buffer2<f32>) -> bool {
     let width = residual.width();
     let height = residual.height();
 
-    (x == 0 || residual[(x - 1, y)] < v)
-        && (x + 1 >= width || residual[(x + 1, y)] < v)
+    // Before in raster order: the row above, and the left neighbour.
+    (y == 0 || x == 0 || residual[(x - 1, y - 1)] < v)
         && (y == 0 || residual[(x, y - 1)] < v)
-        && (y + 1 >= height || residual[(x, y + 1)] < v)
-        && (x == 0 || y == 0 || residual[(x - 1, y - 1)] < v)
-        && (x + 1 >= width || y == 0 || residual[(x + 1, y - 1)] < v)
-        && (x == 0 || y + 1 >= height || residual[(x - 1, y + 1)] < v)
-        && (x + 1 >= width || y + 1 >= height || residual[(x + 1, y + 1)] < v)
+        && (y == 0 || x + 1 >= width || residual[(x + 1, y - 1)] < v)
+        && (x == 0 || residual[(x - 1, y)] < v)
+        // After it: the right neighbour, and the row below.
+        && (x + 1 >= width || residual[(x + 1, y)] <= v)
+        && (y + 1 >= height || x == 0 || residual[(x - 1, y + 1)] <= v)
+        && (y + 1 >= height || residual[(x, y + 1)] <= v)
+        && (y + 1 >= height || x + 1 >= width || residual[(x + 1, y + 1)] <= v)
 }
 
 #[cfg(test)]

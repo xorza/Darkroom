@@ -11,8 +11,9 @@ use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -21,14 +22,14 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
 use crate::pipeline::calibration_notes::CalibrationNotes;
-use crate::pipeline::light_source::MosaicPreparation;
+use crate::pipeline::mosaic_preparation::MosaicPreparation;
 use crate::platform::MappedFile;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::warp_params::WarpParams;
-use crate::registration::resample::{Warp, WarpBuffers};
-use crate::scratch_pool::{Scratch, ScratchPool};
+use crate::registration::resample::{Warp, WarpResult, WarpScratch};
+use crate::scratch_pool::Scratch;
 
 /// The stage benches, then the entry point end to end.
 pub(crate) fn integration(c: &mut Criterion) {
@@ -54,7 +55,7 @@ fn prepare(c: &mut Criterion) {
             let masters: &CalibrationMasters = masters.get_or_init(|| {
                 CalibrationMasters::from_images(
                     scene::masters(FRAME, cfa_type),
-                    DEFAULT_SIGMA_THRESHOLD,
+                    SigmaThreshold::DEFAULT,
                     &CancelToken::never(),
                 )
                 .unwrap()
@@ -74,7 +75,7 @@ fn prepare(c: &mut Criterion) {
                         .prepare(light, Path::new("light.fits"), &context)
                         .unwrap()
                 },
-                fixture::fresh_copies(size_of_val(light.data.pixels())),
+                fixture::fresh_copies(size_of_val(light.data().pixels())),
             );
         });
     }
@@ -109,16 +110,17 @@ fn park(c: &mut Criterion) {
                     })
                     .collect(),
                 flags: flags.as_ref(),
+                flat_gain: None,
             };
             let warp = Pair::typical().similarity_warp();
-            let mut buffers = WarpBuffers::build(parked.dimensions);
-            let rows = ScratchPool::default();
+            let mut buffers = WarpResult::build(parked.dimensions);
+            let scratch = WarpScratch::default();
             let mut warp_parked = || {
                 let job = Warp {
                     transform: &warp,
                     params: WarpParams::default(),
                 };
-                buffers.warp_into(&source, job, &rows);
+                buffers.warp_into(&source, job, &scratch);
             };
             if cold {
                 b.iter_batched(
@@ -159,7 +161,7 @@ fn end_to_end(c: &mut Criterion) {
             let masters: &CalibrationMasters = masters.get_or_init(|| {
                 CalibrationMasters::from_images(
                     scene::masters(FRAME, cfa_type),
-                    DEFAULT_SIGMA_THRESHOLD,
+                    SigmaThreshold::DEFAULT,
                     &CancelToken::never(),
                 )
                 .unwrap()

@@ -2,41 +2,31 @@
 //! file says about it.
 
 use std::f64::consts::FRAC_1_SQRT_2;
-use std::path::Path;
+use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
 use crate::error::Cancelled;
-use crate::frame::frame_peek::FramePeek;
-use crate::frame_store::decode_cache::cache_key::DecoderKind;
-use crate::image::cfa::cfa_colour::CfaColour;
-use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
-use crate::image::cfa::demosaic::bayer::rcd;
-use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::flat_gain::FlatGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::masked_plane::MaskedPlane;
+use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::DomainMap;
-use crate::io::error::{FitsWriteError, ImageError, ScientificRefusal};
-use crate::io::fits::{cfa as fits_cfa, decode as fits_decode};
-use crate::io::input_format::InputFormat;
-use crate::io::load_context::LoadContext;
-use crate::io::raw;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::noise::mosaic_noise::MosaicNoise;
 
-use crate::frame::stackable_image::{ImageParts, StackableImage};
+use crate::image::cfa::demosaic::Demosaic;
+use crate::image::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -46,19 +36,21 @@ use imaginarium::Buffer2;
 pub struct CfaImage {
     /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
     /// Layout: row-major, width * height pixels.
-    pub data: Buffer2<f32>,
-    pub cfa_type: CfaType,
+    data: Buffer2<f32>,
+    cfa_type: CfaType,
     pub metadata: ImageMetadata,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
     /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
-    pub(crate) flags: Option<PixelFlags>,
+    flags: Option<PixelFlags>,
+    /// The gain a flat applied to each pixel's value and noise, by color — see [`FlatGain`]:
+    /// set when calibration divides by a flat, and kept through a demosaic and through a FITS file
+    /// of the mosaic. `None` for a frame no flat divided, and for a master, which the combine made.
+    flat_gain: Option<Arc<FlatGain>>,
 }
 
 impl StackableImage for CfaImage {
-    const DECODER: DecoderKind = DecoderKind::Cfa;
-
     fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new(self.size(), 1)
+        ImageDimensions::new(self.size(), ChannelLayout::Mono)
     }
 
     fn flags(&self) -> Option<&PixelFlags> {
@@ -78,35 +70,36 @@ impl StackableImage for CfaImage {
         Some(self.cfa_type)
     }
 
-    fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::load_path(path, context)
-    }
-
-    fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
-        CfaFrameInfo::from_file(path, context)
-            .ok()
-            .map(FramePeek::from)
-    }
-
     fn into_parts(self) -> ImageParts {
         let mut planes = ArrayVec::new();
         planes.push(self.data);
         ImageParts {
             planes,
             flags: self.flags,
+            flat_gain: self.flat_gain,
         }
     }
 
     fn from_parts(parts: ImageParts, cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self {
-        let ImageParts { planes, flags } = parts;
+        let ImageParts {
+            planes,
+            flags,
+            flat_gain,
+        } = parts;
         assert_eq!(planes.len(), 1, "a mosaic is one plane");
         let data = planes.into_iter().next().expect("one plane");
-        Self {
+        let mut image = Self::from_plane(
             data,
-            cfa_type: cfa_type.expect("a mosaic states its pattern"),
+            cfa_type.expect("a mosaic states its pattern"),
             metadata,
-            flags,
-        }
+        );
+        image.set_flags(flags);
+        image.set_flat_gain(flat_gain);
+        image
+    }
+
+    fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+        Self::flat_gain(self)
     }
 }
 
@@ -165,24 +158,23 @@ impl CfaImage {
             cfa_type,
             metadata,
             flags: None,
+            flat_gain: None,
         }
     }
 
-    /// Load an un-demosaiced sensor image from camera RAW or mosaic FITS.
-    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::load_path(path.as_ref(), context)
+    /// The samples, row-major.
+    pub const fn data(&self) -> &Buffer2<f32> {
+        &self.data
     }
 
-    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        context.check_cancelled(path)?;
-        match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_cfa(path, context),
-            InputFormat::CameraRaw => raw::load_cfa(path, context),
-            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::RasterCfa,
-            )),
-        }
+    /// The samples, mutably: calibration's arithmetic on the mosaic.
+    pub(crate) const fn data_mut(&mut self) -> &mut Buffer2<f32> {
+        &mut self.data
+    }
+
+    /// The mosaic pattern the samples lie under.
+    pub const fn cfa_type(&self) -> CfaType {
+        self.cfa_type
     }
 
     /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
@@ -196,19 +188,44 @@ impl CfaImage {
         self.flags.as_ref()
     }
 
-    /// Save this sensor-domain image as a checksummed floating-point FITS file, with its flags
-    /// in a `LUMFLAGS` extension when they hold more than the NaN of a sample with no data.
-    pub fn save_fits(&self, path: &Path) -> Result<(), FitsWriteError> {
-        fits_cfa::save(path, self)
+    /// Replace the flags with `flags`, of these pixels.
+    pub(crate) fn set_flags(&mut self, flags: Option<PixelFlags>) {
+        debug_assert!(
+            flags
+                .as_ref()
+                .is_none_or(|flags| flags.size() == self.size()),
+            "flags for another geometry"
+        );
+        self.flags = flags;
     }
 
-    /// Replace every null with the median of its same-colour neighbours.
+    /// The flags, moved out.
+    pub(crate) const fn take_flags(&mut self) -> Option<PixelFlags> {
+        self.flags.take()
+    }
+
+    /// The gain a flat applied to the pixels, by color, for a mosaic a flat divided.
+    pub const fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+        self.flat_gain.as_ref()
+    }
+
+    /// Replace the flat gain with `gain`, which covers these pixels and the pattern's colors.
+    pub(crate) fn set_flat_gain(&mut self, gain: Option<Arc<FlatGain>>) {
+        debug_assert!(
+            gain.as_ref()
+                .is_none_or(|gain| gain.covers(self.size(), self.cfa_type.num_colors())),
+            "an image's flat gain covers another image's pixels"
+        );
+        self.flat_gain = gain;
+    }
+
+    /// Replace every null with the median of its same-color neighbours.
     ///
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
     /// mask does not cover. The resampler answers the same problem by sampling over the taps that
     /// hold data and normalizing by their weight — `resample::flagged_sources` — but an adaptive
     /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's
-    /// frame-median fill there would spread a value with no local meaning; a same-colour neighbour
+    /// frame-median fill there would spread a value with no local meaning; a same-color neighbour
     /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
     /// fabrication.
     ///
@@ -220,8 +237,7 @@ impl CfaImage {
     /// master left without a measurement holds a fill, not a difference against a bound.
     pub(crate) fn repair_nulls(&mut self) {
         let Some(flags) = self
-            .flags
-            .as_ref()
+            .flags()
             .filter(|flags| flags.contains(QualityFlags::NO_DATA))
         else {
             return;
@@ -244,37 +260,38 @@ impl CfaImage {
         self.add_flags_where(QualityFlags::REPAIRED, |index| nulls.get(index));
     }
 
-    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`.
-    /// Consumes self.
+    /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`, its
+    /// `mosaic_noise` measured on this mosaic before: `None` exactly for a mono sensor. Consumes
+    /// self.
     pub(crate) fn demosaic(
         mut self,
         passes: MarkesteijnPasses,
+        mosaic_noise: Option<MosaicNoise>,
         cancel: &CancelToken,
     ) -> Result<LinearImage, Cancelled> {
+        debug_assert_eq!(mosaic_noise.is_some(), self.cfa_type.is_mosaic());
         // Calibration repairs a light's nulls, and this leaves those alone; it repairs the rest: a
         // frame no calibration touched, or one read back from a file, which holds the decoder's
         // fill under each null.
         self.repair_nulls();
-        let size = self.size();
         let cfa_type = self.cfa_type;
+        let demosaic = Demosaic::of(cfa_type, passes);
         // Interpolation correlates neighbouring samples, which hides part of their noise from any
         // later measurement, and mixes them, so one step's σ no longer bounds any of them. A mono
         // sensor's samples pass through untouched and keep it.
-        let mosaic_noise = (cfa_type != CfaType::Mono).then(|| MosaicNoise::measure(&self));
         let mut metadata = self.metadata;
-        if let Some(provenance) = &mut metadata.provenance {
-            provenance.color = cfa_type.demosaiced_color();
-            provenance.demosaic = cfa_type.demosaic_provenance(passes);
+        if let Some(provenance) = metadata.derived.provenance_mut() {
+            provenance.color = cfa_type.planes_color();
+            provenance.demosaic = demosaic.provenance();
         }
-        if mosaic_noise.is_some() {
-            metadata.mosaic_noise = mosaic_noise;
-            metadata.quantization_sigma = None;
+        if cfa_type.is_mosaic() {
+            metadata.derived.after_interpolation(mosaic_noise);
         }
-        // The direction decisions compare neighbours of different colours, so the kernels balance
-        // the colours by these gains as they read and take them back out as they write (see
+        // The direction decisions compare neighbours of different colors, so the kernels balance
+        // the colors by these gains as they read and take them back out as they write (see
         // `tiled`). Relative to green, so the samples keep the sensor's balance.
         let gains = (cfa_type != CfaType::Mono)
-            .then_some(metadata.camera_white_balance)
+            .then_some(metadata.header.camera_white_balance)
             .flatten()
             .map_or([1.0; 3], |[red, green, blue, _]| {
                 [red / green, 1.0, blue / green]
@@ -284,26 +301,11 @@ impl CfaImage {
         // that. Every other fact spreads as far as the demosaic reads.
         let mut flags = self.flags;
         if let Some(flags) = &mut flags {
-            flags.dilate(cfa_type.demosaic_support(passes), QualityFlags::NO_DATA);
+            flags.dilate(demosaic.support(), QualityFlags::NO_DATA);
         }
 
-        let mut image = match cfa_type {
-            CfaType::Mono => {
-                LinearImage::from_pixels(ImageDimensions::new(size, 1), self.data.into_vec())
-            }
-            CfaType::Bayer(cfa_pattern) => {
-                let bayer = BayerImage::new(&self.data, cfa_pattern).with_gains(gains);
-                let planes = rcd::demosaic(&bayer, cancel)?;
-                LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
-            }
-            CfaType::XTrans(pattern) => {
-                let xtrans = XTransImage::new(&self.data, pattern).with_gains(gains);
-                let planes = markesteijn::demosaic(&xtrans, passes, cancel)?;
-                LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
-            }
-        };
-        image.metadata = metadata;
-        image.flags = flags;
+        let mut image = LinearImage::new(demosaic.run(self.data, gains, cancel)?, flags, metadata);
+        image.set_flat_gain(self.flat_gain);
         Ok(image)
     }
 
@@ -311,30 +313,28 @@ impl CfaImage {
     /// (`interpolate_nongreen`): each green photosite as it is, and every other filled from the
     /// green photosites of its 3×3 neighbourhood, weighed 1 beside it and 1/√2 on a diagonal. On
     /// a Bayer mosaic that is the mean of its four green neighbours, on X-Trans of the hexagon's.
-    /// Stars are measured on green alone, at its full resolution, with no colour interpolated
+    /// Stars are measured on green alone, at its full resolution, with no color interpolated
     /// across an edge as a demosaic would.
     ///
     /// A filled photosite carries the flags of the greens it was filled from. One with no green
     /// neighbour, which only a frame narrower than its pattern has, keeps its own sample and
-    /// flags. A mono frame is its own proxy.
+    /// flags. A mono frame is its own proxy, its metadata whole: nothing was filled, so its
+    /// quantization step and flat gain still hold.
     pub fn green_proxy(&self) -> LinearImage {
-        const GREEN: usize = CfaColour::Green.index();
+        const GREEN: usize = CfaColor::Green.index();
         let size = self.size();
-        let mut metadata = ImageMetadata {
-            quantization_sigma: None,
-            mosaic_noise: None,
-            flat_gain: None,
-            ..self.metadata.clone()
-        };
-        if let Some(provenance) = &mut metadata.provenance {
-            provenance.demosaic = DemosaicProvenance::GreenProxy;
-        }
-        let dimensions = ImageDimensions::new(size, 1);
+        let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
         if !self.cfa_type.is_mosaic() {
-            let mut image = LinearImage::from_pixels(dimensions, self.data.pixels().to_vec());
-            image.metadata = metadata;
-            image.flags.clone_from(&self.flags);
+            let mut image = LinearImage::from_interleaved(dimensions, self.data.pixels().to_vec());
+            image.metadata = self.metadata.clone();
+            image.set_flags(self.flags.clone());
+            image.set_flat_gain(self.flat_gain.clone());
             return image;
+        }
+        let mut metadata = self.metadata.clone();
+        metadata.derived.after_interpolation(None);
+        if let Some(provenance) = metadata.derived.provenance_mut() {
+            provenance.demosaic = DemosaicProvenance::GreenProxy;
         }
         let cfa_type = self.cfa_type;
         let flags = self.flags.as_ref();
@@ -345,7 +345,7 @@ impl CfaImage {
             for (x, sample) in row.iter_mut().enumerate() {
                 let index = y * size.width + x;
                 let own_flags = flags.map_or(0, |flags| flags.at(index).byte());
-                if cfa_type.color_at(Vec2us::new(x, y)) == GREEN {
+                if cfa_type.slot_at(Vec2us::new(x, y)) == GREEN {
                     *sample = self.data[index];
                     if let Some(row_flags) = row_flags.as_deref_mut() {
                         row_flags[x] = own_flags;
@@ -363,7 +363,7 @@ impl CfaImage {
                         if (dx, dy) == (0, 0)
                             || nx >= size.width
                             || ny >= size.height
-                            || cfa_type.color_at(Vec2us::new(nx, ny)) != GREEN
+                            || cfa_type.slot_at(Vec2us::new(nx, ny)) != GREEN
                         {
                             continue;
                         }
@@ -395,76 +395,31 @@ impl CfaImage {
                 .for_each(|((y, row), row_flags)| fill_row(y, row, Some(row_flags))),
             None => rows.for_each(|(y, row)| fill_row(y, row, None)),
         }
-        let mut image = LinearImage::from_pixels(dimensions, pixels);
+        let mut image = LinearImage::from_interleaved(dimensions, pixels);
         image.metadata = metadata;
-        image.flags = proxy_flags.and_then(|bytes| {
-            PixelFlags::from_buffer(Buffer2::new(size.width, size.height, bytes))
-        });
+        image.set_flags(proxy_flags.and_then(|bytes| {
+            PixelFlags::from_bytes(Buffer2::new(size.width, size.height, bytes))
+        }));
         image
     }
+}
 
-    /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
-    /// mapped through `map` — the map that expresses it in this frame's domain
-    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)), which also moves its
-    /// pedestal onto this frame's. The identity map subtracts the samples as they are.
-    ///
-    /// When both frames declare a domain, this frame's pedestal becomes what
-    /// [`SampleDomain::after_subtracting`](crate::SampleDomain::after_subtracting) says.
-    ///
-    /// Where `dark` holds no measurement, this frame is flagged [`QualityFlags::NO_DATA`]: what is
-    /// left there is not one either.
-    ///
-    /// May produce negative pixel values when dark noise exceeds signal.
-    /// This is intentional: the f32 pipeline preserves negatives, and stacking
-    /// averages them out correctly. Clamping to zero would introduce a positive
-    /// bias in the stacked result.
-    pub fn subtract(&mut self, dark: &Self, map: DomainMap) {
-        self.subtract_scaled(dark, map, 1.0);
-    }
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use common::CancelToken;
 
-    /// [`Self::subtract`] with `dark`'s signal scaled by `scale` first, as a bias-removed dark is
-    /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not
-    /// signal.
-    pub(crate) fn subtract_scaled(&mut self, dark: &Self, map: DomainMap, scale: f64) {
-        assert!(
-            self.size() == dark.size(),
-            "CfaImage dimensions mismatch: {} vs {}",
-            self.size(),
-            dark.size()
-        );
-        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the map
-        // from the two domains and refuses a pair with none. Only checked when both declare a
-        // domain — a synthesized frame has none.
-        debug_assert!(
-            match (&self.metadata.domain, &dark.metadata.domain) {
-                (Some(light), Some(dark)) => dark.conversion_to(light) == Some(map),
-                _ => true,
-            },
-            "{map:?} does not convert {:?} into {:?}",
-            dark.metadata.domain,
-            self.metadata.domain
-        );
-        let gain = map.gain * scale;
-        self.data
-            .par_iter_mut()
-            .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l = (f64::from(*l) - (f64::from(*d) * gain + map.offset)) as f32);
-        self.take_master_flags(dark);
-        if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
-            light.pedestal = light.after_subtracting(dark);
+    use crate::image::cfa::cfa_image::CfaImage;
+    use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+    use crate::image::linear_image::LinearImage;
+    use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
+
+    impl CfaImage {
+        /// The mosaic demosaiced as a decoder demosaics it, an X-Trans one in `passes`: its noise
+        /// measured first, with no cancel.
+        pub(crate) fn demosaic_measured(self, passes: MarkesteijnPasses) -> LinearImage {
+            let noise = MosaicNoiseMeasure::of(&self).map(MosaicNoiseMeasure::measure);
+            self.demosaic(passes, noise, &CancelToken::never())
+                .expect("a token that never cancels")
         }
-    }
-
-    /// Flag [`QualityFlags::NO_DATA`] wherever `master`, just applied to this frame, holds no
-    /// measurement — a fill, or a saturated bound: the calibrated value there is not one either.
-    fn take_master_flags(&mut self, master: &Self) {
-        let Some(flags) = master.flags.as_ref().filter(|flags| {
-            flags.contains(QualityFlags::NO_DATA) || flags.contains(QualityFlags::SATURATED)
-        }) else {
-            return;
-        };
-        self.add_flags_where(QualityFlags::NO_DATA, |index| {
-            flags.at(index).intersects(QualityFlags::UNMEASURED)
-        });
     }
 }

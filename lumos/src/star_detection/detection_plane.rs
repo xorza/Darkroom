@@ -77,7 +77,8 @@ impl DetectionPlane {
                 mask: spec.mask,
             },
             spec.background,
-            resources,
+            &resources.floats,
+            &mut resources.background,
         );
         Self {
             values: residual,
@@ -85,12 +86,17 @@ impl DetectionPlane {
         }
     }
 
-    /// Fill `mask` with the pixels above `sigma` of the plane's own noise, held to its floor.
-    pub(crate) fn threshold(&self, sigma: f32, mask: &mut BitBuffer2) {
+    /// The threshold `sigma` of the plane's own noise, held to its floor.
+    pub(crate) const fn threshold_params(&self, sigma: f32) -> ThresholdParams {
         ThresholdParams {
             sigma,
             min_noise: self.noise.floor,
         }
-        .fill_mask(&self.values, &self.noise.noise, mask);
+    }
+
+    /// Fill `mask` with the pixels above [`Self::threshold_params`] at `sigma`.
+    pub(crate) fn threshold(&self, sigma: f32, mask: &mut BitBuffer2) {
+        self.threshold_params(sigma)
+            .fill_mask(&self.values, &self.noise.noise, mask);
     }
 }

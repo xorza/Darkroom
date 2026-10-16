@@ -5,7 +5,6 @@
 
 use std::cell::OnceCell;
 
-use common::CancelToken;
 use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
@@ -17,9 +16,9 @@ use crate::image::linear_image::LinearImage;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
-use crate::registration::resample::{Warp, WarpBuffers};
-use crate::registration::transform::warp_transform::WarpTransform;
-use crate::scratch_pool::{Scratch, ScratchPool};
+use crate::registration::resample::{Warp, WarpResult, WarpScratch};
+use crate::registration::warp_transform::WarpTransform;
+use crate::scratch_pool::Scratch;
 
 pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
@@ -44,8 +43,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let rgb = || {
         field
             .mosaic(FRAME, CfaType::Bayer(CfaPattern::Rggb))
-            .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-            .expect("never cancelled")
+            .demosaic_measured(MarkesteijnPasses::One)
     };
     let method = InterpolationMethod::default();
     let id = |variant: &str| BenchmarkId::new(format!("{}/{variant}", name(method)), field.name());
@@ -105,7 +103,7 @@ fn warp(b: &mut Bencher<'_>, case: WarpCase<'_>) {
         },
     };
     let source = SourceImage::of(light);
-    let mut buffers = WarpBuffers::build(light.dimensions());
-    let rows = ScratchPool::default();
-    b.iter(|| buffers.warp_into(&source, warp, &rows));
+    let mut buffers = WarpResult::build(light.dimensions());
+    let scratch = WarpScratch::default();
+    b.iter(|| buffers.warp_into(&source, warp, &scratch));
 }

@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn vote_matrices_count_each_pair_in_order() {
     for (n_ref, n_target) in [(10, 10), (3, 4), (600, 600)] {
-        let mut matrix = VoteMatrix::default();
+        let mut matrix = Votes::default();
         assert!(matrix.nonzero_entries().is_empty());
         let entries = [
             (n_ref - 1, n_target - 1, 4),
@@ -24,7 +24,7 @@ fn vote_matrices_count_each_pair_in_order() {
         expected.sort_unstable();
         assert_eq!(matrix.nonzero_entries(), expected, "{n_ref}×{n_target}");
     }
-    let mut matrix = VoteMatrix::default();
+    let mut matrix = Votes::default();
     for _ in 0..70_000 {
         matrix.increment(599, 3);
     }
@@ -73,7 +73,7 @@ fn resolve_claims_each_star_once_by_votes() {
         (&[], 1, &[]),
     ];
     for (entries, min_votes, expected) in cases {
-        let matches = vote_matrix_from_entries(entries).resolve(5, 5, min_votes);
+        let matches = votes_from_entries(entries).resolve(5, 5, min_votes);
         let resolved: Vec<(usize, usize, f64)> = matches
             .iter()
             .map(|m| (m.indices.reference, m.indices.target, m.confidence))

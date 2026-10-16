@@ -1,4 +1,4 @@
-//! `RgbaF32` math shared across the GUI's *derived* colours. The theme names the
+//! `RgbaF32` math shared across the GUI's *derived* colors. The theme names the
 //! resting colors; the places that blend one — a wire endpoint pulled toward
 //! the canvas at rest, a port circle pulled toward white on hover —
 //! go through here, so two emphases of the same swatch can't drift apart.
@@ -19,7 +19,7 @@ pub(crate) fn toward(c: RgbaF32, to: RgbaF32, t: f32) -> RgbaF32 {
 
 /// The hover emphasis every port shares: blend toward white, so the port lifts off the canvas.
 ///
-/// The palette cannot carry a lifted colour beside each resting one — most port colours already
+/// The palette cannot carry a lifted color beside each resting one — most port colors already
 /// sit on its brightest tint, which has nothing above it — so the lift is computed here instead.
 pub(crate) fn hover_lift(c: RgbaF32) -> RgbaF32 {
     const T: f32 = 0.28;

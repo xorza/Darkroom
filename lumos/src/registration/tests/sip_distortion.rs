@@ -9,9 +9,11 @@ use glam::DVec2;
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{StarScatter, positions_to_stars};
 use crate::registration::distortion::sip::SipConfig;
+use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers;
 use crate::registration::transform::{Transform, TransformType};
+use crate::registration::transform_model::TransformModel;
 
 /// A shift with a cubic barrel field before it, `d·1e-8·|d|²` about (512, 512) — 3 to 4 px at the
 /// corners — on 120 stars. With SIP of order 3 about the field's centre the warp is the field: GRIC
@@ -41,12 +43,16 @@ fn register_with_sip_recovers_barrel_distortion() {
         ..RegistrationConfig::default()
     };
     let with_sip = (RegistrationConfig {
-        sip: Some(SipConfig {
-            order: 3,
-            reference_point: Some(field.centre),
-        }),
+        model: TransformModel::Auto {
+            sip: Some(SipConfig {
+                order: SipOrder::Three,
+                reference_point: Some(field.centre),
+            }),
+        },
         ..base_config.clone()
     })
+    .registrar()
+    .unwrap()
     .register(&ref_stars, &target_stars)
     .expect("SIP registration should succeed");
     assert_eq!(
@@ -64,9 +70,11 @@ fn register_with_sip_recovers_barrel_distortion() {
     }
 
     let no_sip = (RegistrationConfig {
-        sip: None,
+        model: TransformModel::Auto { sip: None },
         ..base_config
     })
+    .registrar()
+    .unwrap()
     .register(&ref_stars, &target_stars)
     .expect("linear registration should succeed");
     assert!(no_sip.num_inliers() < 120, "{}", no_sip.num_inliers());

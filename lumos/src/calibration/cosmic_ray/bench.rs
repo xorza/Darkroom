@@ -24,7 +24,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter_batched_ref(
                 || mosaic.clone(),
                 |mosaic| cosmic_ray::reject(mosaic, &config).unwrap(),
-                fixture::fresh_copies(size_of_val(mosaic.data.pixels())),
+                fixture::fresh_copies(size_of_val(mosaic.data().pixels())),
             );
         });
     }

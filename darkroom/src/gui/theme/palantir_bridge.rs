@@ -12,7 +12,7 @@ use crate::gui::theme::type_scale::TypeScale;
 /// mapping:
 /// - `window_background` is the window clear and the selected tab chip —
 ///   the graph canvas, so a chip dissolves into the pane below it.
-/// - `element` and `node_fill` are one colour by design: nodes and
+/// - `element` and `node_fill` are one color by design: nodes and
 ///   palantir's own surfaces sit on the same tier.
 pub(super) const fn palette(p: &Palette) -> palantir::Palette {
     palantir::Palette {
@@ -28,7 +28,7 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
     }
 }
 
-/// The darkroom colours the bridge needs past the palette projection —
+/// The darkroom colors the bridge needs past the palette projection —
 /// the roles whose palantir counterpart lands on a different rung than
 /// darkroom wants.
 ///
@@ -52,7 +52,7 @@ pub(super) struct BridgeRoles<'a> {
 
 /// Palantir sub-theme for darkroom: assemble every widget recipe from
 /// the palette via [`palantir::Theme::from_palette`], then apply the
-/// darkroom-only tweaks (smaller context-menu font, chrome-coloured dock
+/// darkroom-only tweaks (smaller context-menu font, chrome-colored dock
 /// seam, darkroom's own tab chips).
 ///
 /// Takes the type scale rather than reaching for a private menu-font
@@ -73,7 +73,7 @@ pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Them
 
     tab_roles(&mut theme, p, r);
 
-    // Context-menu rows at the smaller menu scale, each keeping the colour
+    // Context-menu rows at the smaller menu scale, each keeping the color
     // its own state resolved to.
     let shrink = |look: &mut WidgetLook| {
         look.text = look.text.with_font_size(text.body);
@@ -145,7 +145,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 /// palantir widget resolves against a menu-bar style: the bar hands this
 /// to [`palantir::Button::style`] at the call site.
 ///
-/// Pins colour and size only; every other axis inherits the ambient style
+/// Pins color and size only; every other axis inherits the ambient style
 /// an unstyled label would have.
 pub(super) fn menu_button(p: &palantir::Palette, text: &TypeScale) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);

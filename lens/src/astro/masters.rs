@@ -75,7 +75,9 @@ impl From<CalibrationMasters> for Masters {
 mod tests {
     use common::CancelToken;
     use imaginarium::Buffer2;
-    use lumos::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, ImageMetadata};
+    use lumos::{
+        CalibrationMasters, CalibrationSet, CfaImage, CfaType, ImageMetadata, SigmaThreshold,
+    };
 
     use crate::astro::masters::Masters;
 
@@ -90,7 +92,7 @@ mod tests {
                 )),
                 ..CalibrationSet::default()
             },
-            5.0,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never(),
         )
         .unwrap()

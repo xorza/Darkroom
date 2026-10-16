@@ -13,14 +13,14 @@
 
 pub(crate) mod ransac_config;
 mod sampling;
-pub(super) mod transforms;
 mod welsch;
 
 use std::mem;
 
 use glam::DVec2;
 
-use crate::registration::error::RansacFailureReason;
+use crate::registration::error::RansacFailure;
+use crate::registration::estimate::Pairs;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::ransac::sampling::Sampler;
@@ -69,15 +69,6 @@ pub(super) struct RansacResult {
     pub(super) inliers: Vec<usize>,
 }
 
-/// Why RANSAC produced no model: the reason, how many iterations ran, and the most inliers any
-/// hypothesis gathered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct RansacFailure {
-    pub(super) reason: RansacFailureReason,
-    pub(super) iterations: usize,
-    pub(super) best_inlier_count: usize,
-}
-
 /// RANSAC estimator for robust transformation fitting.
 #[derive(Debug)]
 pub(super) struct RansacEstimator {
@@ -95,17 +86,29 @@ impl RansacEstimator {
         Self { config, max_sigma }
     }
 
-    /// Whether a hypothesis's rotation and scale lie within the configured bounds; a bound left
-    /// unset passes everything.
-    fn is_plausible(&self, transform: &Transform) -> bool {
+    /// Whether a hypothesis fitted to `support` maps the frame as a registration can: every
+    /// support point in front of a homography's horizon, no mirror — triangle matching pairs
+    /// stars by their orientation, so a mirrored match is a wrong one — and, at `centre`, its
+    /// rotation and both principal stretches within the configured bounds. A bound left unset
+    /// passes everything.
+    fn is_plausible(&self, transform: &Transform, support: &[DVec2], centre: DVec2) -> bool {
+        if !support.iter().all(|&point| transform.maps_forward(point)) {
+            return false;
+        }
+        let geometry = transform.local_geometry(centre);
+        if geometry.mirrors() {
+            return false;
+        }
         let rotation_exceeds = self
             .config
             .max_rotation
-            .is_some_and(|max_rotation| transform.rotation_angle().abs() > max_rotation);
-        let scale_outside = self
-            .config
-            .scale_range
-            .is_some_and(|range| range.excludes(transform.scale_factor()));
+            .is_some_and(|max_rotation| geometry.rotation.abs() > max_rotation);
+        let scale_outside = self.config.scale_range.is_some_and(|range| {
+            geometry
+                .stretch
+                .iter()
+                .any(|&stretch| range.excludes(stretch))
+        });
         !rotation_exceeds && !scale_outside
     }
 
@@ -122,13 +125,10 @@ impl RansacEstimator {
     ) -> Result<RansacResult, RansacFailure> {
         debug_assert_eq!(pairs.reference.len(), confidences.len());
         let min_samples = transform_type.min_points();
-        if pairs.reference.len() < min_samples {
-            return Err(RansacFailure {
-                reason: RansacFailureReason::TooFewMatches,
-                iterations: 0,
-                best_inlier_count: 0,
-            });
-        }
+        debug_assert!(
+            pairs.reference.len() >= min_samples,
+            "the matcher's floor holds the matches to a minimal sample at least"
+        );
         let mut sampler = Sampler::new(confidences, min_samples, &self.config);
         let guided_iterations = sampler.guided_iterations();
         Search::new(self, pairs, transform_type).run(guided_iterations, |iteration, sample| {
@@ -145,6 +145,8 @@ struct Search<'a> {
     pairs: &'a PointPairs,
     transform_type: TransformType,
     scorer: WelschScorer,
+    /// The centroid of the reference points, where a hypothesis's rotation and stretch are read.
+    centre: DVec2,
 }
 
 impl<'a> Search<'a> {
@@ -158,6 +160,7 @@ impl<'a> Search<'a> {
             pairs,
             transform_type,
             scorer: WelschScorer::new(estimator.max_sigma),
+            centre: pairs.reference.iter().sum::<DVec2>() / pairs.reference.len() as f64,
         }
     }
 
@@ -189,6 +192,7 @@ impl<'a> Search<'a> {
         // The adaptive bound of the best hypothesis so far, in uniform iterations, checked on every
         // iteration: once that many have run, an all-inlier sample has been drawn with the
         // configured confidence, whether or not anything has improved on that hypothesis since.
+        // Set from every new best, so it never outlives the hypothesis it was derived from.
         let mut iteration_bound = max_iter;
         let mut iterations = 0;
 
@@ -206,16 +210,17 @@ impl<'a> Search<'a> {
                 continue;
             }
 
-            let Some(transform) = transforms::estimate_transform(
-                &sample.reference,
-                &sample.target,
-                self.transform_type,
-            ) else {
+            let Some(transform) =
+                Pairs::unit(&sample.reference, &sample.target).estimate(self.transform_type)
+            else {
                 continue;
             };
 
             // Before scoring, which is the expensive part.
-            if !self.estimator.is_plausible(&transform) {
+            if !self
+                .estimator
+                .is_plausible(&transform, &sample.reference, self.centre)
+            {
                 continue;
             }
 
@@ -234,16 +239,11 @@ impl<'a> Search<'a> {
             };
 
             // Standard LO-RANSAC: only a new best is refined.
-            if config.local_optimization && candidate.inliers.len() >= min_samples {
+            if config.local_max_iterations > 0 && candidate.inliers.len() >= min_samples {
                 self.local_optimization(&mut candidate, &mut lo_buffers);
             }
 
-            let inlier_ratio = candidate.inliers.len() as f64 / n as f64;
-            if inlier_ratio >= config.min_inlier_ratio {
-                iteration_bound =
-                    transforms::adaptive_iterations(inlier_ratio, min_samples, config.confidence)
-                        .min(max_iter);
-            }
+            iteration_bound = self.iteration_bound(candidate.inliers.len());
             if let Some(previous) = best.replace(candidate) {
                 scratch = previous.inliers;
             }
@@ -254,22 +254,11 @@ impl<'a> Search<'a> {
         let best_inlier_count = best.as_ref().map_or(0, |best| best.inliers.len());
         let Some(best) = best.filter(|best| best.inliers.len() >= min_samples) else {
             return Err(RansacFailure {
-                reason: RansacFailureReason::NoInliersFound,
                 iterations,
                 best_inlier_count,
             });
         };
-        lo_buffers
-            .points
-            .gather(&best.inliers, &self.pairs.reference, &self.pairs.target);
-        let refined = transforms::estimate_transform(
-            &lo_buffers.points.reference,
-            &lo_buffers.points.target,
-            self.transform_type,
-        );
-        if let Some(refined) = refined
-            && self.estimator.is_plausible(&refined)
-        {
+        if let Some(refined) = self.plausible_refit(&best.inliers, &mut lo_buffers.points) {
             let refined_score = self.score(&refined, &mut scratch, best.score);
             if refined_score >= best.score && scratch.len() >= min_samples {
                 return Ok(RansacResult {
@@ -282,6 +271,35 @@ impl<'a> Search<'a> {
             transform: best.transform,
             inliers: best.inliers,
         })
+    }
+
+    /// The uniform iterations a best hypothesis with `inliers` of the pairs asks for: the adaptive
+    /// count at its inlier ratio, or every iteration while that ratio is below the configured
+    /// minimum, where the search goes on.
+    fn iteration_bound(&self, inliers: usize) -> usize {
+        let config = &self.estimator.config;
+        let inlier_ratio = inliers as f64 / self.pairs.reference.len() as f64;
+        if inlier_ratio < config.min_inlier_ratio {
+            return config.max_iterations;
+        }
+        sampling::adaptive_iterations(
+            inlier_ratio,
+            self.transform_type.min_points(),
+            config.confidence,
+            config.max_iterations,
+        )
+    }
+
+    /// The model refitted to the pairs `inliers` names, gathered into `points`, or `None` when
+    /// they do not determine one or it is not plausible.
+    fn plausible_refit(&self, inliers: &[usize], points: &mut PointPairs) -> Option<Transform> {
+        points.gather(inliers, &self.pairs.reference, &self.pairs.target);
+        Pairs::unit(&points.reference, &points.target)
+            .estimate(self.transform_type)
+            .filter(|refit| {
+                self.estimator
+                    .is_plausible(refit, &points.reference, self.centre)
+            })
     }
 
     /// Local optimization: refine `hypothesis` in place by re-estimating from its inliers and
@@ -299,20 +317,14 @@ impl<'a> Search<'a> {
         buffers.inlier_buf.extend_from_slice(&hypothesis.inliers);
         let mut current_score = hypothesis.score;
 
-        for _ in 0..self.estimator.config.lo_iterations {
+        for _ in 0..self.estimator.config.local_max_iterations {
             if buffers.inlier_buf.len() < min_samples {
                 break;
             }
-            buffers.points.gather(
-                &buffers.inlier_buf,
-                &self.pairs.reference,
-                &self.pairs.target,
-            );
-            let Some(refined) = transforms::estimate_transform(
-                &buffers.points.reference,
-                &buffers.points.target,
-                self.transform_type,
-            ) else {
+            // A chain stops at its first implausible refit, keeping the last plausible
+            // improvement rather than throwing the chain away.
+            let Some(refined) = self.plausible_refit(&buffers.inlier_buf, &mut buffers.points)
+            else {
                 break;
             };
             let new_score = self.score(&refined, &mut buffers.scored, current_score);
@@ -328,9 +340,9 @@ impl<'a> Search<'a> {
             current_score = new_score;
         }
 
-        // Commit only a refit that improved the score and stays plausible; otherwise `hypothesis`
+        // Commit only a refit that improved the score, each one plausible; otherwise `hypothesis`
         // keeps its complete pre-LO inliers.
-        if current_score > hypothesis.score && self.estimator.is_plausible(&current_transform) {
+        if current_score > hypothesis.score {
             hypothesis.transform = current_transform;
             hypothesis.score = current_score;
             mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);

@@ -15,8 +15,8 @@ pub struct FilterConfig {
     /// Maximum accepted absolute roundness, on both DAOFIND metrics. Each lies in `[−2, 2]`, so 2
     /// keeps every shape.
     pub max_roundness: f32,
-    /// How far above the median FWHM a star may lie, in robust σ, `1.4826·MAD` of the brightest
-    /// half's FWHMs, or `None` to keep every FWHM.
+    /// How far above the median FWHM a star may lie, in the robust σ of the brightest half's
+    /// FWHMs, from their MAD, or `None` to keep every FWHM.
     pub max_fwhm_deviation: Option<f32>,
     /// Minimum retained separation between duplicate stars in pixels.
     pub duplicate_min_separation: f32,

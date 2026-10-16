@@ -1,5 +1,7 @@
 use std::array;
 
+use imaginarium::Buffer2;
+
 use crate::image_ops::ml::backend::*;
 
 /// A plane whose every sample names its pixel and channel: `c/4 + (x + y·w)/(4·w·h)`, inside
@@ -103,7 +105,8 @@ fn feather_ramps_from_either_edge() {
 /// A model that returns its input, run over every tile of a frame two tiles a side, blends back to
 /// the input. Each pixel is `Σ v·wₖ / Σ wₖ` over at most four tiles: four products, three sums
 /// above and three below the line, and the division round by half an ulp each — 5.5ε of `v`.
-/// Gray averages its three equal channels first, two sums and a product more: 8ε bounds both.
+/// Gray averages its three equal channels first, two sums and a product more: 8ε bounds both. The
+/// blend lands in the frame's planes, which keep the frame's metadata.
 #[test]
 fn an_identity_model_reproduces_the_input() {
     let size = Size2us::new(700, 600);
@@ -112,17 +115,15 @@ fn an_identity_model_reproduces_the_input() {
     }));
     let gray = LinearImage::from(ramp(size.width, size.height, 1));
     for image in [rgb, gray] {
-        let mut blend = FeatherBlend::new(image.dimensions());
-        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-        for &ty in &tile_starts(size.height, 256) {
-            for &tx in &tile_starts(size.width, 256) {
-                let tile = Vec2us::new(tx, ty);
-                fill_tile_input(&image, tile, &mut input);
-                blend.add(&input, tile);
-            }
-        }
-        let output = blend.into_image();
+        let mut output = image.clone();
+        output.metadata.header.exposure_time = Some(30.0);
+        run_tiles(&mut output, OnnxModel::DEFAULT_STRIDE, |input, tile| {
+            tile.copy_from_slice(input);
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(output.channels(), image.channels());
+        assert_eq!(output.metadata.header.exposure_time, Some(30.0));
         for c in 0..image.channels() {
             for (i, (&got, &expected)) in output
                 .channel(c)
@@ -140,16 +141,12 @@ fn an_identity_model_reproduces_the_input() {
     }
 }
 
-/// The stride covers the frame at full weight or is refused before any model loads: 0 never
+/// The stride covers the frame at full weight or is refused before any tile runs: 0 never
 /// advances, and past 512 − 2·64 = 384 a band between tiles lies only on their feather ramps. 1
 /// and 384 are the edges that run. At 384 the full-weight cores, positions 64 to 447 of each
 /// window, meet: the next core starts at 384 + 64 = 448.
 #[test]
 fn the_stride_must_cover_the_frame() {
-    let config = |stride| TiledOnnxConfig {
-        weights: "unused.onnx".into(),
-        stride,
-    };
     assert_eq!(MAX_STRIDE, 384);
     let core: Vec<usize> = (0..WINDOW).filter(|&i| feather(i) == 1.0).collect();
     assert_eq!(
@@ -157,13 +154,16 @@ fn the_stride_must_cover_the_frame() {
         (64, 447, MAX_STRIDE)
     );
     for stride in [1, 256, MAX_STRIDE] {
-        assert_eq!(config(stride).validate(), Ok(()), "{stride}");
+        assert_eq!(validate_stride(stride), Ok(()), "{stride}");
     }
     for stride in [0, MAX_STRIDE + 1, WINDOW] {
-        let image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
-        let error = config(stride).run(&image).unwrap_err();
+        let mut image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
+        let error = run_tiles(&mut image, stride, |_, _| {
+            panic!("a stride refused runs no tile")
+        })
+        .unwrap_err();
         assert!(
-            matches!(&error, MlError::InvalidConfig(invalid) if invalid.field == "ML tile stride"),
+            matches!(&error, MlError::Config(invalid) if invalid.field == "ML tile stride"),
             "{stride}: {error:?}"
         );
     }

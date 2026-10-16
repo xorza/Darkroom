@@ -7,10 +7,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Kind, Scale};
+use crate::image::flat_gain::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::noise::binned_samples::BinnedSamples;
-use crate::noise::gain_bins::GainBins;
-use crate::noise::mrs_noise::{MrsNoise, PixelGains};
+use crate::noise::mrs_noise::{NoisePlane, PixelGains};
 
 /// One tile of the MRS grid, and a frame the 4 × 4 grid covers in part.
 const SIDES: [usize; 2] = [1_024, 4_096];
@@ -56,21 +56,27 @@ pub(crate) fn atomic(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size.pixel_count() as u64));
         group.bench_function(BenchmarkId::new("mrs_estimate", side), |b| {
             let plane = Buffer2::new(side, side, fixture::sky(size.pixel_count(), 5));
-            b.iter(|| MrsNoise::estimate(black_box(&plane), |_| false));
+            b.iter(|| {
+                NoisePlane {
+                    samples: black_box(&plane),
+                    excluded: |_| false,
+                }
+                .sigma()
+            });
         });
         group.bench_function(BenchmarkId::new("mrs_estimate_split", side), |b| {
             let plane = Buffer2::new(side, side, fixture::sky(size.pixel_count(), 5));
             let gains = vignette(size.pixel_count());
             let bins = GainBins::of(&mut gains.clone());
             b.iter(|| {
-                MrsNoise::estimate_split(
-                    black_box(&plane),
-                    |_| false,
-                    PixelGains {
-                        gain: |index| gains[index],
-                        bins: &bins,
-                    },
-                )
+                NoisePlane {
+                    samples: black_box(&plane),
+                    excluded: |_| false,
+                }
+                .background(Some(PixelGains {
+                    gain: |index| gains[index],
+                    bins: &bins,
+                }))
             });
         });
     }

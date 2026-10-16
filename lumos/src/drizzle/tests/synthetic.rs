@@ -84,7 +84,6 @@ fn drizzle(frames: &DitheredFrames, config: &DrizzleConfig) -> StackProduct {
         ProgressMonitor::unattended(),
     )
     .unwrap()
-    .product
 }
 
 /// Drizzle keeps surface brightness, so the output holds `s²` times an input frame's flux: with
@@ -217,7 +216,7 @@ fn drizzle_quality_maps_have_their_closed_form() {
     );
     let mut frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
     for image in &mut frames.images {
-        image.metadata.quantization_sigma = Some(1.0);
+        image.metadata.derived.set_quantization_sigma(Some(1.0));
     }
     let product = drizzle(&frames, &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0));
     let coverage = product.coverage.as_ref().unwrap();

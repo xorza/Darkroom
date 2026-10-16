@@ -1,6 +1,5 @@
 use crate::image::cfa::demosaic::tiled::TilePlace;
 use crate::image::cfa::demosaic::xtrans::markesteijn::*;
-use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
@@ -43,7 +42,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
         ],
     ];
     let scenes: [(&str, Scene); 4] = [
-        ("colour edge", |channel, x, _| {
+        ("color edge", |channel, x, _| {
             let (left, right) = ([0.1, 0.3, 0.8], [0.9, 0.6, 0.2]);
             if x < WIDTH / 2 {
                 left[channel]
@@ -65,7 +64,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
             let amplitude = [0.9f32, 0.7, 0.5][channel];
             0.02 + amplitude / (1.0 + (dx * dx + dy * dy) / (width * width))
         }),
-        ("colour grating", |channel, x, y| {
+        ("color grating", |channel, x, y| {
             let phase = [0.0f32, 0.333_333_34, 0.666_666_7][channel];
             let t = 0.075 * x as f32 + 0.05 * y as f32 + phase;
             0.1 + 1.6 * (t - t.floor() - 0.5).abs()
@@ -79,7 +78,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
                 scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
             });
             let planes = demosaic(
-                &XTransImage::new(&data, pattern),
+                &MosaicView::new(&data, pattern),
                 passes,
                 &CancelToken::never(),
             )
@@ -99,7 +98,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
     }
 }
 
-/// A constant colour per channel — uniform grey and two distinct (R, G, B) — comes back as itself
+/// A constant color per channel — uniform grey and two distinct (R, G, B) — comes back as itself
 /// at every pixel, border included, at every frame size: 12 and 24 have no tile and are all border
 /// fill, 25 one tile cut short by the frame at one pass and none at three, 37 one at both, 130 two
 /// tiles each way. The output starts as
@@ -107,17 +106,17 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
 /// output is the input to a few f32 roundings: under 2e-7, where one rounding of a value below 1 is
 /// up to 6e-8.
 #[test]
-fn constant_colour_reconstructs_to_rounding_at_every_size() {
+fn constant_color_reconstructs_to_rounding_at_every_size() {
     let pattern = XTRANS_PATTERN;
     for side in [12, 24, 25, 37, 130] {
         let size = Size2us::new(side, side);
-        for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
+        for color in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-                colour[pattern.color_at(Vec2us::new(x, y)).index()]
+                color[pattern.color_at(Vec2us::new(x, y)).index()]
             });
             for passes in PASSES {
                 let planes = demosaic(
-                    &XTransImage::new(&data, pattern),
+                    &MosaicView::new(&data, pattern),
                     passes,
                     &CancelToken::never(),
                 )
@@ -126,9 +125,9 @@ fn constant_colour_reconstructs_to_rounding_at_every_size() {
                     for (index, &value) in plane.iter().enumerate() {
                         assert_close!(
                             value,
-                            colour[channel],
+                            color[channel],
                             2e-7,
-                            "{side}, {colour:?}, {passes:?}, channel {channel} at {index}: {value}"
+                            "{side}, {color:?}, {passes:?}, channel {channel} at {index}: {value}"
                         );
                     }
                 }
@@ -148,7 +147,7 @@ fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
     let zeros = Buffer2::new_filled(size.width, size.height, 0.0f32);
     for passes in PASSES {
         let planes = demosaic(
-            &XTransImage::new(&ramp, XTRANS_PATTERN),
+            &MosaicView::new(&ramp, XTRANS_PATTERN),
             passes,
             &CancelToken::never(),
         )
@@ -157,7 +156,7 @@ fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
             assert!(v.is_finite(), "{passes:?}: {v} at {i}");
         }
         let planes = demosaic(
-            &XTransImage::new(&zeros, XTRANS_PATTERN),
+            &MosaicView::new(&zeros, XTRANS_PATTERN),
             passes,
             &CancelToken::never(),
         )
@@ -172,15 +171,15 @@ fn markesteijn_ramp_is_finite_and_zeros_stay_zero() {
 /// passes leave uncomputed.
 ///
 /// The tile runs twice, with every channel no sample gives seeded at +1000 and at −1000: a cell
-/// whose colours differ reads, through some chain of stages, a value no stage computed. A pixel's
-/// output reads the colours of every direction within 4 of it — the second differences reach 1, the
+/// whose colors differ reads, through some chain of stages, a value no stage computed. A pixel's
+/// output reads the colors of every direction within 4 of it — the second differences reach 1, the
 /// 3×3 homogeneity counts 1 more, their 5×5 sums 2 more — so a margin `m` holds when no such cell
 /// lies within 4 of the part `[m, M − m)` a tile of extent `M` writes. The reads repeat every three
 /// rows and columns, so three tiles, starting at each phase and cut short by the frame at each,
-/// meet every case at both edges. Random samples, so opposite colours take both of their axes
+/// meet every case at both edges. Random samples, so opposite colors take both of their axes
 /// often at every phase.
 #[test]
-fn margin_is_the_least_that_reads_only_computed_colours() {
+fn margin_is_the_least_that_reads_only_computed_colors() {
     const POISON: f32 = 1000.0;
     const READ_REACH: usize = 4;
     let pattern = XTRANS_PATTERN;
@@ -196,7 +195,7 @@ fn margin_is_the_least_that_reads_only_computed_colours() {
             };
             let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
             let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
-            let xtrans = XTransImage::new(&data, pattern);
+            let xtrans = MosaicView::new(&data, pattern);
             let hex = HexTable::new(pattern);
             let mut tile = Tile::new(passes.directions());
             let job = TileJob {
@@ -240,10 +239,10 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
     let large = Size2us::new(152, 144);
     let mut rng = TestRng::new(7);
     let samples = Buffer2::from_fn(large.width, large.height, |_, _| 0.1 + 0.8 * rng.next_f32());
-    let rows = *XTRANS_PATTERN.rows();
+    let rows = XTRANS_PATTERN.rows();
     for passes in PASSES {
         let whole = demosaic(
-            &XTransImage::new(&samples, XTRANS_PATTERN),
+            &MosaicView::new(&samples, XTRANS_PATTERN),
             passes,
             &CancelToken::never(),
         )
@@ -252,15 +251,15 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
             let small = Size2us::new(128 + (ox + 2 * oy) % 3, 120 + (2 * ox + oy) % 3);
             let mut shifted = [[0u8; 6]; 6];
             for (y, row) in shifted.iter_mut().enumerate() {
-                for (x, colour) in row.iter_mut().enumerate() {
-                    *colour = rows[(y + oy) % 6][(x + ox) % 6];
+                for (x, color) in row.iter_mut().enumerate() {
+                    *color = rows[(y + oy) % 6][(x + ox) % 6];
                 }
             }
             let crop =
                 Buffer2::from_fn(small.width, small.height, |x, y| samples[(x + ox, y + oy)]);
             let pattern = XTransPattern::new(shifted).unwrap();
             let part = demosaic(
-                &XTransImage::new(&crop, pattern),
+                &MosaicView::new(&crop, pattern),
                 passes,
                 &CancelToken::never(),
             )

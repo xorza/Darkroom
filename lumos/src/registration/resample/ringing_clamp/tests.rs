@@ -1,4 +1,5 @@
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights, RingingClamp};
+use crate::registration::resample::warp_params::ClampingThreshold;
 
 const LOBES: LobeWeights = LobeWeights {
     positive: 1.6,
@@ -26,7 +27,7 @@ fn light(positive: f32, negative: f32) -> LobeSums {
 /// The soft branch rounds through a handful of f32 operations on values near 1, so 1e-6.
 #[test]
 fn each_branch_of_the_rule_by_hand() {
-    let clamp = RingingClamp::new(0.3);
+    let clamp = RingingClamp::new(ClampingThreshold::new(0.3).unwrap());
     let no_lobes = || -> LobeWeights { panic!("the plain branch needs no lobe weights") };
     assert_eq!(clamp.sample(light(2.0, -0.5), 1.0, no_lobes), 1.5);
     let soft = clamp.sample(light(2.0, -1.0), 1.0, || LOBES);
@@ -45,7 +46,7 @@ fn each_branch_of_the_rule_by_hand() {
 /// has `r = 0.5625`, past 0.3, and reads 3 back to rounding: its sums scale with its weights.
 #[test]
 fn the_threshold_ends_and_a_flat_field() {
-    let open = RingingClamp::new(1.0);
+    let open = RingingClamp::new(ClampingThreshold::new(1.0).unwrap());
     let plain = open.sample(light(2.0, -1.9), 1.0, || {
         panic!("r = 0.95 is plain at threshold 1")
     });
@@ -56,6 +57,10 @@ fn the_threshold_ends_and_a_flat_field() {
         positive: 1.6,
         negative: -0.9,
     };
-    let flat = RingingClamp::new(0.3).sample(light(3.0 * 1.6, 3.0 * -0.9), 0.7, || lobes);
+    let flat = RingingClamp::new(ClampingThreshold::new(0.3).unwrap()).sample(
+        light(3.0 * 1.6, 3.0 * -0.9),
+        0.7,
+        || lobes,
+    );
     assert!((flat - 3.0).abs() < 1e-5, "{flat}");
 }

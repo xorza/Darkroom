@@ -39,7 +39,7 @@ pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
     let mut neighbors: Vec<Neighbor> = Vec::new();
 
     for i in 0..n {
-        let point_i = tree.get_point(i);
+        let point_i = tree.points()[i];
         // The point is its own nearest neighbour.
         tree.k_nearest_into(point_i, k + 1, &mut neighbors);
 

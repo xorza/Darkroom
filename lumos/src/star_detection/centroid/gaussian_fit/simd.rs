@@ -83,13 +83,14 @@ impl<S: Isa> LaneProfile<S, 7> for Profile<S> {
 mod tests {
     use crate::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
+    use crate::star_detection::centroid::profile_bounds::ProfileBounds;
     use crate::star_detection::centroid::profile_problem::LMModel;
     use crate::star_detection::centroid::profile_problem::internals::ModelStamp;
     use crate::star_detection::centroid::simd::internals::assert_every_tier_matches_portable;
 
     #[test]
     fn every_tier_matches_portable_bit_for_bit() {
-        let mut model = Gaussian2D::new(15.0, 1e-6);
+        let mut model = Gaussian2D::new(ProfileBounds::of_stamp(15.0), 1e-6);
         model.integrate_at(3);
         let stamp = ModelStamp::of(&model, 4, &[1.6, 1.4, 500.0, 0.25, -0.02, 0.18, 50.0]);
         assert_every_tier_matches_portable(

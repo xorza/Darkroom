@@ -7,10 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::Pod;
 
-use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::platform::{Eviction, ScratchFile};
 
@@ -76,36 +74,6 @@ impl RunScratch {
                 Err(source) => return Err(FrameStoreError::OpenFile { path, source }),
             }
         }
-    }
-}
-
-impl PlaneStore for RunScratch {
-    fn store_channel(
-        &self,
-        _channel: usize,
-        pixels: &[f32],
-    ) -> Result<StoredPlane, FrameStoreError> {
-        self.store(pixels)
-    }
-
-    fn store_quality(
-        &self,
-        _plane: FramePlane,
-        pixels: &[f32],
-    ) -> Result<StoredPlane, FrameStoreError> {
-        self.store(pixels)
-    }
-
-    fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError> {
-        self.store(bytes)
-    }
-
-    fn store_samples(&self, _slot: usize, samples: &[f32]) -> Result<StoredPlane, FrameStoreError> {
-        self.store(samples)
-    }
-
-    fn store_gain(&self, _channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
-        self.store(nodes)
     }
 }
 

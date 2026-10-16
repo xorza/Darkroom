@@ -10,9 +10,9 @@ use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::combine::frame_cache::frame_chunk::ChunkCopy;
+use crate::combine::frame_read::frame_chunk::ChunkCopy;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::image::linear_image::LinearImage;
@@ -74,7 +74,7 @@ struct Warped {
     scratch: RunScratch,
     image: LinearImage,
     quality: FrameQuality<Buffer2<f32>>,
-    stats: FrameStats,
+    stats: Admitted,
     _dir: TempDir,
 }
 
@@ -90,7 +90,7 @@ impl Warped {
             coverage: plane(),
             confidence: plane(),
         };
-        let stats = FrameStats::measure(&image);
+        let stats = Admitted::measure(&image);
         Self {
             scratch,
             image,
@@ -100,11 +100,11 @@ impl Warped {
         }
     }
 
-    fn spill(&self, stats: FrameStats) -> StoredFrame {
+    fn spill(&self, stats: Admitted) -> StoredFrame {
         SpillFrame {
             image: &self.image,
             quality: &self.quality,
-            source_stats: stats,
+            admitted: stats,
         }
         .spill(&self.scratch)
         .unwrap()

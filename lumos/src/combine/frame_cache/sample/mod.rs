@@ -1,11 +1,9 @@
 //! What one reduced pixel carries out of the combine, and the buffers that get it there.
 
-use crate::combine::frame_cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
 use crate::scratch_pool::Scratch;
-use crate::stack_product::quality_planes::QualityPlanes;
 
 /// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says
 /// the value is not the photosite's own measurement.
@@ -28,20 +26,11 @@ pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
     pub(super) eff_weights: Vec<f32>,
     pub(super) sample_flags: Vec<u8>,
-    /// The columns of [`NoiseColumns`], filled only when the combine asked for noise.
+    /// The columns of [`NoiseColumns`](crate::combine::reducer::pixel_samples::NoiseColumns), filled only when the combine asked for noise.
     pub(super) noise_background: Vec<f32>,
     pub(super) noise_sky: Vec<f32>,
-    pub(super) noise_inverse_electrons: Vec<f32>,
+    pub(super) noise_per_unit: Vec<f32>,
     pub(super) buffers: ScratchBuffers,
-}
-
-/// One pixel's gathered samples, as a reducer reads them.
-#[derive(Debug)]
-pub(crate) struct PixelSamples<'a> {
-    pub(crate) values: &'a mut [f32],
-    pub(crate) weights: &'a [f32],
-    /// Each sample's noise model, when the combine measures a spread or a variance.
-    pub(crate) noise: Option<NoiseColumns<'a>>,
 }
 
 impl Scratch for CombineScratch {
@@ -60,7 +49,7 @@ impl Scratch for CombineScratch {
         self.sample_flags.resize(frame_count, 0);
         self.noise_background.resize(frame_count, 0.0);
         self.noise_sky.resize(frame_count, 0.0);
-        self.noise_inverse_electrons.resize(frame_count, 0.0);
+        self.noise_per_unit.resize(frame_count, 0.0);
         self.buffers.reserve(frame_count);
     }
 
@@ -71,7 +60,7 @@ impl Scratch for CombineScratch {
             self.sample_flags.len(),
             self.noise_background.len(),
             self.noise_sky.len(),
-            self.noise_inverse_electrons.len(),
+            self.noise_per_unit.len(),
         ] == [frame_count; 6]
     }
 }
@@ -92,7 +81,7 @@ pub(super) struct GatheredSamples<'a> {
     pub(super) sample_flags: &'a mut [u8],
     pub(super) noise_background: &'a mut [f32],
     pub(super) noise_sky: &'a mut [f32],
-    pub(super) noise_inverse_electrons: &'a mut [f32],
+    pub(super) noise_per_unit: &'a mut [f32],
 }
 
 impl GatheredSamples<'_> {
@@ -134,132 +123,11 @@ impl GatheredSamples<'_> {
                 self.sample_flags[write] = self.sample_flags[read];
                 self.noise_background[write] = self.noise_background[read];
                 self.noise_sky[write] = self.noise_sky[read];
-                self.noise_inverse_electrons[write] = self.noise_inverse_electrons[read];
+                self.noise_per_unit[write] = self.noise_per_unit[read];
                 write += 1;
             }
         }
         write
-    }
-}
-
-/// What a reduced pixel reports beside its value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SampleQuality {
-    /// The value alone: the walk over the survivors would produce figures nothing reads, and it
-    /// costs one pass over the frames per pixel.
-    ValueOnly,
-    /// The survivors' weight, the inverse variance of the value and the survivors' dispersion.
-    Measured,
-}
-
-impl SampleQuality {
-    /// What a combine writing `planes` measures of each pixel.
-    pub(crate) const fn of(planes: QualityPlanes) -> Self {
-        if planes.weight || planes.inverse_variance || planes.dispersion {
-            Self::Measured
-        } else {
-            Self::ValueOnly
-        }
-    }
-}
-
-/// One reduced channel sample: the combined value, how many samples reached it, and — when the
-/// caller asked for the quality planes — the survivors' weight, the inverse variance of the value
-/// and the survivors' dispersion.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CombinedSample {
-    pub(crate) value: f32,
-    pub(crate) weight: f32,
-    pub(crate) inverse_variance: f32,
-    pub(crate) dispersion: f32,
-}
-
-impl CombinedSample {
-    /// A weighted mean `value` over the samples of `samples` at `survivors`: the weight is `Σwᵢ`,
-    /// and the inverse variance is `(Σwᵢ)² / Σwᵢ²·vᵢ` with each sample's model variance `vᵢ` taken
-    /// at the combined value, the estimate of the true signal. Taken at each sample's own value
-    /// instead, an upward fluctuation would carry a larger variance and pull the figure down.
-    /// Without noise columns, for a reducer whose request has no inverse variance plane, it reads
-    /// `+∞`, which nothing reads.
-    ///
-    /// The dispersion is the variance of the same mean as the samples' scatter shows it, with no
-    /// noise model: `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`. Where each sample's variance is `c / wᵢ`, the
-    /// weighted sum of squares has expectation `(n − 1)·c` and the mean's variance is `c / Σwᵢ`, so
-    /// the figure is unbiased; noise weighting makes the weights so at the sky where no warp
-    /// averaged and no flat amplified the samples, and equal weights make it the squared standard
-    /// error of the mean. NaN for fewer than two survivors, whose scatter says nothing.
-    pub(crate) fn from_survivors(
-        value: f32,
-        samples: &PixelSamples<'_>,
-        survivors: impl IntoIterator<Item = usize>,
-    ) -> Self {
-        let PixelSamples {
-            values,
-            weights,
-            noise,
-        } = samples;
-        let mut count = 0usize;
-        let mut weight = 0.0f32;
-        let mut weighted_variance = 0.0f32;
-        let mut weighted_squares = 0.0f32;
-        for index in survivors {
-            let survivor_weight = weights[index];
-            count += 1;
-            weight += survivor_weight;
-            let deviation = values[index] - value;
-            weighted_squares += survivor_weight * deviation * deviation;
-            if let Some(noise) = noise {
-                weighted_variance +=
-                    survivor_weight * survivor_weight * noise.variance_at(index, value);
-            }
-        }
-        Self {
-            value,
-            weight,
-            // `+∞` where the model says the samples hold no noise: an exact pixel, honestly.
-            inverse_variance: if weight > 0.0 {
-                weight * weight / weighted_variance
-            } else {
-                0.0
-            },
-            dispersion: if count > 1 && weight > 0.0 {
-                weighted_squares / ((count - 1) as f32 * weight)
-            } else {
-                f32::NAN
-            },
-        }
-    }
-
-    /// The median of `weights.len()` samples, which keeps them all: its weight is their `Σwᵢ`. It
-    /// is no linear combination, so it has no inverse variance or dispersion to report.
-    pub(crate) fn median(value: f32, weights: &[f32]) -> Self {
-        Self {
-            value,
-            weight: weights.iter().sum(),
-            inverse_variance: 0.0,
-            dispersion: f32::NAN,
-        }
-    }
-
-    /// A pixel no sample reached: nothing combined, nothing weighed, and no scatter to read.
-    pub(crate) const fn uncovered() -> Self {
-        Self {
-            value: 0.0,
-            weight: 0.0,
-            inverse_variance: 0.0,
-            dispersion: f32::NAN,
-        }
-    }
-
-    /// A reduction for a combine that asked for no quality planes: the walk over survivor weights
-    /// would produce two numbers nothing reads, and it costs one pass over the frames per pixel.
-    pub(crate) const fn value_only(value: f32) -> Self {
-        Self {
-            value,
-            weight: 0.0,
-            inverse_variance: 0.0,
-            dispersion: 0.0,
-        }
     }
 }
 

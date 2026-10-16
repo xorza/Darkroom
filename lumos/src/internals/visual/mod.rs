@@ -195,7 +195,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 
 /// Write a whole `LinearImage` under `test_output/<name>`, letting imaginarium do the channel
 /// conversion. The multi-channel counterpart to [`save`], which takes one f32 plane and tone-maps
-/// it here; this one has colour to preserve and no single plane to map.
+/// it here; this one has color to preserve and no single plane to map.
 #[cfg(feature = "real-data")]
 pub(crate) fn save_linear(image: &LinearImage, name: &str) {
     let Some(path) = debug_file(name) else {

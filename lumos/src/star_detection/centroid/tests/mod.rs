@@ -17,6 +17,7 @@ use crate::math::fwhm;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::urect::URect;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::stamp::{FitInputs, StampGrid};
 use crate::star_detection::centroid::star_noise::StarNoise;
@@ -159,10 +160,10 @@ impl Measured {
         )
     }
 
-    /// `compute_star` at `pos` over a stamp of `radius`, with the global sky, no gain and the PSF
+    /// [`moment_star`] at `pos` over a stamp of `radius`, with the global sky, no gain and the PSF
     /// of [`TEST_EXPECTED_FWHM`].
     fn compute(&self, pos: DVec2, radius: usize) -> Option<Star> {
-        compute_star(
+        moment_star(
             StampAt {
                 residual: &self.residual,
                 pos,
@@ -172,6 +173,25 @@ impl Measured {
             global_background(&self.sky, pos),
         )
     }
+}
+
+/// The star `measure_star` makes where no fit measured it: [`StampMetrics`] over `stamp` against
+/// `background` and a PSF of `psf_sigma`, its shape from the windowed moments, and no position σ.
+fn moment_star(stamp: StampAt<'_>, psf_sigma: f64, background: StarBackground) -> Option<Star> {
+    let metrics = StampMetrics::measure(stamp, psf_sigma, background)?;
+    let shape = metrics.moment_shape();
+    Some(Star {
+        pos: stamp.pos,
+        position_sigma: f64::NAN,
+        flux: metrics.flux,
+        fwhm: shape.map_or(0.0, Cov2::fwhm),
+        eccentricity: shape.map_or(0.0, Cov2::eccentricity),
+        snr: metrics.snr,
+        peak: metrics.peak,
+        saturated: false,
+        sharpness: metrics.sharpness,
+        roundness: metrics.roundness,
+    })
 }
 
 mod basic;

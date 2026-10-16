@@ -2,6 +2,7 @@
 
 use glam::DVec2;
 
+use crate::math::grid;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::distortion::tps::ThinPlateSpline;
@@ -11,8 +12,12 @@ use crate::registration::distortion::tps::ThinPlateSpline;
 struct DistortionMap {
     /// The grid's extent, in nodes.
     grid: Size2us,
-    /// The distance between nodes, in pixels.
-    spacing: f64,
+    /// The distance between nodes, in pixels; the last cell of an axis may be narrower.
+    spacing: usize,
+    /// The pixel each column of nodes sits on, ending on the image's last column.
+    columns: Vec<usize>,
+    /// The pixel each row of nodes sits on, ending on the image's last row.
+    rows: Vec<usize>,
     /// The distortion at each node, row by row.
     vectors: Vec<DVec2>,
     max_magnitude: f64,
@@ -20,40 +25,34 @@ struct DistortionMap {
 }
 
 impl DistortionMap {
-    /// The distortion `tps` gives at every node of a grid of `grid_spacing` over `image`, its far
-    /// edges included.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "a size over a positive grid spacing is non-negative"
-    )]
-    fn from_tps(tps: &ThinPlateSpline, image: Size2us, grid_spacing: f64) -> Self {
-        let grid = Size2us::new(
-            (image.width as f64 / grid_spacing).ceil() as usize + 1,
-            (image.height as f64 / grid_spacing).ceil() as usize + 1,
-        );
+    /// The distortion `tps` gives at every node of a grid of `spacing` over `image`: every
+    /// `spacing` pixels and the last pixel of each axis ([`grid::nodes`]), so the statistics
+    /// cover the frame and nothing past it, where a spline grows like `r² ln r`.
+    fn from_tps(tps: &ThinPlateSpline, image: Size2us, spacing: usize) -> Self {
+        let columns: Vec<usize> = grid::nodes(image.width, spacing).collect();
+        let rows: Vec<usize> = grid::nodes(image.height, spacing).collect();
+        let grid = Size2us::new(columns.len(), rows.len());
 
         let mut vectors = Vec::with_capacity(grid.pixel_count());
         let mut max_magnitude = 0.0f64;
         let mut sum_magnitude = 0.0;
-
-        for gy in 0..grid.height {
-            for gx in 0..grid.width {
-                let p = DVec2::new(gx as f64 * grid_spacing, gy as f64 * grid_spacing);
-                let t = tps.transform(p);
-                let d = t - p;
+        for &y in &rows {
+            for &x in &columns {
+                let p = DVec2::new(x as f64, y as f64);
+                let d = tps.transform(p) - p;
                 let magnitude = d.length();
-
                 vectors.push(d);
                 max_magnitude = max_magnitude.max(magnitude);
                 sum_magnitude += magnitude;
             }
         }
-
         let mean_magnitude = sum_magnitude / vectors.len() as f64;
 
         Self {
             grid,
-            spacing: grid_spacing,
+            spacing,
+            columns,
+            rows,
             vectors,
             max_magnitude,
             mean_magnitude,
@@ -69,29 +68,32 @@ impl DistortionMap {
 
     /// Interpolate the distortion at an arbitrary position: bilinear inside the grid, and the
     /// nearest edge's value past it, never a zero the map did not measure.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "the grid coordinate is clamped to the grid, so it is non-negative"
-    )]
     fn interpolate(&self, p: DVec2) -> DVec2 {
-        let gx = (p.x / self.spacing).clamp(0.0, (self.grid.width - 1) as f64);
-        let gy = (p.y / self.spacing).clamp(0.0, (self.grid.height - 1) as f64);
-
-        let gx0 = gx.floor() as usize;
-        let gy0 = gy.floor() as usize;
-        let gx1 = (gx0 + 1).min(self.grid.width - 1);
-        let gy1 = (gy0 + 1).min(self.grid.height - 1);
-
-        let fx = gx - gx0 as f64;
-        let fy = gy - gy0 as f64;
-
+        let (x0, x1, fx) = self.cell(&self.columns, p.x);
+        let (y0, y1, fy) = self.cell(&self.rows, p.y);
         let at = |x, y| self.vectors[self.grid.index_of(Vec2us::new(x, y))];
-        let (v00, v10, v01, v11) = (at(gx0, gy0), at(gx1, gy0), at(gx0, gy1), at(gx1, gy1));
-
+        let (v00, v10, v01, v11) = (at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1));
         (1.0 - fx) * (1.0 - fy) * v00
             + fx * (1.0 - fy) * v10
             + (1.0 - fx) * fy * v01
             + fx * fy * v11
+    }
+
+    /// The two nodes of `nodes` around `coordinate`, and how far between them it lies, held to
+    /// the grid: both the last node, and 0, past its far end.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the cell index is clamped to the grid, so it is non-negative"
+    )]
+    fn cell(&self, nodes: &[usize], coordinate: f64) -> (usize, usize, f64) {
+        let last = nodes.len() - 1;
+        if last == 0 {
+            return (0, 0, 0.0);
+        }
+        let lower = ((coordinate / self.spacing as f64).floor().max(0.0) as usize).min(last - 1);
+        let (from, to) = (nodes[lower] as f64, nodes[lower + 1] as f64);
+        let fraction = ((coordinate - from) / (to - from)).clamp(0.0, 1.0);
+        (lower, lower + 1, fraction)
     }
 }
 

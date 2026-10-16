@@ -51,6 +51,7 @@ impl IngestRun {
                 cancel,
                 memory_limit_bytes: memory.decode_ceiling(),
                 fits: config.fits.clone(),
+                nulls: config.nulls,
                 xtrans_passes: config.xtrans_passes,
                 decode_threads: budget.workers(),
             },
@@ -64,6 +65,11 @@ impl IngestRun {
     /// keeps them both.
     pub(crate) fn monitor(&self) -> ProgressMonitor {
         ProgressMonitor::new(self.progress.clone(), self.context.cancel.clone())
+    }
+
+    /// [`Self::monitor`], for the run's last stage, which takes it whole.
+    pub(crate) fn into_monitor(self) -> ProgressMonitor {
+        ProgressMonitor::new(self.progress, self.context.cancel)
     }
 }
 
@@ -95,7 +101,7 @@ mod tests {
 
     use crate::ingest::ingest_config::IngestConfig;
     use crate::ingest::ingest_run::{IngestRun, RunHost};
-    use crate::io::fits::fits_load_options::FitsNullPolicy;
+    use crate::io::null_policy::NullPolicy;
     use crate::memory::budget::Budget;
     use crate::memory::run_memory::RunMemory;
     use crate::progress::progress_callback::ProgressCallback;
@@ -105,9 +111,9 @@ mod tests {
     /// The budget is 75% of the override, and the decode ceiling 75% of the system reading whatever
     /// the override: 75 of 100 and 6000 of 8000 here. A decode takes every one of the run's three
     /// workers. The FITS policy and the storage are the config's: nulls refused, and the kept cache
-    /// under `cache`. The monitor's halves land where the stages read them, and join again whole:
-    /// its token is the decode context's, cancelled through either, and its callback hears the
-    /// run's reports.
+    /// under `cache`. The monitor's halves land where the stages read them, and join again whole,
+    /// borrowed or taken: its token is the decode context's, cancelled through either, and its
+    /// callback hears the run's reports.
     #[test]
     fn the_run_carries_the_ceiling_the_policy_and_the_monitor() {
         let reports = Arc::new(Mutex::new(Vec::new()));
@@ -120,7 +126,7 @@ mod tests {
             keep_cache: true,
             ..IngestConfig::with_cache_dir("cache".into())
         };
-        config.fits.nulls = FitsNullPolicy::Reject;
+        config.nulls = NullPolicy::Reject;
         let host = RunHost {
             memory: RunMemory::new(8_000, Some(100)),
             workers: 3,
@@ -133,7 +139,7 @@ mod tests {
         assert_eq!(run.budget, Budget::new(75, 3));
         assert_eq!(run.context.decode_threads, 3);
         assert_eq!(run.context.memory_limit_bytes, 6_000);
-        assert_eq!(run.context.fits.nulls, FitsNullPolicy::Reject);
+        assert_eq!(run.context.nulls, NullPolicy::Reject);
         assert_eq!(run.cache_dir, Path::new("cache"));
         assert!(run.keep_cache);
 
@@ -144,6 +150,9 @@ mod tests {
         assert!(monitor.cancel.is_cancelled());
         run.progress.report(1, 2, StackingStage::Loading);
         monitor.progress.report(2, 2, StackingStage::Loading);
-        assert_eq!(*reports.lock().unwrap(), [(1, 2), (2, 2)]);
+        let whole = run.into_monitor();
+        assert!(whole.cancel.is_cancelled());
+        whole.progress.report(1, 1, StackingStage::Combining);
+        assert_eq!(*reports.lock().unwrap(), [(1, 2), (2, 2), (1, 1)]);
     }
 }

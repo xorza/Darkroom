@@ -10,14 +10,16 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
-use crate::combine::frame_cache::sample::{PixelSamples, SampleQuality};
-use crate::combine::frame_cache::sample_noise::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseColumns;
+use crate::combine::reducer::pixel_samples::PixelSamples;
+use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
-use crate::combine::rejection::mean_combine::MeanCombine;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::rejection::trim_config::TrimConfig;
+use crate::combine::stack::mean_combine::MeanCombine;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 
@@ -55,6 +57,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 let mut scratch = ScratchBuffers::default();
                 scratch.reserve(frames);
                 let mut values = vec![0.0; frames];
+                let reduce = MeanCombine {
+                    rejection,
+                    small_n: SmallN::none(),
+                    min_survivors: DEFAULT_MIN_SURVIVORS,
+                    quality: SampleQuality::Measured,
+                }
+                .reducer();
                 b.iter(|| {
                     for pixel in block.samples.chunks_exact(frames) {
                         values.copy_from_slice(pixel);
@@ -63,14 +72,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                             weights: &block.weights,
                             noise: Some(block.noise()),
                         };
-                        black_box(
-                            MeanCombine {
-                                rejection,
-                                min_survivors: DEFAULT_MIN_SURVIVORS,
-                                quality: SampleQuality::Measured,
-                            }
-                            .combine(&samples, &mut scratch),
-                        );
+                        black_box(reduce(samples, &mut scratch));
                     }
                 });
             });
@@ -90,7 +92,7 @@ pub(crate) struct Block {
     pub(crate) weights: Vec<f32>,
     background: Vec<f32>,
     sky: Vec<f32>,
-    inverse_electrons: Vec<f32>,
+    per_unit: Vec<f32>,
 }
 
 impl Block {
@@ -118,7 +120,7 @@ impl Block {
             samples,
             weights: background.iter().map(|variance| 1.0 / variance).collect(),
             sky: vec![sky; frames],
-            inverse_electrons: vec![1.0 / FULL_WELL_E; frames],
+            per_unit: vec![1.0 / FULL_WELL_E; frames],
             background,
         }
     }
@@ -127,7 +129,7 @@ impl Block {
         NoiseColumns {
             background: &self.background,
             sky: &self.sky,
-            inverse_electrons: &self.inverse_electrons,
+            per_unit: &self.per_unit,
         }
     }
 }

@@ -6,14 +6,15 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::size2us::Size2us;
-use crate::registration::resample::kernel::warp_kernel::Filter;
+use crate::registration::resample::warp_kernel::Filter;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
 /// there, and outside the source it is the border.
@@ -53,7 +54,7 @@ fn integer_shifts_copy_the_source() {
                 }
                 _ => 0.0,
             };
-            let output = transform.warp_plane(&input, params);
+            let output = params.warp_plane(&input, &transform);
             for y in 0..size.height {
                 for x in 0..size.width {
                     let source_x = x as i32 + shift.0;
@@ -86,8 +87,8 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
     const HORIZON_X: usize = 8;
     const BORDER: f32 = -0.25;
 
-    let input = LinearImage::from_pixels(
-        ImageDimensions::new((WIDTH, HEIGHT), 1),
+    let input = LinearImage::from_interleaved(
+        ImageDimensions::new((WIDTH, HEIGHT), ChannelLayout::Mono),
         vec![0.75; WIDTH * HEIGHT],
     );
     for horizon_scale in [1.0, 1.0 - 1e-12] {
@@ -116,7 +117,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
                 border_value: BORDER,
                 ..Default::default()
             };
-            let warped = wt.warp(&input, params);
+            let warped = params.warp(&input, &wt);
             let output = warped.image.channel(0);
             let coverage = &warped.coverage;
 
@@ -160,7 +161,7 @@ fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
     ] {
-        let output = wt.warp_plane(&input, WarpParams::with_method(method));
+        let output = WarpParams::with_method(method).warp_plane(&input, &wt);
         assert!(
             output
                 .pixels()

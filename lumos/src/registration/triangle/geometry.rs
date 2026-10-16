@@ -18,8 +18,9 @@ pub(super) enum Orientation {
 pub(super) struct Triangle {
     /// Indices of the three points in the original list.
     pub(super) indices: [usize; 3],
-    /// Invariant ratios: `(sides[0]/sides[2], sides[1]/sides[2])`.
-    pub(super) ratios: (f64, f64),
+    /// Invariant ratios: `(sides[0]/sides[2], sides[1]/sides[2])`, the point a triangle is
+    /// matched at.
+    pub(super) ratios: DVec2,
     /// Orientation of the triangle.
     pub(super) orientation: Orientation,
 }
@@ -66,7 +67,7 @@ impl Triangle {
         if longest == 0.0 || twice_area < min_height * longest {
             return None;
         }
-        let ratios = (sides[0] / longest, sides[1] / longest);
+        let ratios = DVec2::new(sides[0] / longest, sides[1] / longest);
 
         // Reorder indices by geometric role:
         // indices[0] = vertex opposite shortest side
@@ -96,8 +97,8 @@ impl Triangle {
 
     /// Whether both ratios are within `tolerance` of `other`'s.
     pub(super) fn is_similar(&self, other: &Self, tolerance: f64) -> bool {
-        let dr0 = (self.ratios.0 - other.ratios.0).abs();
-        let dr1 = (self.ratios.1 - other.ratios.1).abs();
+        let dr0 = (self.ratios.x - other.ratios.x).abs();
+        let dr1 = (self.ratios.y - other.ratios.y).abs();
         dr0 < tolerance && dr1 < tolerance
     }
 
@@ -110,8 +111,8 @@ impl Triangle {
     /// Side `side`, by length from the shortest, over the longest.
     const fn ratio(&self, side: usize) -> f64 {
         match side {
-            0 => self.ratios.0,
-            1 => self.ratios.1,
+            0 => self.ratios.x,
+            1 => self.ratios.y,
             _ => 1.0,
         }
     }

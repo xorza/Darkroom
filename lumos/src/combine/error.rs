@@ -1,15 +1,17 @@
 //! The errors of a stack: its configuration's and its run's.
 
+use std::convert::Infallible;
+
 use thiserror::Error;
 
-use crate::calibration::error::SubtractionError;
-use crate::calibration::master_role::MasterRole;
 use crate::error::Cancelled;
-use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::error::InvalidConfigField;
 use crate::frame::frame_plane::FramePlane;
-use crate::frame_store::error::{ConditionMismatch, FrameStoreError};
+use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::image::error::FrameDimensionMismatch;
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
+use crate::math::size2us::Size2us;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -44,10 +46,10 @@ pub enum StackError {
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
 
-    #[error("No frames provided for stacking")]
+    #[error("no frames provided")]
     NoFrames,
 
-    #[error("stacking cancelled")]
+    #[error("cancelled")]
     Cancelled,
 
     #[error("registered frames have no pixels with common valid warp support")]
@@ -59,7 +61,7 @@ pub enum StackError {
     )]
     NonPositiveMedian {
         index: usize,
-        /// A channel, or a colour of a mosaic.
+        /// A channel, or a color of a mosaic.
         slot: usize,
         median: f32,
     },
@@ -72,23 +74,10 @@ pub enum StackError {
     )]
     NoSignalScale {
         index: usize,
-        /// A channel, or a colour of a mosaic.
+        /// A channel, or a color of a mosaic.
         slot: usize,
         spread: f32,
         noise: f32,
-    },
-
-    /// The master a calibration stack subtracts from every frame cannot be taken from them.
-    #[error(transparent)]
-    Subtraction(#[from] SubtractionError),
-
-    /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
-    /// flat-dark — were not all taken under one: the master would state one frame's conditions and
-    /// hold the majority's signal.
-    #[error("the {role} frames must share one exposure and one temperature: {source}")]
-    MasterConditions {
-        role: MasterRole,
-        source: ConditionMismatch,
     },
 
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
@@ -96,23 +85,28 @@ pub enum StackError {
     #[error("frame {index} has no measured noise to weight by; use Equal or Manual weighting")]
     NoNoiseToWeigh { index: usize },
 
+    /// [`RejectionScale::CcdModel`](crate::RejectionScale::CcdModel) holds each sample to its own
+    /// CCD noise, whose photon term needs the frame's gain, and this frame, the first of the set,
+    /// states none.
+    #[error(
+        "frame {index} states no gain, which CCD-model rejection needs; use Robust rejection or \
+         give every frame its gain"
+    )]
+    UnknownGain { index: usize },
+
     /// A file that could not be decoded, held as the decoder's own error — which already names the
     /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
     /// printed the path twice and flattened the cause into an `io::Error`. A decode that was
     /// cancelled arrives as [`Self::Cancelled`], never here.
     #[error(transparent)]
-    ImageLoad(#[from] ImageError),
+    ImageLoad(ImageError),
 
-    #[error(
-        "{plane} dimensions for frame {index} do not match: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
-    )]
-    WarpPlaneDimensionMismatch {
+    #[error("{plane} dimensions for frame {index} do not match: expected {expected}, got {actual}")]
+    PlaneDimensionMismatch {
         index: usize,
         plane: FramePlane,
-        expected_width: usize,
-        expected_height: usize,
-        actual_width: usize,
-        actual_height: usize,
+        expected: Size2us,
+        actual: Size2us,
     },
 
     /// A frame failed the checks every frame of a set passes before it is combined.
@@ -163,28 +157,22 @@ impl StackError {
                 spread,
                 noise,
             },
-            Self::Subtraction(error) => Self::Subtraction(error.renumbered(inputs)),
-            Self::MasterConditions { role, source } => Self::MasterConditions {
-                role,
-                source: source.renumbered(inputs),
-            },
             Self::NoNoiseToWeigh { index } => Self::NoNoiseToWeigh {
                 index: inputs[index],
             },
-            Self::WarpPlaneDimensionMismatch {
+            Self::UnknownGain { index } => Self::UnknownGain {
+                index: inputs[index],
+            },
+            Self::PlaneDimensionMismatch {
                 index,
                 plane,
-                expected_width,
-                expected_height,
-                actual_width,
-                actual_height,
-            } => Self::WarpPlaneDimensionMismatch {
+                expected,
+                actual,
+            } => Self::PlaneDimensionMismatch {
                 index: inputs[index],
                 plane,
-                expected_width,
-                expected_height,
-                actual_width,
-                actual_height,
+                expected,
+                actual,
             },
             Self::Admission(error) => Self::Admission(error.renumbered(inputs)),
             error @ (Self::FrameStore(_)
@@ -212,6 +200,33 @@ impl From<AdmissionError> for StackError {
     }
 }
 
+/// Cancellation is the run stopping, not a file failing, so a cancelled decode leaves the load
+/// error behind and reports as the stack's own.
+impl From<ImageError> for StackError {
+    fn from(error: ImageError) -> Self {
+        match error {
+            ImageError::Cancelled { .. } => Self::Cancelled,
+            error => Self::ImageLoad(error),
+        }
+    }
+}
+
+impl From<LoadError> for StackError {
+    fn from(error: LoadError) -> Self {
+        match error {
+            LoadError::Decode(error) => error.into(),
+            LoadError::Store(error) => error.into(),
+        }
+    }
+}
+
+/// The error of a step no run takes.
+impl From<Infallible> for StackError {
+    fn from(never: Infallible) -> Self {
+        match never {}
+    }
+}
+
 impl From<Cancelled> for StackError {
     fn from(Cancelled: Cancelled) -> Self {
         Self::Cancelled
@@ -225,6 +240,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::combine::error::*;
+    use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::image_provenance::RowOrder;
 
@@ -298,7 +314,7 @@ mod tests {
     #[test]
     fn no_frames_error_message() {
         let err = StackError::NoFrames;
-        assert_eq!(err.to_string(), "No frames provided for stacking");
+        assert_eq!(err.to_string(), "no frames provided");
         assert_eq!(
             StackError::NoCommonCoverage.to_string(),
             "registered frames have no pixels with common valid warp support"
@@ -307,7 +323,7 @@ mod tests {
 
     /// A load failure travels as the decoder's own error: the path appears once, the variant stays
     /// matchable on which decode failed, and `source()` reaches the real cause. Wrapping it in a
-    /// `{ path, source: io::Error }` of our own printed "Failed to load image '{p}': Failed to read
+    /// `{ path, source: io::Error }` of our own printed "failed to load image '{p}': failed to read
     /// file '{p}': …" and flattened the `ImageError` into a string.
     #[test]
     fn a_load_failure_states_the_path_once_and_stays_typed() {
@@ -320,7 +336,7 @@ mod tests {
         let message = error.to_string();
         assert_eq!(
             message,
-            "Failed to read file '/path/to/image.fits': file not found"
+            "failed to read file '/path/to/image.fits': file not found"
         );
         assert_eq!(message.matches("/path/to/image.fits").count(), 1);
         assert!(matches!(
@@ -330,6 +346,11 @@ mod tests {
 
         let source = error.source().expect("the decode's own cause");
         assert!(source.downcast_ref::<io::Error>().is_some(), "{source}");
+
+        let cancelled = StackError::from(ImageError::Cancelled {
+            path: PathBuf::from("/path/to/image.fits"),
+        });
+        assert!(matches!(cancelled, StackError::Cancelled), "{cancelled:?}");
     }
 
     /// The variants that carry a shared payload print exactly what the payload prints — the wording
@@ -347,8 +368,8 @@ mod tests {
 
         let mismatch = FrameDimensionMismatch::check(
             5,
-            ImageDimensions::new((100, 100), 3),
-            ImageDimensions::new((200, 100), 3),
+            ImageDimensions::new((100, 100), ChannelLayout::Rgb),
+            ImageDimensions::new((200, 100), ChannelLayout::Rgb),
         )
         .unwrap_err();
         assert_eq!(

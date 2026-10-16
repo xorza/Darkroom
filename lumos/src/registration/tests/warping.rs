@@ -4,6 +4,7 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::fixtures::star_field;
@@ -11,8 +12,8 @@ use crate::internals::synthetic::metrics;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
-use crate::registration::transform::warp_transform::WarpTransform;
 use crate::registration::transform::{Transform, TransformType};
+use crate::registration::warp_transform::WarpTransform;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -26,7 +27,7 @@ fn do_warp(
 }
 
 fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpParams) -> Buffer2<f32> {
-    WarpTransform::new(transform.inverse()).warp_plane(input, params)
+    params.warp_plane(input, &WarpTransform::new(transform.inverse()))
 }
 
 /// Peak signal-to-noise ratio between two images of peak `max_val`, in dB; infinite for equal ones.
@@ -235,7 +236,10 @@ fn interpolation_quality_ordering() {
 
 #[test]
 fn warp_preserves_output_metadata() {
+    use crate::image::channel_layout::ChannelLayout;
+    use crate::image::derived_facts::DerivedFacts;
     use crate::image::image_metadata::ImageMetadata;
+    use crate::image::observation_header::ObservationHeader;
 
     let pixels = star_field(Size2us::new(256, 256), 30, 11111)
         .image
@@ -243,12 +247,17 @@ fn warp_preserves_output_metadata() {
         .clone();
     let width = pixels.width();
     let height = pixels.height();
-    let mut image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
+    let mut image = LinearImage::from_interleaved(
+        ImageDimensions::new((width, height), ChannelLayout::Mono),
+        pixels.into_vec(),
+    );
     image.metadata = ImageMetadata {
-        object: Some("M42".to_string()),
-        exposure_time: Some(120.0),
-        ..Default::default()
+        header: ObservationHeader {
+            object: Some("M42".to_string()),
+            exposure_time: Some(120.0),
+            ..Default::default()
+        },
+        derived: DerivedFacts::default(),
     };
 
     let transform = Transform::translation(DVec2::new(5.0, 5.0));
@@ -256,14 +265,14 @@ fn warp_preserves_output_metadata() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = WarpTransform::new(transform)
-        .warp(&image, warp_config)
+    let warped = warp_config
+        .warp(&image, &WarpTransform::new(transform))
         .image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
-    assert_eq!(warped.metadata.object, Some("M42".to_string()));
-    assert_eq!(warped.metadata.exposure_time, Some(120.0));
+    assert_eq!(warped.metadata.header.object, Some("M42".to_string()));
+    assert_eq!(warped.metadata.header.exposure_time, Some(120.0));
 }
 
 /// The central regions of two images, row by row.
@@ -302,8 +311,10 @@ fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> 
 /// `WarpTransform`'s tests) — for every method, on a field whose correction reaches past 0.1 px.
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
+    use crate::image::channel_layout::ChannelLayout;
     use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
     use crate::registration::distortion::sip::SipModel;
+    use crate::registration::distortion::sip::sip_order::SipOrder;
 
     let size = Size2us::new(128, 128);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
@@ -320,7 +331,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
         extent: 109,
     });
     let sip = SipModel {
-        order: 3,
+        order: SipOrder::Three,
         origin: field.centre,
     }
     .fitted_under(&transform, &ref_points, &target_points);
@@ -328,14 +339,14 @@ fn the_public_warp_samples_through_the_sip_correction() {
     let warp_transform = WarpTransform::with_sip(transform, sip);
 
     let pixels = star_field(size, 20, 12321).image.channel(0).clone();
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
         pixels.pixels().to_vec(),
     );
     for method in InterpolationMethod::ALL {
         let params = WarpParams::with_method(method);
-        let warped = warp_transform.warp(&image, params).image;
-        let plane = warp_transform.warp_plane(&pixels, params);
+        let warped = params.warp(&image, &warp_transform).image;
+        let plane = params.warp_plane(&pixels, &warp_transform);
         for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
             assert_eq!(
                 a.to_bits(),
@@ -354,8 +365,8 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // must read back exactly V.
     const V: f32 = 0.5;
     let size = Size2us::new(16usize, 8usize);
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],
     );
 
@@ -369,7 +380,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = WarpTransform::new(transform).warp(&image, config);
+    let result = config.warp(&image, &WarpTransform::new(transform));
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -400,8 +411,8 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
     let size = Size2us::new(32usize, 8usize);
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],
     );
 
@@ -413,7 +424,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = WarpTransform::new(transform).warp(&image, config);
+    let result = config.warp(&image, &WarpTransform::new(transform));
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();

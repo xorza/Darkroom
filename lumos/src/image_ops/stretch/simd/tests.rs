@@ -151,7 +151,7 @@ fn asinh_plane_matches_scalar() {
 }
 
 /// A NaN sample shows as black on every tier and on the scalar path: on the plane, and in any
-/// channel of a colour pixel, whose other channels go black with it because their intensity is
+/// channel of a color pixel, whose other channels go black with it because their intensity is
 /// NaN.
 #[test]
 fn a_nan_sample_is_black_on_every_path() {

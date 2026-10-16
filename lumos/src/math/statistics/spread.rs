@@ -1,7 +1,7 @@
 //! [`Spread`]: a robust location and scale, and the floor below which a measured scale says
 //! nothing.
 
-use crate::math::statistics::MAD_TO_SIGMA;
+use crate::math::statistics;
 
 /// The median of a sorted window and its MAD in Gaussian units, unbiased at every count.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9,16 +9,6 @@ pub(crate) struct Spread {
     pub(crate) centre: f32,
     pub(crate) sigma: f32,
 }
-
-/// `b_n` for n = 2 ..= 20, so that `b_n · 1.4826 · MAD` is unbiased for n Gaussian samples. The
-/// MAD here takes the mean of the two middle values at an even count, for the median and for the
-/// median of the deviations, and Croux & Rousseeuw's (1992) table does not fit that form at even n
-/// (n = 6: 1.200 against 1.1895). Measured by `internals/reference/mad_consistency.py` from 10⁷
-/// trials per count: the standard error is below 3·10⁻⁴ at n = 3 and falls with n.
-const MAD_CONSISTENCY: [f32; 19] = [
-    1.1955, 1.4869, 1.3604, 1.2170, 1.1895, 1.1378, 1.1274, 1.1011, 1.0958, 1.0799, 1.0765, 1.0661,
-    1.0638, 1.0563, 1.0548, 1.0491, 1.0478, 1.0435, 1.0425,
-];
 
 /// The spacing of `f32` at 0.
 const SMALLEST_STEP: f32 = f32::from_bits(1);
@@ -29,13 +19,10 @@ impl Spread {
         debug_assert!(!sorted.is_empty());
         debug_assert!(sorted.is_sorted());
         let centre = Self::median_of_sorted(sorted);
-        let sigma = if sorted.len() < 2 {
-            0.0
-        } else {
-            let scale = MAD_TO_SIGMA * f64::from(Self::consistency(sorted.len()));
-            (f64::from(mad_of_sorted(sorted, centre)) * scale) as f32
-        };
-        Self { centre, sigma }
+        Self {
+            centre,
+            sigma: statistics::sigma_of_mad(mad_of_sorted(sorted, centre), sorted.len()),
+        }
     }
 
     /// The median of an ascending window: the middle sample, or the mean of the two middle ones.
@@ -48,19 +35,6 @@ impl Spread {
             sorted[n / 2]
         } else {
             f32::midpoint(sorted[n / 2 - 1], sorted[n / 2])
-        }
-    }
-
-    /// The small-sample factor `b_n` for `n ≥ 2` samples. Above the table, Croux & Rousseeuw's
-    /// `n / (n − 0.8)`, which the same simulation puts within 0.1% of the measured factor from
-    /// n = 20 on.
-    fn consistency(n: usize) -> f32 {
-        debug_assert!(n >= 2);
-        if let Some(&factor) = MAD_CONSISTENCY.get(n - 2) {
-            factor
-        } else {
-            let n = n as f64;
-            (n / (n - 0.8)) as f32
         }
     }
 
@@ -174,7 +148,7 @@ mod tests {
     use super::*;
     use crate::internals::invariance::Affine;
     use crate::internals::test_rng::TestRng;
-    use crate::math::statistics::median_mut;
+    use crate::math::statistics::MAD_TO_SIGMA;
 
     /// The centre and the MAD are medians at both parities. [1, 3, 7, 9]: centre (3 + 7)/2 = 5,
     /// deviations ranked [2, 2, 4, 4], MAD (2 + 4)/2 = 3. [1, 3, 7]: centre 3, deviations ranked
@@ -228,17 +202,12 @@ mod tests {
     }
 
     /// σ is 1.4826 · MAD · `b_n`, in f64 and rounded once. [1, 3, 7, 9] has MAD 3 and n = 4, so
-    /// σ = 3 · 1.482602 · 1.3604. Above the table, n = 21 gives 21/20.2. One sample has no spread.
+    /// σ = 3 · (1.482602 · 1.3604). One sample has no spread.
     #[test]
     fn sigma_carries_the_small_sample_factor() {
         let four = Spread::of_sorted(&[1.0, 3.0, 7.0, 9.0]);
         assert_eq!(four.centre, 5.0);
-        assert_eq!(
-            four.sigma,
-            (3.0 * MAD_TO_SIGMA * f64::from(1.3604f32)) as f32
-        );
-        assert_eq!(Spread::consistency(21), (21.0f64 / 20.2) as f32);
-        assert_eq!(Spread::consistency(20), 1.0425);
+        assert_eq!(four.sigma, (3.0 * (MAD_TO_SIGMA * 1.3604)) as f32);
         assert_eq!(
             Spread::of_sorted(&[4.0]),
             Spread {
@@ -314,10 +283,7 @@ mod tests {
         let mut sorted = values.clone();
         sorted.sort_unstable_by(f32::total_cmp);
         let spread = Spread::of_sorted(&sorted);
-        assert_eq!(spread.centre, median_mut(&mut values));
-        assert_eq!(
-            spread.sigma,
-            (2.0 * MAD_TO_SIGMA * f64::from(Spread::consistency(5))) as f32
-        );
+        assert_eq!(spread.centre, statistics::median_mut(&mut values));
+        assert_eq!(spread.sigma, (2.0 * (MAD_TO_SIGMA * 1.2170)) as f32);
     }
 }

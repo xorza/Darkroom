@@ -4,11 +4,11 @@
 //! The sums are [`TapWindow`](crate::registration::resample::tap_window::TapWindow)'s for such a
 //! window, from the same weights; only the order of their additions differs.
 
-use crate::registration::resample::kernel::warp_kernel::WarpKernel;
-use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
+use crate::registration::resample::ringing_clamp::LobeSums;
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_position::SourceAt;
-use crate::registration::resample::tap_window::RowLanes;
+use crate::registration::resample::tap_window::{AxisSums, Lobes, RowLanes, WindowWeights};
+use crate::registration::resample::warp_kernel::WarpKernel;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// A window of at most [`F32_LANES`] taps per axis, wholly inside the source.
@@ -21,15 +21,7 @@ pub(crate) struct InteriorWindow<V: F32x8> {
     wx: V,
     lanes: RowLanes<V>,
     wy: [f32; F32_LANES],
-    x_sums: AxisMoments,
-    y_sums: AxisMoments,
-}
-
-/// One axis's weight sum and sum of squares.
-#[derive(Debug, Clone, Copy)]
-struct AxisMoments {
-    total: f32,
-    square: f32,
+    weights: WindowWeights,
 }
 
 impl<V: F32x8> InteriorWindow<V> {
@@ -62,43 +54,15 @@ impl<V: F32x8> InteriorWindow<V> {
             wx,
             lanes,
             wy: wy_lanes.to_array(),
-            x_sums: AxisMoments {
-                total: wx.reduce_sum(),
-                square: (wx * wx).reduce_sum(),
-            },
-            y_sums: AxisMoments {
-                total: wy_lanes.reduce_sum(),
-                square: (wy_lanes * wy_lanes).reduce_sum(),
-            },
+            weights: AxisSums::of_lanes(isa, wx).window(AxisSums::of_lanes(isa, wy_lanes)),
         })
     }
 
-    /// `Σ L` over the window, `L = wₓ·w_y`.
-    pub(crate) fn total_weight(&self) -> f32 {
-        self.x_sums.total * self.y_sums.total
-    }
-
-    /// Kish's effective sample size of the normalized weights, as
-    /// [`WindowWeights::confidence`](crate::registration::resample::tap_window::WindowWeights::confidence).
-    pub(crate) fn confidence(&self) -> f32 {
-        let total = self.total_weight();
-        total * total / (self.x_sums.square * self.y_sums.square)
-    }
-
-    /// The window's weight by lobe, from each axis's split by sign.
-    #[inline(always)]
-    pub(crate) fn lobes<S: Isa<F32 = V>>(&self, isa: S) -> LobeWeights {
-        let zero = isa.splat_f32(0.0);
-        let wy = isa.load_f32(&self.wy);
-        let (x_positive, x_negative) = (
-            self.wx.max(zero).reduce_sum(),
-            self.wx.min(zero).reduce_sum(),
-        );
-        let (y_positive, y_negative) = (wy.max(zero).reduce_sum(), wy.min(zero).reduce_sum());
-        LobeWeights {
-            positive: x_positive * y_positive + x_negative * y_negative,
-            negative: x_positive * y_negative + x_negative * y_positive,
-        }
+    /// The window's weight sums, as [`TapWindow::weights`] gives them for the same taps.
+    ///
+    /// [`TapWindow::weights`]: crate::registration::resample::tap_window::TapWindow::weights
+    pub(crate) const fn weights(&self) -> WindowWeights {
+        self.weights
     }
 
     /// `Σ L·f` over the window of `plane`.
@@ -117,25 +81,21 @@ impl<V: F32x8> InteriorWindow<V> {
     pub(crate) fn lobe_sums<S: Isa<F32 = V>>(&self, isa: S, plane: SourcePlane<'_>) -> LobeSums {
         let zero = isa.splat_f32(0.0);
         let (x_positive, x_negative) = (self.wx.max(zero), self.wx.min(zero));
-        let (mut positive, mut negative, mut below_zero) = (zero, zero, zero);
+        let mut lobes = Lobes::zero(isa);
+        let mut below_zero = zero;
         for (j, &wy) in self.wy[..self.rows].iter().enumerate() {
             let values = self.lanes.load(isa, plane.pixels, self.row(plane, j));
             let light = values.max(zero);
-            let on_positive = light * x_positive;
-            let on_negative = light * x_negative;
-            let wy_lanes = isa.splat_f32(wy);
-            let (to_positive, to_negative) = if wy > 0.0 {
-                (on_positive, on_negative)
-            } else {
-                (on_negative, on_positive)
+            let on_row = Lobes {
+                positive: light * x_positive,
+                negative: light * x_negative,
             };
-            positive = to_positive.mul_add(wy_lanes, positive);
-            negative = to_negative.mul_add(wy_lanes, negative);
-            below_zero = ((values - light) * self.wx).mul_add(wy_lanes, below_zero);
+            lobes.add_row(isa, on_row, wy);
+            below_zero = ((values - light) * self.wx).mul_add(isa.splat_f32(wy), below_zero);
         }
         LobeSums {
-            positive: positive.reduce_sum(),
-            negative: negative.reduce_sum(),
+            positive: lobes.positive.reduce_sum(),
+            negative: lobes.negative.reduce_sum(),
             below_zero: below_zero.reduce_sum(),
         }
     }

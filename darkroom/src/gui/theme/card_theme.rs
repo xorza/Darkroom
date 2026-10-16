@@ -15,14 +15,14 @@ pub(crate) struct CardTheme {
     pub(crate) fill: RgbaF32,
     /// Resting outline. Transparent: the ambient shadow carries the edge,
     /// and the stroke slot is reserved for the selection / breaker /
-    /// missing colours.
+    /// missing colors.
     pub(crate) border: RgbaF32,
     /// Header band fill, a step brighter than `fill` so the band reads
     /// against the body. Doubles as the chrome lift behind a hovered strip
     /// glyph.
     pub(crate) header_fill: RgbaF32,
     /// Ambient elevation shadow cast when no status glow claims the slot —
-    /// one colour so every elevated surface casts the same kind of shadow.
+    /// one color so every elevated surface casts the same kind of shadow.
     pub(crate) ambient_shadow: RgbaF32,
     /// Resting outline width. The drawn stroke is always
     /// [`Self::border_width_total`] — twice this — so selecting never resizes
@@ -53,7 +53,7 @@ impl CardTheme {
     }
 
     /// The stroke width a card actually draws — always the *selection* width (`border_width * 2`)
-    /// regardless of selection state, so selecting one never resizes it (only its colour changes).
+    /// regardless of selection state, so selecting one never resizes it (only its color changes).
     /// Named so the doubling can't drift between the call sites that must agree on it: the stroke
     /// itself, [`Self::inner_radius`], and
     /// [`Theme::port_overhang_for`](crate::gui::theme::Theme::port_overhang_for).
@@ -73,7 +73,7 @@ impl CardTheme {
 
     /// Ambient elevation shadow shared by every card — node bodies, inspector
     /// panels — so they all read as the same kind of surface. Only the blur
-    /// scales with how high a surface sits; colour and offset are fixed.
+    /// scales with how high a surface sits; color and offset are fixed.
     #[inline]
     pub(crate) const fn elevation_shadow(&self, blur: f32) -> Shadow {
         Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), blur)

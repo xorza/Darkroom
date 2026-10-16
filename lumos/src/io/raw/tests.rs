@@ -1,3 +1,5 @@
+use std::fs;
+
 use common::TempDir;
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -27,7 +29,7 @@ fn load_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
     // A path that cannot be read is an `Io` error; a readable file libraw
     // refuses is a `Raw` one, pinned by `load_rejects_invalid_files`.
-    let error = load(path, &LoadContext::default()).unwrap_err();
+    let error = load_preview(path, &LoadContext::default()).unwrap_err();
     assert!(
         matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
         "a missing file should read as an Io error, got: {error}",
@@ -37,7 +39,7 @@ fn load_invalid_path() {
     cancel.cancel();
     let cancelled = LoadContext::new(cancel, u64::MAX);
     assert!(matches!(
-        load(path, &cancelled),
+        load_preview(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
@@ -73,7 +75,10 @@ fn load_rejects_invalid_files() {
     for case in cases {
         let path = directory.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
-        assert!(load(&path, &LoadContext::default()).is_err(), "{case:?}");
+        assert!(
+            load_preview(&path, &LoadContext::default()).is_err(),
+            "{case:?}"
+        );
 
         // The rejection happens while libraw is being opened, so the handle exists and has to
         // free itself on the way out — the failure path most likely to leak the instance. The file
@@ -96,7 +101,7 @@ fn load_rejects_invalid_files() {
 /// one-pixel margins, RGGB, as `dump` describes it.
 fn bayer_dump(samples: &Buffer2<u16>, dump: BayerDump) -> Result<UnpackedRaw, RawError> {
     let libraw = Libraw::open_bayer(samples, dump, &CancelToken::never())?;
-    UnpackedRaw::unpack(libraw, Path::new("bayer-dump"), 1)
+    UnpackedRaw::unpack(libraw, 1)
 }
 
 /// The preview is the science frame demosaicked and clamped, bit for bit, and what lies in the
@@ -136,11 +141,10 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         .unwrap()
         .into_cfa_image()
         .unwrap()
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+        .demosaic_measured(MarkesteijnPasses::One);
     assert_eq!(
         dark.dimensions(),
-        ImageDimensions::new((SIDE - 2, SIDE - 2), 3)
+        ImageDimensions::new((SIDE - 2, SIDE - 2), ChannelLayout::Rgb)
     );
     let mut outside = 0;
     for channel in 0..3 {
@@ -164,7 +168,7 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         outside > 0,
         "the science frame leaves [0, 1], so the clamp is tested"
     );
-    assert!(dark.metadata.provenance.as_ref().unwrap().clipped);
+    assert!(dark.metadata.derived.provenance().unwrap().clipped);
 }
 
 #[cfg(feature = "real-data")]
@@ -179,7 +183,7 @@ fn load_valid_file() {
 
     init_tracing();
 
-    let result = load(&path, &LoadContext::default());
+    let result = load_preview(&path, &LoadContext::default());
     assert!(result.is_ok(), "Failed to load {path:?}: {result:?}");
 
     let image = result.unwrap();
@@ -217,7 +221,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
     use crate::internals::real_data::raw_frames;
 
     for path in raw_frames("raw_samples") {
-        let mut raw = open_raw(&path, &LoadContext::default()).unwrap();
+        let mut raw = open_raw(&path, &LoadContext::default(), |_| Ok(RawPath::Processed)).unwrap();
         let visible = raw.layout.active;
         assert_ne!(
             visible.width, visible.height,
@@ -332,20 +336,23 @@ fn a_stated_linear_limit_sets_the_saturation_level_within_its_bounds() {
 #[test]
 fn the_raw_values_settle_no_data_and_saturation() {
     const SIDE: usize = 24;
-    let flags_for = |procflags: u8| {
+    let dump = |procflags: u8| {
         let mut samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
         samples[7 * SIDE + 5] = 0;
         samples[0] = 0;
         samples[10 * SIDE + 10] = 62_309;
         samples[12 * SIDE + 12] = 62_308;
-        let raw = bayer_dump(
+        bayer_dump(
             &samples,
             BayerDump {
                 procflags,
                 ..black(1000)
             },
         )
-        .unwrap();
+        .unwrap()
+    };
+    let flags_for = |procflags| {
+        let raw = dump(procflags);
         raw.decode(raw.libraw.raw_image().unwrap()).flags.unwrap()
     };
 
@@ -360,6 +367,57 @@ fn the_raw_values_settle_no_data_and_saturation() {
     let flags = flags_for(0);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 0);
     assert_eq!(flags.at_pos(Vec2us::new(4, 6)), QualityFlags::default());
+
+    // The frame keeps its dead photosite at the median of the others, as a FITS null is kept:
+    // 2000 at every visible pixel but three, so the median is the floor visible (3, 3) holds.
+    // Read as a value, the zero normalizes below black, to −1000 / span.
+    let at = |image: &CfaImage, x: usize, y: usize| image.data()[y * (SIDE - 2) + x];
+    let masked = dump(2).into_cfa_image().unwrap();
+    assert_eq!(at(&masked, 4, 6).to_bits(), at(&masked, 3, 3).to_bits());
+    let measured = dump(0).into_cfa_image().unwrap();
+    assert!(at(&measured, 4, 6) < 0.0, "{}", at(&measured, 4, 6));
+    assert_eq!(at(&measured, 3, 3).to_bits(), at(&masked, 3, 3).to_bits());
+}
+
+/// A decode is admitted from the header, before `unpack`, against the context's memory limit.
+/// The 24 × 24 dump is 1152 file bytes and unpacks into a 1152-byte raw buffer (576 photosites
+/// of 2 bytes). Its 22 × 22 = 484 visible pixels then hold 4 bytes each on the mosaic path, 1936
+/// bytes for a sum of 4240, and 8 + 6 + 12 = 26 each through LibRaw's processing, 12584 bytes
+/// for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
+#[test]
+fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
+    let samples = Buffer2::new_filled(24, 24, 2000u16);
+    let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
+    let refused = |route, limit| match admit(&libraw, route, limit) {
+        Err(RawError::OverBudget(budget)) => Some(budget),
+        Ok(()) => None,
+        Err(error) => panic!("{error:?}"),
+    };
+    let over = |required, limit| Some(OverBudget { required, limit });
+    assert_eq!(refused(RawPath::Mosaic, 4240), None);
+    assert_eq!(refused(RawPath::Mosaic, 4239), over(4240, 4239));
+    assert_eq!(refused(RawPath::Processed, 14888), None);
+    assert_eq!(refused(RawPath::Processed, 14887), over(14888, 14887));
+    assert_eq!(RawPath::preview(&libraw).unwrap(), RawPath::Mosaic);
+
+    // A file longer than the limit is refused before it is read: these 3 bytes past a limit of 2.
+    let directory = TempDir::new("raw-over-budget");
+    let path = directory.join("long.raf");
+    fs::write(&path, [0u8; 3]).unwrap();
+    let error = load_cfa(&path, &LoadContext::new(CancelToken::never(), 2)).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            ImageError::Raw {
+                source: RawError::OverBudget(OverBudget {
+                    required: 3,
+                    limit: 2
+                }),
+                ..
+            }
+        ),
+        "{error:?}"
+    );
 }
 
 /// LibRaw measures a camera's black on its masked pixels and keeps each channel's mean truncated,
@@ -437,7 +495,7 @@ fn a_cancelled_token_stops_libraw() {
     let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &cancel).unwrap();
     cancel.cancel();
     let path = Path::new("bayer-dump");
-    let error = UnpackedRaw::unpack(libraw, path, 1).unwrap_err();
+    let error = UnpackedRaw::unpack(libraw, 1).unwrap_err();
     assert!(
         matches!(error, RawError::Unpack(LibrawCode::Cancelled)),
         "{error:?}"
@@ -455,7 +513,10 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
     let samples = Buffer2::new_filled(24, 24, 2000u16);
     let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     let info = frame_info(&libraw).unwrap();
-    assert_eq!(info.dimensions, ImageDimensions::new((22, 22), 1));
+    assert_eq!(
+        info.dimensions,
+        ImageDimensions::new((22, 22), ChannelLayout::Mono)
+    );
     assert_eq!(info.decoder_bytes, 1152 + 1152);
 }
 
@@ -471,8 +532,11 @@ fn libraws_processing_declares_its_own_span() {
         .unwrap()
         .processed_by_libraw()
         .unwrap();
-    assert_eq!(image.dimensions(), ImageDimensions::new((22, 22), 3));
-    assert_eq!(image.metadata.domain.as_ref().unwrap().scale, 64_535.0);
+    assert_eq!(
+        image.dimensions(),
+        ImageDimensions::new((22, 22), ChannelLayout::Rgb)
+    );
+    assert_eq!(image.metadata.derived.domain().unwrap().scale, 64_535.0);
     let expected = 1000.0 / 64_535.0;
     for channel in 0..3 {
         for &value in image.channel(channel).pixels() {

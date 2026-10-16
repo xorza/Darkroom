@@ -8,6 +8,7 @@ use std::f64::consts::PI;
 use glam::DVec2;
 
 use super::*;
+use crate::image::channel_layout::ChannelLayout;
 use crate::internals::images::rgb_image;
 use crate::math::vec2us::Vec2us;
 
@@ -144,8 +145,7 @@ fn two_frames_combine_to_their_weighted_mean() {
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
-        .unwrap()
-        .product;
+        .unwrap();
         // Two frames' deposits, at the larger value.
         let bound = (4.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * 6.0 * LOBE_EXCESS;
         for (index, (&value, &weight)) in product
@@ -291,8 +291,7 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
         ),
         &config,
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let out = product.image.channel(0);
     let weight = weight_plane(&product);
     for (x, y) in [(1, 0), (1, 1)] {
@@ -357,8 +356,7 @@ fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
         drizzle_frames(vec![image], &[Transform::identity()]),
         &config,
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let weight = weight_plane(&product);
     let coverage = product.coverage.as_ref().unwrap();
     for y in 0..8 {
@@ -419,7 +417,10 @@ fn a_drop_deposits_its_pixel_weight() {
     let mut weights = only(size, pixel);
     weights[(pixel.x, pixel.y)] = 2.5;
     for kernel in DrizzleKernel::ALL {
-        let mut acc = accumulator(ImageDimensions::new(size, 1), usual_config(kernel));
+        let mut acc = accumulator(
+            ImageDimensions::new(size, ChannelLayout::Mono),
+            usual_config(kernel),
+        );
         acc.add_image(
             constant_image(size, 1.0),
             &Transform::translation(DVec2::new(0.3, -0.2)),
@@ -485,7 +486,7 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
             "{kernel:?}"
         );
 
-        let mut alone = accumulator(ImageDimensions::new(size, 1), config);
+        let mut alone = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), config);
         alone.add_image(
             constant_image(size, 4.0),
             &transform,
@@ -510,7 +511,7 @@ fn pixel_weights_scale_their_pixel_share() {
     let mut half = Buffer2::new_filled(4, 4, 1.0f32);
     half[(1, 1)] = 0.5;
     let mut acc = accumulator(
-        ImageDimensions::new(size, 1),
+        ImageDimensions::new(size, ChannelLayout::Mono),
         kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
     acc.add_image(
@@ -536,9 +537,7 @@ fn a_frame_of_zero_pixel_weights_is_not_gathered() {
         &[Transform::identity(); 2],
     );
     frames[1].pixel_weight_map = Some(Buffer2::new_filled(size.width, size.height, 0.0));
-    let product = drizzle_plain(frames, &usual_config(DrizzleKernel::Turbo))
-        .unwrap()
-        .product;
+    let product = drizzle_plain(frames, &usual_config(DrizzleKernel::Turbo)).unwrap();
     let weight = weight_plane(&product);
     for (index, &value) in product.image.channel(0).pixels().iter().enumerate() {
         let expected = if weight.pixels()[index] > 0.0 {
@@ -603,6 +602,31 @@ fn radial_drops_lose_the_flux_that_misses_the_grid() {
     }
 }
 
+/// A Gaussian drop far narrower than an output pixel deposits its whole weight wherever it lands:
+/// at scale 1 and pixfrac 0.1, σ = 0.1/2.3548 = 0.042, and a drop 0.4 px off a pixel centre has
+/// taps `exp(−0.4²/2σ²)` = `exp(−44)` and smaller, whose product with the other axis's underflows
+/// any normalizer. Taken relative to the nearest pixel the taps are 1 and `exp(−55)`, so the 16
+/// drops of a flat 4×4 frame leave the weight a centred one leaves, each at its nearest pixel.
+#[test]
+fn a_narrow_gaussian_drop_off_a_pixel_centre_deposits_its_weight() {
+    let size = Size2us::new(4, 4);
+    let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 0.1);
+    let weights = |shift: f64| {
+        let product = drizzle_one(
+            config.clone(),
+            &DrizzleFrame::new(
+                constant_image(size, 1.0),
+                warp_of(Transform::translation(DVec2::new(shift, 0.0))),
+            ),
+        );
+        weight_plane(&product).pixels().to_vec()
+    };
+    let centred = weights(0.0);
+    assert!(centred.iter().all(|&weight| weight > 0.0));
+    let shifted = weights(0.4);
+    assert_eq!(shifted, centred);
+}
+
 /// Each channel of an RGB frame drizzles on its own: pixel (1, 1) of (1, 2, 3) fills its block of
 /// cells with those three values, exactly — see `one_bright_pixel_fills_its_own_block`.
 #[test]
@@ -615,7 +639,7 @@ fn rgb_channels_drizzle_independently() {
     };
     let image = rgb_image(size, [plane(1.0), plane(2.0), plane(3.0)]);
     let mut acc = accumulator(
-        ImageDimensions::new(size, 3),
+        ImageDimensions::new(size, ChannelLayout::Rgb),
         kernel_config(DrizzleKernel::Turbo, 2.0, 0.8),
     );
     acc.add_image(image, &Transform::identity(), None);
@@ -643,7 +667,10 @@ fn a_zero_lanczos_tap_marks_no_coverage() {
     let pixel = Vec2us::new(6, 6);
     let config = kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0);
     let shift = Transform::translation(DVec2::new(0.5, 0.0));
-    let mut alone = accumulator(ImageDimensions::new(size, 1), config.clone());
+    let mut alone = accumulator(
+        ImageDimensions::new(size, ChannelLayout::Mono),
+        config.clone(),
+    );
     alone.add_image(constant_image(size, 1.0), &shift, Some(&only(size, pixel)));
     let zero_cells: Vec<(usize, usize)> = (4..=10)
         .flat_map(|x| [(x, 3), (x, 9)])
@@ -665,7 +692,7 @@ fn a_zero_lanczos_tap_marks_no_coverage() {
             pixel_weight_map: Some(only(size, pixel)),
         },
     ];
-    let product = drizzle_plain(frames, &config).unwrap().product;
+    let product = drizzle_plain(frames, &config).unwrap();
     let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for &(x, y) in &zero_cells {
         assert_eq!(coverage[(x, y)], 0.5, "({x}, {y}) coverage");

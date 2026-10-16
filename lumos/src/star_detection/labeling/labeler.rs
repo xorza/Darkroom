@@ -189,7 +189,6 @@ impl Labeler {
 impl Strip {
     /// Find the runs of `rows` of `mask`, joining each to the runs of the row above it.
     fn label_rows(&mut self, mask: &BitBuffer2, rows: Range<usize>, join: RunJoin<'_>) {
-        let words_per_row = mask.words_per_row();
         let Self {
             runs,
             first_row_runs,
@@ -206,11 +205,7 @@ impl Strip {
         let last = rows.end - 1;
         for y in rows {
             curr_runs.clear();
-            run::extract_runs_from_row(
-                &mask.words[y * words_per_row..(y + 1) * words_per_row],
-                mask.size.width,
-                curr_runs,
-            );
+            run::extract_runs_from_row(mask.row_words(y), mask.size.width, curr_runs);
 
             if curr_runs.is_empty() {
                 prev_runs.clear();

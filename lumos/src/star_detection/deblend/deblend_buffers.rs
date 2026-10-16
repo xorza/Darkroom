@@ -5,6 +5,7 @@ use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::multi_threshold::TreeBuffers;
 use crate::star_detection::deblend::pixel::Pixel;
+use crate::star_detection::deblend::region::Region;
 
 /// The scratch one deblending job reuses across the components it handles, leased from the
 /// detector's pool so a frame after the first allocates nothing here.
@@ -22,6 +23,8 @@ pub(crate) struct DeblendBuffers {
     pub(crate) assignment: Assignment,
     /// The multi-threshold deblender's working sets.
     pub(crate) tree: TreeBuffers,
+    /// The regions this job's components split into, gathered across them.
+    pub(crate) regions: Vec<Region>,
 }
 
 impl Shapeless for DeblendBuffers {}

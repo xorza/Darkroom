@@ -1,6 +1,6 @@
 use std::fs::File;
+use std::mem;
 use std::ops::Range;
-use std::path::Path;
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
@@ -12,29 +12,29 @@ use common::CancelToken;
 
 use crate::concurrency;
 use crate::error::Cancelled;
-use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::error::{FitsRefusal, ImageError};
 use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::plan::FitsDecodePlan;
+use crate::io::fits::error::FitsLoadError;
+use crate::io::fits::error::FitsRefusal;
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 
+use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
+use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, SourceProvenance,
 };
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::image::sample_domain::SampleDomain;
-use crate::io::fits::fits_checksum_provenance::FitsChecksumProvenance;
-use crate::io::fits::fits_load_options::{FitsChecksumPolicy, FitsNullPolicy};
-use crate::io::fits::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+use crate::io::fits::fits_load_options::FitsChecksumPolicy;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 use crate::io::load_context::LoadContext;
-use crate::math::statistics::median_mut;
-use crate::math::statistics::subsample::Subsample;
+use crate::io::null_policy::NullSamples;
+use crate::io::null_policy::{self, NullPolicy};
 
 /// The decode of one image HDU: the HDU, its header and the plan its preflight made, and the file
 /// it is read from under the load's context.
@@ -43,7 +43,8 @@ pub(super) struct HduDecode<'a> {
     pub(super) hdu: FitsHduProvenance,
     pub(super) header: &'a Header,
     pub(super) plan: &'a FitsDecodePlan,
-    pub(super) path: &'a Path,
+    /// The pattern the header declares, which the selection resolved.
+    pub(super) cfa_type: Option<CfaType>,
     pub(super) context: &'a LoadContext,
 }
 
@@ -55,23 +56,19 @@ impl HduDecode<'_> {
         self,
         reader: &mut StreamReader<File>,
         policy: FitsChecksumPolicy,
-    ) -> Result<DecodedFitsImage, ImageError> {
+    ) -> Result<DecodedFitsImage, FitsLoadError> {
         let index = self.hdu.index;
-        let path = self.path;
         let context = self.context;
         if policy == FitsChecksumPolicy::Ignore {
             return self.read(&mut HduSections::new(reader, index), |_| {
                 Ok(FitsChecksumProvenance::NOT_CHECKED)
             });
         }
-        let mut sections =
-            HduSections::summed(reader, index).map_err(|source| ImageError::fits(path, source))?;
+        let mut sections = HduSections::summed(reader, index)?;
         self.read(&mut sections, |sections| {
-            context.check_cancelled(path)?;
-            let report = sections
-                .finish_checksum()
-                .map_err(|source| ImageError::fits(path, source))?;
-            policy.judge(report, index, path)
+            Cancelled::check(&context.cancel)?;
+            let report = sections.finish_checksum()?;
+            policy.judge(report, index)
         })
     }
 
@@ -80,12 +77,12 @@ impl HduDecode<'_> {
     pub(super) fn read(
         self,
         sections: &mut HduSections<'_>,
-        checksum: impl FnOnce(&mut HduSections<'_>) -> Result<FitsChecksumProvenance, ImageError>,
-    ) -> Result<DecodedFitsImage, ImageError> {
+        checksum: impl FnOnce(&mut HduSections<'_>) -> Result<FitsChecksumProvenance, FitsLoadError>,
+    ) -> Result<DecodedFitsImage, FitsLoadError> {
         let Self {
             header,
             plan,
-            path,
+            cfa_type,
             context,
             ..
         } = self;
@@ -96,28 +93,15 @@ impl HduDecode<'_> {
             "FITS image passed header-first memory preflight"
         );
         // The keywords that can fail a load are read before a plane is: a frame they refuse costs
-        // no decode. A sensor frame is one plane. A cube's mosaic keywords describe the frame
-        // before someone else's demosaic, so they say nothing about the planes decoded here.
-        let cfa_type = if plan.dimensions.is_grayscale() {
-            metadata::read_cfa(
-                header,
-                plan.dimensions.height(),
-                context.fits.unstated_bayer_pattern,
-            )
-            .map_err(|source| ImageError::fits(path, source))?
-        } else {
-            None
-        };
-        let row_order =
-            metadata::read_row_order(header).map_err(|source| ImageError::fits(path, source))?;
+        // no decode.
+        let row_order = metadata::read_row_order(header)?;
         // The unit is half the sample domain, which decides whether frames combine. An all-blank
         // BUNIT parses to the single significant space §4.2.1.1 requires, which states no unit
         // rather than an empty one — left alone it would disagree with every real unit. Surrounding
         // blanks are a writer artifact rather than part of a unit name, so both ends go, and the
         // domain comparison downstream is then plain equality — see `SampleDomain::conversion_to`
         // for why it stops there and does not fold case.
-        let unit = metadata::read_text(header, "BUNIT")
-            .map_err(|source| ImageError::fits(path, source))?
+        let unit = metadata::read_text(header, "BUNIT")?
             .map(|unit| unit.trim().to_owned())
             .filter(|unit| !unit.is_empty());
         let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
@@ -131,53 +115,37 @@ impl HduDecode<'_> {
             .map(|plane| plane.scan)
             .fold(SampleScan::EMPTY, SampleScan::merge);
         if !plan.sample_scale.accepts_maximum(scan.maximum) {
-            return Err(ImageError::fits_unsupported(
-                path,
-                FitsRefusal::UndeclaredFloatScale {
-                    maximum: scan.maximum,
-                },
-            ));
+            return Err(FitsLoadError::from(FitsRefusal::UndeclaredFloatScale {
+                maximum: scan.maximum,
+            }));
         }
-        let header_err = |source| ImageError::fits(path, source);
-        let quantization_sigma =
-            match domain_keywords::read_quantization_sigma(header).map_err(header_err)? {
-                Some(sigma) => Some(sigma),
-                None => plan.sample_type.is_integer().then(|| {
-                    let step = scan.integer_step(plan.scaling.bscale)
-                        / f64::from(plan.sample_scale.divisor);
-                    step as f32 * QUANTIZATION_SIGMA_PER_STEP
-                }),
-            };
-        let pedestal = domain_keywords::read_pedestal(header)
-            .map_err(header_err)?
-            .unwrap_or(context.fits.pedestal);
+        let quantization_sigma = match domain_keywords::read_quantization_sigma(header)? {
+            Some(sigma) => Some(sigma),
+            None => plan.sample_type.is_integer().then(|| {
+                let step = scan.integer_step(plan.scaling.bscale) / plan.sample_scale.divisor;
+                step as f32 * QUANTIZATION_SIGMA_PER_STEP
+            }),
+        };
+        let pedestal = domain_keywords::read_pedestal(header)?.unwrap_or(context.fits.pedestal);
         let mut metadata = metadata::read(header, plan.sample_type);
         // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to
         // the samples if it is divided by the same span they were.
-        metadata.data_max = plan
+        metadata.header.data_max = plan
             .data_max
-            .map(|data_max| data_max / f64::from(plan.sample_scale.divisor));
+            .map(|data_max| data_max / plan.sample_scale.divisor);
         let saturation = metadata
+            .header
             .data_max
             .map(|data_max| SATURATION_FRACTION * data_max as f32);
-        metadata.saturation_flagged = saturation.is_some()
-            || domain_keywords::read_saturation_flagged(header).map_err(header_err)?;
+        let saturation_flagged =
+            saturation.is_some() || domain_keywords::read_saturation_flagged(header)?;
         let flags = self.resolve_flags(&mut planes, saturation)?;
         let pixels = LinearPixels::from_planar_channels(
             plan.dimensions,
             planes.into_iter().map(|plane| plane.samples),
         );
-        metadata.domain = Some(SampleDomain {
-            scale: plan.sample_scale.physical,
-            origin: plan.sample_scale.origin,
-            pedestal,
-            unit,
-        });
-        metadata.quantization_sigma = quantization_sigma;
-        metadata.provenance = Some(ImageProvenance {
-            container: SourceContainer::Fits,
-            decoder: DecoderProvenance::FitsWell,
-            transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
+        let provenance = ImageProvenance {
+            source: SourceProvenance::Fits(FitsTransferProvenance {
                 bscale: plan.scaling.bscale,
                 bzero: plan.scaling.bzero,
                 hdu: self.hdu,
@@ -196,13 +164,25 @@ impl HduDecode<'_> {
             // and only the Bayer phase was corrected for it. What it buys is that a set mixing the
             // two orders — which loads as mutually mirrored images — can be named as such.
             row_order,
-        });
+        };
+        metadata.derived = mem::take(&mut metadata.derived)
+            .rebuild()
+            .saturation_flagged(saturation_flagged)
+            .domain(SampleDomain {
+                scale: plan.sample_scale.divisor,
+                origin: plan.sample_scale.origin,
+                pedestal,
+                unit,
+            })
+            .quantization_sigma(quantization_sigma)
+            .provenance(provenance)
+            .build();
 
         Ok(DecodedFitsImage {
             metadata,
-            cfa_type,
             pixels,
             flags,
+            flat_gain: None,
         })
     }
 
@@ -217,10 +197,9 @@ impl HduDecode<'_> {
         &self,
         planes: &mut [DecodedPlane],
         saturation: Option<f32>,
-    ) -> Result<Option<PixelFlags>, ImageError> {
-        let path = self.path;
+    ) -> Result<Option<PixelFlags>, FitsLoadError> {
         let dimensions = self.plan.dimensions;
-        let policy = self.context.fits.nulls;
+        let policy = self.context.nulls;
         let count: usize = planes
             .iter()
             .filter_map(|plane| plane.nulls)
@@ -230,7 +209,7 @@ impl HduDecode<'_> {
             return Ok(None);
         }
 
-        if count > 0 && policy == FitsNullPolicy::Reject {
+        if count > 0 && policy == NullPolicy::Reject {
             let first_index = planes
                 .iter()
                 .enumerate()
@@ -243,10 +222,7 @@ impl HduDecode<'_> {
             // Samples, not pixels: this counts each channel's nulls separately, and the index is in
             // the channel-major sample space the count belongs to. The pixel figure needs the mask,
             // which this branch does not build.
-            return Err(ImageError::fits_unsupported(
-                path,
-                FitsRefusal::NullSamples { count, first_index },
-            ));
+            return Err(NullSamples { count, first_index }.into());
         }
 
         // Before the fill, which is what erases the evidence. A non-finite sample fails every
@@ -273,7 +249,7 @@ impl HduDecode<'_> {
         }
         for plane in planes.iter_mut() {
             if let Some(nulls) = plane.nulls {
-                fill_nulls(&mut plane.samples, nulls.count);
+                null_policy::fill(&mut plane.samples, nulls.count);
             }
         }
         let flags =
@@ -293,8 +269,7 @@ impl HduDecode<'_> {
         &self,
         channel: usize,
         sections: &mut HduSections<'_>,
-    ) -> Result<DecodedPlane, ImageError> {
-        let path = self.path;
+    ) -> Result<DecodedPlane, FitsLoadError> {
         let plan = self.plan;
         let context = self.context;
         let width = plan.dimensions.width();
@@ -304,24 +279,20 @@ impl HduDecode<'_> {
         let mut nulls: Option<NullSummary> = None;
         let mut scan = SampleScan::EMPTY;
         for row_start in (0..height).step_by(plan.rows_per_chunk) {
-            context.check_cancelled(path)?;
+            Cancelled::check(&context.cancel)?;
             let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
             let expected_chunk = (row_end - row_start) * width;
-            let section = sections
-                .read_section(&channel_ranges(plan, channel, row_start..row_end))
-                .map_err(|source| ImageError::fits(path, source))?;
-            context.check_cancelled(path)?;
+            let section =
+                sections.read_section(&channel_ranges(plan, channel, row_start..row_end))?;
+            Cancelled::check(&context.cancel)?;
             let samples = section.samples();
             if samples.len() != expected_chunk {
-                return Err(ImageError::fits_unsupported(
-                    path,
-                    FitsRefusal::SectionLength {
-                        channel,
-                        rows: row_start..row_end,
-                        samples: samples.len(),
-                        expected: expected_chunk,
-                    },
-                ));
+                return Err(FitsLoadError::from(FitsRefusal::SectionLength {
+                    channel,
+                    rows: row_start..row_end,
+                    samples: samples.len(),
+                    expected: expected_chunk,
+                }));
             }
             let start = row_start * width;
             let ChunkScan {
@@ -329,11 +300,10 @@ impl HduDecode<'_> {
                 scan: chunk_scan,
             } = Conversion {
                 scaling: section.scaling(),
-                divisor: f64::from(plan.sample_scale.divisor),
+                divisor: plan.sample_scale.divisor,
                 cancel: &context.cancel,
             }
-            .scan(samples, &mut output[start..start + expected_chunk])
-            .map_err(|Cancelled| ImageError::cancelled(path))?;
+            .scan(samples, &mut output[start..start + expected_chunk])?;
             scan = scan.merge(chunk_scan);
             // Each chunk locates its nulls in its own index space; the plane's is what a caller can
             // act on, so the offset is applied here rather than threaded into the pass.
@@ -362,48 +332,6 @@ struct DecodedPlane {
     samples: Vec<f32>,
     nulls: Option<NullSummary>,
     scan: SampleScan,
-}
-
-/// Samples the fill's median is taken over, at most.
-///
-/// The median of a hundred thousand values drawn evenly across a plane and the median of all
-/// twenty-four million agree to far more precision than a stand-in for missing data needs, and the
-/// bound is what keeps this off the memory preflight: the scratch is a fixed 400 KB rather than a
-/// second copy of the plane the preflight above did not budget for. `defect_map::sampling` bounds
-/// its own medians the same way and for the same reason.
-const FILL_MEDIAN_SAMPLES: usize = 100_000;
-
-/// Replace a plane's non-finite samples with the median of its finite ones.
-///
-/// What sits under a null is not data and [`QualityFlags::NO_DATA`] says so, but the stages that
-/// measure a whole plane mostly do not consult the flags, so this value is what they see. The
-/// median is the frame's own background level, which leaves a masked region a flat patch instead of
-/// the hard-edged hole a zero fill would cut — and a hard edge is what manufactures star detections
-/// and drags a background estimate. A deliberate stand-in, not a correction.
-fn fill_nulls(samples: &mut [f32], null_count: usize) {
-    debug_assert!(null_count > 0 && null_count <= samples.len());
-    // Every `stride`-th *finite* sample rather than every `stride`-th sample: nulls arrive in
-    // regions — a mosaic edge, a coverage gap — so striding the plane itself would draw its whole
-    // quota from one side of a frame that is masked down the other.
-    let sample = Subsample::new(samples.len() - null_count, FILL_MEDIAN_SAMPLES);
-    let mut finite = Vec::with_capacity(sample.count());
-    finite.extend(
-        samples
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite())
-            .step_by(sample.stride()),
-    );
-    // A wholly-null plane has no level of its own to borrow, and no guess is better than any
-    // other. The flags say every pixel of it is missing, which is the part that has to survive.
-    let fill = if finite.is_empty() {
-        0.0
-    } else {
-        median_mut(&mut finite)
-    };
-    for value in samples.iter_mut().filter(|value| !value.is_finite()) {
-        *value = fill;
-    }
 }
 
 fn channel_ranges(plan: &FitsDecodePlan, channel: usize, rows: Range<usize>) -> Vec<Range<usize>> {
@@ -522,7 +450,8 @@ impl Conversion<'_> {
         }
     }
 
-    /// Integer samples, the `BLANK` sentinel a NaN and no part of the stored integers' OR.
+    /// Integer samples, the `BLANK` sentinel a NaN and no part of the stored integers' OR. Every
+    /// stored value is a sample when the HDU declares no `BLANK`, `i64::MIN` included.
     fn integers<T: Copy + Sync + Into<i64>>(
         self,
         stored: &[T],
@@ -533,24 +462,37 @@ impl Conversion<'_> {
             bzero,
             blank,
         } = self.scaling;
-        // A sentinel no stored value matches when the HDU declares none.
-        let blank = blank.unwrap_or(i64::MIN);
         let divisor = self.divisor;
-        self.each_chunk(stored, out, |stored, out| {
-            let mut raw_bits = 0u64;
-            for &raw in stored {
-                let raw: i64 = raw.into();
-                // Two's complement keeps a negative value's trailing zeros.
-                raw_bits |= if raw == blank { 0 } else { raw.cast_unsigned() };
-            }
-            for (pixel, &raw) in out.iter_mut().zip(stored) {
-                let raw: i64 = raw.into();
-                let physical = bzero + bscale * raw as f64;
-                let value = (physical / divisor) as f32;
-                *pixel = if raw == blank { f32::NAN } else { value };
-            }
-            raw_bits
-        })
+        let physical = move |raw: i64| ((bzero + bscale * raw as f64) / divisor) as f32;
+        match blank {
+            Some(blank) => self.each_chunk(stored, out, |stored, out| {
+                let mut raw_bits = 0u64;
+                for &raw in stored {
+                    let raw: i64 = raw.into();
+                    // Two's complement keeps a negative value's trailing zeros.
+                    raw_bits |= if raw == blank { 0 } else { raw.cast_unsigned() };
+                }
+                for (pixel, &raw) in out.iter_mut().zip(stored) {
+                    let raw: i64 = raw.into();
+                    *pixel = if raw == blank {
+                        f32::NAN
+                    } else {
+                        physical(raw)
+                    };
+                }
+                raw_bits
+            }),
+            None => self.each_chunk(stored, out, |stored, out| {
+                let mut raw_bits = 0u64;
+                for &raw in stored {
+                    raw_bits |= raw.into().cast_unsigned();
+                }
+                for (pixel, &raw) in out.iter_mut().zip(stored) {
+                    *pixel = physical(raw.into());
+                }
+                raw_bits
+            }),
+        }
     }
 
     /// Floating-point samples, which carry their own nulls.

@@ -42,7 +42,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     let pixels = frame.image.channel(0);
     let size = Size2us::new(pixels.width(), pixels.height());
     let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
-    let saturation = frame.image.metadata.saturation_level();
+    let saturation = frame.image.metadata.header.saturation_level();
     let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;
     assert!(
         lone_stars.len() >= 15,

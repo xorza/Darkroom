@@ -1,38 +1,37 @@
 //! Per-frame robust statistics, with the white noise measured before any interpolation.
 
+use std::sync::Arc;
+
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::frame::frame_facts::FrameFacts;
-use crate::frame::stackable_image::StackableImage;
+use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::stackable_image::StackableImage;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
-use crate::noise::background_split::BackgroundSplit;
 use crate::noise::ccd_noise::CcdNoise;
-use crate::noise::mosaic_noise::MosaicNoise;
-use crate::noise::mrs_noise::{MrsNoise, PixelGains};
+use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
+use crate::noise::mrs_noise::{self, NoisePlane, PixelGains};
 use imaginarium::Buffer2;
 
-/// Per-frame statistics, per slot: a channel, or a colour of a mosaic, whose one channel holds three
-/// colours of their own level and noise.
+/// Per-frame statistics, per slot: a channel, or a color of a mosaic, whose one channel holds three
+/// colors of their own level and noise.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FrameStats {
     /// Each slot's median over its pixels the source measured.
     pub(crate) medians: ArrayVec<f32, 3>,
-    /// The white-noise standard deviation where no flat amplified it, without the signal MAD
-    /// includes: per colour of a mosaic by [`MosaicNoise`], per colour of the mosaic a demosaiced
-    /// frame came from, or per channel by [`MrsNoise`]. Measured over the pixels no flag names.
-    pub(crate) noise: ArrayVec<f32, 3>,
-    /// The share of each slot's `noise²` a flat amplified twice, in the slots of `noise`: see
-    /// [`BackgroundSplit`]. 0 for a frame no flat divided.
-    pub(crate) read_share: ArrayVec<f32, 3>,
-    /// The level `noise` was measured at, in the same slots: each colour's median of the mosaic,
-    /// or each channel's median.
+    /// The white-noise variance where no flat amplified it, without the signal MAD includes, split
+    /// by how a flat amplified it: per color of a mosaic by [`MosaicNoiseMeasure`], per color of
+    /// the mosaic a demosaiced frame came from, or per channel by [`NoisePlane`]. Measured over the
+    /// pixels no flag names; unflattened for a frame no flat divided.
+    pub(crate) background: ArrayVec<BackgroundSplit, 3>,
+    /// The level `background` was measured at, in the same slots: each color's median of the
+    /// mosaic, or each channel's median.
     pub(crate) sky: ArrayVec<f32, 3>,
     /// Each slot's robust spread over the same pixels as its median: noise and signal together.
     /// Measured only where a normalization scales frames one by one, which a drizzle of mosaics
@@ -43,13 +42,11 @@ pub(crate) struct FrameStats {
     ///
     /// [`ImageMetadata::electrons_per_unit`]: crate::image::image_metadata::ImageMetadata::electrons_per_unit
     pub(crate) electrons_per_unit: Option<f32>,
-    /// What the decoder said the samples are; what makes two frames' statistics comparable at all.
-    pub(crate) facts: FrameFacts,
 }
 
 impl FrameStats {
     /// Measure each slot's median on `image`, and its white noise before any interpolation: on a
-    /// mosaic, per colour; on a demosaiced frame, the [`MosaicNoise`] its demosaic measured, because
+    /// mosaic, per color; on a demosaiced frame, the [`MosaicNoise`](crate::image::mosaic_noise::MosaicNoise) its demosaic measured, because
     /// the frame's own correlated pixels would understate it; elsewhere, per channel.
     ///
     /// Pixels the source declared no measurement for are left out: the decoder fills a null with
@@ -66,7 +63,7 @@ impl FrameStats {
     }
 
     /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
-    /// workers: its noise first — a mosaic's by [`MosaicNoise`], any other frame's by [`MrsNoise`]
+    /// workers: its noise first — a mosaic's by [`MosaicNoiseMeasure`], any other frame's by [`NoisePlane`]
     /// one channel at a time — then the samples its levels sort, every slot's at once.
     pub(crate) fn heap_bytes(
         dimensions: ImageDimensions,
@@ -75,9 +72,9 @@ impl FrameStats {
     ) -> usize {
         let size = dimensions.size();
         match mosaic {
-            Some(cfa_type) => MosaicNoise::heap_bytes(size, cfa_type)
+            Some(cfa_type) => MosaicNoiseMeasure::heap_bytes(size, cfa_type)
                 .max(dimensions.pixel_count() * size_of::<f32>()),
-            None => MrsNoise::heap_bytes(size, threads).max(dimensions.frame_bytes()),
+            None => mrs_noise::heap_bytes(size, threads).max(dimensions.frame_bytes()),
         }
     }
 
@@ -86,14 +83,21 @@ impl FrameStats {
     pub(crate) fn measure_as(image: &impl StackableImage, spreads: Spreads) -> Self {
         let dimensions = image.dimensions();
         let metadata = image.metadata();
-        let facts = FrameFacts::of(image);
         let flags = image.flags();
-        let excluded =
-            |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
+        let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
         let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
         let mosaic_noise = match mosaic {
-            Some(_) => Some(MosaicNoise::measure(image)),
-            None => metadata.mosaic_noise.inspect(|_| {
+            Some(cfa_type) => Some(
+                MosaicNoiseMeasure {
+                    plane: image.channel(0),
+                    cfa_type,
+                    flags,
+                    flat_gain: image.flat_gain().map(Arc::as_ref),
+                    quantization_sigma: metadata.derived.quantization_sigma(),
+                }
+                .measure(),
+            ),
+            None => metadata.derived.mosaic_noise().inspect(|_| {
                 assert_eq!(
                     dimensions.channels(),
                     3,
@@ -101,41 +105,29 @@ impl FrameStats {
                 );
             }),
         };
-        // Each slot's σ where no flat amplified it, and the share of its variance a flat amplified
-        // twice.
-        let (noise, read_share): (ArrayVec<f32, 3>, ArrayVec<f32, 3>) = match &mosaic_noise {
-            Some(mosaic_noise) => (
-                ArrayVec::from(mosaic_noise.sigma),
-                ArrayVec::from(mosaic_noise.read_share),
-            ),
+        let background: ArrayVec<BackgroundSplit, 3> = match &mosaic_noise {
+            Some(mosaic_noise) => ArrayVec::from(mosaic_noise.background),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
                 .map(|channel| {
-                    let plane = image.channel(channel);
                     let size = dimensions.size();
-                    match image.flat_gain() {
-                        Some(gain) => {
-                            let split = MrsNoise::estimate_split(
-                                plane,
-                                excluded,
-                                PixelGains {
-                                    gain: |index| {
-                                        gain.at(
-                                            channel,
-                                            (index % size.width) as f32,
-                                            (index / size.width) as f32,
-                                        )
-                                    },
-                                    bins: gain.bins(channel),
-                                },
-                            );
-                            (split.variance.sqrt(), split.read_share)
-                        }
-                        None => (MrsNoise::estimate(plane, excluded), 0.0),
+                    NoisePlane {
+                        samples: image.channel(channel),
+                        excluded,
                     }
+                    .background(image.flat_gain().map(|gain| PixelGains {
+                        gain: move |index| {
+                            gain.at(
+                                channel,
+                                (index % size.width) as f32,
+                                (index / size.width) as f32,
+                            )
+                        },
+                        bins: gain.bins(channel),
+                    }))
                 })
-                .unzip(),
+                .collect(),
         };
         let nulls = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA));
         let measured = |index: usize| {
@@ -144,9 +136,9 @@ impl FrameStats {
         let levels: Vec<SlotLevel> = match mosaic {
             Some(cfa_type) => (0..cfa_type.num_colors())
                 .into_par_iter()
-                .map(|colour| {
+                .map(|color| {
                     SlotLevel::of(image.channel(0), spreads, |index, position| {
-                        measured(index) && cfa_type.color_at(position) == colour
+                        measured(index) && cfa_type.slot_at(position) == color
                     })
                 })
                 .collect(),
@@ -171,41 +163,29 @@ impl FrameStats {
         };
         Self {
             medians,
-            noise,
-            read_share,
+            background,
             sky,
             spread,
             quantization_sigma: match mosaic_noise {
                 Some(mosaic_noise) => mosaic_noise.quantization_sigma,
-                None => metadata.quantization_sigma,
+                None => metadata.derived.quantization_sigma(),
             },
             electrons_per_unit: metadata.electrons_per_unit(),
-            facts,
         }
     }
 
-    /// The statistics of a frame as those of the image its drizzle makes of it, which is no
-    /// sensor frame: a mosaic's colour slots become the channels of their colours, as for the
-    /// frame its demosaic makes, and nothing is a mosaic any more.
-    pub(crate) const fn into_drizzled(mut self) -> Self {
-        self.facts.cfa_type = None;
-        self
-    }
-
-    /// The white noise of a slot, raised to the quantization σ.
+    /// The white noise of a slot where no flat amplified it, raised to the quantization σ.
     pub(crate) fn slot_noise(&self, slot: usize) -> f32 {
-        self.noise[slot].max(self.quantization_sigma.unwrap_or(0.0))
+        self.background[slot]
+            .sigma()
+            .max(self.quantization_sigma.unwrap_or(0.0))
     }
 
-    /// The noise model of one slot: a channel, or a colour of a mosaic.
+    /// The noise model of one slot: a channel, or a color of a mosaic.
     pub(crate) fn ccd_noise(&self, slot: usize) -> CcdNoise {
-        let sigma = self.noise[slot];
         let step = self.quantization_sigma.unwrap_or(0.0);
         CcdNoise {
-            background: BackgroundSplit {
-                variance: sigma * sigma,
-                read_share: self.read_share[slot],
-            },
+            background: self.background[slot],
             quantization_variance: step * step,
             sky: self.sky[slot],
             electrons_per_unit: self.electrons_per_unit,
@@ -220,7 +200,7 @@ pub(crate) enum Spreads {
     Measured,
 }
 
-/// One slot's robust spread: `1.4826·MAD`, and how many samples it was taken over, which its
+/// One slot's robust spread: σ from the MAD, and how many samples it was taken over, which its
 /// standard error goes as.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SlotSpread {
@@ -237,7 +217,7 @@ struct SlotLevel {
 
 impl SlotLevel {
     /// The median of the samples of `plane` whose index and position `keep` names, and with
-    /// [`Spreads::Measured`] their `1.4826·MAD`. Both 0 when `keep` names none: a frame with
+    /// [`Spreads::Measured`] their σ from the MAD. Both 0 when `keep` names none: a frame with
     /// nothing measured there contributes at none of them, so the figures are never read — but the
     /// median of nothing would panic.
     fn of(plane: &Buffer2<f32>, spreads: Spreads, keep: impl Fn(usize, Vec2us) -> bool) -> Self {
@@ -267,13 +247,12 @@ impl SlotLevel {
             };
         }
         if spreads == Spreads::Measured {
-            let samples_taken = samples.len();
             let stats = MedianMad::of_mut(&mut samples);
             Self {
                 median: stats.median,
                 spread: Some(SlotSpread {
                     sigma: stats.sigma(),
-                    samples: samples_taken,
+                    samples: stats.count,
                 }),
             }
         } else {

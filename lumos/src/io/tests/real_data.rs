@@ -3,10 +3,8 @@
 //! Kept apart from the rest of `io`'s tests so the decoder-facing imports they need are
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
-use common::{CancelToken, internals};
+use common::internals;
 
-use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
-use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::real_data::raw_frames;
 use crate::io::load_context::LoadContext;
@@ -17,15 +15,13 @@ use crate::io::load_context::LoadContext;
 fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     let path = &raw_frames("Lights")[0];
     let context = LoadContext::default();
-    let declared = CfaFrameInfo::from_file(path, &context).unwrap().dimensions;
-    let cfa = CfaImage::from_file(path, &context).unwrap();
+    let declared = context.cfa_info(path).unwrap().dimensions;
+    let cfa = context.cfa(path).unwrap();
     assert_eq!(
-        (cfa.data.width(), cfa.data.height()),
+        (cfa.data().width(), cfa.data().height()),
         (declared.width(), declared.height())
     );
-    let image = cfa
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+    let image = cfa.demosaic_measured(MarkesteijnPasses::One);
     assert_eq!(image.dimensions().size(), declared.size());
     assert_eq!(image.channels(), 3);
 

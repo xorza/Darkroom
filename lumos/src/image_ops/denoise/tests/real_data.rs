@@ -10,7 +10,7 @@ use crate::image_ops::stretch::Stretch;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::math::statistics;
+use crate::math::statistics::median_mad::MedianMad;
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
@@ -28,9 +28,7 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
         .filter(|&i| i % width != width - 1)
         .map(|i| px[i + 1] - px[i])
         .collect();
-    let median = statistics::median_mut(&mut diffs);
-    let mut scratch = Vec::new();
-    statistics::mad_to_sigma(statistics::mad_with_scratch(&diffs, median, &mut scratch))
+    MedianMad::of_mut(&mut diffs).sigma()
 }
 
 #[test]

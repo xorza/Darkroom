@@ -1,22 +1,11 @@
 //! A decoded display or inspection product, outside the scientific pipeline.
 
 use std::mem;
-use std::path::Path;
 
-use imaginarium::{ChannelCount, Image};
+use imaginarium::Image;
 
 use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
-};
 use crate::image::linear_image::LinearImage;
-use crate::io::error::ImageError;
-use crate::io::fits::decode as fits_decode;
-use crate::io::input_format::InputFormat;
-use crate::io::load_context::LoadContext;
-use crate::io::raw;
-use crate::io::standard;
 
 /// A decoded display or inspection product that cannot enter the scientific pipeline directly.
 #[derive(Debug)]
@@ -40,42 +29,12 @@ pub enum PreviewPixels {
 }
 
 impl PreviewImage {
-    /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::load_path(path.as_ref(), context)
-    }
-
-    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        context.check_cancelled(path)?;
-        let format = match InputFormat::of(path)? {
-            InputFormat::Fits => {
-                return fits_decode::load_preview(path, context).map(Into::into);
-            }
-            InputFormat::CameraRaw => return raw::load(path, context).map(Into::into),
-            InputFormat::Raster(format) => format,
-        };
-        let decoded = standard::read(path)?;
-        context.check_cancelled(path)?;
-        let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
-        let target = standard::f32_target_format(&decoded);
-        let image = decoded.convert(target);
-        let metadata = ImageMetadata {
-            provenance: Some(ImageProvenance {
-                container: SourceContainer::from(format),
-                decoder: DecoderProvenance::Imaginarium,
-                transfer: TransferProvenance::UnspecifiedRaster,
-                color: ColorProvenance::UnmanagedRaster { alpha_dropped },
-                clipped: false,
-                demosaic: DemosaicProvenance::None,
-                // Every raster format this path reads stores its first row at the top.
-                row_order: RowOrder::TopDown,
-            }),
-            ..Default::default()
-        };
-        Ok(Self {
+    /// A raster decode, `f32` samples interleaved as it read them, with `metadata`.
+    pub(crate) const fn interleaved(image: Image, metadata: ImageMetadata) -> Self {
+        Self {
             metadata,
             pixels: PreviewPixels::Interleaved(image),
-        })
+        }
     }
 
     /// The pixels, in the layout the decoder produced.

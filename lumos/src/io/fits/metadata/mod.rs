@@ -1,16 +1,26 @@
+pub(crate) mod dark_comparison_keywords;
 pub(crate) mod domain_keywords;
+
+use std::fmt::Display;
 
 use fits_well::header::Header;
 use fits_well::image::SampleType;
 
-use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::image::calibration_state::CalibrationState;
-use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::RowOrder;
+use crate::image::observation_header::ObservationHeader;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
+use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
+
+/// The keyword that names the Lumos format of an HDU, as `CFAIMAGE` or `LUMFLAGS`'s `PIXFLAGS`.
+pub(crate) const FORMAT_KEYWORD: &str = "LUMOSFMT";
+/// The keyword that states the version of an HDU's Lumos format.
+pub(crate) const VERSION_KEYWORD: &str = "LUMOSVER";
 
 /// A metadata field and every keyword it is read from: the standard or most common spelling first,
 /// which is also the one written, then the aliases other writers use, as Siril reads them
@@ -93,8 +103,8 @@ impl MetadataField {
             // sec z: 1 at the zenith, more toward the horizon.
             Self::Airmass => value >= 1.0,
             Self::Iso | Self::XBinning | Self::YBinning => value >= 1.0,
-            Self::DataMax
-            | Self::Offset
+            Self::DataMax => is_saturation_level(value),
+            Self::Offset
             | Self::Object
             | Self::Instrument
             | Self::Telescope
@@ -123,7 +133,11 @@ impl MetadataField {
                     self.accepts(value as f64)
                         .then(|| T::try_from(value).ok())
                         .flatten()
-                        .ok_or(fits_well::FitsError::KeywordOutOfRange { name: key })
+                        .ok_or_else(|| {
+                            FitsLoadError::from(FitsRefusal::KeywordOutOfRange {
+                                keyword: key.to_owned(),
+                            })
+                        })
                 })
                 .transpose()
         })
@@ -134,7 +148,7 @@ impl MetadataField {
     fn read<T>(
         self,
         header: &Header,
-        read: impl Fn(&Header, &'static str) -> fits_well::Result<Option<T>>,
+        read: impl Fn(&Header, &'static str) -> Result<Option<T>, FitsLoadError>,
     ) -> Option<T> {
         self.keywords()
             .iter()
@@ -148,50 +162,44 @@ impl MetadataField {
 pub(super) fn read(header: &Header, sample_type: SampleType) -> ImageMetadata {
     let text = |field: MetadataField| field.read(header, read_text);
     ImageMetadata {
-        object: text(MetadataField::Object),
-        instrument: text(MetadataField::Instrument),
-        telescope: text(MetadataField::Telescope),
-        date_obs: text(MetadataField::DateObs),
-        date_local: text(MetadataField::DateLocal),
-        exposure_time: MetadataField::ExposureTime.real(header),
-        iso: MetadataField::Iso.integer(header),
-        sample_type: Some(sample_type),
-        camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
-        filter: text(MetadataField::Filter),
-        gain: MetadataField::Gain.real(header),
-        egain: MetadataField::Egain.real(header),
-        ccd_temp: MetadataField::CcdTemp.real(header),
-        camera_temp: MetadataField::CameraTemp.real(header),
-        image_type: text(MetadataField::ImageType),
-        xbinning: MetadataField::XBinning.integer(header),
-        ybinning: MetadataField::YBinning.integer(header),
-        set_temp: MetadataField::SetTemp.real(header),
-        offset: MetadataField::Offset.integer(header),
-        focal_length: MetadataField::FocalLength.real(header),
-        airmass: MetadataField::Airmass.real(header),
-        ra_deg: read_ra_deg(header),
-        dec_deg: read_dec_deg(header),
-        pixel_size_x: MetadataField::PixelSizeX.real(header),
-        pixel_size_y: MetadataField::PixelSizeY.real(header),
-        // The decoder fills these: they depend on the decode plan as well as the header.
-        data_max: None,
-        provenance: None,
-        domain: None,
-        quantization_sigma: None,
-        mosaic_noise: None,
-        flat_gain: None,
-        saturation_flagged: false,
-        calibration: read_calibration(header),
-        unverified_dark: read_unverified_dark(header),
+        header: ObservationHeader {
+            object: text(MetadataField::Object),
+            instrument: text(MetadataField::Instrument),
+            telescope: text(MetadataField::Telescope),
+            date_obs: text(MetadataField::DateObs),
+            date_local: text(MetadataField::DateLocal),
+            exposure_time: MetadataField::ExposureTime.real(header),
+            iso: MetadataField::Iso.integer(header),
+            sample_type: Some(sample_type),
+            camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
+            filter: text(MetadataField::Filter),
+            gain: MetadataField::Gain.real(header),
+            egain: MetadataField::Egain.real(header),
+            ccd_temp: MetadataField::CcdTemp.real(header),
+            camera_temp: MetadataField::CameraTemp.real(header),
+            image_type: text(MetadataField::ImageType),
+            xbinning: MetadataField::XBinning.integer(header),
+            ybinning: MetadataField::YBinning.integer(header),
+            set_temp: MetadataField::SetTemp.real(header),
+            offset: MetadataField::Offset.integer(header),
+            focal_length: MetadataField::FocalLength.real(header),
+            airmass: MetadataField::Airmass.real(header),
+            ra_deg: read_ra_deg(header),
+            dec_deg: read_dec_deg(header),
+            pixel_size_x: MetadataField::PixelSizeX.real(header),
+            pixel_size_y: MetadataField::PixelSizeY.real(header),
+            // The decoder fills these: they depend on the decode plan as well as the header.
+            data_max: None,
+        },
+        derived: DerivedFacts::builder()
+            .calibration(read_calibration(header))
+            .dark_comparison(DarkComparisonKeywords::IMAGE.read(header))
+            .build(),
     }
 }
 
 /// The logical keyword that records each part calibration removed: bias, dark signal, flat.
 const CALIBRATION_KEYWORDS: [&str; 3] = ["LUMCALB", "LUMCALD", "LUMCALF"];
-
-/// The logical keyword that records each capture condition a dark match did not compare:
-/// exposure, temperature.
-const UNVERIFIED_DARK_KEYWORDS: [&str; 2] = ["LUMUVEXP", "LUMUVTMP"];
 
 fn read_calibration(header: &Header) -> CalibrationState {
     let [bias, thermal, flat] = read_flags(header, CALIBRATION_KEYWORDS);
@@ -202,18 +210,16 @@ fn read_calibration(header: &Header) -> CalibrationState {
     }
 }
 
-fn read_unverified_dark(header: &Header) -> UnverifiedConditions {
-    let [exposure, temperature] = read_flags(header, UNVERIFIED_DARK_KEYWORDS);
-    UnverifiedConditions {
-        exposure,
-        temperature,
-    }
-}
-
 /// Each logical keyword's value, `false` when it is absent: a record keyword is written only when
 /// it is set.
 fn read_flags<const N: usize>(header: &Header, keywords: [&str; N]) -> [bool; N] {
     keywords.map(|keyword| optional(keyword, header.get_logical(keyword)).unwrap_or(false))
+}
+
+/// Whether a finite `DATAMAX` is a saturation level. The decode flags every sample at or above 95 %
+/// of it, so a non-positive one, a common "not computed" placeholder, would flag the whole frame.
+pub(super) const fn is_saturation_level(value: f64) -> bool {
+    value > 0.0
 }
 
 /// The header's `DATAMAX`, in the file's sample units; `None`, with the reason logged, when it is
@@ -224,7 +230,7 @@ pub(super) fn read_data_max(header: &Header) -> Option<f64> {
 
 /// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
 /// a form it cannot have.
-fn optional<T>(keyword: &str, value: fits_well::Result<Option<T>>) -> Option<T> {
+fn optional<T, E: Display>(keyword: &str, value: Result<Option<T>, E>) -> Option<T> {
     value.unwrap_or_else(|error| {
         tracing::warn!(keyword, %error, "ignoring a FITS keyword given in a form it cannot have");
         None
@@ -237,93 +243,122 @@ pub(super) fn write_image(
     image_type: Option<&str>,
 ) -> fits_well::Result<()> {
     use MetadataField as Field;
-    set_optional_text(header, Field::Object.keyword(), metadata.object.as_deref())?;
+    set_optional_text(
+        header,
+        Field::Object.keyword(),
+        metadata.header.object.as_deref(),
+    )?;
     set_optional_text(
         header,
         Field::Instrument.keyword(),
-        metadata.instrument.as_deref(),
+        metadata.header.instrument.as_deref(),
     )?;
     set_optional_text(
         header,
         Field::Telescope.keyword(),
-        metadata.telescope.as_deref(),
+        metadata.header.telescope.as_deref(),
     )?;
     set_optional_text(
         header,
         Field::DateObs.keyword(),
-        metadata.date_obs.as_deref(),
+        metadata.header.date_obs.as_deref(),
     )?;
     set_optional_text(
         header,
         Field::DateLocal.keyword(),
-        metadata.date_local.as_deref(),
+        metadata.header.date_local.as_deref(),
     )?;
     set_optional_real(
         header,
         Field::ExposureTime.keyword(),
-        metadata.exposure_time,
+        metadata.header.exposure_time,
     )?;
-    set_optional_integer(header, Field::Iso.keyword(), metadata.iso.map(i64::from))?;
-    set_optional_text(header, Field::Filter.keyword(), metadata.filter.as_deref())?;
-    set_optional_real(header, Field::Gain.keyword(), metadata.gain)?;
-    set_optional_real(header, Field::Egain.keyword(), metadata.egain)?;
-    set_optional_real(header, Field::CcdTemp.keyword(), metadata.ccd_temp)?;
-    set_optional_real(header, Field::CameraTemp.keyword(), metadata.camera_temp)?;
+    set_optional_integer(
+        header,
+        Field::Iso.keyword(),
+        metadata.header.iso.map(i64::from),
+    )?;
+    set_optional_text(
+        header,
+        Field::Filter.keyword(),
+        metadata.header.filter.as_deref(),
+    )?;
+    set_optional_real(header, Field::Gain.keyword(), metadata.header.gain)?;
+    set_optional_real(header, Field::Egain.keyword(), metadata.header.egain)?;
+    set_optional_real(header, Field::CcdTemp.keyword(), metadata.header.ccd_temp)?;
+    set_optional_real(
+        header,
+        Field::CameraTemp.keyword(),
+        metadata.header.camera_temp,
+    )?;
     set_optional_text(
         header,
         Field::ImageType.keyword(),
-        image_type.or(metadata.image_type.as_deref()),
+        image_type.or(metadata.header.image_type.as_deref()),
     )?;
     set_optional_integer(
         header,
         Field::XBinning.keyword(),
-        metadata.xbinning.map(i64::from),
+        metadata.header.xbinning.map(i64::from),
     )?;
     set_optional_integer(
         header,
         Field::YBinning.keyword(),
-        metadata.ybinning.map(i64::from),
+        metadata.header.ybinning.map(i64::from),
     )?;
-    set_optional_real(header, Field::SetTemp.keyword(), metadata.set_temp)?;
+    set_optional_real(header, Field::SetTemp.keyword(), metadata.header.set_temp)?;
     set_optional_integer(
         header,
         Field::Offset.keyword(),
-        metadata.offset.map(i64::from),
+        metadata.header.offset.map(i64::from),
     )?;
-    set_optional_real(header, Field::FocalLength.keyword(), metadata.focal_length)?;
-    set_optional_real(header, Field::Airmass.keyword(), metadata.airmass)?;
-    set_optional_real(header, "RA", metadata.ra_deg)?;
-    set_optional_real(header, "DEC", metadata.dec_deg)?;
-    set_optional_real(header, Field::PixelSizeX.keyword(), metadata.pixel_size_x)?;
-    set_optional_real(header, Field::PixelSizeY.keyword(), metadata.pixel_size_y)?;
-    set_optional_real(header, Field::DataMax.keyword(), metadata.data_max)?;
+    set_optional_real(
+        header,
+        Field::FocalLength.keyword(),
+        metadata.header.focal_length,
+    )?;
+    set_optional_real(header, Field::Airmass.keyword(), metadata.header.airmass)?;
+    set_optional_real(header, "RA", metadata.header.ra_deg)?;
+    set_optional_real(header, "DEC", metadata.header.dec_deg)?;
+    set_optional_real(
+        header,
+        Field::PixelSizeX.keyword(),
+        metadata.header.pixel_size_x,
+    )?;
+    set_optional_real(
+        header,
+        Field::PixelSizeY.keyword(),
+        metadata.header.pixel_size_y,
+    )?;
+    // DATAMAX is a physical value, so it carries the `BSCALE` the samples are written with.
+    set_optional_real(
+        header,
+        Field::DataMax.keyword(),
+        metadata
+            .header
+            .data_max
+            .map(|data_max| data_max * domain_keywords::scaling(metadata).bscale),
+    )?;
     let CalibrationState {
         bias,
         thermal,
         flat,
-    } = metadata.calibration;
-    let UnverifiedConditions {
-        exposure,
-        temperature,
-    } = metadata.unverified_dark;
-    for (keyword, set) in CALIBRATION_KEYWORDS
-        .into_iter()
-        .zip([bias, thermal, flat])
-        .chain(
-            UNVERIFIED_DARK_KEYWORDS
-                .into_iter()
-                .zip([exposure, temperature]),
-        )
-    {
+    } = metadata.derived.calibration();
+    for (keyword, set) in CALIBRATION_KEYWORDS.into_iter().zip([bias, thermal, flat]) {
         if set {
             header.set(keyword, true)?;
         }
     }
+    DarkComparisonKeywords::IMAGE.write(header, metadata.derived.dark_comparison())?;
     domain_keywords::write(header, metadata)?;
     Ok(())
 }
 
-pub(super) fn write_cfa(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
+/// Write the rows' order: the order this writer holds them in, and the source's.
+pub(super) fn write_row_order(
+    header: &mut Header,
+    metadata: &ImageMetadata,
+) -> fits_well::Result<()> {
     // Two keywords, because they answer two questions that a bottom-up source pulls apart.
     //
     // `ROWORDER` says which rows the `BAYERPAT` below is expressed against, and that is always
@@ -336,10 +371,19 @@ pub(super) fn write_cfa(header: &mut Header, cfa: &CfaImage) -> fits_well::Resul
     // frames have to agree on. Omitted for a frame this crate synthesized, which has no source to
     // report and whose reader then falls back to `ROWORDER`.
     header.set("ROWORDER", RowOrder::TopDown.keyword())?;
-    if let Some(row_order) = cfa.metadata.row_order() {
+    if let Some(row_order) = metadata.derived.row_order() {
         header.set(SOURCE_ROW_ORDER, row_order.keyword())?;
     }
-    match cfa.cfa_type {
+    Ok(())
+}
+
+/// Write the `cfa_type` mosaic of an image of `metadata`, and the camera's white balance.
+pub(super) fn write_cfa(
+    header: &mut Header,
+    metadata: &ImageMetadata,
+    cfa_type: CfaType,
+) -> fits_well::Result<()> {
+    match cfa_type {
         CfaType::Mono => {
             header.set("CFATYPE", "MONO")?;
         }
@@ -360,7 +404,7 @@ pub(super) fn write_cfa(header: &mut Header, cfa: &CfaImage) -> fits_well::Resul
         }
     }
 
-    if let Some([red, green_1, blue, green_2]) = cfa.metadata.camera_white_balance {
+    if let Some([red, green_1, blue, green_2]) = metadata.header.camera_white_balance {
         header.set("LUMWBR", f64::from(red))?;
         header.set("LUMWBG1", f64::from(green_1))?;
         header.set("LUMWBB", f64::from(blue))?;
@@ -408,7 +452,7 @@ pub(super) fn read_cfa(
     header: &Header,
     height: usize,
     unstated_bayer_pattern: Option<CfaPattern>,
-) -> fits_well::Result<Option<CfaType>> {
+) -> Result<Option<CfaType>, FitsLoadError> {
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
@@ -417,11 +461,11 @@ pub(super) fn read_cfa(
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
             return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
         }
-        Some(_) => {
-            return Err(fits_well::FitsError::TypeMismatch {
-                name: "CFATYPE".to_string(),
-                expected: "MONO, BAYER, or XTRANS",
-            });
+        Some(value) => {
+            return Err(FitsRefusal::CfaTypeKeyword {
+                value: value.to_owned(),
+            }
+            .into());
         }
         None => {}
     }
@@ -442,7 +486,7 @@ const SOURCE_ROW_ORDER: &str = "LUMROWO";
 /// [`SOURCE_ROW_ORDER`] where this writer left one, and `ROWORDER` otherwise — for a file from
 /// anyone else the two are the same thing, and only a Lumos round-trip separates them. This is the
 /// one the combine holds frames to agreeing on: it is about the sky, not about the pattern.
-pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
+pub(super) fn read_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
     if let Some(recorded) = header.get_text(SOURCE_ROW_ORDER)? {
         return Ok(row_order_of(recorded));
     }
@@ -453,7 +497,7 @@ pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
 ///
 /// The FITS standard has no `ROWORDER`; it is a convention, and a file without it is read the way
 /// every writer that omits it means — first row first.
-pub(super) fn read_declared_row_order(header: &Header) -> fits_well::Result<RowOrder> {
+pub(super) fn read_declared_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
     Ok(header
         .get_text("ROWORDER")?
         .map_or(RowOrder::TopDown, row_order_of))
@@ -491,10 +535,10 @@ impl Bayerpat {
         header: &Header,
         height: usize,
         unstated_bayer_pattern: Option<CfaPattern>,
-    ) -> fits_well::Result<Option<CfaType>> {
+    ) -> Result<Option<CfaType>, FitsLoadError> {
         let Some(bayerpat) = header.get_text("BAYERPAT")? else {
             return match self {
-                Self::Required => Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" }),
+                Self::Required => Err(FitsRefusal::MissingBayerPattern.into()),
                 Self::Optional => Ok(None),
             };
         };
@@ -502,17 +546,12 @@ impl Bayerpat {
         let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");
         let mut pattern = match (stated, unstated, unstated_bayer_pattern) {
             (Some(pattern), _, _) | (None, true, Some(pattern)) => pattern,
-            (None, true, None) => {
-                return Err(fits_well::FitsError::TypeMismatch {
-                    name: "BAYERPAT".to_string(),
-                    expected: "a Bayer phase; 'TRUE' states none, so FitsLoadOptions::unstated_bayer_pattern must give it",
-                });
-            }
+            (None, true, None) => return Err(FitsRefusal::UnstatedBayerPhase.into()),
             (None, false, _) => {
-                return Err(fits_well::FitsError::TypeMismatch {
-                    name: "BAYERPAT".to_string(),
-                    expected: "RGGB, BGGR, GRBG, or GBRG",
-                });
+                return Err(FitsRefusal::BayerPattern {
+                    value: bayerpat.to_owned(),
+                }
+                .into());
             }
         };
 
@@ -545,42 +584,27 @@ impl Bayerpat {
     }
 }
 
-fn read_xtrans_pattern(header: &Header) -> fits_well::Result<XTransPattern> {
+fn read_xtrans_pattern(header: &Header) -> Result<XTransPattern, FitsLoadError> {
     let mut pattern = [[0u8; 6]; 6];
     for (row, values) in pattern.iter_mut().enumerate() {
-        let keyword = format!("XTRNROW{row}");
-        let value =
-            header
-                .get_text(&keyword)?
-                .ok_or_else(|| fits_well::FitsError::TypeMismatch {
-                    name: keyword.clone(),
-                    expected: "six X-Trans color digits",
-                })?;
+        let refused = || FitsLoadError::from(FitsRefusal::XTransRow { row });
+        let value = header
+            .get_text(&format!("XTRNROW{row}"))?
+            .ok_or_else(refused)?;
         if value.len() != 6 {
-            return Err(fits_well::FitsError::TypeMismatch {
-                name: keyword,
-                expected: "six X-Trans color digits",
-            });
+            return Err(refused());
         }
         for (column, byte) in value.bytes().enumerate() {
             values[column] = match byte {
                 b'0'..=b'2' => byte - b'0',
-                _ => {
-                    return Err(fits_well::FitsError::TypeMismatch {
-                        name: keyword,
-                        expected: "X-Trans digits in the range 0..=2",
-                    });
-                }
+                _ => return Err(refused()),
             };
         }
     }
-    XTransPattern::new(pattern).map_err(|error| fits_well::FitsError::TypeMismatch {
-        name: format!("XTRNROW0..XTRNROW5 ({error})"),
-        expected: "X-Trans pattern",
-    })
+    XTransPattern::new(pattern).map_err(|error| FitsRefusal::XTransPattern(error).into())
 }
 
-fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 4]>> {
+fn read_camera_white_balance(header: &Header) -> Result<Option<[f32; 4]>, FitsLoadError> {
     let values = [
         header.get_real("LUMWBR")?,
         header.get_real("LUMWBG1")?,
@@ -594,13 +618,10 @@ fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 
             if values.iter().all(|value| value.is_finite() && *value > 0.0) {
                 Ok(Some(values))
             } else {
-                Err(fits_well::FitsError::KeywordOutOfRange { name: "LUMWB*" })
+                Err(FitsRefusal::WhiteBalanceRange.into())
             }
         }
-        _ => Err(fits_well::FitsError::TypeMismatch {
-            name: "LUMWB*".to_string(),
-            expected: "all four white-balance multipliers or none",
-        }),
+        _ => Err(FitsRefusal::PartialWhiteBalance.into()),
     }
 }
 
@@ -656,7 +677,7 @@ fn parse_sexagesimal(value: &str) -> Option<f64> {
     Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0))
 }
 
-pub(super) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<String>> {
+pub(super) fn read_text(header: &Header, key: &str) -> Result<Option<String>, FitsLoadError> {
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 
@@ -664,14 +685,17 @@ fn read_real_where(
     header: &Header,
     key: &'static str,
     valid: impl Fn(f64) -> bool,
-) -> fits_well::Result<Option<f64>> {
+) -> Result<Option<f64>, FitsLoadError> {
     header
         .get_real(key)?
         .map(|value| {
             if value.is_finite() && valid(value) {
                 Ok(value)
             } else {
-                Err(fits_well::FitsError::KeywordOutOfRange { name: key })
+                Err(FitsRefusal::KeywordOutOfRange {
+                    keyword: key.to_owned(),
+                }
+                .into())
             }
         })
         .transpose()

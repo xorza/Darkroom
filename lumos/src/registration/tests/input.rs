@@ -4,7 +4,8 @@
 use glam::DVec2;
 
 use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
-use crate::registration::registration_config::{RegistrationConfig, median_fwhm};
+use crate::registration::register::median_fwhm;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tuning;
 use crate::star_detection::star::Star;
 
@@ -91,6 +92,8 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
         stars[3].pos = DVec2::new(f64::NAN, 4.0);
 
         let error = RegistrationConfig::default()
+            .registrar()
+            .unwrap()
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         match error {
@@ -109,9 +112,11 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
     }
 }
 
-/// Every float a star carries is checked, in both catalogs.
+/// What registration reads is checked, in both catalogs: a finite FWHM and a finite, positive
+/// position σ, which the final fit divides by. A measurement it does not read, such as the SNR, is
+/// not checked, and a NaN there does not fail a registration.
 #[test]
-fn register_rejects_non_finite_fields_in_both_catalogs() {
+fn register_checks_the_fields_it_reads_in_both_catalogs() {
     for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
         let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
         let mut target_stars = ref_stars.clone();
@@ -120,9 +125,12 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = f32::INFINITY;
-        stars[6].snr = f32::NAN;
+        stars[6].position_sigma = 0.0;
+        stars[7].snr = f32::NAN;
 
         let error = RegistrationConfig::default()
+            .registrar()
+            .unwrap()
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         match error {
@@ -144,6 +152,8 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
         };
         stars[5].fwhm = 2.0;
         let error = RegistrationConfig::default()
+            .registrar()
+            .unwrap()
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         assert!(
@@ -151,11 +161,69 @@ fn register_rejects_non_finite_fields_in_both_catalogs() {
                 error,
                 RegistrationError::InvalidStarField {
                     index: 6,
-                    field: StarField::Snr,
+                    field: StarField::PositionSigma,
+                    value: 0.0,
                     ..
                 }
             ),
             "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("{catalog} star 6 position σ must be finite and positive, got 0")
+        );
+        let stars = match catalog {
+            RegistrationCatalog::Reference => &mut ref_stars,
+            RegistrationCatalog::Target => &mut target_stars,
+        };
+        stars[6].position_sigma = 0.1;
+        let error = RegistrationConfig::default()
+            .registrar()
+            .unwrap()
+            .register(&ref_stars, &target_stars);
+        assert!(
+            !matches!(error, Err(RegistrationError::InvalidStarField { .. })),
+            "{error:?}"
+        );
+    }
+}
+
+/// A catalog with too few unsaturated stars for the fit fails at once, naming the catalog, on
+/// either side: the final fit reads no saturated star. Before, an all-saturated target read
+/// "found 0" stars and an all-saturated reference ran on to "too few inliers".
+#[test]
+fn too_few_unsaturated_stars_name_their_catalog() {
+    let stars: Vec<Star> = (0..30)
+        .map(|i| {
+            Star::at(DVec2::new(
+                f64::from(i) * 37.0,
+                f64::from(i * i % 23) * 41.0,
+            ))
+        })
+        .collect();
+    let config = RegistrationConfig::default();
+    let required = config.matching.min_matches;
+    for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
+        let mut saturated = stars.clone();
+        for star in &mut saturated {
+            star.saturated = true;
+        }
+        let (reference, target) = match catalog {
+            RegistrationCatalog::Reference => (&saturated, &stars),
+            RegistrationCatalog::Target => (&stars, &saturated),
+        };
+        let error = config
+            .registrar()
+            .unwrap()
+            .register(reference, target)
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                RegistrationError::TooFewUnsaturatedStars { catalog: actual, found: 0, required: r }
+                    if actual == catalog && r == required
+            ),
+            "{catalog}: {error:?}"
         );
     }
 }

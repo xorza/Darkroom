@@ -2,11 +2,12 @@
 //!
 //! Provides utilities to create `BackgroundEstimate` instances for benchmarks and tests.
 
-use crate::image::masked_plane::MaskedPlane;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::background_estimate::{BackgroundEstimate, noise_floor_for};
+use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::star_detection::background::sky_noise::{SkyNoise, noise_floor_for};
 use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
+use crate::star_detection::refined_background::RefinedBackground;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use imaginarium::Buffer2;
@@ -18,10 +19,12 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
             Buffer2::new_filled(size.width, size.height, background),
             size,
         ),
-        noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, noise), size),
-        // The map is uniform, so the frame's typical σ is `noise` itself and the estimator's
-        // median-tile-σ derivation reduces to exactly this.
-        noise_floor: noise_floor_for(noise),
+        sky: SkyNoise {
+            noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, noise), size),
+            // The map is uniform, so the frame's typical σ is `noise` itself and the estimator's
+            // median-tile-σ derivation reduces to exactly this.
+            floor: noise_floor_for(noise),
+        },
     }
 }
 
@@ -40,18 +43,17 @@ pub(crate) fn estimate_in(
     config: &BackgroundConfig,
     pool: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    BackgroundEstimate::estimate(MaskedPlane::from(pixels), config, pool)
-        .refine(
-            pixels,
-            PlaneSpec {
-                prefilter: Prefilter::None,
-                matched: None,
-                mask: None,
-                background: config,
-            },
-            pool,
-        )
-        .estimate
+    RefinedBackground::measure(
+        pixels,
+        PlaneSpec {
+            prefilter: Prefilter::None,
+            matched: None,
+            mask: None,
+            background: config,
+        },
+        pool,
+    )
+    .estimate
 }
 
 #[cfg(test)]
@@ -64,6 +66,6 @@ mod tests {
         assert_eq!(bg.background.width(), 100);
         assert_eq!(bg.background.height(), 100);
         assert!((bg.background[(50, 50)] - 0.1).abs() < 1e-6);
-        assert!((bg.noise[(50, 50)] - 0.01).abs() < 1e-6);
+        assert!((bg.sky.noise[(50, 50)] - 0.01).abs() < 1e-6);
     }
 }

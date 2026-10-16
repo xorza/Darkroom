@@ -12,6 +12,7 @@ use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{Files, LIGHTS};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field, STACKED_LIGHTS};
+use crate::drizzle::accumulator;
 use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -20,12 +21,16 @@ use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// Each light's side.
 const SIDE: Size2us = Size2us::new(2048, 2048);
 
 /// The stage benches, then the entry point end to end.
+pub(crate) fn atomic(c: &mut Criterion) {
+    accumulator::bench::atomic(c);
+}
+
 pub(crate) fn integration(c: &mut Criterion) {
     stage(c);
     end_to_end(c);
@@ -68,7 +73,7 @@ fn stage(c: &mut Criterion) {
 
 /// `DrizzleConfig::drizzle_cfa_paths` over a session's calibrated lights, mosaics as calibration
 /// saves them, end to end under the default configuration and the light preset: each light read,
-/// its photosites dropped onto the channels of their colours at twice the frame's side through its
+/// its photosites dropped onto the channels of their colors at twice the frame's side through its
 /// dither, and the drops combined with the light preset's noise weighting.
 fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;

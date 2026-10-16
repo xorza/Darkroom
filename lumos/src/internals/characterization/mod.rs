@@ -11,20 +11,24 @@ mod snapshot;
 
 use std::path::PathBuf;
 
-use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::master_recipe::MASTER_PIN;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
 use crate::calibration::subtractor::Subtractor;
-use crate::combine::stack::stack_frame::StackFrame;
-use crate::combine::stack_config::{Normalization, StackConfig, Weighting};
+use crate::combine::normalization::Normalization;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::combine::stack_frame::StackFrame;
+use crate::decode::decode_pins::DECODE_PINS;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame_store::decode_cache::decode_pins::DECODE_PINS;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
@@ -35,12 +39,14 @@ use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::test_rng::TestRng;
 use crate::io::fits::cfa;
 use crate::io::load_context::LoadContext;
+use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
+use crate::registration::resample::warp_params::WarpParams;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
@@ -92,16 +98,20 @@ fn dither() -> Transform {
 }
 
 fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
-    WarpTransform::new(transform).warp(image, RegistrationConfig::default().warp)
+    WarpParams::default().warp(image, &WarpTransform::new(transform))
 }
 
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
 /// quantization σ, so a change to any of the three moves its decode pin.
 fn cfa_snapshot(snapshot: &mut Snapshot, cfa: &CfaImage) {
-    snapshot.f32s(cfa.data.pixels());
+    snapshot.f32s(cfa.data().pixels());
     let flags = cfa.flags().map_or(&[][..], |flags| flags.bytes());
     snapshot.count(flags.len()).bytes(flags);
-    snapshot.f32s(&[cfa.metadata.quantization_sigma.unwrap_or(f32::NAN)]);
+    snapshot.f32s(&[cfa
+        .metadata
+        .derived
+        .quantization_sigma()
+        .unwrap_or(f32::NAN)]);
 }
 
 fn detect(image: &LinearImage) -> Vec<Star> {
@@ -120,7 +130,7 @@ fn decode_snapshot() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
+    let image = LoadContext::default().linear(path).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);
     assert_decode("FITS decode", &snapshot, DECODE_PINS.fits_linear);
@@ -130,14 +140,14 @@ fn decode_snapshot() {
     let size = Size2us::new(48, 40);
     let channels = [0x61, 0x62, 0x63].map(|seed| star_field(size, 10, seed).image);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new(size, 3),
+        ImageDimensions::new(size, ChannelLayout::Rgb),
         channels
             .iter()
             .map(|image| image.channel(0).pixels().to_vec()),
     );
     let tiff = scratch.join("field.tiff");
-    rgb.save(&tiff).unwrap();
-    let image = LinearImage::from_file(&tiff, &LoadContext::default()).unwrap();
+    writer::raster(&rgb, &tiff).unwrap();
+    let image = LoadContext::default().linear(&tiff).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);
     assert_decode("float TIFF decode", &snapshot, DECODE_PINS.float_tiff);
@@ -150,7 +160,7 @@ fn decode_snapshot() {
         CfaType::Bayer(CfaPattern::Rggb),
     );
     cfa::save(&fits, &mosaic).unwrap();
-    let cfa = CfaImage::from_file(&fits, &LoadContext::default()).unwrap();
+    let cfa = LoadContext::default().cfa(&fits).unwrap();
     let mut snapshot = Snapshot::default();
     cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("mosaic FITS decode", &snapshot, DECODE_PINS.fits_cfa);
@@ -200,31 +210,26 @@ fn calibrate_snapshot() {
             bias: Some(make_cfa(size, bias, bayer)),
             flat_dark: None,
         },
-        DEFAULT_SIGMA_THRESHOLD,
+        SigmaThreshold::DEFAULT,
         &CancelToken::never(),
     )
     .unwrap();
     let mut light = make_cfa(size, light, bayer);
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
-    snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "c76adc4ec4532692");
+    snapshot.f32s(light.data().pixels());
+    assert_snapshot("calibration", &snapshot, "c0cac2b4835d1059");
 
     let mut snapshot = Snapshot::default();
     let xtrans = make_cfa(
         size,
-        light.data.pixels().to_vec(),
+        light.data().pixels().to_vec(),
         CfaType::XTrans(XTRANS_PATTERN),
     );
-    let demosaiced = light
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+    let demosaiced = light.demosaic_measured(MarkesteijnPasses::One);
     image_snapshot(&mut snapshot, &demosaiced);
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
-        let demosaiced = xtrans
-            .clone()
-            .demosaic(passes, &CancelToken::never())
-            .unwrap();
+        let demosaiced = xtrans.clone().demosaic_measured(passes);
         image_snapshot(&mut snapshot, &demosaiced);
     }
     assert_decode("demosaic", &snapshot, DECODE_PINS.demosaic);
@@ -277,7 +282,7 @@ fn master_snapshot() {
         })
         .collect();
     let ingest = IngestConfig::with_cache_dir(scratch.join("cache"));
-    let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
+    let stack = |paths: &[PathBuf], role: MasterRole, subtract: &[Subtractor<'_>]| {
         MasterStack {
             paths,
             role,
@@ -289,15 +294,15 @@ fn master_snapshot() {
         .unwrap()
         .unwrap()
     };
-    let bias_master = stack(&bias, MasterRole::Bias, None);
-    let dark_master = stack(&darks, MasterRole::Dark, None);
+    let bias_master = stack(&bias, MasterRole::Bias, &[]);
+    let dark_master = stack(&darks, MasterRole::Dark, &[]);
     let flat_master = stack(
         &flats,
         MasterRole::Flat,
-        Some(Subtractor {
+        &[Subtractor {
             role: MasterRole::Bias,
             master: &bias_master,
-        }),
+        }],
     );
     let mut snapshot = Snapshot::default();
     for master in [&bias_master, &dark_master, &flat_master] {
@@ -324,10 +329,7 @@ fn frame_stats_snapshot() {
         mono.channel(0).pixels().to_vec(),
         CfaType::Bayer(CfaPattern::Rggb),
     );
-    let demosaiced = mosaic
-        .clone()
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+    let demosaiced = mosaic.clone().demosaic_measured(MarkesteijnPasses::One);
     let mut snapshot = Snapshot::default();
     for stats in [
         FrameStats::measure(&mono),
@@ -336,7 +338,13 @@ fn frame_stats_snapshot() {
     ] {
         snapshot
             .f32s(&stats.medians)
-            .f32s(&stats.noise)
+            .f32s(
+                &stats
+                    .background
+                    .iter()
+                    .map(|split| split.sigma())
+                    .collect::<Vec<_>>(),
+            )
             .f32s(&stats.sky)
             .f32s(&[stats.quantization_sigma.unwrap_or(-1.0)]);
     }
@@ -361,7 +369,7 @@ fn detect_snapshot() {
             star.sharpness,
         ]);
     }
-    assert_snapshot("detection", &snapshot, "536e3d7473800503");
+    assert_snapshot("detection", &snapshot, "fc7b51416f4dd402");
 }
 
 #[test]
@@ -374,6 +382,8 @@ fn register_snapshot() {
     let mut config = RegistrationConfig::default();
     config.ransac.seed = 0x5EED;
     let result = config
+        .registrar()
+        .unwrap()
         .register(&detect(&reference), &detect(&target))
         .unwrap();
     let mut snapshot = Snapshot::default();
@@ -381,7 +391,7 @@ fn register_snapshot() {
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "c38536a6a8e496d2");
+    assert_snapshot("registration", &snapshot, "f6beeb64b73e5f9d");
 }
 
 #[test]
@@ -395,7 +405,7 @@ fn warp_snapshot() {
     snapshot
         .f32s(result.coverage.pixels())
         .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "7538c11ee896ac39");
+    assert_snapshot("warp", &snapshot, "b0e4f2a5dded7f0a");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
@@ -421,7 +431,7 @@ fn combine_snapshot() {
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "689b77424ba770ea");
+    assert_snapshot("combine", &snapshot, "c7fffd8295b11ecd");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.
@@ -433,7 +443,7 @@ fn stretch_snapshot() {
     let size = Size2us::new(96, 96);
     let channels = [0x51, 0x52, 0x53].map(|seed| star_field(size, 20, seed).image);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new(size, 3),
+        ImageDimensions::new(size, ChannelLayout::Rgb),
         channels
             .iter()
             .map(|image| image.channel(0).pixels().to_vec()),
@@ -458,7 +468,7 @@ fn stretch_snapshot() {
         stretch.apply(&mut image).unwrap();
         image_snapshot(&mut snapshot, &image);
     }
-    assert_snapshot("stretch", &snapshot, "262d78318d67a2d8");
+    assert_snapshot("stretch", &snapshot, "088d3a703a929f22");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane — see [`cfa_snapshot`].

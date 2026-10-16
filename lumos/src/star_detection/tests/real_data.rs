@@ -7,12 +7,13 @@ use common::internals;
 use std::time::Instant;
 
 use crate::ImageDimensions;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::transform::TransformModel;
+use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
@@ -32,8 +33,11 @@ pub(crate) fn rho_opiuchi() -> LinearImage {
     let image = imaginarium::Image::read_file(rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::L_F32);
-    LinearImage::from_pixels(
-        ImageDimensions::new((image.desc().width, image.desc().height), 1),
+    LinearImage::from_interleaved(
+        ImageDimensions::new(
+            (image.desc().width, image.desc().height),
+            ChannelLayout::Mono,
+        ),
         bytemuck::cast_slice(image.bytes()).to_vec(),
     )
 }
@@ -134,8 +138,7 @@ fn detect_rho_opiuchi() {
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::internals::visual;
     use crate::star_detection::resources::DetectionResources;
-    use crate::star_detection::star_detector::stages::detect::DetectResult;
-    use crate::star_detection::star_detector::stages::fwhm;
+    use crate::star_detection::star_detector::stages::detect::Candidates;
     use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
     use imaginarium::Buffer2;
 
@@ -157,17 +160,17 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     };
 
     // 1. The measurement plane, the sky out, and the sky's noise.
-    let frame = PreparedFrame::new(&linear_image, &config, &mut pool);
+    let mut frame = PreparedFrame::new(&linear_image, &config, &mut pool);
     save(&frame.measure, "01_measure");
     save(&frame.sky.noise, "02_sky_noise");
 
     // 2. FWHM estimation.
-    let fwhm_source = fwhm::estimate(&frame, &config, &mut pool);
+    let fwhm_source = frame.estimate_fwhm(&config, &mut pool);
     let fwhm = fwhm_source.value();
     println!("Estimated FWHM: {fwhm:?} ({fwhm_source:?})");
 
     // 3. The detection plane and the noise measured on it.
-    let plane = frame.detection_plane(fwhm, &config, &mut pool);
+    let plane = frame.final_plane(fwhm, &config, &mut pool);
     save(&plane.values, "03_detection_plane");
     save(&plane.noise.noise, "04_detection_noise");
 
@@ -191,7 +194,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     drop(mask);
 
     // The stage itself, on the same plane, saw what these images show.
-    let stage = DetectResult::from_plane(
+    let stage = Candidates::detect(
         DetectionInput {
             plane: &plane,
             no_data: frame.no_data.as_deref(),
@@ -232,13 +235,14 @@ fn weighted_fit_registration_rms() {
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let mut reg_config = RegistrationConfig {
-            transform_type: TransformModel::Auto,
-            sip: None,
+            model: TransformModel::Auto { sip: None },
             ..RegistrationConfig::default()
         };
         // Seeded, so the two runs differ only in their centroids.
         reg_config.ransac.seed = 0x5EED;
         let r = reg_config
+            .registrar()
+            .unwrap()
             .register(&s1, &s2)
             .expect("registration should succeed");
         Registered {

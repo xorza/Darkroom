@@ -34,7 +34,7 @@
 //! `I = (r+g+b)/3` and every channel is scaled by `f(I)/I`, so hue/saturation and star color are
 //! preserved and only intensity is remapped. The ratio is formed after the black point, as Lupton
 //! et al. and PixInsight's ArcsinhStretch form it: on data that still holds the sky, a faint
-//! nebula's colour is a small excess over a grey pedestal and comes out nearly grey. A per-channel
+//! nebula's color is a small excess over a grey pedestal and comes out nearly grey. A per-channel
 //! stretch instead ties an object's color to its brightness and burns bright star cores toward
 //! white.
 
@@ -47,7 +47,7 @@ use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
-use crate::image_ops::error::OpError;
+use crate::image_ops::error::{AutoStretch, OpError};
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
@@ -152,7 +152,7 @@ impl Stretch {
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters, and
+    /// [`OpError::Config`] on out-of-range parameters, and
     /// [`OpError::UnreachableBackground`] when an auto method cannot place the measured background
     /// on its target. The image is unchanged on error.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
@@ -275,7 +275,7 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
             hp,
         } => Some(Curve {
             black: BlackPoint::new(black_point),
-            tone: Tone::Ghs(GhsCurve::new(GhsShape { d, b, sp, lp, hp })),
+            tone: GhsCurve::new(GhsShape { d, b, sp, lp, hp }).map_or(Tone::Identity, Tone::Ghs),
         }),
         StretchMethod::AutoStf { .. } | StretchMethod::AutoAsinh { .. } => None,
     }
@@ -343,7 +343,7 @@ impl Background {
     /// and the midtones that put the median on `target`.
     fn stf_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
         let unreachable = || OpError::UnreachableBackground {
-            method: "auto STF",
+            method: AutoStretch::Stf,
             median: self.median,
             target,
         };
@@ -359,7 +359,7 @@ impl Background {
     /// the softening that puts the median on `target`.
     fn auto_asinh_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
         let unreachable = || OpError::UnreachableBackground {
-            method: "auto asinh",
+            method: AutoStretch::Asinh,
             median: self.median,
             target,
         };
@@ -381,8 +381,8 @@ struct AutoBackground {
 
 impl AutoBackground {
     /// The black point `shadow_sigmas` times the background's σ below its median, held at 0 from
-    /// below; `unreachable` when it reaches white or leaves the median at or below it, or at white
-    /// — nothing for a curve to place.
+    /// below; `unreachable` when the black point reaches white, or the median sits at or below it
+    /// or at white: nothing for a curve to place.
     fn new(
         background: Background,
         shadow_sigmas: f32,
@@ -540,8 +540,6 @@ impl GhsShape {
 /// C¹ and monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
 #[derive(Debug, Clone, Copy)]
 struct GhsCurve {
-    /// `d = 0`, or a range too small to normalize: the transform is the identity.
-    identity: bool,
     shape: GhsShape,
     /// `T(sp − lp)` / `T'(sp − lp)` — the shadow tail's intercept and slope.
     t_sp_lp: f32,
@@ -555,48 +553,34 @@ struct GhsCurve {
 }
 
 impl GhsCurve {
-    fn new(shape: GhsShape) -> Self {
+    /// The curve of `shape`; `None` where it is the identity: `d = 0`, or a `d` so small that the
+    /// curve's range underflows, which the normalization would divide by.
+    fn new(shape: GhsShape) -> Option<Self> {
         let GhsShape { d, sp, lp, hp, .. } = shape;
-        let zero = Self {
-            identity: true,
-            shape,
-            t_sp_lp: 0.0,
-            tp_sp_lp: 0.0,
-            t_hp_sp: 0.0,
-            tp_hp_sp: 0.0,
-            t0: 0.0,
-            inv_range: 1.0,
-        };
         let t_sp_lp = shape.base(sp - lp);
         let tp_sp_lp = shape.base_slope(sp - lp);
         let t_hp_sp = shape.base(hp - sp);
         let tp_hp_sp = shape.base_slope(hp - sp);
         let t0 = -lp * tp_sp_lp - t_sp_lp; // T1(0)
         let t1 = (1.0 - hp) * tp_hp_sp + t_hp_sp; // T4(1)
-        // `d = 0` is the identity, and a `d` so small that the curve's range underflows is it too:
-        // the normalization would divide by zero.
         if d == 0.0 || !(t1 - t0).is_normal() {
-            return zero;
+            return None;
         }
-        Self {
-            identity: false,
+        Some(Self {
+            shape,
             t_sp_lp,
             tp_sp_lp,
             t_hp_sp,
             tp_hp_sp,
             t0,
             inv_range: 1.0 / (t1 - t0),
-            ..zero
-        }
+        })
     }
 }
 
 impl ToneCurve for GhsCurve {
     #[inline]
     fn eval(&self, x: f32) -> f32 {
-        if self.identity {
-            return unit(x);
-        }
         let GhsShape { sp, lp, hp, .. } = self.shape;
         let raw = if x < lp {
             // T1: linear, tangent to the mirrored base at lp.
@@ -624,9 +608,22 @@ struct Curve {
 
 #[derive(Debug, Clone, Copy)]
 enum Tone {
+    /// The samples kept, clamped to `[0, 1]`: a GHS of no strength.
+    Identity,
     Mtf(MtfCurve),
     Asinh(AsinhCurve),
     Ghs(GhsCurve),
+}
+
+/// The identity tone: each sample clamped to `[0, 1]`.
+#[derive(Debug, Clone, Copy)]
+struct IdentityCurve;
+
+impl ToneCurve for IdentityCurve {
+    #[inline]
+    fn eval(&self, x: f32) -> f32 {
+        unit(x)
+    }
 }
 
 /// Midtones Transfer Function: a rational (Möbius) interpolation through `(0,0)`, `(m,0.5)`,
@@ -697,6 +694,7 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpEr
 /// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
 fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
     match curve.tone {
+        Tone::Identity => map_plane(plane, curve.black, IdentityCurve),
         Tone::Mtf(c) => map_plane(plane, curve.black, c),
         Tone::Asinh(c) => map_plane(plane, curve.black, c),
         Tone::Ghs(c) => map_plane(plane, curve.black, c),
@@ -734,6 +732,7 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     }
     let black = curve.black;
     match curve.tone {
+        Tone::Identity => image.map_rgb(|px| color_preserve_pixel(px, black, &IdentityCurve)),
         Tone::Mtf(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
         Tone::Asinh(c) => apply_color_preserving_asinh(image, black, c),
         Tone::Ghs(c) => image.map_rgb(|px| color_preserve_pixel(px, black, &c)),
@@ -763,13 +762,14 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: A
 
 #[cfg(test)]
 mod internals {
-    use crate::image_ops::stretch::{Curve, Tone, ToneCurve};
+    use crate::image_ops::stretch::{Curve, IdentityCurve, Tone, ToneCurve};
 
     impl Curve {
         /// The curve at `x`, its black point first.
         pub(super) fn eval(&self, x: f32) -> f32 {
             let x = self.black.rescale(x);
             match self.tone {
+                Tone::Identity => IdentityCurve.eval(x),
                 Tone::Mtf(c) => c.eval(x),
                 Tone::Asinh(c) => c.eval(x),
                 Tone::Ghs(c) => c.eval(x),

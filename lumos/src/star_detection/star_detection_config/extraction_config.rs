@@ -1,6 +1,6 @@
 //! Candidate detection, deblending, and region-filtering settings.
 
-use crate::config_value::{self, ConfigValue};
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Pixel connectivity for connected component labeling.
@@ -23,11 +23,12 @@ pub enum Connectivity {
 /// How a connected component is split into stars.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Deblend {
-    /// Every residual peak at least `min_prominence` of the component's brightest, and at least
+    /// Every residual peak at least `min_relative_height` of the component's brightest, and at least
     /// `deblend_min_separation` from a brighter one, is its own star.
     LocalMaxima {
-        /// A peak's share of the component's brightest residual, in `[0, 1]`.
-        min_prominence: f32,
+        /// A peak's height as a share of the component's brightest residual, in `[0, 1]`: a
+        /// relative height, not a prominence — no saddle to the brighter peak is measured.
+        min_relative_height: f32,
     },
     /// SExtractor's tree: the component is thresholded at `n_thresholds` levels spaced
     /// exponentially between the detection threshold and its peak residual, and a branch is its
@@ -73,7 +74,7 @@ impl Default for ExtractionConfig {
             sigma_threshold: 4.0,
             connectivity: Connectivity::Eight,
             deblend: Deblend::LocalMaxima {
-                min_prominence: 0.3,
+                min_relative_height: 0.3,
             },
             deblend_min_separation: 3,
             min_area: 5,
@@ -90,17 +91,19 @@ impl ExtractionConfig {
         ConfigValue::count("deblend_min_separation", self.deblend_min_separation)
             .must_be("at least 1", self.deblend_min_separation >= 1)?;
         match self.deblend {
-            Deblend::LocalMaxima { min_prominence } => {
-                ConfigValue::new("deblend min_prominence", min_prominence)
+            Deblend::LocalMaxima {
+                min_relative_height,
+            } => {
+                ConfigValue::new("deblend min_relative_height", min_relative_height)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }
             Deblend::MultiThreshold {
                 n_thresholds,
                 min_contrast,
             } => {
-                ConfigValue::count("deblend n_thresholds", n_thresholds).must_be_against(
+                ConfigValue::count("deblend n_thresholds", n_thresholds).must_be_against_count(
                     "between 2 and the deblend level cap",
-                    config_value::exact(MAX_DEBLEND_N_THRESHOLDS),
+                    MAX_DEBLEND_N_THRESHOLDS,
                     (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&n_thresholds),
                 )?;
                 ConfigValue::new("deblend min_contrast", min_contrast)
@@ -108,9 +111,9 @@ impl ExtractionConfig {
             }
         }
         ConfigValue::count("min_area", self.min_area).must_be("at least 1", self.min_area >= 1)?;
-        ConfigValue::count("max_area", self.max_area).must_be_against(
+        ConfigValue::count("max_area", self.max_area).must_be_against_count(
             "at least min_area",
-            config_value::exact(self.min_area),
+            self.min_area,
             self.max_area >= self.min_area,
         )?;
         Ok(())

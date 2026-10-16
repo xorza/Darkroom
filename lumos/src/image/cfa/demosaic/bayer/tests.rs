@@ -2,9 +2,9 @@
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::bayer::rcd::INTERPOLATED_BORDER;
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
@@ -34,32 +34,6 @@ fn from_bayerpat_reads_each_spelling_and_refuses_the_rest() {
     for refused in ["TRUE", "XXXX", ""] {
         assert_eq!(CfaPattern::from_bayerpat(refused), None, "{refused:?}");
     }
-}
-
-#[test]
-fn from_filters_decodes_the_libraw_word_and_rejects_the_rest() {
-    // Standard LibRaw encodings: two bits per position, the 2x2 block repeated across the word.
-    assert_eq!(
-        CfaPattern::from_filters(0x9494_9494),
-        Some(CfaPattern::Rggb)
-    );
-    assert_eq!(
-        CfaPattern::from_filters(0x1616_1616),
-        Some(CfaPattern::Bggr)
-    );
-    assert_eq!(
-        CfaPattern::from_filters(0x6161_6161),
-        Some(CfaPattern::Grbg)
-    );
-    assert_eq!(
-        CfaPattern::from_filters(0x4949_4949),
-        Some(CfaPattern::Gbrg)
-    );
-    // filters == 0 is monochrome / no CFA; exotic patterns match nothing either.
-    assert_eq!(CfaPattern::from_filters(0), None);
-    assert_eq!(CfaPattern::from_filters(0x1234_5678), None);
-    // RGGB in rows 0–5 but BGGR in rows 6–7: not 2-row periodic, whatever the first block says.
-    assert_eq!(CfaPattern::from_filters(0x1694_9494), None);
 }
 
 #[test]
@@ -104,25 +78,10 @@ fn flip_both_axes() {
     );
 }
 
-/// A frame takes its plane's size, which must not be empty.
-#[test]
-fn a_bayer_image_holds_its_size_in_samples() {
-    let data = Buffer2::new_default(3, 2);
-    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
-    assert_eq!(bayer.size, Size2us::new(3, 2));
-    for size in [Size2us::new(0, 2), Size2us::new(2, 0)] {
-        let data = Buffer2::new_default(size.width, size.height);
-        let refused = std::panic::catch_unwind(|| {
-            BayerImage::new(&data, CfaPattern::Rggb);
-        });
-        assert!(refused.is_err(), "{size:?}");
-    }
-}
-
 #[test]
 fn cancelled_token_bails_the_demosaic() {
     let data = Buffer2::new_filled(20, 20, 0.5f32);
-    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
+    let bayer = MosaicView::new(&data, CfaPattern::Rggb);
 
     // A live, tripped token bails at the first between-stage check rather than
     // running the whole demosaic.
@@ -148,7 +107,7 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
         let index = y * size.width + x;
         ((index * 37 + y * 11) % 1_024) as f32 / 1_023.0
     });
-    let bayer = BayerImage::new(&data, CfaPattern::Rggb);
+    let bayer = MosaicView::new(&data, CfaPattern::Rggb);
 
     let run = |threads| {
         ThreadPoolBuilder::new()
@@ -169,10 +128,10 @@ const ROUNDING: f32 = 1.0 / (1 << 21) as f32;
 
 /// Demosaic `data` under `pattern`, with no margins.
 fn demosaic(data: &Buffer2<f32>, pattern: CfaPattern) -> [Vec<f32>; 3] {
-    rcd::demosaic(&BayerImage::new(data, pattern), &CancelToken::never()).unwrap()
+    rcd::demosaic(&MosaicView::new(data, pattern), &CancelToken::never()).unwrap()
 }
 
-/// A mosaic of `size` under `pattern` sampling each pixel's own colour of `scene`.
+/// A mosaic of `size` under `pattern` sampling each pixel's own color of `scene`.
 fn mosaic(
     size: Size2us,
     pattern: CfaPattern,
@@ -184,30 +143,30 @@ fn mosaic(
     })
 }
 
-/// A constant colour per channel — uniform grey and two distinct (R, G, B) — through every phase
+/// A constant color per channel — uniform grey and two distinct (R, G, B) — through every phase
 /// comes back as itself at every pixel, the interpolated border included, and each native sample
 /// exactly.
 ///
-/// The ratio correction is level-free, so a constant colour comes back to a few f32 roundings of
+/// The ratio correction is level-free, so a constant color comes back to a few f32 roundings of
 /// each step: 2⁻²¹ of the value, eight units in the last place, holds them. The border averages
 /// equal neighbours and is exact up to rounding.
 #[test]
-fn constant_colour_reconstructs_on_every_phase() {
+fn constant_color_reconstructs_on_every_phase() {
     let size = Size2us::new(40, 36);
     for pattern in CfaPattern::ALL {
-        for colour in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
-            let data = mosaic(size, pattern, |_, channel| colour[channel]);
+        for color in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
+            let data = mosaic(size, pattern, |_, channel| color[channel]);
             let planes = demosaic(&data, pattern);
             for (index, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
                 let native = pattern.color_at(pos).index();
-                assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
+                assert_eq!(planes[native][index].to_bits(), color[native].to_bits());
                 for channel in 0..3 {
                     let value = planes[channel][index];
                     assert_close!(
                         value,
-                        colour[channel],
-                        colour[channel] * ROUNDING,
-                        "{pattern:?} {colour:?} channel {channel} at {pos:?}: {value}"
+                        color[channel],
+                        color[channel] * ROUNDING,
+                        "{pattern:?} {color:?} channel {channel} at {pos:?}: {value}"
                     );
                 }
             }
@@ -260,7 +219,7 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
 /// count — under a camera white balance of red 2.13 and blue 1.71 over green, on a frame of 130
 /// that both kernels tile as well as fill at its border. The kernels read the samples balanced and
 /// write each native one from the input, so no `(x·g)/g` round trip rounds it, and an
-/// interpolated sample is balanced back by its own colour's gain.
+/// interpolated sample is balanced back by its own color's gain.
 #[test]
 fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let ramp = |size: Size2us| -> Buffer2<f32> {
@@ -270,7 +229,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     };
     let assert_native = |planes: &[Vec<f32>; 3],
                          data: &[f32],
-                         colour: &dyn Fn(Vec2us) -> usize,
+                         color: &dyn Fn(Vec2us) -> usize,
                          size: Size2us,
                          case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
@@ -282,7 +241,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
             }
         }
         for (index, &sample) in data.iter().enumerate() {
-            let channel = colour(size.point_of(index));
+            let channel = color(size.point_of(index));
             assert_eq!(
                 planes[channel][index].to_bits(),
                 sample.to_bits(),
@@ -311,13 +270,13 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
     ] {
         let mut cfa = make_cfa(size, data.pixels().to_vec(), cfa_type);
-        cfa.metadata.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);
-        let image = cfa.demosaic(passes, &CancelToken::never()).unwrap();
+        cfa.metadata.header.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);
+        let image = cfa.demosaic_measured(passes);
         let planes = [0, 1, 2].map(|channel| image.channel(channel).pixels().to_vec());
         assert_native(
             &planes,
             &data,
-            &|pos| cfa_type.color_at(pos),
+            &|pos| cfa_type.slot_at(pos),
             size,
             &format!("{cfa_type:?} {passes:?}, balanced"),
         );
@@ -385,7 +344,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
 
     let base_data = mosaic(CfaPattern::Rggb, 0, 0);
     let base = rcd::demosaic(
-        &BayerImage::new(&base_data, CfaPattern::Rggb),
+        &MosaicView::new(&base_data, CfaPattern::Rggb),
         &CancelToken::never(),
     )
     .unwrap();
@@ -403,7 +362,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
         let (cw, ch) = (w - dx, h - dy);
         let data = mosaic(pattern, dx, dy);
         let shifted =
-            rcd::demosaic(&BayerImage::new(&data, pattern), &CancelToken::never()).unwrap();
+            rcd::demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
         for y in MARGIN..ch - MARGIN {
             for x in MARGIN..cw - MARGIN {
                 for channel in 0..3 {

@@ -1,8 +1,5 @@
-//! [`CfaLattice`]: the colour of each photosite, and each photosite's neighbours under the same
+//! [`CfaLattice`]: the color of each photosite, and each photosite's neighbours under the same
 //! filter.
-
-use imaginarium::Buffer2;
-use rayon::prelude::*;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::masked_plane::MaskedPlane;
@@ -10,7 +7,7 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
 
-/// One same-colour neighbour of a phase: its offset, and its squared distance, which orders the
+/// One same-color neighbour of a phase: its offset, and its squared distance, which orders the
 /// stencil and decides its ties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Tap {
@@ -19,16 +16,16 @@ struct Tap {
     distance2: i32,
 }
 
-/// A colour filter array as a lattice: the colour of a photosite, and for every phase of the
+/// A color filter array as a lattice: the color of a photosite, and for every phase of the
 /// pattern the neighbours under the same filter nearest first, in one flat table.
 ///
-/// The same filter is the same colour, and on a Bayer sensor the same phase too: its two greens,
+/// The same filter is the same color, and on a Bayer sensor the same phase too: its two greens,
 /// one in the red rows (Gr) and one in the blue rows (Gb), are read through different neighbours
 /// and amplifier paths and can sit at different levels, so a green taken from the other phase would
 /// carry that imbalance into its repair. A Bayer photosite's neighbours are thus the stride-2
 /// lattice through it, as its red and blue already were.
 ///
-/// Every consumer that needs a photosite's same-colour surroundings reads them here: the defect and
+/// Every consumer that needs a photosite's same-color surroundings reads them here: the defect and
 /// null repair, the cosmic-ray scans, and the deinterleave a 2-periodic pattern allows. A count of
 /// neighbours always takes whole groups of equal distance: cutting a group by scan order would
 /// favour one direction over the others at the same distance, which is how the X-Trans repair came
@@ -36,22 +33,32 @@ struct Tap {
 #[derive(Debug)]
 pub(crate) struct CfaLattice {
     period: usize,
+    /// The neighbours a median takes, before the tie group it lands in completes.
+    count: usize,
     /// The taps of phase `p` are `taps[starts[p]..starts[p + 1]]`, by distance and then by a fixed
     /// order that does not matter, since groups are never cut.
     taps: Vec<Tap>,
     starts: Vec<u32>,
 }
 
+/// A stencil holds this many times the neighbours a median takes, in whole shells: with up to
+/// `1 − 1/MASKED_HEADROOM` of a stencil masked, the median still takes its full count.
+const MASKED_HEADROOM: usize = 2;
+
+/// The square every stencil is cut from, in pixels either side. Its inscribed disc of whole shells
+/// holds [`MASKED_HEADROOM`] times every count: X-Trans red and blue, 2 of each 9 photosites,
+/// need 48, which a disc of radius 8.3 holds.
+const SEARCH_RADIUS: i32 = 12;
+
 impl CfaLattice {
     pub(crate) fn new(cfa: &CfaType) -> Self {
-        // Each window holds more of every colour than the largest count a consumer asks for, 24,
-        // with the tie group that count may land in.
-        let (period, radius): (usize, i32) = match cfa {
-            CfaType::Mono => (1, 3),
-            CfaType::Bayer(_) => (2, 5),
-            CfaType::XTrans(_) => (6, 6),
+        let period = cfa.period();
+        let count = match cfa {
+            CfaType::Mono | CfaType::Bayer(_) => 8,
+            CfaType::XTrans(_) => 24,
         };
-        // The pattern is periodic, so a neighbour's colour is its phase's: shifting by whole
+        let radius = SEARCH_RADIUS;
+        // The pattern is periodic, so a neighbour's color is its phase's: shifting by whole
         // periods keeps every position non-negative.
         let shift = (radius.unsigned_abs() as usize).div_ceil(period) * period;
         let mut taps = Vec::new();
@@ -59,7 +66,7 @@ impl CfaLattice {
         for phase in 0..period * period {
             starts.push(u32::try_from(taps.len()).expect("the table is small"));
             let origin = Vec2us::new(phase % period, phase / period);
-            let colour = cfa.color_at(origin);
+            let color = cfa.slot_at(origin);
             let first = taps.len();
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
@@ -72,22 +79,26 @@ impl CfaLattice {
                     );
                     let same_filter = match cfa {
                         CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
-                        CfaType::Mono | CfaType::XTrans(_) => cfa.color_at(position) == colour,
+                        CfaType::Mono | CfaType::XTrans(_) => cfa.slot_at(position) == color,
                     };
-                    if same_filter {
-                        taps.push(Tap {
-                            dx,
-                            dy,
-                            distance2: dx * dx + dy * dy,
-                        });
+                    let distance2 = dx * dx + dy * dy;
+                    // Within the inscribed disc, every offset of a shell lies in the square.
+                    if same_filter && distance2 <= radius * radius {
+                        taps.push(Tap { dx, dy, distance2 });
                     }
                 }
             }
             taps[first..].sort_by_key(|tap| (tap.distance2, tap.dy, tap.dx));
+            let target = MASKED_HEADROOM * count;
+            debug_assert!(taps.len() - first >= target, "phase {phase}");
+            let last = taps[first + target - 1].distance2;
+            let end = first + taps[first..].partition_point(|tap| tap.distance2 <= last);
+            taps.truncate(end);
         }
         starts.push(u32::try_from(taps.len()).expect("the table is small"));
         Self {
             period,
+            count,
             taps,
             starts,
         }
@@ -101,8 +112,9 @@ impl CfaLattice {
     /// The median of `position`'s nearest neighbours in `plane` under its filter that the plane's
     /// mask does not name, so a defect is never repaired from another: 8 with their ties for mono
     /// and Bayer, which on a Bayer sensor are the four at 2 and the four at 2√2 of its own phase,
-    /// and 24 with their ties for X-Trans; fewer where the frame's edge cuts the window. The
-    /// pixel's own value when none is valid.
+    /// and 24 with their ties for X-Trans; fewer where the frame's edge cuts the window, or where
+    /// more than the [`MASKED_HEADROOM`] allows is masked. The pixel's own value when none is
+    /// valid.
     pub(crate) fn median(
         &self,
         plane: MaskedPlane<'_>,
@@ -111,11 +123,12 @@ impl CfaLattice {
     ) -> f32 {
         let MaskedPlane { pixels, mask } = plane;
         let size = Size2us::from(pixels);
-        let count = if self.period == 6 { 24 } else { 8 };
+        let count = self.count;
         scratch.values.clear();
-        scratch.distances.clear();
+        // The distance of the last neighbour taken: the count stops only between tie groups.
+        let mut last_distance = None;
         for tap in self.stencil(position) {
-            if scratch.values.len() >= count && scratch.distances.last() != Some(&tap.distance2) {
+            if scratch.values.len() >= count && last_distance != Some(tap.distance2) {
                 break;
             }
             let (Some(x), Some(y)) = (
@@ -130,7 +143,7 @@ impl CfaLattice {
             let index = y * size.width + x;
             if !mask.is_some_and(|mask| mask.get(index)) {
                 scratch.values.push(pixels[index]);
-                scratch.distances.push(tap.distance2);
+                last_distance = Some(tap.distance2);
             }
         }
         if scratch.values.is_empty() {
@@ -138,78 +151,19 @@ impl CfaLattice {
         }
         statistics::median_mut(&mut scratch.values)
     }
-
-    /// Copy phase `(a, b)` of a 2-periodic mosaic into a dense plane of its
-    /// [`Self::phase_size`], row-major. Each phase of a Bayer pattern is one colour.
-    ///
-    /// Row-parallel, as [`Self::interleave`] is: they are a few percent of a cosmic-ray pass, but
-    /// they are the whole of its serial fraction otherwise.
-    pub(crate) fn deinterleave(
-        &self,
-        mosaic: &Buffer2<f32>,
-        phase: Vec2us,
-        plane: &mut Buffer2<f32>,
-    ) {
-        debug_assert_eq!(self.period, 2);
-        let size = Size2us::from(mosaic);
-        let plane_size = Self::phase_size(size, phase);
-        plane.reshape(plane_size.width, plane_size.height, 0.0);
-        plane
-            .par_chunks_mut(plane_size.width.max(1))
-            .enumerate()
-            .for_each(|(y, row)| {
-                let source = mosaic.row(2 * y + phase.y);
-                for (x, value) in row.iter_mut().enumerate() {
-                    *value = source[2 * x + phase.x];
-                }
-            });
-    }
-
-    /// Write a dense plane back into phase `(a, b)` of the mosaic: the inverse of
-    /// [`Self::deinterleave`].
-    pub(crate) fn interleave(
-        &self,
-        plane: &Buffer2<f32>,
-        phase: Vec2us,
-        mosaic: &mut Buffer2<f32>,
-    ) {
-        debug_assert_eq!(self.period, 2);
-        let size = Size2us::from(&*mosaic);
-        debug_assert_eq!(
-            Size2us::from(plane),
-            Self::phase_size(size, phase),
-            "the plane is the phase's"
-        );
-        mosaic
-            .par_chunks_mut(size.width)
-            .enumerate()
-            .filter(|(y, _)| y % 2 == phase.y)
-            .for_each(|(y, row)| {
-                for (x, &value) in plane.row(y / 2).iter().enumerate() {
-                    row[2 * x + phase.x] = value;
-                }
-            });
-    }
-
-    /// The size of phase `(a, b)`'s dense plane in a `size` mosaic.
-    pub(crate) const fn phase_size(size: Size2us, phase: Vec2us) -> Size2us {
-        Size2us::new(
-            (size.width - phase.x).div_ceil(2),
-            (size.height - phase.y).div_ceil(2),
-        )
-    }
 }
 
-/// The neighbours one [`CfaLattice::median`] took, with each one's squared distance, nearest
-/// first: scratch a caller keeps across medians.
+/// The neighbours one [`CfaLattice::median`] took, nearest first: scratch a caller keeps across
+/// medians.
 #[derive(Debug, Default)]
 pub(crate) struct Gathered {
     values: Vec<f32>,
-    distances: Vec<i32>,
 }
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::Buffer2;
+
     use super::*;
     use crate::bit_buffer2::BitBuffer2;
     use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -255,28 +209,48 @@ mod tests {
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
     }
 
-    /// Every X-Trans phase takes whole shells of equal distance: no same-colour neighbour outside
-    /// the selection is as near as the farthest one in it, so no direction at a shared distance is
-    /// favoured. And the selection holds at least the 24 asked for.
+    /// Every phase's stencil is whole shells of equal distance holding at least twice its count:
+    /// every same-filter offset as near as its farthest tap is in it, none farther, so a median
+    /// cut short by its count favours no direction at a shared distance, and half the stencil
+    /// masked still leaves the full count. X-Trans red and blue hold 48 at least, where the
+    /// square stencil they replace held 38.
     #[test]
-    fn x_trans_takes_whole_shells() {
-        let lattice = CfaLattice::new(&CfaType::XTrans(XTRANS_PATTERN));
-        for phase in 0..36 {
-            let position = Vec2us::new(phase % 6, phase / 6);
-            let stencil = lattice.stencil(position);
-            let taken = offsets(&lattice, position, 24);
-            assert!(taken.len() >= 24, "phase {phase}");
-            let farthest = stencil[taken.len() - 1].distance2;
-            assert!(
-                stencil[taken.len()..]
-                    .iter()
-                    .all(|tap| tap.distance2 > farthest),
-                "phase {phase}"
-            );
+    fn every_stencil_is_whole_shells_with_headroom() {
+        for cfa in [
+            CfaType::Mono,
+            CfaType::Bayer(CfaPattern::Grbg),
+            CfaType::XTrans(XTRANS_PATTERN),
+        ] {
+            let lattice = CfaLattice::new(&cfa);
+            let period = lattice.period;
+            for phase in 0..period * period {
+                let origin = Vec2us::new(phase % period, phase / period);
+                let stencil = lattice.stencil(origin);
+                assert!(stencil.len() >= 2 * lattice.count, "{cfa:?} phase {phase}");
+                let farthest = stencil[stencil.len() - 1].distance2;
+                let mut expected = Vec::new();
+                for dy in -20i32..=20 {
+                    for dx in -20i32..=20 {
+                        let at = Vec2us::new(
+                            (60 + origin.x).strict_add_signed(dx as isize),
+                            (60 + origin.y).strict_add_signed(dy as isize),
+                        );
+                        let same = match cfa {
+                            CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
+                            _ => cfa.slot_at(at) == cfa.slot_at(origin),
+                        };
+                        if same && (dx, dy) != (0, 0) && dx * dx + dy * dy <= farthest {
+                            expected.push((dx, dy));
+                        }
+                    }
+                }
+                let taken: Vec<(i32, i32)> = stencil.iter().map(|tap| (tap.dx, tap.dy)).collect();
+                assert_eq!(sorted(taken), sorted(expected), "{cfa:?} phase {phase}");
+            }
         }
     }
 
-    /// With each filter held at its own constant — each X-Trans colour, each Bayer phase, so Gr and
+    /// With each filter held at its own constant — each X-Trans color, each Bayer phase, so Gr and
     /// Gb differ — every pixel's median is its filter's value, interior or border: a neighbour
     /// under another filter, a Gb beside a Gr included, would mix them.
     #[test]
@@ -289,7 +263,7 @@ mod tests {
             let size = Size2us::new(25, 19);
             let level = |position: Vec2us| match cfa {
                 CfaType::Bayer(_) => 0.125 * (1 + position.x % 2 + 2 * (position.y % 2)) as f32,
-                _ => 0.125 * (cfa.color_at(position) + 1) as f32,
+                _ => 0.125 * (cfa.slot_at(position) + 1) as f32,
             };
             let pixels = Buffer2::from_fn(size.width, size.height, |x, y| level(Vec2us::new(x, y)));
             let mut scratch = Gathered::default();
@@ -382,38 +356,6 @@ mod tests {
         assert_eq!(
             lattice.median(MaskedPlane::from(&pixels), Vec2us::new(1, 0), &mut scratch),
             30.0
-        );
-    }
-
-    /// Phase (1, 0) of a 5 × 3 mosaic holding its own indices is columns 1 and 3 of rows 0 and 2:
-    /// a 2 × 2 plane of 1, 3, 11, 13. Phase (0, 1) is row 1's columns 0, 2 and 4.
-    #[test]
-    fn deinterleave_takes_one_phase() {
-        let lattice = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
-        let size = Size2us::new(5, 3);
-        let mosaic = Buffer2::from_fn(5, 3, |x, y| (y * 5 + x) as f32);
-        let mut plane = Buffer2::default();
-        lattice.deinterleave(&mosaic, Vec2us::new(1, 0), &mut plane);
-        assert_eq!(Size2us::from(&plane), Size2us::new(2, 2));
-        assert_eq!(plane.pixels(), [1.0, 3.0, 11.0, 13.0]);
-        assert_eq!(
-            CfaLattice::phase_size(size, Vec2us::new(1, 0)),
-            Size2us::new(2, 2)
-        );
-        lattice.deinterleave(&mosaic, Vec2us::new(0, 1), &mut plane);
-        assert_eq!(Size2us::from(&plane), Size2us::new(3, 1));
-        assert_eq!(plane.pixels(), [5.0, 7.0, 9.0]);
-        let mut written = Buffer2::new_default(5, 3);
-        lattice.interleave(
-            &Buffer2::new(3, 1, vec![-1.0, -2.0, -3.0]),
-            Vec2us::new(0, 1),
-            &mut written,
-        );
-        assert_eq!(
-            written.pixels(),
-            [
-                0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, -2.0, 0.0, -3.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            ]
         );
     }
 }

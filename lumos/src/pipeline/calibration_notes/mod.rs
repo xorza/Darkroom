@@ -5,12 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::DarkScaleSource;
-use crate::calibration::temperature_source::TemperatureSource;
+use crate::image::temperature_source::TemperatureSource;
 use crate::stack_product::run_report::RunReport;
 
 /// What calibrating the lights could not check, counted across the workers.
 #[derive(Debug, Default)]
-pub(crate) struct CalibrationNotes {
+pub(super) struct CalibrationNotes {
     unverified_exposures: AtomicU64,
     unverified_temperatures: AtomicU64,
     temperature_differences: AtomicU64,
@@ -20,18 +20,22 @@ pub(crate) struct CalibrationNotes {
 }
 
 impl CalibrationNotes {
-    pub(crate) fn record(&self, outcome: CalibrationOutcome) {
+    pub(super) fn record(&self, outcome: CalibrationOutcome) {
         let count = |counter: &AtomicU64, happened: bool| {
             counter.fetch_add(u64::from(happened), Ordering::Relaxed);
         };
-        count(&self.unverified_exposures, outcome.unverified.exposure);
+        let dark = outcome.dark;
+        count(
+            &self.unverified_exposures,
+            dark.is_some_and(|dark| !dark.exposure_compared),
+        );
         count(
             &self.unverified_temperatures,
-            outcome.unverified.temperature,
+            dark.is_some_and(|dark| dark.temperature.is_none()),
         );
         count(
             &self.temperature_differences,
-            outcome.dark_temperature_difference.is_some(),
+            dark.is_some_and(|dark| dark.temperature_difference.is_some()),
         );
         count(
             &self.scaled_darks,
@@ -47,19 +51,19 @@ impl CalibrationNotes {
         );
         count(
             &self.camera_temperature_darks,
-            outcome.dark_temperature == Some(TemperatureSource::Camera),
+            dark.is_some_and(|dark| dark.temperature == Some(TemperatureSource::Camera)),
         );
     }
 
     /// The counts, and what `masters` could not check, into `report`.
-    pub(crate) fn report_into(&self, report: &mut RunReport, masters: &CalibrationMasters) {
+    pub(super) fn report_into(&self, report: &mut RunReport, masters: &CalibrationMasters) {
         report.unverified_dark_exposures = self.unverified_exposures.load(Ordering::Relaxed);
         report.unverified_dark_temperatures = self.unverified_temperatures.load(Ordering::Relaxed);
         report.dark_temperature_differences = self.temperature_differences.load(Ordering::Relaxed);
         report.scaled_darks = self.scaled_darks.load(Ordering::Relaxed);
         report.fitted_dark_scales = self.fitted_dark_scales.load(Ordering::Relaxed);
         report.camera_temperature_darks = self.camera_temperature_darks.load(Ordering::Relaxed);
-        report.unverified_flat_dark = masters.unverified_flat_dark();
+        report.flat_dark = masters.flat_dark();
         report.floored_flat_pixels = masters.floored_flat_pixels() as u64;
     }
 }

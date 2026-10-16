@@ -1,96 +1,107 @@
-//! [`MasterSubtraction`]: a master taken from every frame of a calibration stack.
+//! [`MasterSubtraction`]: the additive masters taken from every frame of a calibration stack.
 
-use crate::calibration::dark_match::{DarkBias, DarkMatch};
+use arrayvec::ArrayVec;
+
+use crate::calibration::calibration_pass::Saturation;
 use crate::calibration::error::SubtractionError;
 use crate::calibration::master_role::MasterRole;
+use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
-use crate::frame::capture_conditions::CaptureConditions;
+use crate::combine::frame_cache::frame_step::FrameStep;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::sample_domain::DomainMap;
-use crate::ingest::frame_step::FrameStep;
+use crate::image::pixel_flags::PixelFlags;
 
-/// A [`Subtractor`] taken from each frame of a calibration stack — a flat's flat-dark or bias, so
-/// the multiplicative normalization scales the flat's own signal, or a dark's bias — checked
-/// against the role of the frames it is taken from, with the parts it removes from each.
-#[derive(Debug, Clone, Copy)]
+/// The additive masters taken from each frame of a calibration stack, in order — a flat's bias,
+/// then the dark signal of its flat-dark matched to the flat's own exposure and temperature, so the
+/// multiplicative normalization scales the flat's own signal — each checked against the role of
+/// the frames it is taken from, with the parts it removes.
+///
+/// A light's [`calibrate`](crate::CalibrationMasters::calibrate) removes the same two parts through
+/// the same [`Subtraction`]: a bias as it stands, and a bias-removed dark scaled to the light.
+#[derive(Debug, Clone)]
 pub(crate) struct MasterSubtraction<'a> {
-    subtractor: Subtractor<'a>,
-    removes: CalibrationState,
+    subtractors: ArrayVec<Subtractor<'a>, 2>,
+    /// `NO_DATA` where a subtractor holds no measurement, found once for every frame.
+    imposed: Option<PixelFlags>,
 }
 
 impl<'a> MasterSubtraction<'a> {
-    /// The subtraction of `subtractor` from every frame of a `target` stack.
+    /// The subtraction of `subtractors`, in order, from every frame of a `target` stack, or `None`
+    /// when there are none.
     ///
     /// # Errors
     ///
-    /// The subtractor lost everything its role holds, or more than its role may lose, or it holds
-    /// more than a `target` frame may lose before it is combined, as a flat holds its response.
-    pub(crate) const fn new(
+    /// A subtractor lost everything its role holds, or more than its role may lose, or it holds
+    /// more than a `target` frame may lose before it is combined, as a flat holds its response,
+    /// or it would remove a part an earlier one removes.
+    pub(crate) fn new(
         target: MasterRole,
-        subtractor: Subtractor<'a>,
-    ) -> Result<Self, SubtractionError> {
-        let lost = subtractor.master.metadata.calibration;
-        let removes = subtractor.role.signal().without(lost);
-        if removes.is_none() || !subtractor.role.may_have_lost().contains(lost) {
-            return Err(SubtractionError::OverCalibratedSubtractor {
-                subtractor: subtractor.role,
-            });
+        subtractors: &[Subtractor<'a>],
+    ) -> Result<Option<Self>, SubtractionError> {
+        let mut removed = CalibrationState::NONE;
+        for &subtractor in subtractors {
+            let lost = subtractor.master.metadata.derived.calibration();
+            let removes = subtractor.removes();
+            if removes.is_none() || !subtractor.role.may_have_lost().contains(lost) {
+                return Err(SubtractionError::OverCalibratedSubtractor {
+                    subtractor: subtractor.role,
+                });
+            }
+            if !target.may_have_lost().contains(removes) || removed.overlaps(removes) {
+                return Err(SubtractionError::SubtractorForRole {
+                    target,
+                    subtractor: subtractor.role,
+                });
+            }
+            removed = removed.union(removes);
         }
-        if !target.may_have_lost().contains(removes) {
-            return Err(SubtractionError::SubtractorForRole {
-                target,
-                subtractor: subtractor.role,
-            });
+        if subtractors.is_empty() {
+            return Ok(None);
         }
-        Ok(Self {
-            subtractor,
-            removes,
-        })
+        Ok(Some(Self {
+            subtractors: subtractors.iter().copied().collect(),
+            imposed: subtraction::unmeasured(subtractors),
+        }))
     }
 }
 
 impl FrameStep<CfaImage> for MasterSubtraction<'_> {
     type Error = SubtractionError;
 
+    /// Check every subtractor against frame `index`, then remove them all in one pass.
     fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), SubtractionError> {
-        let master = self.subtractor.master;
-        if master.cfa_type != frame.cfa_type || master.size() != frame.size() {
-            return Err(SubtractionError::SubtractorShape {
-                index,
-                frame: frame.size(),
-                subtractor: master.size(),
-            });
-        }
-        if frame.metadata.calibration.overlaps(self.removes) {
-            return Err(SubtractionError::SubtractedTwice {
-                index,
-                subtractor: self.subtractor.role,
-            });
-        }
-        let matched = self
-            .removes
-            .thermal
-            .then(|| {
-                DarkMatch::new(
-                    CaptureConditions::of(&frame.metadata),
-                    CaptureConditions::of(&master.metadata),
-                    DarkBias::held_in(self.removes),
-                )
-            })
-            .transpose()
-            .map_err(|source| SubtractionError::SubtractorConditions { index, source })?;
-        let map = match (&frame.metadata.domain, &master.metadata.domain) {
-            (Some(frame_domain), Some(master_domain)) => master_domain
-                .conversion_to(frame_domain)
-                .ok_or_else(|| SubtractionError::SubtractorDomain {
+        for subtractor in &self.subtractors {
+            let master = subtractor.master;
+            if master.cfa_type() != frame.cfa_type() {
+                return Err(SubtractionError::SubtractorPattern {
                     index,
-                    frame: Box::new(frame_domain.clone()),
-                    subtractor: Box::new(master_domain.clone()),
-                })?,
-            _ => DomainMap::IDENTITY,
-        };
-        self.subtractor.remove_from(frame, map, matched);
+                    frame: frame.cfa_type(),
+                    subtractor: master.cfa_type(),
+                });
+            }
+            if master.size() != frame.size() {
+                return Err(SubtractionError::SubtractorShape {
+                    index,
+                    frame: frame.size(),
+                    subtractor: master.size(),
+                });
+            }
+            if frame
+                .metadata
+                .derived
+                .calibration()
+                .overlaps(subtractor.removes())
+            {
+                return Err(SubtractionError::SubtractedTwice {
+                    index,
+                    subtractor: subtractor.role,
+                });
+            }
+        }
+        Subtraction::resolve(frame, self.subtractors.iter().copied())
+            .map_err(|fault| SubtractionError::of_frame(index, fault))?
+            .apply(frame, self.imposed.as_ref(), Saturation::Detect);
         Ok(())
     }
 }

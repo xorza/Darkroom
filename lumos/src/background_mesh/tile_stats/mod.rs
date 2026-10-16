@@ -2,12 +2,10 @@
 //! statistics, read about the tile's own plane for the sky, and the crowding-aware Pearson-mode
 //! sky estimator for a single tile box.
 
-use std::fmt;
-use std::fmt::Formatter;
-
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
@@ -29,24 +27,26 @@ const CLIP_KAPPA: f32 = 3.0;
 /// the first plane, at the noise's own width. A third measured no better.
 const PLANE_FITS: usize = 2;
 
-/// What every tile of a mesh is measured from: the plane, the mask that leaves pixels out, which
-/// pixels may take part at all, and the σ-clip passes of each tile.
-#[derive(Clone, Copy)]
+/// What every tile of a mesh is measured from: the plane, the mask that leaves pixels out, the
+/// color of a mosaic the tiles read alone, and the σ-clip passes of each tile.
+#[derive(Debug, Clone, Copy)]
 pub(super) struct TileInput<'a> {
     pub(super) pixels: &'a Buffer2<f32>,
     pub(super) mask: Option<&'a BitBuffer2>,
-    pub(super) eligible: Option<&'a Eligible<'a>>,
-    pub(super) sigma_clip_iterations: usize,
+    pub(super) color: Option<CfaColor<'a>>,
+    pub(super) sigma_clip_max_iterations: usize,
 }
 
-impl fmt::Debug for TileInput<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TileInput")
-            .field("pixels", &self.pixels)
-            .field("mask", &self.mask)
-            .field("eligible", &self.eligible.map(|_| ".."))
-            .field("sigma_clip_iterations", &self.sigma_clip_iterations)
-            .finish()
+/// One color of a mosaic: the photosites under `cfa` of color `color`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CfaColor<'a> {
+    pub(crate) cfa: &'a CfaType,
+    pub(crate) color: usize,
+}
+
+impl CfaColor<'_> {
+    const fn takes(self, position: Vec2us) -> bool {
+        self.cfa.slot_at(position) == self.color
     }
 }
 
@@ -141,7 +141,7 @@ impl TileSlope {
     }
 }
 
-/// Which of a tile's two statistics a spline pass is working on.
+/// Which of a tile's statistics a spline interpolates.
 ///
 /// The sky and sigma planes are interpolated by identical code over identical grids; naming the
 /// plane rather than passing a `fn(&TileStats) -> f32` is what keeps that one loop instead of two.
@@ -151,34 +151,7 @@ pub(crate) enum TileComponent {
     Sigma,
 }
 
-impl TileComponent {
-    /// Both components, in the order the spline solver visits them.
-    pub(crate) const ALL: [Self; 2] = [Self::Sky, Self::Sigma];
-}
-
-/// The second derivative in Y of each tile statistic, for the natural cubic spline. Paired so a
-/// pass cannot compute one plane's derivative and forget the other's.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TileD2y {
-    pub(crate) sky: f32,
-    pub(crate) sigma: f32,
-}
-
-impl TileD2y {
-    pub(crate) const fn get(self, component: TileComponent) -> f32 {
-        match component {
-            TileComponent::Sky => self.sky,
-            TileComponent::Sigma => self.sigma,
-        }
-    }
-
-    pub(crate) const fn get_mut(&mut self, component: TileComponent) -> &mut f32 {
-        match component {
-            TileComponent::Sky => &mut self.sky,
-            TileComponent::Sigma => &mut self.sigma,
-        }
-    }
-}
+impl TileComponent {}
 
 impl TileStats {
     /// The statistic `component` names.
@@ -209,8 +182,8 @@ impl TileStats {
     /// where the sky changes fast across a tile the mesh follows it worst: a σ about the plane
     /// drops the threshold under that model error, and on a vignetted or nebulous field the sky's
     /// residual then joins the stars into a few large regions that hide most of them.
-    /// `input.eligible`, when given, limits the tile to the pixels it takes, such as one colour of
-    /// a mosaic; the half is then of those pixels.
+    /// `input.color`, when given, limits the tile to the photosites of that color; the half is
+    /// then of those photosites.
     pub(super) fn compute(
         input: &TileInput<'_>,
         tile: URect,
@@ -224,13 +197,9 @@ impl TileStats {
         samples.values.clear();
         samples.offsets.clear();
 
-        match (input.mask, input.eligible) {
-            (mask, Some(eligible)) => {
-                let selection = EligibleTile {
-                    mask,
-                    eligible,
-                    tile,
-                };
+        match (input.mask, input.color) {
+            (mask, Some(color)) => {
+                let selection = ColorTile { mask, color, tile };
                 let counted = selection.count();
                 if counted.unmasked == 0 || 2 * counted.unmasked < counted.eligible {
                     return None;
@@ -238,10 +207,11 @@ impl TileStats {
                 samples.collect_eligible(input.pixels, &selection, counted.unmasked);
             }
             (Some(m), None) => {
-                if 2 * count_unmasked_pixels(m, tile) < tile.area() {
+                let unmasked = count_unmasked_pixels(m, tile);
+                if 2 * unmasked < tile.area() {
                     return None;
                 }
-                samples.collect_unmasked(input.pixels, m, tile);
+                samples.collect_unmasked(input.pixels, m, tile, unmasked);
             }
             (None, None) => samples.collect_tile(input.pixels, tile),
         }
@@ -265,7 +235,7 @@ impl TileStats {
                 deviations,
                 SigmaClip {
                     kappa: CLIP_KAPPA,
-                    iterations: input.sigma_clip_iterations,
+                    iterations: input.sigma_clip_max_iterations,
                 },
             )
         };
@@ -365,32 +335,36 @@ impl TileSamples {
         }
     }
 
-    /// The pixels of `tile` that `mask` leaves, or [`MAX_TILE_SAMPLES`] of them picked by
-    /// [`sample_ordinal`], each with its [`centred`] offset.
+    /// The `unmasked_count` pixels of `tile` that `mask` leaves, or [`MAX_TILE_SAMPLES`] of them
+    /// picked by [`sample_ordinal`], each with its [`centred`] offset.
     #[inline]
-    fn collect_unmasked(&mut self, pixels: &Buffer2<f32>, mask: &BitBuffer2, tile: URect) {
-        let unmasked_count = count_unmasked_pixels(mask, tile);
+    fn collect_unmasked(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        mask: &BitBuffer2,
+        tile: URect,
+        unmasked_count: usize,
+    ) {
+        debug_assert_eq!(unmasked_count, count_unmasked_pixels(mask, tile));
         let sample_count = sample_count(unmasked_count);
         if sample_count == 0 {
             return;
         }
 
         let width = pixels.width();
-        let mask_words = &mask.words;
-        let words_per_row = mask.words_per_row();
         let mut next_ordinal = sample_ordinal(0, sample_count, unmasked_count);
         let mut ordinal = 0;
         let mut selected_count = 0;
 
         for y in tile.min.y..tile.max.y {
             let row_start = y * width;
-            let word_row_start = y * words_per_row;
+            let mask_row = mask.row_words(y);
             let mut x = tile.min.x;
 
             while x < tile.max.x {
                 let word_idx = x / 64;
                 let bit_offset = x % 64;
-                let mask_word = mask_words[word_row_start + word_idx];
+                let mask_word = mask_row[word_idx];
                 let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
                 let mut bits = unmasked_bits(mask_word, bit_offset, bits_to_process);
                 while bits != 0 {
@@ -418,7 +392,7 @@ impl TileSamples {
     fn collect_eligible(
         &mut self,
         pixels: &Buffer2<f32>,
-        selection: &EligibleTile<'_>,
+        selection: &ColorTile<'_>,
         candidates: usize,
     ) {
         let count = sample_count(candidates);
@@ -444,24 +418,22 @@ impl TileSamples {
     }
 }
 
-/// Which pixels a tile may read beyond the mask, by position: one colour of a mosaic, for one.
-pub(super) type Eligible<'a> = dyn Fn(Vec2us) -> bool + Sync + 'a;
-
-/// One tile's pixels that an eligibility test takes and the mask leaves.
-struct EligibleTile<'a> {
+/// One tile's photosites of one color, and the mask that leaves some of them out.
+#[derive(Debug)]
+struct ColorTile<'a> {
     mask: Option<&'a BitBuffer2>,
-    eligible: &'a Eligible<'a>,
+    color: CfaColor<'a>,
     tile: URect,
 }
 
-/// A tile's pixels that `eligible` takes, and how many of those the mask leaves.
+/// A tile's photosites of the color, and how many of those the mask leaves.
 #[derive(Debug, Clone, Copy)]
 struct EligibleCount {
     eligible: usize,
     unmasked: usize,
 }
 
-impl EligibleTile<'_> {
+impl ColorTile<'_> {
     fn count(&self) -> EligibleCount {
         let mut count = EligibleCount {
             eligible: 0,
@@ -470,7 +442,7 @@ impl EligibleTile<'_> {
         for y in self.tile.min.y..self.tile.max.y {
             for x in self.tile.min.x..self.tile.max.x {
                 let position = Vec2us::new(x, y);
-                if (self.eligible)(position) {
+                if self.color.takes(position) {
                     count.eligible += 1;
                     count.unmasked += usize::from(!self.masked(position));
                 }
@@ -480,7 +452,7 @@ impl EligibleTile<'_> {
     }
 
     fn takes(&self, position: Vec2us) -> bool {
-        (self.eligible)(position) && !self.masked(position)
+        self.color.takes(position) && !self.masked(position)
     }
 
     fn masked(&self, position: Vec2us) -> bool {
@@ -488,34 +460,19 @@ impl EligibleTile<'_> {
     }
 }
 
-impl fmt::Debug for EligibleTile<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EligibleTile")
-            .field("mask", &self.mask)
-            .field("tile", &self.tile)
-            .finish_non_exhaustive()
-    }
-}
-
 #[inline]
 fn count_unmasked_pixels(mask: &BitBuffer2, tile: URect) -> usize {
-    let mask_words = &mask.words;
-    let words_per_row = mask.words_per_row();
     let mut count = 0;
 
     for y in tile.min.y..tile.max.y {
-        let word_row_start = y * words_per_row;
+        let mask_row = mask.row_words(y);
         let mut x = tile.min.x;
         while x < tile.max.x {
             let word_idx = x / 64;
             let bit_offset = x % 64;
             let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
-            count += unmasked_bits(
-                mask_words[word_row_start + word_idx],
-                bit_offset,
-                bits_to_process,
-            )
-            .count_ones() as usize;
+            count += unmasked_bits(mask_row[word_idx], bit_offset, bits_to_process).count_ones()
+                as usize;
             x += bits_to_process;
         }
     }

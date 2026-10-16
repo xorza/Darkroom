@@ -4,12 +4,16 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
-use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples, SampleQuality};
-use crate::combine::rejection::mean_combine::MeanCombine;
-use crate::combine::rejection::rejection_scale::RejectionScale;
+use crate::combine::reducer::combined_sample::CombinedSample;
+
+use crate::combine::reducer::pixel_samples::PixelSamples;
+
+use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::*;
+use crate::combine::stack::mean_combine::MeanCombine;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::invariance::Affine;
 use crate::internals::test_rng::TestRng;
 
@@ -31,7 +35,7 @@ fn kept_with(rejection: Rejection, samples: NoisySamples<'_>, min_survivors: usi
     let noise = NoiseColumns {
         background: &variances,
         sky: &zeros,
-        inverse_electrons: &zeros,
+        per_unit: &zeros,
     };
     let window = rejection.surviving_window(&mut scratch, Some(noise), min_survivors);
     let mut kept: Vec<usize> = scratch.sorted.positions()[window]
@@ -59,22 +63,31 @@ fn all_but(count: usize, dropped: &[usize]) -> Vec<usize> {
     (0..count).filter(|i| !dropped.contains(i)).collect()
 }
 
-/// [`MeanCombine::combine`] over `values` with `weights`, every sample its own frame, and no noise.
+/// [`MeanCombine::reducer`] over `values` with `weights`, every sample its own frame, and no noise.
 fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSample {
     let mut values = values.to_vec();
-    MeanCombine {
-        rejection,
-        min_survivors: DEFAULT_MIN_SURVIVORS,
-        quality: SampleQuality::Measured,
-    }
-    .combine(
-        &PixelSamples {
+    mean(rejection, SampleQuality::Measured)(
+        PixelSamples {
             values: &mut values,
             weights,
             noise: None,
         },
         &mut ScratchBuffers::default(),
     )
+}
+
+/// The reducer of a mean under `rejection`, with no small-sample fallback.
+fn mean(
+    rejection: Rejection,
+    quality: SampleQuality,
+) -> impl Fn(PixelSamples<'_>, &mut ScratchBuffers) -> CombinedSample {
+    MeanCombine {
+        rejection,
+        small_n: SmallN::none(),
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        quality,
+    }
+    .reducer()
 }
 
 fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
@@ -91,7 +104,7 @@ fn rejection_configs_default_and_construct_as_documented() {
         SigmaClipConfig::default(),
         SigmaClipConfig {
             sigma: symmetric(2.5),
-            max_passes: 3,
+            max_iterations: 3,
             scale: RejectionScale::Robust,
         }
     );
@@ -105,7 +118,7 @@ fn rejection_configs_default_and_construct_as_documented() {
         LinearFitClipConfig::default(),
         LinearFitClipConfig {
             sigma: symmetric(3.0),
-            max_passes: 4
+            max_iterations: 4
         }
     );
     assert_eq!(
@@ -678,7 +691,7 @@ fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
         let noise = floor.then(|| NoiseColumns {
             background: &unit[..count],
             sky: &zeros[..count],
-            inverse_electrons: &zeros[..count],
+            per_unit: &zeros[..count],
         });
         let mut rejected = 0usize;
         let mut values = vec![0.0f32; count];
@@ -1060,7 +1073,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
     }
 }
 
-/// [`MeanCombine::combine`] averages the survivors under their own weights. Each expected value is the
+/// [`MeanCombine::reducer`] averages the survivors under their own weights. Each expected value is the
 /// weighted mean of survivors derived above, an exact quotient rounded once.
 ///
 /// - No rejection over 1 … 5: 15/5, and with frame 0 weighing 10: (10 + 14)/14.
@@ -1168,60 +1181,51 @@ fn a_mean_weighs_each_survivor_by_its_own_weight() {
     }
 }
 
-/// The survivors' positions follow the sort: the ramp's survivors are its first seven samples, in
-/// ascending order, and a pixel that sorted nothing reports none. The sample counts them, and its
-/// weight is that of the seven unit weights, 7.
+/// The ramp's survivors are its seven samples but the 100, so the sample's weight is that of the
+/// seven unit weights, 7, and with no rejection all eight count.
 ///
 /// The inverse variance is `(Σw)²/Σw²·v` with each sample's model taken at the combined value
 /// 17.5/7 = 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 49/(7·3/4) = 28/3,
 /// exact up to its one rounding. The survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to
-/// 7, so the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding.
+/// 7, so the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding, before the band's
+/// correction multiplies it by 1/0.9545 = 1.0477, the inverse of a unit normal's variance in ±2σ.
 #[test]
-fn the_survivors_are_named_after_the_combine() {
+fn the_survivors_make_the_sample() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
     let mut values = ramp;
     let noise = NoiseColumns {
         background: &[0.25; 8],
         sky: &[0.5; 8],
-        inverse_electrons: &[0.25; 8],
+        per_unit: &[0.25; 8],
     };
     let mut scratch = ScratchBuffers::default();
-    let sample = MeanCombine {
-        rejection: Rejection::sigma_clip(2.0),
-        min_survivors: DEFAULT_MIN_SURVIVORS,
-        quality: SampleQuality::Measured,
-    }
-    .combine(
-        &PixelSamples {
+    let rejection = Rejection::sigma_clip(2.0);
+    let sample = mean(rejection, SampleQuality::Measured)(
+        PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             noise: Some(noise),
         },
         &mut scratch,
     );
-    assert_eq!(
-        scratch.survivor_positions(),
-        Some(&[1, 4, 5, 7, 6, 3, 0][..])
-    );
     assert_eq!(sample.value, 2.5);
     assert_eq!(sample.weight, 7.0);
     assert_eq!(sample.inverse_variance, 28.0 / 3.0);
-    assert_eq!(sample.dispersion, 1.0 / 6.0);
+    assert_eq!(
+        sample.dispersion,
+        1.0 / 6.0 * rejection.dispersion_correction()
+    );
 
-    MeanCombine {
-        rejection: Rejection::None,
-        min_survivors: DEFAULT_MIN_SURVIVORS,
-        quality: SampleQuality::Measured,
-    }
-    .combine(
-        &PixelSamples {
+    let mut values = ramp;
+    let all = mean(Rejection::None, SampleQuality::Measured)(
+        PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             noise: None,
         },
         &mut scratch,
     );
-    assert_eq!(scratch.survivor_positions(), None);
+    assert_eq!(all.weight, 8.0);
 }
 
 /// The background columns become the floor as their root mean square: four samples of variance
@@ -1236,29 +1240,24 @@ fn the_gathered_noise_floors_the_spread() {
     let survivors = |background: Option<&[f32]>| {
         let mut values = values;
         let mut scratch = ScratchBuffers::default();
-        MeanCombine {
-            rejection: Rejection::sigma_clip(2.0),
-            min_survivors: DEFAULT_MIN_SURVIVORS,
-            quality: SampleQuality::ValueOnly,
-        }
-        .combine(
-            &PixelSamples {
+        let sample = mean(Rejection::sigma_clip(2.0), SampleQuality::Measured)(
+            PixelSamples {
                 values: &mut values,
                 weights: &[1.0; 8],
                 noise: background.map(|background| NoiseColumns {
                     background,
                     sky: &zeros,
-                    inverse_electrons: &zeros,
+                    per_unit: &zeros,
                 }),
             },
             &mut scratch,
         );
-        scratch.survivor_positions().map_or(8, <[u32]>::len)
+        sample.weight
     };
     let mixed = [0.25, 0.25, 0.25, 0.25, 0.75, 0.75, 0.75, 0.75];
-    assert_eq!(survivors(Some(&mixed)), 7);
-    assert_eq!(survivors(None), 7);
-    assert_eq!(survivors(Some(&[1.0; 8])), 8);
+    assert_eq!(survivors(Some(&mixed)), 7.0);
+    assert_eq!(survivors(None), 7.0);
+    assert_eq!(survivors(Some(&[1.0; 8])), 8.0);
 }
 
 /// Both scales floor at the noise model, which holds the photon noise a MAD cannot see. On
@@ -1272,11 +1271,11 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
     let values = [99.0, 100.0, 100.0, 101.0, 100.0, 115.0];
     let background = [0.01; 6];
     let sky = [0.0; 6];
-    let inverse_electrons = [1.0; 6];
+    let per_unit = [1.0; 6];
     let noise = NoiseColumns {
         background: &background,
         sky: &sky,
-        inverse_electrons: &inverse_electrons,
+        per_unit: &per_unit,
     };
     let kept_under = |scale| {
         let mut scratch = ScratchBuffers::default();
@@ -1306,7 +1305,7 @@ fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
     let noise = NoiseColumns {
         background: &background,
         sky: &zeros,
-        inverse_electrons: &zeros,
+        per_unit: &zeros,
     };
     let survivors = |scale| {
         let mut scratch = ScratchBuffers::default();

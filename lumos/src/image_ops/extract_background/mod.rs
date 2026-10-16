@@ -9,7 +9,7 @@
 //!
 //! Distinct from background *neutralization* (`color_calibration::neutralize_background`, which
 //! only equalizes per-channel offsets): this removes a **spatial surface**, per channel (light
-//! pollution is coloured), and runs on the linear master *before* colour calibration and the
+//! pollution is colored), and runs on the linear master *before* color calibration and the
 //! stretch.
 
 use crate::math::lstsq::Lstsq;
@@ -19,14 +19,15 @@ use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
-use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
+use crate::background_mesh::mesh_workspace::{
+    DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams, MeshWorkspace,
+};
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
-use crate::math::statistics;
-use crate::star_detection::star_detection_config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
+use crate::math::statistics::median_mad::MedianMad;
 
 /// How the modeled background is removed from the image.
 ///
@@ -88,7 +89,7 @@ impl ExtractBackground {
     /// image as it was.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters; [`OpError::RankDeficient`] when the
+    /// [`OpError::Config`] on out-of-range parameters; [`OpError::RankDeficient`] when the
     /// sample geometry cannot determine the requested polynomial;
     /// [`OpError::NonPositiveBackground`] when [`BackgroundMode::Divide`] meets a model whose mean
     /// is not positive.
@@ -112,7 +113,13 @@ impl ExtractBackground {
         workspace: &mut MeshWorkspace,
     ) -> Result<Surface, OpError> {
         let samples = collect_samples(plane, self.tile_size, workspace);
-        let terms = Monomial::up_to(effective_degree(samples.len(), self.degree));
+        let terms = Monomial::up_to(self.degree);
+        if terms.len() > samples.len() {
+            return Err(OpError::TooFewSamples {
+                samples: samples.len(),
+                degree: self.degree,
+            });
+        }
         let polynomial = self.fit_surface(&samples, &terms)?;
         let surface = Surface::new(&polynomial, Size2us::from(plane));
         let mean = surface.mean();
@@ -133,13 +140,15 @@ impl ExtractBackground {
         let mut active: Vec<Sample> = samples.to_vec();
         let mut polynomial = Polynomial::fit(terms, &active)?;
         // Reused by every refit rather than reallocated per iteration.
-        let mut deviations: Vec<f64> = Vec::new();
+        let mut scratch: Vec<f64> = Vec::new();
         for _ in 0..self.iterations {
             let residuals: Vec<f64> = active
                 .iter()
                 .map(|s| s.z - polynomial.at(s.x, s.y))
                 .collect();
-            let sigma = statistics::robust_sigma_f64(&residuals, &mut deviations);
+            scratch.clear();
+            scratch.extend_from_slice(&residuals);
+            let sigma = MedianMad::of_mut(&mut scratch).sigma();
             if sigma <= 0.0 {
                 break;
             }
@@ -169,7 +178,7 @@ impl ExtractBackground {
                 // Only the model's variation is removed; its mean stays as the sky pedestal, as
                 // Siril does. Without it the sky sits at ≈0 and the next step that measures the
                 // background against zero (an auto stretch) has nothing to place. Each channel
-                // keeps its own level, like `Divide` — neutralizing the sky colour is a separate
+                // keeps its own level, like `Divide` — neutralizing the sky color is a separate
                 // op.
                 surface.remove(plane, |p, m| p - (m - mean));
             }
@@ -205,10 +214,9 @@ struct Sample {
 
 /// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and
 /// the shared [`crate::background_mesh::BackgroundMesh`] SExtractor-style sky estimate (per-tile
-/// ±σ-clip → Pearson mode). Reuses the exact estimator star detection uses, so the gradient fit and
-/// the detector see the same sky. The grid 3×3 median filter is **off** (it would bias a real
-/// gradient's boundary tiles; outlier tiles are instead rejected by the surface fit's residual
-/// clip). A `None` object mask for now — a star/bright-signal mask from the star detector belongs
+/// ±σ-clip → Pearson mode), the estimator star detection reads its sky from. Its grid 3×3 median
+/// filter is **off** here, where the detector's is on: it would bias a real gradient's boundary
+/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. A `None` object mask for now — a star/bright-signal mask from the star detector belongs
 /// in that slot.
 fn collect_samples(
     channel: &Buffer2<f32>,
@@ -216,12 +224,13 @@ fn collect_samples(
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
     let size = Size2us::from(channel);
-    let grid = workspace.tile_stats(
+    let grid = workspace.measure(
         channel,
+        None,
         None,
         MeshParams {
             tile_size: tile,
-            sigma_clip_iterations: DEFAULT_SIGMA_CLIP_ITERATIONS,
+            sigma_clip_max_iterations: DEFAULT_SIGMA_CLIP_MAX_ITERATIONS,
             median_filter: MedianFilter::Skip,
         },
     );
@@ -238,16 +247,6 @@ fn collect_samples(
         }
     }
     samples
-}
-
-/// Largest degree whose term count `(d+1)(d+2)/2` fits within `n` samples (so the fit is
-/// determined).
-fn effective_degree(n: usize, requested: usize) -> usize {
-    let mut d = requested.min(4);
-    while d > 0 && (d + 1) * (d + 2) / 2 > n {
-        d -= 1;
-    }
-    d
 }
 
 /// One monomial of the surface, by the exponent of each coordinate.
@@ -288,7 +287,6 @@ impl<'a> Polynomial<'a> {
         let z = DMatrix::from_fn(m, 1, |r, _| samples[r].z);
         let lstsq = Lstsq::new(a);
         let solution = lstsq.solve(&z).ok_or_else(|| OpError::RankDeficient {
-            operation: "background surface fit",
             rank: lstsq.rank(),
             required_rank: k,
         })?;
@@ -339,7 +337,7 @@ impl Surface {
             .map(|term| usize::from(term.x + term.y))
             .max()
             .unwrap_or(0);
-        // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` fits fixed buffers.
+        // `validate` caps the degree at 4, so `degree + 1 ≤ 5` fits fixed buffers.
         assert!(degree <= 4, "background surface degree {degree} exceeds 4");
         let d1 = degree + 1;
         let mut c_mat = [0.0f64; 25];

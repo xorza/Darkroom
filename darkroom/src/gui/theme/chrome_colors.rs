@@ -1,4 +1,4 @@
-//! [`ChromeColors`]: the colours belonging to no single widget — the
+//! [`ChromeColors`]: the colors belonging to no single widget — the
 //! surround, the shared inks, and the badge roster.
 
 use palantir::RgbaF32;
@@ -6,7 +6,7 @@ use palantir::widget::Animatable;
 
 use crate::gui::theme::palette::Palette;
 
-/// Chrome colours that belong to no single widget — the surround, the
+/// Chrome colors that belong to no single widget — the surround, the
 /// shared inks, and the badge roster.
 #[derive(Clone, Debug)]
 pub(crate) struct ChromeColors {

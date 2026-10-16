@@ -72,7 +72,7 @@ impl MasterRole {
         }
     }
 
-    /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
+    /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-color
     /// normalized and clamped. Only the flat is; the others are stored as stacked.
     pub(crate) const fn prepared(self) -> bool {
         matches!(self, Self::Flat)

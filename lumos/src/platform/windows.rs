@@ -62,14 +62,15 @@ pub(super) fn available_memory(system: &System) -> u64 {
     };
     let mut available = system.available_memory();
     let flags = limits.BasicLimitInformation.LimitFlags;
-    if flags.contains(JOB_OBJECT_LIMIT_PROCESS_MEMORY)
-        && let Some(committed) = committed_by(unsafe { GetCurrentProcess() })
-    {
+    // Where the commit now cannot be read, the job's peak stands in: never less than it, and for
+    // a process cap the peak of any process of the job, this one among them.
+    if flags.contains(JOB_OBJECT_LIMIT_PROCESS_MEMORY) {
+        let committed = committed_by(unsafe { GetCurrentProcess() })
+            .unwrap_or(limits.PeakProcessMemoryUsed as u64);
         available = available.min((limits.ProcessMemoryLimit as u64).saturating_sub(committed));
     }
     if flags.contains(JOB_OBJECT_LIMIT_JOB_MEMORY) {
-        // No query reports a job's commit now, only its peak; the processes' own sum is it, and
-        // the peak, never less than it, stands in when a process of the job cannot be read.
+        // No query reports a job's commit now, only its peak; the processes' own sum is it.
         let committed = job_committed().unwrap_or(limits.PeakJobMemoryUsed as u64);
         available = available.min((limits.JobMemoryLimit as u64).saturating_sub(committed));
     }

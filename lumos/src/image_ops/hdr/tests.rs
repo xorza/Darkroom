@@ -213,10 +213,10 @@ fn a_flat_plane_comes_back_as_itself() {
     }
 }
 
-/// On colour the compression stays in display range on its own — the remap divides by a channel
+/// On color the compression stays in display range on its own — the remap divides by a channel
 /// past white rather than clipping it — on a dome whose red runs twice its intensity.
 #[test]
-fn hdr_keeps_colour_in_range() {
+fn hdr_keeps_color_in_range() {
     let size = Size2us::new(96, 96);
     let i = dome(size);
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
@@ -318,25 +318,25 @@ fn near_black_pixels_keep_their_ratio() {
     assert!((ratio - 10.0).abs() <= 0.1, "{ratio}");
 }
 
-/// A pixel with no positive intensity is black on grey and on colour alike.
+/// A pixel with no positive intensity is black on grey and on color alike.
 #[test]
-fn no_positive_intensity_is_black_on_grey_and_colour() {
+fn no_positive_intensity_is_black_on_grey_and_color() {
     let size = Size2us::new(16, 16);
     let mut px = vec![0.3f32; size.pixel_count()];
     px[0] = -0.01;
     px[1] = 0.0;
     let mut grey = gray_image(size, px.clone());
-    let mut colour = rgb_image(size, [px.clone(), px.clone(), px]);
+    let mut color = rgb_image(size, [px.clone(), px.clone(), px]);
     let hdr = Hdr {
         scales: 2,
         amount: 0.5,
     };
     hdr.apply(&mut grey).unwrap();
-    hdr.apply(&mut colour).unwrap();
+    hdr.apply(&mut color).unwrap();
     for index in [0, 1] {
         assert_eq!(grey.channel(0).pixels()[index], 0.0);
         for channel in 0..3 {
-            assert_eq!(colour.channel(channel).pixels()[index], 0.0);
+            assert_eq!(color.channel(channel).pixels()[index], 0.0);
         }
     }
 }

@@ -4,7 +4,7 @@ use scenarium::FuncId;
 use scenarium::async_lambda;
 use std::sync::{Arc, LazyLock};
 
-use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, PreviewPixels, RAW_EXTENSIONS};
+use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewPixels, RAW_EXTENSIONS};
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
@@ -48,7 +48,7 @@ pub(crate) fn register(library: &mut Library) {
                         cancel,
                         ..Default::default()
                     };
-                    PreviewImage::from_file(&path, &context)
+                    context.preview(&path)
                 })
                 .await?;
 

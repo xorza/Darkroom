@@ -6,8 +6,9 @@
 //! counts the low half of the values in that bin. The keys order the values as
 //! [`f32::total_cmp`] does, so the middle values are the ones
 //! [`median_mut`](crate::math::statistics::median_mut) selects, and the median is bit for bit its
-//! own wherever the two middles' sum stays finite: [`f32::midpoint`] also averages two values near
-//! the largest float, where `median_mut`'s sum overflows.
+//! own.
+
+use crate::math::statistics::float;
 
 /// Bins per pass: one for each value of a 16-bit half of a key.
 const BINS: usize = 1 << 16;
@@ -74,7 +75,7 @@ impl RadixMedian {
 impl<'a> HighPass<'a> {
     #[inline]
     pub(crate) const fn add(&mut self, value: f32) {
-        self.counts[(key(value) >> 16) as usize] += 1;
+        self.counts[(float::unsigned_key(value) >> 16) as usize] += 1;
         self.len += 1;
     }
 
@@ -84,12 +85,12 @@ impl<'a> HighPass<'a> {
     pub(crate) fn add_all(&mut self, values: &[f32]) {
         let (octets, rest) = values.as_chunks::<8>();
         for octet in octets {
-            for key in octet.map(key) {
+            for key in octet.map(float::unsigned_key) {
                 self.counts[(key >> 16) as usize] += 1;
             }
         }
         for &value in rest {
-            self.counts[(key(value) >> 16) as usize] += 1;
+            self.counts[(float::unsigned_key(value) >> 16) as usize] += 1;
         }
         self.len += values.len();
     }
@@ -137,7 +138,7 @@ impl<'a> HighPass<'a> {
 impl LowPass<'_> {
     #[inline]
     pub(crate) fn add(&mut self, value: f32) {
-        let key = key(value);
+        let key = float::unsigned_key(value);
         match &mut self.middle {
             Middle::OneBin { high, .. } => {
                 if key >> 16 == *high {
@@ -169,7 +170,7 @@ impl LowPass<'_> {
             Middle::OneBin { high, .. } => {
                 let high = *high;
                 for octet in octets {
-                    let keys = octet.map(key);
+                    let keys = octet.map(float::unsigned_key);
                     if keys.iter().any(|&key| key >> 16 == high) {
                         for key in keys {
                             if key >> 16 == high {
@@ -186,7 +187,7 @@ impl LowPass<'_> {
                 upper_min,
             } => {
                 for octet in octets {
-                    for key in octet.map(key) {
+                    for key in octet.map(float::unsigned_key) {
                         let high = key >> 16;
                         *lower_max = (*lower_max).max(if high == *lower { key } else { 0 });
                         *upper_min = (*upper_min).min(if high == *upper { key } else { u32::MAX });
@@ -217,7 +218,7 @@ impl LowPass<'_> {
                 let Rank { bin: low, below } = Rank::of(self.counts, rank as usize);
                 let lower = (high << 16) | low;
                 if !even {
-                    return value(lower);
+                    return float::from_unsigned_key(lower);
                 }
                 let upper = if (rank as usize) + 1 < below + self.counts[low as usize] as usize {
                     lower
@@ -242,7 +243,10 @@ impl LowPass<'_> {
                 (lower_max, upper_min)
             }
         };
-        f32::midpoint(value(lower), value(upper))
+        f32::midpoint(
+            float::from_unsigned_key(lower),
+            float::from_unsigned_key(upper),
+        )
     }
 }
 
@@ -271,32 +275,10 @@ impl Rank {
     }
 }
 
-/// The value's bits mapped so unsigned order is [`f32::total_cmp`]'s: a negative value's bits all
-/// flip, a positive value's sign bit sets.
-#[inline]
-const fn key(value: f32) -> u32 {
-    let bits = value.to_bits();
-    if bits >> 31 == 1 {
-        !bits
-    } else {
-        bits | (1 << 31)
-    }
-}
-
-/// The value whose [`key`] is `key`.
-#[inline]
-const fn value(key: u32) -> f32 {
-    f32::from_bits(if key >> 31 == 1 {
-        key & !(1 << 31)
-    } else {
-        !key
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::math::statistics::median_mut;
+    use crate::math::statistics;
 
     fn radix_median(values: &[f32]) -> f32 {
         let mut median = RadixMedian::default();
@@ -323,27 +305,6 @@ mod tests {
             low.add_all(chunk);
         }
         low.median()
-    }
-
-    /// The key orders values as `total_cmp` does, and maps back to the same bits.
-    #[test]
-    fn keys_follow_the_total_order() {
-        let ordered = [
-            f32::NEG_INFINITY,
-            -1.5,
-            -f32::MIN_POSITIVE,
-            -0.0,
-            0.0,
-            f32::MIN_POSITIVE,
-            1.5,
-            f32::INFINITY,
-        ];
-        for pair in ordered.windows(2) {
-            assert!(key(pair[0]) < key(pair[1]), "{pair:?}");
-        }
-        for number in ordered {
-            assert_eq!(value(key(number)).to_bits(), number.to_bits());
-        }
     }
 
     /// Hand-ranked cases for each way the middle ranks fall:
@@ -395,7 +356,7 @@ mod tests {
                     _ => (next() as i32) as f32 * 1e-9,
                 })
                 .collect();
-            let expected = median_mut(&mut values.clone());
+            let expected = statistics::median_mut(&mut values.clone());
             assert_eq!(
                 radix_median(&values).to_bits(),
                 expected.to_bits(),

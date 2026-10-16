@@ -8,7 +8,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::STACKED_LIGHTS;
-use crate::combine::frame_cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::reducer::combined_sample::CombinedSample;
+use crate::combine::reducer::pixel_samples::PixelSamples;
 use crate::combine::rejection::bench::{BLOCK, Block};
 use crate::math::sum;
 

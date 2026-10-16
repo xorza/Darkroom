@@ -176,15 +176,23 @@ fn mirror_index_overflow() {
 
 #[test]
 fn mirror_index_far_out_of_bounds() {
-    // Past one reflection the index clamps: −5 reflects to 5 and clamps to the last pixel, 4;
-    // 2·5 − 2 − 20 saturates to 0.
+    // Past one reflection the index reflects again, with period 2(len − 1) = 8 for len 5:
+    // −5 → 3, −10 → 2 (phase 6, 8 − 6), 20 → 4 (phase 4), 100 → 4 (phase 4). For len 3, period 4,
+    // −5 → 1 and 5 → 1, where one reflection and a clamp gave 2 and 0. Length 1 is always 0.
     let len = 5;
-    assert_eq!(mirror_index(-5, len), 4);
-    assert_eq!(mirror_index(-10, len), 4);
-    assert_eq!(mirror_index(20, len), 0);
-    assert_eq!(mirror_index(100, len), 0);
+    assert_eq!(mirror_index(-5, len), 3);
+    assert_eq!(mirror_index(-10, len), 2);
+    assert_eq!(mirror_index(20, len), 4);
+    assert_eq!(mirror_index(100, len), 4);
+    assert_eq!(mirror_index(-5, 3), 1);
+    assert_eq!(mirror_index(5, 3), 1);
+    assert_eq!(mirror_index(7, 1), 0);
     for i in -20..30 {
-        assert!(mirror_index(i, len) < len, "mirror_index({i}, {len})");
+        let index = mirror_index(i, len);
+        assert!(index < len, "mirror_index({i}, {len})");
+        // Mirroring is symmetric about 0 and periodic.
+        assert_eq!(index, mirror_index(-i, len), "{i}");
+        assert_eq!(index, mirror_index(i + 8, len), "{i}");
     }
 }
 

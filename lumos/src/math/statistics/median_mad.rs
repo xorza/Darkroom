@@ -3,37 +3,44 @@
 use serde::{Deserialize, Serialize};
 
 use crate::math::statistics;
+use crate::math::statistics::float::Float;
 
-/// A distribution's location and spread — what one pass over the values measures.
+/// A sample's location and spread — what one pass over the values measures.
 ///
 /// The spread is always the raw MAD, in the data's own units; [`Self::sigma`] rescales on
 /// demand. Carrying the MAD rather than an already-scaled sigma is what keeps "median and MAD"
-/// and "median and sigma" one type instead of two, and applies the 1.4826 factor exactly once,
-/// where the caller needs Gaussian units.
+/// and "median and sigma" one type instead of two, and applies the Gaussian factor exactly once,
+/// where the caller needs Gaussian units. The count is what that factor depends on.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MedianMad {
-    pub(crate) median: f32,
-    pub(crate) mad: f32,
+pub(crate) struct MedianMad<F = f32> {
+    pub(crate) median: F,
+    pub(crate) mad: F,
+    pub(crate) count: usize,
 }
 
-impl MedianMad {
-    /// Measure both together, in one pass over `data`.
+impl<F: Float> MedianMad<F> {
+    /// Measure both together, in one pass over `data`, which must not be empty.
     ///
     /// More efficient than computing separately since the median is needed for the MAD.
     /// Mutates the input buffer.
-    pub(crate) fn of_mut(data: &mut [f32]) -> Self {
+    pub(crate) fn of_mut(data: &mut [F]) -> Self {
         debug_assert!(!data.is_empty());
 
         let median = statistics::median_mut(data);
         statistics::abs_deviation_inplace(data, median);
         let mad = statistics::median_of_magnitudes(data);
 
-        Self { median, mad }
+        Self {
+            median,
+            mad,
+            count: data.len(),
+        }
     }
 
-    /// The MAD rescaled to the standard deviation of an equivalent normal distribution.
+    /// The MAD rescaled to an unbiased estimate of the standard deviation of the normal
+    /// distribution the `count` samples came from.
     #[inline]
-    pub(crate) const fn sigma(self) -> f32 {
-        statistics::mad_to_sigma(self.mad)
+    pub(crate) fn sigma(self) -> F {
+        statistics::sigma_of_mad(self.mad, self.count)
     }
 }

@@ -57,7 +57,7 @@ impl Mosaics<'_> {
         });
         let result = run.value;
         assert_eq!(
-            result.alignment.registered(),
+            result.registered(),
             lights,
             "{label}: every light registers"
         );
@@ -203,7 +203,7 @@ fn held_lights_add_no_more_than_the_budget() {
                 .align_stack_images(lights, &ingest, ProgressMonitor::unattended())
                 .unwrap()
         });
-        assert_eq!(run.value.alignment.registered(), LIGHTS);
+        assert_eq!(run.value.registered(), LIGHTS);
         budget.assert_held("held", run.peak_bytes, &run.value.product.report);
     });
 }

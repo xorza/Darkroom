@@ -9,7 +9,7 @@ use crate::registration::triangle::matching::{
 };
 use crate::registration::triangle::reference_triangles::ReferenceTriangles;
 use crate::registration::triangle::triangle_config::TriangleConfig;
-use crate::registration::triangle::voting::{PointMatch, VoteMatrix};
+use crate::registration::triangle::voting::{PointMatch, Votes};
 
 /// The 3-4-5 right triangle: sides 3, 4 and 5, so ratios (0.6, 0.8), all exact.
 const THREE_FOUR_FIVE: [DVec2; 3] = [
@@ -65,19 +65,15 @@ fn triangles_of(points: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
 }
 
 /// The votes `target`'s triangles cast against `reference`'s, under `config`.
-fn cast_votes(
-    target: &[Triangle],
-    reference: Vec<Triangle>,
-    config: &TriangleConfig,
-) -> VoteMatrix {
+fn cast_votes(target: &[Triangle], reference: Vec<Triangle>, config: &TriangleConfig) -> Votes {
     ReferenceTriangles::new(reference)
         .expect("a fixture has triangles")
         .vote(target, config)
 }
 
-/// Build a `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.
-fn vote_matrix_from_entries(entries: &[(usize, usize, usize)]) -> VoteMatrix {
-    let mut vm = VoteMatrix::default();
+/// Build a `Votes` from (`ref_idx`, `target_idx`, votes) entries.
+fn votes_from_entries(entries: &[(usize, usize, usize)]) -> Votes {
+    let mut vm = Votes::default();
     for &(r, t, count) in entries {
         for _ in 0..count {
             vm.increment(r, t);

@@ -15,12 +15,14 @@
 //! - [`pixel_quadrature`]: Gauss–Legendre quadrature over one pixel
 //! - [`pixel_gaussian`]: A Gaussian's mean over a pixel, in closed form
 //! - [`dmat3`]: A 3×3 `f64` matrix
+//! - [`grid`]: The nodes of a sampling grid over a frame's pixels
 //! - [`size2us`], [`vec2us`], [`urect`]: Integer sizes, positions and rectangles
 
 pub(crate) mod dmat3;
 pub(crate) mod error_function;
 pub(crate) mod floor_i32;
 pub(crate) mod fwhm;
+pub(crate) mod grid;
 pub(crate) mod size2us;
 pub(crate) mod urect;
 pub(crate) mod vec2us;
@@ -34,3 +36,6 @@ pub(crate) mod pixel_gaussian;
 pub(crate) mod pixel_quadrature;
 pub(crate) mod statistics;
 pub(crate) mod sum;
+
+#[cfg(feature = "internals")]
+pub(crate) mod bench;

@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::combine::frame_cache::sample_noise::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseColumns;
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::math::statistics::spread::Spread;
@@ -33,12 +33,15 @@ pub(crate) struct Proposal {
     pub(crate) centre: f32,
 }
 
-/// What a pass decides: one band for every sample, which keeps a run of the sorted window, or a
-/// band for each sample in units of its own noise model, which can keep any subset of it.
+/// What a pass decides: one band for every sample, which keeps a run of the sorted window, a band
+/// for each sample in units of its own noise model, which can keep any subset of it, or nothing
+/// more to test.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Narrowing {
     Window(Proposal),
     PerSample(SampleBand),
+    /// Nothing left to test: the method ends with the samples it holds.
+    Settled,
 }
 
 /// A band about `centre` in units of each sample's own noise model σ there.

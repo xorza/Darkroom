@@ -2,7 +2,9 @@ use imaginarium::Buffer2;
 
 use crate::calibration::cosmic_ray::noise_model::*;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::derived_facts::DerivedFacts;
 use crate::image::masked_plane::MaskedPlane;
+use crate::image::observation_header::ObservationHeader;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::size2us::Size2us;
 
@@ -32,12 +34,12 @@ fn the_noise_adds_the_photons_above_the_local_sky() {
     assert_eq!(gain.noise(1.0, pixel(0.0, 1.0)), f32::EPSILON);
 }
 
-/// A pixel's background is its colour's mesh value and its flat's gain there: a frame no flat
+/// A pixel's background is its color's mesh value and its flat's gain there: a frame no flat
 /// divided reads gain 1, one under a flat of 0.5 reads 2, the sky the mesh measured either way.
 #[test]
 fn a_pixel_reads_its_mesh_and_its_flat_gain() {
     let size = Size2us::new(16, 16);
-    let mesh = ColourMesh::measure(
+    let mesh = ColorMesh::measure(
         MaskedPlane {
             pixels: &Buffer2::new(16, 16, vec![0.5; size.pixel_count()]),
             mask: None,
@@ -71,13 +73,15 @@ fn a_stated_gain_takes_its_unit_from_the_frame() {
         electrons_per_adu: 1.5,
     };
     let declared = ImageMetadata {
-        domain: Some(SampleDomain {
-            scale: 4095.0,
-            origin: ScaleOrigin::Declared,
-            pedestal: Pedestal::Removed,
-            unit: None,
-        }),
-        ..Default::default()
+        header: ObservationHeader::default(),
+        derived: DerivedFacts::builder()
+            .domain(SampleDomain {
+                scale: 4095.0,
+                origin: ScaleOrigin::Declared,
+                pedestal: Pedestal::Removed,
+                unit: None,
+            })
+            .build(),
     };
     assert_eq!(
         NoiseModel::resolve(&estimation, &declared)
@@ -86,8 +90,10 @@ fn a_stated_gain_takes_its_unit_from_the_frame() {
         Some(6142.5)
     );
     let stepped = ImageMetadata {
-        quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
-        ..Default::default()
+        header: ObservationHeader::default(),
+        derived: DerivedFacts::builder()
+            .quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0))
+            .build(),
     };
     assert_eq!(
         NoiseModel::resolve(&estimation, &stepped)
@@ -100,8 +106,11 @@ fn a_stated_gain_takes_its_unit_from_the_frame() {
         Err(CosmicRayError::UnknownAdcStep)
     );
     let egain = ImageMetadata {
-        egain: Some(2.0),
-        ..declared
+        header: ObservationHeader {
+            egain: Some(2.0),
+            ..declared.header
+        },
+        derived: declared.derived,
     };
     assert_eq!(
         NoiseModel::resolve(&NoiseEstimation::Measured, &egain)

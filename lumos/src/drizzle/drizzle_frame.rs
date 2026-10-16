@@ -2,13 +2,13 @@
 
 use imaginarium::Buffer2;
 
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// One drizzle input and all metadata that must remain aligned with it.
 #[derive(Debug, Clone)]
 pub struct DrizzleFrame<T> {
     /// Image or path to load: a demosaiced or mono frame, or a calibrated mosaic whose photosites
-    /// each reach the channel of their colour alone.
+    /// each reach the channel of their color alone.
     pub source: T,
     /// The registration's warp, from the common reference grid to this input — what
     /// [`RegistrationResult::warp_transform`](crate::RegistrationResult::warp_transform) returns.

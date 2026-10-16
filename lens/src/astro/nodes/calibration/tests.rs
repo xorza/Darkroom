@@ -8,6 +8,7 @@ use imaginarium::Buffer2;
 use lumos::{
     CachedMaster, CalibrationSet, CfaImage, CfaType, FitsChecksumPolicy, ImageMetadata,
     IngestConfig, MasterBuildError, MasterCache, MasterInputs, MasterRecipe, MasterRole,
+    SigmaThreshold,
 };
 
 use crate::astro::nodes::calibration::{
@@ -88,7 +89,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
     let inputs = MasterInputs {
         role: MasterRole::Dark,
         frames: &frames,
-        subtracted: None,
+        subtracted: &[],
         recipe: MasterRecipe::of(MasterRole::Dark, &IngestConfig::default()),
     };
     let cache = SourceDirectoryCache {
@@ -120,7 +121,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
     cache.store(Some(place), &master).unwrap();
     assert!(matches!(
         cache.load(&inputs).unwrap(),
-        CachedMaster::Kept(kept) if kept.data == master.data
+        CachedMaster::Kept(kept) if kept.data() == master.data()
     ));
 
     // Another recipe over the same frames, as another lumos or other decode options give, finds
@@ -149,7 +150,7 @@ fn frame_set_key_runs_only_with_the_cache_on() {
                 dark: vec![missing.clone()],
                 ..CalibrationSet::default()
             },
-            sigma: 3.0,
+            sigma: SigmaThreshold::new(3.0).unwrap(),
             caching,
         }
         .build(&CancelToken::never())

@@ -12,8 +12,13 @@
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
-use crate::image::linear_image::LinearImage;
+use crate::combine::stack_config::combine::Combine;
+
+use crate::combine::normalization::Normalization;
+
+use crate::combine::stack_config::StackConfig;
+
+use crate::combine::stack_config::weighting::Weighting;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
@@ -100,7 +105,8 @@ fn disk_and_memory_tiers_produce_identical_masters() {
     let per_frame: Vec<f32> = paths
         .iter()
         .map(|p| {
-            LinearImage::from_file(p, &LoadContext::default())
+            LoadContext::default()
+                .linear(p)
                 .unwrap()
                 .channel(0)
                 .pixels()[0]

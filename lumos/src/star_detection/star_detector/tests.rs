@@ -22,8 +22,7 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     use imaginarium::Buffer2;
 
     use crate::image::image_provenance::{
-        ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-        SourceContainer, TransferProvenance,
+        ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
     };
     use crate::image::linear_image::LinearImage;
 
@@ -49,15 +48,13 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
         .collect();
     let frame = |demosaic| {
         let mut image = rgb_image(size, [channel.clone(), channel.clone(), channel.clone()]);
-        image.metadata.provenance = Some(ImageProvenance {
-            container: SourceContainer::CameraRaw,
-            decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized,
+        image.metadata.derived.set_provenance(Some(ImageProvenance {
+            source: SourceProvenance::CameraRaw,
             color: ColorProvenance::SensorRgb,
             clipped: true,
             demosaic,
             row_order: RowOrder::TopDown,
-        });
+        }));
         image
     };
     // A star this narrow, off the pixel grid, reads lopsided marginals; its shape is not what
@@ -116,7 +113,7 @@ fn detection_is_invariant_to_scale_zero_point_and_rotation() {
         .collect();
     let detect = |pixels: Vec<f32>| {
         let mut image = gray_image(size, pixels);
-        image.metadata.saturation_flagged = true;
+        image.metadata.derived.set_saturation_flagged(true);
         StarDetector::default().detect(&image).stars
     };
     let reference = detect(base.clone());

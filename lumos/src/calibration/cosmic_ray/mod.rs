@@ -12,8 +12,8 @@
 //!
 //! Dispatches per CFA type: **Mono** = textbook subsampled L.A.Cosmic; **Bayer** = deinterleave the
 //! four 2×2 phases and reuse the mono detector per dense same-color plane. **X-Trans** is refused
-//! ([`CosmicRayError::XTransUnsupported`]): it has no dense same-colour sub-lattice, and its red
-//! and blue photosites have no point-symmetric same-colour pair nearer than √18 px, so no second
+//! ([`CosmicRayError::XTransUnsupported`]): it has no dense same-color sub-lattice, and its red
+//! and blue photosites have no point-symmetric same-color pair nearer than √18 px, so no second
 //! difference separates a hit from a star's convex wing at the scale of a star. No reference tool
 //! runs L.A.Cosmic on an X-Trans mosaic, and Siril refuses its CFA cosmetic correction there.
 //! X-Trans data relies on dithering and stack-time rejection.
@@ -33,9 +33,8 @@ pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
 
-use crate::background_mesh::colour_mesh::ColourMesh;
+use crate::background_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
-use crate::frame::stackable_image::StackableImage;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -51,7 +50,7 @@ use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
 use crate::image::masked_plane::MaskedPlane;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
-/// beside a sensor's gradients and amp glow, large enough for a robust sky per colour.
+/// beside a sensor's gradients and amp glow, large enough for a robust sky per color.
 const BACKGROUND_TILE_SIZE: usize = 64;
 
 /// Floor for the **noise-normalized** fine structure `F/noise` in the contrast test (in σ units).
@@ -92,24 +91,22 @@ pub(crate) fn reject(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
 ) -> Result<usize, CosmicRayError> {
-    let layout = Layout::of(&image.cfa_type)?;
+    let layout = Layout::of(&image.cfa_type())?;
     let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
-    let size = Size2us::from(&image.data);
-    let kept_out = KeptOut::of(&image.data, image.flags.as_ref());
+    let size = Size2us::from(image.data());
+    let kept_out = KeptOut::of(image.data(), image.flags());
     // Measured once, before any repair: a hit spoils a tile's statistics no more than a star does,
     // and the mesh's clip and median filter are what keep both out.
-    let mesh = ColourMesh::measure(
+    let mesh = ColorMesh::measure(
         MaskedPlane {
-            pixels: &image.data,
+            pixels: image.data(),
             mask: kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
         },
-        &image.cfa_type,
+        &image.cfa_type(),
         BACKGROUND_TILE_SIZE,
     );
-    // Through the checked accessor, then shared: the pixels below are borrowed apart from it.
-    let flat_gain = image
-        .flat_gain()
-        .and_then(|_| image.metadata.flat_gain.clone());
+    // Shared, as the pixels below are borrowed apart from it.
+    let flat_gain = image.flat_gain().cloned();
     let backgrounds = PixelBackgrounds {
         mesh: &mesh,
         flat_gain: flat_gain.as_deref(),
@@ -120,12 +117,12 @@ pub(crate) fn reject(
     let found = match layout {
         Layout::Bayer(pattern) => {
             bayer = BayerDetector::new(config, noise, pattern);
-            bayer.reject(&mut image.data, &backgrounds, kept_out.as_ref())
+            bayer.reject(image.data_mut(), &backgrounds, kept_out.as_ref())
         }
         Layout::Mono => {
             mono = MonoDetector::new(config, noise);
             mono.reject(
-                &mut image.data,
+                image.data_mut(),
                 &|index| backgrounds.at(0, size.point_of(index)),
                 kept_out.as_ref(),
             )
@@ -144,7 +141,7 @@ pub(crate) fn reject(
 /// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at
 /// its peak: the detector's planes and masks and the pass's own [`PASS_MASKS`], or the
 /// [`KEPT_OUT_BUILD_MASKS`] before them where those are more. Left out are the
-/// fixed sizes: the background mesh, a few tiles per colour and one tile's samples per worker,
+/// fixed sizes: the background mesh, a few tiles per color and one tile's samples per worker,
 /// about 20 KB each, and the 256 KiB histogram the saturation level is ranked in.
 ///
 /// # Errors

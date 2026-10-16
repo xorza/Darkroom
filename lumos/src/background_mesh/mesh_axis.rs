@@ -3,7 +3,7 @@
 /// One axis of a tile mesh: tiles of `tile_size` from the origin, the last one ending where the axis
 /// ends. A remainder of at least half a tile is a tile of its own, cut short as SExtractor's
 /// `BACK_SIZE` rule cuts it; a narrower one joins the tile before it, since a sliver of a few
-/// pixels measures its sky from too few of them, and on a mosaic may hold no pixel of a colour. A
+/// pixels measures its sky from too few of them, and on a mosaic may hold no pixel of a color. A
 /// tile's centre is the mean index of the pixels it holds, `(start + end − 1)/2`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MeshAxis {

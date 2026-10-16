@@ -121,7 +121,7 @@ fn moffat_carries_heavier_wings_than_a_gaussian_of_equal_fwhm() {
         Vec2::splat(32.0),
         1.0,
         StarProfile::Moffat {
-            alpha: fwhm::to_alpha(fwhm, beta),
+            alpha: fwhm::to_alpha(f64::from(fwhm), f64::from(beta)) as f32,
             beta,
         },
     );
@@ -144,7 +144,7 @@ fn moffat_needs_a_wider_radius_than_a_gaussian_to_reach_the_same_floor() {
     // 8α vs 4σ: for equal FWHM the Moffat box is the larger one.
     let beta = 2.5;
     let moffat = StarProfile::Moffat {
-        alpha: fwhm::to_alpha(4.0, beta),
+        alpha: fwhm::to_alpha(4.0, f64::from(beta)) as f32,
         beta,
     };
     let gaussian = StarProfile::gaussian(fwhm::to_sigma(4.0));

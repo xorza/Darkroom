@@ -4,11 +4,11 @@
 // Generator: ayu-graphite/darkroom/build.py
 //
 // Each entry names a role darkroom paints with, the role here it is
-// taken from, and the primitive that resolves to. Every colour is a
+// taken from, and the primitive that resolves to. Every color is a
 // resting one: a port lifts under the pointer by blending toward
 // white, because the palette's top tint has nothing above it.
 //
-// The graph ground is the one colour with no step of its own. The
+// The graph ground is the one color with no step of its own. The
 // neutral ramp holds five chrome surfaces and darkroom stacks six, so
 // the ground is placed one of that ramp's own steps below `bg`.
 (

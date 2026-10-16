@@ -213,14 +213,14 @@ fn a_crowded_group_splits_into_every_star() {
 /// map removes exactly. Thresholded at 4 · 0.01, they form one component: the saddle 2.5 px from
 /// each holds 0.2·e^(−6.25/4.5) + 0.05·e^(−6.25/4.5) ≈ 0.062. The faint centre is a local maximum
 /// of 0.0508 against its neighbours' 0.0457, a quarter of the bright one:
-/// - local maxima at prominence 0.3 keeps it whole (0.0508 < 0.06), at 0.2 splits it (≥ 0.04);
+/// - local maxima at relative height 0.3 keeps it whole (0.0508 < 0.06), at 0.2 splits it (≥ 0.04);
 /// - multi-threshold cuts the 27-px component, holding 2.498, on a ladder from 0.04 to 0.2. At its
 ///   third level, 0.0465, the faint star is its peak pixel alone, 0.0508, which holds 0.00426 above
 ///   the level: more than 0.001 of the component's flux (0.0025), so it splits there, and less than
 ///   0.005 of it (0.0125), so it stays whole there and at 0.5. Its whole value, the pedestal under
 ///   the split included, cleared 0.005.
 ///
-/// Measured on sky-included values, the 0.1 pedestal turned the prominence bar into 0.3 · 0.3 =
+/// Measured on sky-included values, the 0.1 pedestal turned the relative-height bar into 0.3 · 0.3 =
 /// 0.09 against a 0.15 secondary, so the first case split there and not on a zero sky.
 #[test]
 fn deblending_does_not_depend_on_the_sky_level() {
@@ -253,13 +253,13 @@ fn deblending_does_not_depend_on_the_sky_level() {
     for (deblend, count) in [
         (
             Deblend::LocalMaxima {
-                min_prominence: 0.3,
+                min_relative_height: 0.3,
             },
             1,
         ),
         (
             Deblend::LocalMaxima {
-                min_prominence: 0.2,
+                min_relative_height: 0.2,
             },
             2,
         ),

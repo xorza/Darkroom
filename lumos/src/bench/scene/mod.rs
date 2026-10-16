@@ -3,11 +3,12 @@
 //!
 //! Every frame is taken on one sensor, with its filters, vignette, bias, dark current and defects.
 //! A light reads all of them, and the masters that calibrate it come from the same sensor. A
-//! calibrated frame is a light as calibration leaves it: the filters' colour balance and the hot
+//! calibrated frame is a light as calibration leaves it: the filters' color balance and the hot
 //! pixels stay, the bias, the dark current and the vignette are gone.
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::CosmicRays;
@@ -28,7 +29,7 @@ pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
 /// A daylight white balance, red and blue gains over green's, in `camera_white_balance`'s order.
 const WHITE_BALANCE: [f32; 4] = [2.13, 1.0, 1.71, 1.0];
 
-/// What each colour's filter passes, in [`CfaType::color_at`]'s slots: the inverse of
+/// What each color's filter passes, in [`CfaType::slot_at`]'s slots: the inverse of
 /// [`WHITE_BALANCE`], so the balanced demosaic gives grey back for grey.
 const FILTER_GAIN: [f32; 3] = [1.0 / 2.13, 1.0, 1.0 / 1.71];
 
@@ -184,7 +185,7 @@ impl Field {
     }
 
     /// The field's stacked master over a frame of `size` in linear RGB, as the light preset stacks
-    /// 30 lights of a colour sensor: each star its colour, from red to blue, on a light-polluted
+    /// 30 lights of a color sensor: each star its color, from red to blue, on a light-polluted
     /// sky of 1.2, 1 and 0.8 times the field's in red, green and blue, with a thirtieth of one
     /// light's noise variance and no hot pixels, which the stack rejects.
     pub(crate) fn stacked_rgb(self, size: Size2us) -> LinearImage {
@@ -194,16 +195,16 @@ impl Field {
         camera.defects.hot.clear();
         let scene = self.scene(size);
         let mut rng = TestRng::new(self.seed() ^ 0xC010);
-        let colours: Vec<f32> = scene.sources.iter().map(|_| rng.next_f32()).collect();
+        let colors: Vec<f32> = scene.sources.iter().map(|_| rng.next_f32()).collect();
         let planes = [1.2, 1.0, 0.8]
             .into_iter()
             .enumerate()
             .map(|(channel, level)| {
                 let mut light = scene.clone();
                 light.background = sky(level);
-                for (source, &colour) in light.sources.iter_mut().zip(&colours) {
+                for (source, &color) in light.sources.iter_mut().zip(&colors) {
                     // A red star (0) is 1.3 in red and 0.7 in blue, a blue one (1) the reverse.
-                    source.flux *= 1.0 + 0.3 * (1.0 - 2.0 * colour) * (1.0 - channel as f32);
+                    source.flux *= 1.0 + 0.3 * (1.0 - 2.0 * color) * (1.0 - channel as f32);
                 }
                 let observation = Observation {
                     exposure_s: EXPOSURE_S,
@@ -215,7 +216,7 @@ impl Field {
                     .pixels()
                     .to_vec()
             });
-        LinearImage::from_planar_channels(ImageDimensions::new(size, 3), planes)
+        LinearImage::from_planar_channels(ImageDimensions::new(size, ChannelLayout::Rgb), planes)
     }
 
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray
@@ -288,8 +289,8 @@ impl Field {
             amplitude: 0.3..1.0,
             seed: self.seed() ^ 0xC05 ^ ((index as u64) << 16),
         }
-        .add_to(&mut image.data);
-        for pixel in image.data.pixels_mut() {
+        .add_to(image.data_mut());
+        for pixel in image.data_mut().pixels_mut() {
             *pixel = pixel.min(1.0);
         }
         image
@@ -332,7 +333,7 @@ pub(crate) fn master_frames(
         let camera = Sensor::raw(size, cfa_type).camera();
         let frame = render(&scene, &camera, &observation);
         let mut master = mosaic(frame, cfa_type);
-        master.metadata.image_type = Some(role.extname().to_string());
+        master.metadata.header.image_type = Some(role.extname().to_string());
         Some(master)
     };
     CalibrationSet {
@@ -422,7 +423,7 @@ impl Sensor {
         let mut camera = Camera::realistic(FWHM);
         camera.cfa_type = cfa_type;
         if cfa_type != CfaType::Mono {
-            camera.flat.colour_gain = FILTER_GAIN;
+            camera.flat.color_gain = FILTER_GAIN;
         }
         let SensorDefects { hot, dead } = defects(size);
         camera.defects.hot = hot;
@@ -460,20 +461,12 @@ fn defects(size: Size2us) -> SensorDefects {
 
 /// A one-plane frame as the mosaic of `cfa_type`, under [`WHITE_BALANCE`].
 fn mosaic(frame: SimFrame, cfa_type: CfaType) -> CfaImage {
-    let LinearImage {
-        mut metadata,
-        pixels,
-        ..
-    } = frame.image;
+    let mut image = frame.image;
+    let mut metadata = std::mem::take(&mut image.metadata);
     if cfa_type != CfaType::Mono {
-        metadata.camera_white_balance = Some(WHITE_BALANCE);
+        metadata.header.camera_white_balance = Some(WHITE_BALANCE);
     }
-    CfaImage {
-        data: pixels.into_l(),
-        cfa_type,
-        metadata,
-        flags: None,
-    }
+    CfaImage::from_plane(image.into_pixels().into_l(), cfa_type, metadata)
 }
 
 /// `count` of something the standard frame holds, at the same density on a frame of `size`, and

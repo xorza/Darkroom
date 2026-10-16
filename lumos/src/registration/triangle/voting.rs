@@ -3,17 +3,7 @@
 //! Every pair of matching triangles votes for the three vertex correspondences it implies;
 //! the accumulated votes are then resolved greedily so each point is claimed at most once.
 
-/// A reference star paired with a target star, by index into their respective slices.
-///
-/// The bare pair, shared by everything that carries one: `PointMatch` adds the vote evidence
-/// that produced it, and `StarMatch` adds the residual only measurable once a transform exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MatchIndices {
-    /// Index into the reference star slice.
-    pub reference: usize,
-    /// Index into the target star slice.
-    pub target: usize,
-}
+use crate::registration::match_indices::MatchIndices;
 
 /// A matched point pair between reference and target, with the confidence its votes earned.
 #[derive(Debug, Clone, Copy)]
@@ -29,11 +19,11 @@ pub(crate) struct PointMatch {
 /// star count, visited in `(reference, target)` order. A dense matrix costs `n_ref·n_target` cells
 /// whatever the votes, and a hash map visits in an order its seed sets.
 #[derive(Debug, Default)]
-pub(super) struct VoteMatrix {
+pub(super) struct Votes {
     votes: Vec<u64>,
 }
 
-impl VoteMatrix {
+impl Votes {
     #[inline]
     pub(super) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
         debug_assert!(
@@ -44,37 +34,40 @@ impl VoteMatrix {
             .push(((ref_idx as u64) << 32) | target_idx as u64);
     }
 
-    /// Hand every pair that drew votes to `visit`, with how many it drew, in `(reference, target)`
-    /// order.
-    ///
-    /// The pair travels as a [`MatchIndices`] rather than two `usize`s, which are the same type
-    /// and so could be handed over transposed without the compiler noticing.
-    pub(super) fn for_each_nonzero(&mut self, mut visit: impl FnMut(MatchIndices, usize)) {
+    /// Put the votes in `(reference, target)` order, so each pair's votes are one run.
+    pub(super) fn sort(&mut self) {
         self.votes.sort_unstable();
-        for run in self.votes.chunk_by(|a, b| a == b) {
+    }
+
+    /// Every pair that drew votes, with how many it drew, in the order of the votes: by
+    /// `(reference, target)` once [`Self::sort`]ed. The pair travels as a [`MatchIndices`] rather
+    /// than two `usize`s, which are the same type and so could be handed over transposed without
+    /// the compiler noticing.
+    pub(super) fn counts(&self) -> impl Iterator<Item = (MatchIndices, usize)> + '_ {
+        debug_assert!(self.votes.is_sorted(), "votes are counted once sorted");
+        self.votes.chunk_by(|a, b| a == b).map(|run| {
             let pair = MatchIndices {
                 reference: (run[0] >> 32) as usize,
                 target: (run[0] & u64::from(u32::MAX)) as usize,
             };
-            visit(pair, run.len());
-        }
+            (pair, run.len())
+        })
     }
 
     /// The matches the votes resolve to: each pair of at least `min_votes`, most votes first,
     /// greedily, so each of the `n_ref` reference and `n_target` target stars is claimed at most
     /// once.
     pub(super) fn resolve(
-        &mut self,
+        mut self,
         n_ref: usize,
         n_target: usize,
         min_votes: usize,
     ) -> Vec<PointMatch> {
-        let mut voted: Vec<(MatchIndices, usize)> = Vec::new();
-        self.for_each_nonzero(|pair, votes| {
-            if votes >= min_votes {
-                voted.push((pair, votes));
-            }
-        });
+        self.sort();
+        let mut voted: Vec<(MatchIndices, usize)> = self
+            .counts()
+            .filter(|&(_, votes)| votes >= min_votes)
+            .collect();
 
         // By votes, descending; the stable sort keeps the matrix's `(reference, target)` order
         // among ties, so the greedy resolution below takes them the same way every run.
@@ -105,15 +98,16 @@ impl VoteMatrix {
 
 #[cfg(test)]
 pub(super) mod internals {
-    use crate::registration::triangle::voting::VoteMatrix;
+    use crate::registration::triangle::voting::Votes;
 
-    impl VoteMatrix {
+    impl Votes {
         /// Every non-zero entry as an owned `(ref_idx, target_idx, votes)` list — the shape the
         /// tests assert against, which production has no use for.
         pub(crate) fn nonzero_entries(&mut self) -> Vec<(usize, usize, usize)> {
-            let mut entries = Vec::new();
-            self.for_each_nonzero(|pair, votes| entries.push((pair.reference, pair.target, votes)));
-            entries
+            self.sort();
+            self.counts()
+                .map(|(pair, votes)| (pair.reference, pair.target, votes))
+                .collect()
         }
     }
 }

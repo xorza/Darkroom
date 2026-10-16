@@ -4,7 +4,8 @@ use crate::internals::assertions::assert_close;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::noise::mrs_noise::MrsNoise;
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
+use crate::noise::mrs_noise::{self, NoisePlane};
 
 fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
@@ -21,10 +22,13 @@ fn white_noise_reads_its_own_sigma() {
     let size = Size2us::new(1024, 1024);
     let mean = (1..=2u64)
         .map(|seed| {
-            f64::from(MrsNoise::estimate(
-                &white_noise(size, 1.0, seed * 104_729),
-                |_| false,
-            ))
+            f64::from(
+                NoisePlane {
+                    samples: &white_noise(size, 1.0, seed * 104_729),
+                    excluded: |_| false,
+                }
+                .sigma(),
+            )
         })
         .sum::<f64>()
         / 2.0;
@@ -49,8 +53,16 @@ fn a_ramp_leaves_the_noise_estimate() {
             .map(|(index, &value)| value + (index % 512) as f32 / 512.0)
             .collect(),
     );
-    let plain = MrsNoise::estimate(&noise, |_| false);
-    let with_ramp = MrsNoise::estimate(&ramped, |_| false);
+    let plain = NoisePlane {
+        samples: &noise,
+        excluded: |_| false,
+    }
+    .sigma();
+    let with_ramp = NoisePlane {
+        samples: &ramped,
+        excluded: |_| false,
+    }
+    .sigma();
     assert!(
         (with_ramp - plain).abs() < 0.001 * plain,
         "{plain} against {with_ramp}"
@@ -72,11 +84,19 @@ fn excluded_pixels_leave_the_estimate() {
         512,
         |x, y| if x < 256 { left[(x, y)] } else { right[(x, y)] },
     );
-    let sigma = MrsNoise::estimate(&frame, |index| index % 512 >= 256);
+    let sigma = NoisePlane {
+        samples: &frame,
+        excluded: |index| index % 512 >= 256,
+    }
+    .sigma();
     assert!((sigma - 0.01).abs() < 0.000_3, "{sigma}");
     // A constant frame has no noise.
     assert_eq!(
-        MrsNoise::estimate(&Buffer2::new_filled(512, 512, 0.5), |_| false),
+        NoisePlane {
+            samples: &Buffer2::new_filled(512, 512, 0.5),
+            excluded: |_| false
+        }
+        .sigma(),
         0.0
     );
 }
@@ -96,7 +116,11 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
             for x in 8..40 {
                 frame[24 * 48 + x] += 1.0;
             }
-            MrsNoise::estimate(&frame, |_| false)
+            NoisePlane {
+                samples: &frame,
+                excluded: |_| false,
+            }
+            .sigma()
         })
         .collect();
     assert!(estimates.iter().all(|&sigma| sigma > 0.0), "{estimates:?}");
@@ -118,15 +142,21 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
 fn working_sets_are_what_the_buffers_hold() {
     let wide = Size2us::new(1024, 1024);
     assert_eq!(
-        MrsNoise::heap_bytes(wide, 16),
+        mrs_noise::heap_bytes(wide, 16),
         34_603_008 + 41_402_368 + 20_480 + 2176
     );
     assert_eq!(
-        MrsNoise::heap_bytes(wide, 4),
+        mrs_noise::heap_bytes(wide, 4),
         34_603_008 + 11_468_800 + 5120 + 2176
     );
     assert_eq!(
-        MrsNoise::heap_bytes(Size2us::new(192, 192), 16),
+        mrs_noise::heap_bytes(Size2us::new(192, 192), 16),
         36_864 * 33 + 36_864 * 28 + 16 * 192 * 4 + 136
     );
+}
+
+/// The step's σ is `1/√12` to the nearest f32: the f64 value, 0.28867513459…, rounds to it.
+#[test]
+fn the_quantization_sigma_is_one_over_root_twelve() {
+    assert_eq!(QUANTIZATION_SIGMA_PER_STEP, (1.0f64 / 12.0).sqrt() as f32);
 }

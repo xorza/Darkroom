@@ -53,7 +53,7 @@ pub struct StarDetectionConfig {
 
 impl StarDetectionConfig {
     /// Validate every parameter before constructing a detector.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         self.background.validate()?;
         self.extraction.validate()?;
         self.fwhm.validate()?;
@@ -165,7 +165,7 @@ impl StarDetectionConfig {
         Self {
             background: BackgroundConfig {
                 tile_size: 128,
-                sigma_clip_iterations: 3,
+                sigma_clip_max_iterations: 3,
                 refinement: BackgroundRefinement::Iterative(IterativeRefinement {
                     iterations: NonZeroUsize::new(3).unwrap(),
                     mask_dilation: 5,

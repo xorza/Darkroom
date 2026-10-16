@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use std::sync::Arc;
+
 use common::file_utils;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
@@ -7,16 +9,22 @@ use fits_well::image::Image;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::quality_flags::QualityFlags;
-use crate::io::error::{FitsRefusal, FitsWriteError, ImageError};
+use crate::io::error::WriteError;
+use crate::io::fits::error::FitsLoadError;
+use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
+use crate::io::fits::linear::LINEAR_FITS_FORMAT;
 use crate::io::fits::metadata;
+use crate::io::fits::metadata::domain_keywords;
+use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
-/// 4: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration
-/// removed (`LUMCALB`, `LUMCALD`, `LUMCALF`). A file of an earlier version is refused, so a master
-/// cached by one, whose record of what it lost is missing, is rebuilt instead.
-pub(crate) const CFA_FITS_VERSION: i64 = 4;
+/// 5: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration
+/// removed (`LUMCALB`, `LUMCALD`, `LUMCALF`) and what its dark was compared on (`LUMDK*`). A file
+/// of an earlier version is refused, so a master cached by one, whose record is missing, is rebuilt
+/// instead.
+pub(crate) const CFA_FITS_VERSION: i64 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {
@@ -31,56 +39,45 @@ pub(crate) struct CfaFitsHdu {
     pub(crate) header: Header,
 }
 
-pub(super) fn validate_container_format(
-    path: &Path,
-    primary: Option<&Header>,
-) -> Result<(), ImageError> {
+/// Refuse a file whose `primary` header names a Lumos container of other than one image, such as
+/// a calibration bundle.
+pub(super) fn validate_container_format(primary: Option<&Header>) -> Result<(), FitsLoadError> {
     if let Some(primary) = primary
-        && let Some(format) = primary
-            .get_text("LUMOSFMT")
-            .map_err(|source| ImageError::fits(path, source))?
+        && let Some(format) = primary.get_text(FORMAT_KEYWORD)?
         && format != CFA_FITS_FORMAT
+        && format != LINEAR_FITS_FORMAT
     {
-        return Err(ImageError::fits_unsupported(
-            path,
-            FitsRefusal::NotStandaloneCfa {
-                format: format.to_owned(),
-            },
-        ));
+        return Err(FitsLoadError::from(FitsRefusal::NotStandaloneImage {
+            format: format.to_owned(),
+        }));
     }
     Ok(())
 }
 
-pub(crate) fn validate_image_header(path: &Path, image: &Header) -> Result<bool, ImageError> {
+pub(crate) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
     let is_lumos_cfa = image
-        .get_text("LUMOSFMT")
-        .map_err(|source| ImageError::fits(path, source))?
+        .get_text(FORMAT_KEYWORD)?
         .is_some_and(|format| format == CFA_FITS_FORMAT);
     if is_lumos_cfa {
-        let version = image
-            .get_integer("LUMOSVER")
-            .map_err(|source| ImageError::fits(path, source))?;
+        let version = image.get_integer(VERSION_KEYWORD)?;
         if version != Some(CFA_FITS_VERSION) {
-            return Err(ImageError::fits_unsupported(
-                path,
-                FitsRefusal::CfaVersion { version },
-            ));
+            return Err(FitsLoadError::from(FitsRefusal::CfaVersion { version }));
         }
     }
     Ok(is_lumos_cfa)
 }
 
-pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), FitsWriteError> {
+pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
     let encoded = CfaFitsHdu::encode(
         image,
         CfaFitsHduMetadata {
             extname: None,
-            image_type: image.metadata.image_type.as_deref(),
+            image_type: image.metadata.header.image_type.as_deref(),
             prepared: false,
         },
     )?;
-    let flags = FlagsExtension::encode(image.flags.as_ref(), None, 1)?;
-    let gain = GainExtension::encode(image.metadata.flat_gain.as_deref(), None)?;
+    let flags = FlagsExtension::encode(image.flags(), None, 1)?;
+    let gain = GainExtension::encode(image.flat_gain().map(Arc::as_ref), None)?;
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer.write_image(&encoded.image, Some(&encoded.header))?;
@@ -99,11 +96,11 @@ impl CfaFitsHdu {
     pub(crate) fn encode(
         cfa: &CfaImage,
         hdu_metadata: CfaFitsHduMetadata<'_>,
-    ) -> Result<Self, FitsWriteError> {
+    ) -> Result<Self, WriteError> {
         let mut header = Header::new();
         header
-            .set("LUMOSFMT", CFA_FITS_FORMAT)
-            .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))?;
+            .set(FORMAT_KEYWORD, CFA_FITS_FORMAT)
+            .and_then(|header| header.set(VERSION_KEYWORD, CFA_FITS_VERSION))?;
         if let Some(extname) = hdu_metadata.extname {
             header.set("EXTNAME", extname)?;
             header.set("LUMROLE", extname)?;
@@ -112,25 +109,29 @@ impl CfaFitsHdu {
             header.set("LUMPREP", true)?;
         }
         metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)?;
-        metadata::write_cfa(&mut header, cfa)?;
+        metadata::write_row_order(&mut header, &cfa.metadata)?;
+        metadata::write_cfa(&mut header, &cfa.metadata, cfa.cfa_type())?;
 
-        let mut samples = cfa.data.pixels().to_vec();
+        let mut samples = cfa.data().pixels().to_vec();
         if let Some(flags) = cfa
-            .flags
-            .as_ref()
+            .flags()
             .filter(|flags| flags.contains(QualityFlags::NO_DATA))
         {
             // Back out as the standard's own flag, which every FITS reader understands. This is
             // written with a floating-point `BITPIX`, for which IEEE NaN *is* the blank. Without it
-            // the samples under those pixels — a decoder fill, or the same-colour median
+            // the samples under those pixels — a decoder fill, or the same-color median
             // `CfaImage::repair_nulls` put there — would reload as measurements in a reader that
             // does not know the `LUMFLAGS` extension.
-            let width = cfa.data.width();
+            let width = cfa.data().width();
             flags
                 .mask_of(QualityFlags::NO_DATA)
                 .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
         }
-        let image = Image::new([cfa.data.width(), cfa.data.height()], samples)?;
+        let image = Image::new_scaled(
+            [cfa.data().width(), cfa.data().height()],
+            samples,
+            domain_keywords::scaling(&cfa.metadata),
+        )?;
         Ok(Self { image, header })
     }
 }

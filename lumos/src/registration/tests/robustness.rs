@@ -9,15 +9,18 @@ use crate::internals::test_rng::TestRng;
 use crate::registration::error::RegistrationError;
 use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
+use crate::registration::match_indices::MatchIndices;
 use crate::registration::model_search::ModelSearch;
 use crate::registration::point_pairs::PointPairs;
+use crate::registration::ransac::RansacEstimator;
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{
     self, FWHM_NORMAL, FieldMotion, map_stars, max_deviation,
 };
-use crate::registration::transform::{Transform, TransformModel, TransformType};
-use crate::registration::triangle::voting::MatchIndices;
+use crate::registration::transform::{Transform, TransformType};
+use crate::registration::transform_model::TransformModel;
+use crate::registration::tuning;
 use crate::star_detection::star::Star;
 
 /// How far an exact fit may stray, in pixels, anywhere on the field.
@@ -123,7 +126,7 @@ impl Scenario {
 
     fn config(&self) -> RegistrationConfig {
         let mut config = RegistrationConfig {
-            transform_type: TransformModel::Fixed(self.model),
+            model: TransformModel::Fixed(self.model),
             matching: helpers::matching_config(self.min_stars, self.min_matches),
             ..Default::default()
         };
@@ -154,6 +157,8 @@ impl Scenario {
         let catalogs = self.catalogs();
         let result = self
             .config()
+            .registrar()
+            .unwrap()
             .register(&catalogs.reference, &catalogs.target)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
         let found = result.transform();
@@ -714,13 +719,12 @@ fn the_smallest_catalogs_register_and_three_stars_do_not() {
     let catalogs = three.catalogs();
     let result = three
         .config()
+        .registrar()
+        .unwrap()
         .register(&catalogs.reference, &catalogs.target);
     assert!(
-        matches!(
-            result,
-            Err(RegistrationError::InsufficientStars { found: 3, .. })
-        ),
-        "expected InsufficientStars {{ found: 3 }}, got {result:?}"
+        matches!(result, Err(RegistrationError::TooFewStars { found: 3, .. })),
+        "expected TooFewStars {{ found: 3 }}, got {result:?}"
     );
 }
 
@@ -749,24 +753,23 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
         })
         .collect();
     let mut config = RegistrationConfig {
-        transform_type: TransformModel::Fixed(TransformType::Translation),
+        model: TransformModel::Fixed(TransformType::Translation),
         ..RegistrationConfig::default()
     };
     config.ransac.seed = 1;
     let as_stars = |points: &[DVec2]| points.iter().map(|&p| Star::at(p)).collect::<Vec<_>>();
-    let catalogs = FitCatalogs::new(&as_stars(&reference), &as_stars(&target)).unwrap();
+    let catalogs = FitCatalogs::new(&as_stars(&reference), &as_stars(&target));
     let search = ModelSearch {
         pairs: PointPairs { reference, target },
         confidences: vec![1.0; 12],
         catalogs: &catalogs,
-        max_sigma: 1.0,
-        config: &config,
+        ransac: RansacEstimator::new(config.ransac, 1.0),
+        recovery_radius: tuning::recovery_radius(1.0),
+        min_matches: config.matching.min_matches,
+        max_rms_error: config.max_rms_error,
     };
     let error = search
-        .estimate_and_refine(FitModel {
-            transform: TransformType::Translation,
-            sip: None,
-        })
+        .estimate_and_refine(FitModel::Plain(TransformType::Translation))
         .unwrap_err();
     assert!(
         matches!(

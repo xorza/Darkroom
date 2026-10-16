@@ -40,12 +40,10 @@ pub(crate) struct RingingClamp {
 }
 
 impl RingingClamp {
-    pub(crate) fn new(threshold: f32) -> Self {
-        debug_assert!(
-            (0.0..=1.0).contains(&threshold),
-            "a clamping threshold lies in [0, 1], got {threshold}"
-        );
-        Self { threshold }
+    pub(crate) const fn new(threshold: ClampingThreshold) -> Self {
+        Self {
+            threshold: threshold.get(),
+        }
     }
 
     /// The clamped sample from a window's `sums`, the `total` weight of its taps that hold data,
@@ -89,3 +87,4 @@ impl RingingClamp {
 
 #[cfg(test)]
 mod tests;
+use crate::registration::resample::warp_params::ClampingThreshold;

@@ -885,7 +885,7 @@ fn the_scratch_follows_the_pixels_not_the_box() {
     .deblend(&component, &mut buffers, &mut regions);
     LocalMaximaParams {
         min_separation: 3,
-        min_prominence: 0.3,
+        min_relative_height: 0.3,
     }
     .deblend(&component, &mut buffers, &mut regions);
     assert_eq!(buffers.pixels.pixels.len(), 1000);

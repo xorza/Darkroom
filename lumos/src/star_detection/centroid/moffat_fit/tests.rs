@@ -153,6 +153,14 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         fit_radius: 12,
         ..with_alpha("alpha_6", 6.0)
     },
+    // At β 10 the FWHM per α is 0.537, so a star of FWHM 4 has α 7.45, past a radius-7 stamp:
+    // held to the same widths as a Gaussian, the fit takes it, where an α capped at the radius
+    // refused it.
+    MoffatCase {
+        alpha: 7.447,
+        fit_radius: 7,
+        ..with_beta("beta_10_alpha_past_the_radius", 10.0)
+    },
     // From Lorentzian-like 1.5 to Gaussian-like 6, through every `PowStrategy`.
     with_beta("beta_1.5", 1.5),
     with_beta("beta_2", 2.0),
@@ -235,7 +243,10 @@ fn moffat_fit_recovers_known_parameters() {
                 ),
                 (
                     "FWHM",
-                    relative(result.fwhm, fwhm::from_alpha_beta(case.alpha, case.beta)),
+                    relative(
+                        result.fwhm,
+                        fwhm::from_alpha_beta(f64::from(case.alpha), f64::from(case.beta)) as f32,
+                    ),
                 ),
             ] {
                 assert!(error <= bound, "{}: {what} off by {error:e}", case.name);

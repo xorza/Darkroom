@@ -7,8 +7,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench;
+use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::star::Star;
-use crate::star_detection::star_detector::stages::filter::duplicate_scratch::DuplicateScratch;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "detection/filter", Scale::Sample);
@@ -23,10 +23,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 .collect();
             stars.sort_by(|a, b| b.flux.total_cmp(&a.flux));
             let min_separation = bench::config(field).filter.duplicate_min_separation;
-            let mut scratch = DuplicateScratch::default();
+            let mut scratch = Duplicates::default();
             b.iter_batched_ref(
                 || stars.clone(),
-                |stars| scratch.remove_duplicates(stars, min_separation),
+                |stars| scratch.remove(stars, min_separation),
                 fixture::fresh_copies(size_of_val(stars.as_slice())),
             );
         });

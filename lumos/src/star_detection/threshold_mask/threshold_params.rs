@@ -17,12 +17,19 @@ use crate::star_detection::threshold_mask::simd::ProcessWords;
 pub(crate) struct ThresholdParams {
     /// Detection threshold in units of the local noise σ.
     pub(crate) sigma: f32,
-    /// Floor applied to each per-pixel σ, in the samples' own units — the frame's own floor from
-    /// `background_estimate::noise_floor_from`, which is what every caller in the pipeline passes.
+    /// Floor applied to each per-pixel σ, in the samples' own units — the frame's own floor,
+    /// [`SkyNoise::floor`](crate::star_detection::background::sky_noise::SkyNoise::floor), which is
+    /// what every caller in the pipeline passes.
     pub(crate) min_noise: f32,
 }
 
 impl ThresholdParams {
+    /// The level a residual must exceed where the noise is `noise`: `sigma · max(noise,
+    /// min_noise)`, the expression the kernel computes lane by lane.
+    pub(crate) const fn level(self, noise: f32) -> f32 {
+        self.sigma * noise.max(self.min_noise)
+    }
+
     /// Fill `mask` from a residual — an image whose sky is already subtracted, matched-filtered or
     /// not: bit `i` set where `residual[i] > sigma · max(noise[i], min_noise)`.
     ///
@@ -40,23 +47,19 @@ impl ThresholdParams {
         debug_assert_eq!(width, noise.width());
         debug_assert_eq!(height, noise.height());
 
-        let words_per_row = mask.words_per_row();
         let residual = residual.pixels();
         let noise = noise.pixels();
 
-        mask.words
-            .par_chunks_mut(words_per_row)
-            .enumerate()
-            .for_each(|(y, row_words)| {
-                let row = y * width..(y + 1) * width;
-                ProcessWords {
-                    pixels: &residual[row.clone()],
-                    noise: &noise[row],
-                    threshold: self,
-                    words: row_words,
-                }
-                .dispatch();
-            });
+        mask.par_rows_mut().enumerate().for_each(|(y, row_words)| {
+            let row = y * width..(y + 1) * width;
+            ProcessWords {
+                pixels: &residual[row.clone()],
+                noise: &noise[row],
+                threshold: self,
+                words: row_words,
+            }
+            .dispatch();
+        });
     }
 }
 
@@ -71,12 +74,6 @@ pub(crate) mod internals {
     const TEST_MIN_NOISE: f32 = 1e-6;
 
     impl ThresholdParams {
-        /// The level a residual must exceed where the noise is `noise`: `sigma · max(noise,
-        /// min_noise)`, the expression the kernel computes lane by lane.
-        pub(crate) const fn level(self, noise: f32) -> f32 {
-            self.sigma * noise.max(self.min_noise)
-        }
-
         /// The threshold at `sigma` with the shared test floor.
         #[cfg(test)]
         pub(crate) const fn test(sigma: f32) -> Self {

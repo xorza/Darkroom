@@ -98,9 +98,10 @@ impl MultiThresholdParams {
             let min_sep_sq = params.min_separation * params.min_separation;
             for &star in stars.iter() {
                 let candidate = objects[star as usize].peak;
-                if !peaks.iter().any(|kept: &Pixel| {
-                    deblend::peaks_too_close(candidate.pos, kept.pos, min_sep_sq)
-                }) {
+                if !peaks
+                    .iter()
+                    .any(|kept: &Pixel| deblend::dist_sq(candidate.pos, kept.pos) < min_sep_sq)
+                {
                     peaks.push(candidate);
                 }
             }
@@ -184,13 +185,15 @@ impl TreeBuffers {
     /// component, and levels `1..n_thresholds` cut every object of the level below into its
     /// regions above the level holding at least `min_area` pixels. Exponential spacing puts the
     /// levels densest at the faint end, where neighbours first separate.
-    fn build(&mut self, pixels: &ComponentPixels, cut: TreeCut) {
+    fn build(&mut self, pixels: &mut ComponentPixels, cut: TreeCut) {
         let TreeCut {
             root: peak,
             ladder,
             min_area,
             connectivity,
         } = cut;
+        pixels.link();
+        let pixels = &*pixels;
         let count = pixels.pixels.len();
         self.object_of.clear();
         self.object_of.resize(count, 0);
@@ -348,9 +351,8 @@ impl TreeBuffers {
                 unsplit[index] = false;
             }
         }
-        if unsplit[0] {
-            stars.clear();
-        }
+        // A split marks every ancestor split, the root among them, so an unsplit root found none.
+        debug_assert!(!unsplit[0] || stars.is_empty());
     }
 }
 

@@ -10,7 +10,7 @@ use crate::gui::theme::palette::Palette;
 pub(crate) struct CanvasTheme {
     /// Ground fill behind the whole graph.
     pub(crate) bg: RgbaF32,
-    /// Backdrop grid dot colour.
+    /// Backdrop grid dot color.
     pub(crate) dot: RgbaF32,
     /// World-space base spacing between dots. Wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into noise —

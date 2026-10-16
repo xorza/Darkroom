@@ -5,7 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lumos::{MlDenoise, MlError, RemoveStars};
+use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncId, FuncInput, FuncOutput, Library};
@@ -35,7 +35,7 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
                 debug_assert_eq!(outputs.len(), 1);
                 let model = PathBuf::from(inputs[1].required_fs_path());
                 let output = runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
-                    MlDenoise::new(model).apply(&mut image)?;
+                    MlDenoise::new(OnnxModel::load(model)?).apply(&mut image)?;
                     Ok::<_, MlError>(image)
                 })
                 .await?;
@@ -66,7 +66,7 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                 if need_stars {
                     let result =
                         runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
-                            RemoveStars::new(model).split(image)
+                            RemoveStars::new(OnnxModel::load(model)?).split(image)
                         })
                         .await?;
                     outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
@@ -75,7 +75,7 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                     let starless = runtime::run_on_planes(
                         mem::take(&mut inputs[0]),
                         move |mut image| {
-                            RemoveStars::new(model).apply(&mut image)?;
+                            RemoveStars::new(OnnxModel::load(model)?).apply(&mut image)?;
                             Ok::<_, MlError>(image)
                         },
                     )

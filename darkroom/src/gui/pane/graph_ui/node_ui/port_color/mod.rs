@@ -11,7 +11,7 @@
 //!
 //! The hue rosters themselves live on the theme
 //! ([`TypeColors`], serialized like every
-//! other colour), and so does the hover lift; this module owns only the
+//! other color), and so does the hover lift; this module owns only the
 //! type → slot mapping.
 
 use palantir::RgbaF32;
@@ -33,7 +33,7 @@ pub(crate) fn data(theme: &Theme, ty: &DataType, kind: PortKind) -> RgbaF32 {
 }
 
 /// `RgbaF32` for an event emitter glyph, subscription pin, or event wire, at
-/// rest. Events carry no data type, so they use the theme's event colour
+/// rest. Events carry no data type, so they use the theme's event color
 /// rather than a type hue.
 pub(crate) const fn event(theme: &Theme) -> RgbaF32 {
     theme.ports.event

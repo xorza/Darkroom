@@ -49,7 +49,7 @@ impl LocalContrast {
     /// Enhance the local contrast of `image` in place via CLAHE.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         if self.strength == 0.0 {

@@ -16,8 +16,8 @@
 use common::CancelToken;
 
 use crate::combine::error::StackError;
+use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
-use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
 
@@ -163,7 +163,7 @@ pub(super) struct PairedGain {
 #[derive(Debug, Clone, Copy)]
 struct Seed {
     gain: f32,
-    /// 1.4826·MAD of the lever-arm ratios; 0 when there were too few to seed from.
+    /// The σ of the lever-arm ratios from their MAD; 0 when there were too few to seed from.
     scatter: f32,
     relative_error: f64,
 }
@@ -275,20 +275,20 @@ impl SamplePair<'_> {
         Ok(paired)
     }
 
-    /// The pairs in runs of [`Cancelled::POLL_CHUNK`], the frame's beside the reference's.
+    /// The pairs in runs of [`CANCEL_POLL_CHUNK`], the frame's beside the reference's.
     fn chunks(&self) -> impl Iterator<Item = (&[f32], &[f32])> {
         self.frame
             .samples
-            .chunks(Cancelled::POLL_CHUNK)
-            .zip(self.reference.samples.chunks(Cancelled::POLL_CHUNK))
+            .chunks(CANCEL_POLL_CHUNK)
+            .zip(self.reference.samples.chunks(CANCEL_POLL_CHUNK))
     }
 
     /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, or the ratio of
     /// the sky spreads when there are too few of them.
     fn seed(&self, cancel: &CancelToken) -> Result<Seed, StackError> {
         let (frame_stats, reference_stats) = (self.frame.stats, self.reference.stats);
-        let frame_floor = LEVER_SIGMAS * mad_to_sigma(frame_stats.mad);
-        let reference_floor = LEVER_SIGMAS * mad_to_sigma(reference_stats.mad);
+        let frame_floor = LEVER_SIGMAS * frame_stats.sigma();
+        let reference_floor = LEVER_SIGMAS * reference_stats.sigma();
         // Every pair at most, so the ratios never grow past the room they took.
         let mut ratios = Vec::with_capacity(self.frame.samples.len());
         for (frame_chunk, reference_chunk) in self.chunks() {
@@ -302,14 +302,13 @@ impl SamplePair<'_> {
             ));
         }
         if ratios.len() >= MIN_LEVER_PAIRS {
-            let count = ratios.len() as f64;
             let ratio_stats = MedianMad::of_mut(&mut ratios);
-            let scatter = mad_to_sigma(ratio_stats.mad);
+            let scatter = ratio_stats.sigma();
             return Ok(Seed {
                 gain: ratio_stats.median,
                 scatter,
                 relative_error: MEDIAN_ERROR * f64::from(scatter)
-                    / count.sqrt()
+                    / (ratio_stats.count as f64).sqrt()
                     / f64::from(ratio_stats.median),
             });
         }
@@ -348,19 +347,18 @@ impl SamplePair<'_> {
                 |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
             ));
         }
+        // Measuring leaves each residual's deviation from the median in its place.
         let residual_stats = MedianMad::of_mut(&mut residuals);
         let resolution = Spread::resolution(reference_stats.median);
         if residual_stats.mad <= resolution && seed.scatter == 0.0 {
-            let exact = residuals
-                .iter()
-                .all(|&residual| (residual - residual_stats.median).abs() <= resolution);
+            let exact = residuals.iter().all(|&deviation| deviation <= resolution);
             return Ok(if exact {
                 Residuals::Exact
             } else {
                 Residuals::Degenerate
             });
         }
-        let sky_sigma = f64::from(mad_to_sigma(residual_stats.mad));
+        let sky_sigma = f64::from(residual_stats.sigma());
         Ok(Residuals::Window(ResidualWindow {
             gain,
             offset,

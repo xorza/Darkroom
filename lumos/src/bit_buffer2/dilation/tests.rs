@@ -213,6 +213,12 @@ fn dilation_matches_the_brute_force_reference() {
             radii: &[1, 3, 5],
         },
         Case {
+            name: "smears of every doubling remainder across word edges",
+            size: Size2us::new(200, 7),
+            seed: Seed::Pixels(&[(62, 3), (65, 0), (127, 6), (128, 3), (191, 1)]),
+            radii: &[4, 5, 6, 7, 8, 31, 32, 33, 50],
+        },
+        Case {
             name: "max radius 63",
             size: Size2us::new(70, 3),
             seed: Seed::Pixels(&[(35, 1)]),

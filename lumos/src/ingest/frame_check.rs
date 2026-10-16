@@ -7,13 +7,14 @@
 
 use common::CancelToken;
 
+use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::set_facts::SetFacts;
 
@@ -46,7 +47,7 @@ impl FrameCheck<'_> {
     ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
         self.geometry(frame, dimensions)?;
-        facts.admit(self.index, &frame.source_stats.facts)?;
+        facts.admit(self.index, &frame.facts)?;
         self.stored_samples(&frame.channels, dimensions.pixel_count())?;
         self.stored_quality(frame, dimensions)
     }
@@ -111,12 +112,12 @@ impl FrameCheck<'_> {
         );
         let index = self.index;
         for (chunk, (support, confidence)) in support
-            .chunks(Cancelled::POLL_CHUNK)
-            .zip(confidence.chunks(Cancelled::POLL_CHUNK))
+            .chunks(CANCEL_POLL_CHUNK)
+            .zip(confidence.chunks(CANCEL_POLL_CHUNK))
             .enumerate()
         {
             Cancelled::check(self.cancel)?;
-            let pixel = |offset| chunk * Cancelled::POLL_CHUNK + offset;
+            let pixel = |offset| chunk * CANCEL_POLL_CHUNK + offset;
             for (offset, (&support, &confidence)) in support.iter().zip(confidence).enumerate() {
                 for (kind, value) in [(kind, support), (FramePlane::Confidence, confidence)] {
                     if !kind.accepts(value) {
@@ -193,14 +194,14 @@ impl FrameCheck<'_> {
         channels: impl IntoIterator<Item = &'s [f32]>,
     ) -> Result<(), AdmissionError> {
         for (channel, samples) in channels.into_iter().enumerate() {
-            for (chunk, values) in samples.chunks(Cancelled::POLL_CHUNK).enumerate() {
+            for (chunk, values) in samples.chunks(CANCEL_POLL_CHUNK).enumerate() {
                 Cancelled::check(self.cancel)?;
                 for (offset, value) in values.iter().copied().enumerate() {
                     if !value.is_finite() {
                         return Err(AdmissionError::NonFiniteImageSample {
                             index: self.index,
                             channel,
-                            pixel: chunk * Cancelled::POLL_CHUNK + offset,
+                            pixel: chunk * CANCEL_POLL_CHUNK + offset,
                             value,
                         });
                     }

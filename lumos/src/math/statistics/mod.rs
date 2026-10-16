@@ -26,17 +26,17 @@ fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
 ///
 /// For a normal distribution σ ≈ 1.4826 × MAD; the factor is `1 / Φ⁻¹(3/4)`, where Φ⁻¹ is the
 /// inverse normal CDF, carried to full double precision. A test holds it to the normal CDF.
-///
-/// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
-/// round apart. Reaching the `f64` users through `f64::from` on the `f32` constant instead would
-/// spend an `f32` round-trip inside an `f64` computation for nothing.
 const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
 
-/// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.
-///
-/// The nearest `f32` to the `f64` constant is the value those paths always used, so making the
-/// `f64` one canonical left every single-precision result bit-identical.
-const MAD_TO_SIGMA_F32: f32 = MAD_TO_SIGMA as f32;
+/// `b_n` for n = 2 ..= 20, so that `b_n · 1.4826 · MAD` is unbiased for n Gaussian samples. The
+/// MAD here takes the mean of the two middle values at an even count, for the median and for the
+/// median of the deviations, and Croux & Rousseeuw's (1992) table does not fit that form at even n
+/// (n = 6: 1.200 against 1.1895). Measured by `internals/reference/mad_consistency.py` from 10⁷
+/// trials per count: the standard error is below 3·10⁻⁴ at n = 3 and falls with n.
+const MAD_CONSISTENCY: [f64; 19] = [
+    1.1955, 1.4869, 1.3604, 1.2170, 1.1895, 1.1378, 1.1274, 1.1011, 1.0958, 1.0799, 1.0765, 1.0661,
+    1.0638, 1.0563, 1.0548, 1.0491, 1.0478, 1.0435, 1.0425,
+];
 
 /// χ²(0.99) for k = 2 degrees of freedom: the squared Mahalanobis radius enclosing 99% of an
 /// isotropic 2-D Gaussian, so `r² > CHI2_99_2DOF · σ²` is the 1%-tail outlier test for a position
@@ -47,13 +47,29 @@ const MAD_TO_SIGMA_F32: f32 = MAD_TO_SIGMA as f32;
 ///
 /// Lives here rather than beside either caller because registration gates 2-D residuals twice, at
 /// the same confidence: the RANSAC scorer's outlier boundary uses it squared, match recovery uses
-/// its square root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
+/// its square root as a radius, and one constant keeps the two gates at one confidence.
 pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
 
-/// Convert MAD to standard deviation (assuming normal distribution).
+/// The σ of `count` normal samples from their MAD: `1.4826 · b_n · MAD`, multiplied in `f64` and
+/// rounded once, unbiased at every count.
 #[inline]
-pub(crate) const fn mad_to_sigma(mad: f32) -> f32 {
-    mad * MAD_TO_SIGMA_F32
+pub(crate) fn sigma_of_mad<F: Float>(mad: F, count: usize) -> F {
+    mad.scaled(MAD_TO_SIGMA * mad_consistency(count))
+}
+
+/// The small-sample factor `b_n` for `count` samples. One sample's MAD is 0 whatever scales it.
+/// Above the table, Croux & Rousseeuw's `n / (n − 0.8)`, which the same simulation puts within
+/// 0.1% of the measured factor from n = 20 on.
+fn mad_consistency(count: usize) -> f64 {
+    debug_assert!(count > 0);
+    match count {
+        1 => 1.0,
+        2..=20 => MAD_CONSISTENCY[count - 2],
+        _ => {
+            let n = count as f64;
+            n / (n - 0.8)
+        }
+    }
 }
 
 /// The median of `data`, in place.
@@ -110,23 +126,7 @@ fn median_of_partitioned_keys<F: Float>(keys: &mut [F::Key], boundary: usize) ->
     // vectorizes, ten times as fast on arm64 and twice on x86.
     let lower_part = &keys[..middle];
     let lower = F::from_key(lower_part.iter().copied().fold(lower_part[0], Ord::max));
-    (lower + upper) * F::HALF
-}
-
-/// MAD-scaled robust sigma of `data`: `1.4826 · median|x − median(x)|`, or `0.0` when empty.
-///
-/// Leaves `data` intact — callers that go on to threshold against their own residuals need them
-/// — by working entirely in `scratch`, which is overwritten in full. Hoist `scratch` out of a
-/// refit loop and the whole iteration allocates nothing.
-pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
-    if data.is_empty() {
-        return 0.0;
-    }
-
-    scratch.clear();
-    scratch.extend_from_slice(data);
-    let median = median_mut(scratch);
-    MAD_TO_SIGMA * mad_with_scratch(data, median, scratch)
+    lower.midpoint(upper)
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
@@ -147,9 +147,7 @@ fn fill_abs_deviations<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) 
 /// hold NaN still measures.
 #[inline]
 pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
-    if values.is_empty() {
-        return F::ZERO;
-    }
+    debug_assert!(!values.is_empty());
     fill_abs_deviations(values, median, scratch);
     median_of_magnitudes(scratch)
 }
@@ -166,6 +164,18 @@ pub(crate) const fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::math::statistics::MAD_TO_SIGMA;
+    use crate::math::statistics::float::Float;
+
+    /// The σ of a normal distribution whose MAD is `mad`: `sigma_of_mad` as the count grows, for
+    /// fixtures that state a population and no sample.
+    pub(crate) fn mad_to_sigma<F: Float>(mad: F) -> F {
+        mad.scaled(MAD_TO_SIGMA)
+    }
+}
 
 #[cfg(test)]
 mod tests;

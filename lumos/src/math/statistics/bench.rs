@@ -7,11 +7,11 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Kind, Scale};
+use crate::math::statistics;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::statistics::spread::Spread;
-use crate::math::statistics::{mad_with_scratch, median_mut, robust_sigma_f64};
 
 /// A combine pixel's frames, a star's stamp, a 64² background tile.
 const LENGTHS: [usize; 3] = [16, 256, 4_096];
@@ -22,11 +22,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "math/statistics", Scale::Sample);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
-        group.bench_function(BenchmarkId::new("median_mut", len), |b| {
+        group.bench_function(BenchmarkId::new("statistics::median_mut", len), |b| {
             let values = fixture::sky(len, 2);
             b.iter_batched_ref(
                 || values.clone(),
-                |values| median_mut(black_box(values)),
+                |values| statistics::median_mut(black_box(values)),
                 fixture::fresh_copies(len * size_of::<f32>()),
             );
         });
@@ -38,16 +38,19 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 fixture::fresh_copies(len * size_of::<f32>()),
             );
         });
-        group.bench_function(BenchmarkId::new("mad_with_scratch", len), |b| {
+        group.bench_function(BenchmarkId::new("statistics::mad_with_scratch", len), |b| {
             let values = fixture::sky(len, 2);
-            let median = median_mut(&mut values.clone());
+            let median = statistics::median_mut(&mut values.clone());
             let mut scratch = Vec::with_capacity(len);
-            b.iter(|| mad_with_scratch(black_box(&values), median, &mut scratch));
+            b.iter(|| statistics::mad_with_scratch(black_box(&values), median, &mut scratch));
         });
-        group.bench_function(BenchmarkId::new("robust_sigma_f64", len), |b| {
+        group.bench_function(BenchmarkId::new("median_mad_f64", len), |b| {
             let values: Vec<f64> = fixture::sky(len, 2).into_iter().map(f64::from).collect();
-            let mut scratch = Vec::with_capacity(len);
-            b.iter(|| robust_sigma_f64(black_box(&values), &mut scratch));
+            b.iter_batched_ref(
+                || values.clone(),
+                |values| MedianMad::of_mut(black_box(values)),
+                fixture::fresh_copies(len * size_of::<f64>()),
+            );
         });
         group.bench_function(BenchmarkId::new("sigma_clipped", len), |b| {
             let values = fixture::sky(len, 2);
@@ -100,7 +103,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         b.iter(|| {
             copy.clear();
             copy.extend_from_slice(black_box(&plane));
-            median_mut(&mut copy)
+            statistics::median_mut(&mut copy)
         });
     });
     group.finish();

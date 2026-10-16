@@ -5,53 +5,17 @@ use std::path::Path;
 use crate::combine::stack_config::StackConfig;
 use crate::config_value::ConfigValue;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_result::DrizzleResult;
+use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::drizzle::drizzle_run::DrizzleRun;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::math::size2us::Size2us;
+use crate::io::decoder::cfa_decoder::CfaDecoder;
+use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::progress::progress_monitor::ProgressMonitor;
-
-/// Drizzle kernel type for distributing flux.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DrizzleKernel {
-    /// Square kernel: the exact overlap area of each drop's transformed quadrilateral with every
-    /// output pixel, by STScI's `boxer` / `sgarea` edge integration. Correct for any transform,
-    /// rotation and shear included. Default, as in DrizzlePac, PixInsight and Siril.
-    /// Reference: `STScI` cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
-    #[default]
-    Square,
-    /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
-    /// Approximation of true square kernel — always aligned with output X/Y axes regardless
-    /// of rotation, so it is exact only at rotations of 0°, 90° and 180°.
-    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there integrates the transformed polygon's
-    /// edges, as [`Self::Square`] does.)
-    Turbo,
-    /// Point kernel - single pixel contribution.
-    /// Fastest but requires very good dithering.
-    Point,
-    /// Gaussian droplet whose FWHM is the drop size, `pixfrac·scale` output pixels, as in
-    /// `STScI` drizzle. Smoother output, slight flux redistribution.
-    Gaussian,
-    /// A Lanczos interpolation of the frame at each output pixel. Only valid at pixfrac = 1 and
-    /// scale = 1, where it resamples rather than drizzles, and the slowest kernel. Its weights go
-    /// negative, so it rings at sharp edges as any Lanczos resampling does.
-    Lanczos,
-}
-
-impl DrizzleKernel {
-    /// Every kernel.
-    pub const ALL: [Self; 5] = [
-        Self::Square,
-        Self::Turbo,
-        Self::Point,
-        Self::Gaussian,
-        Self::Lanczos,
-    ];
-}
+use crate::stack_product::StackProduct;
 
 /// Configuration for Drizzle stacking.
 #[derive(Debug, Clone)]
@@ -98,59 +62,8 @@ impl Default for DrizzleConfig {
 }
 
 impl DrizzleConfig {
-    /// The output grid an `input` frame drizzles onto: each side `scale` times the input's, rounded
-    /// up so every drop of a validated config lands inside it.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "validate holds the scale positive, so each output side is non-negative"
-    )]
-    pub(crate) fn output_size(&self, input: Size2us) -> Size2us {
-        Size2us::new(
-            (input.width as f32 * self.scale).ceil() as usize,
-            (input.height as f32 * self.scale).ceil() as usize,
-        )
-    }
-
-    /// Create config for 1.5x super-resolution.
-    pub fn x1_5() -> Self {
-        Self {
-            scale: 1.5,
-            ..Default::default()
-        }
-    }
-
-    /// Create config for 3x super-resolution.
-    pub fn x3() -> Self {
-        Self {
-            scale: 3.0,
-            pixfrac: 0.7,
-            ..Default::default()
-        }
-    }
-
-    /// Set pixel fraction.
-    #[must_use]
-    pub const fn with_pixfrac(mut self, pixfrac: f32) -> Self {
-        self.pixfrac = pixfrac;
-        self
-    }
-
-    /// Set kernel type.
-    #[must_use]
-    pub const fn with_kernel(mut self, kernel: DrizzleKernel) -> Self {
-        self.kernel = kernel;
-        self
-    }
-
-    /// Set the fill gate, [`Self::min_weight_fraction`].
-    #[must_use]
-    pub const fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
-        self.min_weight_fraction = min_weight_fraction;
-        self
-    }
-
     /// Validate parameters before allocating or processing an output image.
-    pub fn validate(&self) -> Result<(), DrizzleConfigError> {
+    pub(crate) fn validate(&self) -> Result<(), DrizzleConfigError> {
         ConfigValue::new("scale", self.scale)
             .finite_and("finite and positive", |value| value > 0.0)?;
         ConfigValue::new("pixfrac", self.pixfrac)
@@ -189,9 +102,9 @@ impl DrizzleConfig {
         frames: Vec<DrizzleFrame<P>>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<DrizzleResult, DrizzleError> {
+    ) -> Result<StackProduct, DrizzleError> {
         self.begin(ingest, monitor)
-            .drizzle_files::<LinearImage, P>(frames)
+            .drizzle_files::<LinearDecoder, P>(frames)
     }
 
     /// Drizzle frames already held in memory, and combine them under [`Self::stack`].
@@ -207,22 +120,22 @@ impl DrizzleConfig {
         frames: Vec<DrizzleFrame<LinearImage>>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<DrizzleResult, DrizzleError> {
+    ) -> Result<StackProduct, DrizzleError> {
         self.begin(ingest, monitor).drizzle_held(frames)
     }
 
     /// Drizzle calibrated, un-demosaiced sensor frames from disk — mosaic FITS or camera RAW — and
     /// combine them under [`Self::stack`]: CFA (Bayer or X-Trans) drizzle.
     ///
-    /// Each photosite deposits into the output channel of its colour alone, so a colour plane holds
-    /// only that colour's own samples, and an output pixel no photosite of a colour reached is left
-    /// out of that channel's combine. That takes many well-dithered frames to fill every colour at
+    /// Each photosite deposits into the output channel of its color alone, so a color plane holds
+    /// only that color's own samples, and an output pixel no photosite of a color reached is left
+    /// out of that channel's combine. That takes many well-dithered frames to fill every color at
     /// every pixel; a few undithered frames are better demosaiced and stacked. Register the frames
     /// on [`CfaImage::green_proxy`], which interpolates nothing but the green the stars are
     /// measured on.
     ///
     /// A normalized combine compares each frame with its reference over the pixels both reached in
-    /// a colour. At scale 1 a sub-pixel dither shares them all; above it, two frames a photosite
+    /// a color. At scale 1 a sub-pixel dither shares them all; above it, two frames a photosite
     /// apart can share none, and the combine then fails with
     /// [`StackError::NoCommonCoverage`](crate::combine::error::StackError::NoCommonCoverage).
     /// `Normalization::None` takes any set.
@@ -240,9 +153,9 @@ impl DrizzleConfig {
         frames: Vec<DrizzleFrame<P>>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<DrizzleResult, DrizzleError> {
+    ) -> Result<StackProduct, DrizzleError> {
         self.begin(ingest, monitor)
-            .drizzle_files::<CfaImage, P>(frames)
+            .drizzle_files::<CfaDecoder, P>(frames)
     }
 
     /// Drizzle calibrated mosaics already held in memory, and combine them under [`Self::stack`]:
@@ -256,7 +169,7 @@ impl DrizzleConfig {
         frames: Vec<DrizzleFrame<CfaImage>>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<DrizzleResult, DrizzleError> {
+    ) -> Result<StackProduct, DrizzleError> {
         self.begin(ingest, monitor).drizzle_held(frames)
     }
 

@@ -9,19 +9,19 @@ use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus, HduKind};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::fits_checksum_provenance::FitsChecksumState;
+use crate::image::fits_transfer_provenance::FitsTransferProvenance;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
-use crate::io::error::FitsAllocation;
+use crate::io::error::OverBudget;
 use crate::io::fits::cfa;
-use crate::io::fits::decode::plan::DecodeLimit;
 use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::*;
-use crate::io::fits::fits_checksum_provenance::FitsChecksumState;
+use crate::io::fits::error::FitsAllocation;
 use crate::io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
-    FitsNullPolicy,
 };
-use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
 use common::{CancelToken, TempDir};
 use std::fs;
 use std::fs::File;
@@ -111,10 +111,9 @@ fn write_named_multi_image(path: &Path) {
 
 #[test]
 fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panicking() {
-    let path = Path::new("untrusted.fits");
     for shape in [&[0, 2][..], &[2, 0], &[2, 2, 0]] {
         let reason = fits_refusal(
-            plan::dimensions_from_shape(path, shape, FitsCubeInterpretation::Reject).unwrap_err(),
+            plan::dimensions_from_shape(shape, FitsCubeInterpretation::Reject).unwrap_err(),
         );
         assert_eq!(
             reason,
@@ -129,7 +128,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
     let side = ImageDimensions::MAX_SIDE;
     for shape in [[side + 1, 2], [2, side + 1], [usize::MAX, 2]] {
         let reason = fits_refusal(
-            plan::dimensions_from_shape(path, &shape, FitsCubeInterpretation::Reject).unwrap_err(),
+            plan::dimensions_from_shape(&shape, FitsCubeInterpretation::Reject).unwrap_err(),
         );
         assert_eq!(
             reason,
@@ -149,7 +148,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         "FITS image 1073741825x2 has a side past 1073741824 px"
     );
     assert_eq!(
-        plan::dimensions_from_shape(path, &[side, 1], FitsCubeInterpretation::Reject)
+        plan::dimensions_from_shape(&[side, 1], FitsCubeInterpretation::Reject)
             .unwrap()
             .size(),
         (side, 1).into()
@@ -169,10 +168,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            DecodeLimit {
-                path,
-                bytes: u64::MAX,
-            },
+            u64::MAX,
         )
         .unwrap_err(),
     );
@@ -182,7 +178,6 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
 
 #[test]
 fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
-    let path = Path::new("budget.fits");
     let rgb_shape = [100, 100, 3];
     let rgb = image_header(-64, &rgb_shape);
     let plan = HduSpec {
@@ -193,14 +188,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         source_bytes: 241_920,
     }
     .description()
-    .plan(
-        FitsCubeInterpretation::Rgb,
-        FitsFloatScale::Auto,
-        DecodeLimit {
-            path,
-            bytes: u64::MAX,
-        },
-    )
+    .plan(FitsCubeInterpretation::Rgb, FitsFloatScale::Auto, u64::MAX)
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
     assert_eq!(plan.decoded_bytes, 120_000);
@@ -235,10 +223,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     .plan(
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
-        DecodeLimit {
-            path,
-            bytes: plan.peak_bytes,
-        },
+        plan.peak_bytes,
     )
     .unwrap();
     let reason = fits_refusal(
@@ -253,10 +238,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         .plan(
             FitsCubeInterpretation::Rgb,
             FitsFloatScale::Auto,
-            DecodeLimit {
-                path,
-                bytes: plan.peak_bytes - 1,
-            },
+            plan.peak_bytes - 1,
         )
         .unwrap_err(),
     );
@@ -264,35 +246,28 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         reason,
         FitsRefusal::OverBudget {
             allocation: FitsAllocation::PeakMemory,
-            required: 290_000,
-            limit: 289_999
+            budget: OverBudget {
+                required: 290_000,
+                limit: 289_999
+            }
         }
     );
     assert_eq!(
         reason.to_string(),
-        "estimated peak memory requires 290000 bytes, exceeding the FITS load budget of 289999 \
-         bytes"
+        "estimated peak memory needs 290000 bytes, past the load's memory limit of 289999 bytes"
     );
     // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
     // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
-    plan.admit_flags_extension(DecodeLimit {
-        path,
-        bytes: 140_000,
-    })
-    .unwrap();
-    let reason = fits_refusal(
-        plan.admit_flags_extension(DecodeLimit {
-            path,
-            bytes: 139_999,
-        })
-        .unwrap_err(),
-    );
+    plan.admit_flags_extension(140_000).unwrap();
+    let reason = fits_refusal(plan.admit_flags_extension(139_999).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::OverBudget {
             allocation: FitsAllocation::DecodedOutputWithFlags,
-            required: 140_000,
-            limit: 139_999
+            budget: OverBudget {
+                required: 140_000,
+                limit: 139_999
+            }
         }
     );
 
@@ -314,29 +289,14 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            DecodeLimit {
-                path,
-                bytes: u64::MAX,
-            },
+            u64::MAX,
         )
         .unwrap()
     };
     let without = plan_of(&mono);
     assert_eq!(without.peak_bytes, 80_000);
-    without
-        .admit_flags_extension(DecodeLimit {
-            path,
-            bytes: 50_000,
-        })
-        .unwrap();
-    assert!(
-        without
-            .admit_flags_extension(DecodeLimit {
-                path,
-                bytes: 49_999
-            })
-            .is_err()
-    );
+    without.admit_flags_extension(50_000).unwrap();
+    assert!(without.admit_flags_extension(49_999).is_err());
     mono.set("DATAMAX", 30_000.0).unwrap();
     assert_eq!(plan_of(&mono).peak_bytes, 90_000);
 
@@ -354,10 +314,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         .plan(
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
-            DecodeLimit {
-                path,
-                bytes: 4 * 1024 * 1024 - 1,
-            },
+            4 * 1024 * 1024 - 1,
         )
         .unwrap_err(),
     );
@@ -365,8 +322,10 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         reason,
         FitsRefusal::OverBudget {
             allocation: FitsAllocation::DecodedOutput,
-            required: 4_194_304,
-            limit: 4_194_303
+            budget: OverBudget {
+                required: 4_194_304,
+                limit: 4_194_303
+            }
         }
     );
 }
@@ -381,19 +340,20 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
     bytes.truncate(BLOCK_SIZE);
     fs::write(&path, bytes).unwrap();
 
-    let reason = fits_refusal(
-        read_selected_image(&path, &LoadContext::new(CancelToken::never(), 1)).unwrap_err(),
-    );
+    let reason =
+        fits_refusal(load_linear(&path, &LoadContext::new(CancelToken::never(), 1)).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::OverBudget {
             allocation: FitsAllocation::StoredDataUnit,
-            required: 2880,
-            limit: 1
+            budget: OverBudget {
+                required: 2880,
+                limit: 1
+            }
         }
     );
     assert!(matches!(
-        read_selected_image(&path, &LoadContext::new(CancelToken::never(), 10_000),).unwrap_err(),
+        load_linear(&path, &LoadContext::new(CancelToken::never(), 10_000)).unwrap_err(),
         ImageError::Fits { .. }
     ));
 }
@@ -410,7 +370,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let zero_axis = FitsRefusal::ZeroAxis { shape: vec![0, 2] };
     let reason = fits_refusal(load_linear(&zero_path, &load_context()).unwrap_err());
     assert_eq!(reason, zero_axis);
-    let reason = fits_refusal(linear_peek(&zero_path, &load_context()).unwrap_err());
+    let reason = fits_refusal(linear_info(&zero_path, &load_context()).unwrap_err());
     assert_eq!(reason, zero_axis, "the peek refuses what the load refuses");
 
     let rgb_path = directory.join("rgb.fits");
@@ -419,10 +379,13 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     ];
     write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
     let loaded = load_linear(&rgb_path, &rgb_load_context()).unwrap();
-    assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
+    assert_eq!(
+        loaded.dimensions(),
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb)
+    );
     // The decode reads one channel's two rows at a time: 4 samples of 4 bytes as stored, and as
     // many swapped into words, beside the frame.
-    let peek = linear_peek(&rgb_path, &rgb_load_context()).unwrap();
+    let peek = linear_info(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(
         peek.dimensions,
         loaded.dimensions(),
@@ -441,7 +404,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     )
     .unwrap();
     assert!(matches!(
-        linear_peek(&mosaic_path, &load_context()),
+        linear_info(&mosaic_path, &load_context()),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::MosaicFits,
             ..
@@ -470,7 +433,10 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
         .unwrap();
 
     let loaded = load_linear(&path, &rgb_load_context()).unwrap();
-    assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
+    assert_eq!(
+        loaded.dimensions(),
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb)
+    );
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(loaded.channel(1).pixels(), &[10.0, 20.0, 30.0, 40.0]);
     assert_eq!(loaded.channel(2).pixels(), &[100.0, 200.0, 300.0, 400.0]);
@@ -548,7 +514,6 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             // Samples of 10 to 40 with no DATAMAX: said to be normalized, or `Auto` refuses them.
             float_scale: FitsFloatScale::Normalized,
-            nulls: FitsNullPolicy::Mask,
             unstated_bayer_pattern: None,
             pedestal: Pedestal::Unknown,
         },
@@ -641,4 +606,45 @@ fn cancellation_prevents_fits_selection() {
         load_linear(&path, &context),
         Err(ImageError::Cancelled { .. })
     ));
+}
+
+/// `DATAMAX` is read once, for the scale and for the saturation level. A level of 0, a "not
+/// computed" placeholder, is no level: the float samples are taken as normalized, as with no
+/// `DATAMAX` at all, and nothing is flagged.
+#[test]
+fn a_zero_datamax_is_no_saturation_level() {
+    let directory = TempDir::new("fits_datamax");
+    let path = directory.join("zero.fits");
+    let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
+    let mut header = Header::new();
+    header.set("DATAMAX", 0.0).unwrap();
+    write_fits(&path, &image, Some(&header));
+    let loaded = load_linear(&path, &load_context()).unwrap();
+    assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
+    assert_eq!(loaded.metadata.header.data_max, None);
+    assert!(loaded.flags().is_none());
+    assert!(!loaded.metadata.derived.saturation_flagged());
+}
+
+/// `Auto` picks the one HDU that holds pixels: a header-only image extension (`NAXIS = 0`) beside
+/// it is no second candidate.
+#[test]
+fn a_header_only_image_extension_is_no_second_image() {
+    let directory = TempDir::new("fits_header_only");
+    let path = directory.join("one_image.fits");
+    let mut writer = FitsWriter::new(File::create(&path).unwrap());
+    let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
+    writer.write_image(&image, None).unwrap();
+    let mut empty = Header::new();
+    empty.set("XTENSION", "IMAGE").unwrap();
+    empty.set("BITPIX", -32).unwrap();
+    empty.set("NAXIS", 0).unwrap();
+    empty.set("PCOUNT", 0).unwrap();
+    empty.set("GCOUNT", 1).unwrap();
+    writer.write_raw_hdu(&empty, &[]).unwrap();
+    writer.into_inner().sync_all().unwrap();
+
+    let loaded = load_linear(&path, &load_context()).unwrap();
+    assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
+    assert_eq!(fits_transfer(&loaded).hdu.index, 0);
 }

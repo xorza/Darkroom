@@ -6,7 +6,9 @@ use std::slice;
 use arrayvec::ArrayVec;
 use imaginarium::{Buffer2, ChannelCount, Image};
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::math::size2us::Size2us;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -140,7 +142,7 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
+    pub(crate) fn planes_mut(&mut self) -> slice::IterMut<'_, Buffer2<f32>> {
         match self {
             Self::L(plane) => slice::from_mut(plane).iter_mut(),
             Self::Rgb(planes) => planes.iter_mut(),
@@ -159,16 +161,20 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) const fn channel_count(&self) -> usize {
+    pub(crate) const fn layout(&self) -> ChannelLayout {
         match self {
-            Self::L(_) => 1,
-            Self::Rgb(_) => 3,
+            Self::L(_) => ChannelLayout::Mono,
+            Self::Rgb(_) => ChannelLayout::Rgb,
         }
+    }
+
+    pub(crate) const fn channel_count(&self) -> usize {
+        self.layout().count()
     }
 
     pub(crate) fn dimensions(&self) -> ImageDimensions {
         let plane = self.channel(0);
-        ImageDimensions::new((plane.width(), plane.height()), self.channel_count())
+        ImageDimensions::new((plane.width(), plane.height()), self.layout())
     }
 
     pub(crate) fn into_l(self) -> Buffer2<f32> {
@@ -188,7 +194,9 @@ impl LinearPixels {
 
 impl From<Buffer2<f32>> for LinearPixels {
     fn from(plane: Buffer2<f32>) -> Self {
-        ImageDimensions::validate((plane.width(), plane.height()), 1);
+        if let Err(error) = ImageDimensions::checked(Size2us::from(&plane), ChannelLayout::Mono) {
+            panic!("{error}");
+        }
         Self::L(plane)
     }
 }
@@ -197,12 +205,28 @@ impl From<[Buffer2<f32>; 3]> for LinearPixels {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
         let width = planes[0].width();
         let height = planes[0].height();
-        ImageDimensions::validate((width, height), 3);
+        if let Err(error) =
+            ImageDimensions::checked(Size2us::new(width, height), ChannelLayout::Rgb)
+        {
+            panic!("{error}");
+        }
         for plane in &planes[1..] {
             assert_eq!(plane.width(), width, "all RGB planes must share width");
             assert_eq!(plane.height(), height, "all RGB planes must share height");
         }
         Self::Rgb(planes)
+    }
+}
+
+/// The planes of an image, one or three of one size.
+impl From<ArrayVec<Buffer2<f32>, 3>> for LinearPixels {
+    fn from(planes: ArrayVec<Buffer2<f32>, 3>) -> Self {
+        let mut planes = planes.into_iter();
+        match (planes.next(), planes.next(), planes.next()) {
+            (Some(luminance), None, None) => luminance.into(),
+            (Some(red), Some(green), Some(blue)) => [red, green, blue].into(),
+            _ => panic!("an image has one plane or three"),
+        }
     }
 }
 

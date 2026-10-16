@@ -3,10 +3,10 @@ use rayon::prelude::*;
 
 use crate::internals::synthetic::transforms::StarScatter;
 use crate::internals::test_rng::TestRng;
+use crate::registration::estimate::Pairs;
 use crate::registration::final_fit::fit_catalogs::{CAUCHY_TUNING, FitCatalogs};
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
 use crate::registration::final_fit::{FinalFit, FitModel};
-use crate::registration::ransac::transforms::estimate_transform;
 use crate::registration::transform::{Transform, TransformType};
 use crate::star_detection::star::Star;
 
@@ -59,16 +59,9 @@ fn a_seed_that_misses_stars_reaches_them_all() {
         .count();
     assert!(missed > 0, "the seed has to miss stars to test anything");
 
-    let catalogs = FitCatalogs::new(&stars(&reference, 0.01), &stars(&target, 0.01)).unwrap();
+    let catalogs = FitCatalogs::new(&stars(&reference, 0.01), &stars(&target, 0.01));
     let fit = catalogs
-        .fit(
-            seed,
-            FitModel {
-                transform: TransformType::Euclidean,
-                sip: None,
-            },
-            3.0,
-        )
+        .fit(seed, FitModel::Plain(TransformType::Euclidean), 3.0)
         .unwrap();
     assert_eq!(indices(&fit), (0..50).map(|i| (i, i)).collect::<Vec<_>>());
     for p in [DVec2::ZERO, DVec2::new(2000.0, 0.0), DVec2::splat(2000.0)] {
@@ -102,14 +95,11 @@ fn pairs_weigh_by_their_variance() {
             ..Star::at(r + DVec2::new(5.0 + offset, 0.0))
         });
     }
-    let catalogs = FitCatalogs::new(&reference, &target).unwrap();
+    let catalogs = FitCatalogs::new(&reference, &target);
     let fit = catalogs
         .fit(
             Transform::translation(DVec2::new(5.0, 0.0)),
-            FitModel {
-                transform: TransformType::Translation,
-                sip: None,
-            },
+            FitModel::Plain(TransformType::Translation),
             3.0,
         )
         .unwrap();
@@ -137,16 +127,9 @@ fn saturated_stars_and_a_blend_take_no_part() {
     let mut target = stars(&target_points, 0.01);
     reference[3].saturated = true;
     target[7].saturated = true;
-    let catalogs = FitCatalogs::new(&reference, &target).unwrap();
+    let catalogs = FitCatalogs::new(&reference, &target);
     let fit = catalogs
-        .fit(
-            truth,
-            FitModel {
-                transform: TransformType::Euclidean,
-                sip: None,
-            },
-            3.0,
-        )
+        .fit(truth, FitModel::Plain(TransformType::Euclidean), 3.0)
         .unwrap();
     let expected: Vec<(usize, usize)> = (0..51)
         .filter(|i| ![3, 7, 11].contains(i))
@@ -249,16 +232,9 @@ fn the_fit_reaches_the_cramer_rao_bound() {
                     ..Star::at(noisy(truth.apply(p), sigma))
                 })
                 .collect();
-            let catalogs = FitCatalogs::new(&reference, &target).unwrap();
+            let catalogs = FitCatalogs::new(&reference, &target);
             let fit = catalogs
-                .fit(
-                    truth,
-                    FitModel {
-                        transform: TransformType::Similarity,
-                        sip: None,
-                    },
-                    3.0,
-                )
+                .fit(truth, FitModel::Plain(TransformType::Similarity), 3.0)
                 .unwrap();
             parameters(&fit.warp.transform)
         })
@@ -312,8 +288,9 @@ fn the_homography_minimizes_the_reprojection_error() {
             .sum::<f64>()
     };
     let refined = pairs.fit(TransformType::Homography).unwrap();
-    let algebraic =
-        estimate_transform(&pairs.reference, &pairs.target, TransformType::Homography).unwrap();
+    let algebraic = Pairs::unit(&pairs.reference, &pairs.target)
+        .estimate(TransformType::Homography)
+        .unwrap();
     assert!(
         chi2(&refined) < chi2(&algebraic),
         "{} vs {}",

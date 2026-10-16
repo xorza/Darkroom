@@ -1,5 +1,7 @@
 //! [`FlatGain`]: the factor a flat multiplied each pixel's value and noise by, per channel.
 
+pub(crate) mod gain_bins;
+
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
@@ -9,10 +11,12 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::InvalidFlatGain;
+use crate::image::flat_gain::gain_bins::GainBins;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::noise::gain_bins::GainBins;
 
 /// Pixels between the grid's nodes on each axis.
 ///
@@ -22,7 +26,7 @@ use crate::noise::gain_bins::GainBins;
 pub(crate) const STEP: usize = 4;
 
 /// The gain `g = 1/f` a normalized flat `f` multiplied an image's pixels by, and so their noise,
-/// per channel — a colour of the mosaic, or the channel of the frame demosaiced from it.
+/// per channel — a color of the mosaic, or the channel of the frame demosaiced from it.
 ///
 /// Held on a grid of nodes 4 pixels apart, node `(i, j)` at pixel `(4i, 4j)` and the last on each
 /// axis at or past the image's last pixel, and read bilinearly between them.
@@ -31,6 +35,8 @@ pub(crate) const STEP: usize = 4;
 pub struct FlatGain {
     /// The image the grid covers.
     size: Size2us,
+    /// The node grid over [`Self::size`].
+    grid: GainGrid,
     nodes: ArrayVec<Buffer2<f32>, 3>,
     /// Each channel's bins of equal count over the sensor's gain, which a frame's noise is
     /// measured over before any warp moves it.
@@ -67,11 +73,14 @@ impl TryFrom<FlatGainRecord> for FlatGain {
             channels: record.nodes.len(),
             bins: record.bins.len(),
         };
+        // The size first: a zero side has no grid, and an overflowing one no pixel count.
         let size = Size2us::new(record.width, record.height);
+        if ImageDimensions::checked(size, ChannelLayout::Mono).is_err() {
+            return Err(invalid);
+        }
         let grid = GainGrid::of(size);
         let shaped = (1..=3).contains(&record.nodes.len())
             && record.bins.len() == record.nodes.len()
-            && size.pixel_count() > 0
             && record.nodes.iter().all(|plane| {
                 plane.len() == grid.columns * grid.rows
                     && plane.iter().all(|gain| gain.is_finite() && *gain > 0.0)
@@ -81,6 +90,7 @@ impl TryFrom<FlatGainRecord> for FlatGain {
         }
         Ok(Self {
             size,
+            grid,
             nodes: record
                 .nodes
                 .into_iter()
@@ -93,9 +103,9 @@ impl TryFrom<FlatGainRecord> for FlatGain {
 
 impl FlatGain {
     /// The gain of `divisor`, a normalized flat of `cfa_type` over its own sensor: each node of
-    /// colour `c` the mean of `1/f` over the colour's photosites within half a step of it, those
+    /// color `c` the mean of `1/f` over the color's photosites within half a step of it, those
     /// `excluded` names left out where any other remains — a photosite the flat did not measure,
-    /// or one its floor raised, would pull every node around it. A window with none of the colour
+    /// or one its floor raised, would pull every node around it. A window with none of the color
     /// widens by a step at a time until it holds one.
     pub(crate) fn of_divisor(
         divisor: &Buffer2<f32>,
@@ -111,7 +121,7 @@ impl FlatGain {
             excluded,
         };
         let nodes = (0..cfa_type.num_colors())
-            .map(|colour| {
+            .map(|color| {
                 let mut plane = Buffer2::new_default(columns, rows);
                 plane
                     .pixels_mut()
@@ -119,7 +129,7 @@ impl FlatGain {
                     .enumerate()
                     .for_each(|(j, row)| {
                         for (i, node) in row.iter_mut().enumerate() {
-                            *node = flat.node_gain(colour, Vec2us::new(STEP * i, STEP * j));
+                            *node = flat.node_gain(color, Vec2us::new(STEP * i, STEP * j));
                         }
                     });
                 plane
@@ -141,38 +151,49 @@ impl FlatGain {
             .iter()
             .map(|plane| GainBins::of(&mut plane.pixels().to_vec()))
             .collect();
-        Self { size, nodes, bins }
+        Self {
+            size,
+            grid,
+            nodes,
+            bins,
+        }
     }
 
     /// This gain as an output frame of `size` sees it through `to_source`, its output-to-source
     /// map: each node the source's gain where the map samples it.
     pub(crate) fn warped(&self, to_source: impl Fn(DVec2) -> DVec2 + Sync, size: Size2us) -> Self {
-        let columns = nodes_along(size.width);
-        let rows = nodes_along(size.height);
-        let mut nodes: ArrayVec<Buffer2<f32>, 3> = self
-            .nodes
-            .iter()
-            .map(|_| Buffer2::new_default(columns, rows))
-            .collect();
+        let grid = GainGrid::of(size);
         let to_source = &to_source;
-        let sources: Vec<DVec2> = (0..rows)
+        let source_grid = self.grid;
+        // Where each output node samples the source, located among its nodes once for every
+        // channel.
+        let points: Vec<GainPoint> = (0..grid.rows)
             .into_par_iter()
             .flat_map_iter(|j| {
-                (0..columns)
-                    .map(move |i| to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64)))
+                (0..grid.columns).map(move |i| {
+                    let source = to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64));
+                    source_grid.point(source.x as f32, source.y as f32)
+                })
             })
             .collect();
-        for (channel, plane) in nodes.iter_mut().enumerate() {
-            plane
-                .pixels_mut()
-                .par_iter_mut()
-                .zip(&sources)
-                .for_each(|(node, source)| {
-                    *node = self.at(channel, source.x as f32, source.y as f32);
-                });
-        }
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|source| {
+                let mut plane = Buffer2::new_default(grid.columns, grid.rows);
+                plane
+                    .pixels_mut()
+                    .par_iter_mut()
+                    .zip(&points)
+                    .for_each(|(node, point)| {
+                        *node = point.read(source.pixels(), source_grid.columns, 0);
+                    });
+                plane
+            })
+            .collect();
         Self {
             size,
+            grid,
             nodes,
             bins: self.bins.clone(),
         }
@@ -196,17 +217,20 @@ impl FlatGain {
     /// The gain of `channel` at pixel `(x, y)`, between the nodes around it; held at the outermost
     /// nodes past the grid.
     pub(crate) fn at(&self, channel: usize, x: f32, y: f32) -> f32 {
-        self.at_point(channel, GainGrid::of(self.size).point(x, y))
+        self.grid
+            .point(x, y)
+            .read(self.nodes[channel].pixels(), self.grid.columns, 0)
     }
 
-    /// The gain of `channel` at `point`, located on this grid once for every channel.
-    fn at_point(&self, channel: usize, point: GainPoint) -> f32 {
-        GainRows::new(GainGrid::of(self.size), 0, self.planes().collect()).at(channel, point)
-    }
-
-    /// The colours or channels the gain covers.
+    /// The colors or channels the gain covers.
     pub(crate) const fn channels(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Whether the gain covers an image of `size` and `channels` channels, or of `channels`
+    /// colors for a mosaic.
+    pub(crate) fn covers(&self, size: Size2us, channels: usize) -> bool {
+        self.size() == size && self.channels() == channels
     }
 }
 
@@ -252,6 +276,20 @@ pub(crate) struct GainPoint {
     row: AxisPoint,
 }
 
+impl GainPoint {
+    /// The gain at this point, bilinear between the four nodes around it, of `plane`: a grid's
+    /// node rows `first..`, `columns` nodes each, row-major.
+    fn read(self, plane: &[f32], columns: usize, first: usize) -> f32 {
+        let Self { column, row } = self;
+        let node = |i: usize, j: usize| plane[(j - first) * columns + i];
+        let top = node(column.low, row.low)
+            + (node(column.high, row.low) - node(column.low, row.low)) * column.fraction;
+        let bottom = node(column.low, row.high)
+            + (node(column.high, row.high) - node(column.low, row.high)) * column.fraction;
+        top + (bottom - top) * row.fraction
+    }
+}
+
 /// The node rows `first..` of a grid, each channel's, as the combine reads them for a band of
 /// pixel rows.
 #[derive(Debug, Clone)]
@@ -274,15 +312,7 @@ impl<'a> GainRows<'a> {
 
     /// The gain of `channel` at `point`, which these rows must reach.
     pub(crate) fn at(&self, channel: usize, point: GainPoint) -> f32 {
-        let plane = self.planes[channel];
-        let columns = self.grid.columns;
-        let GainPoint { column, row } = point;
-        let node = |i: usize, j: usize| plane[(j - self.first) * columns + i];
-        let top = node(column.low, row.low)
-            + (node(column.high, row.low) - node(column.low, row.low)) * column.fraction;
-        let bottom = node(column.low, row.high)
-            + (node(column.high, row.high) - node(column.low, row.high)) * column.fraction;
-        top + (bottom - top) * row.fraction
+        point.read(self.planes[channel], self.grid.columns, self.first)
     }
 }
 
@@ -329,9 +359,9 @@ struct NormalizedFlat<'a, E> {
 }
 
 impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
-    /// The mean of `1/f` over the photosites of `colour` within half a step of `node`; 1, no gain
-    /// known, for a colour the sensor has no photosite of.
-    fn node_gain(&self, colour: usize, node: Vec2us) -> f32 {
+    /// The mean of `1/f` over the photosites of `color` within half a step of `node`; 1, no gain
+    /// known, for a color the sensor has no photosite of.
+    fn node_gain(&self, color: usize, node: Vec2us) -> f32 {
         let divisor = self.divisor;
         let size = Size2us::from(divisor);
         let mut half = STEP / 2;
@@ -344,7 +374,7 @@ impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
             for y in window(size.height, node.y) {
                 for x in window(size.width, node.x) {
                     let position = Vec2us::new(x, y);
-                    if self.cfa_type.color_at(position) != colour {
+                    if self.cfa_type.slot_at(position) != color {
                         continue;
                     }
                     let index = y * size.width + x;

@@ -13,6 +13,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
 use crate::internals::fits::write_fits;
+use crate::io::writer;
 
 /// The lights of the end-to-end sets: few enough that an iteration stays near ten seconds.
 pub(crate) const LIGHTS: usize = 12;
@@ -33,7 +34,7 @@ impl Files {
         })
     }
 
-    /// [`LIGHTS`] dithered exposures of `field` as a colour camera writes them: 16-bit mosaics
+    /// [`LIGHTS`] dithered exposures of `field` as a color camera writes them: 16-bit mosaics
     /// behind `cfa_type`'s filters, the pattern in `BAYERPAT`.
     pub(crate) fn raw_lights(field: Field, cfa_type: CfaType) -> Self {
         Self::write("raw", |path, index| {
@@ -42,13 +43,10 @@ impl Files {
     }
 
     /// [`LIGHTS`] dithered exposures of `field` as calibration leaves them, mosaics behind
-    /// `cfa_type`'s filters saved by `CfaImage::save_fits`: a set to drizzle.
+    /// `cfa_type`'s filters saved by `writer::cfa_fits`: a set to drizzle.
     pub(crate) fn calibrated_mosaics(field: Field, cfa_type: CfaType) -> Self {
         Self::write("calibrated", |path, index| {
-            field
-                .mosaic_exposure(FRAME, cfa_type, index)
-                .save_fits(path)
-                .unwrap();
+            writer::cfa_fits(&field.mosaic_exposure(FRAME, cfa_type, index), path).unwrap();
         })
     }
 
@@ -111,10 +109,10 @@ pub(crate) fn write_mono_f32(path: &Path, image: &LinearImage) {
 /// `mosaic` as a camera's 16-bit file: `BITPIX = 16` with `BZERO = 32768`, and for a Bayer mosaic
 /// its pattern in `BAYERPAT`.
 pub(crate) fn write_mosaic_u16(path: &Path, mosaic: &CfaImage) {
-    let shape = vec![mosaic.data.width(), mosaic.data.height()];
-    let image = Image::from_u16(shape, &quantize(mosaic.data.pixels())).unwrap();
+    let shape = vec![mosaic.data().width(), mosaic.data().height()];
+    let image = Image::from_u16(shape, &quantize(mosaic.data().pixels())).unwrap();
     let mut header = Header::new();
-    if let CfaType::Bayer(pattern) = mosaic.cfa_type {
+    if let CfaType::Bayer(pattern) = mosaic.cfa_type() {
         header.set("BAYERPAT", pattern.bayerpat()).unwrap();
     }
     write_fits(path, &image, Some(&header));
@@ -156,7 +154,7 @@ mod tests {
         let path = dir.join("mono.fits");
         write_mosaic_u16(&path, &mono);
         let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
-        within_half_step(loaded.channel(0).pixels(), mono.data.pixels());
+        within_half_step(loaded.channel(0).pixels(), mono.data().pixels());
 
         let render = field.render(size).image;
         let path = dir.join("render.fits");
@@ -168,14 +166,14 @@ mod tests {
         let path = dir.join("mosaic.fits");
         write_mosaic_u16(&path, &mosaic);
         let loaded = decode::load_cfa(&path, &LoadContext::default()).unwrap();
-        assert_eq!(loaded.cfa_type, mosaic.cfa_type);
-        within_half_step(loaded.data.pixels(), mosaic.data.pixels());
+        assert_eq!(loaded.cfa_type(), mosaic.cfa_type());
+        within_half_step(loaded.data().pixels(), mosaic.data().pixels());
 
         let calibrated = field.mosaic_exposure(size, CfaType::Bayer(CfaPattern::Rggb), 1);
         let path = dir.join("calibrated.fits");
-        calibrated.save_fits(&path).unwrap();
+        writer::cfa_fits(&calibrated, &path).unwrap();
         let loaded = decode::load_cfa(&path, &LoadContext::default()).unwrap();
-        assert_eq!(loaded.cfa_type, calibrated.cfa_type);
-        assert_eq!(loaded.data.pixels(), calibrated.data.pixels());
+        assert_eq!(loaded.cfa_type(), calibrated.cfa_type());
+        assert_eq!(loaded.data().pixels(), calibrated.data().pixels());
     }
 }

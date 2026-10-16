@@ -1,7 +1,5 @@
-//! Spatial data structures for efficient star queries.
-//!
-//! This module provides a k-d tree implementation optimized for 2D star positions,
-//! enabling efficient nearest-neighbor queries for triangle formation.
+//! [`KdTree`]: a 2-D k-d tree over star positions, for the k-nearest neighbours triangle formation
+//! reads, the radius search the triangle vote reads, and the nearest target the final fit reads.
 
 use glam::DVec2;
 
@@ -136,7 +134,7 @@ impl KdTree {
     /// Results are sorted by ascending distance.
     pub(super) fn k_nearest_into(&self, query: DVec2, k: usize, out: &mut Vec<Neighbor>) {
         out.clear();
-        if k == 0 || self.indices.is_empty() {
+        if k == 0 {
             return;
         }
 
@@ -153,9 +151,6 @@ impl KdTree {
     /// More efficient than `k_nearest(query, 1)` — uses a scalar best-distance
     /// tracker with no heap or Vec allocation.
     pub(super) fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
-        if self.indices.is_empty() {
-            return None;
-        }
         let mut best = NearestOne(Neighbor {
             index: 0,
             dist_sq: f64::INFINITY,
@@ -170,9 +165,6 @@ impl KdTree {
     /// called repeatedly in a loop. The results are in traversal order, not sorted.
     pub(super) fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
         indices.clear();
-        if self.indices.is_empty() {
-            return;
-        }
         let mut within = WithinRadius {
             radius_sq: radius * radius,
             indices,
@@ -220,10 +212,6 @@ impl KdTree {
 
     pub(super) const fn len(&self) -> usize {
         self.points.len()
-    }
-
-    pub(super) fn get_point(&self, idx: usize) -> DVec2 {
-        self.points[idx]
     }
 
     /// The points the tree was built over, in their original order.

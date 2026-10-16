@@ -1,6 +1,6 @@
 //! Demosaic quality against libraw's own, as a hand-run report on the dataset's RAW files.
 //!
-//! The reports print per-channel and colour-structure differences after removing each channel's
+//! The reports print per-channel and color-structure differences after removing each channel's
 //! affine difference (libraw white-balances, this pipeline does not), so they read pure demosaic
 //! quality. They assert only that the two decodes share a shape: a quality ranking is a judgement
 //! to read, not a number to pin.
@@ -33,7 +33,7 @@ fn markesteijn_quality_vs_libraw() {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Quality comparison on: {}\n", path.display());
 
-    let ours = raw::load(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load_preview(&path, &LoadContext::default()).unwrap();
     let one_pass = load_raw_libraw_demosaic(&path, 1).unwrap();
     let three_pass = load_raw_libraw_demosaic(&path, 3).unwrap();
     assert_eq!(ours.dimensions(), one_pass.dimensions());
@@ -97,7 +97,7 @@ fn bayer_rcd_quality_vs_libraw() {
         .expect("No Bayer test file found in test_data/raw_samples/");
     println!("Bayer quality comparison on: {}\n", path.display());
 
-    let ours = raw::load(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load_preview(&path, &LoadContext::default()).unwrap();
     for (qual, label) in [(3, "AHD"), (2, "PPG"), (11, "DHT")] {
         let reference = load_raw_libraw_demosaic(&path, qual).unwrap();
         assert_eq!(ours.dimensions(), reference.dimensions(), "{label}");
@@ -276,6 +276,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
 mod tests {
     use super::*;
+    use crate::image::channel_layout::ChannelLayout;
 
     #[test]
     fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
@@ -288,9 +289,9 @@ mod tests {
         assert_eq!(channel.max_abs, 0.0);
         assert!((channel.correlation - 1.0).abs() < 1e-12);
 
-        let dimensions = ImageDimensions::new((1, 1), 3);
-        let black = LinearImage::from_pixels(dimensions, vec![0.0; 3]);
-        let colored = LinearImage::from_pixels(dimensions, vec![3.0, 1.0, 5.0]);
+        let dimensions = ImageDimensions::new((1, 1), ChannelLayout::Rgb);
+        let black = LinearImage::from_interleaved(dimensions, vec![0.0; 3]);
+        let colored = LinearImage::from_interleaved(dimensions, vec![3.0, 1.0, 5.0]);
         let transforms = array::from_fn(|_| ChannelCompareStats {
             mae: 0.0,
             max_abs: 0.0,

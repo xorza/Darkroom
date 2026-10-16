@@ -10,13 +10,14 @@ use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::FrameNorm;
+use crate::combine::normalization::Normalization;
 use crate::combine::normalization::slot_planes::SlotPlanes;
-use crate::combine::stack_config::Normalization;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 
 /// The dither between the two lights, in pixels: the margin the second leaves uncovered.
@@ -38,11 +39,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     confidence: coverage.clone(),
                     coverage,
                 };
-                let stats = FrameStats::measure(&image);
+                let stats = Admitted::measure(&image);
                 StoredFrame::from_memory(image, quality, stats)
             })
             .collect();
-        let dimensions = ImageDimensions::new(FRAME, 1);
+        let dimensions = ImageDimensions::new(FRAME, ChannelLayout::Mono);
         b.iter(|| {
             FrameNorm::measure(
                 SlotPlanes {

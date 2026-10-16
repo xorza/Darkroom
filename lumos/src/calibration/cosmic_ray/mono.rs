@@ -2,7 +2,7 @@
 //!
 //! Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)`
 //! → fine structure `F` → flag → grow → in-paint → iterate. Also serves each deinterleaved Bayer
-//! phase, whose dense neighbours are same-colour in the mosaic.
+//! phase, whose dense neighbours are same-color in the mosaic.
 
 use std::array;
 use std::fmt;
@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 
@@ -123,7 +123,7 @@ impl<'a> MonoDetector<'a> {
 
     /// The bytes a detection on a `size` plane allocates beside it: the scratch planes and the
     /// masks, or on a plane too small to scan the empty mask of what it found alone.
-    pub(super) fn heap_bytes(size: Size2us) -> usize {
+    pub(super) const fn heap_bytes(size: Size2us) -> usize {
         if !Self::scans(size) {
             return BitBuffer2::heap_bytes(size);
         }
@@ -169,7 +169,7 @@ impl<'a> MonoDetector<'a> {
         changed.clear();
         changed.resize(size.height, true);
 
-        for _ in 0..config.niter {
+        for _ in 0..config.max_iterations {
             let MonoScratch {
                 significance,
                 fine,
@@ -261,6 +261,7 @@ impl<'a> MonoDetector<'a> {
             Repair {
                 flagged: &masks.accumulated,
                 unread: kept_out.map(|kept_out| &kept_out.unread),
+                local,
             }
             .apply(data, staged, windows);
             changed.clear();
@@ -411,7 +412,7 @@ impl WindowMedian {
                                     .push(data[size.index_of(Vec2us::new(xx, yy))]);
                             }
                         }
-                        row[x] = median_mut(&mut scratch.values);
+                        row[x] = statistics::median_mut(&mut scratch.values);
                         x += 1;
                     }
                 }
@@ -535,8 +536,10 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 }
 
 /// The in-painting of the pixels `flagged` holds: each takes the median of its 5×5 neighbors
-/// (edge-clamped) that neither `flagged` nor `unread` holds; fully-flagged neighborhoods (huge CRs)
-/// are left for the next iteration to shrink.
+/// (edge-clamped) that neither `flagged` nor `unread` holds, as L.A.Cosmic does. Where none of
+/// them is measured — a hit of 5×5 or more, or one ringed by saturated or star-core pixels — the
+/// window widens a ring at a time up to [`REPAIR_REACH`], and past that the pixel takes its local
+/// sky. Every flagged pixel is replaced, so none keeps the hit's value under a `REPAIRED` flag.
 ///
 /// The frame copy is not what makes replacements independent of each other — writes land only on
 /// masked pixels and reads only on unmasked ones, so no replacement can consult a replaced
@@ -546,10 +549,27 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 /// pointer would be sound — the sets are disjoint — but measures *slower* on every run of
 /// `bench_cosmic_ray_reject_mono`: the false sharing costs more than the copy. The copy lands in
 /// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub(super) struct Repair<'a> {
     pub(super) flagged: &'a BitBuffer2,
     pub(super) unread: Option<&'a BitBuffer2>,
+    /// Each pixel's local background, whose sky stands in where no neighbour within
+    /// [`REPAIR_REACH`] is measured.
+    pub(super) local: &'a (dyn Fn(usize) -> PixelBackground + Sync),
+}
+
+/// The widest ring a repair reaches for a measured neighbour, a 15×15 window: past twice the
+/// 5×5 window's reach, a pixel's neighbours describe the star or gradient around the hit less well
+/// than the local sky does.
+const REPAIR_REACH: usize = 7;
+
+impl fmt::Debug for Repair<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Repair")
+            .field("flagged", &self.flagged)
+            .field("unread", &self.unread)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Repair<'_> {
@@ -563,6 +583,7 @@ impl Repair<'_> {
         let Self {
             flagged: mask,
             unread,
+            local,
         } = self;
         let size = Size2us::from(&*data);
         snapshot.reshape(size.width, size.height, 0.0);
@@ -577,31 +598,55 @@ impl Repair<'_> {
                         continue;
                     }
                     buf.clear();
-                    // The 5×5 window about `(x, y)`, replicated into the frame at both edges.
-                    for dy in 0..=4 {
-                        let yy = (y + dy).saturating_sub(2).min(size.height - 1);
-                        for dx in 0..=4 {
-                            let xx = (x + dx).saturating_sub(2).min(size.width - 1);
+                    let measured =
+                        |j: usize| !mask.get(j) && unread.is_none_or(|unread| !unread.get(j));
+                    // The window about `(x, y)`, replicated into the frame at both edges: the 5×5
+                    // first, then a ring at a time while none of it is measured.
+                    for reach in 0..=REPAIR_REACH {
+                        if reach > 2 && !buf.is_empty() {
+                            break;
+                        }
+                        for (xx, yy) in ring(Vec2us::new(x, y), reach, size) {
                             let j = size.index_of(Vec2us::new(xx, yy));
-                            if !mask.get(j) && unread.is_none_or(|unread| !unread.get(j)) {
+                            if measured(j) {
                                 buf.push(src[j]);
                             }
                         }
                     }
-                    if !buf.is_empty() {
-                        *o = median_mut(buf);
-                    }
+                    *o = if buf.is_empty() {
+                        local(size.index_of(Vec2us::new(x, y))).local.sky
+                    } else {
+                        statistics::median_mut(buf)
+                    };
                 }
             },
         );
     }
 }
 
+/// The pixels at Chebyshev distance `reach` from `centre`, each replicated into the `size` frame
+/// at its edges: the centre itself for 0.
+fn ring(centre: Vec2us, reach: usize, size: Size2us) -> impl Iterator<Item = (usize, usize)> {
+    let side = 2 * reach + 1;
+    let clamp =
+        move |at: usize, limit: usize| (at + reach).saturating_sub(2 * reach).min(limit - 1);
+    (0..side).flat_map(move |dy| {
+        let on_edge = dy == 0 || dy == side - 1;
+        let step = if on_edge { 1 } else { (side - 1).max(1) };
+        (0..side).step_by(step).map(move |dx| {
+            (
+                clamp(centre.x + dx, size.width),
+                clamp(centre.y + dy, size.height),
+            )
+        })
+    })
+}
+
 #[cfg(test)]
 pub(crate) mod internals {
     use imaginarium::Buffer2;
 
-    use crate::background_mesh::colour_mesh::LocalBackground;
+    use crate::background_mesh::color_mesh::LocalBackground;
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
     use crate::calibration::cosmic_ray::mono::{

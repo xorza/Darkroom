@@ -1,11 +1,12 @@
 //! [`DrizzleShape`]: what a drizzle run holds, and the tier its drizzled frames live in.
 
-use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
+use crate::combine::frame_read::slots::Slots;
+use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
 use crate::frame::frame_stats::FrameStats;
+use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::frame_store::tier::Tier;
 use crate::image::image_dimensions::ImageDimensions;
@@ -18,8 +19,8 @@ use crate::memory::stage::{Stage, Units};
 /// them when the run reads the machine's memory.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FrameOrigin {
-    /// Decoded from files, one at a time.
-    Files,
+    /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache.
+    Files { uncached: usize },
     /// Handed over decoded, every one resident from the start and freed once drizzled.
     Memory,
 }
@@ -35,19 +36,34 @@ pub(crate) struct DrizzleShape {
 }
 
 impl DrizzleShape {
-    /// The tier of a run of this shape combined under `stack`, planned over its [`Self::stages`].
-    pub(crate) fn tier(&self, stack: &StackConfig, run: &IngestRun) -> Result<Tier, DrizzleError> {
+    /// The tier of a run of this shape combined under `stack`, planned over its [`Self::stages`],
+    /// on `storage` once its disk holds what the run writes: the decoded frames the decode cache
+    /// does not hold yet, and the drizzled ones when they spill.
+    pub(crate) fn tier(
+        &self,
+        stack: &StackConfig,
+        run: &IngestRun,
+        storage: &RunStorage,
+    ) -> Result<Tier, DrizzleError> {
         let budget = run.budget;
         let plan = RunPlan::of(
             self.frame_count,
             &self.stages(stack, budget.workers()),
             budget,
         );
-        let spill_bytes = (self.drizzled().heap_bytes(self.output) as u64)
-            .saturating_mul(self.frame_count as u64);
-        Tier::for_plan(&plan, spill_bytes, &run.cache_dir)
-            .map(|tier| tier.holding_beside(self.depth_bytes()))
-            .map_err(|source| DrizzleError::Stack(source.into()))
+        let uncached = match self.origin {
+            FrameOrigin::Files { uncached } => uncached,
+            FrameOrigin::Memory => 0,
+        };
+        let writes = RunWrites {
+            kept: (StoredLayout::decoded(self.input).heap_bytes(self.input) as u64)
+                .saturating_mul(uncached as u64),
+            spilled: (self.drizzled().heap_bytes(self.output) as u64)
+                .saturating_mul(self.frame_count as u64),
+        };
+        Ok(storage
+            .tier(&plan, writes)?
+            .holding_beside(self.depth_bytes()))
     }
 
     /// How a drizzled frame is stored: its channels, a drop weight and Kish size per weight plane,
@@ -84,10 +100,7 @@ impl DrizzleShape {
         let drizzled = self.drizzled();
         let drizzled_bytes = drizzled.heap_bytes(output);
         let input_bytes = StoredLayout::decoded(input).heap_bytes(input);
-        let mosaic = match deposit {
-            Deposit::Mosaic(cfa_type) => Some(cfa_type),
-            Deposit::Channels(_) => None,
-        };
+        let mosaic = deposit.mosaic();
         let way = Footprint::kept(input_bytes)
             .beside(FrameStats::heap_bytes(input, mosaic.as_ref(), workers))
             .then(Footprint {
@@ -97,12 +110,31 @@ impl DrizzleShape {
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
         // frees at most its own size.
         let kept = match origin {
-            FrameOrigin::Files => drizzled_bytes,
+            FrameOrigin::Files { .. } => drizzled_bytes,
             FrameOrigin::Memory => drizzled_bytes - input_bytes.min(drizzled_bytes),
         };
         let depth = self.depth_bytes();
-        // Each channel gathered by its own weights is covered by its own plane.
-        let coverage_planes = usize::from(stack.quality.coverage) * deposit.weight_planes();
+        // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each channel by
+        // its color's own.
+        let [normalize, combine] = PlannedCombine {
+            normalization: stack.normalization,
+            quality: stack.quality,
+        }
+        .stages(
+            PlannedFrames {
+                count: frame_count,
+                dimensions: output,
+                layout: drizzled,
+                slots: Slots::new(None, output.channels()),
+                coverage: deposit.set_coverage(),
+                workers,
+            },
+            kept,
+        )
+        .map(|stage| Stage {
+            held: stage.held + depth,
+            ..stage
+        });
         [
             Stage {
                 kept,
@@ -110,45 +142,19 @@ impl DrizzleShape {
                 in_flight: way.transient(),
                 units: Units::Serial,
             },
-            Stage {
-                kept,
-                // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each
-                // channel by its colour's own.
-                held: depth
-                    + PlannedNormalization {
-                        frame_count,
-                        dimensions: output,
-                        slots: Slots::new(None, output.channels()),
-                        normalization: stack.normalization,
-                        coverage: match deposit {
-                            Deposit::Mosaic(_) => SetCoverage::PerChannel,
-                            Deposit::Channels(_) => SetCoverage::Common,
-                        },
-                        threads: workers,
-                    }
-                    .heap_bytes(),
-                in_flight: 0,
-                units: Units::Whole,
-            },
-            Stage {
-                kept,
-                held: stack
-                    .quality
-                    .pixel_bytes(output.channels(), coverage_planes, 1)
-                    * output.pixel_count()
-                    + depth,
-                in_flight: frame_count * drizzled.pixel_bytes() * output.width(),
-                units: Units::Rows(output.height()),
-            },
+            normalize,
+            combine,
         ]
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::combine::stack_config::{Normalization, StackConfig};
+    use crate::combine::normalization::Normalization;
+    use crate::combine::stack_config::StackConfig;
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
+    use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
@@ -166,11 +172,11 @@ mod tests {
     #[test]
     fn the_depth_is_held_through_every_stage() {
         let shape = DrizzleShape {
-            input: ImageDimensions::new((2, 2), 1),
-            output: ImageDimensions::new((4, 4), 1),
-            deposit: Deposit::Channels(1),
+            input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
+            output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+            deposit: Deposit::Channels(ChannelLayout::Mono),
             frame_count: 3,
-            origin: FrameOrigin::Files,
+            origin: FrameOrigin::Files { uncached: 0 },
         };
         let stack = StackConfig {
             normalization: Normalization::None,

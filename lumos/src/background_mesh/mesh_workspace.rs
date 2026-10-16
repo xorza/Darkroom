@@ -3,20 +3,21 @@
 use imaginarium::Buffer2;
 
 use crate::background_mesh::BackgroundMesh;
-use crate::background_mesh::tile_stats::{Eligible, TileInput, TileScratch, TileStats};
+use crate::background_mesh::tile_stats::{CfaColor, TileInput, TileScratch, TileStats};
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
 
-/// The buffers a tile mesh is measured in: the grid itself, the median filter's second grid, the
-/// spline solve's columns, and each worker's tile scratch.
+/// The σ-clip passes of each tile a mesh measures by default, for the sky of a frame and the samples
+/// of a gradient alike.
+pub(crate) const DEFAULT_SIGMA_CLIP_MAX_ITERATIONS: usize = 3;
+
+/// The buffers a tile mesh is measured in: the grid itself, the median filter's second grid, and
+/// each worker's tile scratch.
 #[derive(Debug, Default)]
 pub(crate) struct MeshWorkspace {
     grid: Option<BackgroundMesh>,
     median_filter_scratch: Option<Buffer2<TileStats>>,
-    spline_values: Vec<f32>,
-    spline_d2: Vec<f32>,
-    spline_scratch: Vec<f32>,
     tile_scratch: ScratchPool<TileScratch>,
 }
 
@@ -25,7 +26,7 @@ pub(crate) struct MeshWorkspace {
 pub(crate) struct MeshParams {
     pub(crate) tile_size: usize,
     /// The σ-clip passes of each tile.
-    pub(crate) sigma_clip_iterations: usize,
+    pub(crate) sigma_clip_max_iterations: usize,
     pub(crate) median_filter: MedianFilter,
 }
 
@@ -38,64 +39,20 @@ pub(crate) enum MedianFilter {
 }
 
 impl MeshWorkspace {
-    /// The tile grid of `pixels` with its statistics and the y-spline derivatives that
-    /// interpolating it reads.
-    pub(crate) fn compute(
+    /// The tile grid of `pixels` with its statistics, leaving out the pixels `mask` sets: of the
+    /// photosites of `color` alone when given.
+    pub(crate) fn measure(
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
+        color: Option<CfaColor<'_>>,
         params: MeshParams,
     ) -> &BackgroundMesh {
         let input = TileInput {
             pixels,
             mask,
-            eligible: None,
-            sigma_clip_iterations: params.sigma_clip_iterations,
-        };
-        self.fill_tile_stats(&input, params);
-        let tiles_y = self.grid.as_ref().unwrap().stats.height();
-        self.spline_values.resize(tiles_y, 0.0);
-        self.spline_d2.resize(tiles_y, 0.0);
-        self.spline_scratch.resize(tiles_y.saturating_sub(2), 0.0);
-        let grid = self.grid.as_mut().unwrap();
-        grid.compute_y_spline_derivatives(
-            &mut self.spline_values,
-            &mut self.spline_d2,
-            &mut self.spline_scratch,
-        );
-        grid
-    }
-
-    /// The tile grid of `pixels` with its statistics only, for a caller that reads the tiles and
-    /// never interpolates between them.
-    pub(crate) fn tile_stats(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        mask: Option<&BitBuffer2>,
-        params: MeshParams,
-    ) -> &BackgroundMesh {
-        let input = TileInput {
-            pixels,
-            mask,
-            eligible: None,
-            sigma_clip_iterations: params.sigma_clip_iterations,
-        };
-        self.fill_tile_stats(&input, params);
-        self.grid.as_ref().unwrap()
-    }
-
-    /// [`Self::tile_stats`] over the pixels `eligible` takes alone, such as one colour of a mosaic.
-    pub(super) fn tile_stats_where(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        eligible: &Eligible<'_>,
-        params: MeshParams,
-    ) -> &BackgroundMesh {
-        let input = TileInput {
-            pixels,
-            mask: None,
-            eligible: Some(eligible),
-            sigma_clip_iterations: params.sigma_clip_iterations,
+            color,
+            sigma_clip_max_iterations: params.sigma_clip_max_iterations,
         };
         self.fill_tile_stats(&input, params);
         self.grid.as_ref().unwrap()
@@ -148,14 +105,14 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
 
     impl BackgroundMesh {
-        /// The mesh [`MeshWorkspace::compute`] measures, in a workspace of its own.
+        /// The mesh [`MeshWorkspace::measure`] measures, in a workspace of its own.
         pub(crate) fn computed(
             pixels: &Buffer2<f32>,
             mask: Option<&BitBuffer2>,
             params: MeshParams,
         ) -> Self {
             let mut workspace = MeshWorkspace::default();
-            workspace.compute(pixels, mask, params);
+            workspace.measure(pixels, mask, None, params);
             workspace.grid.take().unwrap()
         }
     }
@@ -174,17 +131,17 @@ mod tests {
     const fn params(tile_size: usize, median_filter: MedianFilter) -> MeshParams {
         MeshParams {
             tile_size,
-            sigma_clip_iterations: 2,
+            sigma_clip_max_iterations: 2,
             median_filter,
         }
     }
 
     #[test]
-    fn repeated_compute_reuses_mesh_allocations_and_preserves_results() {
+    fn repeated_measures_reuse_mesh_allocations_and_preserve_results() {
         let pixels = Buffer2::new_filled(256, 256, 0.5);
         let mut workspace = MeshWorkspace::default();
         let expected = {
-            let grid = workspace.compute(&pixels, None, params(64, MedianFilter::Apply));
+            let grid = workspace.measure(&pixels, None, None, params(64, MedianFilter::Apply));
             grid.stats.pixels().to_vec()
         };
         let first_stats_ptr = workspace.grid.as_ref().unwrap().stats.pixels().as_ptr();
@@ -194,11 +151,8 @@ mod tests {
             .unwrap()
             .pixels()
             .as_ptr();
-        let spline_values_ptr = workspace.spline_values.as_ptr();
-        let spline_d2_ptr = workspace.spline_d2.as_ptr();
-        let spline_scratch_ptr = workspace.spline_scratch.as_ptr();
         {
-            let grid = workspace.compute(&pixels, None, params(64, MedianFilter::Apply));
+            let grid = workspace.measure(&pixels, None, None, params(64, MedianFilter::Apply));
             assert_eq!(grid.stats.pixels().as_ptr(), filter_ptr);
             for (actual, expected) in grid.stats.pixels().iter().zip(expected) {
                 assert_eq!(actual.sky, expected.sky);
@@ -214,16 +168,13 @@ mod tests {
                 .as_ptr(),
             first_stats_ptr
         );
-        assert_eq!(workspace.spline_values.as_ptr(), spline_values_ptr);
-        assert_eq!(workspace.spline_d2.as_ptr(), spline_d2_ptr);
-        assert_eq!(workspace.spline_scratch.as_ptr(), spline_scratch_ptr);
     }
 
     #[test]
     fn clear_releases_all_mesh_allocations() {
         let pixels = Buffer2::new_filled(128, 128, 0.5);
         let mut workspace = MeshWorkspace::default();
-        workspace.compute(&pixels, None, params(32, MedianFilter::Apply));
+        workspace.measure(&pixels, None, None, params(32, MedianFilter::Apply));
         assert!(workspace.grid.is_some());
         assert!(workspace.median_filter_scratch.is_some());
         assert_ne!(workspace.tile_scratch.pooled(), 0);
@@ -232,28 +183,25 @@ mod tests {
 
         assert!(workspace.grid.is_none());
         assert!(workspace.median_filter_scratch.is_none());
-        assert!(workspace.spline_values.is_empty());
-        assert!(workspace.spline_d2.is_empty());
-        assert!(workspace.spline_scratch.is_empty());
         assert_eq!(workspace.tile_scratch.pooled(), 0);
     }
 
     #[test]
-    fn compute_rebuilds_grid_for_layout_changes() {
+    fn a_measure_rebuilds_the_grid_for_layout_changes() {
         let first_pixels = Buffer2::new_filled(100, 70, 0.5);
         let second_pixels = Buffer2::new_filled(64, 32, 0.25);
         let mut workspace = MeshWorkspace::default();
 
         // 100 × 70 in 32s: remainders of 4 and 6, under half a tile, join their neighbours.
-        let grid = workspace.compute(&first_pixels, None, params(32, MedianFilter::Skip));
+        let grid = workspace.measure(&first_pixels, None, None, params(32, MedianFilter::Skip));
         assert_eq!(grid.stats.width(), 3);
         assert_eq!(grid.stats.height(), 2);
 
-        let grid = workspace.compute(&first_pixels, None, params(50, MedianFilter::Skip));
+        let grid = workspace.measure(&first_pixels, None, None, params(50, MedianFilter::Skip));
         assert_eq!(grid.stats.width(), 2);
         assert_eq!(grid.stats.height(), 1);
 
-        let grid = workspace.compute(&second_pixels, None, params(16, MedianFilter::Skip));
+        let grid = workspace.measure(&second_pixels, None, None, params(16, MedianFilter::Skip));
         assert_eq!(grid.stats.width(), 4);
         assert_eq!(grid.stats.height(), 2);
         for stats in grid.stats.pixels() {
@@ -263,12 +211,12 @@ mod tests {
     }
 
     #[test]
-    fn masked_compute_keeps_per_job_scratch_bounded() {
+    fn a_masked_measure_keeps_per_job_scratch_bounded() {
         let pixels = Buffer2::new_filled(512, 512, 0.5);
         let mask = BitBuffer2::new_filled(Size2us::new(512, 512), false);
         let mut workspace = MeshWorkspace::default();
 
-        workspace.compute(&pixels, Some(&mask), params(256, MedianFilter::Skip));
+        workspace.measure(&pixels, Some(&mask), None, params(256, MedianFilter::Skip));
         assert_ne!(workspace.tile_scratch.pooled(), 0);
         assert!(
             workspace

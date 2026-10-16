@@ -1,7 +1,37 @@
 //! The profile models' side of a fit: the samples, and the model as [`LmController`] reads it.
 
+use glam::DVec2;
+
 use crate::math::lm_controller::{LmController, LmFit, LmProblem, NormalEquations};
 use crate::math::pixel_quadrature::PixelQuadrature;
+
+/// How closely a profile fit integrates its model over each pixel, relative to the amplitude:
+/// half an ulp of the f32 samples it is fit to.
+pub(super) const PIXEL_MEAN_TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
+
+/// Whether a profile fit's centre landed somewhere its caller can use: finite, and within
+/// `stamp_radius` of where the fit started. The shape is each model's own to judge, against the
+/// bounds its `constrain` holds it to.
+///
+/// The centre needs [`DVec2::is_finite`] of its own: `max_element` reduces with [`f64::max`], which
+/// *ignores* NaN and returns the other lane, so a NaN x-coordinate would silently compare as the
+/// (finite) y-offset.
+///
+/// A rejected fit is not an error: the star keeps its windowed centroid.
+pub(super) fn fit_is_plausible(result_pos: DVec2, input_pos: DVec2, stamp_radius: usize) -> bool {
+    result_pos.is_finite() && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
+}
+
+/// The position σ of a profile fit whose first two parameters are the centre: `(JᵀWJ)⁻¹·χ²/(n − p)`
+/// per axis, which holds when the weights are right up to a common scale, and `√((σ_x² + σ_y²)/2)`
+/// of them. `None` when the Hessian at the solution is singular, or the stamp holds no more
+/// samples than parameters.
+pub(super) fn position_sigma<const N: usize>(fit: &LmFit<N>, samples: usize) -> Option<f64> {
+    let inverse = fit.inverse_hessian_diagonal?;
+    let freedom = samples.checked_sub(N).filter(|&freedom| freedom > 0)?;
+    let scale = fit.chi2 / freedom as f64;
+    Some(((inverse[0] + inverse[1]) * scale / 2.0).sqrt())
+}
 
 /// The samples a model is fit against, with optional per-pixel inverse-variance
 /// weights (`None` ≡ all 1). All three coordinate slices are indexed in lockstep.
@@ -41,8 +71,7 @@ pub(super) trait LMModel<const N: usize>: std::fmt::Debug {
     fn integrate_at(&mut self, order: usize);
 
     /// The smallest order that integrates the profile at `params` over a pixel within
-    /// [`PIXEL_MEAN_TOLERANCE`](crate::star_detection::centroid::PIXEL_MEAN_TOLERANCE) of its
-    /// amplitude.
+    /// [`PIXEL_MEAN_TOLERANCE`] of its amplitude.
     fn sufficient_order(&self, params: &[f64; N]) -> usize;
 
     /// The profile integrated over the pixel centred at `(x, y)`.

@@ -4,11 +4,12 @@ use std::sync::OnceLock;
 
 use common::CancelToken;
 
-use crate::error::FrameDimensionMismatch;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, Spreads};
-use crate::frame::stackable_image::StackableImage;
+use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::set_facts::SetFacts;
@@ -56,9 +57,10 @@ impl<'a> FrameAdmission<'a> {
         &self,
         index: usize,
         image: &impl StackableImage,
-    ) -> Result<FrameStats, AdmissionError> {
+    ) -> Result<Admitted, AdmissionError> {
         FrameDimensionMismatch::check(index, self.dimensions, image.dimensions())?;
-        self.check_facts(index, &FrameFacts::of(image))?;
+        let facts = FrameFacts::of(image);
+        self.check_facts(index, &facts)?;
         FrameCheck {
             index,
             cancel: self.cancel,
@@ -67,10 +69,10 @@ impl<'a> FrameAdmission<'a> {
         let stats = FrameStats::measure_as(image, self.spreads);
         if index == 0 {
             self.first_facts
-                .set(SetFacts::of_first(&stats.facts))
+                .set(SetFacts::of_first(&facts))
                 .expect("frame 0 is admitted once");
         }
-        Ok(stats)
+        Ok(Admitted { stats, facts })
     }
 
     /// Check the facts of frame `index` against frame 0's, once they are known: for a frame read

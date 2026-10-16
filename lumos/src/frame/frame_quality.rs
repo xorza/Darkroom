@@ -11,9 +11,9 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::frame::frame_plane::FramePlane;
-use crate::frame::stackable_image::StackableImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::stackable_image::StackableImage;
 
 /// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
 /// interpolation that produced it was.
@@ -43,7 +43,7 @@ pub(crate) enum FrameQuality<P> {
     /// its channels instead of two planes of the same bit.
     Mask { excluded: QualityFlags },
     /// A frame drizzled on its own: one [`DropPlanes`] every channel shares, or one per channel
-    /// for a mosaic whose photosites each reached the channel of their colour alone.
+    /// for a mosaic whose photosites each reached the channel of their color alone.
     Drizzled { drops: ArrayVec<DropPlanes<P>, 3> },
 }
 
@@ -136,7 +136,7 @@ impl<P> FrameQuality<P> {
     }
 
     /// Whether the frame is gathered by a different rule in each channel: a mosaic drizzled
-    /// into the channels of its colours.
+    /// into the channels of its colors.
     pub(crate) const fn per_channel(&self) -> bool {
         matches!(self, Self::Drizzled { drops } if drops.len() > 1)
     }
@@ -147,6 +147,12 @@ impl<P> FrameQuality<P> {
             Self::Mask { excluded } => Some(*excluded),
             Self::None | Self::Planes { .. } | Self::Drizzled { .. } => None,
         }
+    }
+
+    /// Whether a stored frame of this quality keeps `flags`: a mask reads them, and otherwise they
+    /// are kept when they hold any flag but `NO_DATA`, which the quality already holds.
+    pub(crate) const fn keeps(&self, flags: &PixelFlags) -> bool {
+        self.mask().is_some() || flags.contains_other_than(QualityFlags::NO_DATA)
     }
 
     pub(crate) fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> FrameQuality<Q> {

@@ -5,8 +5,8 @@
 //! - RAW and FITS decode into linear planar images ([`LinearImage`], [`CfaImage`]).
 //! - Master dark, flat and bias, defect maps, and per-frame calibration ([`CalibrationMasters`]).
 //! - Sub-pixel star detection that feeds registration ([`StarDetector`]).
-//! - Star-pattern alignment and the warp into a common frame ([`RegistrationConfig::register`],
-//!   [`WarpTransform::warp`]).
+//! - Star-pattern alignment and the warp into a common frame ([`Registrar::register`],
+//!   [`WarpParams::warp`]).
 //! - Statistical per-pixel combination, with rejection, normalization and weighting
 //!   ([`StackConfig`]).
 //! - Fruchter & Hook variable-pixel reconstruction of dithered sets ([`DrizzleConfig`]).
@@ -25,7 +25,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load an astronomical image
-//! let image = LinearImage::from_file("linear_light_001.fits", &LoadContext::default())?;
+//! let image = LoadContext::default().linear("linear_light_001.fits")?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
@@ -43,6 +43,7 @@ mod calibration;
 mod combine;
 mod concurrency;
 mod config_value;
+mod decode;
 mod drizzle;
 mod error;
 mod frame;
@@ -67,58 +68,64 @@ mod star_detection;
 pub use calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration::cosmic_ray::error::CosmicRayError;
 pub use calibration::error::{
-    BundleError, CalibrationError, DarkMismatch, DefectTableError, MasterBuildError,
-    SubtractionError,
+    CalibrationError, DarkMismatch, MasterBuildError, MasterStackError, SubtractionError,
 };
-pub use calibration::temperature_difference::TemperatureDifference;
-pub use calibration::temperature_source::TemperatureSource;
-pub use error::{FrameDimensionMismatch, InvalidConfigField};
-pub use frame::unverified_conditions::UnverifiedConditions;
+pub use error::InvalidConfigField;
+pub use image::background_split::BackgroundSplit;
 pub use image::calibration_state::CalibrationState;
-pub use image::cfa::cfa_colour::CfaColour;
+pub use image::cfa::cfa_color::CfaColor;
 pub use image::cfa::cfa_image::CfaImage;
 pub use image::cfa::cfa_pattern::CfaPattern;
 pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 pub use image::cfa::xtrans_pattern::XTransPattern;
+pub use image::channel_layout::ChannelLayout;
+pub use image::dark_comparison::DarkComparison;
+pub use image::derived_facts::DerivedFacts;
 pub use image::error::XTransPatternError;
+pub use image::error::{DimensionsError, FrameDimensionMismatch};
+pub use image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+pub use image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 pub use image::flat_gain::FlatGain;
 pub use image::image_dimensions::ImageDimensions;
 pub use image::image_metadata::ImageMetadata;
 pub use image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RasterFormat,
+    RasterTransfer, RowOrder, SourceProvenance,
 };
 pub use image::linear_image::LinearImage;
+pub use image::mosaic_noise::MosaicNoise;
+pub use image::observation_header::ObservationHeader;
 pub use image::pixel_flags::PixelFlags;
 pub use image::preview_image::{PreviewImage, PreviewPixels};
 pub use image::quality_flags::QualityFlags;
 pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
-pub use io::PREVIEW_IMAGE_EXTENSIONS;
-pub use io::error::{FitsAllocation, FitsRefusal, FitsWriteError, ImageError, ScientificRefusal};
-pub use io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+pub use image::temperature_difference::TemperatureDifference;
+pub use image::temperature_source::TemperatureSource;
+pub use image::unverified_conditions::UnverifiedConditions;
+pub use io::error::{ImageError, OverBudget, ScientificRefusal, WriteError};
+pub use io::fits::calibration_bundle::error::{BundleError, DefectTableError};
+pub use io::fits::error::{FitsAllocation, FitsRefusal};
 pub use io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
-    FitsNullPolicy,
 };
-pub use io::fits::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 pub use io::fits::lumos_extension::LumosExtension;
+pub use io::input_format::{PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 pub use io::load_context::LoadContext;
-pub use io::raw::RAW_EXTENSIONS;
+pub use io::null_policy::NullPolicy;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
+pub use io::writer;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
-pub use noise::mosaic_noise::MosaicNoise;
 
 pub use calibration::calibration_component::CalibrationComponent;
-pub use calibration::calibration_masters::{
-    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, MasterBuild,
-};
+pub use calibration::calibration_masters::{CalibrationMasters, MasterBuild};
 pub use calibration::calibration_outcome::CalibrationOutcome;
 pub use calibration::calibration_set::CalibrationSet;
 pub use calibration::dark_scale::{DarkScale, DarkScaleSource};
-pub use calibration::defect_map::defect_summary::{ColourDefects, DefectSummary};
+pub use calibration::defect_map::defect_summary::{ColorDefects, ColorShares, DefectSummary};
+pub use calibration::defect_map::sigma_threshold::SigmaThreshold;
 pub use calibration::master_cache::{
     CachedMaster, MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
 };
@@ -144,22 +151,28 @@ pub use star_detection::star_detector::detection_result::{
     DetectionDiagnostics, DetectionResult, FwhmSource, QualityFilterDiagnostics,
 };
 
+pub use registration::distortion::sip::sip_order::SipOrder;
 pub use registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use registration::error::{
-    FailedModel, RansacFailureReason, RegistrationCatalog, RegistrationError, StarField,
+    FailedModel, RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
+pub use registration::match_indices::MatchIndices;
 pub use registration::ransac::ransac_config::{RansacConfig, ScaleRange};
+pub use registration::registrar::Registrar;
 pub use registration::registration_config::{RegistrationConfig, RegistrationMatchingConfig};
 pub use registration::registration_result::{RegistrationResult, StarMatch};
 pub use registration::resample::WarpResult;
-pub use registration::resample::warp_params::{InterpolationMethod, WarpParams};
-pub use registration::transform::inverse_warp::{InverseMapped, InverseWarp};
-pub use registration::transform::warp_transform::WarpTransform;
-pub use registration::transform::{Transform, TransformModel, TransformType};
+pub use registration::resample::warp_params::{ClampingThreshold, InterpolationMethod, WarpParams};
+pub use registration::transform::linear_model::LinearModel;
+pub use registration::transform::local_geometry::LocalGeometry;
+pub use registration::transform::{Transform, TransformType};
+pub use registration::transform_model::TransformModel;
 pub use registration::triangle::triangle_config::TriangleConfig;
-pub use registration::triangle::voting::MatchIndices;
+pub use registration::warp_transform::WarpTransform;
+pub use registration::warp_transform::inverse_warp::{InverseMapped, InverseWarp};
 
 pub use combine::error::{StackConfigError, StackError};
+pub use combine::normalization::Normalization;
 pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
 pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
@@ -168,13 +181,16 @@ pub use combine::rejection::sigma_bounds::SigmaBounds;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
-pub use combine::stack::stack_frame::StackFrame;
-pub use combine::stack_config::{
-    Combine, CombineMethod, Normalization, SmallN, StackConfig, Weighting,
-};
+pub use combine::stack_config::StackConfig;
+pub use combine::stack_config::combine::Combine;
+pub use combine::stack_config::combine_method::CombineMethod;
+pub use combine::stack_config::small_n::SmallN;
+pub use combine::stack_config::weighting::Weighting;
+pub use combine::stack_frame::StackFrame;
 pub use frame::capture_condition::CaptureCondition;
+pub use frame::error::ConditionMismatch;
 pub use frame::frame_plane::FramePlane;
-pub use frame_store::error::{ConditionMismatch, FrameStoreError};
+pub use frame_store::error::FrameStoreError;
 pub use image::flag_counts::FlagCounts;
 pub use image::quality_map::QualityMap;
 pub use ingest::error::AdmissionError;
@@ -188,19 +204,19 @@ pub use stack_product::quality_planes::QualityPlanes;
 pub use stack_product::run_report::RunReport;
 
 pub use pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
-pub use pipeline::align_stack_result::{AlignStackResult, AlignmentSummary};
-pub use pipeline::error::AlignStackError;
+pub use pipeline::align_stack_result::{AlignStackResult, LightOutcome};
+pub use pipeline::error::{AlignStackConfigError, AlignStackError};
 pub use pipeline::frame_registration::FrameRegistration;
 
-pub use drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
+pub use drizzle::drizzle_config::DrizzleConfig;
 pub use drizzle::drizzle_frame::DrizzleFrame;
-pub use drizzle::drizzle_result::DrizzleResult;
+pub use drizzle::drizzle_kernel::DrizzleKernel;
 pub use drizzle::error::{DrizzleConfigError, DrizzleError};
 
 pub use image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 
 pub use image_ops::color_calibration::neutralize_background::NeutralizeBackground;
-pub use image_ops::color_calibration::scnr::Scnr;
+pub use image_ops::color_calibration::scnr::{Scnr, ScnrProtection};
 
 pub use image_ops::extract_background::{BackgroundMode, ExtractBackground};
 
@@ -210,12 +226,12 @@ pub use image_ops::local_contrast::LocalContrast;
 
 pub use image_ops::hdr::Hdr;
 
-pub use image_ops::error::OpError;
+pub use image_ops::error::{AutoStretch, OpError};
 
 #[cfg(feature = "ml")]
 pub use image_ops::error::MlError;
 #[cfg(feature = "ml")]
-pub use image_ops::ml::backend::TiledOnnxConfig;
+pub use image_ops::ml::backend::OnnxModel;
 #[cfg(feature = "ml")]
 pub use image_ops::ml::ml_denoise::MlDenoise;
 #[cfg(feature = "ml")]

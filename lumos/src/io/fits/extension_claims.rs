@@ -1,12 +1,10 @@
 //! [`ExtensionClaims`]: the Lumos image extensions of a FITS file that describe another of its
 //! images, and the image each is for.
 
-use std::path::Path;
-
 use fits_well::io::Hdu;
 
-use crate::io::error::{FitsRefusal, ImageError};
-use crate::io::fits::hdu_list::HduList;
+use crate::io::fits::error::FitsLoadError;
+use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
@@ -32,32 +30,20 @@ struct Claim {
 impl ExtensionClaims {
     /// The `extension` HDUs of `file`, refused unless each names one image of the file that no
     /// other names.
-    pub(crate) fn of(file: HduList<'_>, extension: LumosExtension) -> Result<Self, ImageError> {
-        let HduList { path, hdus } = file;
+    pub(crate) fn of(file: &[Hdu], extension: LumosExtension) -> Result<Self, FitsLoadError> {
+        let hdus = file;
         let mut images = Vec::new();
         let mut claims = Vec::new();
         for (index, hdu) in hdus.iter().enumerate() {
-            let name = metadata::read_text(&hdu.header, "EXTNAME")
-                .map_err(|source| ImageError::fits(path, source))?;
-            if name
-                .as_deref()
-                .is_some_and(|name| name.eq_ignore_ascii_case(extension.extname()))
-            {
-                let image = metadata::read_text(&hdu.header, IMAGE_KEYWORD)
-                    .map_err(|source| ImageError::fits(path, source))?
-                    .ok_or_else(|| {
-                        ImageError::fits_unsupported(
-                            path,
-                            FitsRefusal::ClaimsNoImage {
-                                extension,
-                                hdu: index,
-                            },
-                        )
-                    })?;
+            if extension.names(&hdu.header)? {
+                let image = metadata::read_text(&hdu.header, IMAGE_KEYWORD)?.ok_or_else(|| {
+                    FitsLoadError::from(FitsRefusal::ClaimsNoImage {
+                        extension,
+                        hdu: index,
+                    })
+                })?;
                 claims.push(Claim { hdu: index, image });
-            } else if hdu.is_image()
-                && hdu.data_bytes > 0
-                && !Self::describes_another(path, hdu)?
+            } else if Self::holds_image(hdu)?
                 && let Some(name) = image_name(file, index)?
             {
                 images.push(name);
@@ -66,26 +52,20 @@ impl ExtensionClaims {
         for (position, claim) in claims.iter().enumerate() {
             let same = |name: &String| name.eq_ignore_ascii_case(&claim.image);
             if !images.iter().any(same) {
-                return Err(ImageError::fits_unsupported(
-                    path,
-                    FitsRefusal::ClaimsMissingImage {
-                        extension,
-                        hdu: claim.hdu,
-                        image: claim.image.clone(),
-                    },
-                ));
+                return Err(FitsLoadError::from(FitsRefusal::ClaimsMissingImage {
+                    extension,
+                    hdu: claim.hdu,
+                    image: claim.image.clone(),
+                }));
             }
             if claims[..position]
                 .iter()
                 .any(|earlier| same(&earlier.image))
             {
-                return Err(ImageError::fits_unsupported(
-                    path,
-                    FitsRefusal::DuplicateClaim {
-                        extension,
-                        image: claim.image.clone(),
-                    },
-                ));
+                return Err(FitsLoadError::from(FitsRefusal::DuplicateClaim {
+                    extension,
+                    image: claim.image.clone(),
+                }));
             }
         }
         Ok(Self { claims })
@@ -94,9 +74,9 @@ impl ExtensionClaims {
     /// The extension for the image at HDU `image`; `None` when it has none.
     pub(crate) fn for_image(
         &self,
-        file: HduList<'_>,
+        file: &[Hdu],
         image: usize,
-    ) -> Result<Option<usize>, ImageError> {
+    ) -> Result<Option<usize>, FitsLoadError> {
         let Some(name) = image_name(file, image)? else {
             return Ok(None);
         };
@@ -107,23 +87,30 @@ impl ExtensionClaims {
             .map(|claim| claim.hdu))
     }
 
+    /// Whether `hdu` is an image of its own: an image HDU with at least one axis, which no lumos
+    /// extension that describes another image is. A header-only image extension (`NAXIS = 0`) is
+    /// none; one with a zero-length axis is, and is refused for that when it is read.
+    pub(crate) fn holds_image(hdu: &Hdu) -> Result<bool, FitsLoadError> {
+        Ok(hdu.is_image()
+            && hdu.header.naxis().is_ok_and(|naxis| naxis > 0)
+            && !Self::describes_another(hdu)?)
+    }
+
     /// Whether `hdu` is an extension that describes another image rather than being one.
-    pub(crate) fn describes_another(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
-        Ok(metadata::read_text(&hdu.header, "EXTNAME")
-            .map_err(|source| ImageError::fits(path, source))?
-            .is_some_and(|extname| {
-                LumosExtension::ALL
-                    .iter()
-                    .any(|describing| extname.eq_ignore_ascii_case(describing.extname()))
-            }))
+    fn describes_another(hdu: &Hdu) -> Result<bool, FitsLoadError> {
+        for extension in LumosExtension::ALL {
+            if extension.names(&hdu.header)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
 /// The name an extension refers to the image at HDU `index` by: its `EXTNAME`, or [`PRIMARY`] for
 /// an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(file: HduList<'_>, index: usize) -> Result<Option<String>, ImageError> {
-    let extname = metadata::read_text(&file.hdus[index].header, "EXTNAME")
-        .map_err(|source| ImageError::fits(file.path, source))?;
+fn image_name(file: &[Hdu], index: usize) -> Result<Option<String>, FitsLoadError> {
+    let extname = metadata::read_text(&file[index].header, "EXTNAME")?;
     Ok(match extname {
         Some(extname) => Some(extname),
         None => (index == 0).then(|| PRIMARY.to_owned()),

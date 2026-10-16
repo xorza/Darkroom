@@ -11,10 +11,9 @@
 //! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in
 //!   `image_ops/ml/tests/`.
 
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::path::{Path, PathBuf};
-
-use common::CancelToken;
 
 use crate::image::linear_image::LinearImage;
 use crate::io::load_context::LoadContext;
@@ -22,10 +21,7 @@ use crate::io::raw;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::io::raw::raw_files;
-use crate::{
-    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NeutralizeBackground, Scnr,
-    Stretch,
-};
+use crate::{CalibrationMasters, CalibrationSet, NeutralizeBackground, Scnr, Stretch};
 
 mod milky_way;
 
@@ -66,13 +62,13 @@ pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
 pub(crate) fn raw_light(path: &Path) -> LinearImage {
     raw::load_cfa(path, &LoadContext::default())
         .expect("load a RAW light")
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .expect("demosaic a RAW light")
+        .demosaic_measured(MarkesteijnPasses::One)
 }
 
 /// The bundled stacked light master, linear — a real stack, so its bright star cores exceed 1.0.
 pub(crate) fn linear_master() -> LinearImage {
-    LinearImage::from_file(dataset_path("stacked_light.tiff"), &LoadContext::default())
+    LoadContext::default()
+        .linear(dataset_path("stacked_light.tiff"))
         .expect("load stacked_light.tiff")
 }
 
@@ -113,7 +109,7 @@ pub(crate) fn calibration_masters() -> CalibrationMasters {
             bias: &frames.bias,
             flat_dark: &[],
         },
-        DEFAULT_SIGMA_THRESHOLD,
+        SigmaThreshold::DEFAULT,
     )
 }
 

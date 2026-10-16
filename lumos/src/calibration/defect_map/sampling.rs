@@ -1,15 +1,15 @@
-//! Drawing a representative sample of one CFA colour.
+//! Drawing a representative sample of one CFA color.
 //!
 //! An exact median over every red pixel of a 60 MP sensor is slower than the detection it feeds,
-//! so each colour is capped at [`MAX_MEDIAN_SAMPLES`]. The sample has to be spread rather than
-//! taken from a corner: it is stratified across the colour's CFA phases, then across rows, then
+//! so each color is capped at [`MAX_MEDIAN_SAMPLES`]. The sample has to be spread rather than
+//! taken from a corner: it is stratified across the color's CFA phases, then across rows, then
 //! across columns within each row, with a per-row rotation so a column-aligned defect cannot land
 //! in every sampled row.
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
-use crate::background_mesh::colour_mesh::ColourMesh;
+use crate::background_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
@@ -25,15 +25,15 @@ struct CfaSamplePhase {
     sample_count: usize,
 }
 
-/// A master's samples over its colour mesh, read colour by colour of its `cfa_type`.
+/// A master's samples over its color mesh, read color by color of its `cfa_type`.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ColourResiduals<'a> {
+pub(super) struct ColorResiduals<'a> {
     pub(super) data: &'a Buffer2<f32>,
     pub(super) cfa_type: CfaType,
-    pub(super) background: &'a ColourMesh,
+    pub(super) background: &'a ColorMesh,
 }
 
-impl ColourResiduals<'_> {
+impl ColorResiduals<'_> {
     /// The residuals of `target_color`'s stratified sample.
     pub(super) fn samples(self, target_color: usize) -> Vec<f32> {
         let Self {
@@ -50,7 +50,7 @@ impl ColourResiduals<'_> {
 }
 
 /// The sorted flat indices of `target_color`'s stratified sample of a `size` frame: every
-/// photosite of the colour, or [`MAX_MEDIAN_SAMPLES`] of them spread across its phases, rows and
+/// photosite of the color, or [`MAX_MEDIAN_SAMPLES`] of them spread across its phases, rows and
 /// columns.
 pub(super) fn color_sample_indices(
     size: Size2us,
@@ -72,7 +72,7 @@ pub(super) fn color_sample_indices(
     let mut phases = ArrayVec::<CfaSamplePhase, 36>::new();
     for y_offset in 0..period.min(size.height) {
         for x_offset in 0..period.min(size.width) {
-            if pattern.color_at(Vec2us::new(x_offset, y_offset)) != target_color {
+            if pattern.slot_at(Vec2us::new(x_offset, y_offset)) != target_color {
                 continue;
             }
             let columns = (size.width - 1 - x_offset) / period + 1;
@@ -158,7 +158,7 @@ pub(crate) mod internals {
     use crate::image::cfa::cfa_type::CfaType;
     use crate::math::size2us::Size2us;
 
-    /// The values of [`sampling::color_sample_indices`]' stratified sample of one colour.
+    /// The values of [`sampling::color_sample_indices`]' stratified sample of one color.
     pub(crate) fn color_samples(
         data: &Buffer2<f32>,
         cfa_type: CfaType,

@@ -1,21 +1,19 @@
-//! Shared `ort` (ONNX Runtime) backend for the display-domain ML filters. Loads a caller-supplied
-//! `512×512×3` NHWC model and runs it over an image in overlapping, feather-blended 512×512 tiles.
-//! Used by [`star_removal`](crate::image_ops::ml::remove_stars) and
-//! [`denoise`](crate::image_ops::ml::ml_denoise).
+//! Shared `ort` (ONNX Runtime) backend for the display-domain ML filters: a caller-loaded
+//! `512×512×3` NHWC [`OnnxModel`], run over an image in overlapping, feather-blended 512×512 tiles.
+//! Used by [`remove_stars`](crate::image_ops::ml::remove_stars) and
+//! [`ml_denoise`](crate::image_ops::ml::ml_denoise).
 //!
 //! The tile loop is **sequential** and lets ONNX Runtime use its default (all-core) intra-op
 //! threading. These nets are memory-bandwidth-bound (~125 MB of weights streamed per tile), so
 //! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM.
 //! ~60 s for a full 24 MP frame on a 10-core machine.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Mutex;
 
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
-
-use imaginarium::Buffer2;
 
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
@@ -36,73 +34,88 @@ const FEATHER_MIN: f32 = 0.02;
 /// `FEATHER_RAMP` of their window edges, where the model sees least context.
 const MAX_STRIDE: usize = WINDOW - 2 * FEATHER_RAMP;
 
-/// Where the ONNX model is and how finely to tile. lumos ships **no model** — the caller supplies a
-/// legally-obtained `.onnx`.
-#[derive(Debug, Clone)]
-pub struct TiledOnnxConfig {
-    /// Path to the caller-supplied ONNX model.
-    pub weights: PathBuf,
-    /// Tile stride in px (overlap = `WINDOW − stride`), in `1..=384`: a wider stride would leave
-    /// bands that only the feathered edges of tiles cover. Default 256 (50% overlap).
-    pub stride: usize,
+/// A loaded ONNX model of the shape these filters run: one NHWC `[1, 512, 512, 3]` tile in `[0, 1]`
+/// in, one out. lumos ships **no model**: the caller loads a legally-obtained `.onnx`, once, at its
+/// own edge, and runs it over as many images as it likes.
+#[derive(Debug)]
+pub struct OnnxModel {
+    session: Session,
 }
 
-impl TiledOnnxConfig {
-    pub fn new(weights: impl Into<PathBuf>) -> Self {
-        Self {
-            weights: weights.into(),
-            stride: 256,
-        }
-    }
+impl OnnxModel {
+    /// The tile stride a filter runs at unless told otherwise: 50% overlap.
+    pub const DEFAULT_STRIDE: usize = 256;
 
-    /// A stride that covers the frame at full weight: at least one pixel, and at most
-    /// [`MAX_STRIDE`].
-    fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("ML tile stride", self.stride)
-            .must_be("between 1 and 384", (1..=MAX_STRIDE).contains(&self.stride))
-    }
-}
-
-impl TiledOnnxConfig {
-    /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
-    /// overlaps. Returns a new image with the same channel count as the input (grayscale is
-    /// replicated to RGB for the model, then averaged back). Expects a display-domain `[0, 1]`
-    /// master.
+    /// The model at `path`, its weights read now: about 125 MB for the nets these filters run.
     ///
-    /// Unlike the in-place ops this returns a fresh image rather than mutating: the model's output
-    /// is a separate buffer from its input, and the tile loop reads the input long after it has
-    /// begun writing the output.
-    pub(crate) fn run(&self, image: &LinearImage) -> Result<LinearImage, MlError> {
-        self.validate()?;
-        let size = Size2us::new(image.width(), image.height());
-        if size.width < WINDOW || size.height < WINDOW {
-            return Err(MlError::TooSmall(size));
-        }
-        let mut session = Session::builder(&environment()?)?.commit_from_file(&self.weights)?;
-
-        let mut blend = FeatherBlend::new(image.dimensions());
-        // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
-        // duration of `session.run` instead of taking ownership, so one allocation serves the
-        // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
-        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-
-        let xs = tile_starts(size.width, self.stride);
-        let ys = tile_starts(size.height, self.stride);
-        for &ty in &ys {
-            for &tx in &xs {
-                fill_tile_input(image, Vec2us::new(tx, ty), &mut input);
-                let tensor =
-                    TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))?;
-                let outputs = session.run(ort::inputs![tensor])?;
-                let (_shape, tile) = outputs[0].try_extract_tensor::<f32>()?;
-                if tile.len() != WINDOW * WINDOW * 3 {
-                    return Err(MlError::OutputLength { len: tile.len() });
-                }
-                blend.add(tile, Vec2us::new(tx, ty));
-            }
-        }
-        Ok(blend.into_image())
+    /// # Errors
+    /// [`MlError::Model`] when ONNX Runtime cannot start or read the model.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, MlError> {
+        let session = Session::builder(&environment()?)?.commit_from_file(path.as_ref())?;
+        Ok(Self { session })
     }
+
+    /// The model over `image` in 512² tiles at `stride`, feather-blended, written into `image`'s
+    /// planes: see [`run_tiles`].
+    pub(crate) fn run(&mut self, image: &mut LinearImage, stride: usize) -> Result<(), MlError> {
+        run_tiles(image, stride, |input, output| self.infer(input, output))
+    }
+
+    /// The model's output tile for the `input` tile, written into `output`.
+    fn infer(&mut self, input: &[f32], output: &mut [f32]) -> Result<(), MlError> {
+        let tensor = TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input))?;
+        let outputs = self.session.run(ort::inputs![tensor])?;
+        let (_shape, tile) = outputs[0].try_extract_tensor::<f32>()?;
+        if tile.len() != output.len() {
+            return Err(MlError::OutputLength { len: tile.len() });
+        }
+        output.copy_from_slice(tile);
+        Ok(())
+    }
+}
+
+/// Run `infer` over `image` in 512² tiles at `stride` (NHWC `[0,1]` in, NHWC out), feather-blending
+/// the overlaps, and write the blend into `image`'s planes: its metadata and flags stay, as every
+/// other op keeps them. Grayscale is replicated to RGB for the model, then averaged back. Expects a
+/// display-domain `[0, 1]` master.
+///
+/// The tile loop reads the input until its last tile, so the blend gathers in buffers of its own
+/// and reaches the planes once every tile is in. One input and one output buffer serve every tile.
+///
+/// # Errors
+/// [`MlError::Config`] for a stride that does not cover the frame at full weight, refused before
+/// any tile runs; [`MlError::TooSmall`] for an image smaller than a tile; and what `infer` returns.
+pub(crate) fn run_tiles(
+    image: &mut LinearImage,
+    stride: usize,
+    mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,
+) -> Result<(), MlError> {
+    validate_stride(stride)?;
+    let size = Size2us::new(image.width(), image.height());
+    if size.width < WINDOW || size.height < WINDOW {
+        return Err(MlError::TooSmall(size));
+    }
+    let mut blend = FeatherBlend::new(image.dimensions());
+    let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
+    let mut output = vec![0.0f32; WINDOW * WINDOW * 3];
+    let xs = tile_starts(size.width, stride);
+    let ys = tile_starts(size.height, stride);
+    for &ty in &ys {
+        for &tx in &xs {
+            let tile = Vec2us::new(tx, ty);
+            fill_tile_input(image, tile, &mut input);
+            infer(&input, &mut output)?;
+            blend.add(&output, tile);
+        }
+    }
+    blend.write_into(image);
+    Ok(())
+}
+
+/// A stride that covers the frame at full weight: at least one pixel, and at most [`MAX_STRIDE`].
+fn validate_stride(stride: usize) -> Result<(), InvalidConfigField> {
+    ConfigValue::count("ML tile stride", stride)
+        .must_be("between 1 and 384", (1..=MAX_STRIDE).contains(&stride))
 }
 
 /// The process's ONNX Runtime environment, built on first use. ONNX Runtime allows one environment
@@ -136,8 +149,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
 /// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
-/// tile-loop-lifetime scratch buffer (see [`TiledOnnxConfig::run`]), overwritten in full every
-/// call.
+/// tile-loop-lifetime scratch buffer (see [`run_tiles`]), overwritten in full every call.
 fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
     let w = planar.width();
     let chans: [&[f32]; 3] = if planar.is_rgb() {
@@ -186,7 +198,7 @@ const fn feather(i: usize) -> f32 {
 }
 
 /// The model's tiles over a frame, each feathered by its weight: the weighted sum of each output
-/// channel and the sum of the weights, normalized into an image once every tile is in.
+/// channel and the sum of the weights, normalized into the frame's planes once every tile is in.
 #[derive(Debug)]
 struct FeatherBlend {
     dimensions: ImageDimensions,
@@ -223,32 +235,27 @@ impl FeatherBlend {
         }
     }
 
-    /// The normalized blend, with the frame's channel count: a grayscale frame takes the mean of
-    /// the model's three channels.
-    fn into_image(self) -> LinearImage {
+    /// Write the normalized blend over `image`'s planes, of the frame it was made for: a
+    /// grayscale frame takes the mean of the model's three channels.
+    fn write_into(self, image: &mut LinearImage) {
         let Self {
             dimensions,
             channels,
             weight,
         } = self;
-        let size = dimensions.size();
+        debug_assert_eq!(image.dimensions(), dimensions);
         if dimensions.is_rgb() {
-            LinearImage::from(channels.map(|channel| {
-                let px = channel
-                    .iter()
-                    .zip(&weight)
-                    .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
-                    .collect();
-                Buffer2::new(size.width, size.height, px)
-            }))
+            for (plane, channel) in image.planes_mut().zip(&channels) {
+                for ((out, &sum), &wt) in plane.pixels_mut().iter_mut().zip(channel).zip(&weight) {
+                    *out = (sum / wt).clamp(0.0, 1.0);
+                }
+            }
         } else {
-            let gray: Vec<f32> = (0..size.pixel_count())
-                .map(|i| {
-                    ((channels[0][i] + channels[1][i] + channels[2][i]) / (3.0 * weight[i]))
-                        .clamp(0.0, 1.0)
-                })
-                .collect();
-            LinearImage::from(Buffer2::new(size.width, size.height, gray))
+            let plane = image.channel_mut(0).pixels_mut();
+            for (i, out) in plane.iter_mut().enumerate() {
+                *out = ((channels[0][i] + channels[1][i] + channels[2][i]) / (3.0 * weight[i]))
+                    .clamp(0.0, 1.0);
+            }
         }
     }
 }

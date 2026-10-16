@@ -7,75 +7,132 @@
 //! - A fill, a hit, a defect or its repair ([`QualityFlags::RESAMPLE_EXCLUDED`]) is no measurement
 //!   at all. The warp samples over the other taps alone, normalized by their weight (normalized
 //!   convolution), and the share of the kernel's magnitude they hold is the pixel's coverage: the
-//!   space-telescope pipelines' rule, which gives such a pixel no weight. With every excluded pixel
-//!   set to zero in the channels, a window's sums over the data already leave them out, and the
-//!   validity plane gives the weight sums over the taps that remain.
+//!   space-telescope pipelines' rule, which gives such a pixel no weight. A window near one masks
+//!   its sums by the validity plane, lane by lane, so the value under an excluded pixel, a NaN
+//!   fill among them, never enters a sum, and the validity plane's own sums are the weights of the
+//!   taps that remain.
 //! - A bound, at saturation or the flat's floor ([`QualityFlags::RESAMPLE_CARRIED`]), is still
 //!   the best figure for its pixel, and where every frame clips a star's core the only one. The
 //!   warp samples it like any other and carries its flag to every output pixel whose sample gave
 //!   it weight, for the combine to leave out while enough clean samples remain.
 
-use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
-use rayon::prelude::*;
 
-use crate::image::pixel_flags::{PixelFlags, Reach};
+use crate::image::flag_counts::FlagCounts;
+use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};
 use crate::image::quality_flags::QualityFlags;
-use crate::math::vec2us::Vec2us;
-use crate::registration::resample::kernel::warp_kernel::TapAxis;
-use crate::registration::resample::source_image::{SourceImage, SourcePlane};
+use crate::math::size2us::Size2us;
+use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::warp_kernel::TapAxis;
+use crate::scratch_pool::Shapeless;
 
-/// A flagged frame's sources as the warp samples them, prepared once per frame.
-///
-/// Built per flagged frame rather than held in
-/// [`WarpBuffers`](crate::registration::resample::WarpBuffers): a frame with no flags must not pay
-/// planes it will never touch, and a frame with some is already the exception.
+/// A flagged frame's sources as the warp samples them, prepared once per frame in a
+/// [`FlagScratch`].
 #[derive(Debug)]
 pub(crate) struct FlaggedSources<'a> {
     flags: &'a PixelFlags,
-    excluded: Option<ExcludedSources>,
+    /// 1 where the source holds a measurement, 0 at an excluded pixel; for a frame that excludes
+    /// any.
+    validity: Option<&'a Buffer2<f32>>,
     /// The flags grown by the kernel's window: a source cell holds every flag a window sampling
-    /// from it can read. A window near none is a product of its axes like any other.
-    near: PixelFlags,
+    /// from it can read. A window near none is a product of its axes like any other. For a filter
+    /// alone: the nearest pixel reads its own flags.
+    near: Option<&'a Buffer2<u8>>,
 }
 
-/// The channels with every excluded pixel set to zero, and the validity plane: 1 where the source
-/// holds a measurement, 0 at an excluded pixel.
-#[derive(Debug)]
-struct ExcludedSources {
-    validity: Buffer2<f32>,
-    zeroed: ArrayVec<Buffer2<f32>, 3>,
+/// The planes a flagged frame's warp prepares beside the frame, kept in a pool from one frame to
+/// the next. Every calibrated light flags pixels — its saturation at least — so a set a
+/// frame would pay their whole area in allocation and first-touch page faults each time.
+#[derive(Debug, Default)]
+pub(crate) struct FlagScratch {
+    validity: Option<Buffer2<f32>>,
+    near: Option<Buffer2<u8>>,
+    dilation: DilationScratch,
+    /// A plane for the warped flags, kept from a frame that carried none.
+    output: Option<Buffer2<u8>>,
 }
 
-impl<'a> FlaggedSources<'a> {
-    /// `image`'s sources under `flags`, for a kernel whose windows read `reach` around their
-    /// cell.
-    pub(crate) fn new(image: &SourceImage<'_>, flags: &'a PixelFlags, reach: Reach) -> Self {
-        let excluded = flags
-            .contains(QualityFlags::RESAMPLE_EXCLUDED)
-            .then(|| ExcludedSources::new(image, flags));
-        let mut near = flags.clone();
-        near.dilate_window(reach, QualityFlags::default());
-        Self {
+impl FlagScratch {
+    /// `flags`' sources prepared in this scratch, for windows that read `reach` around their
+    /// cell, or for the nearest pixel when `reach` is `None`.
+    pub(crate) fn prepare<'a>(
+        &'a mut self,
+        flags: &'a PixelFlags,
+        reach: Option<Reach>,
+    ) -> FlaggedSources<'a> {
+        let size = flags.size();
+        if flags.contains(QualityFlags::RESAMPLE_EXCLUDED) {
+            flags.validity_into(
+                QualityFlags::RESAMPLE_EXCLUDED,
+                sized(&mut self.validity, size),
+            );
+        }
+        if let Some(reach) = reach {
+            flags.dilated_into(
+                DilationSpec {
+                    reach,
+                    fixed: QualityFlags::default(),
+                },
+                sized(&mut self.near, size),
+                &mut self.dilation,
+            );
+        }
+        FlaggedSources {
             flags,
-            excluded,
-            near,
+            validity: self
+                .validity
+                .as_ref()
+                .filter(|_| flags.contains(QualityFlags::RESAMPLE_EXCLUDED)),
+            near: self.near.as_ref().filter(|_| reach.is_some()),
         }
     }
 
-    /// The channels with their excluded pixels at zero, when the frame excludes any.
-    pub(crate) fn zeroed_planes(&self) -> Option<impl Iterator<Item = SourcePlane<'_>>> {
-        self.excluded
-            .as_ref()
-            .map(|excluded| excluded.zeroed.iter().map(plane))
+    /// Keep the plane of `flags`, the last frame's warped flags, for the next frame's.
+    pub(crate) fn keep(&mut self, flags: Option<PixelFlags>) {
+        if let Some(flags) = flags {
+            self.output = Some(flags.into_buffer());
+        }
     }
 
+    /// A plane for the warped flags of a frame of `size`: the one kept here, or a new one. Every
+    /// pixel is written, so none is cleared.
+    pub(crate) fn output(&mut self, size: Size2us) -> Buffer2<u8> {
+        match self.output.take() {
+            Some(plane) if Size2us::from(&plane) == size => plane,
+            _ => Buffer2::new_default(size.width, size.height),
+        }
+    }
+
+    /// The warped flags in `plane`; the plane kept here when it holds none.
+    pub(crate) fn finish(&mut self, plane: Buffer2<u8>) -> Option<PixelFlags> {
+        let counts = FlagCounts::of(plane.pixels());
+        if counts.any() {
+            PixelFlags::from_counted(plane, counts)
+        } else {
+            self.output = Some(plane);
+            None
+        }
+    }
+}
+
+impl Shapeless for FlagScratch {}
+
+/// The plane in `slot`, made for `size` when it holds none of that size.
+fn sized<T: Default + Clone>(slot: &mut Option<Buffer2<T>>, size: Size2us) -> &mut Buffer2<T> {
+    if slot
+        .as_ref()
+        .is_none_or(|plane| Size2us::from(plane) != size)
+    {
+        *slot = Some(Buffer2::new_default(size.width, size.height));
+    }
+    slot.as_mut().expect("the slot was filled above")
+}
+
+impl FlaggedSources<'_> {
     /// The validity plane, when the frame excludes any pixel.
     pub(crate) fn validity(&self) -> Option<SourcePlane<'_>> {
-        self.excluded
-            .as_ref()
-            .map(|excluded| plane(&excluded.validity))
+        self.validity.map(plane)
     }
 
     /// The flags a window sampling `position` can read. A position in the footprint's rim takes
@@ -85,10 +142,12 @@ impl<'a> FlaggedSources<'a> {
         reason = "each cell is clamped to the image before the conversion"
     )]
     pub(crate) fn near(&self, position: SourcePosition) -> QualityFlags {
-        let size = self.near.size();
-        let x = (position.cell_x.max(0) as usize).min(size.width - 1);
-        let y = (position.cell_y.max(0) as usize).min(size.height - 1);
-        self.near.at(y * size.width + x)
+        let near = self
+            .near
+            .expect("a filter's sources are grown by its window");
+        let x = (position.cell_x.max(0) as usize).min(near.width() - 1);
+        let y = (position.cell_y.max(0) as usize).min(near.height() - 1);
+        QualityFlags::from_byte(near.pixels()[y * near.width() + x])
     }
 
     /// The carried flags of source pixel `index`, none when it is excluded: an excluded pixel is
@@ -109,42 +168,6 @@ impl<'a> FlaggedSources<'a> {
             }
         }
         carried
-    }
-}
-
-impl ExcludedSources {
-    fn new(image: &SourceImage<'_>, flags: &PixelFlags) -> Self {
-        let size = image.size();
-        let zeroed = image
-            .planes
-            .iter()
-            .map(|source| {
-                let mut zeroed = Buffer2::new_default(size.width, size.height);
-                let width = size.width;
-                zeroed
-                    .pixels_mut()
-                    .par_chunks_mut(width)
-                    .zip(source.pixels.par_chunks(width))
-                    .enumerate()
-                    .for_each(|(y, (row, source_row))| {
-                        for (x, (value, &sample)) in row.iter_mut().zip(source_row).enumerate() {
-                            *value = if flags
-                                .at_pos(Vec2us::new(x, y))
-                                .intersects(QualityFlags::RESAMPLE_EXCLUDED)
-                            {
-                                0.0
-                            } else {
-                                sample
-                            };
-                        }
-                    });
-                zeroed
-            })
-            .collect();
-        Self {
-            validity: flags.validity_plane(QualityFlags::RESAMPLE_EXCLUDED),
-            zeroed,
-        }
     }
 }
 

@@ -6,6 +6,7 @@
 use std::f32::consts::SQRT_2;
 
 use super::*;
+use crate::combine::error::StackError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -19,34 +20,35 @@ use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Sc
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::transform::{TransformModel, TransformType};
+use crate::registration::transform::TransformType;
+use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::{CancelToken, TempDir};
+use common::TempDir;
 use glam::DVec2;
 
-/// The known scene: colour `colour`'s value at reference pixel `(x, y)`, distinct in every
-/// colour and every pixel of a period, and a multiple of 1/64 so every sum below is exact.
-fn scene(colour: usize, x: i64, y: i64) -> f32 {
-    1.0 + colour as f32 + (x * 31 + y * 17 + colour as i64 * 7).rem_euclid(64) as f32 / 64.0
+/// The known scene: color `color`'s value at reference pixel `(x, y)`, distinct in every
+/// color and every pixel of a period, and a multiple of 1/64 so every sum below is exact.
+fn scene(color: usize, x: i64, y: i64) -> f32 {
+    1.0 + color as f32 + (x * 31 + y * 17 + color as i64 * 7).rem_euclid(64) as f32 / 64.0
 }
 
 /// A mosaic drizzled at scale 1 and pixfrac 1 under whole-pixel dithers puts each photosite on one
-/// output pixel whole, in the channel of its colour alone, so each colour plane reads the scene
-/// exactly wherever a photosite of that colour landed, and the fill everywhere else.
+/// output pixel whole, in the channel of its color alone, so each color plane reads the scene
+/// exactly wherever a photosite of that color landed, and the fill everywhere else.
 ///
 /// Frame `k`, dithered by `d_k`, sees the scene at reference pixel `p + d_k` through its photosite
 /// `p`. Output pixel `o` of channel `c` gathers the frames whose photosite `o − d_k` is on the
-/// sensor and of colour `c`: `n` of them, each the scene's own value at weight 1, so their mean
+/// sensor and of color `c`: `n` of them, each the scene's own value at weight 1, so their mean
 /// is that value exactly, the weight `n`, and the coverage `n` of the frames. RGGB under the four
 /// dithers of a period reads red and blue once and green twice inside the first row and column;
 /// output pixel (0, 0) is reached only by frame 0's red photosite, so its green and blue hold no
-/// weight and take the fill. X-Trans under nine dithers leaves pixels some colour never reached.
+/// weight and take the fill. X-Trans under nine dithers leaves pixels some color never reached.
 ///
 /// Each set runs twice: with its drizzled frames resident, and spilled to disk under a memory
 /// budget of nothing, which writes and maps back every channel's drops.
 #[test]
-fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
+fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
     const FILL: f32 = -1.0;
 
     let scratch = TempDir::new("cfa_drizzle_spill");
@@ -73,13 +75,13 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
     .into_iter()
     .flat_map(|set| tiers.iter().map(move |ingest| (set.clone(), ingest)))
     {
-        let colour = |x: i64, y: i64| cfa_type.color_at(Vec2us::new(x as usize, y as usize));
+        let color = |x: i64, y: i64| cfa_type.slot_at(Vec2us::new(x as usize, y as usize));
         let frames = dithers
             .iter()
             .map(|&(dx, dy)| {
                 let pixels = (0..size.height as i64)
                     .flat_map(|y| (0..size.width as i64).map(move |x| (x, y)))
-                    .map(|(x, y)| scene(colour(x, y), x + dx, y + dy))
+                    .map(|(x, y)| scene(color(x, y), x + dx, y + dy))
                     .collect();
                 DrizzleFrame::new(
                     make_cfa(size, pixels, cfa_type),
@@ -94,8 +96,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
         };
         let product = config
             .drizzle_cfa_images(frames, ingest, ProgressMonitor::unattended())
-            .unwrap()
-            .product;
+            .unwrap();
         assert_eq!(
             product.report.spilled_frames,
             if ingest.memory_override.is_some() {
@@ -121,7 +122,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
                         .iter()
                         .filter(|&&(dx, dy)| {
                             let (px, py) = (x - dx, y - dy);
-                            px >= 0 && py >= 0 && colour(px, py) == c
+                            px >= 0 && py >= 0 && color(px, py) == c
                         })
                         .count();
                     let expected = if reached > 0 {
@@ -155,9 +156,9 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_colour_alone() {
 /// (0.2, 0.5, 0.3), white noise of σ 0.002 and sub-pixel dithers, drizzled at pixfrac and scale
 /// one. A red drop is one pixel wide on a lattice of two, so under a sub-pixel dither it reaches
 /// every output pixel beside its photosite, and each frame shares every interior pixel of every
-/// colour with the reference, which the frames' pair-by-pair normalization measures over.
+/// color with the reference, which the frames' pair-by-pair normalization measures over.
 ///
-/// Every output pixel of every colour reads the sky at its reference point to within 6σ — the
+/// Every output pixel of every color reads the sky at its reference point to within 6σ — the
 /// combine averages several samples, so its noise is below one sample's — plus the slope over a
 /// drop's reach: a photosite whose drop covers an output pixel lies within one pixel of it on
 /// each axis, where the sky differs by `0.5·√2/256` at most.
@@ -177,8 +178,8 @@ fn the_light_preset_combines_a_cfa_drizzle() {
             let pixels = (0..size.pixel_count())
                 .map(|index| {
                     let position = Vec2us::new(index % size.width, index / size.width);
-                    let colour = rggb.color_at(position);
-                    sky(colour, position.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
+                    let color = rggb.slot_at(position);
+                    sky(color, position.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
                 })
                 .collect();
             DrizzleFrame::new(
@@ -200,8 +201,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
         &IngestConfig::default(),
         ProgressMonitor::unattended(),
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let bound = 6.0 * SIGMA + 0.5 * SQRT_2 / 256.0;
     let output = product.image.dimensions().size();
     let mut checked = 0;
@@ -237,7 +237,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
 ///
 /// The scene varies along y alone, `f(y) = 1/4 + (y mod 8)/32`, with no noise, and frame `k` reads
 /// `g_k·f + o_k` at gains that are powers of 2 and dyadic offsets. A whole-pixel shift along x
-/// leaves every colour's samples the same multiset, so each frame's median and spread are exactly
+/// leaves every color's samples the same multiset, so each frame's median and spread are exactly
 /// `g_k` times the reference's, and its white noise is 0: every norm is exact. Red and blue
 /// photosites sit on a product lattice, so a drop's x-weights factor out of every red and blue
 /// output pixel, which then reads the same mean over source rows in every frame. Normalized, each
@@ -292,7 +292,6 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
             ProgressMonitor::unattended(),
         )
         .unwrap()
-        .product
     };
     let all = drizzle(
         (0..affine.len()).map(frame).collect(),
@@ -347,12 +346,12 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     assert!(
         matches!(
             error,
-            DrizzleError::Admission(AdmissionError::CfaPatternMismatch {
+            DrizzleError::Stack(StackError::Admission(AdmissionError::CfaPatternMismatch {
                 index: 1,
                 expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
                 reference_index: 0,
-            })
+            }))
         ),
         "{error:?}"
     );
@@ -401,7 +400,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .enumerate()
             .map(|(index, &value)| {
                 let position = Vec2us::new(index % size.width, index / size.width);
-                value * gains[rggb.color_at(position)]
+                value * gains[rggb.slot_at(position)]
             })
             .collect();
         make_cfa(size, pixels, rggb)
@@ -413,7 +412,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
     config.extraction.sigma_threshold = 3.0;
     let mut detector = StarDetector::from_config(config).unwrap();
     let registration = RegistrationConfig {
-        transform_type: TransformModel::Fixed(TransformType::Translation),
+        model: TransformModel::Fixed(TransformType::Translation),
         ..Default::default()
     };
     let mut register_on = |reference: LinearImage, target: LinearImage| {
@@ -421,7 +420,11 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             detector.detect(&reference).stars,
             detector.detect(&target).stars,
         ];
-        let result = registration.register(&stars[0], &stars[1]).unwrap();
+        let result = registration
+            .registrar()
+            .unwrap()
+            .register(&stars[0], &stars[1])
+            .unwrap();
         (
             result.transform().apply(DVec2::ZERO),
             result.num_inliers(),
@@ -432,11 +435,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
         mosaic(&reference).green_proxy(),
         mosaic(&target).green_proxy(),
     );
-    let demosaic = |frame: &SimFrame| {
-        mosaic(frame)
-            .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-            .unwrap()
-    };
+    let demosaic = |frame: &SimFrame| mosaic(frame).demosaic_measured(MarkesteijnPasses::One);
     let (demosaiced, _, _) = register_on(demosaic(&reference), demosaic(&target));
 
     let sigma =

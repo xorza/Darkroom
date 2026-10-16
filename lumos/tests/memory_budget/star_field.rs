@@ -8,6 +8,7 @@ use common::TempDir;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::Image as FitsImage;
+use lumos::ChannelLayout;
 use lumos::{ImageDimensions, LinearImage};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -76,7 +77,7 @@ impl StarField {
     /// Exposure `index` as a mono frame in memory, as [`Self::expose`] writes it.
     pub(crate) fn frame(&self, index: usize) -> LinearImage {
         LinearImage::from_planar_channels(
-            ImageDimensions::new((self.side, self.side), 1),
+            ImageDimensions::new((self.side, self.side), ChannelLayout::Mono),
             [self.render(index)],
         )
     }
