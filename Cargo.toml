@@ -2,7 +2,7 @@
 name = "imaginarium"
 version = "0.1.0"
 edition = "2024"
-exclude = ["AGENTS.md", "CLAUDE.md", "x.py"]
+exclude = ["AGENTS.md", "CLAUDE.md", "drive/"]
 
 # Warn, not deny: the verification chain runs clippy with `-D warnings`.
 [lints.rust]
@@ -154,7 +154,7 @@ required-features = ["internals"]
 ignored = ["strum"]
 
 # The second lint set is the CPU-only build. Benches always measure the GPU build.
-[package.metadata.x]
+[package.metadata.drive]
 lint = ["--all-features", ""]
 bench = "--features wgpu"
 
